@@ -132,6 +132,19 @@ async fn handle_text_message(store: &BlockStore, text: &str) -> ServerMessage {
                 Err(error) => error.to_response(CommandKind::UpdateBlock, id),
             }
         }
+        ClientMessage::ReadBlock { id, offset, len } => {
+            match store.read_block(id, offset, len).await {
+                Ok(read) => ServerMessage::ReadBlock {
+                    command: CommandKind::ReadBlock,
+                    id,
+                    data: read.data,
+                    offset: read.offset,
+                    len: read.len,
+                    total_size: read.total_size,
+                },
+                Err(error) => error.to_response(CommandKind::ReadBlock, id),
+            }
+        }
     }
 }
 
@@ -149,6 +162,11 @@ enum ClientMessage {
         seq: u64,
         operation: Vec<u8>,
     },
+    ReadBlock {
+        id: Uuid,
+        offset: u64,
+        len: u64,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -159,6 +177,15 @@ enum ServerMessage {
         id: Uuid,
         #[serde(skip_serializing_if = "Option::is_none")]
         seq: Option<u64>,
+    },
+    #[serde(rename = "ok")]
+    ReadBlock {
+        command: CommandKind,
+        id: Uuid,
+        data: Vec<u8>,
+        offset: u64,
+        len: u64,
+        total_size: u64,
     },
     Error {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +202,7 @@ enum ServerMessage {
 enum CommandKind {
     CreateBlock,
     UpdateBlock,
+    ReadBlock,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -273,6 +301,30 @@ impl BlockStore {
         Ok(())
     }
 
+    async fn read_block(&self, id: Uuid, offset: u64, len: u64) -> Result<BlockRead, StoreError> {
+        let snapshot_path = self.block_path(id).join("snapshots").join("0");
+        let data = match fs::read(snapshot_path).await {
+            Ok(data) => data,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Err(StoreError::BlockNotFound);
+            }
+            Err(error) => return Err(StoreError::Io(error)),
+        };
+
+        let total_size = data.len() as u64;
+        let start = offset.min(total_size) as usize;
+        let requested_end = offset.saturating_add(len).min(total_size);
+        let end = requested_end.max(offset.min(total_size)) as usize;
+        let data = data[start..end].to_vec();
+
+        Ok(BlockRead {
+            offset,
+            len: data.len() as u64,
+            total_size,
+            data,
+        })
+    }
+
     fn block_path(&self, id: Uuid) -> PathBuf {
         self.root.join(id.to_string())
     }
@@ -281,6 +333,13 @@ impl BlockStore {
         let mut locks = self.locks.lock().await;
         Arc::clone(locks.entry(id).or_insert_with(|| Arc::new(Mutex::new(()))))
     }
+}
+
+struct BlockRead {
+    data: Vec<u8>,
+    offset: u64,
+    len: u64,
+    total_size: u64,
 }
 
 #[derive(Serialize)]
@@ -504,6 +563,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_block_returns_only_requested_in_range_data() {
+        let root = test_root();
+        let store = BlockStore::new(root.clone());
+        fs::create_dir_all(store.root()).await.unwrap();
+
+        let id = Uuid::new_v4();
+        store
+            .create_block(id, Uuid::new_v4(), vec![1, 2, 3, 4, 5])
+            .await
+            .unwrap();
+
+        let read = store.read_block(id, 1, 3).await.unwrap();
+        assert_eq!(read.data, vec![2, 3, 4]);
+        assert_eq!(read.offset, 1);
+        assert_eq!(read.len, 3);
+        assert_eq!(read.total_size, 5);
+
+        let read = store.read_block(id, 3, 99).await.unwrap();
+        assert_eq!(read.data, vec![4, 5]);
+        assert_eq!(read.offset, 3);
+        assert_eq!(read.len, 2);
+        assert_eq!(read.total_size, 5);
+
+        let read = store.read_block(id, 99, 10).await.unwrap();
+        assert!(read.data.is_empty());
+        assert_eq!(read.offset, 99);
+        assert_eq!(read.len, 0);
+        assert_eq!(read.total_size, 5);
+
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn running_server_accepts_json_messages() {
         let root = test_root();
         let store = Arc::new(BlockStore::new(root.clone()));
@@ -565,6 +657,33 @@ mod tests {
                 "command": "update_block",
                 "id": id,
                 "seq": 1
+            }),
+        );
+
+        client
+            .send(Message::Text(
+                serde_json::json!({
+                    "command": "read_block",
+                    "id": id,
+                    "offset": 1,
+                    "len": 10
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let response = client.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&response.into_text().unwrap()).unwrap(),
+            serde_json::json!({
+                "status": "ok",
+                "command": "read_block",
+                "id": id,
+                "data": [2, 3],
+                "offset": 1,
+                "len": 2,
+                "total_size": 3
             }),
         );
 
