@@ -140,6 +140,7 @@ async fn handle_text_message(store: &BlockStore, text: &str) -> ServerMessage {
                     data: read.data,
                     offset: read.offset,
                     len: read.len,
+                    seq: read.seq,
                     total_size: read.total_size,
                 },
                 Err(error) => error.to_response(CommandKind::ReadBlock, id),
@@ -185,6 +186,7 @@ enum ServerMessage {
         data: Vec<u8>,
         offset: u64,
         len: u64,
+        seq: u64,
         total_size: u64,
     },
     Error {
@@ -320,6 +322,7 @@ impl BlockStore {
         Ok(BlockRead {
             offset,
             len: data.len() as u64,
+            seq: 0,
             total_size,
             data,
         })
@@ -339,6 +342,7 @@ struct BlockRead {
     data: Vec<u8>,
     offset: u64,
     len: u64,
+    seq: u64,
     total_size: u64,
 }
 
@@ -578,18 +582,21 @@ mod tests {
         assert_eq!(read.data, vec![2, 3, 4]);
         assert_eq!(read.offset, 1);
         assert_eq!(read.len, 3);
+        assert_eq!(read.seq, 0);
         assert_eq!(read.total_size, 5);
 
         let read = store.read_block(id, 3, 99).await.unwrap();
         assert_eq!(read.data, vec![4, 5]);
         assert_eq!(read.offset, 3);
         assert_eq!(read.len, 2);
+        assert_eq!(read.seq, 0);
         assert_eq!(read.total_size, 5);
 
         let read = store.read_block(id, 99, 10).await.unwrap();
         assert!(read.data.is_empty());
         assert_eq!(read.offset, 99);
         assert_eq!(read.len, 0);
+        assert_eq!(read.seq, 0);
         assert_eq!(read.total_size, 5);
 
         fs::remove_dir_all(root).await.unwrap();
@@ -683,6 +690,7 @@ mod tests {
                 "data": [2, 3],
                 "offset": 1,
                 "len": 2,
+                "seq": 0,
                 "total_size": 3
             }),
         );
