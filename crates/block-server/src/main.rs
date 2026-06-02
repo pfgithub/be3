@@ -3,7 +3,10 @@ use std::{
     env, fmt,
     io::ErrorKind,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use futures_util::{SinkExt, StreamExt};
@@ -11,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     net::{TcpListener, TcpStream},
-    sync::Mutex,
+    sync::{mpsc, Mutex},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use uuid::Uuid;
@@ -23,6 +26,7 @@ const DEFAULT_DATA_DIR: &str = "block-data";
 async fn main() -> Result<(), ServerError> {
     let config = Config::from_env();
     let store = Arc::new(BlockStore::new(config.data_dir));
+    let watch_hub = Arc::new(WatchHub::new());
     fs::create_dir_all(store.root()).await?;
 
     let listener = TcpListener::bind(&config.addr).await?;
@@ -36,9 +40,10 @@ async fn main() -> Result<(), ServerError> {
     loop {
         let (stream, peer_addr) = listener.accept().await?;
         let store = Arc::clone(&store);
+        let watch_hub = Arc::clone(&watch_hub);
 
         tokio::spawn(async move {
-            if let Err(error) = handle_connection(stream, store).await {
+            if let Err(error) = handle_connection(stream, store, watch_hub).await {
                 eprintln!("connection {peer_addr} closed with error: {error}");
             }
         });
@@ -64,48 +69,83 @@ impl Config {
     }
 }
 
-async fn handle_connection(stream: TcpStream, store: Arc<BlockStore>) -> Result<(), ServerError> {
+async fn handle_connection(
+    stream: TcpStream,
+    store: Arc<BlockStore>,
+    watch_hub: Arc<WatchHub>,
+) -> Result<(), ServerError> {
     let mut socket = accept_async(stream).await?;
+    let (outbound, mut outbound_messages) = mpsc::unbounded_channel();
+    let client_id = watch_hub.next_client_id();
 
-    while let Some(message) = socket.next().await {
-        let message = message?;
-
-        match message {
-            Message::Text(text) => {
-                let response = handle_text_message(&store, &text).await;
+    loop {
+        tokio::select! {
+            Some(outbound_message) = outbound_messages.recv() => {
                 socket
-                    .send(Message::Text(serde_json::to_string(&response)?))
+                    .send(Message::Text(serde_json::to_string(&outbound_message)?))
                     .await?;
             }
-            Message::Close(_) => break,
-            Message::Ping(payload) => socket.send(Message::Pong(payload)).await?,
-            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
-                let response = ServerMessage::Error {
-                    command: None,
-                    id: None,
-                    code: ErrorCode::UnsupportedMessage,
-                    message: "only JSON text websocket messages are supported".to_string(),
-                };
-                socket
-                    .send(Message::Text(serde_json::to_string(&response)?))
-                    .await?;
+            Some(message) = socket.next() => {
+                let message = message?;
+
+                match message {
+                    Message::Text(text) => {
+                        let outcome = handle_text_message(
+                            &store,
+                            &watch_hub,
+                            client_id,
+                            outbound.clone(),
+                            &text,
+                        )
+                        .await;
+                        socket
+                            .send(Message::Text(serde_json::to_string(&outcome.response)?))
+                            .await?;
+
+                        for notification in outcome.notifications {
+                            watch_hub.broadcast(notification.id(), notification).await;
+                        }
+                    }
+                    Message::Close(_) => break,
+                    Message::Ping(payload) => socket.send(Message::Pong(payload)).await?,
+                    Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
+                        let response = ServerMessage::Error {
+                            command: None,
+                            id: None,
+                            code: ErrorCode::UnsupportedMessage,
+                            message: "only JSON text websocket messages are supported".to_string(),
+                        };
+                        socket
+                            .send(Message::Text(serde_json::to_string(&response)?))
+                            .await?;
+                    }
+                }
             }
+            else => break,
         }
     }
+
+    watch_hub.remove_client(client_id).await;
 
     Ok(())
 }
 
-async fn handle_text_message(store: &BlockStore, text: &str) -> ServerMessage {
+async fn handle_text_message(
+    store: &BlockStore,
+    watch_hub: &WatchHub,
+    client_id: ClientId,
+    outbound: OutboundMessages,
+    text: &str,
+) -> MessageOutcome {
     let command = match serde_json::from_str::<ClientMessage>(text) {
         Ok(command) => command,
         Err(error) => {
-            return ServerMessage::Error {
+            return MessageOutcome::single(ServerMessage::Error {
                 command: None,
                 id: None,
                 code: ErrorCode::InvalidMessage,
                 message: format!("invalid command JSON: {error}"),
-            };
+            });
         }
     };
 
@@ -114,27 +154,47 @@ async fn handle_text_message(store: &BlockStore, text: &str) -> ServerMessage {
             id,
             block_type,
             data,
+            watch,
         } => match store.create_block(id, block_type, data).await {
-            Ok(()) => ServerMessage::Ok {
-                command: CommandKind::CreateBlock,
-                id,
-                seq: None,
-            },
-            Err(error) => error.to_response(CommandKind::CreateBlock, id),
+            Ok(()) => {
+                if watch {
+                    watch_hub.watch(id, client_id, outbound).await;
+                }
+
+                ServerMessage::Ok {
+                    command: CommandKind::CreateBlock,
+                    id,
+                    seq: None,
+                }
+                .into()
+            }
+            Err(error) => error.to_response(CommandKind::CreateBlock, id).into(),
         },
         ClientMessage::UpdateBlock { id, seq, operation } => {
-            match store.update_block(id, seq, operation).await {
-                Ok(()) => ServerMessage::Ok {
-                    command: CommandKind::UpdateBlock,
-                    id,
-                    seq: Some(seq),
+            match store.update_block(id, seq, operation.clone()).await {
+                Ok(()) => MessageOutcome {
+                    response: ServerMessage::Ok {
+                        command: CommandKind::UpdateBlock,
+                        id,
+                        seq: Some(seq),
+                    },
+                    notifications: vec![ServerMessage::BlockUpdated { id, seq, operation }],
                 },
-                Err(error) => error.to_response(CommandKind::UpdateBlock, id),
+                Err(error) => error.to_response(CommandKind::UpdateBlock, id).into(),
             }
         }
-        ClientMessage::ReadBlock { id, offset, len } => {
-            match store.read_block(id, offset, len).await {
-                Ok(read) => ServerMessage::ReadBlock {
+        ClientMessage::ReadBlock {
+            id,
+            offset,
+            len,
+            watch,
+        } => match store.read_block(id, offset, len).await {
+            Ok(read) => {
+                if watch {
+                    watch_hub.watch(id, client_id, outbound).await;
+                }
+
+                ServerMessage::ReadBlock {
                     command: CommandKind::ReadBlock,
                     id,
                     data: read.data,
@@ -142,10 +202,28 @@ async fn handle_text_message(store: &BlockStore, text: &str) -> ServerMessage {
                     len: read.len,
                     seq: read.seq,
                     total_size: read.total_size,
-                },
-                Err(error) => error.to_response(CommandKind::ReadBlock, id),
+                }
+                .into()
             }
+            Err(error) => error.to_response(CommandKind::ReadBlock, id).into(),
+        },
+        ClientMessage::UnwatchBlock { id } => {
+            watch_hub.unwatch(id, client_id).await;
+            ServerMessage::Ok {
+                command: CommandKind::UnwatchBlock,
+                id,
+                seq: None,
+            }
+            .into()
         }
+        ClientMessage::PostPresence { id, data } => MessageOutcome {
+            response: ServerMessage::Ok {
+                command: CommandKind::PostPresence,
+                id,
+                seq: None,
+            },
+            notifications: vec![ServerMessage::Presence { id, data }],
+        },
     }
 }
 
@@ -157,6 +235,7 @@ enum ClientMessage {
         #[serde(rename = "type")]
         block_type: Uuid,
         data: Vec<u8>,
+        watch: bool,
     },
     UpdateBlock {
         id: Uuid,
@@ -167,10 +246,18 @@ enum ClientMessage {
         id: Uuid,
         offset: u64,
         len: u64,
+        watch: bool,
+    },
+    UnwatchBlock {
+        id: Uuid,
+    },
+    PostPresence {
+        id: Uuid,
+        data: Vec<u8>,
     },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum ServerMessage {
     Ok {
@@ -197,6 +284,119 @@ enum ServerMessage {
         code: ErrorCode,
         message: String,
     },
+    BlockUpdated {
+        id: Uuid,
+        seq: u64,
+        operation: Vec<u8>,
+    },
+    Presence {
+        id: Uuid,
+        data: Vec<u8>,
+    },
+}
+
+impl ServerMessage {
+    fn id(&self) -> Uuid {
+        match self {
+            Self::Ok { id, .. }
+            | Self::ReadBlock { id, .. }
+            | Self::Error { id: Some(id), .. }
+            | Self::BlockUpdated { id, .. }
+            | Self::Presence { id, .. } => *id,
+            Self::Error { id: None, .. } => unreachable!("broadcast messages always have ids"),
+        }
+    }
+}
+
+impl From<ServerMessage> for MessageOutcome {
+    fn from(response: ServerMessage) -> Self {
+        Self {
+            response,
+            notifications: Vec::new(),
+        }
+    }
+}
+
+struct MessageOutcome {
+    response: ServerMessage,
+    notifications: Vec<ServerMessage>,
+}
+
+impl MessageOutcome {
+    fn single(response: ServerMessage) -> Self {
+        response.into()
+    }
+}
+
+type ClientId = u64;
+type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
+
+struct WatchHub {
+    next_client_id: AtomicU64,
+    watchers: Mutex<HashMap<Uuid, HashMap<ClientId, OutboundMessages>>>,
+}
+
+impl WatchHub {
+    fn new() -> Self {
+        Self {
+            next_client_id: AtomicU64::new(1),
+            watchers: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn next_client_id(&self) -> ClientId {
+        self.next_client_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    async fn watch(&self, id: Uuid, client_id: ClientId, outbound: OutboundMessages) {
+        self.watchers
+            .lock()
+            .await
+            .entry(id)
+            .or_default()
+            .insert(client_id, outbound);
+    }
+
+    async fn unwatch(&self, id: Uuid, client_id: ClientId) {
+        let mut watchers = self.watchers.lock().await;
+        let Some(block_watchers) = watchers.get_mut(&id) else {
+            return;
+        };
+
+        block_watchers.remove(&client_id);
+
+        if block_watchers.is_empty() {
+            watchers.remove(&id);
+        }
+    }
+
+    async fn remove_client(&self, client_id: ClientId) {
+        let mut watchers = self.watchers.lock().await;
+        let mut empty_blocks = Vec::new();
+
+        for (id, block_watchers) in watchers.iter_mut() {
+            block_watchers.remove(&client_id);
+
+            if block_watchers.is_empty() {
+                empty_blocks.push(*id);
+            }
+        }
+
+        for id in empty_blocks {
+            watchers.remove(&id);
+        }
+    }
+
+    async fn broadcast(&self, id: Uuid, message: ServerMessage) {
+        let watchers = self.watchers.lock().await;
+        let Some(block_watchers) = watchers.get(&id) else {
+            return;
+        };
+
+        for outbound in block_watchers.values() {
+            let _ = outbound.send(message.clone());
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -205,6 +405,8 @@ enum CommandKind {
     CreateBlock,
     UpdateBlock,
     ReadBlock,
+    UnwatchBlock,
+    PostPresence,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -610,10 +812,14 @@ mod tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let watch_hub = Arc::new(WatchHub::new());
         let server_store = Arc::clone(&store);
+        let server_watch_hub = Arc::clone(&watch_hub);
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            handle_connection(stream, server_store).await.unwrap();
+            handle_connection(stream, server_store, server_watch_hub)
+                .await
+                .unwrap();
         });
 
         let (mut client, _) = connect_async(format!("ws://{addr}")).await.unwrap();
@@ -626,7 +832,8 @@ mod tests {
                     "command": "create_block",
                     "id": id,
                     "type": block_type,
-                    "data": [1, 2, 3]
+                    "data": [1, 2, 3],
+                    "watch": false
                 })
                 .to_string(),
             ))
@@ -673,7 +880,8 @@ mod tests {
                     "command": "read_block",
                     "id": id,
                     "offset": 1,
-                    "len": 10
+                    "len": 10,
+                    "watch": false
                 })
                 .to_string(),
             ))
@@ -706,6 +914,202 @@ mod tests {
         );
 
         fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn watchers_receive_updates_and_presence_until_unwatched() {
+        let root = test_root();
+        let store = Arc::new(BlockStore::new(root.clone()));
+        let watch_hub = Arc::new(WatchHub::new());
+        fs::create_dir_all(store.root()).await.unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_store = Arc::clone(&store);
+        let server_watch_hub = Arc::clone(&watch_hub);
+        let server = tokio::spawn(async move {
+            let mut connections = Vec::new();
+
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let store = Arc::clone(&server_store);
+                let watch_hub = Arc::clone(&server_watch_hub);
+                connections.push(tokio::spawn(async move {
+                    handle_connection(stream, store, watch_hub).await.unwrap();
+                }));
+            }
+
+            for connection in connections {
+                connection.await.unwrap();
+            }
+        });
+
+        let (mut watcher_a, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        let (mut watcher_b, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        let (mut writer, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+
+        let id = Uuid::new_v4();
+        let block_type = Uuid::new_v4();
+
+        watcher_a
+            .send(Message::Text(
+                serde_json::json!({
+                    "command": "create_block",
+                    "id": id,
+                    "type": block_type,
+                    "data": [1, 2, 3],
+                    "watch": true
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            next_json(&mut watcher_a).await,
+            serde_json::json!({
+                "status": "ok",
+                "command": "create_block",
+                "id": id
+            })
+        );
+
+        watcher_b
+            .send(Message::Text(
+                serde_json::json!({
+                    "command": "read_block",
+                    "id": id,
+                    "offset": 0,
+                    "len": 10,
+                    "watch": true
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            next_json(&mut watcher_b).await,
+            serde_json::json!({
+                "status": "ok",
+                "command": "read_block",
+                "id": id,
+                "data": [1, 2, 3],
+                "offset": 0,
+                "len": 3,
+                "seq": 0,
+                "total_size": 3
+            })
+        );
+
+        writer
+            .send(Message::Text(
+                serde_json::json!({
+                    "command": "update_block",
+                    "id": id,
+                    "seq": 1,
+                    "operation": [4, 5]
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            next_json(&mut writer).await,
+            serde_json::json!({
+                "status": "ok",
+                "command": "update_block",
+                "id": id,
+                "seq": 1
+            })
+        );
+
+        let update = serde_json::json!({
+            "status": "block_updated",
+            "id": id,
+            "seq": 1,
+            "operation": [4, 5]
+        });
+        assert_eq!(next_json(&mut watcher_a).await, update);
+        assert_eq!(next_json(&mut watcher_b).await, update);
+
+        watcher_b
+            .send(Message::Text(
+                serde_json::json!({
+                    "command": "unwatch_block",
+                    "id": id
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            next_json(&mut watcher_b).await,
+            serde_json::json!({
+                "status": "ok",
+                "command": "unwatch_block",
+                "id": id
+            })
+        );
+
+        writer
+            .send(Message::Text(
+                serde_json::json!({
+                    "command": "post_presence",
+                    "id": id,
+                    "data": [9, 8, 7]
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            next_json(&mut writer).await,
+            serde_json::json!({
+                "status": "ok",
+                "command": "post_presence",
+                "id": id
+            })
+        );
+        assert_eq!(
+            next_json(&mut watcher_a).await,
+            serde_json::json!({
+                "status": "presence",
+                "id": id,
+                "data": [9, 8, 7]
+            })
+        );
+        assert_no_message(&mut watcher_b).await;
+
+        watcher_a.close(None).await.unwrap();
+        watcher_b.close(None).await.unwrap();
+        writer.close(None).await.unwrap();
+        server.await.unwrap();
+
+        assert_eq!(
+            fs::read(root.join(id.to_string()).join("operations").join("1"))
+                .await
+                .unwrap(),
+            vec![4, 5]
+        );
+        assert!(!root.join(id.to_string()).join("presence").exists());
+
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    async fn next_json<S>(client: &mut S) -> serde_json::Value
+    where
+        S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        let message = client.next().await.unwrap().unwrap();
+        serde_json::from_str(&message.into_text().unwrap()).unwrap()
+    }
+
+    async fn assert_no_message<S>(client: &mut S)
+    where
+        S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(50), client.next()).await;
+        assert!(result.is_err(), "client unexpectedly received a message");
     }
 
     fn test_root() -> PathBuf {
