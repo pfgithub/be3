@@ -10,9 +10,9 @@ use unicode_script::{Script, UnicodeScript};
 use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -161,14 +161,29 @@ pub struct Component {
     rect: Rect,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Kind {
     Sized(SizedComponent),
     Fill(Fill),
     Text(Text),
-    Button(Box<Component>),
+    Outline(Outline),
+    Button(Button),
     List(List),
     Scrollable(Scrollable),
+}
+
+impl std::fmt::Debug for Kind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sized(value) => formatter.debug_tuple("Sized").field(value).finish(),
+            Self::Fill(value) => formatter.debug_tuple("Fill").field(value).finish(),
+            Self::Text(value) => formatter.debug_tuple("Text").field(value).finish(),
+            Self::Outline(value) => formatter.debug_tuple("Outline").field(value).finish(),
+            Self::Button(value) => formatter.debug_tuple("Button").field(value).finish(),
+            Self::List(value) => formatter.debug_tuple("List").field(value).finish(),
+            Self::Scrollable(value) => formatter.debug_tuple("Scrollable").field(value).finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -185,8 +200,40 @@ pub struct Fill {
 }
 
 #[derive(Clone, Debug)]
+pub struct Outline {
+    color: Color,
+    gap: f32,
+    width: f32,
+    child: Box<Component>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Text {
     value: String,
+}
+
+#[derive(Clone)]
+pub struct Button {
+    on_state_change: Arc<dyn Fn(&mut Component, ButtonState)>,
+    on_activate: Arc<dyn Fn()>,
+    state: ButtonState,
+    child: Box<Component>,
+}
+
+impl std::fmt::Debug for Button {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Button")
+            .field("state", &self.state)
+            .field("child", &self.child)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ButtonState {
+    pub focused: bool,
+    pub pressed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -223,14 +270,39 @@ impl Component {
         }))
     }
 
+    pub fn outline(color: Color, gap: f32, width: f32, child: Component) -> Self {
+        Self::new(Kind::Outline(Outline {
+            color,
+            gap: gap.max(0.0),
+            width: width.max(0.0),
+            child: Box::new(child),
+        }))
+    }
+
     pub fn text(value: impl Into<String>) -> Self {
         Self::new(Kind::Text(Text {
             value: value.into(),
         }))
     }
 
-    pub fn button(child: Component) -> Self {
-        Self::new(Kind::Button(Box::new(child)))
+    pub fn button(
+        child: Component,
+        on_state_change: impl Fn(&mut Component, ButtonState) + 'static,
+    ) -> Self {
+        Self::button_with_action(child, on_state_change, || {})
+    }
+
+    pub fn button_with_action(
+        child: Component,
+        on_state_change: impl Fn(&mut Component, ButtonState) + 'static,
+        on_activate: impl Fn() + 'static,
+    ) -> Self {
+        Self::new(Kind::Button(Button {
+            on_state_change: Arc::new(on_state_change),
+            on_activate: Arc::new(on_activate),
+            state: ButtonState::default(),
+            child: Box::new(child),
+        }))
     }
 
     pub fn list<const N: usize>(axis: Axis, children: [(Sizing, Component); N]) -> Self {
@@ -255,7 +327,8 @@ impl Component {
             Kind::Sized(sized) => sized.layout(recommendation),
             Kind::Fill(fill) => fill.child.layout(recommendation),
             Kind::Text(text) => text.layout(),
-            Kind::Button(child) => child.layout(recommendation),
+            Kind::Outline(outline) => outline.child.layout(recommendation),
+            Kind::Button(button) => button.child.layout(recommendation),
             Kind::List(list) => list.layout(recommendation),
             Kind::Scrollable(scrollable) => scrollable.layout(recommendation),
         };
@@ -272,7 +345,16 @@ impl Component {
             Kind::Fill(fill) => fill
                 .child
                 .place(Rect::new(0.0, 0.0, rect.width, rect.height)),
-            Kind::Button(child) => child.place(Rect::new(0.0, 0.0, rect.width, rect.height)),
+            Kind::Outline(outline) => {
+                outline
+                    .child
+                    .place(Rect::new(0.0, 0.0, rect.width, rect.height))
+            }
+            Kind::Button(button) => {
+                button
+                    .child
+                    .place(Rect::new(0.0, 0.0, rect.width, rect.height))
+            }
             Kind::List(list) => list.place(rect.size()),
             Kind::Scrollable(scrollable) => scrollable.place(rect.size()),
         }
@@ -280,6 +362,33 @@ impl Component {
 
     pub fn rect(&self) -> Rect {
         self.rect
+    }
+
+    pub fn child_mut(&mut self) -> Option<&mut Component> {
+        match &mut self.kind {
+            Kind::Sized(sized) => sized.child.as_deref_mut(),
+            Kind::Fill(fill) => Some(&mut fill.child),
+            Kind::Outline(outline) => Some(&mut outline.child),
+            Kind::Button(button) => Some(&mut button.child),
+            Kind::Scrollable(scrollable) => Some(&mut scrollable.child),
+            Kind::Text(_) | Kind::List(_) => None,
+        }
+    }
+
+    pub fn set_fill_color(&mut self, color: Color) -> bool {
+        let Kind::Fill(fill) = &mut self.kind else {
+            return false;
+        };
+        fill.color = color;
+        true
+    }
+
+    pub fn set_outline_width(&mut self, width: f32) -> bool {
+        let Kind::Outline(outline) = &mut self.kind else {
+            return false;
+        };
+        outline.width = width.max(0.0);
+        true
     }
 
     fn new(kind: Kind) -> Self {
@@ -306,7 +415,21 @@ impl Component {
                 fill.child.paint(scene, x, y);
             }
             Kind::Text(text) => scene.draw_text(x, y + 2.0, &text.value, Color::BLACK),
-            Kind::Button(child) => child.paint(scene, x, y),
+            Kind::Outline(outline) => {
+                outline.child.paint(scene, x, y);
+                let outset = outline.gap + outline.width;
+                scene.stroke_rect(
+                    Rect::new(
+                        x - outset,
+                        y - outset,
+                        self.rect.width + outset * 2.0,
+                        self.rect.height + outset * 2.0,
+                    ),
+                    outline.width,
+                    outline.color,
+                );
+            }
+            Kind::Button(button) => button.child.paint(scene, x, y),
             Kind::List(list) => {
                 for child in &list.children {
                     child.component.paint(scene, x, y);
@@ -337,6 +460,182 @@ impl Component {
                 }
             }
         }
+    }
+
+    fn set_button_focus(&mut self, target: Option<usize>, cursor: &mut usize) -> bool {
+        let mut changed = false;
+        match &mut self.kind {
+            Kind::Button(button) => {
+                let focused = target == Some(*cursor);
+                *cursor += 1;
+                changed |= button.set_state(focused, button.state.pressed);
+            }
+            Kind::Sized(sized) => {
+                if let Some(child) = &mut sized.child {
+                    changed |= child.set_button_focus(target, cursor);
+                }
+            }
+            Kind::Fill(fill) => changed |= fill.child.set_button_focus(target, cursor),
+            Kind::Outline(outline) => changed |= outline.child.set_button_focus(target, cursor),
+            Kind::List(list) => {
+                for child in &mut list.children {
+                    changed |= child.component.set_button_focus(target, cursor);
+                }
+            }
+            Kind::Scrollable(scrollable) => {
+                changed |= scrollable.child.set_button_focus(target, cursor)
+            }
+            Kind::Text(_) => {}
+        }
+        changed
+    }
+
+    fn focused_button(&self, cursor: &mut usize) -> (Option<usize>, usize) {
+        let mut focused = None;
+        match &self.kind {
+            Kind::Button(button) => {
+                if button.state.focused {
+                    focused = Some(*cursor);
+                }
+                *cursor += 1;
+            }
+            Kind::Sized(sized) => {
+                if let Some(child) = &sized.child {
+                    focused = child.focused_button(cursor).0;
+                }
+            }
+            Kind::Fill(fill) => focused = fill.child.focused_button(cursor).0,
+            Kind::Outline(outline) => focused = outline.child.focused_button(cursor).0,
+            Kind::List(list) => {
+                for child in &list.children {
+                    let child_focused = child.component.focused_button(cursor).0;
+                    focused = focused.or(child_focused);
+                }
+            }
+            Kind::Scrollable(scrollable) => focused = scrollable.child.focused_button(cursor).0,
+            Kind::Text(_) => {}
+        }
+        (focused, *cursor)
+    }
+
+    fn button_at(
+        &self,
+        point: (f32, f32),
+        offset: (f32, f32),
+        cursor: &mut usize,
+    ) -> Option<usize> {
+        let origin = (offset.0 + self.rect.x, offset.1 + self.rect.y);
+        if !self.contains(point, origin) {
+            *cursor += self.button_count();
+            return None;
+        }
+        match &self.kind {
+            Kind::Button(_) => {
+                let index = *cursor;
+                *cursor += 1;
+                Some(index)
+            }
+            Kind::Sized(sized) => sized
+                .child
+                .as_ref()
+                .and_then(|child| child.button_at(point, origin, cursor)),
+            Kind::Fill(fill) => fill.child.button_at(point, origin, cursor),
+            Kind::Outline(outline) => outline.child.button_at(point, origin, cursor),
+            Kind::List(list) => list
+                .children
+                .iter()
+                .find_map(|child| child.component.button_at(point, origin, cursor)),
+            Kind::Scrollable(scrollable) => scrollable.child.button_at(point, origin, cursor),
+            Kind::Text(_) => None,
+        }
+    }
+
+    fn button_count(&self) -> usize {
+        match &self.kind {
+            Kind::Button(_) => 1,
+            Kind::Sized(sized) => sized.child.as_ref().map_or(0, |child| child.button_count()),
+            Kind::Fill(fill) => fill.child.button_count(),
+            Kind::Outline(outline) => outline.child.button_count(),
+            Kind::List(list) => list
+                .children
+                .iter()
+                .map(|child| child.component.button_count())
+                .sum(),
+            Kind::Scrollable(scrollable) => scrollable.child.button_count(),
+            Kind::Text(_) => 0,
+        }
+    }
+
+    fn contains(&self, point: (f32, f32), origin: (f32, f32)) -> bool {
+        point.0 >= origin.0
+            && point.1 >= origin.1
+            && point.0 < origin.0 + self.rect.width
+            && point.1 < origin.1 + self.rect.height
+    }
+
+    fn set_button_pressed(&mut self, targets: [Option<usize>; 2], cursor: &mut usize) -> bool {
+        let mut changed = false;
+        match &mut self.kind {
+            Kind::Button(button) => {
+                let pressed = targets.contains(&Some(*cursor));
+                *cursor += 1;
+                changed |= button.set_state(button.state.focused, pressed);
+            }
+            Kind::Sized(sized) => {
+                if let Some(child) = &mut sized.child {
+                    changed |= child.set_button_pressed(targets, cursor);
+                }
+            }
+            Kind::Fill(fill) => changed |= fill.child.set_button_pressed(targets, cursor),
+            Kind::Outline(outline) => changed |= outline.child.set_button_pressed(targets, cursor),
+            Kind::List(list) => {
+                for child in &mut list.children {
+                    changed |= child.component.set_button_pressed(targets, cursor);
+                }
+            }
+            Kind::Scrollable(scrollable) => {
+                changed |= scrollable.child.set_button_pressed(targets, cursor)
+            }
+            Kind::Text(_) => {}
+        }
+        changed
+    }
+
+    fn activate_button(&self, target: usize, cursor: &mut usize) -> bool {
+        match &self.kind {
+            Kind::Button(button) => {
+                let matches = *cursor == target;
+                *cursor += 1;
+                if matches {
+                    (button.on_activate)();
+                }
+                matches
+            }
+            Kind::Sized(sized) => sized
+                .child
+                .as_ref()
+                .is_some_and(|child| child.activate_button(target, cursor)),
+            Kind::Fill(fill) => fill.child.activate_button(target, cursor),
+            Kind::Outline(outline) => outline.child.activate_button(target, cursor),
+            Kind::List(list) => list
+                .children
+                .iter()
+                .any(|child| child.component.activate_button(target, cursor)),
+            Kind::Scrollable(scrollable) => scrollable.child.activate_button(target, cursor),
+            Kind::Text(_) => false,
+        }
+    }
+}
+
+impl Button {
+    fn set_state(&mut self, focused: bool, pressed: bool) -> bool {
+        let state = ButtonState { focused, pressed };
+        if self.state == state {
+            return false;
+        }
+        self.state = state;
+        (self.on_state_change)(&mut self.child, state);
+        true
     }
 }
 
@@ -521,6 +820,10 @@ struct UiApplication {
     initial_size: PhysicalSize<u32>,
     root: Component,
     recommendation: SizeRecommendation,
+    cursor_position: (f32, f32),
+    modifiers: ModifiersState,
+    pointer_pressed: Option<usize>,
+    keyboard_pressed: Option<usize>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     error: Option<String>,
@@ -538,6 +841,10 @@ impl UiApplication {
             initial_size,
             root,
             recommendation,
+            cursor_position: (0.0, 0.0),
+            modifiers: ModifiersState::empty(),
+            pointer_pressed: None,
+            keyboard_pressed: None,
             window: None,
             renderer: None,
             error: None,
@@ -547,6 +854,56 @@ impl UiApplication {
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl ToString) {
         self.error = Some(error.to_string());
         event_loop.exit();
+    }
+
+    fn request_redraw(&self) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    fn focus_button(&mut self, target: Option<usize>) -> bool {
+        self.root.set_button_focus(target, &mut 0)
+    }
+
+    fn focus_adjacent_button(&mut self, backwards: bool) -> bool {
+        let (focused, count) = self.root.focused_button(&mut 0);
+        if count == 0 {
+            return false;
+        }
+        let next = match (focused, backwards) {
+            (Some(0), true) | (None, true) => count - 1,
+            (Some(index), true) => index - 1,
+            (Some(index), false) => (index + 1) % count,
+            (None, false) => 0,
+        };
+        self.focus_button(Some(next))
+    }
+
+    fn button_at_cursor(&self) -> Option<usize> {
+        self.root
+            .button_at(self.cursor_position, (0.0, 0.0), &mut 0)
+    }
+
+    fn move_cursor(&mut self, position: (f32, f32)) -> bool {
+        self.cursor_position = position;
+        self.update_pressed_buttons()
+    }
+
+    fn update_pressed_buttons(&mut self) -> bool {
+        let pointer_pressed = self
+            .pointer_pressed
+            .filter(|pressed| self.button_at_cursor() == Some(*pressed));
+        self.root
+            .set_button_pressed([pointer_pressed, self.keyboard_pressed], &mut 0)
+    }
+
+    fn focused_button_index(&self) -> Option<usize> {
+        self.root.focused_button(&mut 0).0
+    }
+
+    fn activate_button(&self, target: usize) {
+        self.root.activate_button(target, &mut 0);
     }
 }
 
@@ -589,11 +946,91 @@ impl ApplicationHandler for UiApplication {
         }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. }
+            WindowEvent::CursorMoved { position, .. } => {
+                if self.move_cursor((position.x as f32, position.y as f32)) {
+                    self.request_redraw();
+                }
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let target = self.button_at_cursor();
+                let changed = match state {
+                    ElementState::Pressed => {
+                        self.pointer_pressed = target;
+                        self.focus_button(target) | self.update_pressed_buttons()
+                    }
+                    ElementState::Released => {
+                        let pressed = self.pointer_pressed.take();
+                        let changed = self.update_pressed_buttons();
+                        if let Some(index) = pressed.filter(|index| Some(*index) == target) {
+                            self.activate_button(index);
+                        }
+                        changed
+                    }
+                };
+                if changed {
+                    self.request_redraw();
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed
-                    && event.logical_key == Key::Named(NamedKey::Escape) =>
-            {
-                event_loop.exit();
+                    && event.logical_key == Key::Named(NamedKey::Escape)
+                {
+                    event_loop.exit();
+                    return;
+                }
+
+                if event.state == ElementState::Pressed
+                    && event.logical_key == Key::Named(NamedKey::Tab)
+                    && !event.repeat
+                {
+                    if self.focus_adjacent_button(self.modifiers.shift_key()) {
+                        self.request_redraw();
+                    }
+                    return;
+                }
+
+                if matches!(
+                    event.logical_key,
+                    Key::Named(NamedKey::Space | NamedKey::Enter)
+                ) {
+                    match event.state {
+                        ElementState::Pressed if !event.repeat => {
+                            if let Some(index) = self.focused_button_index() {
+                                self.keyboard_pressed = Some(index);
+                                if self.update_pressed_buttons() {
+                                    self.request_redraw();
+                                }
+                            }
+                        }
+                        ElementState::Released => {
+                            if let Some(index) = self.keyboard_pressed.take() {
+                                let changed = self.update_pressed_buttons();
+                                if self.focused_button_index() == Some(index) {
+                                    self.activate_button(index);
+                                }
+                                if changed {
+                                    self.request_redraw();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            WindowEvent::Focused(false) => {
+                self.pointer_pressed = None;
+                self.keyboard_pressed = None;
+                let changed = self.focus_button(None) | self.update_pressed_buttons();
+                if changed {
+                    self.request_redraw();
+                }
             }
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
@@ -679,6 +1116,23 @@ impl Scene {
             rect,
             [0.5 / ATLAS_SIZE as f32; 2],
             [0.5 / ATLAS_SIZE as f32; 2],
+            color,
+        );
+    }
+
+    fn stroke_rect(&mut self, rect: Rect, width: f32, color: Color) {
+        let width = width.min(rect.width / 2.0).min(rect.height / 2.0);
+        if width <= 0.0 {
+            return;
+        }
+        self.fill_rect(Rect::new(rect.x, rect.y, rect.width, width), color);
+        self.fill_rect(
+            Rect::new(rect.x, rect.y + rect.height - width, rect.width, width),
+            color,
+        );
+        self.fill_rect(Rect::new(rect.x, rect.y, width, rect.height), color);
+        self.fill_rect(
+            Rect::new(rect.x + rect.width - width, rect.y, width, rect.height),
             color,
         );
     }
@@ -1361,6 +1815,8 @@ const FONT_CANDIDATES: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
     #[test]
     fn vertical_list_measures_intrinsic_then_fr_children() {
@@ -1414,7 +1870,7 @@ mod tests {
             [
                 (
                     Sizing::Intrinsic,
-                    Component::button(Component::text("Demo")),
+                    Component::button(Component::text("Demo"), |_, _| {}),
                 ),
                 (
                     Sizing::fr(1.0),
@@ -1432,10 +1888,13 @@ mod tests {
 
     #[test]
     fn button_paints_only_its_child() {
-        let mut button = Component::button(Component::fill(
-            Color::WHITE,
-            Component::sized(SizeSource::Parent, SizeSource::Parent, None),
-        ));
+        let mut button = Component::button(
+            Component::fill(
+                Color::WHITE,
+                Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+            ),
+            |_, _| {},
+        );
         let size = button.layout(SizeRecommendation::exact(100.0, 40.0));
         button.place(Rect::new(0.0, 0.0, size.width, size.height));
         let mut scene = Scene::new(100, 40);
@@ -1444,6 +1903,199 @@ mod tests {
 
         assert_eq!(scene.vertices.len(), 4);
         assert_eq!(scene.indices.len(), 6);
+    }
+
+    #[test]
+    fn outline_paints_outside_its_bounds_without_affecting_layout() {
+        let mut outline = Component::outline(
+            Color::BLACK,
+            2.0,
+            2.0,
+            Component::fill(
+                Color::WHITE,
+                Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+            ),
+        );
+        let size = outline.layout(SizeRecommendation::exact(100.0, 40.0));
+        outline.place(Rect::new(0.0, 0.0, size.width, size.height));
+        let mut scene = Scene::new(100, 40);
+
+        outline.paint(&mut scene, 0.0, 0.0);
+
+        assert_eq!(size, Size::new(100.0, 40.0));
+        assert_eq!(
+            outline.child_mut().unwrap().rect(),
+            Rect::new(0.0, 0.0, 100.0, 40.0)
+        );
+        assert_eq!(scene.vertices[0].color, Color::WHITE.as_f32());
+        assert_eq!(scene.vertices[4].color, Color::BLACK.as_f32());
+        assert_eq!(scene.vertices[4].position, [-1.08, 1.2]);
+    }
+
+    #[test]
+    fn button_mutates_retained_child_when_interaction_state_changes() {
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let changed_states = states.clone();
+        let mut button = Component::button(
+            Component::fill(Color::WHITE, Component::text("Demo")),
+            move |child, state| {
+                changed_states.lock().unwrap().push(state);
+                child.set_fill_color(if state.pressed {
+                    Color::BLACK
+                } else {
+                    Color::WHITE
+                });
+            },
+        );
+        let child_address = match &button.kind {
+            Kind::Button(button) => (&*button.child) as *const Component,
+            _ => unreachable!(),
+        };
+
+        assert!(button.set_button_focus(Some(0), &mut 0));
+        assert!(button.set_button_pressed([Some(0), None], &mut 0));
+
+        assert_eq!(
+            *states.lock().unwrap(),
+            vec![
+                ButtonState {
+                    focused: true,
+                    pressed: false,
+                },
+                ButtonState {
+                    focused: true,
+                    pressed: true,
+                },
+            ]
+        );
+        match &button.kind {
+            Kind::Button(button) => {
+                assert_eq!((&*button.child) as *const Component, child_address);
+                match button.child.kind {
+                    Kind::Fill(ref fill) => assert_eq!(fill.color, Color::BLACK),
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn focus_traversal_wraps_in_both_directions() {
+        let root = Component::list(
+            Axis::Vertical,
+            [
+                (
+                    Sizing::Intrinsic,
+                    Component::button(Component::text("First"), |_, _| {}),
+                ),
+                (
+                    Sizing::Intrinsic,
+                    Component::button(Component::text("Second"), |_, _| {}),
+                ),
+            ],
+        );
+        let mut app = UiApplication::new(
+            "test".to_owned(),
+            PhysicalSize::new(100, 100),
+            root,
+            SizeRecommendation::exact(100.0, 100.0),
+        );
+
+        assert!(app.focus_adjacent_button(false));
+        assert_eq!(app.focused_button_index(), Some(0));
+        assert!(app.focus_adjacent_button(false));
+        assert_eq!(app.focused_button_index(), Some(1));
+        assert!(app.focus_adjacent_button(false));
+        assert_eq!(app.focused_button_index(), Some(0));
+        assert!(app.focus_adjacent_button(true));
+        assert_eq!(app.focused_button_index(), Some(1));
+    }
+
+    #[test]
+    fn held_pointer_only_presses_button_while_hovering_it() {
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let changed_states = states.clone();
+        let mut root = Component::button(Component::text("Demo"), move |_, state| {
+            changed_states.lock().unwrap().push(state);
+        });
+        let size = root.layout(SizeRecommendation::exact(100.0, 40.0));
+        root.place(Rect::new(0.0, 0.0, size.width, size.height));
+        let mut app = UiApplication::new(
+            "test".to_owned(),
+            PhysicalSize::new(100, 40),
+            root,
+            SizeRecommendation::exact(100.0, 40.0),
+        );
+        app.pointer_pressed = Some(0);
+
+        assert!(app.move_cursor((10.0, 10.0)));
+        assert!(app.move_cursor((110.0, 10.0)));
+        assert!(app.move_cursor((10.0, 10.0)));
+
+        assert_eq!(
+            states.lock().unwrap().as_slice(),
+            [
+                ButtonState {
+                    focused: false,
+                    pressed: true,
+                },
+                ButtonState::default(),
+                ButtonState {
+                    focused: false,
+                    pressed: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn releasing_keyboard_does_not_clear_active_pointer_press() {
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let changed_states = states.clone();
+        let mut root = Component::button(Component::text("Demo"), move |_, state| {
+            changed_states.lock().unwrap().push(state);
+        });
+        let size = root.layout(SizeRecommendation::exact(100.0, 40.0));
+        root.place(Rect::new(0.0, 0.0, size.width, size.height));
+        let mut app = UiApplication::new(
+            "test".to_owned(),
+            PhysicalSize::new(100, 40),
+            root,
+            SizeRecommendation::exact(100.0, 40.0),
+        );
+        app.cursor_position = (10.0, 10.0);
+        app.pointer_pressed = Some(0);
+        app.keyboard_pressed = Some(0);
+        assert!(app.update_pressed_buttons());
+
+        app.keyboard_pressed = None;
+
+        assert!(!app.update_pressed_buttons());
+        assert_eq!(
+            states.lock().unwrap().last(),
+            Some(&ButtonState {
+                focused: false,
+                pressed: true,
+            })
+        );
+    }
+
+    #[test]
+    fn activating_button_runs_its_action() {
+        let activations = Arc::new(AtomicUsize::new(0));
+        let action_activations = activations.clone();
+        let button = Component::button_with_action(
+            Component::text("Demo"),
+            |_, _| {},
+            move || {
+                action_activations.fetch_add(1, Ordering::Relaxed);
+            },
+        );
+
+        button.activate_button(0, &mut 0);
+
+        assert_eq!(activations.load(Ordering::Relaxed), 1);
     }
 
     #[test]
