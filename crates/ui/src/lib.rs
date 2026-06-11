@@ -1,5 +1,10 @@
-use font8x8::UnicodeFonts;
+use freetype::freetype as ft;
+use harfbuzz_rs::{shape, Face as HbFace, Font as HbFont, UnicodeBuffer};
 use minifb::{Key, Window, WindowOptions};
+use once_cell::sync::OnceCell;
+use std::ffi::CString;
+use std::path::Path;
+use std::ptr;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SizeRecommendation {
@@ -23,13 +28,6 @@ impl SizeRecommendation {
         match axis {
             Axis::Horizontal => self.width,
             Axis::Vertical => self.height,
-        }
-    }
-
-    fn cross(self, axis: Axis) -> Option<f32> {
-        match axis {
-            Axis::Horizontal => self.height,
-            Axis::Vertical => self.width,
         }
     }
 
@@ -121,6 +119,24 @@ impl Sizing {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyAxes {
+    None,
+    Horizontal,
+    Vertical,
+    Both,
+}
+
+impl CopyAxes {
+    fn copies_horizontal(self) -> bool {
+        matches!(self, Self::Horizontal | Self::Both)
+    }
+
+    fn copies_vertical(self) -> bool {
+        matches!(self, Self::Vertical | Self::Both)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Color(u32);
 
 impl Color {
@@ -140,7 +156,7 @@ pub struct Component {
 
 #[derive(Clone, Debug)]
 enum Kind {
-    Void,
+    Void(CopyAxes),
     Fill(Fill),
     Text(Text),
     Button(Box<Component>),
@@ -178,8 +194,8 @@ pub struct Scrollable {
 }
 
 impl Component {
-    pub fn void() -> Self {
-        Self::new(Kind::Void)
+    pub fn void(copy_axes: CopyAxes) -> Self {
+        Self::new(Kind::Void(copy_axes))
     }
 
     pub fn fill(color: Color, child: Component) -> Self {
@@ -218,9 +234,17 @@ impl Component {
 
     pub fn layout(&mut self, recommendation: SizeRecommendation) -> Size {
         let size = match &mut self.kind {
-            Kind::Void => Size::new(
-                recommendation.width.unwrap_or(0.0),
-                recommendation.height.unwrap_or(0.0),
+            Kind::Void(copy_axes) => Size::new(
+                if copy_axes.copies_horizontal() {
+                    recommendation.width.unwrap_or(0.0)
+                } else {
+                    0.0
+                },
+                if copy_axes.copies_vertical() {
+                    recommendation.height.unwrap_or(0.0)
+                } else {
+                    0.0
+                },
             ),
             Kind::Fill(fill) => fill.child.layout(recommendation),
             Kind::Text(text) => text.layout(),
@@ -236,7 +260,7 @@ impl Component {
     pub fn place(&mut self, rect: Rect) {
         self.rect = rect;
         match &mut self.kind {
-            Kind::Void | Kind::Text(_) => {}
+            Kind::Void(_) | Kind::Text(_) => {}
             Kind::Fill(fill) => fill
                 .child
                 .place(Rect::new(0.0, 0.0, rect.width, rect.height)),
@@ -261,7 +285,7 @@ impl Component {
         let x = offset_x + self.rect.x;
         let y = offset_y + self.rect.y;
         match &self.kind {
-            Kind::Void => {}
+            Kind::Void(_) => {}
             Kind::Fill(fill) => {
                 canvas.fill_rect(
                     Rect::new(x, y, self.rect.width, self.rect.height),
@@ -316,7 +340,9 @@ impl Component {
 
 impl Text {
     fn layout(&self) -> Size {
-        Size::new(self.value.chars().count() as f32 * 10.0, 20.0)
+        TextEngine::new()
+            .map(|engine| engine.measure(&self.value))
+            .unwrap_or_else(|| Size::new(self.value.chars().count() as f32 * 10.0, 20.0))
     }
 }
 
@@ -360,14 +386,7 @@ impl List {
             }
         }
 
-        Size::from_axes(
-            axis,
-            intrinsic_main + fr_main,
-            recommendation
-                .cross(axis)
-                .unwrap_or(max_cross)
-                .max(max_cross),
-        )
+        Size::from_axes(axis, intrinsic_main + fr_main, max_cross)
     }
 
     fn place(&mut self, size: Size) {
@@ -504,33 +523,217 @@ impl Canvas {
     }
 
     fn draw_text(&mut self, x: f32, y: f32, value: &str, color: Color) {
-        let mut pen_x = x as i32;
-        let pen_y = y as i32;
-        for character in value.chars() {
-            if let Some(glyph) = font8x8::BASIC_FONTS.get(character) {
-                for (row, bits) in glyph.iter().enumerate() {
-                    for col in 0..8 {
-                        if bits & (1 << col) != 0 {
-                            self.set_pixel(pen_x + col, pen_y + row as i32, color);
-                        }
-                    }
-                }
-            }
-            pen_x += 10;
+        if let Some(mut engine) = TextEngine::new() {
+            engine.draw(self, x, y, value, color);
         }
     }
 
-    fn set_pixel(&mut self, x: i32, y: i32, color: Color) {
-        if x < 0 || y < 0 {
+    fn blend_pixel(&mut self, x: i32, y: i32, color: Color, alpha: u8) {
+        if x < 0 || y < 0 || alpha == 0 {
             return;
         }
         let x = x as usize;
         let y = y as usize;
-        if x < self.width && y < self.height {
-            self.buffer[y * self.width + x] = color.0;
+        if x >= self.width || y >= self.height {
+            return;
+        }
+
+        let index = y * self.width + x;
+        self.buffer[index] = blend_color(self.buffer[index], color.0, alpha);
+    }
+}
+
+const TEXT_PIXEL_SIZE: u32 = 18;
+const TEXT_SCALE: i32 = (TEXT_PIXEL_SIZE as i32) * 64;
+
+struct TextEngine {
+    library: ft::FT_Library,
+    face: ft::FT_Face,
+    font_path: &'static str,
+}
+
+#[derive(Clone, Copy)]
+struct ShapedGlyph {
+    id: u32,
+    x_advance: f32,
+    x_offset: f32,
+    y_offset: f32,
+}
+
+impl TextEngine {
+    fn new() -> Option<Self> {
+        let font_path = default_font_path()?;
+        let font_path_c = CString::new(font_path).ok()?;
+        let mut library = ptr::null_mut();
+        let mut face = ptr::null_mut();
+        unsafe {
+            if ft::FT_Init_FreeType(&mut library) != 0 {
+                return None;
+            }
+            if ft::FT_New_Face(library, font_path_c.as_ptr(), 0, &mut face) != 0 {
+                ft::FT_Done_FreeType(library);
+                return None;
+            }
+            if ft::FT_Set_Pixel_Sizes(face, 0, TEXT_PIXEL_SIZE) != 0 {
+                ft::FT_Done_Face(face);
+                ft::FT_Done_FreeType(library);
+                return None;
+            }
+        }
+        Some(Self {
+            library,
+            face,
+            font_path,
+        })
+    }
+
+    fn measure(&self, value: &str) -> Size {
+        let width = self
+            .shape(value)
+            .into_iter()
+            .map(|glyph| glyph.x_advance)
+            .sum::<f32>()
+            .ceil();
+        Size::new(width, self.line_height())
+    }
+
+    fn draw(&mut self, canvas: &mut Canvas, x: f32, y: f32, value: &str, color: Color) {
+        let baseline = y + self.ascender();
+        let mut pen_x = x;
+
+        for glyph in self.shape(value) {
+            unsafe {
+                if ft::FT_Load_Glyph(self.face, glyph.id, ft::FT_LOAD_DEFAULT as i32) == 0 {
+                    let slot = (*self.face).glyph;
+                    if ft::FT_Render_Glyph(slot, ft::FT_Render_Mode::FT_RENDER_MODE_NORMAL) == 0 {
+                        let bitmap_x = pen_x + glyph.x_offset + (*slot).bitmap_left as f32;
+                        let bitmap_y = baseline - glyph.y_offset - (*slot).bitmap_top as f32;
+                        paint_glyph_bitmap(canvas, bitmap_x, bitmap_y, &(*slot).bitmap, color);
+                    }
+                }
+            }
+
+            pen_x += glyph.x_advance;
+        }
+    }
+
+    fn shape(&self, value: &str) -> Vec<ShapedGlyph> {
+        let hb_face = match HbFace::from_file(self.font_path, 0) {
+            Ok(face) => face,
+            Err(_) => return Vec::new(),
+        };
+        let mut hb_font = HbFont::new(hb_face);
+        hb_font.set_scale(TEXT_SCALE, TEXT_SCALE);
+        hb_font.set_ppem(TEXT_PIXEL_SIZE, TEXT_PIXEL_SIZE);
+
+        let buffer = UnicodeBuffer::new()
+            .add_str(value)
+            .guess_segment_properties();
+        let output = shape(&hb_font, buffer, &[]);
+        output
+            .get_glyph_infos()
+            .iter()
+            .zip(output.get_glyph_positions())
+            .map(|(info, position)| ShapedGlyph {
+                id: info.codepoint,
+                x_advance: position.x_advance as f32 / 64.0,
+                x_offset: position.x_offset as f32 / 64.0,
+                y_offset: position.y_offset as f32 / 64.0,
+            })
+            .collect()
+    }
+
+    fn ascender(&self) -> f32 {
+        unsafe {
+            let size = (*self.face).size;
+            if size.is_null() {
+                TEXT_PIXEL_SIZE as f32
+            } else {
+                (*size).metrics.ascender as f32 / 64.0
+            }
+        }
+    }
+
+    fn line_height(&self) -> f32 {
+        unsafe {
+            let size = (*self.face).size;
+            if size.is_null() {
+                (TEXT_PIXEL_SIZE as f32 * 1.2).ceil()
+            } else {
+                ((*size).metrics.height as f32 / 64.0).ceil()
+            }
         }
     }
 }
+
+impl Drop for TextEngine {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.face.is_null() {
+                ft::FT_Done_Face(self.face);
+            }
+            if !self.library.is_null() {
+                ft::FT_Done_FreeType(self.library);
+            }
+        }
+    }
+}
+
+fn paint_glyph_bitmap(canvas: &mut Canvas, x: f32, y: f32, bitmap: &ft::FT_Bitmap, color: Color) {
+    let width = bitmap.width as i32;
+    let rows = bitmap.rows as i32;
+    let pitch = bitmap.pitch.unsigned_abs() as usize;
+    let byte_len = pitch * rows.max(0) as usize;
+    if bitmap.buffer.is_null() || width <= 0 || rows <= 0 || byte_len == 0 {
+        return;
+    }
+    let buffer = unsafe { std::slice::from_raw_parts(bitmap.buffer, byte_len) };
+    let origin_x = x.round() as i32;
+    let origin_y = y.round() as i32;
+
+    for row in 0..rows {
+        let source_row = if bitmap.pitch >= 0 {
+            row as usize
+        } else {
+            (rows - 1 - row) as usize
+        };
+        let row_start = source_row * pitch;
+        for col in 0..width {
+            let index = row_start + col as usize;
+            if let Some(alpha) = buffer.get(index).copied() {
+                canvas.blend_pixel(origin_x + col, origin_y + row, color, alpha);
+            }
+        }
+    }
+}
+
+fn blend_color(background: u32, foreground: u32, alpha: u8) -> u32 {
+    let alpha = alpha as u32;
+    let inverse = 255 - alpha;
+    let red = (((foreground >> 16) & 0xff) * alpha + ((background >> 16) & 0xff) * inverse) / 255;
+    let green = (((foreground >> 8) & 0xff) * alpha + ((background >> 8) & 0xff) * inverse) / 255;
+    let blue = ((foreground & 0xff) * alpha + (background & 0xff) * inverse) / 255;
+    (red << 16) | (green << 8) | blue
+}
+
+fn default_font_path() -> Option<&'static str> {
+    static FONT_PATH: OnceCell<Option<&'static str>> = OnceCell::new();
+    *FONT_PATH.get_or_init(|| {
+        FONT_CANDIDATES
+            .iter()
+            .copied()
+            .find(|path| Path::new(path).exists())
+    })
+}
+
+const FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/SFNS.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+];
 
 #[cfg(test)]
 mod tests {
@@ -542,7 +745,7 @@ mod tests {
             Axis::Vertical,
             [
                 (Sizing::Intrinsic, Component::text("Demo")),
-                (Sizing::fr(1.0), Component::void()),
+                (Sizing::fr(1.0), Component::void(CopyAxes::Both)),
             ],
         );
 
@@ -559,7 +762,7 @@ mod tests {
                 Axis::Vertical,
                 [(
                     Sizing::fr(1.0),
-                    Component::fill(Color::WHITE, Component::void()),
+                    Component::fill(Color::WHITE, Component::void(CopyAxes::Both)),
                 )],
             ),
         );
@@ -573,5 +776,25 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn horizontal_void_can_copy_width_without_inflating_height() {
+        let mut row = Component::list(
+            Axis::Horizontal,
+            [
+                (
+                    Sizing::Intrinsic,
+                    Component::button(Component::text("Demo")),
+                ),
+                (Sizing::fr(1.0), Component::void(CopyAxes::Horizontal)),
+            ],
+        );
+
+        let size = row.layout(SizeRecommendation::exact(800.0, 600.0));
+
+        assert_eq!(size.width, 800.0);
+        assert!(size.height > 0.0);
+        assert!(size.height < 600.0);
     }
 }

@@ -5,5 +5,7 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
-font8x8 = "0.3"
+freetype = "0.7"
+harfbuzz_rs = "2"
 minifb = "0.27"
+once_cell = "1"
