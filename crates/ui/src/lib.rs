@@ -549,12 +549,17 @@ const TEXT_SCALE: i32 = (TEXT_PIXEL_SIZE as i32) * 64;
 
 struct TextEngine {
     library: ft::FT_Library,
+    fonts: Vec<FontFace>,
+}
+
+struct FontFace {
     face: ft::FT_Face,
     font_path: &'static str,
 }
 
 #[derive(Clone, Copy)]
 struct ShapedGlyph {
+    font_index: usize,
     id: u32,
     x_advance: f32,
     x_offset: f32,
@@ -567,31 +572,48 @@ struct TextRun<'a> {
     script: Option<Script>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FontRun<'a> {
+    value: &'a str,
+    script: Option<Script>,
+    font_index: usize,
+}
+
 impl TextEngine {
     fn new() -> Option<Self> {
-        let font_path = default_font_path()?;
-        let font_path_c = CString::new(font_path).ok()?;
         let mut library = ptr::null_mut();
-        let mut face = ptr::null_mut();
         unsafe {
             if ft::FT_Init_FreeType(&mut library) != 0 {
                 return None;
             }
-            if ft::FT_New_Face(library, font_path_c.as_ptr(), 0, &mut face) != 0 {
-                ft::FT_Done_FreeType(library);
-                return None;
-            }
-            if ft::FT_Set_Pixel_Sizes(face, 0, TEXT_PIXEL_SIZE) != 0 {
-                ft::FT_Done_Face(face);
-                ft::FT_Done_FreeType(library);
-                return None;
-            }
         }
-        Some(Self {
-            library,
-            face,
-            font_path,
-        })
+
+        let fonts = font_paths()
+            .iter()
+            .filter_map(|font_path| {
+                let font_path_c = CString::new(*font_path).ok()?;
+                let mut face = ptr::null_mut();
+                unsafe {
+                    if ft::FT_New_Face(library, font_path_c.as_ptr(), 0, &mut face) != 0 {
+                        return None;
+                    }
+                    if ft::FT_Set_Pixel_Sizes(face, 0, TEXT_PIXEL_SIZE) != 0 {
+                        ft::FT_Done_Face(face);
+                        return None;
+                    }
+                }
+                Some(FontFace { face, font_path })
+            })
+            .collect::<Vec<_>>();
+
+        if fonts.is_empty() {
+            unsafe {
+                ft::FT_Done_FreeType(library);
+            }
+            None
+        } else {
+            Some(Self { library, fonts })
+        }
     }
 
     fn measure(&self, value: &str) -> Size {
@@ -609,9 +631,10 @@ impl TextEngine {
         let mut pen_x = x;
 
         for glyph in self.shape(value) {
+            let face = self.fonts[glyph.font_index].face;
             unsafe {
-                if ft::FT_Load_Glyph(self.face, glyph.id, ft::FT_LOAD_DEFAULT as i32) == 0 {
-                    let slot = (*self.face).glyph;
+                if ft::FT_Load_Glyph(face, glyph.id, ft::FT_LOAD_DEFAULT as i32) == 0 {
+                    let slot = (*face).glyph;
                     if ft::FT_Render_Glyph(slot, ft::FT_Render_Mode::FT_RENDER_MODE_NORMAL) == 0 {
                         let bitmap_x = pen_x + glyph.x_offset + (*slot).bitmap_left as f32;
                         let bitmap_y = baseline - glyph.y_offset - (*slot).bitmap_top as f32;
@@ -625,17 +648,16 @@ impl TextEngine {
     }
 
     fn shape(&self, value: &str) -> Vec<ShapedGlyph> {
-        let hb_face = match HbFace::from_file(self.font_path, 0) {
-            Ok(face) => face,
-            Err(_) => return Vec::new(),
-        };
-        let mut hb_font = HbFont::new(hb_face);
-        hb_font.set_scale(TEXT_SCALE, TEXT_SCALE);
-        hb_font.set_ppem(TEXT_PIXEL_SIZE, TEXT_PIXEL_SIZE);
-
-        script_runs(value)
+        self.font_runs(value)
             .into_iter()
             .flat_map(|run| {
+                let hb_face = match HbFace::from_file(self.fonts[run.font_index].font_path, 0) {
+                    Ok(face) => face,
+                    Err(_) => return Vec::new(),
+                };
+                let mut hb_font = HbFont::new(hb_face);
+                hb_font.set_scale(TEXT_SCALE, TEXT_SCALE);
+                hb_font.set_ppem(TEXT_PIXEL_SIZE, TEXT_PIXEL_SIZE);
                 let mut buffer = UnicodeBuffer::new().add_str(run.value);
                 if let Some(script) = run.script {
                     let tag = script.as_iso15924_tag().to_be_bytes();
@@ -652,6 +674,7 @@ impl TextEngine {
                     .iter()
                     .zip(output.get_glyph_positions())
                     .map(|(info, position)| ShapedGlyph {
+                        font_index: run.font_index,
                         id: info.codepoint,
                         x_advance: position.x_advance as f32 / 64.0,
                         x_offset: position.x_offset as f32 / 64.0,
@@ -662,25 +685,88 @@ impl TextEngine {
             .collect()
     }
 
+    fn font_runs<'a>(&self, value: &'a str) -> Vec<FontRun<'a>> {
+        script_runs(value)
+            .into_iter()
+            .flat_map(|run| split_font_runs(run, |character| self.font_index_for(character)))
+            .collect()
+    }
+
+    fn font_index_for(&self, character: char) -> Option<usize> {
+        self.fonts.iter().position(|font| unsafe {
+            ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0
+        })
+    }
+
     fn ascender(&self) -> f32 {
-        unsafe {
-            let size = (*self.face).size;
-            if size.is_null() {
-                TEXT_PIXEL_SIZE as f32
-            } else {
-                (*size).metrics.ascender as f32 / 64.0
+        self.fonts
+            .iter()
+            .map(|font| face_ascender(font.face))
+            .fold(TEXT_PIXEL_SIZE as f32, f32::max)
+    }
+
+    fn line_height(&self) -> f32 {
+        self.fonts
+            .iter()
+            .map(|font| face_line_height(font.face))
+            .fold((TEXT_PIXEL_SIZE as f32 * 1.2).ceil(), f32::max)
+    }
+}
+
+fn split_font_runs(
+    run: TextRun<'_>,
+    mut font_index_for: impl FnMut(char) -> Option<usize>,
+) -> Vec<FontRun<'_>> {
+    let mut runs = Vec::new();
+    let mut run_start = 0;
+    let mut current_font = None;
+
+    for (index, character) in run.value.char_indices() {
+        let font_index = font_index_for(character).or(current_font).unwrap_or(0);
+        match current_font {
+            None => current_font = Some(font_index),
+            Some(current) if current == font_index => {}
+            Some(current) => {
+                runs.push(FontRun {
+                    value: &run.value[run_start..index],
+                    script: run.script,
+                    font_index: current,
+                });
+                run_start = index;
+                current_font = Some(font_index);
             }
         }
     }
 
-    fn line_height(&self) -> f32 {
-        unsafe {
-            let size = (*self.face).size;
-            if size.is_null() {
-                (TEXT_PIXEL_SIZE as f32 * 1.2).ceil()
-            } else {
-                ((*size).metrics.height as f32 / 64.0).ceil()
-            }
+    if let Some(font_index) = current_font {
+        runs.push(FontRun {
+            value: &run.value[run_start..],
+            script: run.script,
+            font_index,
+        });
+    }
+
+    runs
+}
+
+fn face_ascender(face: ft::FT_Face) -> f32 {
+    unsafe {
+        let size = (*face).size;
+        if size.is_null() {
+            TEXT_PIXEL_SIZE as f32
+        } else {
+            (*size).metrics.ascender as f32 / 64.0
+        }
+    }
+}
+
+fn face_line_height(face: ft::FT_Face) -> f32 {
+    unsafe {
+        let size = (*face).size;
+        if size.is_null() {
+            (TEXT_PIXEL_SIZE as f32 * 1.2).ceil()
+        } else {
+            ((*size).metrics.height as f32 / 64.0).ceil()
         }
     }
 }
@@ -723,8 +809,10 @@ fn script_runs(value: &str) -> Vec<TextRun<'_>> {
 impl Drop for TextEngine {
     fn drop(&mut self) {
         unsafe {
-            if !self.face.is_null() {
-                ft::FT_Done_Face(self.face);
+            for font in &self.fonts {
+                if !font.face.is_null() {
+                    ft::FT_Done_Face(font.face);
+                }
             }
             if !self.library.is_null() {
                 ft::FT_Done_FreeType(self.library);
@@ -770,27 +858,39 @@ fn blend_color(background: u32, foreground: u32, alpha: u8) -> u32 {
     (red << 16) | (green << 8) | blue
 }
 
-fn default_font_path() -> Option<&'static str> {
-    static FONT_PATH: OnceCell<Option<&'static str>> = OnceCell::new();
-    *FONT_PATH.get_or_init(|| {
+fn font_paths() -> &'static Vec<&'static str> {
+    static FONT_PATHS: OnceCell<Vec<&'static str>> = OnceCell::new();
+    FONT_PATHS.get_or_init(|| {
         FONT_CANDIDATES
             .iter()
             .copied()
-            .find(|path| Path::new(path).exists())
+            .filter(|path| Path::new(path).exists())
+            .collect()
     })
 }
 
 const FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\verdana.ttf",
-    "C:\\Windows\\Fonts\\verdanab.ttf",
     "/System/Library/Fonts/Supplemental/Verdana.ttf",
     "/Library/Fonts/Verdana.ttf",
     "/usr/share/fonts/truetype/msttcorefonts/Verdana.ttf",
     "/usr/share/fonts/truetype/msttcorefonts/verdana.ttf",
     "C:\\Windows\\Fonts\\segoeui.ttf",
     "C:\\Windows\\Fonts\\arial.ttf",
+    "C:\\Windows\\Fonts\\msyh.ttc",
+    "C:\\Windows\\Fonts\\meiryo.ttc",
+    "C:\\Windows\\Fonts\\malgun.ttf",
+    "C:\\Windows\\Fonts\\Nirmala.ttf",
+    "C:\\Windows\\Fonts\\seguisym.ttf",
+    "C:\\Windows\\Fonts\\seguiemj.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/System/Library/Fonts/SFNS.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/Geeza Pro.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
 ];
@@ -882,5 +982,66 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("Rust", Some(Script::Latin)), ("𞤀", Some(Script::Adlam)),]
         );
+    }
+
+    #[test]
+    fn font_runs_switch_fonts_without_losing_script_information() {
+        let run = TextRun {
+            value: "Hello 世界 ",
+            script: Some(Script::Latin),
+        };
+
+        assert_eq!(
+            split_font_runs(run, |character| {
+                if matches!(character, '世' | '界') {
+                    Some(1)
+                } else {
+                    Some(0)
+                }
+            }),
+            vec![
+                FontRun {
+                    value: "Hello ",
+                    script: Some(Script::Latin),
+                    font_index: 0,
+                },
+                FontRun {
+                    value: "世界",
+                    script: Some(Script::Latin),
+                    font_index: 1,
+                },
+                FontRun {
+                    value: " ",
+                    script: Some(Script::Latin),
+                    font_index: 0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn installed_fonts_cover_mixed_language_text_when_available() {
+        let Some(engine) = TextEngine::new() else {
+            return;
+        };
+        let characters = "Hello 世界 مرحبا"
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<Vec<_>>();
+        if !characters
+            .iter()
+            .all(|character| engine.font_index_for(*character).is_some())
+        {
+            return;
+        }
+
+        for character in characters {
+            let font = &engine.fonts[engine.font_index_for(character).unwrap()];
+            assert_ne!(
+                unsafe { ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) },
+                0,
+                "no fallback font covers {character:?}"
+            );
+        }
     }
 }
