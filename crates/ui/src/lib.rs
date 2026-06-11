@@ -1,10 +1,11 @@
 use freetype::freetype as ft;
-use harfbuzz_rs::{shape, Face as HbFace, Font as HbFont, UnicodeBuffer};
+use harfbuzz_rs::{shape, Face as HbFace, Font as HbFont, Tag, UnicodeBuffer};
 use minifb::{Key, Window, WindowOptions};
 use once_cell::sync::OnceCell;
 use std::ffi::CString;
 use std::path::Path;
 use std::ptr;
+use unicode_script::{Script, UnicodeScript};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SizeRecommendation {
@@ -560,6 +561,12 @@ struct ShapedGlyph {
     y_offset: f32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TextRun<'a> {
+    value: &'a str,
+    script: Option<Script>,
+}
+
 impl TextEngine {
     fn new() -> Option<Self> {
         let font_path = default_font_path()?;
@@ -626,19 +633,31 @@ impl TextEngine {
         hb_font.set_scale(TEXT_SCALE, TEXT_SCALE);
         hb_font.set_ppem(TEXT_PIXEL_SIZE, TEXT_PIXEL_SIZE);
 
-        let buffer = UnicodeBuffer::new()
-            .add_str(value)
-            .guess_segment_properties();
-        let output = shape(&hb_font, buffer, &[]);
-        output
-            .get_glyph_infos()
-            .iter()
-            .zip(output.get_glyph_positions())
-            .map(|(info, position)| ShapedGlyph {
-                id: info.codepoint,
-                x_advance: position.x_advance as f32 / 64.0,
-                x_offset: position.x_offset as f32 / 64.0,
-                y_offset: position.y_offset as f32 / 64.0,
+        script_runs(value)
+            .into_iter()
+            .flat_map(|run| {
+                let mut buffer = UnicodeBuffer::new().add_str(run.value);
+                if let Some(script) = run.script {
+                    let tag = script.as_iso15924_tag().to_be_bytes();
+                    buffer = buffer.set_script(Tag::new(
+                        tag[0] as char,
+                        tag[1] as char,
+                        tag[2] as char,
+                        tag[3] as char,
+                    ));
+                }
+                let output = shape(&hb_font, buffer.guess_segment_properties(), &[]);
+                output
+                    .get_glyph_infos()
+                    .iter()
+                    .zip(output.get_glyph_positions())
+                    .map(|(info, position)| ShapedGlyph {
+                        id: info.codepoint,
+                        x_advance: position.x_advance as f32 / 64.0,
+                        x_offset: position.x_offset as f32 / 64.0,
+                        y_offset: position.y_offset as f32 / 64.0,
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect()
     }
@@ -664,6 +683,41 @@ impl TextEngine {
             }
         }
     }
+}
+
+fn script_runs(value: &str) -> Vec<TextRun<'_>> {
+    let mut runs = Vec::new();
+    let mut run_start = 0;
+    let mut current = None;
+
+    for (index, character) in value.char_indices() {
+        let script = character.script();
+        if matches!(script, Script::Common | Script::Inherited | Script::Unknown) {
+            continue;
+        }
+
+        match current {
+            None => current = Some(script),
+            Some(current_script) if current_script == script => {}
+            Some(_) => {
+                runs.push(TextRun {
+                    value: &value[run_start..index],
+                    script: current,
+                });
+                run_start = index;
+                current = Some(script);
+            }
+        }
+    }
+
+    if !value.is_empty() {
+        runs.push(TextRun {
+            value: &value[run_start..],
+            script: current,
+        });
+    }
+
+    runs
 }
 
 impl Drop for TextEngine {
@@ -727,6 +781,12 @@ fn default_font_path() -> Option<&'static str> {
 }
 
 const FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\verdana.ttf",
+    "C:\\Windows\\Fonts\\verdanab.ttf",
+    "/System/Library/Fonts/Supplemental/Verdana.ttf",
+    "/Library/Fonts/Verdana.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/Verdana.ttf",
+    "/usr/share/fonts/truetype/msttcorefonts/verdana.ttf",
     "C:\\Windows\\Fonts\\segoeui.ttf",
     "C:\\Windows\\Fonts\\arial.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -796,5 +856,31 @@ mod tests {
         assert_eq!(size.width, 800.0);
         assert!(size.height > 0.0);
         assert!(size.height < 600.0);
+    }
+
+    #[test]
+    fn text_runs_split_by_unicode_script() {
+        assert_eq!(
+            script_runs("Hello 世界 مرحبا")
+                .into_iter()
+                .map(|run| (run.value, run.script))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Hello ", Some(Script::Latin)),
+                ("世界 ", Some(Script::Han)),
+                ("مرحبا", Some(Script::Arabic)),
+            ]
+        );
+    }
+
+    #[test]
+    fn script_runs_cover_scripts_from_unicode_data() {
+        assert_eq!(
+            script_runs("Rust𞤀")
+                .into_iter()
+                .map(|run| (run.value, run.script))
+                .collect::<Vec<_>>(),
+            vec![("Rust", Some(Script::Latin)), ("𞤀", Some(Script::Adlam)),]
+        );
     }
 }
