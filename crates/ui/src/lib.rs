@@ -306,17 +306,7 @@ impl Component {
                 fill.child.paint(scene, x, y);
             }
             Kind::Text(text) => scene.draw_text(x, y + 2.0, &text.value, Color::BLACK),
-            Kind::Button(child) => {
-                scene.fill_rect(
-                    Rect::new(x, y, self.rect.width, self.rect.height),
-                    Color::rgb(0xf2, 0xf2, 0xf2),
-                );
-                scene.stroke_rect(
-                    Rect::new(x, y, self.rect.width, self.rect.height),
-                    Color::BLACK,
-                );
-                child.paint(scene, x, y);
-            }
+            Kind::Button(child) => child.paint(scene, x, y),
             Kind::List(list) => {
                 for child in &list.children {
                     child.component.paint(scene, x, y);
@@ -689,19 +679,6 @@ impl Scene {
             rect,
             [0.5 / ATLAS_SIZE as f32; 2],
             [0.5 / ATLAS_SIZE as f32; 2],
-            color,
-        );
-    }
-
-    fn stroke_rect(&mut self, rect: Rect, color: Color) {
-        self.fill_rect(Rect::new(rect.x, rect.y, rect.width, 1.0), color);
-        self.fill_rect(
-            Rect::new(rect.x, rect.y + rect.height - 1.0, rect.width, 1.0),
-            color,
-        );
-        self.fill_rect(Rect::new(rect.x, rect.y, 1.0, rect.height), color);
-        self.fill_rect(
-            Rect::new(rect.x + rect.width - 1.0, rect.y, 1.0, rect.height),
             color,
         );
     }
@@ -1451,6 +1428,22 @@ mod tests {
         assert_eq!(size.width, 800.0);
         assert!(size.height > 0.0);
         assert!(size.height < 600.0);
+    }
+
+    #[test]
+    fn button_paints_only_its_child() {
+        let mut button = Component::button(Component::fill(
+            Color::WHITE,
+            Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+        ));
+        let size = button.layout(SizeRecommendation::exact(100.0, 40.0));
+        button.place(Rect::new(0.0, 0.0, size.width, size.height));
+        let mut scene = Scene::new(100, 40);
+
+        button.paint(&mut scene, 0.0, 0.0);
+
+        assert_eq!(scene.vertices.len(), 4);
+        assert_eq!(scene.indices.len(), 6);
     }
 
     #[test]
