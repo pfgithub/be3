@@ -1,5 +1,4 @@
-use crate::util::{Color, Rect, Size, Vector};
-use crate::window::Scene;
+use crate::renderer::{Color, Rect, Scene, Vector};
 use freetype::freetype as ft;
 use harfbuzz_rs::{shape, Face as HbFace, Font as HbFont, Tag, UnicodeBuffer};
 use once_cell::sync::OnceCell;
@@ -78,16 +77,6 @@ impl TextEngine {
         } else {
             Some(Self { library, fonts })
         }
-    }
-
-    pub(crate) fn measure(&self, value: &str) -> Size {
-        let width = self
-            .shape(value)
-            .into_iter()
-            .map(|glyph| glyph.x_advance)
-            .sum::<f32>()
-            .ceil();
-        Size::new(width, self.line_height())
     }
 
     pub(crate) fn draw(
@@ -179,13 +168,6 @@ impl TextEngine {
             .map(|font| face_ascender(font.face))
             .fold(TEXT_PIXEL_SIZE as f32, f32::max)
     }
-
-    fn line_height(&self) -> f32 {
-        self.fonts
-            .iter()
-            .map(|font| face_line_height(font.face))
-            .fold((TEXT_PIXEL_SIZE as f32 * 1.2).ceil(), f32::max)
-    }
 }
 
 fn split_font_runs(
@@ -231,17 +213,6 @@ fn face_ascender(face: ft::FT_Face) -> f32 {
             TEXT_PIXEL_SIZE as f32
         } else {
             (*size).metrics.ascender as f32 / 64.0
-        }
-    }
-}
-
-fn face_line_height(face: ft::FT_Face) -> f32 {
-    unsafe {
-        let size = (*face).size;
-        if size.is_null() {
-            (TEXT_PIXEL_SIZE as f32 * 1.2).ceil()
-        } else {
-            ((*size).metrics.height as f32 / 64.0).ceil()
         }
     }
 }
