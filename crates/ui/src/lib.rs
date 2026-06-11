@@ -120,21 +120,10 @@ impl Sizing {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CopyAxes {
-    None,
-    Horizontal,
-    Vertical,
-    Both,
-}
-
-impl CopyAxes {
-    fn copies_horizontal(self) -> bool {
-        matches!(self, Self::Horizontal | Self::Both)
-    }
-
-    fn copies_vertical(self) -> bool {
-        matches!(self, Self::Vertical | Self::Both)
-    }
+pub enum SizeSource {
+    Parent,
+    Child,
+    Zero,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,12 +146,19 @@ pub struct Component {
 
 #[derive(Clone, Debug)]
 enum Kind {
-    Void(CopyAxes),
+    Sized(SizedComponent),
     Fill(Fill),
     Text(Text),
     Button(Box<Component>),
     List(List),
     Scrollable(Scrollable),
+}
+
+#[derive(Clone, Debug)]
+pub struct SizedComponent {
+    x: SizeSource,
+    y: SizeSource,
+    child: Option<Box<Component>>,
 }
 
 #[derive(Clone, Debug)]
@@ -195,8 +191,12 @@ pub struct Scrollable {
 }
 
 impl Component {
-    pub fn void(copy_axes: CopyAxes) -> Self {
-        Self::new(Kind::Void(copy_axes))
+    pub fn sized(x: SizeSource, y: SizeSource, child: Option<Component>) -> Self {
+        Self::new(Kind::Sized(SizedComponent {
+            x,
+            y,
+            child: child.map(Box::new),
+        }))
     }
 
     pub fn fill(color: Color, child: Component) -> Self {
@@ -235,18 +235,7 @@ impl Component {
 
     pub fn layout(&mut self, recommendation: SizeRecommendation) -> Size {
         let size = match &mut self.kind {
-            Kind::Void(copy_axes) => Size::new(
-                if copy_axes.copies_horizontal() {
-                    recommendation.width.unwrap_or(0.0)
-                } else {
-                    0.0
-                },
-                if copy_axes.copies_vertical() {
-                    recommendation.height.unwrap_or(0.0)
-                } else {
-                    0.0
-                },
-            ),
+            Kind::Sized(sized) => sized.layout(recommendation),
             Kind::Fill(fill) => fill.child.layout(recommendation),
             Kind::Text(text) => text.layout(),
             Kind::Button(child) => child.layout(recommendation),
@@ -261,7 +250,8 @@ impl Component {
     pub fn place(&mut self, rect: Rect) {
         self.rect = rect;
         match &mut self.kind {
-            Kind::Void(_) | Kind::Text(_) => {}
+            Kind::Sized(sized) => sized.place(),
+            Kind::Text(_) => {}
             Kind::Fill(fill) => fill
                 .child
                 .place(Rect::new(0.0, 0.0, rect.width, rect.height)),
@@ -286,7 +276,11 @@ impl Component {
         let x = offset_x + self.rect.x;
         let y = offset_y + self.rect.y;
         match &self.kind {
-            Kind::Void(_) => {}
+            Kind::Sized(sized) => {
+                if let Some(child) = &sized.child {
+                    child.paint(canvas, x, y);
+                }
+            }
             Kind::Fill(fill) => {
                 canvas.fill_rect(
                     Rect::new(x, y, self.rect.width, self.rect.height),
@@ -335,6 +329,35 @@ impl Component {
                     ),
                 }
             }
+        }
+    }
+}
+
+impl SizedComponent {
+    fn layout(&mut self, recommendation: SizeRecommendation) -> Size {
+        let child_size = self
+            .child
+            .as_mut()
+            .map(|child| child.layout(recommendation))
+            .unwrap_or(Size::ZERO);
+        Size::new(
+            Self::axis_size(self.x, recommendation.width, child_size.width),
+            Self::axis_size(self.y, recommendation.height, child_size.height),
+        )
+    }
+
+    fn axis_size(source: SizeSource, parent: Option<f32>, child: f32) -> f32 {
+        match source {
+            SizeSource::Parent => parent.unwrap_or(0.0),
+            SizeSource::Child => child,
+            SizeSource::Zero => 0.0,
+        }
+    }
+
+    fn place(&mut self) {
+        if let Some(child) = &mut self.child {
+            let size = child.rect.size();
+            child.place(Rect::new(0.0, 0.0, size.width, size.height));
         }
     }
 }
@@ -905,7 +928,10 @@ mod tests {
             Axis::Vertical,
             [
                 (Sizing::Intrinsic, Component::text("Demo")),
-                (Sizing::fr(1.0), Component::void(CopyAxes::Both)),
+                (
+                    Sizing::fr(1.0),
+                    Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+                ),
             ],
         );
 
@@ -922,7 +948,10 @@ mod tests {
                 Axis::Vertical,
                 [(
                     Sizing::fr(1.0),
-                    Component::fill(Color::WHITE, Component::void(CopyAxes::Both)),
+                    Component::fill(
+                        Color::WHITE,
+                        Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+                    ),
                 )],
             ),
         );
@@ -939,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_void_can_copy_width_without_inflating_height() {
+    fn horizontal_sized_can_copy_width_without_inflating_height() {
         let mut row = Component::list(
             Axis::Horizontal,
             [
@@ -947,7 +976,10 @@ mod tests {
                     Sizing::Intrinsic,
                     Component::button(Component::text("Demo")),
                 ),
-                (Sizing::fr(1.0), Component::void(CopyAxes::Horizontal)),
+                (
+                    Sizing::fr(1.0),
+                    Component::sized(SizeSource::Parent, SizeSource::Zero, None),
+                ),
             ],
         );
 
@@ -956,6 +988,28 @@ mod tests {
         assert_eq!(size.width, 800.0);
         assert!(size.height > 0.0);
         assert!(size.height < 600.0);
+    }
+
+    #[test]
+    fn sized_passes_recommendation_to_child_and_selects_each_axis() {
+        let mut component = Component::sized(
+            SizeSource::Parent,
+            SizeSource::Child,
+            Some(Component::sized(SizeSource::Zero, SizeSource::Parent, None)),
+        );
+
+        let size = component.layout(SizeRecommendation::exact(320.0, 240.0));
+
+        assert_eq!(size, Size::new(320.0, 240.0));
+        match &component.kind {
+            Kind::Sized(sized) => {
+                assert_eq!(
+                    sized.child.as_ref().unwrap().rect().size(),
+                    Size::new(0.0, 240.0)
+                );
+            }
+            _ => unreachable!(),
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use ui::{Axis, Color, Component, CopyAxes, SizeRecommendation, Sizing, UiWindow};
+use ui::{Axis, Color, Component, SizeRecommendation, SizeSource, Sizing, UiWindow};
 
 fn demo_ui() -> Component {
     Component::scrollable(
@@ -17,7 +17,10 @@ fn demo_ui() -> Component {
                                     Sizing::Intrinsic,
                                     Component::button(Component::text("Demo")),
                                 ),
-                                (Sizing::fr(1.0), Component::void(CopyAxes::Horizontal)),
+                                (
+                                    Sizing::fr(1.0),
+                                    Component::sized(SizeSource::Parent, SizeSource::Zero, None),
+                                ),
                             ],
                         ),
                     ),
@@ -26,7 +29,7 @@ fn demo_ui() -> Component {
                     Sizing::fr(1.0),
                     Component::fill(
                         Color::rgb(0xff, 0xff, 0xff),
-                        Component::void(CopyAxes::Both),
+                        Component::sized(SizeSource::Parent, SizeSource::Parent, None),
                     ),
                 ),
             ],
