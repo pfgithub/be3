@@ -1,4 +1,4 @@
-use crate::util::{Color, Rect, Size};
+use crate::util::{Color, Rect, Size, Vector};
 use crate::window::Scene;
 use freetype::freetype as ft;
 use harfbuzz_rs::{shape, Face as HbFace, Font as HbFont, Tag, UnicodeBuffer};
@@ -90,9 +90,15 @@ impl TextEngine {
         Size::new(width, self.line_height())
     }
 
-    pub(crate) fn draw(&mut self, scene: &mut Scene, x: f32, y: f32, value: &str, color: Color) {
-        let baseline = y + self.ascender();
-        let mut pen_x = x;
+    pub(crate) fn draw(
+        &mut self,
+        scene: &mut Scene,
+        position: Vector<2, f32>,
+        value: &str,
+        color: Color,
+    ) {
+        let baseline = position[1] + self.ascender();
+        let mut pen_x = position[0];
 
         for glyph in self.shape(value) {
             let face = self.fonts[glyph.font_index].face;
@@ -102,7 +108,12 @@ impl TextEngine {
                     if ft::FT_Render_Glyph(slot, ft::FT_Render_Mode::FT_RENDER_MODE_NORMAL) == 0 {
                         let bitmap_x = pen_x + glyph.x_offset + (*slot).bitmap_left as f32;
                         let bitmap_y = baseline - glyph.y_offset - (*slot).bitmap_top as f32;
-                        paint_glyph_bitmap(scene, bitmap_x, bitmap_y, &(*slot).bitmap, color);
+                        paint_glyph_bitmap(
+                            scene,
+                            Vector::new(bitmap_x, bitmap_y),
+                            &(*slot).bitmap,
+                            color,
+                        );
                     }
                 }
             }
@@ -285,7 +296,12 @@ impl Drop for TextEngine {
     }
 }
 
-fn paint_glyph_bitmap(scene: &mut Scene, x: f32, y: f32, bitmap: &ft::FT_Bitmap, color: Color) {
+fn paint_glyph_bitmap(
+    scene: &mut Scene,
+    position: Vector<2, f32>,
+    bitmap: &ft::FT_Bitmap,
+    color: Color,
+) {
     let width = bitmap.width as i32;
     let rows = bitmap.rows as i32;
     let pitch = bitmap.pitch.unsigned_abs() as usize;
@@ -309,9 +325,13 @@ fn paint_glyph_bitmap(scene: &mut Scene, x: f32, y: f32, bitmap: &ft::FT_Bitmap,
             }
         }
     }
-    if let Some((uv_min, uv_max)) = scene.add_glyph(width as u32, rows as u32, &pixels) {
+    if let Some((uv_min, uv_max)) = scene.add_glyph(Vector::new(width as u32, rows as u32), &pixels)
+    {
         scene.push_quad(
-            Rect::new(x.round(), y.round(), width as f32, rows as f32),
+            Rect::new(
+                Vector::new(position[0].round(), position[1].round()),
+                Vector::new(width as f32, rows as f32),
+            ),
             uv_min,
             uv_max,
             color,

@@ -1,6 +1,6 @@
 use crate::component::Component;
 use crate::text::TextEngine;
-use crate::util::{Color, Rect, SizeRecommendation};
+use crate::util::{Color, Rect, SizeRecommendation, Vector};
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -13,25 +13,18 @@ use winit::window::{Window, WindowId};
 
 pub struct UiWindow {
     title: String,
-    width: u32,
-    height: u32,
+    size: Vector<2, u32>,
 }
 
 impl UiWindow {
-    pub fn new(
-        title: &str,
-        width: usize,
-        height: usize,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let width = u32::try_from(width)?;
-        let height = u32::try_from(height)?;
-        if width == 0 || height == 0 {
+    pub fn new(title: &str, size: Vector<2, usize>) -> Result<Self, Box<dyn std::error::Error>> {
+        let size = Vector::new(u32::try_from(size[0])?, u32::try_from(size[1])?);
+        if size[0] == 0 || size[1] == 0 {
             return Err("window dimensions must be non-zero".into());
         }
         Ok(Self {
             title: title.to_owned(),
-            width,
-            height,
+            size,
         })
     }
 
@@ -43,7 +36,7 @@ impl UiWindow {
         let event_loop = EventLoop::new()?;
         let mut app = UiApplication::new(
             self.title.clone(),
-            PhysicalSize::new(self.width, self.height),
+            PhysicalSize::new(self.size[0], self.size[1]),
             root,
             initial_recommendation,
         );
@@ -60,7 +53,7 @@ struct UiApplication {
     initial_size: PhysicalSize<u32>,
     root: Component,
     recommendation: SizeRecommendation,
-    cursor_position: (f32, f32),
+    cursor_position: Vector<2, f32>,
     modifiers: ModifiersState,
     pointer_pressed: Option<usize>,
     keyboard_pressed: Option<usize>,
@@ -81,7 +74,7 @@ impl UiApplication {
             initial_size,
             root,
             recommendation,
-            cursor_position: (0.0, 0.0),
+            cursor_position: Vector::default(),
             modifiers: ModifiersState::empty(),
             pointer_pressed: None,
             keyboard_pressed: None,
@@ -122,10 +115,10 @@ impl UiApplication {
 
     fn button_at_cursor(&self) -> Option<usize> {
         self.root
-            .button_at(self.cursor_position, (0.0, 0.0), &mut 0)
+            .button_at(self.cursor_position, Vector::default(), &mut 0)
     }
 
-    fn move_cursor(&mut self, position: (f32, f32)) -> bool {
+    fn move_cursor(&mut self, position: Vector<2, f32>) -> bool {
         self.cursor_position = position;
         self.update_pressed_buttons()
     }
@@ -187,7 +180,7 @@ impl ApplicationHandler for UiApplication {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::CursorMoved { position, .. } => {
-                if self.move_cursor((position.x as f32, position.y as f32)) {
+                if self.move_cursor(Vector::new(position.x as f32, position.y as f32)) {
                     self.request_redraw();
                 }
             }
@@ -285,10 +278,9 @@ impl ApplicationHandler for UiApplication {
                     return;
                 };
                 let size = self.root.layout(self.recommendation);
-                self.root
-                    .place(Rect::new(0.0, 0.0, size.width, size.height));
-                let mut scene = Scene::new(renderer.size.width, renderer.size.height);
-                self.root.paint(&mut scene, 0.0, 0.0);
+                self.root.place(Rect::new(Vector::default(), size));
+                let mut scene = Scene::new(Vector::new(renderer.size.width, renderer.size.height));
+                self.root.paint(&mut scene, Vector::default());
                 let result = renderer.render(&scene);
                 match result {
                     Ok(RenderStatus::Presented | RenderStatus::Skipped) => {}
@@ -325,8 +317,7 @@ impl Vertex {
 }
 
 pub(crate) struct Scene {
-    width: f32,
-    height: f32,
+    size: Vector<2, f32>,
     pub(crate) vertices: Vec<Vertex>,
     pub(crate) indices: Vec<u32>,
     atlas: Vec<u8>,
@@ -336,12 +327,11 @@ pub(crate) struct Scene {
 }
 
 impl Scene {
-    pub(crate) fn new(width: u32, height: u32) -> Self {
+    pub(crate) fn new(size: Vector<2, u32>) -> Self {
         let mut atlas = vec![0; (ATLAS_SIZE * ATLAS_SIZE) as usize];
         atlas[0] = 255;
         Self {
-            width: width.max(1) as f32,
-            height: height.max(1) as f32,
+            size: Vector::new(size[0].max(1) as f32, size[1].max(1) as f32),
             vertices: Vec::new(),
             indices: Vec::new(),
             atlas,
@@ -361,34 +351,47 @@ impl Scene {
     }
 
     pub(crate) fn stroke_rect(&mut self, rect: Rect, width: f32, color: Color) {
-        let width = width.min(rect.width / 2.0).min(rect.height / 2.0);
+        let width = width.min(rect.size[0] / 2.0).min(rect.size[1] / 2.0);
         if width <= 0.0 {
             return;
         }
-        self.fill_rect(Rect::new(rect.x, rect.y, rect.width, width), color);
         self.fill_rect(
-            Rect::new(rect.x, rect.y + rect.height - width, rect.width, width),
+            Rect::new(rect.position, Vector::new(rect.size[0], width)),
             color,
         );
-        self.fill_rect(Rect::new(rect.x, rect.y, width, rect.height), color);
         self.fill_rect(
-            Rect::new(rect.x + rect.width - width, rect.y, width, rect.height),
+            Rect::new(
+                rect.position + Vector::new(0.0, rect.size[1] - width),
+                Vector::new(rect.size[0], width),
+            ),
+            color,
+        );
+        self.fill_rect(
+            Rect::new(rect.position, Vector::new(width, rect.size[1])),
+            color,
+        );
+        self.fill_rect(
+            Rect::new(
+                rect.position + Vector::new(rect.size[0] - width, 0.0),
+                Vector::new(width, rect.size[1]),
+            ),
             color,
         );
     }
 
-    pub(crate) fn draw_text(&mut self, x: f32, y: f32, value: &str, color: Color) {
+    pub(crate) fn draw_text(&mut self, position: Vector<2, f32>, value: &str, color: Color) {
         if let Some(mut engine) = TextEngine::new() {
-            engine.draw(self, x, y, value, color);
+            engine.draw(self, position, value, color);
         }
     }
 
     pub(crate) fn add_glyph(
         &mut self,
-        width: u32,
-        height: u32,
+        size: Vector<2, u32>,
         pixels: &[u8],
     ) -> Option<([f32; 2], [f32; 2])> {
+        let width = size[0];
+        let height = size[1];
         if width == 0 || height == 0 || width >= ATLAS_SIZE || height >= ATLAS_SIZE {
             return None;
         }
@@ -426,13 +429,13 @@ impl Scene {
         uv_max: [f32; 2],
         color: Color,
     ) {
-        if rect.width <= 0.0 || rect.height <= 0.0 {
+        if rect.size[0] <= 0.0 || rect.size[1] <= 0.0 {
             return;
         }
-        let x0 = rect.x / self.width * 2.0 - 1.0;
-        let x1 = (rect.x + rect.width) / self.width * 2.0 - 1.0;
-        let y0 = 1.0 - rect.y / self.height * 2.0;
-        let y1 = 1.0 - (rect.y + rect.height) / self.height * 2.0;
+        let x0 = rect.position[0] / self.size[0] * 2.0 - 1.0;
+        let x1 = (rect.position[0] + rect.size[0]) / self.size[0] * 2.0 - 1.0;
+        let y0 = 1.0 - rect.position[1] / self.size[1] * 2.0;
+        let y1 = 1.0 - (rect.position[1] + rect.size[1]) / self.size[1] * 2.0;
         let color = color.as_f32();
         let base = self.vertices.len() as u32;
         self.vertices.extend_from_slice(&[
@@ -736,7 +739,7 @@ mod tests {
             "test".to_owned(),
             PhysicalSize::new(100, 100),
             root,
-            SizeRecommendation::exact(100.0, 100.0),
+            SizeRecommendation::exact(Vector::new(100.0, 100.0)),
         );
 
         assert!(app.focus_adjacent_button(false));
@@ -756,19 +759,19 @@ mod tests {
         let mut root = Component::button(Component::text("Demo"), move |_, state| {
             changed_states.lock().unwrap().push(state);
         });
-        let size = root.layout(SizeRecommendation::exact(100.0, 40.0));
-        root.place(Rect::new(0.0, 0.0, size.width, size.height));
+        let size = root.layout(SizeRecommendation::exact(Vector::new(100.0, 40.0)));
+        root.place(Rect::new(Vector::default(), size));
         let mut app = UiApplication::new(
             "test".to_owned(),
             PhysicalSize::new(100, 40),
             root,
-            SizeRecommendation::exact(100.0, 40.0),
+            SizeRecommendation::exact(Vector::new(100.0, 40.0)),
         );
         app.pointer_pressed = Some(0);
 
-        assert!(app.move_cursor((10.0, 10.0)));
-        assert!(app.move_cursor((110.0, 10.0)));
-        assert!(app.move_cursor((10.0, 10.0)));
+        assert!(app.move_cursor(Vector::new(10.0, 10.0)));
+        assert!(app.move_cursor(Vector::new(110.0, 10.0)));
+        assert!(app.move_cursor(Vector::new(10.0, 10.0)));
 
         assert_eq!(
             states.lock().unwrap().as_slice(),
@@ -793,15 +796,15 @@ mod tests {
         let mut root = Component::button(Component::text("Demo"), move |_, state| {
             changed_states.lock().unwrap().push(state);
         });
-        let size = root.layout(SizeRecommendation::exact(100.0, 40.0));
-        root.place(Rect::new(0.0, 0.0, size.width, size.height));
+        let size = root.layout(SizeRecommendation::exact(Vector::new(100.0, 40.0)));
+        root.place(Rect::new(Vector::default(), size));
         let mut app = UiApplication::new(
             "test".to_owned(),
             PhysicalSize::new(100, 40),
             root,
-            SizeRecommendation::exact(100.0, 40.0),
+            SizeRecommendation::exact(Vector::new(100.0, 40.0)),
         );
-        app.cursor_position = (10.0, 10.0);
+        app.cursor_position = Vector::new(10.0, 10.0);
         app.pointer_pressed = Some(0);
         app.keyboard_pressed = Some(0);
         assert!(app.update_pressed_buttons());

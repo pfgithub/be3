@@ -1,4 +1,6 @@
-use ui::{Axis, ButtonState, Color, Component, SizeRecommendation, SizeSource, Sizing, UiWindow};
+use ui::{
+    Axis, ButtonState, Color, Component, SizeRecommendation, SizeSource, Sizing, UiWindow, Vector,
+};
 
 fn update_demo_button(component: &mut Component, state: ButtonState) {
     let fill = if state.pressed {
@@ -46,7 +48,10 @@ fn demo_ui() -> Component {
                                 ),
                                 (
                                     Sizing::fr(1.0),
-                                    Component::sized(SizeSource::Parent, SizeSource::Zero, None),
+                                    Component::sized(
+                                        Vector::new(SizeSource::Parent, SizeSource::Zero),
+                                        None,
+                                    ),
                                 ),
                             ],
                         ),
@@ -56,7 +61,7 @@ fn demo_ui() -> Component {
                     Sizing::fr(1.0),
                     Component::fill(
                         Color::rgb(0xff, 0xff, 0xff),
-                        Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+                        Component::sized(Vector::new(SizeSource::Parent, SizeSource::Parent), None),
                     ),
                 ),
             ],
@@ -65,6 +70,9 @@ fn demo_ui() -> Component {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut window = UiWindow::new("ui demo", 800, 600)?;
-    window.run(demo_ui(), SizeRecommendation::exact(800.0, 600.0))
+    let mut window = UiWindow::new("ui demo", Vector::new(800, 600))?;
+    window.run(
+        demo_ui(),
+        SizeRecommendation::exact(Vector::new(800.0, 600.0)),
+    )
 }

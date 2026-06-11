@@ -1,5 +1,5 @@
 use crate::text::TextEngine;
-use crate::util::{Axis, Color, Rect, Size, SizeRecommendation, SizeSource, Sizing};
+use crate::util::{Axis, Color, Rect, Size, SizeRecommendation, SizeSource, Sizing, Vector};
 use crate::window::Scene;
 use std::sync::Arc;
 
@@ -36,8 +36,7 @@ impl std::fmt::Debug for Kind {
 
 #[derive(Clone, Debug)]
 pub struct SizedComponent {
-    x: SizeSource,
-    y: SizeSource,
+    sources: Vector<2, SizeSource>,
     child: Option<Box<Component>>,
 }
 
@@ -103,10 +102,9 @@ pub struct Scrollable {
 }
 
 impl Component {
-    pub fn sized(x: SizeSource, y: SizeSource, child: Option<Component>) -> Self {
+    pub fn sized(sources: Vector<2, SizeSource>, child: Option<Component>) -> Self {
         Self::new(Kind::Sized(SizedComponent {
-            x,
-            y,
+            sources,
             child: child.map(Box::new),
         }))
     }
@@ -180,8 +178,7 @@ impl Component {
             Kind::List(list) => list.layout(recommendation),
             Kind::Scrollable(scrollable) => scrollable.layout(recommendation),
         };
-        self.rect.width = size.width;
-        self.rect.height = size.height;
+        self.rect.size = size;
         size
     }
 
@@ -190,19 +187,9 @@ impl Component {
         match &mut self.kind {
             Kind::Sized(sized) => sized.place(),
             Kind::Text(_) => {}
-            Kind::Fill(fill) => fill
-                .child
-                .place(Rect::new(0.0, 0.0, rect.width, rect.height)),
-            Kind::Outline(outline) => {
-                outline
-                    .child
-                    .place(Rect::new(0.0, 0.0, rect.width, rect.height))
-            }
-            Kind::Button(button) => {
-                button
-                    .child
-                    .place(Rect::new(0.0, 0.0, rect.width, rect.height))
-            }
+            Kind::Fill(fill) => fill.child.place(Rect::new(Vector::default(), rect.size)),
+            Kind::Outline(outline) => outline.child.place(Rect::new(Vector::default(), rect.size)),
+            Kind::Button(button) => button.child.place(Rect::new(Vector::default(), rect.size)),
             Kind::List(list) => list.place(rect.size()),
             Kind::Scrollable(scrollable) => scrollable.place(rect.size()),
         }
@@ -246,62 +233,54 @@ impl Component {
         }
     }
 
-    pub(crate) fn paint(&self, scene: &mut Scene, offset_x: f32, offset_y: f32) {
-        let x = offset_x + self.rect.x;
-        let y = offset_y + self.rect.y;
+    pub(crate) fn paint(&self, scene: &mut Scene, offset: Vector<2, f32>) {
+        let position = offset + self.rect.position;
         match &self.kind {
             Kind::Sized(sized) => {
                 if let Some(child) = &sized.child {
-                    child.paint(scene, x, y);
+                    child.paint(scene, position);
                 }
             }
             Kind::Fill(fill) => {
-                scene.fill_rect(
-                    Rect::new(x, y, self.rect.width, self.rect.height),
-                    fill.color,
-                );
-                fill.child.paint(scene, x, y);
+                scene.fill_rect(Rect::new(position, self.rect.size), fill.color);
+                fill.child.paint(scene, position);
             }
-            Kind::Text(text) => scene.draw_text(x, y + 2.0, &text.value, Color::BLACK),
+            Kind::Text(text) => {
+                scene.draw_text(position + Vector::new(0.0, 2.0), &text.value, Color::BLACK)
+            }
             Kind::Outline(outline) => {
-                outline.child.paint(scene, x, y);
+                outline.child.paint(scene, position);
                 let outset = outline.gap + outline.width;
                 scene.stroke_rect(
                     Rect::new(
-                        x - outset,
-                        y - outset,
-                        self.rect.width + outset * 2.0,
-                        self.rect.height + outset * 2.0,
+                        position + Vector::new(-outset, -outset),
+                        self.rect.size + Vector::new(outset * 2.0, outset * 2.0),
                     ),
                     outline.width,
                     outline.color,
                 );
             }
-            Kind::Button(button) => button.child.paint(scene, x, y),
+            Kind::Button(button) => button.child.paint(scene, position),
             Kind::List(list) => {
                 for child in &list.children {
-                    child.component.paint(scene, x, y);
+                    child.component.paint(scene, position);
                 }
             }
             Kind::Scrollable(scrollable) => {
-                scrollable.child.paint(scene, x, y);
+                scrollable.child.paint(scene, position);
                 let bar_color = Color::rgb(0xc0, 0xc0, 0xc0);
                 match scrollable.axis {
                     Axis::Vertical => scene.fill_rect(
                         Rect::new(
-                            x + self.rect.width - SCROLLBAR_SIZE,
-                            y,
-                            SCROLLBAR_SIZE,
-                            self.rect.height,
+                            position + Vector::new(self.rect.size[0] - SCROLLBAR_SIZE, 0.0),
+                            Vector::new(SCROLLBAR_SIZE, self.rect.size[1]),
                         ),
                         bar_color,
                     ),
                     Axis::Horizontal => scene.fill_rect(
                         Rect::new(
-                            x,
-                            y + self.rect.height - SCROLLBAR_SIZE,
-                            self.rect.width,
-                            SCROLLBAR_SIZE,
+                            position + Vector::new(0.0, self.rect.size[1] - SCROLLBAR_SIZE),
+                            Vector::new(self.rect.size[0], SCROLLBAR_SIZE),
                         ),
                         bar_color,
                     ),
@@ -368,11 +347,11 @@ impl Component {
 
     pub(crate) fn button_at(
         &self,
-        point: (f32, f32),
-        offset: (f32, f32),
+        point: Vector<2, f32>,
+        offset: Vector<2, f32>,
         cursor: &mut usize,
     ) -> Option<usize> {
-        let origin = (offset.0 + self.rect.x, offset.1 + self.rect.y);
+        let origin = offset + self.rect.position;
         if !self.contains(point, origin) {
             *cursor += self.button_count();
             return None;
@@ -414,11 +393,11 @@ impl Component {
         }
     }
 
-    fn contains(&self, point: (f32, f32), origin: (f32, f32)) -> bool {
-        point.0 >= origin.0
-            && point.1 >= origin.1
-            && point.0 < origin.0 + self.rect.width
-            && point.1 < origin.1 + self.rect.height
+    fn contains(&self, point: Vector<2, f32>, origin: Vector<2, f32>) -> bool {
+        point[0] >= origin[0]
+            && point[1] >= origin[1]
+            && point[0] < origin[0] + self.rect.size[0]
+            && point[1] < origin[1] + self.rect.size[1]
     }
 
     pub(crate) fn set_button_pressed(
@@ -499,8 +478,8 @@ impl SizedComponent {
             .map(|child| child.layout(recommendation))
             .unwrap_or(Size::ZERO);
         Size::new(
-            Self::axis_size(self.x, recommendation.width, child_size.width),
-            Self::axis_size(self.y, recommendation.height, child_size.height),
+            Self::axis_size(self.sources[0], recommendation.size[0], child_size[0]),
+            Self::axis_size(self.sources[1], recommendation.size[1], child_size[1]),
         )
     }
 
@@ -515,7 +494,7 @@ impl SizedComponent {
     fn place(&mut self) {
         if let Some(child) = &mut self.child {
             let size = child.rect.size();
-            child.place(Rect::new(0.0, 0.0, size.width, size.height));
+            child.place(Rect::new(Vector::default(), size));
         }
     }
 }
@@ -577,8 +556,14 @@ impl List {
         for child in &mut self.children {
             let child_size = child.component.rect.size();
             let rect = match axis {
-                Axis::Horizontal => Rect::new(cursor, 0.0, child_size.width, size.height),
-                Axis::Vertical => Rect::new(0.0, cursor, size.width, child_size.height),
+                Axis::Horizontal => Rect::new(
+                    Vector::new(cursor, 0.0),
+                    Vector::new(child_size[0], size[1]),
+                ),
+                Axis::Vertical => Rect::new(
+                    Vector::new(0.0, cursor),
+                    Vector::new(size[0], child_size[1]),
+                ),
             };
             child.component.place(rect);
             cursor += child_size.main(axis);
@@ -591,18 +576,18 @@ const SCROLLBAR_SIZE: f32 = 20.0;
 impl Scrollable {
     fn layout(&mut self, recommendation: SizeRecommendation) -> Size {
         let viewport = Size::new(
-            recommendation.width.unwrap_or(0.0),
-            recommendation.height.unwrap_or(0.0),
+            recommendation.size[0].unwrap_or(0.0),
+            recommendation.size[1].unwrap_or(0.0),
         );
         let child_recommendation = match self.axis {
-            Axis::Vertical => SizeRecommendation::new(
-                Some((viewport.width - SCROLLBAR_SIZE).max(0.0)),
-                Some(viewport.height),
-            ),
-            Axis::Horizontal => SizeRecommendation::new(
-                Some(viewport.width),
-                Some((viewport.height - SCROLLBAR_SIZE).max(0.0)),
-            ),
+            Axis::Vertical => SizeRecommendation::new(Vector::new(
+                Some((viewport[0] - SCROLLBAR_SIZE).max(0.0)),
+                Some(viewport[1]),
+            )),
+            Axis::Horizontal => SizeRecommendation::new(Vector::new(
+                Some(viewport[0]),
+                Some((viewport[1] - SCROLLBAR_SIZE).max(0.0)),
+            )),
         };
         self.child.layout(child_recommendation);
         viewport
@@ -610,14 +595,13 @@ impl Scrollable {
 
     fn place(&mut self, size: Size) {
         let child_size = self.child.rect.size();
-        self.child
-            .place(Rect::new(0.0, 0.0, child_size.width, child_size.height));
+        self.child.place(Rect::new(Vector::default(), child_size));
         match self.axis {
             Axis::Vertical => {
-                self.child.rect.width = self.child.rect.width.min(size.width - SCROLLBAR_SIZE);
+                self.child.rect.size[0] = self.child.rect.size[0].min(size[0] - SCROLLBAR_SIZE);
             }
             Axis::Horizontal => {
-                self.child.rect.height = self.child.rect.height.min(size.height - SCROLLBAR_SIZE);
+                self.child.rect.size[1] = self.child.rect.size[1].min(size[1] - SCROLLBAR_SIZE);
             }
         }
     }
@@ -638,12 +622,12 @@ mod tests {
                 (Sizing::Intrinsic, Component::text("Demo")),
                 (
                     Sizing::fr(1.0),
-                    Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+                    Component::sized(Vector::new(SizeSource::Parent, SizeSource::Parent), None),
                 ),
             ],
         );
 
-        let size = list.layout(SizeRecommendation::exact(800.0, 600.0));
+        let size = list.layout(SizeRecommendation::exact(Vector::new(800.0, 600.0)));
 
         assert_eq!(size, Size::new(800.0, 600.0));
     }
@@ -658,13 +642,13 @@ mod tests {
                     Sizing::fr(1.0),
                     Component::fill(
                         Color::WHITE,
-                        Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+                        Component::sized(Vector::new(SizeSource::Parent, SizeSource::Parent), None),
                     ),
                 )],
             ),
         );
 
-        let size = root.layout(SizeRecommendation::exact(800.0, 600.0));
+        let size = root.layout(SizeRecommendation::exact(Vector::new(800.0, 600.0)));
 
         assert_eq!(size, Size::new(800.0, 600.0));
         match root.kind {
@@ -686,16 +670,16 @@ mod tests {
                 ),
                 (
                     Sizing::fr(1.0),
-                    Component::sized(SizeSource::Parent, SizeSource::Zero, None),
+                    Component::sized(Vector::new(SizeSource::Parent, SizeSource::Zero), None),
                 ),
             ],
         );
 
-        let size = row.layout(SizeRecommendation::exact(800.0, 600.0));
+        let size = row.layout(SizeRecommendation::exact(Vector::new(800.0, 600.0)));
 
-        assert_eq!(size.width, 800.0);
-        assert!(size.height > 0.0);
-        assert!(size.height < 600.0);
+        assert_eq!(size[0], 800.0);
+        assert!(size[1] > 0.0);
+        assert!(size[1] < 600.0);
     }
 
     #[test]
@@ -703,15 +687,15 @@ mod tests {
         let mut button = Component::button(
             Component::fill(
                 Color::WHITE,
-                Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+                Component::sized(Vector::new(SizeSource::Parent, SizeSource::Parent), None),
             ),
             |_, _| {},
         );
-        let size = button.layout(SizeRecommendation::exact(100.0, 40.0));
-        button.place(Rect::new(0.0, 0.0, size.width, size.height));
-        let mut scene = Scene::new(100, 40);
+        let size = button.layout(SizeRecommendation::exact(Vector::new(100.0, 40.0)));
+        button.place(Rect::new(Vector::default(), size));
+        let mut scene = Scene::new(Vector::new(100, 40));
 
-        button.paint(&mut scene, 0.0, 0.0);
+        button.paint(&mut scene, Vector::default());
 
         assert_eq!(scene.vertices.len(), 4);
         assert_eq!(scene.indices.len(), 6);
@@ -725,19 +709,19 @@ mod tests {
             2.0,
             Component::fill(
                 Color::WHITE,
-                Component::sized(SizeSource::Parent, SizeSource::Parent, None),
+                Component::sized(Vector::new(SizeSource::Parent, SizeSource::Parent), None),
             ),
         );
-        let size = outline.layout(SizeRecommendation::exact(100.0, 40.0));
-        outline.place(Rect::new(0.0, 0.0, size.width, size.height));
-        let mut scene = Scene::new(100, 40);
+        let size = outline.layout(SizeRecommendation::exact(Vector::new(100.0, 40.0)));
+        outline.place(Rect::new(Vector::default(), size));
+        let mut scene = Scene::new(Vector::new(100, 40));
 
-        outline.paint(&mut scene, 0.0, 0.0);
+        outline.paint(&mut scene, Vector::default());
 
         assert_eq!(size, Size::new(100.0, 40.0));
         assert_eq!(
             outline.child_mut().unwrap().rect(),
-            Rect::new(0.0, 0.0, 100.0, 40.0)
+            Rect::new(Vector::default(), Vector::new(100.0, 40.0))
         );
         assert_eq!(scene.vertices[0].color, Color::WHITE.as_f32());
         assert_eq!(scene.vertices[4].color, Color::BLACK.as_f32());
@@ -812,12 +796,14 @@ mod tests {
     #[test]
     fn sized_passes_recommendation_to_child_and_selects_each_axis() {
         let mut component = Component::sized(
-            SizeSource::Parent,
-            SizeSource::Child,
-            Some(Component::sized(SizeSource::Zero, SizeSource::Parent, None)),
+            Vector::new(SizeSource::Parent, SizeSource::Child),
+            Some(Component::sized(
+                Vector::new(SizeSource::Zero, SizeSource::Parent),
+                None,
+            )),
         );
 
-        let size = component.layout(SizeRecommendation::exact(320.0, 240.0));
+        let size = component.layout(SizeRecommendation::exact(Vector::new(320.0, 240.0)));
 
         assert_eq!(size, Size::new(320.0, 240.0));
         match &component.kind {
