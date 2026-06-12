@@ -48,10 +48,7 @@ impl TextDocument {
         })
     }
 
-    pub fn remove_operation(
-        &self,
-        index: usize,
-    ) -> Result<TextOperation, eips::error::IndexError> {
+    pub fn remove_operation(&self, index: usize) -> Result<TextOperation, eips::error::IndexError> {
         Ok(TextOperation {
             change: self.sequence.remove(index)?,
             item: None,
@@ -67,7 +64,9 @@ impl Default for TextDocument {
 
 impl fmt::Display for TextDocument {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.text.iter().try_for_each(|character| write!(formatter, "{character}"))
+        self.text
+            .iter()
+            .try_for_each(|character| write!(formatter, "{character}"))
     }
 }
 
@@ -116,24 +115,17 @@ mod tests {
         let shared = Arc::new(BlockShared {
             value: RwLock::new(Some(document.clone())),
         });
-        let block = TypedBlock::<TextDocument>::created(
-            Uuid::new_v4(),
-            Arc::clone(&shared),
-            document,
-        );
+        let block =
+            TypedBlock::<TextDocument>::created(Uuid::new_v4(), Arc::clone(&shared), document);
         block.created();
 
         let first_operation = {
-            let value = shared
-                .value
-                .read();
+            let value = shared.value.read();
             value.as_ref().unwrap().insert_operation(0, 'a').unwrap()
         };
         block.local_operation(first_operation);
         let second_operation = {
-            let value = shared
-                .value
-                .read();
+            let value = shared.value.read();
             value.as_ref().unwrap().insert_operation(1, 'b').unwrap()
         };
         block.local_operation(second_operation);
