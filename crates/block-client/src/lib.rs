@@ -137,6 +137,19 @@ impl<B: Block> BlockHandle<B> {
                 .unwrap_or_else(|_| fatal("block client worker stopped before loading the block"));
         }
     }
+
+    pub async fn wait_until(&self, mut predicate: impl FnMut(&B) -> bool) {
+        let mut changed = self.block.changed.subscribe();
+        loop {
+            if self.read().is_some_and(|block| predicate(&block)) {
+                return;
+            }
+            changed
+                .changed()
+                .await
+                .unwrap_or_else(|_| fatal("block client worker stopped while waiting for a block"));
+        }
+    }
 }
 
 pub struct BlockReadGuard<'a, B: Block> {
@@ -497,6 +510,7 @@ struct TypedBlock<B: Block> {
     shared: Arc<BlockShared<B>>,
     state: RwLock<TypedState<B>>,
     loaded: watch::Sender<bool>,
+    changed: watch::Sender<()>,
 }
 
 struct TypedState<B: Block> {
@@ -531,6 +545,7 @@ impl<B: Block> TypedBlock<B> {
                 ready: false,
             }),
             loaded: watch::channel(false).0,
+            changed: watch::channel(()).0,
         }
     }
 
@@ -549,6 +564,7 @@ impl<B: Block> TypedBlock<B> {
                 ready: false,
             }),
             loaded: watch::channel(false).0,
+            changed: watch::channel(()).0,
         }
     }
 
@@ -560,6 +576,7 @@ impl<B: Block> TypedBlock<B> {
             B::apply_operation(&mut value, &pending.operation);
         }
         *self.shared.value.write() = Some(value);
+        self.changed.send_replace(());
     }
 
     fn local_operation(&self, operation: B::Operation) {
@@ -570,6 +587,7 @@ impl<B: Block> TypedBlock<B> {
         });
         if let Some(value) = self.shared.value.write().as_mut() {
             B::apply_operation(value, &operation);
+            self.changed.send_replace(());
         }
     }
 }
@@ -620,6 +638,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
                 B::apply_operation(&mut value, &pending.operation);
             }
             *self.shared.value.write() = Some(value);
+            self.changed.send_replace(());
             state.confirmed = None;
         } else {
             state.confirmed = Some(value);
@@ -731,6 +750,7 @@ impl<B: Block> TypedBlock<B> {
                 });
             if let Some(value) = self.shared.value.write().as_mut() {
                 B::apply_operation(value, &remote);
+                self.changed.send_replace(());
             }
             if let Some(index) = state
                 .pending
@@ -938,6 +958,26 @@ mod tests {
             operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
         });
         assert_eq!(shared.value.read().as_ref().unwrap().count, 3);
+    }
+
+    #[tokio::test]
+    async fn wait_until_observes_current_and_future_values() {
+        let client = BlockClient::new();
+        let block = client.create_block(Counter { count: 1 });
+        block.wait_until(|counter| counter.count == 1).await;
+
+        let block_for_update = block.clone();
+        let update = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            block_for_update.block.remote_operation(OperationRecord {
+                seq: 1,
+                operation_id: Uuid::new_v4(),
+                operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
+            });
+        });
+
+        block.wait_until(|counter| counter.count == 3).await;
+        update.await.unwrap();
     }
 
     #[tokio::test]

@@ -133,6 +133,8 @@ mod tests {
         block_b.operate(operation);
         timeout(client_a.synchronized()).await;
         timeout(client_b.synchronized()).await;
+        timeout(block_a.wait_until(|document| document.len() == 4)).await;
+        timeout(block_b.wait_until(|document| document.len() == 4)).await;
 
         let text_a = block_a.read().unwrap().text();
         let text_b = block_b.read().unwrap().text();
