@@ -9,7 +9,9 @@ use std::{
     },
 };
 
-use block::{ClientMessage, CommandKind, ErrorCode, OperationRecord, ServerMessage};
+use block::{
+    BlockOperation, ClientMessage, CommandKind, ErrorCode, OperationRecord, ServerMessage,
+};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -59,7 +61,12 @@ async fn handle_connection(
                             handle_text_message(&store, &watch_hub, client_id, outbound.clone(), &text).await;
                         sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
                         if let Some(notification) = notification {
-                            watch_hub.broadcast(notification).await;
+                            match notification {
+                                ServerMessage::BatchUpdated { operations } => {
+                                    watch_hub.broadcast_batch(operations).await;
+                                }
+                                notification => watch_hub.broadcast(notification).await,
+                            }
                         }
                     }
                     Message::Close(_) => break,
@@ -178,6 +185,93 @@ async fn handle_text_message(
                 ),
             }
         }
+        ClientMessage::UpdateBatch {
+            request_id,
+            updates,
+        } => {
+            if updates.is_empty() {
+                return (
+                    ServerMessage::Error {
+                        request_id: Some(request_id),
+                        command: Some(CommandKind::UpdateBatch),
+                        id: None,
+                        code: ErrorCode::InvalidMessage,
+                        message: "update batch must not be empty".into(),
+                        expected_seq: None,
+                    },
+                    None,
+                );
+            }
+            let mut ids: Vec<_> = updates.iter().map(|update| update.id).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            if ids.len() != updates.len() {
+                return (
+                    ServerMessage::Error {
+                        request_id: Some(request_id),
+                        command: Some(CommandKind::UpdateBatch),
+                        id: None,
+                        code: ErrorCode::InvalidMessage,
+                        message: "update batch may contain at most one update per block".into(),
+                        expected_seq: None,
+                    },
+                    None,
+                );
+            }
+            let mut locks = Vec::with_capacity(ids.len());
+            for id in ids {
+                locks.push(store.lock_for(id).await);
+            }
+            let mut guards = Vec::with_capacity(locks.len());
+            for lock in &locks {
+                guards.push(lock.lock().await);
+            }
+
+            let mut operations = Vec::with_capacity(updates.len());
+            let mut inserted = Vec::new();
+            for update in updates {
+                match store
+                    .update_block_unlocked(
+                        update.id,
+                        update.seq,
+                        update.operation_id,
+                        update.operation,
+                    )
+                    .await
+                {
+                    Ok(UpdateOutcome::Inserted(operation)) => {
+                        let operation = BlockOperation {
+                            id: update.id,
+                            operation,
+                        };
+                        inserted.push(operation.clone());
+                        operations.push(operation);
+                    }
+                    Ok(UpdateOutcome::Duplicate(operation)) => {
+                        operations.push(BlockOperation {
+                            id: update.id,
+                            operation,
+                        });
+                    }
+                    Err(error) => {
+                        return (
+                            error.to_response(request_id, CommandKind::UpdateBatch, update.id),
+                            None,
+                        );
+                    }
+                }
+            }
+            (
+                ServerMessage::BatchOk {
+                    request_id,
+                    command: CommandKind::UpdateBatch,
+                    operations,
+                },
+                (!inserted.is_empty()).then_some(ServerMessage::BatchUpdated {
+                    operations: inserted,
+                }),
+            )
+        }
         ClientMessage::ReadBlock {
             request_id,
             id,
@@ -290,6 +384,25 @@ impl WatchHub {
             for outbound in entries.values() {
                 let _ = outbound.send(message.clone());
             }
+        }
+    }
+
+    async fn broadcast_batch(&self, operations: Vec<BlockOperation>) {
+        let watchers = self.watchers.lock().await;
+        let mut deliveries: HashMap<ClientId, (OutboundMessages, Vec<BlockOperation>)> =
+            HashMap::new();
+        for operation in operations {
+            if let Some(entries) = watchers.get(&operation.id) {
+                for (&client_id, outbound) in entries {
+                    let delivery = deliveries
+                        .entry(client_id)
+                        .or_insert_with(|| (outbound.clone(), Vec::new()));
+                    delivery.1.push(operation.clone());
+                }
+            }
+        }
+        for (_, (outbound, operations)) in deliveries {
+            let _ = outbound.send(ServerMessage::BatchUpdated { operations });
         }
     }
 }
@@ -855,6 +968,88 @@ mod tests {
                 && found_type == block_type
                 && operations.len() == 1
                 && operations[0].operation_id == operation_id
+        ));
+
+        client.close(None).await.unwrap();
+        server.await.unwrap();
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn batch_is_acknowledged_before_watch_notifications() {
+        let root = test_root();
+        let store = Arc::new(BlockStore::new(root.clone()));
+        let watch_hub = Arc::new(WatchHub::new());
+        fs::create_dir_all(store.root()).await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn({
+            let store = Arc::clone(&store);
+            let watch_hub = Arc::clone(&watch_hub);
+            async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                handle_connection(stream, store, watch_hub).await.unwrap();
+            }
+        });
+        let (mut client, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+
+        for id in [first, second] {
+            send_message(
+                &mut client,
+                ClientMessage::CreateBlock {
+                    request_id: Uuid::new_v4(),
+                    id,
+                    block_type: Uuid::new_v4(),
+                    data: vec![],
+                    watch: true,
+                },
+            )
+            .await;
+            assert!(matches!(
+                next_message(&mut client).await,
+                ServerMessage::Ok {
+                    command: CommandKind::CreateBlock,
+                    ..
+                }
+            ));
+        }
+
+        let request_id = Uuid::new_v4();
+        send_message(
+            &mut client,
+            ClientMessage::UpdateBatch {
+                request_id,
+                updates: vec![
+                    block::BlockUpdate {
+                        id: first,
+                        seq: Some(1),
+                        operation_id: Uuid::new_v4(),
+                        operation: vec![1],
+                    },
+                    block::BlockUpdate {
+                        id: second,
+                        seq: Some(1),
+                        operation_id: Uuid::new_v4(),
+                        operation: vec![2],
+                    },
+                ],
+            },
+        )
+        .await;
+        assert!(matches!(
+            next_message(&mut client).await,
+            ServerMessage::BatchOk {
+                request_id: found,
+                operations,
+                ..
+            } if found == request_id && operations.len() == 2
+        ));
+        assert!(matches!(
+            next_message(&mut client).await,
+            ServerMessage::BatchUpdated { operations }
+                if operations.len() == 2
         ));
 
         client.close(None).await.unwrap();

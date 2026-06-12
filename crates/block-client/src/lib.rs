@@ -6,9 +6,12 @@ use std::{
     thread,
 };
 
-use block::{Block, ClientMessage, CommandKind, ErrorCode, OperationRecord, ServerMessage};
+use block::{
+    Block, BlockOperation, BlockUpdate, ClientMessage, CommandKind, ErrorCode, OperationRecord,
+    ServerMessage,
+};
 use futures_util::{SinkExt, StreamExt};
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
+use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -17,21 +20,27 @@ use uuid::Uuid;
 pub mod text;
 
 pub struct BlockClient {
+    id: Uuid,
     commands: mpsc::Sender<WorkerCommand>,
     connected: Arc<OnceLock<()>>,
+    access: Arc<RwLock<()>>,
 }
 
 impl BlockClient {
     pub fn new() -> Self {
         let (commands, command_rx) = mpsc::channel();
         let connected = Arc::new(OnceLock::new());
+        let access = Arc::new(RwLock::new(()));
+        let worker_access = Arc::clone(&access);
         thread::Builder::new()
             .name("block-client".into())
-            .spawn(move || worker_main(command_rx))
+            .spawn(move || worker_main(command_rx, worker_access))
             .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));
         Self {
+            id: Uuid::new_v4(),
             commands,
             connected,
+            access,
         }
     }
 
@@ -50,9 +59,11 @@ impl BlockClient {
         let block = Arc::new(TypedBlock::<B>::created(id, Arc::clone(&shared), initial));
         self.send(WorkerCommand::AddBlock(block.clone()));
         BlockHandle {
+            client_id: self.id,
             id,
             block,
             commands: self.commands.clone(),
+            access: Arc::clone(&self.access),
         }
     }
 
@@ -63,10 +74,22 @@ impl BlockClient {
         let block = Arc::new(TypedBlock::<B>::unresolved(id, Arc::clone(&shared)));
         self.send(WorkerCommand::AddBlock(block.clone()));
         BlockHandle {
+            client_id: self.id,
             id,
             block,
             commands: self.commands.clone(),
+            access: Arc::clone(&self.access),
         }
+    }
+
+    pub fn batch(&self, update: impl FnOnce(&mut BlockBatch<'_>)) {
+        let mut batch = BlockBatch {
+            client_id: self.id,
+            commands: self.commands.clone(),
+            _access: self.access.write(),
+            ids: Vec::new(),
+        };
+        update(&mut batch);
     }
 
     pub async fn synchronized(&self) {
@@ -91,17 +114,21 @@ impl Default for BlockClient {
 }
 
 pub struct BlockHandle<B: Block> {
+    client_id: Uuid,
     id: Uuid,
     block: Arc<TypedBlock<B>>,
     commands: mpsc::Sender<WorkerCommand>,
+    access: Arc<RwLock<()>>,
 }
 
 impl<B: Block> Clone for BlockHandle<B> {
     fn clone(&self) -> Self {
         Self {
+            client_id: self.client_id,
             id: self.id,
             block: Arc::clone(&self.block),
             commands: self.commands.clone(),
+            access: Arc::clone(&self.access),
         }
     }
 }
@@ -112,11 +139,13 @@ impl<B: Block> BlockHandle<B> {
     }
 
     pub fn read(&self) -> Option<BlockReadGuard<'_, B>> {
+        let access = self.access.read();
         let guard = self.block.shared.value.read();
         if guard.is_none() {
             return None;
         }
         Some(BlockReadGuard {
+            _access: access,
             guard: RwLockReadGuard::map(guard, |value| value.as_ref().unwrap()),
         })
     }
@@ -153,6 +182,7 @@ impl<B: Block> BlockHandle<B> {
 }
 
 pub struct BlockReadGuard<'a, B: Block> {
+    _access: RwLockReadGuard<'a, ()>,
     guard: MappedRwLockReadGuard<'a, B>,
 }
 
@@ -164,6 +194,39 @@ impl<B: Block> Deref for BlockReadGuard<'_, B> {
     }
 }
 
+pub struct BlockBatch<'a> {
+    client_id: Uuid,
+    commands: mpsc::Sender<WorkerCommand>,
+    _access: RwLockWriteGuard<'a, ()>,
+    ids: Vec<Uuid>,
+}
+
+impl BlockBatch<'_> {
+    pub fn operate<B: Block>(&mut self, block: &BlockHandle<B>, operation: B::Operation) {
+        if block.client_id != self.client_id {
+            fatal("cannot batch a block owned by another client");
+        }
+        if self.ids.contains(&block.id) {
+            fatal("a batch may contain at most one operation per block");
+        }
+        block.block.local_operation(operation);
+        self.ids.push(block.id);
+    }
+}
+
+impl Drop for BlockBatch<'_> {
+    fn drop(&mut self) {
+        if self.ids.is_empty() {
+            return;
+        }
+        self.commands
+            .send(WorkerCommand::OperateBatch {
+                ids: std::mem::take(&mut self.ids),
+            })
+            .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+}
+
 struct BlockShared<B: Block> {
     value: RwLock<Option<B>>,
 }
@@ -172,10 +235,11 @@ enum WorkerCommand {
     Connect(String),
     AddBlock(Arc<dyn ErasedBlock>),
     Operate { id: Uuid },
+    OperateBatch { ids: Vec<Uuid> },
     Synchronize(oneshot::Sender<()>),
 }
 
-fn worker_main(commands: mpsc::Receiver<WorkerCommand>) {
+fn worker_main(commands: mpsc::Receiver<WorkerCommand>, access: Arc<RwLock<()>>) {
     let runtime = tokio::runtime::Runtime::new()
         .unwrap_or_else(|error| fatal(format!("failed to create block client runtime: {error}")));
     runtime.block_on(async move {
@@ -191,7 +255,7 @@ fn worker_main(commands: mpsc::Receiver<WorkerCommand>) {
             })
             .unwrap_or_else(|error| fatal(format!("failed to spawn command forwarder: {error}")));
 
-        let mut state = WorkerState::default();
+        let mut state = WorkerState::new(access);
         while let Some(command) = async_rx.recv().await {
             match command {
                 WorkerCommand::Connect(url) => {
@@ -266,9 +330,9 @@ async fn run_connected(
     }
 }
 
-#[derive(Default)]
 struct WorkerState {
     connected: bool,
+    access: Arc<RwLock<()>>,
     blocks: HashMap<Uuid, Arc<dyn ErasedBlock>>,
     requests: HashMap<Uuid, PendingRequest>,
     outbound: VecDeque<ClientMessage>,
@@ -276,6 +340,17 @@ struct WorkerState {
 }
 
 impl WorkerState {
+    fn new(access: Arc<RwLock<()>>) -> Self {
+        Self {
+            connected: false,
+            access,
+            blocks: HashMap::new(),
+            requests: HashMap::new(),
+            outbound: VecDeque::new(),
+            synchronization_waiters: Vec::new(),
+        }
+    }
+
     fn handle_command(&mut self, command: WorkerCommand) {
         match command {
             WorkerCommand::Connect(_) => fatal("unexpected connect command"),
@@ -293,6 +368,12 @@ impl WorkerState {
                     fatal(format!("unknown block {id}"));
                 }
                 self.maybe_send_update(id);
+            }
+            WorkerCommand::OperateBatch { ids } => {
+                if ids.iter().any(|id| !self.blocks.contains_key(id)) {
+                    fatal("batch contains an unknown block");
+                }
+                self.maybe_send_batch(ids);
             }
             WorkerCommand::Synchronize(completed) => {
                 self.synchronization_waiters.push(completed);
@@ -359,6 +440,40 @@ impl WorkerState {
         }
     }
 
+    fn maybe_send_batch(&mut self, ids: Vec<Uuid>) {
+        if !self.connected {
+            return;
+        }
+        let mut updates = Vec::new();
+        for id in ids {
+            if let Some(update) = self.blocks[&id].next_update() {
+                updates.push(BlockUpdate {
+                    id,
+                    seq: update.seq,
+                    operation_id: update.operation_id,
+                    operation: update.operation,
+                });
+            }
+        }
+        if updates.is_empty() {
+            return;
+        }
+        let request_id = Uuid::new_v4();
+        self.requests.insert(
+            request_id,
+            PendingRequest::Batch {
+                operations: updates
+                    .iter()
+                    .map(|update| (update.id, update.operation_id))
+                    .collect(),
+            },
+        );
+        self.outbound.push_back(ClientMessage::UpdateBatch {
+            request_id,
+            updates,
+        });
+    }
+
     fn handle_server_message(&mut self, message: ServerMessage) {
         match message {
             ServerMessage::Ok {
@@ -417,6 +532,38 @@ impl WorkerState {
                 block.resolve(snapshot, snapshot_seq, operations);
                 self.maybe_send_update(id);
             }
+            ServerMessage::BatchOk {
+                request_id,
+                command: CommandKind::UpdateBatch,
+                operations,
+            } => {
+                let pending = self
+                    .requests
+                    .remove(&request_id)
+                    .unwrap_or_else(|| fatal(format!("response for unknown request {request_id}")));
+                let PendingRequest::Batch {
+                    operations: expected,
+                } = pending
+                else {
+                    fatal("batch response did not match its request");
+                };
+                if expected.len() != operations.len() {
+                    fatal("batch response operation count mismatch");
+                }
+                for ((expected_id, expected_operation), operation) in
+                    expected.into_iter().zip(operations)
+                {
+                    if operation.id != expected_id
+                        || operation.operation.operation_id != expected_operation
+                    {
+                        fatal("batch response operation mismatch");
+                    }
+                    self.blocks[&operation.id]
+                        .acknowledge(operation.operation.operation_id, operation.operation.seq);
+                    self.maybe_send_update(operation.id);
+                }
+            }
+            ServerMessage::BatchOk { .. } => fatal("invalid batch response command"),
             ServerMessage::Error {
                 request_id,
                 command,
@@ -454,12 +601,32 @@ impl WorkerState {
                 ));
             }
             ServerMessage::BlockUpdated { id, operation } => {
+                let access = Arc::clone(&self.access);
+                let _access = access.write();
                 let block = self
                     .blocks
                     .get(&id)
                     .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
                 block.remote_operation(operation);
+                drop(_access);
                 self.maybe_send_update(id);
+            }
+            ServerMessage::BatchUpdated { operations } => {
+                let access = Arc::clone(&self.access);
+                let _access = access.write();
+                let mut ids = Vec::with_capacity(operations.len());
+                for BlockOperation { id, operation } in operations {
+                    let block = self
+                        .blocks
+                        .get(&id)
+                        .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
+                    block.remote_operation(operation);
+                    ids.push(id);
+                }
+                drop(_access);
+                for id in ids {
+                    self.maybe_send_update(id);
+                }
             }
             ServerMessage::Presence { .. } => {}
         }
@@ -484,6 +651,7 @@ enum PendingRequest {
     Create { id: Uuid },
     Read { id: Uuid },
     Update { id: Uuid, operation_id: Uuid },
+    Batch { operations: Vec<(Uuid, Uuid)> },
 }
 
 struct OutboundUpdate {
