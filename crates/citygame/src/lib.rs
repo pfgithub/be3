@@ -1,4 +1,4 @@
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec2, Vec3};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::collections::BTreeMap;
@@ -212,6 +212,310 @@ fn seed_for_path(world_seed: u64, path: &[u32]) -> u64 {
         hash ^= hash >> 33;
     }
     hash
+}
+
+pub mod city {
+    use super::{OrientedBounds, Quat, Vec2, Vec3};
+    use rand::{RngCore, SeedableRng};
+    use rand_chacha::ChaCha8Rng;
+
+    pub const CITY_HALF_EXTENT_M: f32 = 500.0;
+    const GRID_CELLS: usize = 9;
+    const MIN_FRONTAGE_M: f32 = 12.0;
+    const MAX_FRONTAGE_M: f32 = 30.0;
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Road {
+        pub centerline: Vec<Vec2>,
+        pub width_m: f32,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Building {
+        /// Canonical footprint. The final point always equals the first point.
+        pub footprint: Vec<Vec2>,
+        pub height_m: f32,
+        pub access_road: usize,
+    }
+
+    impl Building {
+        pub fn bounds(&self) -> OrientedBounds {
+            let points = &self.footprint[..self.footprint.len() - 1];
+            let mut longest = Vec2::X;
+            let mut longest_squared = 0.0;
+            for edge in points.windows(2) {
+                let delta = edge[1] - edge[0];
+                if delta.length_squared() > longest_squared {
+                    longest = delta.normalize();
+                    longest_squared = delta.length_squared();
+                }
+            }
+            let side = Vec2::new(-longest.y, longest.x);
+            let mut min = Vec2::splat(f32::INFINITY);
+            let mut max = Vec2::splat(f32::NEG_INFINITY);
+            for point in points {
+                let local = Vec2::new(point.dot(longest), point.dot(side));
+                min = min.min(local);
+                max = max.max(local);
+            }
+            let center_2d = longest * ((min.x + max.x) * 0.5) + side * ((min.y + max.y) * 0.5);
+            OrientedBounds::new(
+                Vec3::new(center_2d.x, self.height_m * 0.5, center_2d.y),
+                Vec3::new(
+                    (max.x - min.x) * 0.5,
+                    self.height_m * 0.5,
+                    (max.y - min.y) * 0.5,
+                ),
+                Quat::from_rotation_y(-longest.y.atan2(longest.x)),
+            )
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct CityLayout {
+        pub half_extent_m: f32,
+        pub roads: Vec<Road>,
+        pub buildings: Vec<Building>,
+    }
+
+    impl CityLayout {
+        pub fn generate(seed: u64) -> Self {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let coordinates = irregular_coordinates(&mut rng);
+            let side = GRID_CELLS + 1;
+            let mut intersections = vec![Vec2::ZERO; side * side];
+            for row in 0..side {
+                for column in 0..side {
+                    let boundary =
+                        row == 0 || column == 0 || row == GRID_CELLS || column == GRID_CELLS;
+                    let jitter = if boundary {
+                        Vec2::ZERO
+                    } else {
+                        Vec2::new(
+                            random_range(&mut rng, -12.0, 12.0),
+                            random_range(&mut rng, -12.0, 12.0),
+                        )
+                    };
+                    intersections[index(column, row)] =
+                        Vec2::new(coordinates[column], coordinates[row]) + jitter;
+                }
+            }
+
+            let mut roads = Vec::with_capacity(side * 2);
+            for row in 0..side {
+                roads.push(Road {
+                    centerline: (0..side)
+                        .map(|column| intersections[index(column, row)])
+                        .collect(),
+                    width_m: road_width(&mut rng, row),
+                });
+            }
+            for column in 0..side {
+                roads.push(Road {
+                    centerline: (0..side)
+                        .map(|row| intersections[index(column, row)])
+                        .collect(),
+                    width_m: road_width(&mut rng, column),
+                });
+            }
+
+            let mut buildings = Vec::new();
+            for row in 0..GRID_CELLS {
+                for column in 0..GRID_CELLS {
+                    let corners = [
+                        intersections[index(column, row)],
+                        intersections[index(column + 1, row)],
+                        intersections[index(column + 1, row + 1)],
+                        intersections[index(column, row + 1)],
+                    ];
+                    // Opposite frontages leave a useful open center and avoid lot overlap.
+                    add_frontage_buildings(
+                        &mut buildings,
+                        &mut rng,
+                        corners[0],
+                        corners[1],
+                        polygon_centroid(&corners),
+                        row,
+                        roads[row].width_m,
+                    );
+                    add_frontage_buildings(
+                        &mut buildings,
+                        &mut rng,
+                        corners[2],
+                        corners[3],
+                        polygon_centroid(&corners),
+                        row + 1,
+                        roads[row + 1].width_m,
+                    );
+                }
+            }
+
+            Self {
+                half_extent_m: CITY_HALF_EXTENT_M,
+                roads,
+                buildings,
+            }
+        }
+    }
+
+    fn irregular_coordinates(rng: &mut dyn RngCore) -> Vec<f32> {
+        let weights: Vec<_> = (0..GRID_CELLS)
+            .map(|_| random_range(rng, 0.75, 1.25))
+            .collect();
+        let scale = CITY_HALF_EXTENT_M * 2.0 / weights.iter().sum::<f32>();
+        let mut coordinates = Vec::with_capacity(GRID_CELLS + 1);
+        coordinates.push(-CITY_HALF_EXTENT_M);
+        for weight in weights {
+            coordinates.push(coordinates.last().copied().unwrap() + weight * scale);
+        }
+        *coordinates.last_mut().unwrap() = CITY_HALF_EXTENT_M;
+        coordinates
+    }
+
+    fn road_width(rng: &mut dyn RngCore, grid_index: usize) -> f32 {
+        if grid_index % 4 == 0 {
+            random_range(rng, 18.0, 24.0)
+        } else {
+            random_range(rng, 8.0, 12.0)
+        }
+    }
+
+    fn add_frontage_buildings(
+        buildings: &mut Vec<Building>,
+        rng: &mut dyn RngCore,
+        start: Vec2,
+        end: Vec2,
+        block_center: Vec2,
+        access_road: usize,
+        road_width: f32,
+    ) {
+        let edge = end - start;
+        let length = edge.length();
+        let tangent = edge / length;
+        let mut inward = Vec2::new(-tangent.y, tangent.x);
+        if inward.dot(block_center - (start + end) * 0.5) < 0.0 {
+            inward = -inward;
+        }
+        let corner_clearance = 12.0;
+        let usable = length - corner_clearance * 2.0;
+        if usable < MIN_FRONTAGE_M {
+            return;
+        }
+        let target = random_range(rng, 18.0, 25.0);
+        let count = ((usable / target).round() as usize).max(1);
+        let frontage = usable / count as f32;
+        if !(MIN_FRONTAGE_M..=MAX_FRONTAGE_M).contains(&frontage) {
+            return;
+        }
+
+        for lot in 0..count {
+            let lot_start = corner_clearance + lot as f32 * frontage;
+            let side_setback = random_range(rng, 1.0, 2.5);
+            let front_setback = road_width * 0.5 + random_range(rng, 4.0, 8.0);
+            let lot_depth = random_range(rng, 20.0, 38.0);
+            let building_depth = lot_depth - random_range(rng, 5.0, 9.0);
+            let a = start + tangent * (lot_start + side_setback) + inward * front_setback;
+            let b =
+                start + tangent * (lot_start + frontage - side_setback) + inward * front_setback;
+            let rear_skew = random_range(rng, -1.5, 1.5);
+            let d = a + inward * building_depth + tangent * rear_skew;
+            let c = b + inward * building_depth + tangent * rear_skew;
+            buildings.push(Building {
+                footprint: vec![a, b, c, d, a],
+                height_m: random_range(rng, 7.0, 38.0),
+                access_road,
+            });
+        }
+    }
+
+    fn polygon_centroid(points: &[Vec2; 4]) -> Vec2 {
+        points.iter().copied().sum::<Vec2>() / points.len() as f32
+    }
+
+    fn index(column: usize, row: usize) -> usize {
+        row * (GRID_CELLS + 1) + column
+    }
+
+    fn random_range(rng: &mut dyn RngCore, min: f32, max: f32) -> f32 {
+        let unit = rng.next_u32() as f32 / u32::MAX as f32;
+        min + (max - min) * unit
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn generation_is_deterministic() {
+            assert_eq!(CityLayout::generate(42), CityLayout::generate(42));
+            assert_ne!(CityLayout::generate(42), CityLayout::generate(43));
+        }
+
+        #[test]
+        fn roads_form_a_connected_shared_intersection_grid() {
+            let city = CityLayout::generate(7);
+            let side = GRID_CELLS + 1;
+            assert_eq!(city.roads.len(), side * 2);
+            for row in 0..side {
+                for column in 0..side {
+                    assert_eq!(
+                        city.roads[row].centerline[column],
+                        city.roads[side + column].centerline[row]
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn geometry_has_realistic_dimensions_and_access() {
+            let city = CityLayout::generate(99);
+            assert!(!city.buildings.is_empty());
+            for (index, road) in city.roads.iter().enumerate() {
+                let grid_index = index % (GRID_CELLS + 1);
+                let expected = if grid_index % 4 == 0 {
+                    18.0..=24.0
+                } else {
+                    8.0..=12.0
+                };
+                assert!(expected.contains(&road.width_m));
+            }
+            for building in &city.buildings {
+                assert_eq!(building.footprint.first(), building.footprint.last());
+                assert_eq!(building.footprint.len(), 5);
+                assert!((7.0..=38.0).contains(&building.height_m));
+                assert!(building.access_road < city.roads.len());
+                assert!(building
+                    .footprint
+                    .iter()
+                    .all(|point| point.x.abs() <= CITY_HALF_EXTENT_M
+                        && point.y.abs() <= CITY_HALF_EXTENT_M));
+                assert!(signed_area(&building.footprint).abs() > 20.0);
+                let road = &city.roads[building.access_road];
+                let distance = distance_to_polyline(building.footprint[0], &road.centerline);
+                assert!(distance >= road.width_m * 0.5 + 3.9);
+                assert!(distance <= road.width_m * 0.5 + 9.0);
+            }
+        }
+
+        fn signed_area(points: &[Vec2]) -> f32 {
+            points
+                .windows(2)
+                .map(|edge| edge[0].perp_dot(edge[1]))
+                .sum::<f32>()
+                * 0.5
+        }
+
+        fn distance_to_polyline(point: Vec2, line: &[Vec2]) -> f32 {
+            line.windows(2)
+                .map(|edge| {
+                    let segment = edge[1] - edge[0];
+                    let t =
+                        ((point - edge[0]).dot(segment) / segment.length_squared()).clamp(0.0, 1.0);
+                    point.distance(edge[0] + segment * t)
+                })
+                .fold(f32::INFINITY, f32::min)
+        }
+    }
 }
 
 pub mod demo {
