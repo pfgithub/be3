@@ -5,8 +5,6 @@ use eips::{LocalChange, RemoteChange};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::BlockHandle;
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TextDocument {
     sequence: eips::Eips<Uuid>,
@@ -102,34 +100,6 @@ impl Block for TextDocument {
                 block.text.insert(new, character);
             }
         }
-    }
-}
-
-impl BlockHandle<TextDocument> {
-    pub fn insert(
-        &self,
-        index: usize,
-        character: char,
-    ) -> Result<(), eips::error::IndexError> {
-        let operation = {
-            let document = self
-                .read()
-                .expect("cannot edit a text document before it is loaded");
-            document.insert_operation(index, character)?
-        };
-        self.operate(operation);
-        Ok(())
-    }
-
-    pub fn remove(&self, index: usize) -> Result<(), eips::error::IndexError> {
-        let operation = {
-            let document = self
-                .read()
-                .expect("cannot edit a text document before it is loaded");
-            document.remove_operation(index)?
-        };
-        self.operate(operation);
-        Ok(())
     }
 }
 

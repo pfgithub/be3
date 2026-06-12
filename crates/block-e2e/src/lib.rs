@@ -111,10 +111,26 @@ mod tests {
         let block_b = client_b.get_block::<TextDocument>(block_a.id());
         timeout(block_b.loaded()).await;
 
-        block_a.insert(0, 'a').unwrap();
-        block_a.insert(1, 'b').unwrap();
-        block_b.insert(0, 'x').unwrap();
-        block_b.insert(1, 'y').unwrap();
+        let operation = {
+            let document = block_a.read().unwrap();
+            document.insert_operation(0, 'a').unwrap()
+        };
+        block_a.operate(operation);
+        let operation = {
+            let document = block_a.read().unwrap();
+            document.insert_operation(1, 'b').unwrap()
+        };
+        block_a.operate(operation);
+        let operation = {
+            let document = block_b.read().unwrap();
+            document.insert_operation(0, 'x').unwrap()
+        };
+        block_b.operate(operation);
+        let operation = {
+            let document = block_b.read().unwrap();
+            document.insert_operation(1, 'y').unwrap()
+        };
+        block_b.operate(operation);
         timeout(client_a.synchronized()).await;
         timeout(client_b.synchronized()).await;
 
