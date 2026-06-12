@@ -1,4 +1,7 @@
 use bytemuck::{Pod, Zeroable};
+use citygame::demo::DemoElement;
+use citygame::{NodeId, NodeState, World};
+use glam::{Mat4, Vec3};
 use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
@@ -8,7 +11,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{DeviceEvent, ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 const WIDTH: u32 = 1280;
@@ -16,6 +19,7 @@ const HEIGHT: u32 = 720;
 const MOVE_SPEED: f32 = 4.0;
 const MOUSE_SENSITIVITY: f32 = 0.002;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const WORLD_SEED: u64 = 0x00c1_7a6e;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
@@ -33,6 +37,7 @@ struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     input: Input,
+    modifiers: ModifiersState,
     last_frame: Option<Instant>,
     error: Option<String>,
 }
@@ -51,6 +56,12 @@ impl App {
         }
         window.set_cursor_visible(!captured);
         self.input.cursor_captured = captured;
+    }
+
+    fn update_title(&self) {
+        if let (Some(window), Some(renderer)) = (&self.window, &self.renderer) {
+            window.set_title(&renderer.title());
+        }
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl ToString) {
@@ -74,6 +85,31 @@ impl App {
             Err(error) => self.fail(event_loop, error),
         }
     }
+
+    fn hierarchy_key(&mut self, code: KeyCode) -> bool {
+        let Some(renderer) = &mut self.renderer else {
+            return false;
+        };
+        let handled = match code {
+            KeyCode::Tab => {
+                renderer.cycle_selection(self.modifiers.shift_key());
+                true
+            }
+            KeyCode::Enter => {
+                renderer.expand_selected();
+                true
+            }
+            KeyCode::Backspace => {
+                renderer.unload_selected();
+                true
+            }
+            _ => false,
+        };
+        if handled {
+            self.update_title();
+        }
+        handled
+    }
 }
 
 impl ApplicationHandler for App {
@@ -82,7 +118,7 @@ impl ApplicationHandler for App {
             return;
         }
         let attributes = Window::default_attributes()
-            .with_title("Citygame - WASD + mouse, Escape releases cursor")
+            .with_title("Citygame")
             .with_inner_size(LogicalSize::new(WIDTH, HEIGHT));
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
@@ -96,6 +132,7 @@ impl ApplicationHandler for App {
                 self.window = Some(window);
                 self.renderer = Some(renderer);
                 self.capture_cursor(true);
+                self.update_title();
             }
             Err(error) => self.fail(event_loop, error),
         }
@@ -116,6 +153,7 @@ impl ApplicationHandler for App {
                 self.input.keys.clear();
                 self.capture_cursor(false);
             }
+            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 ..
@@ -130,6 +168,9 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => {
+                if state == ElementState::Pressed && !repeat && self.hierarchy_key(code) {
+                    return;
+                }
                 if code == KeyCode::Escape && state == ElementState::Pressed && !repeat {
                     self.capture_cursor(!self.input.cursor_captured);
                 } else {
@@ -191,112 +232,6 @@ impl Input {
     }
 }
 
-#[derive(Clone, Copy, Default)]
-struct Vec3 {
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
-impl Vec3 {
-    const fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { x, y, z }
-    }
-
-    fn dot(self, other: Self) -> f32 {
-        self.x * other.x + self.y * other.y + self.z * other.z
-    }
-
-    fn cross(self, other: Self) -> Self {
-        Self::new(
-            self.y * other.z - self.z * other.y,
-            self.z * other.x - self.x * other.z,
-            self.x * other.y - self.y * other.x,
-        )
-    }
-
-    fn normalized(self) -> Self {
-        let length = self.dot(self).sqrt();
-        if length == 0.0 {
-            self
-        } else {
-            self * (1.0 / length)
-        }
-    }
-}
-
-impl std::ops::Add for Vec3 {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
-    }
-}
-
-impl std::ops::AddAssign for Vec3 {
-    fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
-    }
-}
-
-impl std::ops::Mul<f32> for Vec3 {
-    type Output = Self;
-
-    fn mul(self, rhs: f32) -> Self {
-        Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Mat4 {
-    columns: [[f32; 4]; 4],
-}
-
-impl Mat4 {
-    fn perspective(fov_y: f32, aspect: f32, near: f32, far: f32) -> Self {
-        let f = 1.0 / (fov_y * 0.5).tan();
-        Self {
-            columns: [
-                [f / aspect, 0.0, 0.0, 0.0],
-                [0.0, f, 0.0, 0.0],
-                [0.0, 0.0, far / (near - far), -1.0],
-                [0.0, 0.0, near * far / (near - far), 0.0],
-            ],
-        }
-    }
-
-    fn look_to(position: Vec3, forward: Vec3, up: Vec3) -> Self {
-        let forward = forward.normalized();
-        let right = forward.cross(up).normalized();
-        let up = right.cross(forward);
-        Self {
-            columns: [
-                [right.x, up.x, -forward.x, 0.0],
-                [right.y, up.y, -forward.y, 0.0],
-                [right.z, up.z, -forward.z, 0.0],
-                [
-                    -right.dot(position),
-                    -up.dot(position),
-                    forward.dot(position),
-                    1.0,
-                ],
-            ],
-        }
-    }
-
-    fn mul(self, rhs: Self) -> Self {
-        let mut result = [[0.0; 4]; 4];
-        for column in 0..4 {
-            for row in 0..4 {
-                result[column][row] = (0..4)
-                    .map(|index| self.columns[index][row] * rhs.columns[column][index])
-                    .sum();
-            }
-        }
-        Self { columns: result }
-    }
-}
-
 struct Camera {
     position: Vec3,
     yaw: f32,
@@ -310,15 +245,12 @@ impl Camera {
             self.pitch.sin(),
             -self.yaw.cos() * self.pitch.cos(),
         )
-        .normalized()
+        .normalize()
     }
 
     fn matrix(&self, aspect: f32) -> Mat4 {
-        Mat4::perspective(60.0_f32.to_radians(), aspect, 0.1, 100.0).mul(Mat4::look_to(
-            self.position,
-            self.forward(),
-            Vec3::new(0.0, 1.0, 0.0),
-        ))
+        Mat4::perspective_rh(60.0_f32.to_radians(), aspect, 0.1, 100.0)
+            * Mat4::look_to_rh(self.position, self.forward(), Vec3::Y)
     }
 }
 
@@ -332,12 +264,10 @@ struct CameraUniform {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
 }
 
 impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+    const ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
 
     fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -348,38 +278,55 @@ impl Vertex {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct Instance {
+    model: [[f32; 4]; 4],
+    color: [f32; 4],
+}
+
+impl Instance {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+        1 => Float32x4,
+        2 => Float32x4,
+        3 => Float32x4,
+        4 => Float32x4,
+        5 => Float32x4
+    ];
+
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
 const VERTICES: &[Vertex] = &[
     Vertex {
         position: [-1.0, -1.0, 1.0],
-        color: [1.0, 0.2, 0.2],
     },
     Vertex {
         position: [1.0, -1.0, 1.0],
-        color: [1.0, 0.5, 0.2],
     },
     Vertex {
         position: [1.0, 1.0, 1.0],
-        color: [1.0, 0.9, 0.2],
     },
     Vertex {
         position: [-1.0, 1.0, 1.0],
-        color: [0.4, 1.0, 0.3],
     },
     Vertex {
         position: [-1.0, -1.0, -1.0],
-        color: [0.2, 0.5, 1.0],
     },
     Vertex {
         position: [1.0, -1.0, -1.0],
-        color: [0.4, 0.2, 1.0],
     },
     Vertex {
         position: [1.0, 1.0, -1.0],
-        color: [0.9, 0.2, 1.0],
     },
     Vertex {
         position: [-1.0, 1.0, -1.0],
-        color: [0.2, 1.0, 1.0],
     },
 ];
 
@@ -426,10 +373,14 @@ struct Renderer {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    instance_buffer: wgpu::Buffer,
+    instance_count: u32,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     depth: DepthTexture,
     camera: Camera,
+    world: World,
+    selected: NodeId,
 }
 
 enum RenderStatus {
@@ -466,14 +417,14 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let camera = Camera {
-            position: Vec3::new(0.0, 0.5, 5.0),
+            position: Vec3::new(0.0, 5.0, 13.0),
             yaw: 0.0,
-            pitch: 0.0,
+            pitch: -0.25,
         };
         let camera_uniform = CameraUniform {
             view_projection: camera
                 .matrix(config.width as f32 / config.height as f32)
-                .columns,
+                .to_cols_array_2d(),
         };
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera uniform"),
@@ -514,7 +465,7 @@ impl Renderer {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Vertex::layout()],
+                buffers: &[Vertex::layout(), Instance::layout()],
             },
             primitive: wgpu::PrimitiveState {
                 cull_mode: Some(wgpu::Face::Back),
@@ -551,6 +502,11 @@ impl Renderer {
             contents: bytemuck::cast_slice(INDICES),
             usage: wgpu::BufferUsages::INDEX,
         });
+        let world = World::new(WORLD_SEED, Box::new(DemoElement::root()));
+        let selected = world.root_id();
+        let instances = instances_for_world(&world, &selected);
+        let instance_buffer = create_instance_buffer(&device, &instances);
+        let instance_count = instances.len() as u32;
         let depth = DepthTexture::new(&device, size);
 
         Ok(Self {
@@ -562,11 +518,55 @@ impl Renderer {
             pipeline,
             vertex_buffer,
             index_buffer,
+            instance_buffer,
+            instance_count,
             camera_buffer,
             camera_bind_group,
             depth,
             camera,
+            world,
+            selected,
         })
+    }
+
+    fn title(&self) -> String {
+        let state = self
+            .world
+            .state(&self.selected)
+            .unwrap_or(NodeState::Unexpanded);
+        format!(
+            "Citygame | {} nodes | selected {} ({state:?}) | Tab/Shift+Tab select, Enter expand, Backspace unload | WASD + mouse",
+            self.world.len(),
+            self.selected,
+        )
+    }
+
+    fn cycle_selection(&mut self, backwards: bool) {
+        let ids: Vec<_> = self.world.loaded_ids().cloned().collect();
+        let current = ids.iter().position(|id| id == &self.selected).unwrap_or(0);
+        let next = if backwards {
+            current.checked_sub(1).unwrap_or(ids.len() - 1)
+        } else {
+            (current + 1) % ids.len()
+        };
+        self.selected = ids[next].clone();
+        self.rebuild_instances();
+    }
+
+    fn expand_selected(&mut self) {
+        self.world.expand(&self.selected);
+        self.rebuild_instances();
+    }
+
+    fn unload_selected(&mut self) {
+        self.world.unload_descendants(&self.selected);
+        self.rebuild_instances();
+    }
+
+    fn rebuild_instances(&mut self) {
+        let instances = instances_for_world(&self.world, &self.selected);
+        self.instance_buffer = create_instance_buffer(&self.device, &instances);
+        self.instance_count = instances.len() as u32;
     }
 
     fn resize(&mut self, size: PhysicalSize<u32>) {
@@ -582,27 +582,27 @@ impl Renderer {
 
     fn update(&mut self, input: &Input, dt: f32) {
         let forward = self.camera.forward();
-        let horizontal_forward = Vec3::new(forward.x, 0.0, forward.z).normalized();
-        let right = horizontal_forward.cross(Vec3::new(0.0, 1.0, 0.0));
-        let mut movement = Vec3::default();
+        let horizontal_forward = Vec3::new(forward.x, 0.0, forward.z).normalize();
+        let right = horizontal_forward.cross(Vec3::Y);
+        let mut movement = Vec3::ZERO;
         if input.pressed(KeyCode::KeyW) {
             movement += horizontal_forward;
         }
         if input.pressed(KeyCode::KeyS) {
-            movement += horizontal_forward * -1.0;
+            movement -= horizontal_forward;
         }
         if input.pressed(KeyCode::KeyD) {
             movement += right;
         }
         if input.pressed(KeyCode::KeyA) {
-            movement += right * -1.0;
+            movement -= right;
         }
-        if movement.dot(movement) > 0.0 {
-            self.camera.position += movement.normalized() * MOVE_SPEED * dt;
+        if movement.length_squared() > 0.0 {
+            self.camera.position += movement.normalize() * MOVE_SPEED * dt;
         }
         let aspect = self.config.width as f32 / self.config.height as f32;
         let uniform = CameraUniform {
-            view_projection: self.camera.matrix(aspect).columns,
+            view_projection: self.camera.matrix(aspect).to_cols_array_2d(),
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -642,9 +642,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.08,
-                            g: 0.12,
-                            b: 0.18,
+                            r: 0.035,
+                            g: 0.055,
+                            b: 0.09,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -665,11 +665,47 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
+            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..self.instance_count);
         }
         self.queue.submit(Some(encoder.finish()));
         frame.present();
         Ok(status)
     }
+}
+
+fn instances_for_world(world: &World, selected: &NodeId) -> Vec<Instance> {
+    world
+        .loaded_nodes()
+        .map(|(id, element, state)| {
+            let bounds = element.bounds();
+            let model = Mat4::from_scale_rotation_translation(
+                bounds.half_extents,
+                bounds.rotation,
+                bounds.center,
+            );
+            let color = if id == selected {
+                [1.0, 0.85, 0.18, 1.0]
+            } else {
+                match state {
+                    NodeState::Unexpanded => [0.2, 0.55, 0.95, 1.0],
+                    NodeState::Expanded => [0.2, 0.8, 0.45, 1.0],
+                    NodeState::Leaf => [0.95, 0.35, 0.2, 1.0],
+                }
+            };
+            Instance {
+                model: model.to_cols_array_2d(),
+                color,
+            }
+        })
+        .collect()
+}
+
+fn create_instance_buffer(device: &wgpu::Device, instances: &[Instance]) -> wgpu::Buffer {
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("hierarchy instances"),
+        contents: bytemuck::cast_slice(instances),
+        usage: wgpu::BufferUsages::VERTEX,
+    })
 }
