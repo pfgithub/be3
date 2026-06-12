@@ -344,7 +344,7 @@ impl BlockStore {
     async fn update_block_unlocked(
         &self,
         id: Uuid,
-        seq: u64,
+        seq: Option<u64>,
         operation_id: Uuid,
         operation: Vec<u8>,
     ) -> Result<UpdateOutcome, StoreError> {
@@ -365,19 +365,19 @@ impl BlockStore {
         }
 
         let expected = records.last().map_or(1, |record| record.seq + 1);
-        if seq != expected {
+        if seq.is_some_and(|seq| seq != expected) {
             return Err(StoreError::InvalidSeq {
                 expected,
-                actual: seq,
+                actual: seq.unwrap(),
             });
         }
 
         let record = OperationRecord {
-            seq,
+            seq: expected,
             operation_id,
             operation,
         };
-        let path = operations_path.join(seq.to_string());
+        let path = operations_path.join(expected.to_string());
         write_new_file(path, serde_json::to_vec(&record)?).await?;
         Ok(UpdateOutcome::Inserted(record))
     }
@@ -621,21 +621,21 @@ mod tests {
 
         assert!(matches!(
             store
-                .update_block_unlocked(id, 1, operation_id, vec![2])
+                .update_block_unlocked(id, Some(1), operation_id, vec![2])
                 .await
                 .unwrap(),
             UpdateOutcome::Inserted(_)
         ));
         assert!(matches!(
             store
-                .update_block_unlocked(id, 99, operation_id, vec![2])
+                .update_block_unlocked(id, Some(99), operation_id, vec![2])
                 .await
                 .unwrap(),
             UpdateOutcome::Duplicate(_)
         ));
         assert!(matches!(
             store
-                .update_block_unlocked(id, 2, operation_id, vec![3])
+                .update_block_unlocked(id, Some(2), operation_id, vec![3])
                 .await,
             Err(StoreError::ConflictingOperationId)
         ));
@@ -654,11 +654,11 @@ mod tests {
             .await
             .unwrap();
         store
-            .update_block_unlocked(id, 1, Uuid::new_v4(), vec![2])
+            .update_block_unlocked(id, Some(1), Uuid::new_v4(), vec![2])
             .await
             .unwrap();
         store
-            .update_block_unlocked(id, 2, Uuid::new_v4(), vec![3])
+            .update_block_unlocked(id, Some(2), Uuid::new_v4(), vec![3])
             .await
             .unwrap();
 
@@ -684,13 +684,78 @@ mod tests {
             .unwrap();
         assert!(matches!(
             store
-                .update_block_unlocked(id, 4, Uuid::new_v4(), vec![])
+                .update_block_unlocked(id, Some(4), Uuid::new_v4(), vec![])
                 .await,
             Err(StoreError::InvalidSeq {
                 expected: 1,
                 actual: 4
             })
         ));
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn omitted_sequences_are_assigned_by_the_server() {
+        let root = test_root();
+        let store = BlockStore::new(root.clone());
+        fs::create_dir_all(store.root()).await.unwrap();
+        let id = Uuid::new_v4();
+        store
+            .create_block_unlocked(id, Uuid::new_v4(), vec![])
+            .await
+            .unwrap();
+
+        let first = store
+            .update_block_unlocked(id, None, Uuid::new_v4(), vec![1])
+            .await
+            .unwrap();
+        let second = store
+            .update_block_unlocked(id, None, Uuid::new_v4(), vec![2])
+            .await
+            .unwrap();
+
+        assert!(matches!(first, UpdateOutcome::Inserted(record) if record.seq == 1));
+        assert!(matches!(second, UpdateOutcome::Inserted(record) if record.seq == 2));
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_sequences_cannot_be_applied_out_of_order() {
+        let root = test_root();
+        let store = BlockStore::new(root.clone());
+        fs::create_dir_all(store.root()).await.unwrap();
+        let id = Uuid::new_v4();
+        store
+            .create_block_unlocked(id, Uuid::new_v4(), vec![])
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .update_block_unlocked(id, Some(2), Uuid::new_v4(), vec![2])
+                .await,
+            Err(StoreError::InvalidSeq {
+                expected: 1,
+                actual: 2
+            })
+        ));
+        store
+            .update_block_unlocked(id, Some(1), Uuid::new_v4(), vec![1])
+            .await
+            .unwrap();
+        store
+            .update_block_unlocked(id, Some(2), Uuid::new_v4(), vec![2])
+            .await
+            .unwrap();
+
+        let read = store.read_block_unlocked(id).await.unwrap();
+        assert_eq!(
+            read.operations
+                .iter()
+                .map(|record| record.seq)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -741,7 +806,7 @@ mod tests {
             ClientMessage::UpdateBlock {
                 request_id: Uuid::new_v4(),
                 id,
-                seq: 1,
+                seq: Some(1),
                 operation_id,
                 operation: vec![3],
             },

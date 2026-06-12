@@ -5,10 +5,11 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
     type Operation: Clone + Serialize + DeserializeOwned + Send + Sync + 'static;
 
     const TYPE_ID: Uuid;
+    const CRDT: bool = false;
 
     fn apply_operation(block: &mut Self, operation: &Self::Operation);
 
-    fn transform_operation(local: &mut Self::Operation, remote: &Self::Operation);
+    fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -54,7 +55,8 @@ pub enum ClientMessage {
     UpdateBlock {
         request_id: Uuid,
         id: Uuid,
-        seq: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        seq: Option<u64>,
         operation_id: Uuid,
         operation: Vec<u8>,
     },

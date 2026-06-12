@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     ops::Deref,
     process,
     sync::{mpsc, Arc, OnceLock},
@@ -13,6 +13,8 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use uuid::Uuid;
+
+pub mod text;
 
 pub struct BlockClient {
     commands: mpsc::Sender<WorkerCommand>,
@@ -321,25 +323,27 @@ impl WorkerState {
         if !self.connected {
             return;
         }
-        let block = self.blocks.get(&id).unwrap();
-        let Some(update) = block.next_update() else {
-            return;
-        };
-        let request_id = Uuid::new_v4();
-        self.requests.insert(
-            request_id,
-            PendingRequest::Update {
+        loop {
+            let block = self.blocks.get(&id).unwrap();
+            let Some(update) = block.next_update() else {
+                return;
+            };
+            let request_id = Uuid::new_v4();
+            self.requests.insert(
+                request_id,
+                PendingRequest::Update {
+                    id,
+                    operation_id: update.operation_id,
+                },
+            );
+            self.outbound.push_back(ClientMessage::UpdateBlock {
+                request_id,
                 id,
+                seq: update.seq,
                 operation_id: update.operation_id,
-            },
-        );
-        self.outbound.push_back(ClientMessage::UpdateBlock {
-            request_id,
-            id,
-            seq: update.seq,
-            operation_id: update.operation_id,
-            operation: update.operation,
-        });
+                operation: update.operation,
+            });
+        }
     }
 
     fn handle_server_message(&mut self, message: ServerMessage) {
@@ -470,7 +474,7 @@ enum PendingRequest {
 }
 
 struct OutboundUpdate {
-    seq: u64,
+    seq: Option<u64>,
     operation_id: Uuid,
     operation: Vec<u8>,
 }
@@ -499,8 +503,10 @@ struct TypedState<B: Block> {
     initial: Option<B>,
     confirmed: Option<B>,
     confirmed_seq: u64,
+    acknowledged_seq: u64,
     pending: VecDeque<PendingOperation<B::Operation>>,
-    in_flight: Option<Uuid>,
+    in_flight: HashSet<Uuid>,
+    buffered: BTreeMap<u64, OperationRecord>,
     ready: bool,
 }
 
@@ -518,8 +524,10 @@ impl<B: Block> TypedBlock<B> {
                 initial: Some(initial.clone()),
                 confirmed: Some(initial),
                 confirmed_seq: 0,
+                acknowledged_seq: 0,
                 pending: VecDeque::new(),
-                in_flight: None,
+                in_flight: HashSet::new(),
+                buffered: BTreeMap::new(),
                 ready: false,
             }),
             loaded: watch::channel(false).0,
@@ -534,8 +542,10 @@ impl<B: Block> TypedBlock<B> {
                 initial: None,
                 confirmed: None,
                 confirmed_seq: 0,
+                acknowledged_seq: 0,
                 pending: VecDeque::new(),
-                in_flight: None,
+                in_flight: HashSet::new(),
+                buffered: BTreeMap::new(),
                 ready: false,
             }),
             loaded: watch::channel(false).0,
@@ -581,7 +591,12 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
     }
 
     fn created(&self) {
-        self.state.write().ready = true;
+        let mut state = self.state.write();
+        state.ready = true;
+        if B::CRDT {
+            state.confirmed = None;
+        }
+        drop(state);
         self.loaded.send_replace(true);
     }
 
@@ -600,31 +615,58 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             seq = record.seq;
         }
         let mut state = self.state.write();
-        state.confirmed = Some(value);
+        if B::CRDT {
+            for pending in &state.pending {
+                B::apply_operation(&mut value, &pending.operation);
+            }
+            *self.shared.value.write() = Some(value);
+            state.confirmed = None;
+        } else {
+            state.confirmed = Some(value);
+            self.rebuild_visible(&state);
+        }
         state.confirmed_seq = seq;
         state.ready = true;
-        self.rebuild_visible(&state);
         self.loaded.send_replace(true);
     }
 
     fn next_update(&self) -> Option<OutboundUpdate> {
         let mut state = self.state.write();
-        if !state.ready || state.in_flight.is_some() {
+        if !state.ready || (!B::CRDT && !state.in_flight.is_empty()) {
             return None;
         }
-        let pending = state.pending.front()?;
+        let pending = state
+            .pending
+            .iter()
+            .find(|pending| !state.in_flight.contains(&pending.id))?;
+        let pending_id = pending.id;
         let update = OutboundUpdate {
-            seq: state.confirmed_seq + 1,
-            operation_id: pending.id,
+            seq: (!B::CRDT).then_some(state.confirmed_seq + 1),
+            operation_id: pending_id,
             operation: serde_json::to_vec(&pending.operation)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize operation: {error}"))),
         };
-        state.in_flight = Some(pending.id);
+        state.in_flight.insert(pending_id);
         Some(update)
     }
 
     fn acknowledge(&self, operation_id: Uuid, seq: u64) {
         let mut state = self.state.write();
+        if B::CRDT {
+            let Some(index) = state
+                .pending
+                .iter()
+                .position(|pending| pending.id == operation_id)
+            else {
+                state.in_flight.remove(&operation_id);
+                state.acknowledged_seq = state.acknowledged_seq.max(seq);
+                return;
+            };
+            state.pending.remove(index);
+            state.in_flight.remove(&operation_id);
+            state.acknowledged_seq = state.acknowledged_seq.max(seq);
+            return;
+        }
         if seq <= state.confirmed_seq {
             return;
         }
@@ -640,16 +682,18 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         let operation = state.pending.pop_front().unwrap().operation;
         B::apply_operation(state.confirmed.as_mut().unwrap(), &operation);
         state.confirmed_seq = seq;
-        state.in_flight = None;
+        state.in_flight.remove(&operation_id);
         self.rebuild_visible(&state);
     }
 
     fn sequence_conflict(&self, operation_id: Uuid, expected_seq: u64) -> bool {
+        if B::CRDT {
+            fatal("CRDT update received a sequence conflict");
+        }
         let mut state = self.state.write();
-        if state.in_flight != Some(operation_id) {
+        if !state.in_flight.remove(&operation_id) {
             fatal("sequence conflict referenced the wrong operation");
         }
-        state.in_flight = None;
         state.confirmed_seq + 1 >= expected_seq
     }
 
@@ -658,8 +702,46 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         if record.seq <= state.confirmed_seq {
             return;
         }
-        if record.seq != state.confirmed_seq + 1 {
-            fatal("received noncontiguous watched operation");
+        state.buffered.entry(record.seq).or_insert(record);
+        loop {
+            let next_seq = state.confirmed_seq + 1;
+            let Some(record) = state.buffered.remove(&next_seq) else {
+                break;
+            };
+            self.apply_remote_operation(&mut state, record);
+        }
+    }
+
+    fn is_synchronized(&self) -> bool {
+        let state = self.state.read();
+        state.ready
+            && state.pending.is_empty()
+            && state.in_flight.is_empty()
+            && state.buffered.is_empty()
+            && (!B::CRDT || state.confirmed_seq >= state.acknowledged_seq)
+    }
+}
+
+impl<B: Block> TypedBlock<B> {
+    fn apply_remote_operation(&self, state: &mut TypedState<B>, record: OperationRecord) {
+        if B::CRDT {
+            let remote: B::Operation =
+                serde_json::from_slice(&record.operation).unwrap_or_else(|error| {
+                    fatal(format!("failed to deserialize remote operation: {error}"))
+                });
+            if let Some(value) = self.shared.value.write().as_mut() {
+                B::apply_operation(value, &remote);
+            }
+            if let Some(index) = state
+                .pending
+                .iter()
+                .position(|pending| pending.id == record.operation_id)
+            {
+                state.pending.remove(index);
+            }
+            state.in_flight.remove(&record.operation_id);
+            state.confirmed_seq = record.seq;
+            return;
         }
 
         if state
@@ -670,7 +752,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             let pending = state.pending.pop_front().unwrap();
             B::apply_operation(state.confirmed.as_mut().unwrap(), &pending.operation);
             state.confirmed_seq = record.seq;
-            state.in_flight = None;
+            state.in_flight.remove(&record.operation_id);
             self.rebuild_visible(&state);
             return;
         }
@@ -685,11 +767,6 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             B::transform_operation(&mut pending.operation, &remote);
         }
         self.rebuild_visible(&state);
-    }
-
-    fn is_synchronized(&self) -> bool {
-        let state = self.state.read();
-        state.ready && state.pending.is_empty() && state.in_flight.is_none()
     }
 }
 
@@ -810,7 +887,7 @@ mod tests {
         assert_eq!(shared.value.read().as_ref().unwrap().count, 15);
         assert!(block.next_update().is_none());
         assert!(block.sequence_conflict(first.operation_id, 2));
-        assert_eq!(block.next_update().unwrap().seq, 2);
+        assert_eq!(block.next_update().unwrap().seq, Some(2));
     }
 
     #[test]
@@ -834,6 +911,33 @@ mod tests {
         block.acknowledge(update.operation_id, 1);
 
         assert_eq!(shared.value.read().as_ref().unwrap().count, 4);
+    }
+
+    #[test]
+    fn watched_operations_are_buffered_until_their_sequence_is_contiguous() {
+        let shared = Arc::new(BlockShared {
+            value: RwLock::new(Some(Counter { count: 0 })),
+        });
+        let block = TypedBlock::<Counter>::created(
+            Uuid::new_v4(),
+            Arc::clone(&shared),
+            Counter { count: 0 },
+        );
+        block.created();
+
+        block.remote_operation(OperationRecord {
+            seq: 2,
+            operation_id: Uuid::new_v4(),
+            operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
+        });
+        assert_eq!(shared.value.read().as_ref().unwrap().count, 0);
+
+        block.remote_operation(OperationRecord {
+            seq: 1,
+            operation_id: Uuid::new_v4(),
+            operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
+        });
+        assert_eq!(shared.value.read().as_ref().unwrap().count, 3);
     }
 
     #[tokio::test]

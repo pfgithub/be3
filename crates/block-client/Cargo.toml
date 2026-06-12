@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 block = { path = "../block" }
+eips = { version = "0.2.4", features = ["serde"] }
 futures-util = "0.3"
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
