@@ -219,7 +219,7 @@ pub mod city {
     use rand::{RngCore, SeedableRng};
     use rand_chacha::ChaCha8Rng;
 
-    pub const CITY_HALF_EXTENT_M: f32 = 500.0;
+    pub const CITY_HALF_EXTENT_M: f32 = 600.0;
     const RADIAL_CENTER: Vec2 = Vec2::new(-75.0, 35.0);
     const DOWNTOWN_CENTER: Vec2 = Vec2::new(235.0, 105.0);
     const NEIGHBORHOOD_CENTER: Vec2 = Vec2::new(170.0, -245.0);
@@ -282,57 +282,7 @@ pub mod city {
     impl CityLayout {
         pub fn generate(seed: u64) -> Self {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let mut roads = Vec::new();
-            add_radial_district(&mut roads, &mut rng);
-            let downtown_angle = random_range(&mut rng, -0.28, -0.12);
-            add_grid_district(
-                &mut roads,
-                &mut rng,
-                DOWNTOWN_CENTER,
-                Vec2::new(150.0, 135.0),
-                downtown_angle,
-                72.0,
-                true,
-            );
-            let neighborhood_angle = random_range(&mut rng, 0.12, 0.3);
-            add_grid_district(
-                &mut roads,
-                &mut rng,
-                NEIGHBORHOOD_CENTER,
-                Vec2::new(145.0, 105.0),
-                neighborhood_angle,
-                64.0,
-                false,
-            );
-            add_organic_district(&mut roads, &mut rng);
-            add_arterial(
-                &mut roads,
-                &mut rng,
-                RADIAL_CENTER,
-                DOWNTOWN_CENTER,
-                Vec2::new(55.0, 70.0),
-            );
-            add_arterial(
-                &mut roads,
-                &mut rng,
-                RADIAL_CENTER,
-                ORGANIC_CENTER,
-                Vec2::new(-145.0, -55.0),
-            );
-            add_arterial(
-                &mut roads,
-                &mut rng,
-                RADIAL_CENTER,
-                NEIGHBORHOOD_CENTER,
-                Vec2::new(35.0, -145.0),
-            );
-            add_arterial(
-                &mut roads,
-                &mut rng,
-                DOWNTOWN_CENTER,
-                NEIGHBORHOOD_CENTER,
-                Vec2::new(300.0, -75.0),
-            );
+            let roads = generate_tensor_roads(seed, &mut rng);
 
             let mut buildings = Vec::new();
             for road_index in 0..roads.len() {
@@ -348,165 +298,320 @@ pub mod city {
         }
     }
 
-    fn add_radial_district(roads: &mut Vec<Road>, rng: &mut dyn RngCore) {
-        const RING_POINTS: usize = 32;
-        const SPOKES: usize = 9;
-        let phase = random_range(rng, 0.0, std::f32::consts::TAU);
-        let mut rings = Vec::new();
-        for (ring_index, radius) in [58.0, 112.0, 172.0].into_iter().enumerate() {
-            let mut centerline = Vec::with_capacity(RING_POINTS + 1);
-            for point_index in 0..RING_POINTS {
-                let angle = point_index as f32 / RING_POINTS as f32 * std::f32::consts::TAU;
-                let variation =
-                    1.0 + 0.045 * (angle * 3.0 + phase).sin() + 0.025 * (angle * 5.0 - phase).sin();
-                centerline.push(RADIAL_CENTER + Vec2::from_angle(angle) * radius * variation);
-            }
-            centerline.push(centerline[0]);
-            roads.push(Road {
-                centerline: centerline.clone(),
-                width_m: if ring_index == 1 {
-                    random_range(rng, 18.0, 23.0)
-                } else {
-                    random_range(rng, 10.0, 15.0)
-                },
-            });
-            rings.push(centerline);
-        }
-        for spoke_index in 0..SPOKES {
-            let point_index = spoke_index * RING_POINTS / SPOKES;
-            let mut centerline = vec![RADIAL_CENTER];
-            centerline.extend(rings.iter().map(|ring| ring[point_index]));
-            roads.push(Road {
-                centerline,
-                width_m: if spoke_index % 3 == 0 {
-                    random_range(rng, 17.0, 22.0)
-                } else {
-                    random_range(rng, 8.0, 13.0)
-                },
-            });
-        }
+    const STREAMLINE_STEP_M: f32 = 7.0;
+    const STREAMLINE_SEPARATION_M: f32 = 42.0;
+    const STREAMLINE_TEST_DISTANCE_M: f32 = 31.5;
+    const MAX_STREAMLINE_STEPS: usize = 180;
+
+    #[derive(Clone, Copy)]
+    enum Eigenvector {
+        Major,
+        Minor,
     }
 
-    fn add_grid_district(
-        roads: &mut Vec<Road>,
-        rng: &mut dyn RngCore,
+    #[derive(Clone, Copy)]
+    enum BasisKind {
+        Grid { angle: f32 },
+        Radial,
+    }
+
+    #[derive(Clone, Copy)]
+    struct BasisField {
         center: Vec2,
-        half_size: Vec2,
-        angle: f32,
-        spacing: f32,
-        dense: bool,
-    ) {
-        let x_axis = Vec2::from_angle(angle);
-        let y_axis = Vec2::new(-x_axis.y, x_axis.x);
-        let mut offset = -half_size.y;
-        while offset <= half_size.y {
-            let wobble = random_range(rng, -5.0, 5.0);
-            roads.push(Road {
-                centerline: vec![
-                    center - x_axis * half_size.x + y_axis * (offset + wobble),
-                    center + x_axis * half_size.x + y_axis * (offset - wobble),
-                ],
-                width_m: grid_road_width(rng, offset, dense),
-            });
-            offset += spacing * random_range(rng, 0.84, 1.16);
-        }
-        offset = -half_size.x;
-        while offset <= half_size.x {
-            let wobble = random_range(rng, -5.0, 5.0);
-            roads.push(Road {
-                centerline: vec![
-                    center + x_axis * (offset + wobble) - y_axis * half_size.y,
-                    center + x_axis * (offset - wobble) + y_axis * half_size.y,
-                ],
-                width_m: grid_road_width(rng, offset, dense),
-            });
-            offset += spacing * random_range(rng, 0.84, 1.16);
-        }
+        radius: f32,
+        strength: f32,
+        kind: BasisKind,
     }
 
-    fn grid_road_width(rng: &mut dyn RngCore, offset: f32, dense: bool) -> f32 {
-        if offset.abs() < 25.0 {
-            random_range(rng, 18.0, 24.0)
-        } else if dense {
-            random_range(rng, 10.0, 15.0)
-        } else {
-            random_range(rng, 8.0, 12.0)
-        }
+    struct TensorField {
+        seed: u64,
+        bases: Vec<BasisField>,
     }
 
-    fn add_organic_district(roads: &mut Vec<Road>, rng: &mut dyn RngCore) {
-        const BRANCHES: usize = 7;
-        for branch in 0..BRANCHES {
-            let angle = branch as f32 / BRANCHES as f32 * std::f32::consts::TAU
-                + random_range(rng, -0.22, 0.22);
-            let direction = Vec2::from_angle(angle);
-            let side = Vec2::new(-direction.y, direction.x);
-            let length = random_range(rng, 125.0, 210.0);
-            let bend = random_range(rng, -42.0, 42.0);
-            let centerline = vec![
-                ORGANIC_CENTER,
-                ORGANIC_CENTER + direction * length * 0.34 + side * bend * 0.25,
-                ORGANIC_CENTER + direction * length * 0.68 + side * bend,
-                ORGANIC_CENTER + direction * length + side * bend * 0.55,
-            ];
-            roads.push(Road {
-                centerline: centerline.clone(),
-                width_m: if branch % 3 == 0 {
-                    random_range(rng, 14.0, 19.0)
-                } else {
-                    random_range(rng, 8.0, 12.0)
+    impl TensorField {
+        fn new(seed: u64, rng: &mut dyn RngCore) -> Self {
+            let bases = vec![
+                BasisField {
+                    center: RADIAL_CENTER,
+                    radius: 260.0,
+                    strength: 1.35,
+                    kind: BasisKind::Radial,
                 },
-            });
-            if branch % 2 == 0 {
-                let junction = centerline[2];
-                let fork_direction = Vec2::from_angle(angle + random_range(rng, 0.55, 0.9));
+                BasisField {
+                    center: DOWNTOWN_CENTER,
+                    radius: 245.0,
+                    strength: 1.2,
+                    kind: BasisKind::Grid {
+                        angle: random_range(rng, -0.28, -0.12),
+                    },
+                },
+                BasisField {
+                    center: NEIGHBORHOOD_CENTER,
+                    radius: 220.0,
+                    strength: 0.95,
+                    kind: BasisKind::Grid {
+                        angle: random_range(rng, 0.12, 0.3),
+                    },
+                },
+                BasisField {
+                    center: ORGANIC_CENTER,
+                    radius: 235.0,
+                    strength: 0.9,
+                    kind: BasisKind::Radial,
+                },
+                BasisField {
+                    center: Vec2::new(-15.0, -125.0),
+                    radius: 330.0,
+                    strength: 0.55,
+                    kind: BasisKind::Grid {
+                        angle: random_range(rng, -0.08, 0.08),
+                    },
+                },
+            ];
+            Self { seed, bases }
+        }
+
+        fn direction(&self, point: Vec2, eigenvector: Eigenvector) -> Vec2 {
+            let mut doubled = Vec2::ZERO;
+            let mut total_weight = 0.0;
+            for basis in &self.bases {
+                let distance = point.distance(basis.center);
+                let normalized = distance / basis.radius;
+                let weight = (-normalized * normalized * 2.0).exp() * basis.strength;
+                let angle = match basis.kind {
+                    BasisKind::Grid { angle } => angle,
+                    BasisKind::Radial if distance > 0.001 => {
+                        let radial = point - basis.center;
+                        radial.y.atan2(radial.x)
+                    }
+                    BasisKind::Radial => 0.0,
+                };
+                doubled += Vec2::from_angle(angle * 2.0) * weight;
+                total_weight += weight;
+            }
+            let fallback = Vec2::from_angle(0.12);
+            let mut direction = if total_weight > 0.0001 && doubled.length_squared() > 0.0001 {
+                Vec2::from_angle(doubled.y.atan2(doubled.x) * 0.5)
+            } else {
+                fallback
+            };
+            if matches!(eigenvector, Eigenvector::Minor) {
+                direction = Vec2::new(-direction.y, direction.x);
+            }
+            let noise = rotational_noise(point, self.seed) * 0.28;
+            Vec2::from_angle(direction.y.atan2(direction.x) + noise)
+        }
+    }
+
+    #[derive(Default)]
+    struct PointGrid {
+        cells: std::collections::HashMap<(i32, i32), Vec<Vec2>>,
+    }
+
+    impl PointGrid {
+        fn insert_line(&mut self, line: &[Vec2]) {
+            for &point in line {
+                self.cells.entry(self.cell(point)).or_default().push(point);
+            }
+        }
+
+        fn is_far_enough(&self, point: Vec2, distance: f32) -> bool {
+            self.nearest(point, distance).is_none()
+        }
+
+        fn nearest(&self, point: Vec2, distance: f32) -> Option<Vec2> {
+            let cell = self.cell(point);
+            let range = (distance / STREAMLINE_SEPARATION_M).ceil() as i32;
+            let mut nearest = None;
+            let mut nearest_squared = distance * distance;
+            for y in cell.1 - range..=cell.1 + range {
+                for x in cell.0 - range..=cell.0 + range {
+                    let Some(points) = self.cells.get(&(x, y)) else {
+                        continue;
+                    };
+                    for &candidate in points {
+                        let distance_squared = point.distance_squared(candidate);
+                        if distance_squared < nearest_squared {
+                            nearest = Some(candidate);
+                            nearest_squared = distance_squared;
+                        }
+                    }
+                }
+            }
+            nearest
+        }
+
+        fn cell(&self, point: Vec2) -> (i32, i32) {
+            (
+                (point.x / STREAMLINE_SEPARATION_M).floor() as i32,
+                (point.y / STREAMLINE_SEPARATION_M).floor() as i32,
+            )
+        }
+    }
+
+    fn generate_tensor_roads(seed: u64, rng: &mut dyn RngCore) -> Vec<Road> {
+        let field = TensorField::new(seed, rng);
+        let mut roads = Vec::new();
+        let mut occupied = PointGrid::default();
+        let mut seeds = Vec::new();
+        let seed_spacing = 58.0;
+        let mut y = -CITY_HALF_EXTENT_M + seed_spacing * 0.5;
+        while y < CITY_HALF_EXTENT_M {
+            let mut x = -CITY_HALF_EXTENT_M + seed_spacing * 0.5;
+            while x < CITY_HALF_EXTENT_M {
+                seeds.push(Vec2::new(
+                    x + random_range(rng, -15.0, 15.0),
+                    y + random_range(rng, -15.0, 15.0),
+                ));
+                x += seed_spacing;
+            }
+            y += seed_spacing;
+        }
+        shuffle(&mut seeds, rng);
+
+        for family in [Eigenvector::Major, Eigenvector::Minor] {
+            for &seed_point in &seeds {
+                if !occupied.is_far_enough(seed_point, STREAMLINE_SEPARATION_M) {
+                    continue;
+                }
+                let line = trace_streamline(seed_point, family, &field, &occupied);
+                if polyline_length(&line) < 65.0 {
+                    continue;
+                }
+                let density = urban_density(seed_point);
+                let width_m = if density > 0.72 {
+                    random_range(rng, 15.0, 22.0)
+                } else if density > 0.35 {
+                    random_range(rng, 10.0, 16.0)
+                } else {
+                    random_range(rng, 7.0, 12.0)
+                };
+                occupied.insert_line(&line);
                 roads.push(Road {
-                    centerline: vec![
-                        junction,
-                        junction + fork_direction * random_range(rng, 45.0, 75.0),
-                        junction
-                            + fork_direction * random_range(rng, 85.0, 120.0)
-                            + side * random_range(rng, -18.0, 18.0),
-                    ],
-                    width_m: random_range(rng, 7.0, 10.0),
+                    centerline: simplify_polyline(line, 2.5),
+                    width_m,
                 });
             }
         }
-        for radius in [62.0, 118.0] {
-            let mut centerline = Vec::new();
-            for point in 0..20 {
-                let angle = point as f32 / 20.0 * std::f32::consts::TAU;
-                centerline.push(
-                    ORGANIC_CENTER
-                        + Vec2::from_angle(angle) * radius * (1.0 + 0.08 * (angle * 3.0).sin()),
-                );
-            }
-            centerline.push(centerline[0]);
-            roads.push(Road {
-                centerline,
-                width_m: random_range(rng, 8.0, 12.0),
-            });
-        }
+        roads
     }
 
-    fn add_arterial(
-        roads: &mut Vec<Road>,
-        rng: &mut dyn RngCore,
-        start: Vec2,
-        end: Vec2,
-        control: Vec2,
-    ) {
-        let mut centerline = Vec::with_capacity(9);
-        for step in 0..=8 {
-            let t = step as f32 / 8.0;
-            let point =
-                start * (1.0 - t).powi(2) + control * (2.0 * (1.0 - t) * t) + end * t.powi(2);
-            centerline.push(point);
+    fn trace_streamline(
+        seed: Vec2,
+        family: Eigenvector,
+        field: &TensorField,
+        occupied: &PointGrid,
+    ) -> Vec<Vec2> {
+        let mut backward = integrate_half(seed, family, -1.0, field, occupied);
+        let forward = integrate_half(seed, family, 1.0, field, occupied);
+        backward.reverse();
+        backward.pop();
+        backward.extend(forward);
+        backward
+    }
+
+    fn integrate_half(
+        seed: Vec2,
+        family: Eigenvector,
+        sign: f32,
+        field: &TensorField,
+        occupied: &PointGrid,
+    ) -> Vec<Vec2> {
+        let mut points = vec![seed];
+        let mut point = seed;
+        let mut previous_direction = field.direction(seed, family) * sign;
+        for _ in 0..MAX_STREAMLINE_STEPS {
+            let next = rk4_step(point, STREAMLINE_STEP_M, family, sign, field);
+            let delta = next - point;
+            if delta.length_squared() < 0.01 || !inside_city(next) {
+                break;
+            }
+            if let Some(connection) = occupied.nearest(next, STREAMLINE_TEST_DISTANCE_M) {
+                if point.distance(connection) > 1.0 {
+                    points.push(connection);
+                }
+                break;
+            }
+            let direction = delta.normalize();
+            if direction.dot(previous_direction) < 0.15
+                || points
+                    .iter()
+                    .take(points.len().saturating_sub(8))
+                    .any(|old| old.distance(next) < STREAMLINE_STEP_M * 1.5)
+            {
+                break;
+            }
+            points.push(next);
+            point = next;
+            previous_direction = direction;
         }
-        roads.push(Road {
-            centerline,
-            width_m: random_range(rng, 20.0, 27.0),
-        });
+        points
+    }
+
+    fn rk4_step(
+        point: Vec2,
+        step: f32,
+        family: Eigenvector,
+        sign: f32,
+        field: &TensorField,
+    ) -> Vec2 {
+        let align = |sample: Vec2, reference: Vec2| {
+            let direction = field.direction(sample, family);
+            if direction.dot(reference) < 0.0 {
+                -direction
+            } else {
+                direction
+            }
+        };
+        let k1 = field.direction(point, family) * sign;
+        let k2 = align(point + k1 * step * 0.5, k1);
+        let k3 = align(point + k2 * step * 0.5, k2);
+        let k4 = align(point + k3 * step, k3);
+        point + (k1 + k2 * 2.0 + k3 * 2.0 + k4) * (step / 6.0)
+    }
+
+    fn rotational_noise(point: Vec2, seed: u64) -> f32 {
+        let phase = (seed as u32) as f32 * 0.000_001_7;
+        let low = (point.x * 0.0107 + phase).sin() * (point.y * 0.0091 - phase).cos();
+        let high = (point.x * 0.026 - point.y * 0.021 + phase * 1.7).sin();
+        low * 0.72 + high * 0.28
+    }
+
+    fn simplify_polyline(points: Vec<Vec2>, tolerance: f32) -> Vec<Vec2> {
+        if points.len() <= 2 {
+            return points;
+        }
+        let mut simplified = vec![points[0]];
+        let mut anchor = points[0];
+        for index in 1..points.len() - 1 {
+            let next = points[index + 1];
+            let segment = next - anchor;
+            let distance = if segment.length_squared() > 0.001 {
+                (points[index] - anchor).perp_dot(segment).abs() / segment.length()
+            } else {
+                0.0
+            };
+            if distance > tolerance {
+                simplified.push(points[index]);
+                anchor = points[index];
+            }
+        }
+        simplified.push(*points.last().unwrap());
+        simplified
+    }
+
+    fn polyline_length(points: &[Vec2]) -> f32 {
+        points
+            .windows(2)
+            .map(|edge| edge[0].distance(edge[1]))
+            .sum()
+    }
+
+    fn shuffle<T>(items: &mut [T], rng: &mut dyn RngCore) {
+        for index in (1..items.len()).rev() {
+            let other = (rng.next_u32() as usize) % (index + 1);
+            items.swap(index, other);
+        }
     }
 
     fn add_landmark_tower(buildings: &mut [Building], rng: &mut dyn RngCore) {
@@ -703,40 +808,65 @@ pub mod city {
         }
 
         #[test]
-        fn roads_mix_connected_grid_radial_and_organic_patterns() {
+        fn roads_follow_the_blended_tensor_field() {
             let city = CityLayout::generate(7);
+            let mut rng = ChaCha8Rng::seed_from_u64(7);
+            let field = TensorField::new(7, &mut rng);
             assert!(city.roads.len() > 35);
-            assert!(
-                city.roads
-                    .iter()
-                    .filter(|road| road.centerline.len() == 2)
-                    .count()
-                    > 12
-            );
-            assert!(
-                city.roads
-                    .iter()
-                    .filter(|road| road.centerline.first() == road.centerline.last())
-                    .count()
-                    >= 5
-            );
+            assert!(city
+                .roads
+                .iter()
+                .all(|road| polyline_length(&road.centerline) >= 60.0));
             assert!(city.roads.iter().any(|road| road.centerline.len() >= 4
                 && road.centerline.windows(3).any(|points| {
                     let a = (points[1] - points[0]).normalize();
                     let b = (points[2] - points[1]).normalize();
                     a.dot(b) < 0.995
                 })));
-            for center in [
-                RADIAL_CENTER,
-                DOWNTOWN_CENTER,
-                NEIGHBORHOOD_CENTER,
-                ORGANIC_CENTER,
-            ] {
-                assert!(city
+            let junctions = city
+                .roads
+                .iter()
+                .enumerate()
+                .flat_map(|(index, road)| {
+                    [road.centerline[0], *road.centerline.last().unwrap()]
+                        .into_iter()
+                        .map(move |endpoint| (index, endpoint))
+                })
+                .filter(|(index, endpoint)| {
+                    city.roads.iter().enumerate().any(|(other_index, other)| {
+                        other_index != *index
+                            && other
+                                .centerline
+                                .iter()
+                                .any(|point| point.distance_squared(*endpoint) < 0.01)
+                    })
+                })
+                .count();
+            assert!(junctions > 10);
+
+            let alignment = city
+                .roads
+                .iter()
+                .flat_map(|road| road.centerline.windows(2))
+                .map(|segment| {
+                    let tangent = (segment[1] - segment[0]).normalize();
+                    let midpoint = (segment[0] + segment[1]) * 0.5;
+                    tangent
+                        .dot(field.direction(midpoint, Eigenvector::Major))
+                        .abs()
+                        .max(
+                            tangent
+                                .dot(field.direction(midpoint, Eigenvector::Minor))
+                                .abs(),
+                        )
+                })
+                .sum::<f32>()
+                / city
                     .roads
                     .iter()
-                    .any(|road| road.centerline.contains(&center)));
-            }
+                    .map(|road| road.centerline.len() - 1)
+                    .sum::<usize>() as f32;
+            assert!(alignment > 0.95);
         }
 
         #[test]
