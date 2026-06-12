@@ -20,8 +20,17 @@ const SPRINT_SPEED_MPS: f32 = 45.0;
 const EYE_HEIGHT_M: f32 = 1.7;
 const MAP_PAN_SCREEN_FRACTION: f32 = 0.65;
 const MOUSE_SENSITIVITY: f32 = 0.002;
+const RIVER_ROAD_GAP_M: f32 = 0.0;
+const RIVER_ROAD_WIDTH_M: f32 = 4.0;
+const BRIDGE_WIDTH_M: f32 = 9.0;
+const BRIDGE_SPACING_M: f32 = 180.0;
+const BRIDGE_END_MARGIN_M: f32 = 70.0;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const WORLD_SEED: u64 = 0x00c1_7a6e;
+const WATER_COLOR: [f32; 3] = [0.08, 0.34, 0.52];
+const ROAD_COLOR: [f32; 3] = [0.18, 0.2, 0.22];
+const BRIDGE_COLOR: [f32; 3] = [0.3, 0.31, 0.32];
+const BRIDGE_CURB_COLOR: [f32; 3] = [0.48, 0.46, 0.42];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
@@ -344,6 +353,10 @@ impl Mesh {
             color,
         }));
         let count = self.vertices.len() as u32 - base;
+        if count < 3 {
+            self.vertices.truncate(base as usize);
+            return;
+        }
         for index in 1..count - 1 {
             self.indices
                 .extend_from_slice(&[base, base + index, base + index + 1]);
@@ -744,6 +757,8 @@ fn city_mesh(city: &City) -> Mesh {
         ],
         [0.17, 0.32, 0.19],
     );
+    add_water(&mut mesh, city);
+    add_river_infrastructure(&mut mesh, city);
     for road in &city.roads {
         add_road(&mut mesh, road);
     }
@@ -751,6 +766,175 @@ fn city_mesh(city: &City) -> Mesh {
         add_building(&mut mesh, building, index);
     }
     mesh
+}
+
+fn add_water(mesh: &mut Mesh, city: &City) {
+    let coastline = &city.water.coastline;
+    if coastline.len() >= 2 {
+        let span = coastline[coastline.len() - 1] - coastline[0];
+        let horizontal = span.x.abs() >= span.y.abs();
+        for segment in coastline.windows(2) {
+            let boundary_start = if horizontal {
+                Vec2::new(segment[0].x, city.origin.y)
+            } else {
+                Vec2::new(city.origin.x, segment[0].y)
+            };
+            let boundary_end = if horizontal {
+                Vec2::new(segment[1].x, city.origin.y)
+            } else {
+                Vec2::new(city.origin.x, segment[1].y)
+            };
+            mesh.quad(
+                [
+                    ground_point(boundary_start, -0.1),
+                    ground_point(boundary_end, -0.1),
+                    ground_point(segment[1], -0.1),
+                    ground_point(segment[0], -0.1),
+                ],
+                WATER_COLOR,
+            );
+        }
+    }
+
+    for segment in river_bank_pairs(&city.water.river).windows(2) {
+        mesh.quad(
+            [
+                ground_point(segment[0].0, -0.08),
+                ground_point(segment[1].0, -0.08),
+                ground_point(segment[1].1, -0.08),
+                ground_point(segment[0].1, -0.08),
+            ],
+            WATER_COLOR,
+        );
+    }
+}
+
+fn add_river_infrastructure(mesh: &mut Mesh, city: &City) {
+    let banks = river_bank_pairs(&city.water.river);
+    if banks.len() < 2 {
+        return;
+    }
+
+    for segment in banks.windows(2) {
+        add_bank_road(mesh, segment[0].0, segment[1].0, segment[0].1, segment[1].1);
+        add_bank_road(mesh, segment[0].1, segment[1].1, segment[0].0, segment[1].0);
+    }
+
+    for index in bridge_indices(&banks) {
+        let (left_bank, right_bank) = banks[index];
+        let left_outward = (left_bank - right_bank).normalize_or_zero();
+        let right_outward = -left_outward;
+        let start = left_bank + left_outward * (RIVER_ROAD_GAP_M + RIVER_ROAD_WIDTH_M);
+        let end = right_bank + right_outward * (RIVER_ROAD_GAP_M + RIVER_ROAD_WIDTH_M);
+        add_segment_band(mesh, start, end, BRIDGE_WIDTH_M, 0.14, BRIDGE_COLOR);
+
+        let across = (end - start).normalize_or_zero();
+        let along = Vec2::new(-across.y, across.x) * (BRIDGE_WIDTH_M * 0.5 - 0.45);
+        add_segment_band(
+            mesh,
+            start + along,
+            end + along,
+            0.5,
+            0.24,
+            BRIDGE_CURB_COLOR,
+        );
+        add_segment_band(
+            mesh,
+            start - along,
+            end - along,
+            0.5,
+            0.24,
+            BRIDGE_CURB_COLOR,
+        );
+    }
+}
+
+fn river_bank_pairs(river: &[Vec2]) -> Vec<(Vec2, Vec2)> {
+    if river.len() < 4 || !river.len().is_multiple_of(2) {
+        return Vec::new();
+    }
+    let bank_len = river.len() / 2;
+    (0..bank_len)
+        .map(|index| (river[index], river[river.len() - 1 - index]))
+        .collect()
+}
+
+fn bridge_indices(banks: &[(Vec2, Vec2)]) -> Vec<usize> {
+    if banks.len() < 3 {
+        return Vec::new();
+    }
+    let centers: Vec<_> = banks
+        .iter()
+        .map(|(left, right)| (*left + *right) * 0.5)
+        .collect();
+    let total_length = centers
+        .windows(2)
+        .map(|pair| pair[0].distance(pair[1]))
+        .sum::<f32>();
+    if total_length <= BRIDGE_END_MARGIN_M * 2.0 {
+        return vec![banks.len() / 2];
+    }
+
+    let usable_length = total_length - BRIDGE_END_MARGIN_M * 2.0;
+    let bridge_count = (usable_length / BRIDGE_SPACING_M).floor().max(1.0) as usize;
+    let spacing = usable_length / bridge_count as f32;
+    let mut indices = Vec::with_capacity(bridge_count);
+    let mut distance = 0.0;
+    let mut target = BRIDGE_END_MARGIN_M + spacing * 0.5;
+    for index in 1..centers.len() {
+        distance += centers[index - 1].distance(centers[index]);
+        if distance >= target && indices.len() < bridge_count {
+            indices.push(index);
+            target += spacing;
+        }
+    }
+    indices
+}
+
+fn add_bank_road(
+    mesh: &mut Mesh,
+    start: Vec2,
+    end: Vec2,
+    opposite_start: Vec2,
+    opposite_end: Vec2,
+) {
+    let start_outward = (start - opposite_start).normalize_or_zero();
+    let end_outward = (end - opposite_end).normalize_or_zero();
+    let inner_start = start + start_outward * RIVER_ROAD_GAP_M;
+    let inner_end = end + end_outward * RIVER_ROAD_GAP_M;
+    mesh.quad(
+        [
+            ground_point(inner_start, 0.01),
+            ground_point(inner_end, 0.01),
+            ground_point(inner_end + end_outward * RIVER_ROAD_WIDTH_M, 0.01),
+            ground_point(inner_start + start_outward * RIVER_ROAD_WIDTH_M, 0.01),
+        ],
+        ROAD_COLOR,
+    );
+}
+
+fn add_segment_band(
+    mesh: &mut Mesh,
+    start: Vec2,
+    end: Vec2,
+    width: f32,
+    height: f32,
+    color: [f32; 3],
+) {
+    let direction = (end - start).normalize_or_zero();
+    if direction == Vec2::ZERO {
+        return;
+    }
+    let side = Vec2::new(-direction.y, direction.x) * width * 0.5;
+    mesh.quad(
+        [
+            ground_point(start - side, height),
+            ground_point(end - side, height),
+            ground_point(end + side, height),
+            ground_point(start + side, height),
+        ],
+        color,
+    );
 }
 
 fn city_center(city: &City) -> Vec2 {
@@ -782,7 +966,7 @@ fn add_road(mesh: &mut Mesh, road: &Road) {
                 ground_point(segment[1] + side, 0.0),
                 ground_point(segment[0] + side, 0.0),
             ],
-            [0.18, 0.2, 0.22],
+            ROAD_COLOR,
         );
     }
 }
@@ -858,5 +1042,27 @@ mod tests {
                 .windows(2)
                 .any(|segment| segment == [start, end])
         }));
+    }
+
+    #[test]
+    fn generated_river_reconstructs_two_matching_banks() {
+        let city = CityGenerator::new(WORLD_SEED, GeneratorConfig::default()).generate(WORLD_SEED);
+        let banks = river_bank_pairs(&city.water.river);
+        assert_eq!(banks.len() * 2, city.water.river.len());
+        assert!(banks.len() > 2);
+        assert!(banks
+            .iter()
+            .all(|(left, right)| left.distance(*right) > 1.0));
+    }
+
+    #[test]
+    fn generated_river_has_spaced_bridges_away_from_its_ends() {
+        let city = CityGenerator::new(WORLD_SEED, GeneratorConfig::default()).generate(WORLD_SEED);
+        let banks = river_bank_pairs(&city.water.river);
+        let bridges = bridge_indices(&banks);
+        assert!(!bridges.is_empty());
+        assert!(bridges
+            .iter()
+            .all(|index| *index > 0 && *index < banks.len() - 1));
     }
 }
