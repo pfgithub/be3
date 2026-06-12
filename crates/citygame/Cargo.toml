@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
+citygenerator = { path = "../citygenerator" }
 glam = "0.30"
 pollster = "0.4"
 rand = "0.9"

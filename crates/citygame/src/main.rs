@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use citygame::city::{Building, CityLayout, Road};
+use citygenerator::{Building, City, CityGenerator, GeneratorConfig, Road};
 use glam::{Mat4, Vec2, Vec3};
 use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_2;
@@ -396,7 +396,7 @@ struct Renderer {
     camera: Camera,
     map_camera: MapCamera,
     mode: ViewMode,
-    city: CityLayout,
+    city: City,
 }
 
 enum RenderStatus {
@@ -432,7 +432,9 @@ impl Renderer {
             .ok_or("surface is not supported by the selected adapter")?;
         surface.configure(&device, &config);
 
-        let city = CityLayout::generate(WORLD_SEED);
+        let mut generator_config = GeneratorConfig::default();
+        generator_config.origin = -generator_config.dimensions * 0.5;
+        let city = CityGenerator::new(WORLD_SEED, generator_config).generate(WORLD_SEED);
         let mesh = city_mesh(&city);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("city vertices"),
@@ -455,8 +457,8 @@ impl Renderer {
             pitch: 0.0,
         };
         let map_camera = MapCamera {
-            center: Vec2::ZERO,
-            half_height_m: city.half_extent_m * 1.08,
+            center: city_center(&city),
+            half_height_m: city.dimensions.y * 0.54,
         };
         let camera_uniform = CameraUniform {
             view_projection: camera
@@ -569,8 +571,8 @@ impl Renderer {
     fn toggle_map(&mut self) {
         self.mode = match self.mode {
             ViewMode::Perspective => {
-                self.map_camera.center = Vec2::ZERO;
-                self.map_camera.half_height_m = self.city.half_extent_m * 1.08;
+                self.map_camera.center = city_center(&self.city);
+                self.map_camera.half_height_m = self.city.dimensions.y * 0.54;
                 ViewMode::Map
             }
             ViewMode::Map => ViewMode::Perspective,
@@ -641,9 +643,8 @@ impl Renderer {
                     } else {
                         WALK_SPEED_MPS
                     };
-                    self.camera.position += (right * movement.x - horizontal_forward * movement.y)
-                        * speed
-                        * dt;
+                    self.camera.position +=
+                        (right * movement.x - horizontal_forward * movement.y) * speed * dt;
                 }
                 ViewMode::Map => {
                     self.map_camera.center +=
@@ -730,15 +731,16 @@ impl Renderer {
     }
 }
 
-fn city_mesh(city: &CityLayout) -> Mesh {
+fn city_mesh(city: &City) -> Mesh {
     let mut mesh = Mesh::new();
-    let extent = city.half_extent_m;
+    let min = city.origin;
+    let max = city.origin + city.dimensions;
     mesh.quad(
         [
-            Vec3::new(-extent, -0.2, -extent),
-            Vec3::new(extent, -0.2, -extent),
-            Vec3::new(extent, -0.2, extent),
-            Vec3::new(-extent, -0.2, extent),
+            ground_point(min, -0.2),
+            ground_point(Vec2::new(max.x, min.y), -0.2),
+            ground_point(max, -0.2),
+            ground_point(Vec2::new(min.x, max.y), -0.2),
         ],
         [0.17, 0.32, 0.19],
     );
@@ -751,14 +753,18 @@ fn city_mesh(city: &CityLayout) -> Mesh {
     mesh
 }
 
-fn camera_spawn_segment(city: &CityLayout) -> Option<[Vec2; 2]> {
+fn city_center(city: &City) -> Vec2 {
+    city.origin + city.dimensions * 0.5
+}
+
+fn camera_spawn_segment(city: &City) -> Option<[Vec2; 2]> {
     city.roads
         .iter()
         .flat_map(|road| {
             road.centerline.windows(2).filter_map(move |segment| {
                 let length_squared = segment[0].distance_squared(segment[1]);
                 (length_squared > 1.0)
-                    .then_some((road.width_m * road.width_m * length_squared, segment))
+                    .then_some((road.width * road.width * length_squared, segment))
             })
         })
         .max_by(|(a, _), (b, _)| a.total_cmp(b))
@@ -768,7 +774,7 @@ fn camera_spawn_segment(city: &CityLayout) -> Option<[Vec2; 2]> {
 fn add_road(mesh: &mut Mesh, road: &Road) {
     for segment in road.centerline.windows(2) {
         let direction = (segment[1] - segment[0]).normalize();
-        let side = Vec2::new(-direction.y, direction.x) * road.width_m * 0.5;
+        let side = Vec2::new(-direction.y, direction.x) * road.width * 0.5;
         mesh.quad(
             [
                 ground_point(segment[0] - side, 0.0),
@@ -782,7 +788,10 @@ fn add_road(mesh: &mut Mesh, road: &Road) {
 }
 
 fn add_building(mesh: &mut Mesh, building: &Building, index: usize) {
-    let footprint = &building.footprint[..building.footprint.len() - 1];
+    let footprint = &building.footprint;
+    if footprint.len() < 3 {
+        return;
+    }
     let tint = (index as f32 * 0.618_034).fract();
     let wall = [0.42 + tint * 0.12, 0.38 + tint * 0.08, 0.33 + tint * 0.06];
     let roof = [wall[0] + 0.14, wall[1] + 0.14, wall[2] + 0.14];
@@ -797,8 +806,8 @@ fn add_building(mesh: &mut Mesh, building: &Building, index: usize) {
             [
                 ground_point(edge.0, 0.05),
                 ground_point(edge.1, 0.05),
-                ground_point(edge.1, building.height_m),
-                ground_point(edge.0, building.height_m),
+                ground_point(edge.1, building.height),
+                ground_point(edge.0, building.height),
             ],
             wall,
         );
@@ -807,7 +816,7 @@ fn add_building(mesh: &mut Mesh, building: &Building, index: usize) {
         footprint
             .iter()
             .copied()
-            .map(|point| ground_point(point, building.height_m)),
+            .map(|point| ground_point(point, building.height)),
         roof,
     );
 
@@ -821,10 +830,10 @@ fn add_building(mesh: &mut Mesh, building: &Building, index: usize) {
         let side = Vec2::new(-direction.y, direction.x) * 0.55;
         mesh.quad(
             [
-                ground_point(a - side, building.height_m + 0.08),
-                ground_point(b - side, building.height_m + 0.08),
-                ground_point(b + side, building.height_m + 0.08),
-                ground_point(a + side, building.height_m + 0.08),
+                ground_point(a - side, building.height + 0.08),
+                ground_point(b - side, building.height + 0.08),
+                ground_point(b + side, building.height + 0.08),
+                ground_point(a + side, building.height + 0.08),
             ],
             [0.08, 0.09, 0.1],
         );
@@ -841,7 +850,7 @@ mod tests {
 
     #[test]
     fn mixed_road_layout_has_a_valid_camera_spawn_segment() {
-        let city = CityLayout::generate(WORLD_SEED);
+        let city = CityGenerator::new(WORLD_SEED, GeneratorConfig::default()).generate(WORLD_SEED);
         let [start, end] = camera_spawn_segment(&city).expect("city should have a road segment");
         assert!(start.distance(end) > 1.0);
         assert!(city.roads.iter().any(|road| {
