@@ -1,0 +1,822 @@
+use std::{
+    collections::HashMap,
+    fmt,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
+
+use block::{ClientMessage, CommandKind, ErrorCode, OperationRecord, ServerMessage};
+use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use tokio::{
+    fs,
+    net::{TcpListener, TcpStream},
+    sync::{mpsc, Mutex},
+};
+use tokio_tungstenite::{accept_async, tungstenite::Message};
+use uuid::Uuid;
+
+pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
+    let store = Arc::new(BlockStore::new(data_dir.into()));
+    let watch_hub = Arc::new(WatchHub::new());
+    fs::create_dir_all(store.root()).await?;
+
+    loop {
+        let (stream, peer_addr) = listener.accept().await?;
+        let store = Arc::clone(&store);
+        let watch_hub = Arc::clone(&watch_hub);
+        tokio::spawn(async move {
+            if let Err(error) = handle_connection(stream, store, watch_hub).await {
+                eprintln!("connection {peer_addr} closed with error: {error}");
+            }
+        });
+    }
+}
+
+async fn handle_connection(
+    stream: TcpStream,
+    store: Arc<BlockStore>,
+    watch_hub: Arc<WatchHub>,
+) -> Result<(), ServerError> {
+    let socket = accept_async(stream).await?;
+    let (mut sink, mut source) = socket.split();
+    let (outbound, mut outbound_rx) = mpsc::unbounded_channel();
+    let client_id = watch_hub.next_client_id();
+
+    loop {
+        tokio::select! {
+            Some(message) = outbound_rx.recv() => {
+                sink.send(Message::Text(serde_json::to_string(&message)?)).await?;
+            }
+            Some(message) = source.next() => {
+                match message? {
+                    Message::Text(text) => {
+                        let (response, notification) =
+                            handle_text_message(&store, &watch_hub, client_id, outbound.clone(), &text).await;
+                        sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
+                        if let Some(notification) = notification {
+                            watch_hub.broadcast(notification).await;
+                        }
+                    }
+                    Message::Close(_) => break,
+                    Message::Ping(payload) => sink.send(Message::Pong(payload)).await?,
+                    Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
+                        let response = ServerMessage::Error {
+                            request_id: None,
+                            command: None,
+                            id: None,
+                            code: ErrorCode::UnsupportedMessage,
+                            message: "only JSON text websocket messages are supported".into(),
+                            expected_seq: None,
+                        };
+                        sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
+                    }
+                }
+            }
+            else => break,
+        }
+    }
+
+    watch_hub.remove_client(client_id).await;
+    Ok(())
+}
+
+async fn handle_text_message(
+    store: &BlockStore,
+    watch_hub: &WatchHub,
+    client_id: ClientId,
+    outbound: OutboundMessages,
+    text: &str,
+) -> (ServerMessage, Option<ServerMessage>) {
+    let command = match serde_json::from_str::<ClientMessage>(text) {
+        Ok(command) => command,
+        Err(error) => {
+            return (
+                ServerMessage::Error {
+                    request_id: None,
+                    command: None,
+                    id: None,
+                    code: ErrorCode::InvalidMessage,
+                    message: format!("invalid command JSON: {error}"),
+                    expected_seq: None,
+                },
+                None,
+            );
+        }
+    };
+
+    match command {
+        ClientMessage::CreateBlock {
+            request_id,
+            id,
+            block_type,
+            data,
+            watch,
+        } => {
+            let lock = store.lock_for(id).await;
+            let _guard = lock.lock().await;
+            let response = match store.create_block_unlocked(id, block_type, data).await {
+                Ok(()) => {
+                    if watch {
+                        watch_hub.watch(id, client_id, outbound).await;
+                    }
+                    ServerMessage::Ok {
+                        request_id,
+                        command: CommandKind::CreateBlock,
+                        id,
+                        seq: None,
+                        operation_id: None,
+                    }
+                }
+                Err(error) => error.to_response(request_id, CommandKind::CreateBlock, id),
+            };
+            (response, None)
+        }
+        ClientMessage::UpdateBlock {
+            request_id,
+            id,
+            seq,
+            operation_id,
+            operation,
+        } => {
+            let lock = store.lock_for(id).await;
+            let _guard = lock.lock().await;
+            match store
+                .update_block_unlocked(id, seq, operation_id, operation)
+                .await
+            {
+                Ok(UpdateOutcome::Inserted(record)) => (
+                    ServerMessage::Ok {
+                        request_id,
+                        command: CommandKind::UpdateBlock,
+                        id,
+                        seq: Some(record.seq),
+                        operation_id: Some(record.operation_id),
+                    },
+                    Some(ServerMessage::BlockUpdated {
+                        id,
+                        operation: record,
+                    }),
+                ),
+                Ok(UpdateOutcome::Duplicate(record)) => (
+                    ServerMessage::Ok {
+                        request_id,
+                        command: CommandKind::UpdateBlock,
+                        id,
+                        seq: Some(record.seq),
+                        operation_id: Some(record.operation_id),
+                    },
+                    None,
+                ),
+                Err(error) => (
+                    error.to_response(request_id, CommandKind::UpdateBlock, id),
+                    None,
+                ),
+            }
+        }
+        ClientMessage::ReadBlock {
+            request_id,
+            id,
+            watch,
+        } => {
+            let lock = store.lock_for(id).await;
+            let _guard = lock.lock().await;
+            let response = match store.read_block_unlocked(id).await {
+                Ok(read) => {
+                    if watch {
+                        watch_hub.watch(id, client_id, outbound).await;
+                    }
+                    ServerMessage::ReadBlock {
+                        request_id,
+                        command: CommandKind::ReadBlock,
+                        id,
+                        block_type: read.block_type,
+                        snapshot: read.snapshot,
+                        snapshot_seq: read.snapshot_seq,
+                        operations: read.operations,
+                    }
+                }
+                Err(error) => error.to_response(request_id, CommandKind::ReadBlock, id),
+            };
+            (response, None)
+        }
+        ClientMessage::UnwatchBlock { request_id, id } => {
+            watch_hub.unwatch(id, client_id).await;
+            (
+                ServerMessage::Ok {
+                    request_id,
+                    command: CommandKind::UnwatchBlock,
+                    id,
+                    seq: None,
+                    operation_id: None,
+                },
+                None,
+            )
+        }
+        ClientMessage::PostPresence {
+            request_id,
+            id,
+            data,
+        } => (
+            ServerMessage::Ok {
+                request_id,
+                command: CommandKind::PostPresence,
+                id,
+                seq: None,
+                operation_id: None,
+            },
+            Some(ServerMessage::Presence { id, data }),
+        ),
+    }
+}
+
+type ClientId = u64;
+type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
+
+struct WatchHub {
+    next_client_id: AtomicU64,
+    watchers: Mutex<HashMap<Uuid, HashMap<ClientId, OutboundMessages>>>,
+}
+
+impl WatchHub {
+    fn new() -> Self {
+        Self {
+            next_client_id: AtomicU64::new(1),
+            watchers: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn next_client_id(&self) -> ClientId {
+        self.next_client_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    async fn watch(&self, id: Uuid, client_id: ClientId, outbound: OutboundMessages) {
+        self.watchers
+            .lock()
+            .await
+            .entry(id)
+            .or_default()
+            .insert(client_id, outbound);
+    }
+
+    async fn unwatch(&self, id: Uuid, client_id: ClientId) {
+        let mut watchers = self.watchers.lock().await;
+        if let Some(entries) = watchers.get_mut(&id) {
+            entries.remove(&client_id);
+            if entries.is_empty() {
+                watchers.remove(&id);
+            }
+        }
+    }
+
+    async fn remove_client(&self, client_id: ClientId) {
+        let mut watchers = self.watchers.lock().await;
+        watchers.retain(|_, entries| {
+            entries.remove(&client_id);
+            !entries.is_empty()
+        });
+    }
+
+    async fn broadcast(&self, message: ServerMessage) {
+        let Some(id) = message.id() else {
+            return;
+        };
+        let watchers = self.watchers.lock().await;
+        if let Some(entries) = watchers.get(&id) {
+            for outbound in entries.values() {
+                let _ = outbound.send(message.clone());
+            }
+        }
+    }
+}
+
+struct BlockStore {
+    root: PathBuf,
+    locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+}
+
+impl BlockStore {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            locks: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn root(&self) -> &Path {
+        &self.root
+    }
+
+    async fn lock_for(&self, id: Uuid) -> Arc<Mutex<()>> {
+        let mut locks = self.locks.lock().await;
+        Arc::clone(locks.entry(id).or_insert_with(|| Arc::new(Mutex::new(()))))
+    }
+
+    async fn create_block_unlocked(
+        &self,
+        id: Uuid,
+        block_type: Uuid,
+        data: Vec<u8>,
+    ) -> Result<(), StoreError> {
+        let block_path = self.block_path(id);
+        match fs::create_dir(&block_path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                return Err(StoreError::BlockAlreadyExists);
+            }
+            Err(error) => return Err(error.into()),
+        }
+        fs::create_dir(block_path.join("snapshots")).await?;
+        fs::create_dir(block_path.join("operations")).await?;
+        fs::write(
+            block_path.join("info.json"),
+            serde_json::to_vec_pretty(&BlockInfo { block_type })?,
+        )
+        .await?;
+        fs::write(block_path.join("snapshots").join("0"), data).await?;
+        Ok(())
+    }
+
+    async fn update_block_unlocked(
+        &self,
+        id: Uuid,
+        seq: u64,
+        operation_id: Uuid,
+        operation: Vec<u8>,
+    ) -> Result<UpdateOutcome, StoreError> {
+        let operations_path = self.block_path(id).join("operations");
+        if !operations_path.is_dir() {
+            return Err(StoreError::BlockNotFound);
+        }
+
+        let records = read_operations(&operations_path).await?;
+        if let Some(existing) = records
+            .iter()
+            .find(|record| record.operation_id == operation_id)
+        {
+            if existing.operation == operation {
+                return Ok(UpdateOutcome::Duplicate(existing.clone()));
+            }
+            return Err(StoreError::ConflictingOperationId);
+        }
+
+        let expected = records.last().map_or(1, |record| record.seq + 1);
+        if seq != expected {
+            return Err(StoreError::InvalidSeq {
+                expected,
+                actual: seq,
+            });
+        }
+
+        let record = OperationRecord {
+            seq,
+            operation_id,
+            operation,
+        };
+        let path = operations_path.join(seq.to_string());
+        write_new_file(path, serde_json::to_vec(&record)?).await?;
+        Ok(UpdateOutcome::Inserted(record))
+    }
+
+    async fn read_block_unlocked(&self, id: Uuid) -> Result<BlockRead, StoreError> {
+        let block_path = self.block_path(id);
+        let info: BlockInfo =
+            serde_json::from_slice(&read_required(block_path.join("info.json")).await?)?;
+        let snapshot_seq = highest_snapshot_seq(&block_path.join("snapshots")).await?;
+        let snapshot =
+            read_required(block_path.join("snapshots").join(snapshot_seq.to_string())).await?;
+        let operations = read_operations(&block_path.join("operations"))
+            .await?
+            .into_iter()
+            .filter(|record| record.seq > snapshot_seq)
+            .collect();
+        Ok(BlockRead {
+            block_type: info.block_type,
+            snapshot,
+            snapshot_seq,
+            operations,
+        })
+    }
+
+    fn block_path(&self, id: Uuid) -> PathBuf {
+        self.root.join(id.to_string())
+    }
+}
+
+enum UpdateOutcome {
+    Inserted(OperationRecord),
+    Duplicate(OperationRecord),
+}
+
+struct BlockRead {
+    block_type: Uuid,
+    snapshot: Vec<u8>,
+    snapshot_seq: u64,
+    operations: Vec<OperationRecord>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct BlockInfo {
+    #[serde(rename = "type")]
+    block_type: Uuid,
+}
+
+async fn read_required(path: PathBuf) -> Result<Vec<u8>, StoreError> {
+    fs::read(path).await.map_err(|error| {
+        if error.kind() == ErrorKind::NotFound {
+            StoreError::BlockNotFound
+        } else {
+            StoreError::Io(error)
+        }
+    })
+}
+
+async fn highest_snapshot_seq(path: &Path) -> Result<u64, StoreError> {
+    let mut highest = None;
+    let mut entries = fs::read_dir(path).await.map_err(|error| {
+        if error.kind() == ErrorKind::NotFound {
+            StoreError::BlockNotFound
+        } else {
+            StoreError::Io(error)
+        }
+    })?;
+    while let Some(entry) = entries.next_entry().await? {
+        if let Some(seq) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u64>().ok())
+        {
+            highest = Some(highest.map_or(seq, |current: u64| current.max(seq)));
+        }
+    }
+    highest.ok_or(StoreError::BlockNotFound)
+}
+
+async fn read_operations(path: &Path) -> Result<Vec<OperationRecord>, StoreError> {
+    let mut records = Vec::new();
+    let mut entries = fs::read_dir(path).await.map_err(|error| {
+        if error.kind() == ErrorKind::NotFound {
+            StoreError::BlockNotFound
+        } else {
+            StoreError::Io(error)
+        }
+    })?;
+    while let Some(entry) = entries.next_entry().await? {
+        let Some(seq) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        let record: OperationRecord = serde_json::from_slice(&fs::read(entry.path()).await?)?;
+        if record.seq != seq {
+            return Err(StoreError::CorruptOperationLog);
+        }
+        records.push(record);
+    }
+    records.sort_by_key(|record| record.seq);
+    for (index, record) in records.iter().enumerate() {
+        if record.seq != index as u64 + 1 {
+            return Err(StoreError::CorruptOperationLog);
+        }
+    }
+    Ok(records)
+}
+
+async fn write_new_file(path: PathBuf, data: Vec<u8>) -> Result<(), StoreError> {
+    use tokio::io::AsyncWriteExt;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await?;
+    file.write_all(&data).await?;
+    file.flush().await?;
+    Ok(())
+}
+
+#[derive(Debug)]
+enum StoreError {
+    BlockAlreadyExists,
+    BlockNotFound,
+    ConflictingOperationId,
+    InvalidSeq { expected: u64, actual: u64 },
+    CorruptOperationLog,
+    Io(std::io::Error),
+    Json(serde_json::Error),
+}
+
+impl StoreError {
+    fn to_response(&self, request_id: Uuid, command: CommandKind, id: Uuid) -> ServerMessage {
+        ServerMessage::Error {
+            request_id: Some(request_id),
+            command: Some(command),
+            id: Some(id),
+            code: self.code(),
+            message: self.to_string(),
+            expected_seq: match self {
+                Self::InvalidSeq { expected, .. } => Some(*expected),
+                _ => None,
+            },
+        }
+    }
+
+    fn code(&self) -> ErrorCode {
+        match self {
+            Self::BlockAlreadyExists => ErrorCode::BlockAlreadyExists,
+            Self::BlockNotFound => ErrorCode::BlockNotFound,
+            Self::ConflictingOperationId => ErrorCode::ConflictingOperationId,
+            Self::InvalidSeq { .. } => ErrorCode::InvalidSeq,
+            Self::CorruptOperationLog | Self::Io(_) | Self::Json(_) => ErrorCode::StorageError,
+        }
+    }
+}
+
+impl fmt::Display for StoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BlockAlreadyExists => write!(formatter, "block already exists"),
+            Self::BlockNotFound => write!(formatter, "block does not exist"),
+            Self::ConflictingOperationId => {
+                write!(formatter, "operation UUID reused with different data")
+            }
+            Self::InvalidSeq { expected, actual } => {
+                write!(formatter, "invalid seq {actual}; expected {expected}")
+            }
+            Self::CorruptOperationLog => write!(formatter, "operation log is not contiguous"),
+            Self::Io(error) => write!(formatter, "storage I/O error: {error}"),
+            Self::Json(error) => write!(formatter, "storage JSON error: {error}"),
+        }
+    }
+}
+
+impl From<std::io::Error> for StoreError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<serde_json::Error> for StoreError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
+#[derive(Debug)]
+pub enum ServerError {
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    WebSocket(Box<tokio_tungstenite::tungstenite::Error>),
+}
+
+impl fmt::Display for ServerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(formatter, "I/O error: {error}"),
+            Self::Json(error) => write!(formatter, "JSON error: {error}"),
+            Self::WebSocket(error) => write!(formatter, "websocket error: {error}"),
+        }
+    }
+}
+
+impl From<std::io::Error> for ServerError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<serde_json::Error> for ServerError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for ServerError {
+    fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocket(Box::new(error))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_tungstenite::connect_async;
+
+    #[tokio::test]
+    async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
+        let root = test_root();
+        let store = BlockStore::new(root.clone());
+        fs::create_dir_all(store.root()).await.unwrap();
+        let id = Uuid::new_v4();
+        store
+            .create_block_unlocked(id, Uuid::new_v4(), vec![1])
+            .await
+            .unwrap();
+        let operation_id = Uuid::new_v4();
+
+        assert!(matches!(
+            store
+                .update_block_unlocked(id, 1, operation_id, vec![2])
+                .await
+                .unwrap(),
+            UpdateOutcome::Inserted(_)
+        ));
+        assert!(matches!(
+            store
+                .update_block_unlocked(id, 99, operation_id, vec![2])
+                .await
+                .unwrap(),
+            UpdateOutcome::Duplicate(_)
+        ));
+        assert!(matches!(
+            store
+                .update_block_unlocked(id, 2, operation_id, vec![3])
+                .await,
+            Err(StoreError::ConflictingOperationId)
+        ));
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reads_replay_contiguous_operation_records() {
+        let root = test_root();
+        let store = BlockStore::new(root.clone());
+        fs::create_dir_all(store.root()).await.unwrap();
+        let id = Uuid::new_v4();
+        let block_type = Uuid::new_v4();
+        store
+            .create_block_unlocked(id, block_type, vec![1])
+            .await
+            .unwrap();
+        store
+            .update_block_unlocked(id, 1, Uuid::new_v4(), vec![2])
+            .await
+            .unwrap();
+        store
+            .update_block_unlocked(id, 2, Uuid::new_v4(), vec![3])
+            .await
+            .unwrap();
+
+        let read = store.read_block_unlocked(id).await.unwrap();
+        assert_eq!(read.block_type, block_type);
+        assert_eq!(read.snapshot, vec![1]);
+        assert_eq!(read.snapshot_seq, 0);
+        assert_eq!(read.operations.len(), 2);
+        assert_eq!(read.operations[0].seq, 1);
+        assert_eq!(read.operations[1].seq, 2);
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sequence_errors_include_the_expected_sequence() {
+        let root = test_root();
+        let store = BlockStore::new(root.clone());
+        fs::create_dir_all(store.root()).await.unwrap();
+        let id = Uuid::new_v4();
+        store
+            .create_block_unlocked(id, Uuid::new_v4(), vec![])
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .update_block_unlocked(id, 4, Uuid::new_v4(), vec![])
+                .await,
+            Err(StoreError::InvalidSeq {
+                expected: 1,
+                actual: 4
+            })
+        ));
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shared_protocol_round_trips_over_websocket() {
+        let root = test_root();
+        let store = Arc::new(BlockStore::new(root.clone()));
+        let watch_hub = Arc::new(WatchHub::new());
+        fs::create_dir_all(store.root()).await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn({
+            let store = Arc::clone(&store);
+            let watch_hub = Arc::clone(&watch_hub);
+            async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                handle_connection(stream, store, watch_hub).await.unwrap();
+            }
+        });
+        let (mut client, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        let id = Uuid::new_v4();
+        let block_type = Uuid::new_v4();
+
+        let create_request = Uuid::new_v4();
+        send_message(
+            &mut client,
+            ClientMessage::CreateBlock {
+                request_id: create_request,
+                id,
+                block_type,
+                data: vec![1, 2],
+                watch: true,
+            },
+        )
+        .await;
+        assert!(matches!(
+            next_message(&mut client).await,
+            ServerMessage::Ok {
+                request_id,
+                command: CommandKind::CreateBlock,
+                ..
+            } if request_id == create_request
+        ));
+
+        let operation_id = Uuid::new_v4();
+        send_message(
+            &mut client,
+            ClientMessage::UpdateBlock {
+                request_id: Uuid::new_v4(),
+                id,
+                seq: 1,
+                operation_id,
+                operation: vec![3],
+            },
+        )
+        .await;
+        assert!(matches!(
+            next_message(&mut client).await,
+            ServerMessage::Ok {
+                command: CommandKind::UpdateBlock,
+                seq: Some(1),
+                operation_id: Some(found),
+                ..
+            } if found == operation_id
+        ));
+        assert!(matches!(
+            next_message(&mut client).await,
+            ServerMessage::BlockUpdated {
+                operation: OperationRecord {
+                    seq: 1,
+                    operation_id: found,
+                    ..
+                },
+                ..
+            } if found == operation_id
+        ));
+
+        let read_request = Uuid::new_v4();
+        send_message(
+            &mut client,
+            ClientMessage::ReadBlock {
+                request_id: read_request,
+                id,
+                watch: true,
+            },
+        )
+        .await;
+        assert!(matches!(
+            next_message(&mut client).await,
+            ServerMessage::ReadBlock {
+                request_id,
+                block_type: found_type,
+                snapshot_seq: 0,
+                operations,
+                ..
+            } if request_id == read_request
+                && found_type == block_type
+                && operations.len() == 1
+                && operations[0].operation_id == operation_id
+        ));
+
+        client.close(None).await.unwrap();
+        server.await.unwrap();
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    async fn send_message<S>(socket: &mut S, message: ClientMessage)
+    where
+        S: SinkExt<Message> + Unpin,
+        S::Error: fmt::Debug,
+    {
+        socket
+            .send(Message::Text(serde_json::to_string(&message).unwrap()))
+            .await
+            .unwrap();
+    }
+
+    async fn next_message<S>(socket: &mut S) -> ServerMessage
+    where
+        S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        let message = socket.next().await.unwrap().unwrap();
+        serde_json::from_str(&message.into_text().unwrap()).unwrap()
+    }
+
+    fn test_root() -> PathBuf {
+        std::env::temp_dir().join(format!("block-server-test-{}", Uuid::new_v4()))
+    }
+}

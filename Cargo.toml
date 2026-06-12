@@ -5,6 +5,7 @@ members = [
     "crates/block",
     "crates/block-server",
     "crates/block-client",
+    "crates/block-e2e",
 ]
 resolver = "2"
 

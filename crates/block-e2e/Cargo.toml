@@ -1,0 +1,14 @@
+[package]
+name = "block-e2e"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+block = { path = "../block" }
+block-client = { path = "../block-client" }
+block-server = { path = "../block-server" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["v4"] }

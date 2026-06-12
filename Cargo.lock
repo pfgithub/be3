@@ -146,6 +146,10 @@ checksum = "84d7ced0ae9557296835c32bf1b1e02b44c746701f898460fb000d7eaa84f00a"
 [[package]]
 name = "block"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
+]
 
 [[package]]
 name = "block-buffer"
@@ -161,6 +165,25 @@ name = "block-client"
 version = "0.1.0"
 dependencies = [
  "block",
+ "futures-util",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
+name = "block-e2e"
+version = "0.1.0"
+dependencies = [
+ "block",
+ "block-client",
+ "block-server",
+ "serde",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
