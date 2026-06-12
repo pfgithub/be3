@@ -336,6 +336,19 @@ impl Mesh {
         self.indices
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
+
+    fn polygon(&mut self, points: impl IntoIterator<Item = Vec3>, color: [f32; 3]) {
+        let base = self.vertices.len() as u32;
+        self.vertices.extend(points.into_iter().map(|point| Vertex {
+            position: point.to_array(),
+            color,
+        }));
+        let count = self.vertices.len() as u32 - base;
+        for index in 1..count - 1 {
+            self.indices
+                .extend_from_slice(&[base, base + index, base + index + 1]);
+        }
+    }
 }
 
 struct DepthTexture {
@@ -432,10 +445,10 @@ impl Renderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let spawn_road = &city.roads[city.roads.len() / 4];
-        let spawn_segment = &spawn_road.centerline[4..=5];
-        let spawn = (spawn_segment[0] + spawn_segment[1]) * 0.5;
-        let spawn_direction = (spawn_segment[1] - spawn_segment[0]).normalize();
+        let [spawn_start, spawn_end] =
+            camera_spawn_segment(&city).ok_or("generated city has no usable road segments")?;
+        let spawn = (spawn_start + spawn_end) * 0.5;
+        let spawn_direction = (spawn_end - spawn_start).normalize();
         let camera = Camera {
             position: Vec3::new(spawn.x, EYE_HEIGHT_M, spawn.y),
             yaw: spawn_direction.x.atan2(-spawn_direction.y),
@@ -738,6 +751,20 @@ fn city_mesh(city: &CityLayout) -> Mesh {
     mesh
 }
 
+fn camera_spawn_segment(city: &CityLayout) -> Option<[Vec2; 2]> {
+    city.roads
+        .iter()
+        .flat_map(|road| {
+            road.centerline.windows(2).filter_map(move |segment| {
+                let length_squared = segment[0].distance_squared(segment[1]);
+                (length_squared > 1.0)
+                    .then_some((road.width_m * road.width_m * length_squared, segment))
+            })
+        })
+        .max_by(|(a, _), (b, _)| a.total_cmp(b))
+        .map(|(_, segment)| [segment[0], segment[1]])
+}
+
 fn add_road(mesh: &mut Mesh, road: &Road) {
     for segment in road.centerline.windows(2) {
         let direction = (segment[1] - segment[0]).normalize();
@@ -776,13 +803,11 @@ fn add_building(mesh: &mut Mesh, building: &Building, index: usize) {
             wall,
         );
     }
-    mesh.quad(
-        [
-            ground_point(footprint[0], building.height_m),
-            ground_point(footprint[1], building.height_m),
-            ground_point(footprint[2], building.height_m),
-            ground_point(footprint[3], building.height_m),
-        ],
+    mesh.polygon(
+        footprint
+            .iter()
+            .copied()
+            .map(|point| ground_point(point, building.height_m)),
         roof,
     );
 
@@ -808,4 +833,21 @@ fn add_building(mesh: &mut Mesh, building: &Building, index: usize) {
 
 fn ground_point(point: Vec2, height: f32) -> Vec3 {
     Vec3::new(point.x, height, point.y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixed_road_layout_has_a_valid_camera_spawn_segment() {
+        let city = CityLayout::generate(WORLD_SEED);
+        let [start, end] = camera_spawn_segment(&city).expect("city should have a road segment");
+        assert!(start.distance(end) > 1.0);
+        assert!(city.roads.iter().any(|road| {
+            road.centerline
+                .windows(2)
+                .any(|segment| segment == [start, end])
+        }));
+    }
 }
