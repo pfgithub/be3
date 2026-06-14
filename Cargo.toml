@@ -8,6 +8,7 @@ members = [
     "crates/block-e2e",
     "crates/citygame",
     "crates/citygenerator",
+    "crates/logicgame",
 ]
 resolver = "2"
 
