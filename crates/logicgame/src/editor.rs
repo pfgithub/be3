@@ -75,6 +75,12 @@ enum Gesture {
     Not { anchor: Point, drag_start: [f32; 2] },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DebugEntity {
+    Component(ComponentId),
+    Wire(Wire),
+}
+
 pub struct LogicEditor {
     grid: LogicGrid,
     tool: Tool,
@@ -105,13 +111,11 @@ impl LogicEditor {
             self.handle_canvas_input(&response);
 
             let pointer_world = response
-                .interact_pointer_pos()
+                .hovered()
+                .then(|| context.pointer_hover_pos())
+                .flatten()
                 .map(|position| self.camera.screen_to_world(position, response.rect));
-            let frame = self.render_frame(response.rect, pointer_world);
-            painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
-                response.rect,
-                GridCallback { frame },
-            ));
+            (response, painter, pointer_world)
         });
 
         egui::Window::new("Tools")
@@ -144,12 +148,165 @@ impl LogicEditor {
                 ui.small("Esc: cancel");
             });
 
+        let hovered_square = canvas
+            .inner
+            .2
+            .map(|pointer| snap_point(pointer, self.tool.scale));
+        let hovered_entity = self.show_grid_debugger(&context, hovered_square);
+        let frame = self.render_frame(canvas.inner.0.rect, canvas.inner.2, hovered_entity);
+        canvas
+            .inner
+            .1
+            .add(eframe::egui_wgpu::Callback::new_paint_callback(
+                canvas.inner.0.rect,
+                GridCallback { frame },
+            ));
+
         if context.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.gesture = None;
         }
 
-        let _ = canvas;
         context.request_repaint();
+    }
+
+    fn show_grid_debugger(
+        &self,
+        context: &egui::Context,
+        hovered_square: Option<Point>,
+    ) -> Option<DebugEntity> {
+        let errors = self.grid.validate();
+        let mut hovered_entity = None;
+
+        egui::Window::new("Grid Debugger")
+            .default_pos([700.0, 16.0])
+            .default_width(240.0)
+            .show(context, |ui| {
+                egui::Grid::new("logic-grid-debug-summary")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Components");
+                        ui.monospace(self.grid.components().count().to_string());
+                        ui.end_row();
+                        ui.label("Wires");
+                        ui.monospace(self.grid.wires().len().to_string());
+                        ui.end_row();
+                        ui.label("Validation errors");
+                        ui.monospace(errors.len().to_string());
+                        ui.end_row();
+                        ui.label("Hovered square");
+                        match hovered_square {
+                            Some(point) => {
+                                ui.monospace(format!("({}, {})", point.x, point.y));
+                            }
+                            None => {
+                                ui.weak("none");
+                            }
+                        }
+                        ui.end_row();
+                    });
+
+                ui.separator();
+                ui.strong("Entities");
+                if self.grid.components().next().is_none() && self.grid.wires().is_empty() {
+                    ui.weak("No entities");
+                } else {
+                    egui::ScrollArea::vertical()
+                        .max_height(360.0)
+                        .show(ui, |ui| {
+                            ui.label("Components");
+                            for component in self.grid.components() {
+                                let response = egui::CollapsingHeader::new(format!(
+                                    "#{} {}",
+                                    component.id.0,
+                                    component_kind_name(&component.kind)
+                                ))
+                                .id_salt(("logic-grid-entity", component.id.0))
+                                .show(ui, |ui| {
+                                    egui::Grid::new(("logic-grid-entity-details", component.id.0))
+                                        .num_columns(2)
+                                        .show(ui, |ui| {
+                                            ui.label("Position");
+                                            ui.monospace(format!(
+                                                "({}, {})",
+                                                component.position.x, component.position.y
+                                            ));
+                                            ui.end_row();
+                                            ui.label("Rotation");
+                                            ui.monospace(format!("{:?}", component.rotation));
+                                            ui.end_row();
+                                            ui.label("Kind");
+                                            ui.monospace(format!("{:?}", component.kind));
+                                            ui.end_row();
+                                            ui.label("Size");
+                                            match component.size() {
+                                                Some(size) => {
+                                                    ui.monospace(format!(
+                                                        "{} x {}",
+                                                        size.width, size.height
+                                                    ));
+                                                }
+                                                None => {
+                                                    ui.weak("overflow");
+                                                }
+                                            }
+                                            ui.end_row();
+                                        });
+                                });
+
+                                let body_hovered =
+                                    response.body_response.is_some_and(|body| body.hovered());
+                                if response.header_response.hovered() || body_hovered {
+                                    hovered_entity = Some(DebugEntity::Component(component.id));
+                                }
+                            }
+
+                            ui.separator();
+                            ui.label("Wire segments");
+                            for (index, wire) in self.grid.wires().iter().copied().enumerate() {
+                                let response = egui::CollapsingHeader::new(format!(
+                                    "#{index} {:?}",
+                                    wire.orientation()
+                                ))
+                                .id_salt(("logic-grid-wire", index))
+                                .show(ui, |ui| {
+                                    egui::Grid::new(("logic-grid-wire-details", index))
+                                        .num_columns(2)
+                                        .show(ui, |ui| {
+                                            ui.label("Start");
+                                            ui.monospace(format!(
+                                                "({}, {})",
+                                                wire.start.x, wire.start.y
+                                            ));
+                                            ui.end_row();
+                                            ui.label("End");
+                                            ui.monospace(format!(
+                                                "({}, {})",
+                                                wire.end.x, wire.end.y
+                                            ));
+                                            ui.end_row();
+                                            ui.label("Orientation");
+                                            ui.monospace(format!("{:?}", wire.orientation()));
+                                            ui.end_row();
+                                            ui.label("Length");
+                                            ui.monospace(wire.length().to_string());
+                                            ui.end_row();
+                                            ui.label("Scale");
+                                            ui.monospace(format!("{}x", wire.scale.get()));
+                                            ui.end_row();
+                                        });
+                                });
+
+                                let body_hovered =
+                                    response.body_response.is_some_and(|body| body.hovered());
+                                if response.header_response.hovered() || body_hovered {
+                                    hovered_entity = Some(DebugEntity::Wire(wire));
+                                }
+                            }
+                        });
+                }
+            });
+
+        hovered_entity
     }
 
     fn handle_canvas_input(&mut self, response: &egui::Response) {
@@ -226,7 +383,12 @@ impl LogicEditor {
         }
     }
 
-    fn render_frame(&self, rect: egui::Rect, pointer_world: Option<[f32; 2]>) -> RenderFrame {
+    fn render_frame(
+        &self,
+        rect: egui::Rect,
+        pointer_world: Option<[f32; 2]>,
+        hovered_entity: Option<DebugEntity>,
+    ) -> RenderFrame {
         let errors = self.grid.validate();
         let mut bad_wires = BTreeSet::new();
         let mut bad_components = BTreeSet::new();
@@ -254,6 +416,9 @@ impl LogicEditor {
         let mut component_triangles = Vec::new();
         let mut wire_triangles = Vec::new();
         for component in self.grid.components() {
+            if hovered_entity == Some(DebugEntity::Component(component.id)) {
+                component_triangles.extend(DrawTriangle::component_highlight(component));
+            }
             if let Some(triangle) =
                 DrawTriangle::component(component, bad_components.contains(&component.id))
             {
@@ -263,7 +428,9 @@ impl LogicEditor {
         for wire in self.grid.wires() {
             wire_triangles.extend(DrawTriangle::wire(
                 *wire,
-                if bad_wires.contains(wire) {
+                if hovered_entity == Some(DebugEntity::Wire(*wire)) {
+                    DrawTriangle::HIGHLIGHT_COLOR
+                } else if bad_wires.contains(wire) {
                     DrawTriangle::ERROR_COLOR
                 } else {
                     DrawTriangle::WIRE_COLOR
@@ -308,6 +475,15 @@ impl LogicEditor {
             grid_scale: self.tool.scale.get() as f32,
             triangles: component_triangles,
         }
+    }
+}
+
+fn component_kind_name(kind: &ComponentKind) -> &'static str {
+    match kind {
+        ComponentKind::Not { .. } => "NOT gate",
+        ComponentKind::Led => "LED",
+        ComponentKind::Storage { .. } => "Storage",
+        ComponentKind::Subcomponent { .. } => "Subcomponent",
     }
 }
 

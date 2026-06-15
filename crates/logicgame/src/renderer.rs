@@ -29,6 +29,7 @@ impl DrawTriangle {
     pub const GATE_COLOR: [f32; 4] = [0.91, 0.91, 0.95, 1.0];
     pub const PREVIEW_COLOR: [f32; 4] = [0.98, 0.78, 0.24, 0.78];
     pub const ERROR_COLOR: [f32; 4] = [0.95, 0.22, 0.25, 1.0];
+    pub const HIGHLIGHT_COLOR: [f32; 4] = [1.0, 0.78, 0.15, 1.0];
 
     fn new(positions: [[f32; 2]; 3], color: [f32; 4]) -> Self {
         Self { positions, color }
@@ -102,6 +103,36 @@ impl DrawTriangle {
                 Self::GATE_COLOR
             },
         ))
+    }
+
+    pub fn component_highlight(component: &Component) -> Vec<Self> {
+        let Some(size) = component.size() else {
+            return Vec::new();
+        };
+        let left = component.position.x as f32;
+        let top = component.position.y as f32;
+        let right = left + size.width as f32;
+        let bottom = top + size.height as f32;
+        let thickness = (size.width.min(size.height) as f32 * 0.08).clamp(0.08, 0.2);
+        let color = Self::HIGHLIGHT_COLOR;
+
+        let mut triangles = Vec::with_capacity(8);
+        triangles.extend(rectangle([left, top, right, top + thickness], color));
+        triangles.extend(rectangle([left, bottom - thickness, right, bottom], color));
+        triangles.extend(rectangle(
+            [left, top + thickness, left + thickness, bottom - thickness],
+            color,
+        ));
+        triangles.extend(rectangle(
+            [
+                right - thickness,
+                top + thickness,
+                right,
+                bottom - thickness,
+            ],
+            color,
+        ));
+        triangles
     }
 
     pub fn with_color(mut self, color: [f32; 4]) -> Self {
@@ -392,6 +423,12 @@ mod tests {
         assert!(tip[0] > gate_triangle.positions[0][0]);
         assert!(tip[0] > gate_triangle.positions[1][0]);
         assert_eq!(gate_triangle.color, DrawTriangle::GATE_COLOR);
+
+        let highlight = DrawTriangle::component_highlight(&gate);
+        assert_eq!(highlight.len(), 8);
+        assert!(highlight
+            .iter()
+            .all(|triangle| triangle.color == DrawTriangle::HIGHLIGHT_COLOR));
     }
 
     #[test]
