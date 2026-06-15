@@ -426,16 +426,21 @@ impl LogicEditor {
                         .max_height(180.0)
                         .show(ui, |ui| {
                             for (index, instruction) in vm.instructions.iter().enumerate() {
-                                if self.simulation.next_instruction == index {
-                                    simulation_instruction_pointer(ui);
+                                let next = self.simulation.next_instruction == index
+                                    || index == 0
+                                        && self.simulation.next_instruction
+                                            >= vm.instructions.len();
+                                let response = ui.selectable_label(
+                                    next,
+                                    egui::RichText::new(format!(
+                                        "{index:03}  {}",
+                                        format_instruction(instruction)
+                                    ))
+                                    .monospace(),
+                                );
+                                if next {
+                                    response.scroll_to_me(Some(egui::Align::Center));
                                 }
-                                ui.monospace(format!(
-                                    "{index:03}  {}",
-                                    format_instruction(instruction)
-                                ));
-                            }
-                            if self.simulation.next_instruction == vm.instructions.len() {
-                                simulation_instruction_pointer(ui);
                             }
                         });
                 }
@@ -1336,17 +1341,6 @@ fn simulation_value_row(ui: &mut egui::Ui, label: String, value: u64) {
     });
 }
 
-fn simulation_instruction_pointer(ui: &mut egui::Ui) {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 5.0), egui::Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.center().y,
-        egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
-    );
-    response.scroll_to_me(Some(egui::Align::Center));
-}
-
 fn format_instruction(instruction: &Instruction) -> String {
     match instruction {
         Instruction::Call {
@@ -1773,7 +1767,7 @@ mod tests {
     }
 
     #[test]
-    fn simulation_tracks_the_next_instruction_boundary() {
+    fn simulation_tracks_the_next_instruction() {
         let mut editor = LogicEditor::default();
         editor.simulation.vm = Some(Vm {
             memory: vec![0, 0],
