@@ -262,7 +262,7 @@ impl ComponentKind {
             }
             Self::Input { scale, .. } | Self::Output { scale, .. } => {
                 let scale = scale.get();
-                Some(Size::new(scale, scale.checked_mul(2)?))
+                Some(Size::new(scale, scale))
             }
             Self::Led => Some(Size::new(1, 2)),
             Self::Subcomponent { size, .. } => Some(*size),
