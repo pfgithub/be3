@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use eframe::egui::{self, PointerButton};
+use logicgame::execution::{GenerationError, Instruction, Vm};
 use logicgame::grid::{
     CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode, LogicGrid,
     Point, Rotation, Scale, ValidationError, Wire,
@@ -128,6 +129,23 @@ struct GraphHover {
     wires: BTreeSet<Wire>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SimulationSnapshot {
+    components: Vec<Component>,
+    wires: Vec<Wire>,
+    graph: CircuitGraph,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Simulation {
+    snapshot: Option<SimulationSnapshot>,
+    vm: Option<Vm>,
+    error: Option<GenerationError>,
+    steps: u64,
+    next_instruction: usize,
+    tick_in_progress: bool,
+}
+
 impl GraphHover {
     fn include_node(&mut self, node: &GraphNode) {
         match node {
@@ -211,6 +229,7 @@ pub struct LogicEditor {
     gesture: Option<Gesture>,
     selection: Selection,
     configured_storage: Option<ComponentId>,
+    simulation: Simulation,
 }
 
 impl Default for LogicEditor {
@@ -225,6 +244,7 @@ impl Default for LogicEditor {
             gesture: None,
             selection: Selection::default(),
             configured_storage: None,
+            simulation: Simulation::default(),
         }
     }
 }
@@ -289,6 +309,7 @@ impl LogicEditor {
             });
 
         self.show_storage_configuration(&context);
+        self.show_simulation(&context);
 
         let hovered_square = canvas
             .inner
@@ -333,6 +354,234 @@ impl LogicEditor {
         }
 
         context.request_repaint();
+    }
+
+    fn show_simulation(&mut self, context: &egui::Context) {
+        egui::Window::new("Simulation")
+            .default_pos([16.0, 390.0])
+            .default_width(300.0)
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Run step").clicked() {
+                        self.run_simulation_step();
+                    }
+                    if ui.button("Step instruction").clicked() {
+                        self.run_simulation_instruction();
+                    }
+                    if ui.button("Restart").clicked() {
+                        self.restart_simulation();
+                    }
+                });
+
+                ui.separator();
+                if let Some(error) = &self.simulation.error {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        format!("Cannot run: {error:?}"),
+                    );
+                    return;
+                }
+
+                let Some(vm) = &self.simulation.vm else {
+                    ui.weak("Run a step to compile and execute the circuit.");
+                    return;
+                };
+                let Some(snapshot) = &self.simulation.snapshot else {
+                    return;
+                };
+
+                egui::Grid::new("logic-simulation-summary")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Steps");
+                        ui.monospace(self.simulation.steps.to_string());
+                        ui.end_row();
+                        ui.label("Instructions");
+                        ui.monospace(vm.instructions.len().to_string());
+                        ui.end_row();
+                        ui.label("Next instruction");
+                        if self.simulation.next_instruction < vm.instructions.len() {
+                            ui.monospace(format!(
+                                "{} / {}",
+                                self.simulation.next_instruction + 1,
+                                vm.instructions.len()
+                            ));
+                        } else {
+                            if vm.instructions.is_empty() {
+                                ui.weak("none");
+                            } else {
+                                ui.weak("tick complete");
+                            }
+                        }
+                        ui.end_row();
+                    });
+
+                ui.separator();
+                ui.strong("Instructions");
+                if vm.instructions.is_empty() {
+                    ui.weak("No instructions");
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt("logic-simulation-instructions")
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            for (index, instruction) in vm.instructions.iter().enumerate() {
+                                if self.simulation.next_instruction == index {
+                                    simulation_instruction_pointer(ui);
+                                }
+                                ui.monospace(format!(
+                                    "{index:03}  {}",
+                                    format_instruction(instruction)
+                                ));
+                            }
+                            if self.simulation.next_instruction == vm.instructions.len() {
+                                simulation_instruction_pointer(ui);
+                            }
+                        });
+                }
+
+                ui.separator();
+                ui.strong("Wire groups");
+                if vm.memory.is_empty() {
+                    ui.weak("No connected wire groups");
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt("logic-simulation-wires")
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            for (address, value) in vm.memory.iter().copied().enumerate() {
+                                let segment_count = snapshot
+                                    .graph
+                                    .nodes
+                                    .iter()
+                                    .filter_map(|node| match node {
+                                        GraphNode::WireNet { wires } => Some(wires.len()),
+                                        _ => None,
+                                    })
+                                    .nth(address)
+                                    .unwrap_or_default();
+                                simulation_value_row(
+                                    ui,
+                                    format!("Memory {address} ({segment_count} segments)"),
+                                    value,
+                                );
+                            }
+                        });
+                }
+
+                ui.separator();
+                ui.strong("Storage");
+                if vm.storage.is_empty() {
+                    ui.weak("No storage components");
+                } else {
+                    for (storage, value) in vm.storage.iter().copied().enumerate() {
+                        let component = snapshot
+                            .components
+                            .iter()
+                            .filter(|component| {
+                                matches!(component.kind, ComponentKind::Storage { .. })
+                            })
+                            .nth(storage)
+                            .map(|component| component.id);
+                        let label = component
+                            .map(|component| format!("Storage #{}", component.0))
+                            .unwrap_or_else(|| format!("Storage {storage}"));
+                        simulation_value_row(ui, label, value);
+                    }
+                }
+            });
+    }
+
+    fn run_simulation_step(&mut self) {
+        if !self.prepare_simulation() || !self.begin_simulation_tick() {
+            return;
+        }
+        while self.simulation.tick_in_progress {
+            self.execute_next_simulation_instruction();
+        }
+    }
+
+    fn run_simulation_instruction(&mut self) {
+        if !self.prepare_simulation() || !self.begin_simulation_tick() {
+            return;
+        }
+        self.execute_next_simulation_instruction();
+    }
+
+    fn restart_simulation(&mut self) {
+        let snapshot = self.simulation_snapshot();
+        self.compile_simulation(snapshot);
+    }
+
+    fn compile_simulation(&mut self, snapshot: SimulationSnapshot) {
+        match Vm::from_graph(&self.grid, &snapshot.graph) {
+            Ok(vm) => {
+                self.simulation = Simulation {
+                    snapshot: Some(snapshot),
+                    vm: Some(vm),
+                    error: None,
+                    steps: 0,
+                    next_instruction: 0,
+                    tick_in_progress: false,
+                };
+            }
+            Err(error) => {
+                self.simulation = Simulation {
+                    snapshot: Some(snapshot),
+                    vm: None,
+                    error: Some(error),
+                    steps: 0,
+                    next_instruction: 0,
+                    tick_in_progress: false,
+                };
+            }
+        }
+    }
+
+    fn prepare_simulation(&mut self) -> bool {
+        let snapshot = self.simulation_snapshot();
+        if self.simulation.snapshot.as_ref() != Some(&snapshot) {
+            self.compile_simulation(snapshot);
+        }
+        self.simulation.vm.is_some()
+    }
+
+    fn begin_simulation_tick(&mut self) -> bool {
+        if self.simulation.tick_in_progress {
+            return true;
+        }
+        let Some(vm) = &mut self.simulation.vm else {
+            return false;
+        };
+        vm.memory.fill(0);
+        self.simulation.next_instruction = 0;
+        if vm.instructions.is_empty() {
+            self.simulation.steps += 1;
+            return false;
+        }
+        self.simulation.tick_in_progress = true;
+        true
+    }
+
+    fn execute_next_simulation_instruction(&mut self) {
+        let Some(vm) = &mut self.simulation.vm else {
+            return;
+        };
+        let instruction = self.simulation.next_instruction;
+        vm.execute_instruction(instruction);
+        self.simulation.next_instruction += 1;
+        if self.simulation.next_instruction == vm.instructions.len() {
+            self.simulation.steps += 1;
+            self.simulation.tick_in_progress = false;
+        }
+    }
+
+    fn simulation_snapshot(&self) -> SimulationSnapshot {
+        SimulationSnapshot {
+            components: self.grid.components().cloned().collect(),
+            wires: self.grid.wires().to_vec(),
+            graph: self.grid.generate_graph(),
+        }
     }
 
     fn show_storage_configuration(&mut self, context: &egui::Context) {
@@ -1079,6 +1328,42 @@ fn storage_bit_indices(scale: Scale) -> Vec<u32> {
     (0..scale.get() as u32).rev().collect()
 }
 
+fn simulation_value_row(ui: &mut egui::Ui, label: String, value: u64) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.monospace(format!("0x{value:016x}"));
+        ui.weak(format!("({value})"));
+    });
+}
+
+fn simulation_instruction_pointer(ui: &mut egui::Ui) {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 5.0), egui::Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+    );
+    response.scroll_to_me(Some(egui::Align::Center));
+}
+
+fn format_instruction(instruction: &Instruction) -> String {
+    match instruction {
+        Instruction::Call {
+            component,
+            inputs,
+            outputs,
+        } => format!("CALL {component} {inputs:?} -> {outputs:?}"),
+        Instruction::Not { input, output } => format!("NOT m{input} -> m{output}"),
+        Instruction::ReadStorage { storage, output } => {
+            format!("READ s{storage} -> m{output}")
+        }
+        Instruction::SaveStorage { storage, input } => {
+            format!("SAVE m{input} -> s{storage}")
+        }
+    }
+}
+
 fn snap_coordinate(value: f32, scale: Scale) -> i64 {
     let scale = scale.get();
     (value / scale as f32).floor() as i64 * scale
@@ -1434,6 +1719,114 @@ mod tests {
         assert_eq!(
             storage_bit_indices(scale(64)),
             (0_u32..64).rev().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn simulation_restarts_when_the_grid_changes() {
+        let mut editor = LogicEditor::default();
+        editor.grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Storage {
+                scale: scale(1),
+                value: 1,
+            },
+        );
+
+        editor.run_simulation_step();
+        assert_eq!(editor.simulation.steps, 1);
+        assert_eq!(editor.simulation.vm.as_ref().unwrap().storage, vec![1]);
+
+        editor.grid.add_component(
+            Point::new(4, 0),
+            Rotation::Up,
+            ComponentKind::Storage {
+                scale: scale(1),
+                value: 0,
+            },
+        );
+        editor.run_simulation_step();
+
+        assert_eq!(editor.simulation.steps, 1);
+        assert_eq!(editor.simulation.vm.as_ref().unwrap().storage, vec![1, 0]);
+    }
+
+    #[test]
+    fn restarting_simulation_restores_grid_storage_values() {
+        let mut editor = LogicEditor::default();
+        editor.grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Storage {
+                scale: scale(1),
+                value: 1,
+            },
+        );
+        editor.run_simulation_step();
+        editor.simulation.vm.as_mut().unwrap().storage[0] = 0;
+
+        editor.restart_simulation();
+
+        assert_eq!(editor.simulation.steps, 0);
+        assert_eq!(editor.simulation.vm.as_ref().unwrap().storage, vec![1]);
+    }
+
+    #[test]
+    fn simulation_tracks_the_next_instruction_boundary() {
+        let mut editor = LogicEditor::default();
+        editor.simulation.vm = Some(Vm {
+            memory: vec![0, 0],
+            storage: vec![7],
+            instructions: vec![
+                Instruction::ReadStorage {
+                    storage: 0,
+                    output: 0,
+                },
+                Instruction::Not {
+                    input: 0,
+                    output: 1,
+                },
+            ],
+        });
+
+        assert!(editor.begin_simulation_tick());
+        assert_eq!(editor.simulation.next_instruction, 0);
+        editor.execute_next_simulation_instruction();
+        assert_eq!(editor.simulation.next_instruction, 1);
+        assert_eq!(editor.simulation.steps, 0);
+        assert!(editor.simulation.tick_in_progress);
+        assert_eq!(editor.simulation.vm.as_ref().unwrap().memory, vec![7, 0]);
+
+        editor.execute_next_simulation_instruction();
+        assert_eq!(editor.simulation.next_instruction, 2);
+        assert_eq!(editor.simulation.steps, 1);
+        assert!(!editor.simulation.tick_in_progress);
+        assert_eq!(editor.simulation.vm.as_ref().unwrap().memory, vec![7, !7]);
+    }
+
+    #[test]
+    fn instructions_have_compact_display_names() {
+        assert_eq!(
+            format_instruction(&Instruction::Not {
+                input: 2,
+                output: 5,
+            }),
+            "NOT m2 -> m5"
+        );
+        assert_eq!(
+            format_instruction(&Instruction::ReadStorage {
+                storage: 3,
+                output: 4,
+            }),
+            "READ s3 -> m4"
+        );
+        assert_eq!(
+            format_instruction(&Instruction::SaveStorage {
+                storage: 3,
+                input: 4,
+            }),
+            "SAVE m4 -> s3"
         );
     }
 

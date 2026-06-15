@@ -237,20 +237,24 @@ impl Vm {
     }
 
     pub fn execute(&mut self) {
-        for instruction in &self.instructions {
-            match instruction {
-                Instruction::Call { component, .. } => {
-                    panic!("calling component {component} is not implemented")
-                }
-                Instruction::Not { input, output } => {
-                    self.memory[*output] |= !self.memory[*input];
-                }
-                Instruction::ReadStorage { storage, output } => {
-                    self.memory[*output] |= self.storage[*storage];
-                }
-                Instruction::SaveStorage { storage, input } => {
-                    self.storage[*storage] = self.memory[*input];
-                }
+        for instruction in 0..self.instructions.len() {
+            self.execute_instruction(instruction);
+        }
+    }
+
+    pub fn execute_instruction(&mut self, index: usize) {
+        match self.instructions[index].clone() {
+            Instruction::Call { component, .. } => {
+                panic!("calling component {component} is not implemented")
+            }
+            Instruction::Not { input, output } => {
+                self.memory[output] |= !self.memory[input];
+            }
+            Instruction::ReadStorage { storage, output } => {
+                self.memory[output] |= self.storage[storage];
+            }
+            Instruction::SaveStorage { storage, input } => {
+                self.storage[storage] = self.memory[input];
             }
         }
     }
@@ -417,6 +421,30 @@ mod tests {
         vm.execute();
 
         assert_eq!(vm.storage[0], !7);
+    }
+
+    #[test]
+    fn instructions_can_execute_one_at_a_time() {
+        let mut vm = Vm {
+            memory: vec![0, 0],
+            storage: vec![7],
+            instructions: vec![
+                Instruction::ReadStorage {
+                    storage: 0,
+                    output: 0,
+                },
+                Instruction::Not {
+                    input: 0,
+                    output: 1,
+                },
+            ],
+        };
+
+        vm.execute_instruction(0);
+        assert_eq!(vm.memory, vec![7, 0]);
+
+        vm.execute_instruction(1);
+        assert_eq!(vm.memory, vec![7, !7]);
     }
 
     #[test]
