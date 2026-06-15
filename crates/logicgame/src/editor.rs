@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use eframe::egui::{self, PointerButton};
 use logicgame::grid::{
-    Component, ComponentId, ComponentKind, LogicGrid, Point, Rotation, Scale, ValidationError, Wire,
+    CircuitGraph, Component, ComponentId, ComponentKind, GraphNode, LogicGrid, Point, Rotation,
+    Scale, ValidationError, Wire,
 };
 
 use crate::renderer::{DrawTriangle, GridCallback, RenderFrame};
@@ -12,6 +13,10 @@ const MAX_ZOOM: f32 = 96.0;
 const DEFAULT_ZOOM: f32 = 24.0;
 const WIRE_HIT_RADIUS: f32 = 7.0;
 const SCALES: [u8; 7] = [1, 2, 4, 8, 16, 32, 64];
+const GRAPH_NODE_SIZE: egui::Vec2 = egui::vec2(150.0, 48.0);
+const GRAPH_COLUMN_GAP: f32 = 70.0;
+const GRAPH_ROW_GAP: f32 = 18.0;
+const GRAPH_MARGIN: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ToolKind {
@@ -225,6 +230,7 @@ impl LogicEditor {
             .2
             .map(|pointer| snap_point(pointer, self.tool.scale));
         let hovered_entity = self.show_grid_debugger(&context, hovered_square);
+        self.show_generated_graph(&context);
         let frame = self.render_frame(canvas.inner.0.rect, canvas.inner.2, hovered_entity);
         canvas
             .inner
@@ -397,6 +403,84 @@ impl LogicEditor {
             });
 
         hovered_entity
+    }
+
+    fn show_generated_graph(&self, context: &egui::Context) {
+        let graph = self.grid.generate_graph();
+
+        egui::Window::new("Generated Graph")
+            .default_pos([360.0, 16.0])
+            .default_size([560.0, 400.0])
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Nodes");
+                    ui.monospace(graph.nodes.len().to_string());
+                    ui.separator();
+                    ui.label("Edges");
+                    ui.monospace(graph.edges.len().to_string());
+                });
+                ui.separator();
+
+                if graph.nodes.is_empty() {
+                    ui.weak("The generated graph is empty.");
+                    return;
+                }
+
+                egui::ScrollArea::both().show(ui, |ui| {
+                    self.paint_generated_graph(ui, &graph);
+                });
+            });
+    }
+
+    fn paint_generated_graph(&self, ui: &mut egui::Ui, graph: &CircuitGraph) {
+        let (positions, size) = graph_layout(graph);
+        let (response, painter) = ui.allocate_painter(size, egui::Sense::hover());
+        let origin = response.rect.min.to_vec2();
+
+        for edge in &graph.edges {
+            let first = positions[edge.first.0] + origin;
+            let second = positions[edge.second.0] + origin;
+            painter.line_segment(
+                [first, second],
+                egui::Stroke::new(2.0, ui.visuals().widgets.noninteractive.fg_stroke.color),
+            );
+        }
+
+        for (index, node) in graph.nodes.iter().enumerate() {
+            let center = positions[index] + origin;
+            let rect = egui::Rect::from_center_size(center, GRAPH_NODE_SIZE);
+            let (fill, title, detail) = graph_node_display(node);
+            painter.rect_filled(rect, 6.0, fill);
+            painter.rect_stroke(
+                rect,
+                6.0,
+                egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                center - egui::vec2(0.0, 9.0),
+                egui::Align2::CENTER_CENTER,
+                format!("#{index} {title}"),
+                egui::FontId::proportional(14.0),
+                egui::Color32::WHITE,
+            );
+            painter.text(
+                center + egui::vec2(0.0, 10.0),
+                egui::Align2::CENTER_CENTER,
+                detail,
+                egui::FontId::monospace(11.0),
+                egui::Color32::from_gray(225),
+            );
+
+            let node_response = ui.interact(
+                rect,
+                ui.id().with(("generated-graph-node", index)),
+                egui::Sense::hover(),
+            );
+            node_response.on_hover_ui(|ui| {
+                ui.monospace(format!("{node:#?}"));
+            });
+        }
     }
 
     fn handle_canvas_input(&mut self, response: &egui::Response) {
@@ -968,6 +1052,68 @@ fn nearest_wire(wires: &[Wire], point: [f32; 2], radius: f32) -> Option<Wire> {
                 .then_with(|| first.cmp(second))
         })
         .map(|(_, wire)| wire)
+}
+
+fn graph_layout(graph: &CircuitGraph) -> (Vec<egui::Pos2>, egui::Vec2) {
+    let mut columns = [Vec::new(), Vec::new(), Vec::new()];
+    for (index, node) in graph.nodes.iter().enumerate() {
+        let column = match node {
+            GraphNode::Component { .. } => 0,
+            GraphNode::Connection { .. } => 1,
+            GraphNode::WireNet { .. } => 2,
+        };
+        columns[column].push(index);
+    }
+
+    let rows = columns.iter().map(Vec::len).max().unwrap_or(0).max(1);
+    let row_stride = GRAPH_NODE_SIZE.y + GRAPH_ROW_GAP;
+    let content_height =
+        rows as f32 * GRAPH_NODE_SIZE.y + rows.saturating_sub(1) as f32 * GRAPH_ROW_GAP;
+    let size = egui::vec2(
+        GRAPH_MARGIN * 2.0 + GRAPH_NODE_SIZE.x * 3.0 + GRAPH_COLUMN_GAP * 2.0,
+        GRAPH_MARGIN * 2.0 + content_height,
+    );
+    let mut positions = vec![egui::Pos2::ZERO; graph.nodes.len()];
+
+    for (column, nodes) in columns.iter().enumerate() {
+        let column_height = nodes.len() as f32 * GRAPH_NODE_SIZE.y
+            + nodes.len().saturating_sub(1) as f32 * GRAPH_ROW_GAP;
+        let top = GRAPH_MARGIN + (content_height - column_height) / 2.0;
+        let x = GRAPH_MARGIN
+            + GRAPH_NODE_SIZE.x / 2.0
+            + column as f32 * (GRAPH_NODE_SIZE.x + GRAPH_COLUMN_GAP);
+        for (row, node) in nodes.iter().enumerate() {
+            positions[*node] =
+                egui::pos2(x, top + GRAPH_NODE_SIZE.y / 2.0 + row as f32 * row_stride);
+        }
+    }
+
+    (positions, size)
+}
+
+fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String) {
+    match node {
+        GraphNode::Component { component } => (
+            egui::Color32::from_rgb(50, 105, 175),
+            "Component",
+            format!("component #{}", component.0),
+        ),
+        GraphNode::WireNet { wires } => (
+            egui::Color32::from_rgb(45, 135, 85),
+            "Wire net",
+            format!("{} segment(s)", wires.len()),
+        ),
+        GraphNode::Connection {
+            component,
+            side,
+            start,
+            end,
+        } => (
+            egui::Color32::from_rgb(155, 95, 45),
+            "Connection",
+            format!("#{} {side:?} [{start}, {end})", component.0),
+        ),
+    }
 }
 
 #[cfg(test)]
