@@ -69,10 +69,10 @@ impl Camera {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Gesture {
     Wire { start: Point },
-    Not { anchor: Point },
+    Not { anchor: Point, drag_start: [f32; 2] },
 }
 
 pub struct LogicEditor {
@@ -193,7 +193,10 @@ impl LogicEditor {
             self.gesture = match self.tool.kind {
                 ToolKind::Select => None,
                 ToolKind::Wire => Some(Gesture::Wire { start: snapped }),
-                ToolKind::Not => Some(Gesture::Not { anchor: snapped }),
+                ToolKind::Not => Some(Gesture::Not {
+                    anchor: snapped,
+                    drag_start: world,
+                }),
             };
         }
 
@@ -207,8 +210,8 @@ impl LogicEditor {
                         self.grid.add_wire(wire);
                     }
                 }
-                Some(Gesture::Not { anchor }) => {
-                    if let Some(rotation) = drag_rotation(anchor, world, self.tool.scale) {
+                Some(Gesture::Not { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, world) {
                         self.grid.add_component(
                             not_gate_position(anchor, rotation, self.tool.scale),
                             rotation,
@@ -275,8 +278,8 @@ impl LogicEditor {
                         instances.push(DrawInstance::wire(wire, DrawInstance::PREVIEW_COLOR));
                     }
                 }
-                Some(Gesture::Not { anchor }) => {
-                    if let Some(rotation) = drag_rotation(anchor, pointer, self.tool.scale) {
+                Some(Gesture::Not { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, pointer) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
                             position: not_gate_position(anchor, rotation, self.tool.scale),
@@ -319,18 +322,23 @@ fn snap_point(point: [f32; 2], scale: Scale) -> Point {
 fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<Wire> {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
-    let end = if dx.abs() >= dy.abs() {
-        Point::new(end.x, start.y)
+    let scale_value = scale.get();
+    let (start, end) = if dx.abs() >= dy.abs() {
+        let min_x = start.x.min(end.x);
+        let max_x = start.x.max(end.x).checked_add(scale_value)?;
+        (Point::new(min_x, start.y), Point::new(max_x, start.y))
     } else {
-        Point::new(start.x, end.y)
+        let min_y = start.y.min(end.y);
+        let max_y = start.y.max(end.y).checked_add(scale_value)?;
+        (Point::new(start.x, min_y), Point::new(start.x, max_y))
     };
     Wire::new(start, end, scale).ok()
 }
 
-fn drag_rotation(anchor: Point, pointer: [f32; 2], scale: Scale) -> Option<Rotation> {
-    let dx = pointer[0] - anchor.x as f32;
-    let dy = pointer[1] - anchor.y as f32;
-    if dx.abs().max(dy.abs()) < scale.get() as f32 * 0.35 {
+fn drag_rotation(start: [f32; 2], pointer: [f32; 2]) -> Option<Rotation> {
+    let dx = pointer[0] - start[0];
+    let dy = pointer[1] - start[1];
+    if dx == 0.0 && dy == 0.0 {
         return None;
     }
     Some(if dx.abs() >= dy.abs() {
@@ -349,9 +357,9 @@ fn drag_rotation(anchor: Point, pointer: [f32; 2], scale: Scale) -> Option<Rotat
 fn not_gate_position(anchor: Point, rotation: Rotation, scale: Scale) -> Point {
     let scale = scale.get();
     match rotation {
-        Rotation::Up => Point::new(anchor.x, anchor.y - scale * 2),
+        Rotation::Up => Point::new(anchor.x, anchor.y - scale),
         Rotation::Right | Rotation::Down => anchor,
-        Rotation::Left => Point::new(anchor.x - scale * 2, anchor.y),
+        Rotation::Left => Point::new(anchor.x - scale, anchor.y),
     }
 }
 
@@ -433,11 +441,19 @@ mod tests {
     fn wire_projection_uses_the_dominant_axis() {
         assert_eq!(
             projected_wire(Point::new(0, 0), Point::new(8, 3), scale(1)),
-            Some(wire((0, 0), (8, 0), 1))
+            Some(wire((0, 0), (9, 0), 1))
+        );
+        assert_eq!(
+            projected_wire(Point::new(8, 3), Point::new(0, 0), scale(1)),
+            Some(wire((0, 3), (9, 3), 1))
         );
         assert_eq!(
             projected_wire(Point::new(0, 0), Point::new(2, -9), scale(1)),
-            Some(wire((0, -9), (0, 0), 1))
+            Some(wire((0, -9), (0, 1), 1))
+        );
+        assert_eq!(
+            projected_wire(Point::new(2, -9), Point::new(0, 0), scale(1)),
+            Some(wire((2, -9), (2, 1), 1))
         );
     }
 
@@ -445,20 +461,32 @@ mod tests {
     fn gate_drag_maps_to_rotation_and_input_anchor() {
         let anchor = Point::new(8, 8);
         assert_eq!(
-            drag_rotation(anchor, [13.0, 9.0], scale(2)),
+            drag_rotation([9.5, 9.5], [13.0, 9.0]),
             Some(Rotation::Right)
         );
+        assert_eq!(drag_rotation([9.5, 9.5], [8.5, 9.5]), Some(Rotation::Left));
+        assert_eq!(drag_rotation([9.5, 9.5], [9.5, 8.5]), Some(Rotation::Up));
+        assert_eq!(drag_rotation([9.5, 9.5], [9.5, 10.5]), Some(Rotation::Down));
+        assert_eq!(
+            drag_rotation([9.5, 9.5], [9.500_001, 9.5]),
+            Some(Rotation::Right)
+        );
+        assert_eq!(drag_rotation([9.5, 9.5], [9.5, 9.5]), None);
         assert_eq!(
             not_gate_position(anchor, Rotation::Right, scale(2)),
             Point::new(8, 8)
         );
         assert_eq!(
+            not_gate_position(anchor, Rotation::Down, scale(2)),
+            Point::new(8, 8)
+        );
+        assert_eq!(
             not_gate_position(anchor, Rotation::Up, scale(2)),
-            Point::new(8, 4)
+            Point::new(8, 6)
         );
         assert_eq!(
             not_gate_position(anchor, Rotation::Left, scale(2)),
-            Point::new(4, 8)
+            Point::new(6, 8)
         );
     }
 
