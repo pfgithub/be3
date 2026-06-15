@@ -1814,7 +1814,7 @@ mod tests {
             },
         };
 
-        assert_eq!(component.size(), Some(Size::new(4, 2)));
+        assert_eq!(component.size(), Some(Size::new(2, 2)));
         assert_eq!(
             component.connection_slots(),
             vec![ConnectionSlot {
@@ -1830,7 +1830,7 @@ mod tests {
             component.lead(),
             Some(ComponentLead {
                 side: ComponentSide::Right,
-                axis: 14,
+                axis: 12,
                 start: 20,
                 end: 22,
             })

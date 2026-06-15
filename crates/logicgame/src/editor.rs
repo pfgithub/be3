@@ -1230,7 +1230,7 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
                         self.grid.add_component(
-                            oriented_component_position(anchor, rotation, scale),
+                            component_placement_position(anchor, rotation, scale, ToolKind::Not),
                             rotation,
                             ComponentKind::Not { scale },
                         );
@@ -1240,7 +1240,12 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let (input_scale, output_scale) = self.tool.conversion_scales();
                         self.grid.add_component(
-                            oriented_component_position(anchor, rotation, output_scale),
+                            component_placement_position(
+                                anchor,
+                                rotation,
+                                output_scale,
+                                ToolKind::MergerSplitter,
+                            ),
                             rotation,
                             ComponentKind::MergerSplitter {
                                 input_scale,
@@ -1252,7 +1257,12 @@ impl LogicEditor {
                 Some(Gesture::Led { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         self.grid.add_component(
-                            oriented_component_position(anchor, rotation, Scale::ONE),
+                            component_placement_position(
+                                anchor,
+                                rotation,
+                                Scale::ONE,
+                                ToolKind::Led,
+                            ),
                             rotation,
                             ComponentKind::Led,
                         );
@@ -1262,7 +1272,12 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
                         self.grid.add_component(
-                            oriented_component_position(anchor, rotation, scale),
+                            component_placement_position(
+                                anchor,
+                                rotation,
+                                scale,
+                                ToolKind::Storage,
+                            ),
                             rotation,
                             ComponentKind::Storage { scale, value: 0 },
                         );
@@ -1272,7 +1287,7 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(drag_start, world).map(|r| r.flip()) {
                         let scale = self.tool.scale;
                         self.grid.add_component(
-                            oriented_component_position(anchor, rotation, scale),
+                            component_placement_position(anchor, rotation, scale, ToolKind::Input),
                             rotation,
                             ComponentKind::Input {
                                 scale,
@@ -1285,7 +1300,7 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
                         self.grid.add_component(
-                            oriented_component_position(anchor, rotation, scale),
+                            component_placement_position(anchor, rotation, scale, ToolKind::Output),
                             rotation,
                             ComponentKind::Output {
                                 scale,
@@ -1558,10 +1573,11 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(*drag_start, pointer) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
-                            position: oriented_component_position(
+                            position: component_placement_position(
                                 *anchor,
                                 rotation,
                                 self.tool.scale,
+                                ToolKind::Not,
                             ),
                             rotation,
                             kind: ComponentKind::Not {
@@ -1582,7 +1598,12 @@ impl LogicEditor {
                         let (input_scale, output_scale) = self.tool.conversion_scales();
                         let component = Component {
                             id: ComponentId(u64::MAX),
-                            position: oriented_component_position(*anchor, rotation, output_scale),
+                            position: component_placement_position(
+                                *anchor,
+                                rotation,
+                                output_scale,
+                                ToolKind::MergerSplitter,
+                            ),
                             rotation,
                             kind: ComponentKind::MergerSplitter {
                                 input_scale,
@@ -1600,7 +1621,12 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(*drag_start, pointer) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
-                            position: oriented_component_position(*anchor, rotation, Scale::ONE),
+                            position: component_placement_position(
+                                *anchor,
+                                rotation,
+                                Scale::ONE,
+                                ToolKind::Led,
+                            ),
                             rotation,
                             kind: ComponentKind::Led,
                         };
@@ -1617,10 +1643,11 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(*drag_start, pointer) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
-                            position: oriented_component_position(
+                            position: component_placement_position(
                                 *anchor,
                                 rotation,
                                 self.tool.scale,
+                                ToolKind::Storage,
                             ),
                             rotation,
                             kind: ComponentKind::Storage {
@@ -1641,10 +1668,11 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(*drag_start, pointer).map(|r| r.flip()) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
-                            position: oriented_component_position(
+                            position: component_placement_position(
                                 *anchor,
                                 rotation,
                                 self.tool.scale,
+                                ToolKind::Input,
                             ),
                             rotation,
                             kind: ComponentKind::Input {
@@ -1665,10 +1693,11 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(*drag_start, pointer) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
-                            position: oriented_component_position(
+                            position: component_placement_position(
                                 *anchor,
                                 rotation,
                                 self.tool.scale,
+                                ToolKind::Output,
                             ),
                             rotation,
                             kind: ComponentKind::Output {
@@ -1937,7 +1966,19 @@ fn drag_rotation(start: [f32; 2], pointer: [f32; 2]) -> Option<Rotation> {
     })
 }
 
-fn oriented_component_position(anchor: Point, rotation: Rotation, scale: Scale) -> Point {
+fn component_placement_position(
+    anchor: Point,
+    rotation: Rotation,
+    scale: Scale,
+    kind: ToolKind,
+) -> Point {
+    if matches!(
+        kind,
+        ToolKind::MergerSplitter | ToolKind::Input | ToolKind::Output
+    ) {
+        return anchor;
+    }
+
     let scale = scale.get();
     match rotation {
         Rotation::Up => Point::new(anchor.x, anchor.y - scale),
@@ -2289,7 +2330,7 @@ mod tests {
     }
 
     #[test]
-    fn gate_drag_maps_to_rotation_and_input_anchor() {
+    fn gate_drag_maps_to_rotation_and_placement_anchor() {
         let anchor = Point::new(8, 8);
         assert_eq!(
             drag_rotation([9.5, 9.5], [13.0, 9.0]),
@@ -2304,21 +2345,39 @@ mod tests {
         );
         assert_eq!(drag_rotation([9.5, 9.5], [9.5, 9.5]), None);
         assert_eq!(
-            oriented_component_position(anchor, Rotation::Right, scale(2)),
+            component_placement_position(anchor, Rotation::Right, scale(2), ToolKind::Not),
             Point::new(8, 8)
         );
         assert_eq!(
-            oriented_component_position(anchor, Rotation::Down, scale(2)),
+            component_placement_position(anchor, Rotation::Down, scale(2), ToolKind::Not),
             Point::new(8, 8)
         );
         assert_eq!(
-            oriented_component_position(anchor, Rotation::Up, scale(2)),
+            component_placement_position(anchor, Rotation::Up, scale(2), ToolKind::Not),
             Point::new(8, 6)
         );
         assert_eq!(
-            oriented_component_position(anchor, Rotation::Left, scale(2)),
+            component_placement_position(anchor, Rotation::Left, scale(2), ToolKind::Not),
             Point::new(6, 8)
         );
+    }
+
+    #[test]
+    fn square_components_stay_on_the_clicked_cell_for_every_rotation() {
+        let anchor = Point::new(8, 8);
+        for kind in [ToolKind::MergerSplitter, ToolKind::Input, ToolKind::Output] {
+            for rotation in [
+                Rotation::Up,
+                Rotation::Right,
+                Rotation::Down,
+                Rotation::Left,
+            ] {
+                assert_eq!(
+                    component_placement_position(anchor, rotation, scale(2), kind),
+                    anchor
+                );
+            }
+        }
     }
 
     #[test]
