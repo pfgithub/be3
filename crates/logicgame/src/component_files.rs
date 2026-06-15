@@ -7,7 +7,7 @@ use std::{
 };
 
 use logicgame::{
-    execution::{GenerationError, Vm},
+    execution::{GenerationError, Instruction, Vm},
     grid::{
         ComponentHash, ComponentKind, ComponentPort, ComponentSide, GeometryError, LogicGrid,
         LogicGridSnapshot, Point, Size,
@@ -70,7 +70,60 @@ impl From<GeometryError> for ComponentFileError {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledComponent {
     pub snapshot: LogicGridSnapshot,
+    #[serde(with = "compiled_vm")]
     pub vm: Vm,
+}
+
+mod compiled_vm {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{Instruction, Vm};
+
+    #[derive(Serialize)]
+    struct SerializedVm<'a> {
+        memory: usize,
+        storage: &'a [u64],
+        inputs: usize,
+        outputs: usize,
+        instructions: &'a [Instruction],
+    }
+
+    #[derive(Deserialize)]
+    struct DeserializedVm {
+        memory: usize,
+        storage: Vec<u64>,
+        inputs: usize,
+        outputs: usize,
+        instructions: Vec<Instruction>,
+    }
+
+    pub fn serialize<S>(vm: &Vm, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        SerializedVm {
+            memory: vm.memory.len(),
+            storage: &vm.storage,
+            inputs: vm.inputs.len(),
+            outputs: vm.outputs.len(),
+            instructions: &vm.instructions,
+        }
+        .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vm, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vm = DeserializedVm::deserialize(deserializer)?;
+        Ok(Vm {
+            memory: vec![0; vm.memory],
+            storage: vm.storage,
+            inputs: vec![0; vm.inputs],
+            outputs: vec![0; vm.outputs],
+            instructions: vm.instructions,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -300,7 +353,10 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use logicgame::grid::{ComponentKind, ComponentSide, Point, Rotation, Scale};
+    use logicgame::{
+        execution::Instruction,
+        grid::{ComponentKind, ComponentSide, InputId, Point, Rotation, Scale},
+    };
 
     use super::*;
 
@@ -368,6 +424,39 @@ mod tests {
             Err(ComponentFileError::Json(_))
         ));
         remove_test_root(&root);
+    }
+
+    #[test]
+    fn compiled_vm_serializes_runtime_buffers_as_lengths() {
+        let compiled = CompiledComponent {
+            snapshot: LogicGrid::new().snapshot(),
+            vm: Vm {
+                memory: vec![3, 4, 5],
+                storage: vec![6, 7],
+                inputs: vec![8],
+                outputs: vec![9, 10],
+                instructions: vec![Instruction::ReadInput {
+                    input: InputId(0),
+                    output: 2,
+                    mask: 0xff,
+                }],
+            },
+        };
+
+        let json = serde_json::to_value(&compiled).unwrap();
+        assert_eq!(json["vm"]["memory"], 3);
+        assert_eq!(json["vm"]["storage"], serde_json::json!([6, 7]));
+        assert_eq!(json["vm"]["inputs"], 1);
+        assert_eq!(json["vm"]["outputs"], 2);
+        assert!(json["vm"]["instructions"].is_array());
+
+        let decoded: CompiledComponent = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.snapshot, compiled.snapshot);
+        assert_eq!(decoded.vm.memory, vec![0; 3]);
+        assert_eq!(decoded.vm.storage, compiled.vm.storage);
+        assert_eq!(decoded.vm.inputs, vec![0; 1]);
+        assert_eq!(decoded.vm.outputs, vec![0; 2]);
+        assert_eq!(decoded.vm.instructions, compiled.vm.instructions);
     }
 
     #[test]
