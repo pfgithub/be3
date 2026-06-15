@@ -4,7 +4,7 @@ mod renderer;
 
 use std::time::{Duration, Instant};
 
-use component_files::ComponentFiles;
+use component_files::{ComponentFileDrag, ComponentFiles};
 use editor::LogicEditor;
 use eframe::egui;
 use renderer::GridRenderer;
@@ -114,14 +114,21 @@ impl LogicGame {
                         .max_height(180.0)
                         .show(ui, |ui| {
                             for name in &self.component_names {
-                                if ui
-                                    .selectable_label(
-                                        self.active_component.as_ref() == Some(name),
-                                        name,
-                                    )
-                                    .clicked()
-                                {
-                                    requested_component = Some(name.clone());
+                                let active = self.active_component.as_ref() == Some(name);
+                                if active {
+                                    if ui.selectable_label(true, name).clicked() {
+                                        requested_component = Some(name.clone());
+                                    }
+                                } else {
+                                    let response = ui
+                                        .selectable_label(false, name)
+                                        .interact(egui::Sense::click_and_drag());
+                                    response.dnd_set_drag_payload(ComponentFileDrag {
+                                        name: name.clone(),
+                                    });
+                                    if response.clicked() {
+                                        requested_component = Some(name.clone());
+                                    }
                                 }
                             }
                         });
@@ -259,12 +266,32 @@ impl LogicGame {
             }
         }
     }
+
+    fn drop_component_file(&mut self, name: &str, position: logicgame::grid::Point) {
+        if self.active_component.as_deref() == Some(name) {
+            self.persistence_error =
+                Some("A component cannot contain the file currently being edited".to_owned());
+            return;
+        }
+        let Some(files) = &self.component_files else {
+            return;
+        };
+        match files.compile_subcomponent(name) {
+            Ok(kind) => {
+                self.editor.insert_subcomponent(position, kind);
+                self.persistence_error = None;
+            }
+            Err(error) => self.persistence_error = Some(error.to_string()),
+        }
+    }
 }
 
 impl eframe::App for LogicGame {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.active_component.is_some() {
-            self.editor.ui(ui);
+            if let Some(dropped) = self.editor.ui(ui) {
+                self.drop_component_file(&dropped.name, dropped.position);
+            }
             self.observe_changes();
             self.autosave();
         } else {

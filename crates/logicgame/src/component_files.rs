@@ -6,7 +6,15 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use logicgame::grid::{LogicGrid, LogicGridSnapshot};
+use logicgame::{
+    execution::{GenerationError, Vm},
+    grid::{
+        ComponentHash, ComponentKind, ComponentPort, ComponentSide, GeometryError, LogicGrid,
+        LogicGridSnapshot, Point, Size,
+    },
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 static TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -16,6 +24,9 @@ pub enum ComponentFileError {
     AlreadyExists(String),
     Io(io::Error),
     Json(serde_json::Error),
+    Generation(GenerationError),
+    InvalidSubcomponent(&'static str),
+    Geometry(GeometryError),
 }
 
 impl fmt::Display for ComponentFileError {
@@ -25,6 +36,9 @@ impl fmt::Display for ComponentFileError {
             Self::AlreadyExists(name) => write!(formatter, "A component named \"{name}\" exists"),
             Self::Io(error) => write!(formatter, "File error: {error}"),
             Self::Json(error) => write!(formatter, "Invalid component file: {error}"),
+            Self::Generation(error) => write!(formatter, "Cannot compile component: {error:?}"),
+            Self::InvalidSubcomponent(message) => formatter.write_str(message),
+            Self::Geometry(error) => write!(formatter, "Invalid component shape: {error:?}"),
         }
     }
 }
@@ -41,13 +55,44 @@ impl From<serde_json::Error> for ComponentFileError {
     }
 }
 
+impl From<GenerationError> for ComponentFileError {
+    fn from(error: GenerationError) -> Self {
+        Self::Generation(error)
+    }
+}
+
+impl From<GeometryError> for ComponentFileError {
+    fn from(error: GeometryError) -> Self {
+        Self::Geometry(error)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompiledComponent {
+    pub snapshot: LogicGridSnapshot,
+    pub vm: Vm,
+}
+
+#[derive(Clone, Debug)]
+pub struct ComponentFileDrag {
+    pub name: String,
+}
+
 pub struct ComponentFiles {
     root: PathBuf,
+    compiled_root: PathBuf,
 }
 
 impl ComponentFiles {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        let compiled_root = root.parent().map_or_else(
+            || PathBuf::from("compiled"),
+            |parent| parent.join("compiled"),
+        );
+        Self {
+            root,
+            compiled_root,
+        }
     }
 
     pub fn list(&self) -> Result<Vec<String>, ComponentFileError> {
@@ -102,9 +147,92 @@ impl ComponentFiles {
         Ok(())
     }
 
+    pub fn compile_subcomponent(&self, name: &str) -> Result<ComponentKind, ComponentFileError> {
+        let grid = self.load(name)?;
+        let bounds = grid
+            .bounds()
+            .ok_or(ComponentFileError::InvalidSubcomponent(
+                "Empty component files cannot be used as subcomponents",
+            ))?;
+        let width = i64::try_from(bounds.width())
+            .map_err(|_| ComponentFileError::InvalidSubcomponent("Component width is too large"))?;
+        let height = i64::try_from(bounds.height()).map_err(|_| {
+            ComponentFileError::InvalidSubcomponent("Component height is too large")
+        })?;
+        let size = Size::new(width, height);
+        let ports = subcomponent_ports(&grid, bounds.min, bounds.max)?;
+        let snapshot = grid.snapshot();
+        let vm = Vm::from_graph(&grid, &grid.generate_graph())?;
+        let bytes = serde_json::to_vec_pretty(&CompiledComponent { snapshot, vm })?;
+        let hash = ComponentHash::new(format!("{:x}", Sha256::digest(&bytes)))
+            .expect("SHA-256 is a valid component hash");
+
+        fs::create_dir_all(&self.compiled_root)?;
+        let path = self.compiled_root.join(format!("{hash}.json"));
+        if !path.exists() {
+            atomic_write(&path, &bytes)?;
+        }
+
+        Ok(ComponentKind::subcomponent(hash, size, ports)?)
+    }
+
+    #[cfg(test)]
+    fn compiled_path(&self, hash: &ComponentHash) -> PathBuf {
+        self.compiled_root.join(format!("{hash}.json"))
+    }
+
     fn path(&self, name: &str) -> PathBuf {
         self.root.join(format!("{name}.json"))
     }
+}
+
+fn subcomponent_ports(
+    grid: &LogicGrid,
+    min: Point,
+    max: Point,
+) -> Result<Vec<ComponentPort>, ComponentFileError> {
+    let mut ports = Vec::new();
+    for component in grid.components() {
+        let (direction, index, scale) = match component.kind {
+            ComponentKind::Input { id, scale } => {
+                (logicgame::grid::ConnectionDirection::Input, id.0, scale)
+            }
+            ComponentKind::Output { id, scale } => {
+                (logicgame::grid::ConnectionDirection::Output, id.0, scale)
+            }
+            _ => continue,
+        };
+        let lead = component
+            .lead()
+            .ok_or(ComponentFileError::InvalidSubcomponent(
+                "Input or output component has no external lead",
+            ))?;
+        let on_boundary = match lead.side {
+            ComponentSide::Top => lead.axis == min.y,
+            ComponentSide::Right => lead.axis == max.x,
+            ComponentSide::Bottom => lead.axis == max.y,
+            ComponentSide::Left => lead.axis == min.x,
+        };
+        if !on_boundary {
+            return Err(ComponentFileError::InvalidSubcomponent(
+                "Every input and output must lie on the component bounds",
+            ));
+        }
+        let offset = match lead.side {
+            ComponentSide::Top | ComponentSide::Bottom => min.x,
+            ComponentSide::Right | ComponentSide::Left => min.y,
+        };
+        ports.push(ComponentPort {
+            direction,
+            index,
+            scale,
+            side: lead.side,
+            start: lead.start - offset,
+            end: lead.end - offset,
+        });
+    }
+    ports.sort_by_key(|port| (port.direction, port.index));
+    Ok(ports)
 }
 
 pub fn validate_name(name: &str) -> Result<&str, ComponentFileError> {
@@ -172,18 +300,24 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use logicgame::grid::{ComponentKind, Point, Rotation, Scale};
+    use logicgame::grid::{ComponentKind, ComponentSide, Point, Rotation, Scale};
 
     use super::*;
 
     static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
     fn test_root() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "logicgame-components-{}-{}",
-            std::process::id(),
-            TEST_ID.fetch_add(1, Ordering::Relaxed)
-        ))
+        std::env::temp_dir()
+            .join(format!(
+                "logicgame-components-{}-{}",
+                std::process::id(),
+                TEST_ID.fetch_add(1, Ordering::Relaxed)
+            ))
+            .join("components")
+    }
+
+    fn remove_test_root(root: &Path) {
+        fs::remove_dir_all(root.parent().expect("test root has a parent")).unwrap();
     }
 
     #[test]
@@ -220,7 +354,7 @@ mod tests {
         files.save("Zed", &grid).unwrap();
         assert_eq!(files.load("Zed").unwrap().snapshot(), grid.snapshot());
 
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
     }
 
     #[test]
@@ -233,6 +367,103 @@ mod tests {
             files.load("broken"),
             Err(ComponentFileError::Json(_))
         ));
-        fs::remove_dir_all(root).unwrap();
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn compiles_and_reuses_content_addressed_subcomponents() {
+        let root = test_root();
+        let files = ComponentFiles::new(root.clone());
+        let mut grid = files.create("source").unwrap();
+        grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::new(2).unwrap(),
+                id: logicgame::grid::InputId(usize::MAX),
+            },
+        );
+        grid.add_component(
+            Point::new(4, 4),
+            Rotation::Down,
+            ComponentKind::Output {
+                scale: Scale::new(4).unwrap(),
+                id: logicgame::grid::OutputId(usize::MAX),
+            },
+        );
+        files.save("source", &grid).unwrap();
+
+        let first = files.compile_subcomponent("source").unwrap();
+        let second = files.compile_subcomponent("source").unwrap();
+        assert_eq!(first, second);
+        let ComponentKind::Subcomponent {
+            component,
+            size,
+            ports,
+            ..
+        } = first
+        else {
+            panic!("expected subcomponent");
+        };
+        assert_eq!(size, Size::new(8, 8));
+        assert_eq!(
+            ports,
+            vec![
+                ComponentPort::input(0, Scale::new(2).unwrap(), ComponentSide::Top, 0, 2),
+                ComponentPort::output(0, Scale::new(4).unwrap(), ComponentSide::Bottom, 4, 8),
+            ]
+        );
+        let path = files.compiled_path(&component);
+        let bytes = fs::read(&path).unwrap();
+        let compiled: CompiledComponent = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(compiled.snapshot, grid.snapshot());
+        assert_eq!(compiled.vm.inputs.len(), 1);
+        assert_eq!(compiled.vm.outputs.len(), 1);
+        assert_eq!(component.as_str(), format!("{:x}", Sha256::digest(&bytes)));
+
+        grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
+        files.save("source", &grid).unwrap();
+        let changed = files.compile_subcomponent("source").unwrap();
+        let ComponentKind::Subcomponent {
+            component: changed_hash,
+            ..
+        } = changed
+        else {
+            panic!("expected subcomponent");
+        };
+        assert_ne!(changed_hash, component);
+        assert!(files.compiled_path(&changed_hash).exists());
+
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn rejects_empty_and_non_boundary_subcomponents() {
+        let root = test_root();
+        let files = ComponentFiles::new(root.clone());
+        files.create("empty").unwrap();
+        assert!(matches!(
+            files.compile_subcomponent("empty"),
+            Err(ComponentFileError::InvalidSubcomponent(_))
+        ));
+
+        let mut grid = files.create("internal-port").unwrap();
+        grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
+        grid.add_component(
+            Point::new(4, 4),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: logicgame::grid::InputId(usize::MAX),
+            },
+        );
+        grid.add_component(Point::new(4, -4), Rotation::Up, ComponentKind::Led);
+        files.save("internal-port", &grid).unwrap();
+        assert!(matches!(
+            files.compile_subcomponent("internal-port"),
+            Err(ComponentFileError::InvalidSubcomponent(_))
+        ));
+
+        remove_test_root(&root);
     }
 }

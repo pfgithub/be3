@@ -1,6 +1,62 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
+
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ComponentHash(String);
+
+impl ComponentHash {
+    pub fn new(value: String) -> Result<Self, ComponentHashError> {
+        if value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            Ok(Self(value))
+        } else {
+            Err(ComponentHashError)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ComponentHash {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl Serialize for ComponentHash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::new(String::deserialize(deserializer)?).map_err(de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComponentHashError;
+
+impl fmt::Display for ComponentHashError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("component hashes must be 64 lowercase hexadecimal characters")
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Point {
@@ -208,6 +264,7 @@ pub enum ComponentKind {
         id: OutputId,
     },
     Subcomponent {
+        component: ComponentHash,
         size: Size,
         snap: Scale,
         ports: Vec<ComponentPort>,
@@ -216,8 +273,8 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     pub fn subcomponent(
+        component: ComponentHash,
         size: Size,
-        snap: Scale,
         ports: Vec<ComponentPort>,
     ) -> Result<Self, GeometryError> {
         if size.width <= 0 || size.height <= 0 {
@@ -229,7 +286,17 @@ impl ComponentKind {
         if let Some(port) = ports.iter().copied().find(|port| !port.is_valid_for(size)) {
             return Err(GeometryError::InvalidSubcomponentPort { size, port });
         }
-        Ok(Self::Subcomponent { size, snap, ports })
+        let snap = ports
+            .iter()
+            .map(|port| port.scale)
+            .max()
+            .unwrap_or(Scale::ONE);
+        Ok(Self::Subcomponent {
+            component,
+            size,
+            snap,
+            ports,
+        })
     }
 
     pub fn snap(&self) -> Scale {
@@ -367,7 +434,7 @@ impl ComponentKind {
                 size.width,
                 *scale,
             )],
-            Self::Subcomponent { snap, ports, .. } => ports
+            Self::Subcomponent { ports, .. } => ports
                 .iter()
                 .enumerate()
                 .map(|(id, port)| {
@@ -377,7 +444,7 @@ impl ComponentKind {
                         port.side,
                         port.start,
                         port.end,
-                        *snap,
+                        port.scale,
                     )
                 })
                 .collect(),
@@ -1218,24 +1285,42 @@ pub enum ConnectionDirection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ComponentPort {
     pub direction: ConnectionDirection,
+    pub index: usize,
+    pub scale: Scale,
     pub side: ComponentSide,
     pub start: i64,
     pub end: i64,
 }
 
 impl ComponentPort {
-    pub const fn input(side: ComponentSide, start: i64, end: i64) -> Self {
+    pub const fn input(
+        index: usize,
+        scale: Scale,
+        side: ComponentSide,
+        start: i64,
+        end: i64,
+    ) -> Self {
         Self {
             direction: ConnectionDirection::Input,
+            index,
+            scale,
             side,
             start,
             end,
         }
     }
 
-    pub const fn output(side: ComponentSide, start: i64, end: i64) -> Self {
+    pub const fn output(
+        index: usize,
+        scale: Scale,
+        side: ComponentSide,
+        start: i64,
+        end: i64,
+    ) -> Self {
         Self {
             direction: ConnectionDirection::Output,
+            index,
+            scale,
             side,
             start,
             end,
@@ -1618,6 +1703,10 @@ mod tests {
 
     fn scale(value: u8) -> Scale {
         Scale::new(value).unwrap()
+    }
+
+    fn component_hash() -> ComponentHash {
+        ComponentHash::new("0".repeat(64)).unwrap()
     }
 
     fn wire(start: (i64, i64), end: (i64, i64), scale: u8) -> Wire {
@@ -2331,12 +2420,12 @@ mod tests {
     fn subcomponent_ports_are_validated_and_rotate_with_the_component() {
         let size = Size::new(7, 11);
         let ports = vec![
-            ComponentPort::input(ComponentSide::Left, 2, 5),
-            ComponentPort::output(ComponentSide::Bottom, 3, 7),
+            ComponentPort::input(0, scale(2), ComponentSide::Left, 2, 5),
+            ComponentPort::output(0, scale(4), ComponentSide::Bottom, 3, 7),
         ];
-        let kind = ComponentKind::subcomponent(size, scale(2), ports).unwrap();
+        let kind = ComponentKind::subcomponent(component_hash(), size, ports).unwrap();
         let mut grid = LogicGrid::new();
-        let id = grid.add_component(Point::new(6, 4), Rotation::Left, kind);
+        let id = grid.add_component(Point::new(8, 4), Rotation::Left, kind);
         let component = grid.component(id).unwrap();
         assert_eq!(component.size(), Some(Size::new(11, 7)));
         assert_eq!(
@@ -2346,8 +2435,8 @@ mod tests {
                     id: ConnectionSlotId(0),
                     direction: ConnectionDirection::Input,
                     side: ComponentSide::Bottom,
-                    start: 8,
-                    end: 11,
+                    start: 10,
+                    end: 13,
                     scale: scale(2),
                 },
                 ConnectionSlot {
@@ -2356,15 +2445,15 @@ mod tests {
                     side: ComponentSide::Right,
                     start: 4,
                     end: 8,
-                    scale: scale(2),
+                    scale: scale(4),
                 },
             ]
         );
         assert!(grid.validate().is_empty());
 
-        let invalid = ComponentPort::input(ComponentSide::Top, 6, 8);
+        let invalid = ComponentPort::input(0, scale(2), ComponentSide::Top, 6, 8);
         assert_eq!(
-            ComponentKind::subcomponent(size, scale(2), vec![invalid]),
+            ComponentKind::subcomponent(component_hash(), size, vec![invalid]),
             Err(GeometryError::InvalidSubcomponentPort {
                 size,
                 port: invalid,
@@ -2420,11 +2509,11 @@ mod tests {
                     position: Point::new(16, 0),
                     rotation: Rotation::Right,
                     kind: ComponentKind::subcomponent(
+                        component_hash(),
                         Size::new(4, 6),
-                        scale(2),
                         vec![
-                            ComponentPort::input(ComponentSide::Left, 0, 2),
-                            ComponentPort::output(ComponentSide::Right, 2, 4),
+                            ComponentPort::input(0, scale(2), ComponentSide::Left, 0, 2),
+                            ComponentPort::output(0, scale(2), ComponentSide::Right, 2, 4),
                         ],
                     )
                     .unwrap(),

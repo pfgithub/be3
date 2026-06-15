@@ -7,7 +7,10 @@ use logicgame::grid::{
     LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
 };
 
-use crate::renderer::{DrawTriangle, GridCallback, RenderFrame};
+use crate::{
+    component_files::ComponentFileDrag,
+    renderer::{DrawTriangle, GridCallback, RenderFrame},
+};
 
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 96.0;
@@ -352,6 +355,11 @@ pub struct LogicEditor {
     simulation: Simulation,
 }
 
+pub struct ComponentFileDrop {
+    pub name: String,
+    pub position: Point,
+}
+
 impl Default for LogicEditor {
     fn default() -> Self {
         Self {
@@ -384,7 +392,7 @@ impl LogicEditor {
         self.simulation = Simulation::default();
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ComponentFileDrop> {
         let context = ui.ctx().clone();
         let canvas = egui::Frame::central_panel(ui.style()).show(ui, |ui| {
             let (response, painter) =
@@ -510,6 +518,23 @@ impl LogicEditor {
         }
 
         context.request_repaint();
+
+        let payload = canvas.inner.0.dnd_release_payload::<ComponentFileDrag>()?;
+        let pointer = context.pointer_interact_pos()?;
+        let world = self.camera.screen_to_world(pointer, canvas.inner.0.rect);
+        Some(ComponentFileDrop {
+            name: payload.name.clone(),
+            position: Point::new(world[0].floor() as i64, world[1].floor() as i64),
+        })
+    }
+
+    pub fn insert_subcomponent(&mut self, position: Point, kind: ComponentKind) {
+        let snap = kind.snap().get();
+        let position = Point::new(
+            position.x.div_euclid(snap) * snap,
+            position.y.div_euclid(snap) * snap,
+        );
+        self.grid.add_component(position, Rotation::Up, kind);
     }
 
     fn show_simulation(&mut self, context: &egui::Context) {

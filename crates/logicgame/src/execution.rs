@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use uuid::Uuid;
+use serde::{Deserialize, Serialize};
 
 use crate::grid::{
-    value_mask, CircuitGraph, ComponentId, ComponentKind, ConnectionDirection, ConnectionSlotId,
-    GraphNode, GraphNodeId, InputId, LogicGrid, OutputId,
+    value_mask, CircuitGraph, ComponentHash, ComponentId, ComponentKind, ConnectionDirection,
+    ConnectionSlotId, GraphNode, GraphNodeId, InputId, LogicGrid, OutputId,
 };
 
 pub type MemoryAddress = usize;
@@ -21,12 +21,12 @@ pub enum GenerationError {
     Cycle,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Instruction {
     Call {
-        component: Uuid,
-        inputs: Vec<MemoryAddress>,
-        outputs: Vec<MemoryAddress>,
+        component: ComponentHash,
+        inputs: Vec<Option<MemoryAddress>>,
+        outputs: Vec<Vec<MemoryAddress>>,
     },
     Not {
         input: MemoryAddress,
@@ -58,7 +58,7 @@ pub enum Instruction {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Vm {
     pub memory: Vec<u64>,
     pub storage: Vec<u64>,
@@ -321,8 +321,56 @@ impl Vm {
                     }
                 }
                 ComponentKind::Led => {}
-                ComponentKind::Subcomponent { .. } => {
-                    return Err(GenerationError::UnsupportedComponent(component.id));
+                ComponentKind::Subcomponent {
+                    component: component_hash,
+                    ports,
+                    ..
+                } => {
+                    let input_count = ports
+                        .iter()
+                        .filter(|port| port.direction == ConnectionDirection::Input)
+                        .map(|port| port.index + 1)
+                        .max()
+                        .unwrap_or(0);
+                    let output_count = ports
+                        .iter()
+                        .filter(|port| port.direction == ConnectionDirection::Output)
+                        .map(|port| port.index + 1)
+                        .max()
+                        .unwrap_or(0);
+                    let mut inputs = vec![None; input_count];
+                    let mut outputs = vec![Vec::new(); output_count];
+                    for (slot, port) in ports.iter().enumerate() {
+                        let addresses = connection_addresses(
+                            &connections,
+                            component.id,
+                            port.direction,
+                            ConnectionSlotId(slot as u16),
+                        );
+                        match port.direction {
+                            ConnectionDirection::Input => {
+                                if addresses.len() > 1 {
+                                    return Err(GenerationError::AmbiguousInput {
+                                        component: component.id,
+                                        slot: ConnectionSlotId(slot as u16),
+                                    });
+                                }
+                                inputs[port.index] = addresses.first().copied();
+                            }
+                            ConnectionDirection::Output => {
+                                outputs[port.index].extend_from_slice(addresses);
+                            }
+                        }
+                    }
+                    operations.push(Operation {
+                        inputs: inputs.iter().flatten().copied().collect(),
+                        outputs: outputs.iter().flatten().copied().collect(),
+                        instructions: vec![Instruction::Call {
+                            component: component_hash.clone(),
+                            inputs,
+                            outputs,
+                        }],
+                    });
                 }
             }
         }
@@ -630,7 +678,7 @@ mod tests {
     fn call_is_not_implemented() {
         let mut vm = Vm {
             instructions: vec![Instruction::Call {
-                component: Uuid::nil(),
+                component: ComponentHash::new("0".repeat(64)).unwrap(),
                 inputs: vec![],
                 outputs: vec![],
             }],
@@ -917,5 +965,74 @@ mod tests {
         vm.execute();
 
         assert_eq!(vm.memory[3], 0xabc0);
+    }
+
+    #[test]
+    fn subcomponents_compile_sparse_bindings_and_output_fanout() {
+        let mut grid = LogicGrid::new();
+        let component_hash = ComponentHash::new("a".repeat(64)).unwrap();
+        let subcomponent = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::subcomponent(
+                component_hash.clone(),
+                crate::grid::Size::new(4, 4),
+                vec![
+                    crate::grid::ComponentPort::input(1, Scale::ONE, ComponentSide::Left, 0, 1),
+                    crate::grid::ComponentPort::output(2, Scale::ONE, ComponentSide::Right, 0, 1),
+                ],
+            )
+            .unwrap(),
+        );
+        let graph = CircuitGraph {
+            nodes: vec![
+                GraphNode::WireNet { wires: Vec::new() },
+                GraphNode::WireNet { wires: Vec::new() },
+                GraphNode::WireNet { wires: Vec::new() },
+                GraphNode::Connection {
+                    component: subcomponent,
+                    slot: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Input,
+                    side: ComponentSide::Left,
+                    start: 0,
+                    end: 1,
+                    scale: Scale::ONE,
+                },
+                GraphNode::Connection {
+                    component: subcomponent,
+                    slot: ConnectionSlotId(1),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Right,
+                    start: 0,
+                    end: 1,
+                    scale: Scale::ONE,
+                },
+            ],
+            edges: vec![
+                GraphEdge {
+                    first: GraphNodeId(0),
+                    second: GraphNodeId(3),
+                },
+                GraphEdge {
+                    first: GraphNodeId(1),
+                    second: GraphNodeId(4),
+                },
+                GraphEdge {
+                    first: GraphNodeId(2),
+                    second: GraphNodeId(4),
+                },
+            ],
+        };
+
+        let vm = Vm::from_graph(&grid, &graph).unwrap();
+
+        assert_eq!(
+            vm.instructions,
+            vec![Instruction::Call {
+                component: component_hash,
+                inputs: vec![None, Some(0)],
+                outputs: vec![vec![], vec![], vec![1, 2]],
+            }]
+        );
     }
 }
