@@ -8,6 +8,8 @@ use logicgame::grid::{
 };
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
+const BOARD_COLOR: [f32; 4] = [0.065, 0.078, 0.098, 1.0];
+const BOARD_OUTLINE_COLOR: [f32; 4] = [0.48, 0.54, 0.66, 1.0];
 const MINOR_GRID_COLOR: [f32; 4] = [0.10, 0.12, 0.15, 1.0];
 const MAJOR_GRID_COLOR: [f32; 4] = [0.18, 0.21, 0.26, 1.0];
 const AXIS_COLOR: [f32; 4] = [0.35, 0.39, 0.48, 1.0];
@@ -18,6 +20,7 @@ pub struct RenderFrame {
     pub camera_center: [f32; 2],
     pub zoom: f32,
     pub grid_scale: f32,
+    pub board_bounds: [f32; 4],
     pub triangles: Vec<DrawTriangle>,
 }
 
@@ -476,23 +479,41 @@ fn frame_triangles(frame: &RenderFrame) -> Vec<DrawTriangle> {
     ];
     let mut triangles = Vec::new();
     triangles.extend(rectangle(bounds, BACKGROUND_COLOR));
-    add_grid_lines(
-        &mut triangles,
-        bounds,
-        frame.grid_scale,
-        1.5 / frame.zoom,
-        MINOR_GRID_COLOR,
-    );
-    add_grid_lines(
-        &mut triangles,
-        bounds,
-        frame.grid_scale * 8.0,
+    triangles.extend(rectangle(frame.board_bounds, BOARD_COLOR));
+    if let Some(visible_board) = intersect_rect(bounds, frame.board_bounds) {
+        add_grid_lines(
+            &mut triangles,
+            visible_board,
+            frame.grid_scale,
+            1.5 / frame.zoom,
+            MINOR_GRID_COLOR,
+        );
+        add_grid_lines(
+            &mut triangles,
+            visible_board,
+            frame.grid_scale * 8.0,
+            2.0 / frame.zoom,
+            MAJOR_GRID_COLOR,
+        );
+        add_axis_lines(&mut triangles, visible_board, 3.0 / frame.zoom);
+    }
+    triangles.extend(outline(
+        frame.board_bounds,
         2.0 / frame.zoom,
-        MAJOR_GRID_COLOR,
-    );
-    add_axis_lines(&mut triangles, bounds, 3.0 / frame.zoom);
+        BOARD_OUTLINE_COLOR,
+    ));
     triangles.extend_from_slice(&frame.triangles);
     triangles
+}
+
+fn intersect_rect(first: [f32; 4], second: [f32; 4]) -> Option<[f32; 4]> {
+    let intersection = [
+        first[0].max(second[0]),
+        first[1].max(second[1]),
+        first[2].min(second[2]),
+        first[3].min(second[3]),
+    ];
+    (intersection[0] < intersection[2] && intersection[1] < intersection[3]).then_some(intersection)
 }
 
 fn add_grid_lines(
@@ -505,18 +526,20 @@ fn add_grid_lines(
     let [left, top, right, bottom] = bounds;
     let mut x = (left / spacing).floor() * spacing;
     while x <= right {
-        triangles.extend(rectangle(
-            [x - width * 0.5, top, x + width * 0.5, bottom],
-            color,
-        ));
+        let line_left = (x - width * 0.5).max(left);
+        let line_right = (x + width * 0.5).min(right);
+        if line_left < line_right {
+            triangles.extend(rectangle([line_left, top, line_right, bottom], color));
+        }
         x += spacing;
     }
     let mut y = (top / spacing).floor() * spacing;
     while y <= bottom {
-        triangles.extend(rectangle(
-            [left, y - width * 0.5, right, y + width * 0.5],
-            color,
-        ));
+        let line_top = (y - width * 0.5).max(top);
+        let line_bottom = (y + width * 0.5).min(bottom);
+        if line_top < line_bottom {
+            triangles.extend(rectangle([left, line_top, right, line_bottom], color));
+        }
         y += spacing;
     }
 }
@@ -524,16 +547,14 @@ fn add_grid_lines(
 fn add_axis_lines(triangles: &mut Vec<DrawTriangle>, bounds: [f32; 4], width: f32) {
     let [left, top, right, bottom] = bounds;
     if left <= 0.0 && 0.0 <= right {
-        triangles.extend(rectangle(
-            [-width * 0.5, top, width * 0.5, bottom],
-            AXIS_COLOR,
-        ));
+        let line_left = (-width * 0.5).max(left);
+        let line_right = (width * 0.5).min(right);
+        triangles.extend(rectangle([line_left, top, line_right, bottom], AXIS_COLOR));
     }
     if top <= 0.0 && 0.0 <= bottom {
-        triangles.extend(rectangle(
-            [left, -width * 0.5, right, width * 0.5],
-            AXIS_COLOR,
-        ));
+        let line_top = (-width * 0.5).max(top);
+        let line_bottom = (width * 0.5).min(bottom);
+        triangles.extend(rectangle([left, line_top, right, line_bottom], AXIS_COLOR));
     }
 }
 
@@ -705,14 +726,56 @@ mod tests {
             camera_center: [0.0, 0.0],
             zoom: 10.0,
             grid_scale: 1.0,
+            board_bounds: [-4.0, -4.0, 4.0, 4.0],
             triangles: Vec::new(),
         };
         let triangles = frame_triangles(&frame);
 
-        let first_minor_x = triangles[2].positions[0][0];
-        let second_minor_x = triangles[4].positions[0][0];
+        let first_minor_x = triangles[6].positions[0][0];
+        let second_minor_x = triangles[8].positions[0][0];
         assert!((second_minor_x - first_minor_x - 1.0).abs() < 0.0001);
-        assert_eq!(triangles[2].color, MINOR_GRID_COLOR);
-        assert_eq!(triangles[4].color, MINOR_GRID_COLOR);
+        assert_eq!(triangles[6].color, MINOR_GRID_COLOR);
+        assert_eq!(triangles[8].color, MINOR_GRID_COLOR);
+    }
+
+    #[test]
+    fn board_background_grid_outline_and_entities_are_layered_and_bounded() {
+        let entity = DrawTriangle::new(
+            [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]],
+            DrawTriangle::WIRE_COLOR,
+        );
+        let frame = RenderFrame {
+            viewport_size: [100.0, 100.0],
+            camera_center: [0.0, 0.0],
+            zoom: 10.0,
+            grid_scale: 1.0,
+            board_bounds: [-2.0, -1.0, 3.0, 4.0],
+            triangles: vec![entity],
+        };
+
+        let triangles = frame_triangles(&frame);
+        assert_eq!(triangles[0].color, BACKGROUND_COLOR);
+        assert_eq!(triangles[2].color, BOARD_COLOR);
+        assert_eq!(triangles.last().unwrap().color, DrawTriangle::WIRE_COLOR);
+
+        let outline_start = triangles
+            .iter()
+            .position(|triangle| triangle.color == BOARD_OUTLINE_COLOR)
+            .unwrap();
+        let entity_start = triangles.len() - frame.triangles.len();
+        assert!(outline_start < entity_start);
+
+        for triangle in triangles.iter().filter(|triangle| {
+            triangle.color == MINOR_GRID_COLOR
+                || triangle.color == MAJOR_GRID_COLOR
+                || triangle.color == AXIS_COLOR
+        }) {
+            assert!(triangle.positions.iter().all(|[x, y]| {
+                frame.board_bounds[0] <= *x
+                    && *x <= frame.board_bounds[2]
+                    && frame.board_bounds[1] <= *y
+                    && *y <= frame.board_bounds[3]
+            }));
+        }
     }
 }
