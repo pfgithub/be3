@@ -66,6 +66,7 @@ struct ShapeVertexOutput {
     @location(1) @interpolate(flat) color: vec4<f32>,
     @location(2) @interpolate(flat) kind: u32,
     @location(3) @interpolate(flat) rotation: u32,
+    @location(4) @interpolate(flat) size: vec2<f32>,
 };
 
 @vertex
@@ -95,6 +96,7 @@ fn shape_vs(
     output.color = input.color;
     output.kind = input.kind;
     output.rotation = input.rotation;
+    output.size = input.rect.zw - input.rect.xy;
     return output;
 }
 
@@ -116,7 +118,30 @@ fn segment_distance(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> f32 {
 @fragment
 fn shape_fs(input: ShapeVertexOutput) -> @location(0) vec4<f32> {
     if input.kind == 0u {
-        return input.color;
+        var point = input.uv * input.size;
+        var length = input.size.x;
+        var scale = input.size.y;
+        if input.rotation == 1u {
+            point = point.yx;
+            length = input.size.y;
+            scale = input.size.x;
+        }
+
+        let center_y = scale * 0.5;
+        let start = vec2<f32>(scale * 0.5, center_y);
+        let end = vec2<f32>(length - scale * 0.5, center_y);
+        let diamond_radius = scale * 0.38;
+        let line_radius = scale * 0.08;
+        let antialias = 1.0 / grid.zoom;
+        let line_alpha =
+            1.0 - smoothstep(line_radius, line_radius + antialias, segment_distance(point, start, end));
+        let start_diamond = abs(point.x - start.x) + abs(point.y - start.y);
+        let end_diamond = abs(point.x - end.x) + abs(point.y - end.y);
+        let diamond_distance = min(start_diamond, end_diamond);
+        let diamond_alpha =
+            1.0 - smoothstep(diamond_radius, diamond_radius + antialias, diamond_distance);
+        let alpha = max(line_alpha, diamond_alpha) * input.color.a;
+        return vec4<f32>(input.color.rgb, alpha);
     }
 
     let uv = canonical_gate_uv(input.uv, input.rotation);

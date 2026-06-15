@@ -60,7 +60,10 @@ impl DrawInstance {
             rect,
             color,
             kind: 0,
-            rotation: 0,
+            rotation: match wire.orientation() {
+                Orientation::Horizontal => 0,
+                Orientation::Vertical => 1,
+            },
             _padding: [0; 2],
         }
     }

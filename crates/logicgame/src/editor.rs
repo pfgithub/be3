@@ -251,9 +251,17 @@ impl LogicEditor {
             }
         }
 
-        let mut instances = Vec::new();
+        let mut component_instances = Vec::new();
+        let mut wire_instances = Vec::new();
+        for component in self.grid.components() {
+            if let Some(instance) =
+                DrawInstance::component(component, bad_components.contains(&component.id))
+            {
+                component_instances.push(instance);
+            }
+        }
         for wire in self.grid.wires() {
-            instances.push(DrawInstance::wire(
+            wire_instances.push(DrawInstance::wire(
                 *wire,
                 if bad_wires.contains(wire) {
                     DrawInstance::ERROR_COLOR
@@ -262,20 +270,13 @@ impl LogicEditor {
                 },
             ));
         }
-        for component in self.grid.components() {
-            if let Some(instance) =
-                DrawInstance::component(component, bad_components.contains(&component.id))
-            {
-                instances.push(instance);
-            }
-        }
 
         if let Some(pointer) = pointer_world {
             let snapped = snap_point(pointer, self.tool.scale);
             match self.gesture {
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(start, snapped, self.tool.scale) {
-                        instances.push(DrawInstance::wire(wire, DrawInstance::PREVIEW_COLOR));
+                        wire_instances.push(DrawInstance::wire(wire, DrawInstance::PREVIEW_COLOR));
                     }
                 }
                 Some(Gesture::Not { anchor, drag_start }) => {
@@ -289,20 +290,22 @@ impl LogicEditor {
                             },
                         };
                         if let Some(instance) = DrawInstance::component(&component, false) {
-                            instances.push(instance.with_color(DrawInstance::PREVIEW_COLOR));
+                            component_instances
+                                .push(instance.with_color(DrawInstance::PREVIEW_COLOR));
                         }
                     }
                 }
                 None => {}
             }
         }
+        component_instances.extend(wire_instances);
 
         RenderFrame {
             viewport_size: [rect.width(), rect.height()],
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
             grid_scale: self.tool.scale.get() as f32,
-            instances,
+            instances: component_instances,
         }
     }
 }
