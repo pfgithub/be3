@@ -1062,44 +1062,36 @@ impl LogicEditor {
             match self.gesture.take() {
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(start, snapped, self.tool.scale) {
-                        self.edit_grid_preserving_edge_attachments(|grid| {
-                            grid.add_wire(wire);
-                        });
+                        self.grid.add_wire(wire);
                     }
                 }
                 Some(Gesture::Not { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
-                        self.edit_grid_preserving_edge_attachments(|grid| {
-                            grid.add_component(
-                                oriented_component_position(anchor, rotation, scale),
-                                rotation,
-                                ComponentKind::Not { scale },
-                            );
-                        });
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, scale),
+                            rotation,
+                            ComponentKind::Not { scale },
+                        );
                     }
                 }
                 Some(Gesture::Led { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
-                        self.edit_grid_preserving_edge_attachments(|grid| {
-                            grid.add_component(
-                                oriented_component_position(anchor, rotation, Scale::ONE),
-                                rotation,
-                                ComponentKind::Led,
-                            );
-                        });
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, Scale::ONE),
+                            rotation,
+                            ComponentKind::Led,
+                        );
                     }
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
-                        self.edit_grid_preserving_edge_attachments(|grid| {
-                            grid.add_component(
-                                oriented_component_position(anchor, rotation, scale),
-                                rotation,
-                                ComponentKind::Storage { scale, value: 0 },
-                            );
-                        });
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, scale),
+                            rotation,
+                            ComponentKind::Storage { scale, value: 0 },
+                        );
                     }
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
@@ -1206,17 +1198,15 @@ impl LogicEditor {
             return;
         };
 
-        self.edit_grid_preserving_edge_attachments(|grid| {
-            for wire in wires {
-                grid.remove_wire(wire.wire);
-            }
-            for (id, position) in moved_components {
-                grid.set_component_position(id, position);
-            }
-            for wire in &moved_wires {
-                grid.add_wire(*wire);
-            }
-        });
+        for wire in wires {
+            self.grid.remove_wire(wire.wire);
+        }
+        for (id, position) in moved_components {
+            self.grid.set_component_position(id, position);
+        }
+        for wire in &moved_wires {
+            self.grid.add_wire(*wire);
+        }
 
         let selected_points: BTreeSet<_> = wires
             .iter()
@@ -1247,46 +1237,6 @@ impl LogicEditor {
             })
             .filter(|endpoint| selected_points.contains(&(endpoint.point(), endpoint.wire.scale)))
             .collect();
-    }
-
-    fn edit_grid_preserving_edge_attachments(&mut self, edit: impl FnOnce(&mut LogicGrid)) {
-        let Some(old_bounds) = BoardBounds::from_grid(&self.grid) else {
-            edit(&mut self.grid);
-            return;
-        };
-        let attachments = BoardBounds::edge_attachments(&self.grid, old_bounds);
-        edit(&mut self.grid);
-        if attachments.is_empty() {
-            return;
-        }
-
-        let ignored_endpoints: BTreeSet<_> = attachments
-            .iter()
-            .map(|attachment| (attachment.point, attachment.wire.scale))
-            .collect();
-        let Some(new_bounds) =
-            BoardBounds::from_grid_ignoring_endpoints(&self.grid, &ignored_endpoints)
-        else {
-            return;
-        };
-
-        let mut replacements = BTreeMap::<Wire, Wire>::new();
-        for attachment in attachments {
-            if !self.grid.wires().contains(&attachment.wire) {
-                continue;
-            }
-            let wire = replacements
-                .get(&attachment.wire)
-                .copied()
-                .unwrap_or(attachment.wire);
-            if let Some(wire) = attachment.extend(wire, old_bounds, new_bounds) {
-                replacements.insert(attachment.wire, wire);
-            }
-        }
-        for (original, replacement) in replacements {
-            self.grid.remove_wire(original);
-            self.grid.add_wire(replacement);
-        }
     }
 
     fn delete_selection(&mut self) {
@@ -1336,8 +1286,6 @@ impl LogicEditor {
 
         let mut component_triangles = Vec::new();
         let mut wire_triangles = Vec::new();
-        let mut preview_components = Vec::new();
-        let mut preview_wires = Vec::new();
         for component in self.grid.components() {
             component_triangles.extend(DrawTriangle::component(
                 component,
@@ -1389,7 +1337,6 @@ impl LogicEditor {
             match self.gesture.as_ref() {
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(*start, snapped, self.tool.scale) {
-                        preview_wires.push(wire);
                         wire_triangles
                             .extend(DrawTriangle::wire(wire, DrawTriangle::PREVIEW_COLOR));
                     }
@@ -1408,7 +1355,6 @@ impl LogicEditor {
                                 scale: self.tool.scale,
                             },
                         };
-                        preview_components.push(component.clone());
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -1424,7 +1370,6 @@ impl LogicEditor {
                             rotation,
                             kind: ComponentKind::Led,
                         };
-                        preview_components.push(component.clone());
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -1447,7 +1392,6 @@ impl LogicEditor {
                                 value: 0,
                             },
                         };
-                        preview_components.push(component.clone());
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -1471,7 +1415,6 @@ impl LogicEditor {
                         };
                         let mut component = original.clone();
                         component.position = position;
-                        preview_components.push(component.clone());
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -1480,7 +1423,6 @@ impl LogicEditor {
                     }
                     for wire in wires {
                         if let Some(wire) = move_selected_wire(*wire, delta) {
-                            preview_wires.push(wire);
                             wire_triangles
                                 .extend(DrawTriangle::wire(wire, DrawTriangle::PREVIEW_COLOR));
                         }
@@ -1491,16 +1433,13 @@ impl LogicEditor {
             }
         }
         wire_triangles.extend(component_triangles);
-        let board_bounds =
-            BoardBounds::from_grid_and_previews(&self.grid, &preview_components, &preview_wires)
-                .unwrap_or_default();
 
         RenderFrame {
             viewport_size: [rect.width(), rect.height()],
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
             grid_scale: self.tool.scale.get() as f32,
-            board_bounds: board_bounds.as_f32(),
+            board_bounds: [-5.0, -5.0, 5.0, 5.0],
             triangles: wire_triangles,
         }
     }
@@ -1583,289 +1522,6 @@ fn move_selected_wire(selected: SelectedWire, delta: Point) -> Option<Wire> {
         selected.wire.end
     };
     Wire::new(start, end, selected.wire.scale).ok()
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct BoardBounds {
-    min: Point,
-    max: Point,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BoardSide {
-    Top,
-    Right,
-    Bottom,
-    Left,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct EdgeAttachment {
-    wire: Wire,
-    point: Point,
-    side: BoardSide,
-}
-
-impl EdgeAttachment {
-    fn extend(self, wire: Wire, old: BoardBounds, new: BoardBounds) -> Option<Wire> {
-        let scale = wire.scale.get();
-        let expanded = match self.side {
-            BoardSide::Top => new.min.y < old.min.y,
-            BoardSide::Right => new.max.x > old.max.x,
-            BoardSide::Bottom => new.max.y > old.max.y,
-            BoardSide::Left => new.min.x < old.min.x,
-        };
-        if !expanded {
-            return None;
-        }
-
-        let point = match self.side {
-            BoardSide::Top => Point::new(self.point.x, new.min.y.checked_sub(scale)?),
-            BoardSide::Right => Point::new(new.max.x, self.point.y),
-            BoardSide::Bottom => Point::new(self.point.x, new.max.y),
-            BoardSide::Left => Point::new(new.min.x.checked_sub(scale)?, self.point.y),
-        };
-        let (start, end) = if self.point == self.wire.start {
-            (point, wire.end)
-        } else {
-            (wire.start, point)
-        };
-        Wire::new(start, end, wire.scale).ok()
-    }
-}
-
-impl Default for BoardBounds {
-    fn default() -> Self {
-        Self {
-            min: Point::new(0, 0),
-            max: Point::new(1, 1),
-        }
-    }
-}
-
-impl BoardBounds {
-    fn from_grid(grid: &LogicGrid) -> Option<Self> {
-        Self::from_grid_and_previews(grid, &[], &[])
-    }
-
-    fn from_grid_and_previews(
-        grid: &LogicGrid,
-        preview_components: &[Component],
-        preview_wires: &[Wire],
-    ) -> Option<Self> {
-        Self::from_geometry(grid, preview_components, preview_wires, &BTreeSet::new())
-    }
-
-    fn from_grid_ignoring_endpoints(
-        grid: &LogicGrid,
-        ignored_endpoints: &BTreeSet<(Point, Scale)>,
-    ) -> Option<Self> {
-        Self::from_geometry(grid, &[], &[], ignored_endpoints)
-    }
-
-    fn from_geometry(
-        grid: &LogicGrid,
-        preview_components: &[Component],
-        preview_wires: &[Wire],
-        ignored_endpoints: &BTreeSet<(Point, Scale)>,
-    ) -> Option<Self> {
-        let mut bounds = None;
-        for component in grid.components().chain(preview_components) {
-            Self::include_component_in(&mut bounds, component);
-        }
-        let wires: Vec<_> = grid
-            .wires()
-            .iter()
-            .copied()
-            .chain(preview_wires.iter().copied())
-            .collect();
-        for wire in &wires {
-            Self::include_wire_interior_in(&mut bounds, *wire);
-        }
-        let mut endpoint_counts = BTreeMap::new();
-        for wire in &wires {
-            for point in [wire.start, wire.end] {
-                *endpoint_counts.entry((point, wire.scale)).or_insert(0) += 1;
-            }
-        }
-        for ((point, scale), count) in &endpoint_counts {
-            if *count >= 2 && !ignored_endpoints.contains(&(*point, *scale)) {
-                if let Some(endpoint) = Self::endpoint_bounds(*point, *scale) {
-                    Self::include_rect(&mut bounds, endpoint.min, endpoint.max);
-                }
-            }
-        }
-
-        let core_bounds = bounds;
-        for wire in wires {
-            for (point, endpoint, attached) in Self::wire_endpoints(wire, core_bounds) {
-                if ignored_endpoints.contains(&(point, wire.scale)) {
-                    continue;
-                }
-                if endpoint_counts
-                    .get(&(point, wire.scale))
-                    .is_some_and(|count| *count >= 2)
-                {
-                    continue;
-                }
-                if !attached {
-                    Self::include_rect(&mut bounds, endpoint.min, endpoint.max);
-                }
-            }
-        }
-        bounds
-    }
-
-    fn edge_attachments(grid: &LogicGrid, bounds: Self) -> Vec<EdgeAttachment> {
-        let mut endpoint_counts = BTreeMap::new();
-        for wire in grid.wires() {
-            for point in [wire.start, wire.end] {
-                *endpoint_counts.entry((point, wire.scale)).or_insert(0) += 1;
-            }
-        }
-
-        let mut attachments = Vec::new();
-        for wire in grid.wires() {
-            for (point, _, attached) in Self::wire_endpoints(*wire, Some(bounds)) {
-                if !attached
-                    || endpoint_counts
-                        .get(&(point, wire.scale))
-                        .is_some_and(|count| *count >= 2)
-                {
-                    continue;
-                }
-                let side = if point == wire.start {
-                    match wire.orientation() {
-                        logicgame::grid::Orientation::Horizontal => BoardSide::Left,
-                        logicgame::grid::Orientation::Vertical => BoardSide::Top,
-                    }
-                } else {
-                    match wire.orientation() {
-                        logicgame::grid::Orientation::Horizontal => BoardSide::Right,
-                        logicgame::grid::Orientation::Vertical => BoardSide::Bottom,
-                    }
-                };
-                attachments.push(EdgeAttachment {
-                    wire: *wire,
-                    point,
-                    side,
-                });
-            }
-        }
-        attachments
-    }
-
-    fn include_component_in(bounds: &mut Option<Self>, component: &Component) {
-        let Some(size) = component.size() else {
-            return;
-        };
-        let Some(max_x) = component.position.x.checked_add(size.width) else {
-            return;
-        };
-        let Some(max_y) = component.position.y.checked_add(size.height) else {
-            return;
-        };
-        Self::include_rect(bounds, component.position, Point::new(max_x, max_y));
-    }
-
-    fn include_wire_interior_in(bounds: &mut Option<Self>, wire: Wire) {
-        let scale = wire.scale.get();
-        let Some(start) = (match wire.orientation() {
-            logicgame::grid::Orientation::Horizontal => wire
-                .start
-                .x
-                .checked_add(scale)
-                .map(|x| Point::new(x, wire.start.y)),
-            logicgame::grid::Orientation::Vertical => wire
-                .start
-                .y
-                .checked_add(scale)
-                .map(|y| Point::new(wire.start.x, y)),
-        }) else {
-            return;
-        };
-        let Some(end) = (match wire.orientation() {
-            logicgame::grid::Orientation::Horizontal => wire
-                .start
-                .y
-                .checked_add(scale)
-                .map(|y| Point::new(wire.end.x, y)),
-            logicgame::grid::Orientation::Vertical => wire
-                .start
-                .x
-                .checked_add(scale)
-                .map(|x| Point::new(x, wire.end.y)),
-        }) else {
-            return;
-        };
-        Self::include_rect(bounds, start, end);
-    }
-
-    fn wire_endpoints(wire: Wire, bounds: Option<Self>) -> Vec<(Point, Self, bool)> {
-        let Some(start) = Self::endpoint_bounds(wire.start, wire.scale) else {
-            return Vec::new();
-        };
-        let Some(end) = Self::endpoint_bounds(wire.end, wire.scale) else {
-            return Vec::new();
-        };
-        let Some(bounds) = bounds else {
-            return vec![(wire.start, start, false), (wire.end, end, false)];
-        };
-        let cross_axis_inside = |endpoint: Self| match wire.orientation() {
-            logicgame::grid::Orientation::Horizontal => {
-                bounds.min.y <= endpoint.min.y && endpoint.max.y <= bounds.max.y
-            }
-            logicgame::grid::Orientation::Vertical => {
-                bounds.min.x <= endpoint.min.x && endpoint.max.x <= bounds.max.x
-            }
-        };
-        let start_attached = cross_axis_inside(start)
-            && match wire.orientation() {
-                logicgame::grid::Orientation::Horizontal => start.max.x == bounds.min.x,
-                logicgame::grid::Orientation::Vertical => start.max.y == bounds.min.y,
-            };
-        let end_attached = cross_axis_inside(end)
-            && match wire.orientation() {
-                logicgame::grid::Orientation::Horizontal => end.min.x == bounds.max.x,
-                logicgame::grid::Orientation::Vertical => end.min.y == bounds.max.y,
-            };
-        vec![
-            (wire.start, start, start_attached),
-            (wire.end, end, end_attached),
-        ]
-    }
-
-    fn endpoint_bounds(point: Point, scale: Scale) -> Option<Self> {
-        Some(Self {
-            min: point,
-            max: Point::new(
-                point.x.checked_add(scale.get())?,
-                point.y.checked_add(scale.get())?,
-            ),
-        })
-    }
-
-    fn include_rect(bounds: &mut Option<Self>, min: Point, max: Point) {
-        if min.x >= max.x || min.y >= max.y {
-            return;
-        }
-        *bounds = Some(match *bounds {
-            Some(bounds) => Self {
-                min: Point::new(bounds.min.x.min(min.x), bounds.min.y.min(min.y)),
-                max: Point::new(bounds.max.x.max(max.x), bounds.max.y.max(max.y)),
-            },
-            None => Self { min, max },
-        });
-    }
-
-    fn as_f32(self) -> [f32; 4] {
-        [
-            self.min.x as f32,
-            self.min.y as f32,
-            self.max.x as f32,
-            self.max.y as f32,
-        ]
-    }
 }
 
 fn world_to_screen(world: [f32; 2], camera: Camera, rect: egui::Rect) -> egui::Pos2 {
@@ -2176,208 +1832,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_grid_uses_the_one_cell_origin_board() {
-        assert_eq!(
-            BoardBounds::from_grid(&LogicGrid::new()).unwrap_or_default(),
-            BoardBounds {
-                min: Point::new(0, 0),
-                max: Point::new(1, 1),
-            }
-        );
-    }
-
-    #[test]
-    fn board_bounds_include_rotated_component_extents() {
-        let mut grid = LogicGrid::new();
-        grid.add_component(
-            Point::new(10, -4),
-            Rotation::Right,
-            ComponentKind::Not { scale: scale(2) },
-        );
-
-        assert_eq!(
-            BoardBounds::from_grid(&grid),
-            Some(BoardBounds {
-                min: Point::new(10, -4),
-                max: Point::new(14, -2),
-            })
-        );
-    }
-
-    #[test]
-    fn wire_board_bounds_exclude_only_edge_facing_endpoints() {
-        let mut horizontal = None;
-        BoardBounds::include_wire_interior_in(&mut horizontal, wire((-4, 6), (8, 6), 2));
-        assert_eq!(
-            horizontal,
-            Some(BoardBounds {
-                min: Point::new(-2, 6),
-                max: Point::new(8, 8),
-            })
-        );
-
-        let mut vertical = None;
-        BoardBounds::include_wire_interior_in(&mut vertical, wire((3, -8), (3, 4), 2));
-        assert_eq!(
-            vertical,
-            Some(BoardBounds {
-                min: Point::new(3, -6),
-                max: Point::new(5, 4),
-            })
-        );
-
-        let mut grid = LogicGrid::new();
-        grid.add_wire(wire((0, 0), (2, 0), 2));
-        assert_eq!(
-            BoardBounds::from_grid(&grid),
-            Some(BoardBounds {
-                min: Point::new(0, 0),
-                max: Point::new(4, 2),
-            })
-        );
-    }
-
-    #[test]
-    fn perpendicular_wire_can_extend_a_side_and_keep_an_external_endpoint() {
-        let mut grid = LogicGrid::new();
-        grid.add_component(
-            Point::new(0, 0),
-            Rotation::Up,
-            ComponentKind::Not { scale: scale(2) },
-        );
-        grid.add_wire(wire((4, -2), (4, 4), 1));
-
-        assert_eq!(
-            BoardBounds::from_grid(&grid),
-            Some(BoardBounds {
-                min: Point::new(0, -1),
-                max: Point::new(5, 4),
-            })
-        );
-    }
-
-    #[test]
-    fn parallel_wire_on_a_side_expands_the_board_instead_of_attaching() {
-        let mut grid = LogicGrid::new();
-        grid.add_component(
-            Point::new(0, 0),
-            Rotation::Up,
-            ComponentKind::Not { scale: scale(2) },
-        );
-        grid.add_wire(wire((0, -1), (1, -1), 1));
-
-        assert_eq!(
-            BoardBounds::from_grid(&grid),
-            Some(BoardBounds {
-                min: Point::new(0, -1),
-                max: Point::new(2, 4),
-            })
-        );
-    }
-
-    #[test]
-    fn shared_t_junction_is_the_component_body_and_leaves_are_attachments() {
-        let mut grid = LogicGrid::new();
-        grid.add_wire(wire((0, 0), (0, 1), 1));
-        grid.add_wire(wire((0, 1), (0, 2), 1));
-        grid.add_wire(wire((0, 1), (1, 1), 1));
-
-        assert_eq!(
-            BoardBounds::from_grid(&grid),
-            Some(BoardBounds {
-                min: Point::new(0, 1),
-                max: Point::new(1, 2),
-            })
-        );
-    }
-
-    #[test]
-    fn expanding_an_edge_stretches_its_existing_attachment_wire() {
-        let mut editor = LogicEditor::default();
-        editor
-            .grid
-            .add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
-        editor.grid.add_wire(wire((0, 0), (1, 0), 1));
-
-        editor.edit_grid_preserving_edge_attachments(|grid| {
-            grid.add_component(Point::new(4, 0), Rotation::Up, ComponentKind::Led);
-        });
-
-        assert_eq!(editor.grid.wires(), &[wire((0, 0), (5, 0), 1)]);
-        assert_eq!(
-            BoardBounds::from_grid(&editor.grid),
-            Some(BoardBounds {
-                min: Point::new(0, 0),
-                max: Point::new(5, 2),
-            })
-        );
-    }
-
-    #[test]
-    fn attachment_extension_uses_the_new_edge_on_all_four_sides() {
-        let old = BoardBounds {
-            min: Point::new(0, 0),
-            max: Point::new(4, 4),
-        };
-        let new = BoardBounds {
-            min: Point::new(-2, -2),
-            max: Point::new(7, 7),
-        };
-        for (attachment, expected) in [
-            (
-                EdgeAttachment {
-                    wire: wire((-1, 1), (0, 1), 1),
-                    point: Point::new(-1, 1),
-                    side: BoardSide::Left,
-                },
-                wire((-3, 1), (0, 1), 1),
-            ),
-            (
-                EdgeAttachment {
-                    wire: wire((3, 1), (4, 1), 1),
-                    point: Point::new(4, 1),
-                    side: BoardSide::Right,
-                },
-                wire((3, 1), (7, 1), 1),
-            ),
-            (
-                EdgeAttachment {
-                    wire: wire((1, -1), (1, 0), 1),
-                    point: Point::new(1, -1),
-                    side: BoardSide::Top,
-                },
-                wire((1, -3), (1, 0), 1),
-            ),
-            (
-                EdgeAttachment {
-                    wire: wire((1, 3), (1, 4), 1),
-                    point: Point::new(1, 4),
-                    side: BoardSide::Bottom,
-                },
-                wire((1, 3), (1, 7), 1),
-            ),
-        ] {
-            assert_eq!(attachment.extend(attachment.wire, old, new), Some(expected));
-        }
-    }
-
-    #[test]
-    fn board_bounds_union_components_and_wire_interiors() {
-        let mut grid = LogicGrid::new();
-        grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
-        grid.add_wire(wire((-3, 1), (5, 1), 1));
-
-        assert_eq!(
-            BoardBounds::from_grid(&grid),
-            Some(BoardBounds {
-                min: Point::new(-2, 0),
-                max: Point::new(5, 2),
-            })
-        );
-    }
-
-    #[test]
-    fn placement_preview_expands_the_rendered_board() {
+    fn component_bounds_are_fixed_during_placement_preview() {
         let mut editor = LogicEditor::default();
         editor.tool = Tool {
             kind: ToolKind::Led,
@@ -2395,7 +1850,7 @@ mod tests {
             &GraphHover::default(),
         );
 
-        assert_eq!(frame.board_bounds, [8.0, 8.0, 10.0, 9.0]);
+        assert_eq!(frame.board_bounds, [-5.0, -5.0, 5.0, 5.0]);
     }
 
     #[test]
