@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use eframe::egui_wgpu::{self, wgpu};
-use logicgame::grid::{Component, ComponentKind, Orientation, Rotation, Wire};
+use logicgame::grid::{
+    Component, ComponentKind, ComponentSide, ConnectionSlot, Orientation, Rotation, Wire,
+};
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
 const MINOR_GRID_COLOR: [f32; 4] = [0.10, 0.12, 0.15, 1.0];
@@ -150,6 +152,31 @@ impl DrawTriangle {
             color,
         ));
         triangles
+    }
+
+    pub fn connection_highlight(component: &Component, connection: ConnectionSlot) -> Vec<Self> {
+        let Some(size) = component.size() else {
+            return Vec::new();
+        };
+        let left = component.position.x as f32;
+        let top = component.position.y as f32;
+        let right = left + size.width as f32;
+        let bottom = top + size.height as f32;
+        let start = connection.start as f32;
+        let end = connection.end as f32;
+        let thickness = (size.width.min(size.height) as f32 * 0.12).clamp(0.12, 0.3);
+        let rect = match connection.side {
+            ComponentSide::Top => [start, top - thickness * 0.5, end, top + thickness * 0.5],
+            ComponentSide::Right => [right - thickness * 0.5, start, right + thickness * 0.5, end],
+            ComponentSide::Bottom => [
+                start,
+                bottom - thickness * 0.5,
+                end,
+                bottom + thickness * 0.5,
+            ],
+            ComponentSide::Left => [left - thickness * 0.5, start, left + thickness * 0.5, end],
+        };
+        rectangle(rect, Self::HIGHLIGHT_COLOR).to_vec()
     }
 
     pub fn with_color(mut self, color: [f32; 4]) -> Self {
@@ -416,7 +443,9 @@ fn add_axis_lines(triangles: &mut Vec<DrawTriangle>, bounds: [f32; 4], width: f3
 #[cfg(test)]
 mod tests {
     use super::*;
-    use logicgame::grid::{ComponentId, Point, Scale};
+    use logicgame::grid::{
+        ComponentId, ComponentSide, ConnectionSlot, ConnectionSlotId, Point, Scale,
+    };
 
     #[test]
     fn wires_and_gates_are_emitted_as_filled_triangles() {
@@ -461,6 +490,20 @@ mod tests {
         let highlight = DrawTriangle::component_highlight(&gate);
         assert_eq!(highlight.len(), 8);
         assert!(highlight
+            .iter()
+            .all(|triangle| triangle.color == DrawTriangle::HIGHLIGHT_COLOR));
+
+        let connection = DrawTriangle::connection_highlight(
+            &gate,
+            ConnectionSlot {
+                id: ConnectionSlotId(0),
+                side: ComponentSide::Bottom,
+                start: 10,
+                end: 12,
+            },
+        );
+        assert_eq!(connection.len(), 2);
+        assert!(connection
             .iter()
             .all(|triangle| triangle.color == DrawTriangle::HIGHLIGHT_COLOR));
     }

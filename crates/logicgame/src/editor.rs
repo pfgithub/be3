@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use eframe::egui::{self, PointerButton};
 use logicgame::grid::{
-    CircuitGraph, Component, ComponentId, ComponentKind, GraphNode, LogicGrid, Point, Rotation,
-    Scale, ValidationError, Wire,
+    CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode, LogicGrid,
+    Point, Rotation, Scale, ValidationError, Wire,
 };
 
 use crate::renderer::{DrawTriangle, GridCallback, RenderFrame};
@@ -116,6 +116,43 @@ enum DebugEntity {
 struct Selection {
     components: BTreeSet<ComponentId>,
     wires: BTreeSet<Wire>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct GraphHover {
+    components: BTreeSet<ComponentId>,
+    connections: BTreeSet<(ComponentId, ConnectionSlot)>,
+    wires: BTreeSet<Wire>,
+}
+
+impl GraphHover {
+    fn include_node(&mut self, node: &GraphNode) {
+        match node {
+            GraphNode::Component { component } => {
+                self.components.insert(*component);
+            }
+            GraphNode::WireNet { wires } => {
+                self.wires.extend(wires.iter().copied());
+            }
+            GraphNode::Connection {
+                component,
+                slot,
+                side,
+                start,
+                end,
+            } => {
+                self.connections.insert((
+                    *component,
+                    ConnectionSlot {
+                        id: *slot,
+                        side: *side,
+                        start: *start,
+                        end: *end,
+                    },
+                ));
+            }
+        }
+    }
 }
 
 impl Selection {
@@ -247,12 +284,12 @@ impl LogicEditor {
             .2
             .map(|pointer| snap_point(pointer, self.tool.scale));
         let hovered_entity = self.show_grid_debugger(&context, hovered_square);
-        let hovered_graph_wires = self.show_generated_graph(&context);
+        let graph_hover = self.show_generated_graph(&context);
         let frame = self.render_frame(
             canvas.inner.0.rect,
             canvas.inner.2,
             hovered_entity,
-            &hovered_graph_wires,
+            &graph_hover,
         );
         canvas
             .inner
@@ -448,9 +485,9 @@ impl LogicEditor {
         hovered_entity
     }
 
-    fn show_generated_graph(&self, context: &egui::Context) -> BTreeSet<Wire> {
+    fn show_generated_graph(&self, context: &egui::Context) -> GraphHover {
         let graph = self.grid.generate_graph();
-        let mut hovered_wires = BTreeSet::new();
+        let mut hover = GraphHover::default();
 
         egui::Window::new("Generated Graph")
             .default_pos([360.0, 16.0])
@@ -471,18 +508,18 @@ impl LogicEditor {
                 }
 
                 egui::ScrollArea::both().show(ui, |ui| {
-                    self.paint_generated_graph(ui, &graph, &mut hovered_wires);
+                    self.paint_generated_graph(ui, &graph, &mut hover);
                 });
             });
 
-        hovered_wires
+        hover
     }
 
     fn paint_generated_graph(
         &self,
         ui: &mut egui::Ui,
         graph: &CircuitGraph,
-        hovered_wires: &mut BTreeSet<Wire>,
+        hover: &mut GraphHover,
     ) {
         let (positions, size) = graph_layout(graph);
         let (response, painter) = ui.allocate_painter(size, egui::Sense::hover());
@@ -529,9 +566,7 @@ impl LogicEditor {
                 egui::Sense::hover(),
             );
             if node_response.hovered() {
-                if let GraphNode::WireNet { wires } = node {
-                    hovered_wires.extend(wires.iter().copied());
-                }
+                hover.include_node(node);
             }
         }
     }
@@ -785,7 +820,7 @@ impl LogicEditor {
         rect: egui::Rect,
         pointer_world: Option<[f32; 2]>,
         hovered_entity: Option<DebugEntity>,
-        hovered_graph_wires: &BTreeSet<Wire>,
+        graph_hover: &GraphHover,
     ) -> RenderFrame {
         let errors = self.grid.validate();
         let mut bad_wires = BTreeSet::new();
@@ -815,6 +850,7 @@ impl LogicEditor {
         let mut wire_triangles = Vec::new();
         for component in self.grid.components() {
             if hovered_entity == Some(DebugEntity::Component(component.id))
+                || graph_hover.components.contains(&component.id)
                 || self.selection.components.contains(&component.id)
             {
                 component_triangles.extend(DrawTriangle::component_highlight(component));
@@ -823,12 +859,20 @@ impl LogicEditor {
                 component,
                 bad_components.contains(&component.id),
             ));
+            for (_, connection) in graph_hover
+                .connections
+                .iter()
+                .filter(|(id, _)| *id == component.id)
+            {
+                component_triangles
+                    .extend(DrawTriangle::connection_highlight(component, *connection));
+            }
         }
         for wire in self.grid.wires() {
             wire_triangles.extend(DrawTriangle::wire(
                 *wire,
                 if hovered_entity == Some(DebugEntity::Wire(*wire))
-                    || hovered_graph_wires.contains(wire)
+                    || graph_hover.wires.contains(wire)
                     || self.selection.wires.contains(wire)
                 {
                     DrawTriangle::HIGHLIGHT_COLOR
@@ -1234,6 +1278,7 @@ fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use logicgame::grid::{ComponentSide, ConnectionSlotId};
 
     fn scale(value: u8) -> Scale {
         Scale::new(value).unwrap()
@@ -1246,6 +1291,33 @@ mod tests {
             Scale::new(scale).unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn graph_hover_maps_each_node_to_its_grid_geometry() {
+        let component = ComponentId(3);
+        let wire = wire((0, 0), (8, 0), 1);
+        let connection = ConnectionSlot {
+            id: ConnectionSlotId(2),
+            side: ComponentSide::Bottom,
+            start: 4,
+            end: 8,
+        };
+        let mut hover = GraphHover::default();
+
+        hover.include_node(&GraphNode::Component { component });
+        hover.include_node(&GraphNode::WireNet { wires: vec![wire] });
+        hover.include_node(&GraphNode::Connection {
+            component,
+            slot: connection.id,
+            side: connection.side,
+            start: connection.start,
+            end: connection.end,
+        });
+
+        assert_eq!(hover.components, BTreeSet::from([component]));
+        assert_eq!(hover.wires, BTreeSet::from([wire]));
+        assert_eq!(hover.connections, BTreeSet::from([(component, connection)]));
     }
 
     #[test]
