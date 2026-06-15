@@ -937,14 +937,14 @@ impl LogicEditor {
                 None => {}
             }
         }
-        component_triangles.extend(wire_triangles);
+        wire_triangles.extend(component_triangles);
 
         RenderFrame {
             viewport_size: [rect.width(), rect.height()],
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
             grid_scale: self.tool.scale.get() as f32,
-            triangles: component_triangles,
+            triangles: wire_triangles,
         }
     }
 }
