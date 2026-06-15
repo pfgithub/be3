@@ -439,10 +439,10 @@ impl LogicGrid {
                 continue;
             };
             for component in &components {
-                if component
-                    .rect()
-                    .is_some_and(|component_rect| wire_rect.overlaps_area(component_rect))
-                {
+                if component.rect().is_some_and(|component_rect| {
+                    wire_rect.overlaps_area(component_rect)
+                        && !wire_component_intersection_is_contact(*wire, component_rect)
+                }) {
                     errors.insert(ValidationError::WireComponentIntersection {
                         wire: *wire,
                         component: component.id,
@@ -628,6 +628,15 @@ impl Rect {
         overlaps(self.min.x, self.max.x, other.min.x, other.max.x)
             && overlaps(self.min.y, self.max.y, other.min.y, other.max.y)
     }
+
+    fn intersection(self, other: Self) -> Option<Self> {
+        let intersection = Self {
+            min: Point::new(self.min.x.max(other.min.x), self.min.y.max(other.min.y)),
+            max: Point::new(self.max.x.min(other.max.x), self.max.y.min(other.max.y)),
+        };
+        (intersection.min.x < intersection.max.x && intersection.min.y < intersection.max.y)
+            .then_some(intersection)
+    }
 }
 
 fn overlaps(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> bool {
@@ -730,6 +739,40 @@ struct Contact {
     end: i64,
 }
 
+fn wire_endpoint_rect(wire: Wire, endpoint: Point) -> Option<Rect> {
+    let scale = wire.scale.get();
+    Some(Rect {
+        min: endpoint,
+        max: Point::new(
+            endpoint.x.checked_add(scale)?,
+            endpoint.y.checked_add(scale)?,
+        ),
+    })
+}
+
+fn wire_component_intersection_is_contact(wire: Wire, component: Rect) -> bool {
+    let Some(wire_rect) = wire.rect() else {
+        return false;
+    };
+    let Some(intersection) = wire_rect.intersection(component) else {
+        return false;
+    };
+    [wire.start, wire.end].into_iter().any(|endpoint| {
+        let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
+            return false;
+        };
+        let on_terminal_side = match wire.orientation() {
+            Orientation::Horizontal => {
+                endpoint_rect.min.x == component.min.x || endpoint_rect.max.x == component.max.x
+            }
+            Orientation::Vertical => {
+                endpoint_rect.min.y == component.min.y || endpoint_rect.max.y == component.max.y
+            }
+        };
+        on_terminal_side && endpoint_rect.intersection(component) == Some(intersection)
+    })
+}
+
 fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
     let Some(rect) = wire.rect() else {
         return Vec::new();
@@ -758,6 +801,27 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                     });
                 }
             }
+            for endpoint in [wire.start, wire.end] {
+                let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
+                    continue;
+                };
+                let start = endpoint_rect.min.y.max(component.min.y);
+                let end = endpoint_rect.max.y.min(component.max.y);
+                if start < end && endpoint_rect.min.x == component.min.x {
+                    contacts.push(Contact {
+                        side: ComponentSide::Left,
+                        start,
+                        end,
+                    });
+                }
+                if start < end && endpoint_rect.max.x == component.max.x {
+                    contacts.push(Contact {
+                        side: ComponentSide::Right,
+                        start,
+                        end,
+                    });
+                }
+            }
         }
         Orientation::Vertical => {
             let Some(end_y) = wire.end.y.checked_add(wire.scale.get()) else {
@@ -774,6 +838,27 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                     });
                 }
                 if start < end && y == component.max.y {
+                    contacts.push(Contact {
+                        side: ComponentSide::Bottom,
+                        start,
+                        end,
+                    });
+                }
+            }
+            for endpoint in [wire.start, wire.end] {
+                let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
+                    continue;
+                };
+                let start = endpoint_rect.min.x.max(component.min.x);
+                let end = endpoint_rect.max.x.min(component.max.x);
+                if start < end && endpoint_rect.min.y == component.min.y {
+                    contacts.push(Contact {
+                        side: ComponentSide::Top,
+                        start,
+                        end,
+                    });
+                }
+                if start < end && endpoint_rect.max.y == component.max.y {
                     contacts.push(Contact {
                         side: ComponentSide::Bottom,
                         start,
@@ -982,18 +1067,83 @@ mod tests {
     }
 
     #[test]
-    fn distinguishes_boundary_contacts_from_component_intersections() {
+    fn accepts_wire_endpoints_in_leds_but_rejects_wires_through_leds() {
         let mut grid = LogicGrid::new();
         let led = grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
         grid.add_wire(wire((0, 0), (9, 0), 1));
         assert!(grid.validate().is_empty());
 
-        grid.add_wire(wire((10, 0), (12, 0), 1));
+        let output = wire((10, 0), (12, 0), 1);
+        grid.add_wire(output);
+        assert!(grid.validate().is_empty());
+        assert!(grid.generate_graph().nodes.iter().any(|node| {
+            matches!(
+                node,
+                GraphNode::Connection {
+                    component,
+                    side: ComponentSide::Right,
+                    start: 0,
+                    end: 1,
+                } if *component == led
+            )
+        }));
+
+        let mut crossing_grid = LogicGrid::new();
+        let crossed_led =
+            crossing_grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
+        let crossing = wire((9, 0), (11, 0), 1);
+        crossing_grid.add_wire(crossing);
+        assert!(crossing_grid
+            .validate()
+            .contains(&ValidationError::WireComponentIntersection {
+                wire: crossing,
+                component: crossed_led,
+            }));
+    }
+
+    #[test]
+    fn wire_endpoint_on_not_gate_terminal_is_a_valid_connection() {
+        let mut grid = LogicGrid::new();
+        let not = grid.add_component(
+            Point::new(1, 3),
+            Rotation::Down,
+            ComponentKind::Not { scale: Scale::ONE },
+        );
+        let input = wire((1, 1), (1, 3), 1);
+        grid.add_wire(input);
+
+        assert!(grid.validate().is_empty());
+
+        let graph = grid.generate_graph();
+        assert!(graph.nodes.iter().any(|node| {
+            matches!(
+                node,
+                GraphNode::Connection {
+                    component,
+                    side: ComponentSide::Top,
+                    start: 1,
+                    end: 2,
+                } if *component == not
+            )
+        }));
+    }
+
+    #[test]
+    fn wire_crossing_past_a_component_terminal_is_an_intersection() {
+        let mut grid = LogicGrid::new();
+        let not = grid.add_component(
+            Point::new(1, 3),
+            Rotation::Down,
+            ComponentKind::Not { scale: Scale::ONE },
+        );
+        let crossing = wire((1, 1), (1, 4), 1);
+        grid.add_wire(crossing);
+
         assert!(grid
             .validate()
             .contains(&ValidationError::WireComponentIntersection {
-                wire: wire((10, 0), (12, 0), 1),
-                component: led,
+                wire: crossing,
+                component: not,
             }));
     }
 

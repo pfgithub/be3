@@ -307,6 +307,27 @@ impl LogicEditor {
                     });
 
                 ui.separator();
+                ui.strong("Validation errors");
+                if errors.is_empty() {
+                    ui.weak("No validation errors");
+                } else {
+                    egui::ScrollArea::both()
+                        .id_salt("logic-grid-validation-errors")
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            for (index, error) in errors.iter().enumerate() {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!("#{index} {error:#?}"))
+                                            .monospace(),
+                                    )
+                                    .selectable(true),
+                                );
+                            }
+                        });
+                }
+
+                ui.separator();
                 ui.strong("Entities");
                 if self.grid.components().next().is_none() && self.grid.wires().is_empty() {
                     ui.weak("No entities");
