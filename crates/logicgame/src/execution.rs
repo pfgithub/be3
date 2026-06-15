@@ -669,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn boundary_inputs_and_outputs_execute_in_dependency_order() {
+    fn inputs_and_outputs_execute_in_dependency_order() {
         let mut grid = LogicGrid::new();
         let removed_input = grid.add_component(
             Point::new(0, 0),

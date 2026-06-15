@@ -3,13 +3,11 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 use eframe::egui_wgpu::{self, wgpu};
 use logicgame::grid::{
-    BoardBounds, Component, ComponentKind, ComponentSide, ConnectionDirection, ConnectionSlot,
+    Component, ComponentKind, ComponentLead, ComponentSide, ConnectionDirection, ConnectionSlot,
     Orientation, Rotation, Wire,
 };
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
-const BOARD_COLOR: [f32; 4] = [0.065, 0.078, 0.098, 1.0];
-const BOARD_OUTLINE_COLOR: [f32; 4] = [0.48, 0.54, 0.66, 1.0];
 const MINOR_GRID_COLOR: [f32; 4] = [0.10, 0.12, 0.15, 1.0];
 const MAJOR_GRID_COLOR: [f32; 4] = [0.18, 0.21, 0.26, 1.0];
 const AXIS_COLOR: [f32; 4] = [0.35, 0.39, 0.48, 1.0];
@@ -20,7 +18,6 @@ pub struct RenderFrame {
     pub camera_center: [f32; 2],
     pub zoom: f32,
     pub grid_scale: f32,
-    pub board_bounds: [f32; 4],
     pub triangles: Vec<DrawTriangle>,
 }
 
@@ -105,16 +102,7 @@ impl DrawTriangle {
         .to_vec()
     }
 
-    #[cfg(test)]
     pub fn component(component: &Component, invalid: bool) -> Vec<Self> {
-        Self::component_in_bounds(component, invalid, BoardBounds::default())
-    }
-
-    pub fn component_in_bounds(
-        component: &Component,
-        invalid: bool,
-        board_bounds: BoardBounds,
-    ) -> Vec<Self> {
         let Some(size) = component.size() else {
             return Vec::new();
         };
@@ -128,31 +116,6 @@ impl DrawTriangle {
         let bounds = [min[0], min[1], min[0] + extent[0], min[1] + extent[1]];
         let thickness = (extent[0].min(extent[1]) * 0.08).clamp(0.06, 0.16);
         let mut triangles = Vec::new();
-        if let Some(lead) = component.boundary_lead(board_bounds) {
-            let lead_color = match component.kind {
-                ComponentKind::Input { .. } => Self::INPUT_COLOR,
-                ComponentKind::Output { .. } => Self::OUTPUT_COLOR,
-                _ => unreachable!(),
-            };
-            let radius = (component.kind.snap().get() as f32 * 0.08).clamp(0.06, 0.16);
-            let lead_bounds = match lead.side {
-                ComponentSide::Top | ComponentSide::Bottom => [
-                    lead.start[0] - radius,
-                    lead.start[1].min(lead.end[1]),
-                    lead.start[0] + radius,
-                    lead.start[1].max(lead.end[1]),
-                ],
-                ComponentSide::Right | ComponentSide::Left => [
-                    lead.start[0].min(lead.end[0]),
-                    lead.start[1] - radius,
-                    lead.start[0].max(lead.end[0]),
-                    lead.start[1] + radius,
-                ],
-            };
-            if lead_bounds[0] < lead_bounds[2] && lead_bounds[1] < lead_bounds[3] {
-                triangles.extend(rectangle(lead_bounds, lead_color));
-            }
-        }
         triangles.extend(rectangle(bounds, Self::COMPONENT_BACKGROUND_COLOR));
         triangles.extend(outline(bounds, thickness, outline_color));
         for connection in component.connection_slots() {
@@ -194,6 +157,67 @@ impl DrawTriangle {
         }
 
         triangles
+    }
+
+    pub fn component_lead(component: &Component, viewport: [f32; 4]) -> Vec<Self> {
+        let color = match component.kind {
+            ComponentKind::Input { .. } => Self::INPUT_COLOR,
+            ComponentKind::Output { .. } => Self::OUTPUT_COLOR,
+            _ => return Vec::new(),
+        };
+        let Some(lead) = component.lead() else {
+            return Vec::new();
+        };
+        let radius = (component.kind.snap().get() as f32 * 0.08).clamp(0.06, 0.16);
+        let [viewport_left, viewport_top, viewport_right, viewport_bottom] = viewport;
+        let center = (lead.start + lead.end) as f32 * 0.5;
+        let rect = match lead {
+            ComponentLead {
+                side: ComponentSide::Top,
+                axis,
+                ..
+            } => [
+                center - radius,
+                viewport_top,
+                center + radius,
+                (axis as f32).min(viewport_bottom),
+            ],
+            ComponentLead {
+                side: ComponentSide::Right,
+                axis,
+                ..
+            } => [
+                (axis as f32).max(viewport_left),
+                center - radius,
+                viewport_right,
+                center + radius,
+            ],
+            ComponentLead {
+                side: ComponentSide::Bottom,
+                axis,
+                ..
+            } => [
+                center - radius,
+                (axis as f32).max(viewport_top),
+                center + radius,
+                viewport_bottom,
+            ],
+            ComponentLead {
+                side: ComponentSide::Left,
+                axis,
+                ..
+            } => [
+                viewport_left,
+                center - radius,
+                (axis as f32).min(viewport_right),
+                center + radius,
+            ],
+        };
+        if rect[0] < rect[2] && rect[1] < rect[3] {
+            rectangle(rect, color).to_vec()
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn component_highlight(component: &Component) -> Vec<Self> {
@@ -527,41 +551,23 @@ fn frame_triangles(frame: &RenderFrame) -> Vec<DrawTriangle> {
     ];
     let mut triangles = Vec::new();
     triangles.extend(rectangle(bounds, BACKGROUND_COLOR));
-    triangles.extend(rectangle(frame.board_bounds, BOARD_COLOR));
-    if let Some(visible_board) = intersect_rect(bounds, frame.board_bounds) {
-        add_grid_lines(
-            &mut triangles,
-            visible_board,
-            frame.grid_scale,
-            1.5 / frame.zoom,
-            MINOR_GRID_COLOR,
-        );
-        add_grid_lines(
-            &mut triangles,
-            visible_board,
-            frame.grid_scale * 8.0,
-            2.0 / frame.zoom,
-            MAJOR_GRID_COLOR,
-        );
-        add_axis_lines(&mut triangles, visible_board, 3.0 / frame.zoom);
-    }
-    triangles.extend(outline(
-        frame.board_bounds,
+    add_grid_lines(
+        &mut triangles,
+        bounds,
+        frame.grid_scale,
+        1.5 / frame.zoom,
+        MINOR_GRID_COLOR,
+    );
+    add_grid_lines(
+        &mut triangles,
+        bounds,
+        frame.grid_scale * 8.0,
         2.0 / frame.zoom,
-        BOARD_OUTLINE_COLOR,
-    ));
+        MAJOR_GRID_COLOR,
+    );
+    add_axis_lines(&mut triangles, bounds, 3.0 / frame.zoom);
     triangles.extend_from_slice(&frame.triangles);
     triangles
-}
-
-fn intersect_rect(first: [f32; 4], second: [f32; 4]) -> Option<[f32; 4]> {
-    let intersection = [
-        first[0].max(second[0]),
-        first[1].max(second[1]),
-        first[2].min(second[2]),
-        first[3].min(second[3]),
-    ];
-    (intersection[0] < intersection[2] && intersection[1] < intersection[3]).then_some(intersection)
 }
 
 fn add_grid_lines(
@@ -611,7 +617,7 @@ mod tests {
     use super::*;
     use logicgame::grid::{
         ComponentId, ComponentSide, ConnectionDirection, ConnectionSlot, ConnectionSlotId, InputId,
-        Point, Scale,
+        OutputId, Point, Scale,
     };
 
     #[test]
@@ -768,27 +774,46 @@ mod tests {
     }
 
     #[test]
-    fn boundary_component_lead_reaches_the_configured_edge() {
-        let component = Component {
+    fn input_and_output_leads_extend_to_the_viewport_edge() {
+        let viewport = [-5.0, -5.0, 5.0, 5.0];
+        let input = Component {
             id: ComponentId(0),
-            position: Point::new(2, 0),
-            rotation: Rotation::Left,
+            position: Point::new(0, 0),
+            rotation: Rotation::Up,
             kind: ComponentKind::Input {
                 scale: Scale::ONE,
                 id: InputId(0),
             },
         };
-        let bounds = BoardBounds::new(Point::new(-5, -5), Point::new(5, 5));
+        let output = Component {
+            id: ComponentId(1),
+            position: Point::new(-10, 0),
+            rotation: Rotation::Right,
+            kind: ComponentKind::Output {
+                scale: Scale::ONE,
+                id: OutputId(0),
+            },
+        };
 
-        let triangles = DrawTriangle::component_in_bounds(&component, false, bounds);
-        let lead = &triangles[..2];
-        assert!(lead
+        let input_lead = DrawTriangle::component_lead(&input, viewport);
+        assert_eq!(input_lead.len(), 2);
+        assert!(input_lead
             .iter()
             .all(|triangle| triangle.color == DrawTriangle::INPUT_COLOR));
-        assert!(lead
+        assert!(input_lead
             .iter()
             .flat_map(|triangle| triangle.positions)
-            .any(|position| position[0] == -5.0));
+            .any(|position| position[1] == viewport[1]));
+
+        let output_lead = DrawTriangle::component_lead(&output, viewport);
+        assert_eq!(output_lead.len(), 2);
+        assert!(output_lead
+            .iter()
+            .all(|triangle| triangle.color == DrawTriangle::OUTPUT_COLOR));
+        assert!(output_lead
+            .iter()
+            .flat_map(|triangle| triangle.positions)
+            .any(|position| position[0] == viewport[2]));
     }
 
     #[test]
@@ -798,20 +823,19 @@ mod tests {
             camera_center: [0.0, 0.0],
             zoom: 10.0,
             grid_scale: 1.0,
-            board_bounds: [-4.0, -4.0, 4.0, 4.0],
             triangles: Vec::new(),
         };
         let triangles = frame_triangles(&frame);
 
-        let first_minor_x = triangles[6].positions[0][0];
-        let second_minor_x = triangles[8].positions[0][0];
+        let first_minor_x = triangles[4].positions[0][0];
+        let second_minor_x = triangles[6].positions[0][0];
         assert!((second_minor_x - first_minor_x - 1.0).abs() < 0.0001);
+        assert_eq!(triangles[4].color, MINOR_GRID_COLOR);
         assert_eq!(triangles[6].color, MINOR_GRID_COLOR);
-        assert_eq!(triangles[8].color, MINOR_GRID_COLOR);
     }
 
     #[test]
-    fn board_background_grid_outline_and_entities_are_layered_and_bounded() {
+    fn viewport_grid_and_entities_are_layered_and_bounded() {
         let entity = DrawTriangle::new(
             [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]],
             DrawTriangle::WIRE_COLOR,
@@ -821,33 +845,22 @@ mod tests {
             camera_center: [0.0, 0.0],
             zoom: 10.0,
             grid_scale: 1.0,
-            board_bounds: [-2.0, -1.0, 3.0, 4.0],
             triangles: vec![entity],
         };
 
         let triangles = frame_triangles(&frame);
         assert_eq!(triangles[0].color, BACKGROUND_COLOR);
-        assert_eq!(triangles[2].color, BOARD_COLOR);
         assert_eq!(triangles.last().unwrap().color, DrawTriangle::WIRE_COLOR);
-
-        let outline_start = triangles
-            .iter()
-            .position(|triangle| triangle.color == BOARD_OUTLINE_COLOR)
-            .unwrap();
-        let entity_start = triangles.len() - frame.triangles.len();
-        assert!(outline_start < entity_start);
 
         for triangle in triangles.iter().filter(|triangle| {
             triangle.color == MINOR_GRID_COLOR
                 || triangle.color == MAJOR_GRID_COLOR
                 || triangle.color == AXIS_COLOR
         }) {
-            assert!(triangle.positions.iter().all(|[x, y]| {
-                frame.board_bounds[0] <= *x
-                    && *x <= frame.board_bounds[2]
-                    && frame.board_bounds[1] <= *y
-                    && *y <= frame.board_bounds[3]
-            }));
+            assert!(triangle
+                .positions
+                .iter()
+                .all(|[x, y]| { -5.0 <= *x && *x <= 5.0 && -5.0 <= *y && *y <= 5.0 }));
         }
     }
 }

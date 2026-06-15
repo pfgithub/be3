@@ -20,33 +20,6 @@ pub struct Size {
     pub height: i64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BoardBounds {
-    pub min: Point,
-    pub max: Point,
-}
-
-impl BoardBounds {
-    pub const fn new(min: Point, max: Point) -> Self {
-        Self { min, max }
-    }
-
-    pub fn as_f32(self) -> [f32; 4] {
-        [
-            self.min.x as f32,
-            self.min.y as f32,
-            self.max.x as f32,
-            self.max.y as f32,
-        ]
-    }
-}
-
-impl Default for BoardBounds {
-    fn default() -> Self {
-        Self::new(Point::new(-5, -5), Point::new(5, 5))
-    }
-}
-
 impl Size {
     pub const fn new(width: i64, height: i64) -> Self {
         Self { width, height }
@@ -400,7 +373,7 @@ impl Component {
             .collect()
     }
 
-    pub fn boundary_lead(&self, bounds: BoardBounds) -> Option<BoundaryLead> {
+    pub fn lead(&self) -> Option<ComponentLead> {
         if !matches!(
             self.kind,
             ComponentKind::Input { .. } | ComponentKind::Output { .. }
@@ -408,72 +381,46 @@ impl Component {
             return None;
         }
         let rect = self.rect()?;
-        let scale = self.kind.snap().get();
-        let (side, corridor, start, end) = match self.rotation {
-            Rotation::Up => {
-                let x = rect.min.x as f32 + scale as f32 * 0.5;
-                (
-                    ComponentSide::Top,
-                    Rect {
-                        min: Point::new(rect.min.x, bounds.min.y),
-                        max: Point::new(rect.max.x, rect.min.y),
-                    },
-                    [x, rect.min.y as f32],
-                    [x, bounds.min.y as f32],
-                )
-            }
-            Rotation::Right => {
-                let y = rect.min.y as f32 + scale as f32 * 0.5;
-                (
-                    ComponentSide::Right,
-                    Rect {
-                        min: Point::new(rect.max.x, rect.min.y),
-                        max: Point::new(bounds.max.x, rect.max.y),
-                    },
-                    [rect.max.x as f32, y],
-                    [bounds.max.x as f32, y],
-                )
-            }
-            Rotation::Down => {
-                let x = rect.min.x as f32 + scale as f32 * 0.5;
-                (
-                    ComponentSide::Bottom,
-                    Rect {
-                        min: Point::new(rect.min.x, rect.max.y),
-                        max: Point::new(rect.max.x, bounds.max.y),
-                    },
-                    [x, rect.max.y as f32],
-                    [x, bounds.max.y as f32],
-                )
-            }
-            Rotation::Left => {
-                let y = rect.min.y as f32 + scale as f32 * 0.5;
-                (
-                    ComponentSide::Left,
-                    Rect {
-                        min: Point::new(bounds.min.x, rect.min.y),
-                        max: Point::new(rect.min.x, rect.max.y),
-                    },
-                    [rect.min.x as f32, y],
-                    [bounds.min.x as f32, y],
-                )
-            }
+        let (side, axis, start, end) = match self.rotation {
+            Rotation::Up => (ComponentSide::Top, rect.min.y, rect.min.x, rect.max.x),
+            Rotation::Right => (ComponentSide::Right, rect.max.x, rect.min.y, rect.max.y),
+            Rotation::Down => (ComponentSide::Bottom, rect.max.y, rect.min.x, rect.max.x),
+            Rotation::Left => (ComponentSide::Left, rect.min.x, rect.min.y, rect.max.y),
         };
-        Some(BoundaryLead {
+        Some(ComponentLead {
             side,
+            axis,
             start,
             end,
-            corridor,
         })
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BoundaryLead {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComponentLead {
     pub side: ComponentSide,
-    pub start: [f32; 2],
-    pub end: [f32; 2],
-    corridor: Rect,
+    pub axis: i64,
+    pub start: i64,
+    pub end: i64,
+}
+
+impl ComponentLead {
+    fn intersects(self, rect: Rect) -> bool {
+        match self.side {
+            ComponentSide::Top => {
+                self.start < rect.max.x && rect.min.x < self.end && rect.min.y < self.axis
+            }
+            ComponentSide::Right => {
+                self.start < rect.max.y && rect.min.y < self.end && self.axis < rect.max.x
+            }
+            ComponentSide::Bottom => {
+                self.start < rect.max.x && rect.min.x < self.end && self.axis < rect.max.y
+            }
+            ComponentSide::Left => {
+                self.start < rect.max.y && rect.min.y < self.end && rect.min.x < self.axis
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -499,7 +446,7 @@ pub enum ValidationError {
     WireOverflow {
         wire: Wire,
     },
-    BoundaryLeadBlocked {
+    InfiniteLeadBlocked {
         component: ComponentId,
         blocker: ComponentId,
     },
@@ -511,13 +458,11 @@ pub struct LogicGrid {
     next_component_id: u64,
     next_input_id: usize,
     next_output_id: usize,
-    board_bounds: BoardBounds,
     revision: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogicGridSnapshot {
-    pub board_bounds: BoardBounds,
     pub components: Vec<Component>,
     pub wires: Vec<Wire>,
 }
@@ -530,7 +475,6 @@ impl Default for LogicGrid {
             next_component_id: 0,
             next_input_id: 0,
             next_output_id: 0,
-            board_bounds: BoardBounds::default(),
             revision: 0,
         }
     }
@@ -551,7 +495,6 @@ impl LogicGrid {
 
     pub fn snapshot(&self) -> LogicGridSnapshot {
         LogicGridSnapshot {
-            board_bounds: self.board_bounds,
             components: self.components.values().cloned().collect(),
             wires: self.wires.clone(),
         }
@@ -598,25 +541,8 @@ impl LogicGrid {
             next_component_id,
             next_input_id,
             next_output_id,
-            board_bounds: snapshot.board_bounds,
             revision: 0,
         }
-    }
-
-    pub fn board_bounds(&self) -> BoardBounds {
-        self.board_bounds
-    }
-
-    pub fn set_board_bounds(&mut self, bounds: BoardBounds) -> bool {
-        if bounds.min.x >= bounds.max.x
-            || bounds.min.y >= bounds.max.y
-            || bounds == self.board_bounds
-        {
-            return false;
-        }
-        self.board_bounds = bounds;
-        self.mark_changed();
-        true
     }
 
     pub fn components(&self) -> impl Iterator<Item = &Component> {
@@ -844,21 +770,14 @@ impl LogicGrid {
         }
 
         for component in &components {
-            let Some(lead) = component.boundary_lead(self.board_bounds) else {
+            let Some(lead) = component.lead() else {
                 continue;
             };
-            if lead.corridor.min.x > lead.corridor.max.x
-                || lead.corridor.min.y > lead.corridor.max.y
-            {
-                continue;
-            }
             for blocker in &components {
                 if component.id != blocker.id
-                    && blocker
-                        .rect()
-                        .is_some_and(|rect| lead.corridor.overlaps_area(rect))
+                    && blocker.rect().is_some_and(|rect| lead.intersects(rect))
                 {
-                    errors.insert(ValidationError::BoundaryLeadBlocked {
+                    errors.insert(ValidationError::InfiniteLeadBlocked {
                         component: component.id,
                         blocker: blocker.id,
                     });
@@ -1733,8 +1652,7 @@ mod tests {
     }
 
     #[test]
-    fn boundary_components_rotate_their_inward_slots_and_outward_leads() {
-        let bounds = BoardBounds::new(Point::new(-5, -5), Point::new(20, 30));
+    fn input_components_rotate_their_connection_slots() {
         let component = Component {
             id: ComponentId(0),
             position: Point::new(10, 20),
@@ -1756,23 +1674,20 @@ mod tests {
                 end: 22,
             }]
         );
-        let lead = component.boundary_lead(bounds).unwrap();
-        assert_eq!(lead.side, ComponentSide::Right);
-        assert_eq!(lead.start, [14.0, 21.0]);
-        assert_eq!(lead.end, [20.0, 21.0]);
-
-        let at_edge = Component {
-            position: Point::new(16, 20),
-            ..component
-        };
-        let lead = at_edge.boundary_lead(bounds).unwrap();
-        assert_eq!(lead.start, lead.end);
+        assert_eq!(
+            component.lead(),
+            Some(ComponentLead {
+                side: ComponentSide::Right,
+                axis: 14,
+                start: 20,
+                end: 22,
+            })
+        );
     }
 
     #[test]
-    fn boundary_leads_are_blocked_by_components_but_not_wires() {
+    fn infinite_leads_are_blocked_by_components_but_not_wires() {
         let mut grid = LogicGrid::new();
-        grid.set_board_bounds(BoardBounds::new(Point::new(-5, -5), Point::new(5, 5)));
         let input = grid.add_component(
             Point::new(0, 2),
             Rotation::Up,
@@ -1786,7 +1701,7 @@ mod tests {
 
         assert!(grid
             .validate()
-            .contains(&ValidationError::BoundaryLeadBlocked {
+            .contains(&ValidationError::InfiniteLeadBlocked {
                 component: input,
                 blocker,
             }));
@@ -1794,7 +1709,7 @@ mod tests {
         grid.remove_component(blocker);
         assert!(!grid.validate().iter().any(|error| matches!(
             error,
-            ValidationError::BoundaryLeadBlocked { component, .. } if *component == input
+            ValidationError::InfiniteLeadBlocked { component, .. } if *component == input
         )));
     }
 
@@ -2176,7 +2091,6 @@ mod tests {
     #[test]
     fn serialized_snapshot_round_trips_and_regenerates_ids() {
         let snapshot = LogicGridSnapshot {
-            board_bounds: BoardBounds::new(Point::new(-20, -12), Point::new(30, 18)),
             components: vec![
                 Component {
                     id: ComponentId(2),
