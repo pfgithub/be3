@@ -964,17 +964,19 @@ impl LogicEditor {
             self.delete_selection();
         }
 
+        if response.hovered() {
+            if let Some(pointer) = response.ctx.pointer_hover_pos() {
+                let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
+                if scroll != 0.0 {
+                    self.camera
+                        .zoom_around(pointer, response.rect, (scroll * 0.002).exp());
+                }
+            }
+        }
+
         let Some(pointer) = response.interact_pointer_pos() else {
             return;
         };
-
-        if response.hovered() {
-            let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                self.camera
-                    .zoom_around(pointer, response.rect, (scroll * 0.002).exp());
-            }
-        }
 
         let middle_down = response
             .ctx
