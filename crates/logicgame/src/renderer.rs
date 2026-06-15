@@ -3,8 +3,8 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 use eframe::egui_wgpu::{self, wgpu};
 use logicgame::grid::{
-    Component, ComponentKind, ComponentSide, ConnectionDirection, ConnectionSlot, Orientation,
-    Rotation, Wire,
+    BoardBounds, Component, ComponentKind, ComponentSide, ConnectionDirection, ConnectionSlot,
+    Orientation, Rotation, Wire,
 };
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
@@ -105,7 +105,16 @@ impl DrawTriangle {
         .to_vec()
     }
 
+    #[cfg(test)]
     pub fn component(component: &Component, invalid: bool) -> Vec<Self> {
+        Self::component_in_bounds(component, invalid, BoardBounds::default())
+    }
+
+    pub fn component_in_bounds(
+        component: &Component,
+        invalid: bool,
+        board_bounds: BoardBounds,
+    ) -> Vec<Self> {
         let Some(size) = component.size() else {
             return Vec::new();
         };
@@ -119,6 +128,31 @@ impl DrawTriangle {
         let bounds = [min[0], min[1], min[0] + extent[0], min[1] + extent[1]];
         let thickness = (extent[0].min(extent[1]) * 0.08).clamp(0.06, 0.16);
         let mut triangles = Vec::new();
+        if let Some(lead) = component.boundary_lead(board_bounds) {
+            let lead_color = match component.kind {
+                ComponentKind::Input { .. } => Self::INPUT_COLOR,
+                ComponentKind::Output { .. } => Self::OUTPUT_COLOR,
+                _ => unreachable!(),
+            };
+            let radius = (component.kind.snap().get() as f32 * 0.08).clamp(0.06, 0.16);
+            let lead_bounds = match lead.side {
+                ComponentSide::Top | ComponentSide::Bottom => [
+                    lead.start[0] - radius,
+                    lead.start[1].min(lead.end[1]),
+                    lead.start[0] + radius,
+                    lead.start[1].max(lead.end[1]),
+                ],
+                ComponentSide::Right | ComponentSide::Left => [
+                    lead.start[0].min(lead.end[0]),
+                    lead.start[1] - radius,
+                    lead.start[0].max(lead.end[0]),
+                    lead.start[1] + radius,
+                ],
+            };
+            if lead_bounds[0] < lead_bounds[2] && lead_bounds[1] < lead_bounds[3] {
+                triangles.extend(rectangle(lead_bounds, lead_color));
+            }
+        }
         triangles.extend(rectangle(bounds, Self::COMPONENT_BACKGROUND_COLOR));
         triangles.extend(outline(bounds, thickness, outline_color));
         for connection in component.connection_slots() {
@@ -155,6 +189,7 @@ impl DrawTriangle {
                 ],
                 outline_color,
             )),
+            ComponentKind::Input { .. } | ComponentKind::Output { .. } => {}
             ComponentKind::Subcomponent { .. } => {}
         }
 
@@ -575,8 +610,8 @@ fn add_axis_lines(triangles: &mut Vec<DrawTriangle>, bounds: [f32; 4], width: f3
 mod tests {
     use super::*;
     use logicgame::grid::{
-        ComponentId, ComponentSide, ConnectionDirection, ConnectionSlot, ConnectionSlotId, Point,
-        Scale,
+        ComponentId, ComponentSide, ConnectionDirection, ConnectionSlot, ConnectionSlotId, InputId,
+        Point, Scale,
     };
 
     #[test]
@@ -730,6 +765,30 @@ mod tests {
                     .all(|[x, y]| { (10.0..=11.0).contains(x) && (20.0..=22.0).contains(y) }));
             }
         }
+    }
+
+    #[test]
+    fn boundary_component_lead_reaches_the_configured_edge() {
+        let component = Component {
+            id: ComponentId(0),
+            position: Point::new(2, 0),
+            rotation: Rotation::Left,
+            kind: ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(0),
+            },
+        };
+        let bounds = BoardBounds::new(Point::new(-5, -5), Point::new(5, 5));
+
+        let triangles = DrawTriangle::component_in_bounds(&component, false, bounds);
+        let lead = &triangles[..2];
+        assert!(lead
+            .iter()
+            .all(|triangle| triangle.color == DrawTriangle::INPUT_COLOR));
+        assert!(lead
+            .iter()
+            .flat_map(|triangle| triangle.positions)
+            .any(|position| position[0] == -5.0));
     }
 
     #[test]

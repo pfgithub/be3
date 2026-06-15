@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use crate::grid::{
-    CircuitGraph, ComponentId, ComponentKind, ConnectionDirection, ConnectionSlotId, GraphNode,
-    GraphNodeId, LogicGrid,
+    value_mask, CircuitGraph, ComponentId, ComponentKind, ConnectionDirection, ConnectionSlotId,
+    GraphNode, GraphNodeId, InputId, LogicGrid, OutputId,
 };
 
 pub type MemoryAddress = usize;
@@ -40,12 +40,24 @@ pub enum Instruction {
         storage: StorageId,
         input: MemoryAddress,
     },
+    ReadInput {
+        input: InputId,
+        output: MemoryAddress,
+        mask: u64,
+    },
+    WriteOutput {
+        output: OutputId,
+        input: MemoryAddress,
+        mask: u64,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Vm {
     pub memory: Vec<u64>,
     pub storage: Vec<u64>,
+    pub inputs: Vec<u64>,
+    pub outputs: Vec<u64>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -100,10 +112,17 @@ impl Vm {
 
         let mut storage_ids = BTreeMap::new();
         let mut storage = Vec::new();
+        let mut input_count = 0;
+        let mut output_count = 0;
         for component in grid.components() {
-            if let ComponentKind::Storage { value, .. } = &component.kind {
-                storage_ids.insert(component.id, storage.len());
-                storage.push(*value);
+            match &component.kind {
+                ComponentKind::Storage { value, .. } => {
+                    storage_ids.insert(component.id, storage.len());
+                    storage.push(*value);
+                }
+                ComponentKind::Input { id, .. } => input_count = input_count.max(id.0 + 1),
+                ComponentKind::Output { id, .. } => output_count = output_count.max(id.0 + 1),
+                _ => {}
             }
         }
 
@@ -181,6 +200,53 @@ impl Vm {
                         });
                     }
                 }
+                ComponentKind::Input { scale, id } => {
+                    let outputs = connection_addresses(
+                        &connections,
+                        component.id,
+                        ConnectionDirection::Output,
+                        ConnectionSlotId(0),
+                    );
+                    if !outputs.is_empty() {
+                        operations.push(Operation {
+                            inputs: Vec::new(),
+                            outputs: outputs.to_vec(),
+                            instructions: outputs
+                                .iter()
+                                .map(|&output| Instruction::ReadInput {
+                                    input: *id,
+                                    output,
+                                    mask: value_mask(*scale),
+                                })
+                                .collect(),
+                        });
+                    }
+                }
+                ComponentKind::Output { scale, id } => {
+                    let inputs = connection_addresses(
+                        &connections,
+                        component.id,
+                        ConnectionDirection::Input,
+                        ConnectionSlotId(0),
+                    );
+                    if inputs.len() > 1 {
+                        return Err(GenerationError::AmbiguousInput {
+                            component: component.id,
+                            slot: ConnectionSlotId(0),
+                        });
+                    }
+                    if let Some(&input) = inputs.first() {
+                        operations.push(Operation {
+                            inputs: vec![input],
+                            outputs: Vec::new(),
+                            instructions: vec![Instruction::WriteOutput {
+                                output: *id,
+                                input,
+                                mask: value_mask(*scale),
+                            }],
+                        });
+                    }
+                }
                 ComponentKind::Led => {}
                 ComponentKind::Subcomponent { .. } => {
                     return Err(GenerationError::UnsupportedComponent(component.id));
@@ -232,8 +298,15 @@ impl Vm {
         Ok(Self {
             memory: vec![0; memory_addresses.len()],
             storage,
+            inputs: vec![0; input_count],
+            outputs: vec![0; output_count],
             instructions,
         })
+    }
+
+    pub fn begin_tick(&mut self) {
+        self.memory.fill(0);
+        self.outputs.fill(0);
     }
 
     pub fn execute(&mut self) {
@@ -255,6 +328,20 @@ impl Vm {
             }
             Instruction::SaveStorage { storage, input } => {
                 self.storage[storage] = self.memory[input];
+            }
+            Instruction::ReadInput {
+                input,
+                output,
+                mask,
+            } => {
+                self.memory[output] |= self.inputs[input.0] & mask;
+            }
+            Instruction::WriteOutput {
+                output,
+                input,
+                mask,
+            } => {
+                self.outputs[output.0] = self.memory[input] & mask;
             }
         }
     }
@@ -285,7 +372,7 @@ fn connection_addresses(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grid::{ComponentSide, GraphEdge, Point, Rotation, Scale};
+    use crate::grid::{ComponentSide, GraphEdge, InputId, OutputId, Point, Rotation, Scale};
 
     fn graph(
         net_count: usize,
@@ -363,6 +450,7 @@ mod tests {
                     output: 1,
                 },
             ],
+            ..Vm::default()
         };
 
         vm.execute();
@@ -390,6 +478,7 @@ mod tests {
                     output: 1,
                 },
             ],
+            ..Vm::default()
         };
 
         vm.execute();
@@ -416,6 +505,7 @@ mod tests {
                     input: 1,
                 },
             ],
+            ..Vm::default()
         };
 
         vm.execute();
@@ -438,6 +528,7 @@ mod tests {
                     output: 1,
                 },
             ],
+            ..Vm::default()
         };
 
         vm.execute_instruction(0);
@@ -575,5 +666,83 @@ mod tests {
         vm.execute();
 
         assert_eq!(vm.storage, vec![!1]);
+    }
+
+    #[test]
+    fn boundary_inputs_and_outputs_execute_in_dependency_order() {
+        let mut grid = LogicGrid::new();
+        let removed_input = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(99),
+            },
+        );
+        grid.remove_component(removed_input);
+        let input = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::new(4).unwrap(),
+                id: InputId(99),
+            },
+        );
+        let removed_output = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Output {
+                scale: Scale::ONE,
+                id: OutputId(99),
+            },
+        );
+        grid.remove_component(removed_output);
+        let output = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Output {
+                scale: Scale::new(4).unwrap(),
+                id: OutputId(99),
+            },
+        );
+        let graph = graph(
+            1,
+            &[
+                (input, ConnectionDirection::Output, 0, 0),
+                (output, ConnectionDirection::Input, 0, 0),
+            ],
+        );
+
+        let mut vm = Vm::from_graph(&grid, &graph).unwrap();
+        assert_eq!(vm.inputs, vec![0, 0]);
+        assert_eq!(vm.outputs, vec![0, 0]);
+        assert!(matches!(
+            vm.instructions.as_slice(),
+            [
+                Instruction::ReadInput {
+                    input: InputId(1),
+                    output: 0,
+                    ..
+                },
+                Instruction::WriteOutput {
+                    output: OutputId(1),
+                    input: 0,
+                    ..
+                }
+            ]
+        ));
+
+        vm.inputs[1] = 0xff;
+        vm.begin_tick();
+        vm.execute();
+        assert_eq!(vm.memory, vec![0x0f]);
+        assert_eq!(vm.outputs, vec![0, 0x0f]);
+
+        vm.memory[0] = u64::MAX;
+        vm.outputs[1] = u64::MAX;
+        vm.begin_tick();
+        assert_eq!(vm.inputs[1], 0xff);
+        assert_eq!(vm.memory, vec![0]);
+        assert_eq!(vm.outputs, vec![0, 0]);
     }
 }

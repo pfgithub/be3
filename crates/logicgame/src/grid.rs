@@ -18,6 +18,33 @@ pub struct Size {
     pub height: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoardBounds {
+    pub min: Point,
+    pub max: Point,
+}
+
+impl BoardBounds {
+    pub const fn new(min: Point, max: Point) -> Self {
+        Self { min, max }
+    }
+
+    pub fn as_f32(self) -> [f32; 4] {
+        [
+            self.min.x as f32,
+            self.min.y as f32,
+            self.max.x as f32,
+            self.max.y as f32,
+        ]
+    }
+}
+
+impl Default for BoardBounds {
+    fn default() -> Self {
+        Self::new(Point::new(-5, -5), Point::new(5, 5))
+    }
+}
+
 impl Size {
     pub const fn new(width: i64, height: i64) -> Self {
         Self { width, height }
@@ -185,6 +212,14 @@ pub enum ComponentKind {
         scale: Scale,
         value: u64,
     },
+    Input {
+        scale: Scale,
+        id: InputId,
+    },
+    Output {
+        scale: Scale,
+        id: OutputId,
+    },
     Subcomponent {
         size: Size,
         snap: Scale,
@@ -212,7 +247,10 @@ impl ComponentKind {
 
     pub fn snap(&self) -> Scale {
         match self {
-            Self::Not { scale } | Self::Storage { scale, .. } => *scale,
+            Self::Not { scale }
+            | Self::Storage { scale, .. }
+            | Self::Input { scale, .. }
+            | Self::Output { scale, .. } => *scale,
             Self::Led => Scale::ONE,
             Self::Subcomponent { snap, .. } => *snap,
         }
@@ -220,7 +258,10 @@ impl ComponentKind {
 
     fn unrotated_size(&self) -> Option<Size> {
         match self {
-            Self::Not { scale } | Self::Storage { scale, .. } => {
+            Self::Not { scale }
+            | Self::Storage { scale, .. }
+            | Self::Input { scale, .. }
+            | Self::Output { scale, .. } => {
                 let scale = scale.get();
                 Some(Size::new(scale, scale.checked_mul(2)?))
             }
@@ -274,6 +315,20 @@ impl ComponentKind {
                     size.width,
                 ),
             ],
+            Self::Input { .. } => vec![ConnectionSlotDefinition::new(
+                0,
+                ConnectionDirection::Output,
+                ComponentSide::Bottom,
+                0,
+                size.width,
+            )],
+            Self::Output { .. } => vec![ConnectionSlotDefinition::new(
+                0,
+                ConnectionDirection::Input,
+                ComponentSide::Bottom,
+                0,
+                size.width,
+            )],
             Self::Subcomponent { ports, .. } => ports
                 .iter()
                 .enumerate()
@@ -293,6 +348,12 @@ impl ComponentKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentId(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputId(pub usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OutputId(pub usize);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Component {
@@ -336,6 +397,81 @@ impl Component {
             })
             .collect()
     }
+
+    pub fn boundary_lead(&self, bounds: BoardBounds) -> Option<BoundaryLead> {
+        if !matches!(
+            self.kind,
+            ComponentKind::Input { .. } | ComponentKind::Output { .. }
+        ) {
+            return None;
+        }
+        let rect = self.rect()?;
+        let scale = self.kind.snap().get();
+        let (side, corridor, start, end) = match self.rotation {
+            Rotation::Up => {
+                let x = rect.min.x as f32 + scale as f32 * 0.5;
+                (
+                    ComponentSide::Top,
+                    Rect {
+                        min: Point::new(rect.min.x, bounds.min.y),
+                        max: Point::new(rect.max.x, rect.min.y),
+                    },
+                    [x, rect.min.y as f32],
+                    [x, bounds.min.y as f32],
+                )
+            }
+            Rotation::Right => {
+                let y = rect.min.y as f32 + scale as f32 * 0.5;
+                (
+                    ComponentSide::Right,
+                    Rect {
+                        min: Point::new(rect.max.x, rect.min.y),
+                        max: Point::new(bounds.max.x, rect.max.y),
+                    },
+                    [rect.max.x as f32, y],
+                    [bounds.max.x as f32, y],
+                )
+            }
+            Rotation::Down => {
+                let x = rect.min.x as f32 + scale as f32 * 0.5;
+                (
+                    ComponentSide::Bottom,
+                    Rect {
+                        min: Point::new(rect.min.x, rect.max.y),
+                        max: Point::new(rect.max.x, bounds.max.y),
+                    },
+                    [x, rect.max.y as f32],
+                    [x, bounds.max.y as f32],
+                )
+            }
+            Rotation::Left => {
+                let y = rect.min.y as f32 + scale as f32 * 0.5;
+                (
+                    ComponentSide::Left,
+                    Rect {
+                        min: Point::new(bounds.min.x, rect.min.y),
+                        max: Point::new(rect.min.x, rect.max.y),
+                    },
+                    [rect.min.x as f32, y],
+                    [bounds.min.x as f32, y],
+                )
+            }
+        };
+        Some(BoundaryLead {
+            side,
+            start,
+            end,
+            corridor,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoundaryLead {
+    pub side: ComponentSide,
+    pub start: [f32; 2],
+    pub end: [f32; 2],
+    corridor: Rect,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -361,13 +497,32 @@ pub enum ValidationError {
     WireOverflow {
         wire: Wire,
     },
+    BoundaryLeadBlocked {
+        component: ComponentId,
+        blocker: ComponentId,
+    },
 }
 
-#[derive(Default)]
 pub struct LogicGrid {
     wires: Vec<Wire>,
     components: BTreeMap<ComponentId, Component>,
     next_component_id: u64,
+    next_input_id: usize,
+    next_output_id: usize,
+    board_bounds: BoardBounds,
+}
+
+impl Default for LogicGrid {
+    fn default() -> Self {
+        Self {
+            wires: Vec::new(),
+            components: BTreeMap::new(),
+            next_component_id: 0,
+            next_input_id: 0,
+            next_output_id: 0,
+            board_bounds: BoardBounds::default(),
+        }
+    }
 }
 
 impl LogicGrid {
@@ -377,6 +532,18 @@ impl LogicGrid {
 
     pub fn wires(&self) -> &[Wire] {
         &self.wires
+    }
+
+    pub fn board_bounds(&self) -> BoardBounds {
+        self.board_bounds
+    }
+
+    pub fn set_board_bounds(&mut self, bounds: BoardBounds) -> bool {
+        if bounds.min.x >= bounds.max.x || bounds.min.y >= bounds.max.y {
+            return false;
+        }
+        self.board_bounds = bounds;
+        true
     }
 
     pub fn components(&self) -> impl Iterator<Item = &Component> {
@@ -393,8 +560,25 @@ impl LogicGrid {
         rotation: Rotation,
         mut kind: ComponentKind,
     ) -> ComponentId {
-        if let ComponentKind::Storage { scale, value } = &mut kind {
-            *value &= storage_value_mask(*scale);
+        match &mut kind {
+            ComponentKind::Storage { scale, value } => {
+                *value &= value_mask(*scale);
+            }
+            ComponentKind::Input { id, .. } => {
+                *id = InputId(self.next_input_id);
+                self.next_input_id = self
+                    .next_input_id
+                    .checked_add(1)
+                    .expect("input ID space exhausted");
+            }
+            ComponentKind::Output { id, .. } => {
+                *id = OutputId(self.next_output_id);
+                self.next_output_id = self
+                    .next_output_id
+                    .checked_add(1)
+                    .expect("output ID space exhausted");
+            }
+            _ => {}
         }
         let id = ComponentId(self.next_component_id);
         self.next_component_id = self
@@ -437,7 +621,7 @@ impl LogicGrid {
         else {
             return false;
         };
-        *stored = value & storage_value_mask(*scale);
+        *stored = value & value_mask(*scale);
         true
     }
 
@@ -558,6 +742,29 @@ impl LogicGrid {
                     errors.insert(ValidationError::ComponentOverlap {
                         first: first.id,
                         second: second.id,
+                    });
+                }
+            }
+        }
+
+        for component in &components {
+            let Some(lead) = component.boundary_lead(self.board_bounds) else {
+                continue;
+            };
+            if lead.corridor.min.x > lead.corridor.max.x
+                || lead.corridor.min.y > lead.corridor.max.y
+            {
+                continue;
+            }
+            for blocker in &components {
+                if component.id != blocker.id
+                    && blocker
+                        .rect()
+                        .is_some_and(|rect| lead.corridor.overlaps_area(rect))
+                {
+                    errors.insert(ValidationError::BoundaryLeadBlocked {
+                        component: component.id,
+                        blocker: blocker.id,
                     });
                 }
             }
@@ -750,7 +957,7 @@ impl LogicGrid {
     }
 }
 
-fn storage_value_mask(scale: Scale) -> u64 {
+pub fn value_mask(scale: Scale) -> u64 {
     let bits = scale.get() as u32;
     if bits == u64::BITS {
         u64::MAX
@@ -1381,6 +1588,114 @@ mod tests {
             &grid.component(storage).unwrap().kind,
             ComponentKind::Storage { value: 0b0001, .. }
         ));
+    }
+
+    #[test]
+    fn input_and_output_ids_are_separate_monotonic_namespaces() {
+        let mut grid = LogicGrid::new();
+        let first_input = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(99),
+            },
+        );
+        let first_output = grid.add_component(
+            Point::new(2, 0),
+            Rotation::Up,
+            ComponentKind::Output {
+                scale: Scale::ONE,
+                id: OutputId(99),
+            },
+        );
+        grid.remove_component(first_input);
+        let second_input = grid.add_component(
+            Point::new(4, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(99),
+            },
+        );
+
+        assert!(matches!(
+            grid.component(first_output).unwrap().kind,
+            ComponentKind::Output {
+                id: OutputId(0),
+                ..
+            }
+        ));
+        assert!(matches!(
+            grid.component(second_input).unwrap().kind,
+            ComponentKind::Input { id: InputId(1), .. }
+        ));
+    }
+
+    #[test]
+    fn boundary_components_rotate_their_inward_slots_and_outward_leads() {
+        let bounds = BoardBounds::new(Point::new(-5, -5), Point::new(20, 30));
+        let component = Component {
+            id: ComponentId(0),
+            position: Point::new(10, 20),
+            rotation: Rotation::Right,
+            kind: ComponentKind::Input {
+                scale: scale(2),
+                id: InputId(0),
+            },
+        };
+
+        assert_eq!(component.size(), Some(Size::new(4, 2)));
+        assert_eq!(
+            component.connection_slots(),
+            vec![ConnectionSlot {
+                id: ConnectionSlotId(0),
+                direction: ConnectionDirection::Output,
+                side: ComponentSide::Left,
+                start: 20,
+                end: 22,
+            }]
+        );
+        let lead = component.boundary_lead(bounds).unwrap();
+        assert_eq!(lead.side, ComponentSide::Right);
+        assert_eq!(lead.start, [14.0, 21.0]);
+        assert_eq!(lead.end, [20.0, 21.0]);
+
+        let at_edge = Component {
+            position: Point::new(16, 20),
+            ..component
+        };
+        let lead = at_edge.boundary_lead(bounds).unwrap();
+        assert_eq!(lead.start, lead.end);
+    }
+
+    #[test]
+    fn boundary_leads_are_blocked_by_components_but_not_wires() {
+        let mut grid = LogicGrid::new();
+        grid.set_board_bounds(BoardBounds::new(Point::new(-5, -5), Point::new(5, 5)));
+        let input = grid.add_component(
+            Point::new(0, 2),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(0),
+            },
+        );
+        let blocker = grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
+        grid.add_wire(wire((-3, 1), (3, 1), 1));
+
+        assert!(grid
+            .validate()
+            .contains(&ValidationError::BoundaryLeadBlocked {
+                component: input,
+                blocker,
+            }));
+
+        grid.remove_component(blocker);
+        assert!(!grid.validate().iter().any(|error| matches!(
+            error,
+            ValidationError::BoundaryLeadBlocked { component, .. } if *component == input
+        )));
     }
 
     #[test]

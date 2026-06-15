@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use eframe::egui::{self, PointerButton};
 use logicgame::execution::{GenerationError, Instruction, Vm};
 use logicgame::grid::{
-    CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode, LogicGrid,
-    Point, Rotation, Scale, ValidationError, Wire,
+    BoardBounds, CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
+    InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
 };
 
 use crate::renderer::{DrawTriangle, GridCallback, RenderFrame};
@@ -28,6 +28,8 @@ enum ToolKind {
     Not,
     Led,
     Storage,
+    Input,
+    Output,
     ConfigureStorage,
 }
 
@@ -39,6 +41,8 @@ impl ToolKind {
             Self::Not => "NOT gate",
             Self::Led => "LED",
             Self::Storage => "Storage",
+            Self::Input => "Input",
+            Self::Output => "Output",
             Self::ConfigureStorage => "Configure storage",
         }
     }
@@ -100,6 +104,14 @@ enum Gesture {
         drag_start: [f32; 2],
     },
     Storage {
+        anchor: Point,
+        drag_start: [f32; 2],
+    },
+    Input {
+        anchor: Point,
+        drag_start: [f32; 2],
+    },
+    Output {
         anchor: Point,
         drag_start: [f32; 2],
     },
@@ -176,6 +188,7 @@ struct SimulationSnapshot {
     components: Vec<Component>,
     wires: Vec<Wire>,
     graph: CircuitGraph,
+    board_bounds: BoardBounds,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -320,7 +333,6 @@ impl Selection {
 
 pub struct LogicEditor {
     grid: LogicGrid,
-    board_bounds: [f32; 4],
     tool: Tool,
     camera: Camera,
     gesture: Option<Gesture>,
@@ -333,7 +345,6 @@ impl Default for LogicEditor {
     fn default() -> Self {
         Self {
             grid: LogicGrid::new(),
-            board_bounds: [-5.0, -5.0, 5.0, 5.0],
             tool: Tool {
                 kind: ToolKind::Select,
                 scale: Scale::ONE,
@@ -365,7 +376,7 @@ impl LogicEditor {
                     })
                     .or_else(|| {
                         boundary_edge_at(
-                            self.board_bounds,
+                            self.grid.board_bounds().as_f32(),
                             world,
                             BOUNDARY_HIT_RADIUS / self.camera.zoom,
                         )
@@ -393,6 +404,8 @@ impl LogicEditor {
                     ToolKind::Not,
                     ToolKind::Led,
                     ToolKind::Storage,
+                    ToolKind::Input,
+                    ToolKind::Output,
                     ToolKind::ConfigureStorage,
                 ] {
                     if ui
@@ -500,7 +513,7 @@ impl LogicEditor {
                     return;
                 }
 
-                let Some(vm) = &self.simulation.vm else {
+                let Some(vm) = &mut self.simulation.vm else {
                     ui.weak("Run a step to compile and execute the circuit.");
                     return;
                 };
@@ -561,6 +574,48 @@ impl LogicEditor {
                                 }
                             }
                         });
+                }
+
+                ui.separator();
+                ui.strong("Inputs");
+                if vm.inputs.is_empty() {
+                    ui.weak("No input components");
+                } else {
+                    for (input, value) in vm.inputs.iter_mut().enumerate() {
+                        let scale =
+                            snapshot
+                                .components
+                                .iter()
+                                .find_map(|component| match component.kind {
+                                    ComponentKind::Input { scale, id } if id.0 == input => {
+                                        Some(scale)
+                                    }
+                                    _ => None,
+                                });
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Input {input}"));
+                            if let Some(scale) = scale {
+                                for bit in storage_bit_indices(scale) {
+                                    let state = (*value >> bit) & 1;
+                                    if ui.small_button(format!("{bit}:{state}")).clicked() {
+                                        *value ^= 1_u64 << bit;
+                                    }
+                                }
+                            } else {
+                                ui.weak("deleted");
+                            }
+                        });
+                    }
+                }
+
+                ui.separator();
+                ui.strong("Outputs");
+                if vm.outputs.is_empty() {
+                    ui.weak("No output components");
+                } else {
+                    for (output, value) in vm.outputs.iter().copied().enumerate() {
+                        simulation_value_row(ui, format!("Output {output}"), value);
+                    }
                 }
 
                 ui.separator();
@@ -676,7 +731,7 @@ impl LogicEditor {
         let Some(vm) = &mut self.simulation.vm else {
             return false;
         };
-        vm.memory.fill(0);
+        vm.begin_tick();
         self.simulation.next_instruction = 0;
         if vm.instructions.is_empty() {
             self.simulation.steps += 1;
@@ -704,6 +759,7 @@ impl LogicEditor {
             components: self.grid.components().cloned().collect(),
             wires: self.grid.wires().to_vec(),
             graph: self.grid.generate_graph(),
+            board_bounds: self.grid.board_bounds(),
         }
     }
 
@@ -1027,7 +1083,8 @@ impl LogicEditor {
         let snapped = snap_point(world, self.tool.scale);
 
         if let Some(Gesture::ResizeBoundary { edge }) = self.gesture.as_ref() {
-            resize_boundary(&mut self.board_bounds, *edge, world);
+            let bounds = resize_boundary(self.grid.board_bounds(), *edge, world);
+            self.grid.set_board_bounds(bounds);
         }
 
         if response.clicked_by(PointerButton::Secondary) && self.tool.kind == ToolKind::Wire {
@@ -1043,7 +1100,7 @@ impl LogicEditor {
             .input(|input| input.pointer.button_pressed(PointerButton::Primary));
         if primary_pressed && response.hovered() {
             if let Some(edge) = boundary_edge_at(
-                self.board_bounds,
+                self.grid.board_bounds().as_f32(),
                 world,
                 BOUNDARY_HIT_RADIUS / self.camera.zoom,
             ) {
@@ -1085,6 +1142,14 @@ impl LogicEditor {
                     anchor: snapped,
                     drag_start: world,
                 }),
+                ToolKind::Input => Some(Gesture::Input {
+                    anchor: snapped,
+                    drag_start: world,
+                }),
+                ToolKind::Output => Some(Gesture::Output {
+                    anchor: snapped,
+                    drag_start: world,
+                }),
                 ToolKind::ConfigureStorage => {
                     if let Some(DebugEntity::Component(id)) = self.entity_at(world) {
                         if let Some(ComponentKind::Storage { scale, .. }) =
@@ -1108,7 +1173,8 @@ impl LogicEditor {
         if primary_released {
             match self.gesture.take() {
                 Some(Gesture::ResizeBoundary { edge }) => {
-                    resize_boundary(&mut self.board_bounds, edge, world);
+                    let bounds = resize_boundary(self.grid.board_bounds(), edge, world);
+                    self.grid.set_board_bounds(bounds);
                 }
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(start, snapped, self.tool.scale) {
@@ -1141,6 +1207,32 @@ impl LogicEditor {
                             oriented_component_position(anchor, rotation, scale),
                             rotation,
                             ComponentKind::Storage { scale, value: 0 },
+                        );
+                    }
+                }
+                Some(Gesture::Input { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, world) {
+                        let scale = self.tool.scale;
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, scale),
+                            rotation,
+                            ComponentKind::Input {
+                                scale,
+                                id: InputId(usize::MAX),
+                            },
+                        );
+                    }
+                }
+                Some(Gesture::Output { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, world) {
+                        let scale = self.tool.scale;
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, scale),
+                            rotation,
+                            ComponentKind::Output {
+                                scale,
+                                id: OutputId(usize::MAX),
+                            },
                         );
                     }
                 }
@@ -1331,15 +1423,21 @@ impl LogicEditor {
                     bad_components.insert(first);
                     bad_components.insert(second);
                 }
+                ValidationError::BoundaryLeadBlocked { component, blocker } => {
+                    bad_components.insert(component);
+                    bad_components.insert(blocker);
+                }
             }
         }
 
+        let board_bounds = self.grid.board_bounds();
         let mut component_triangles = Vec::new();
         let mut wire_triangles = Vec::new();
         for component in self.grid.components() {
-            component_triangles.extend(DrawTriangle::component(
+            component_triangles.extend(DrawTriangle::component_in_bounds(
                 component,
                 bad_components.contains(&component.id),
+                board_bounds,
             ));
             if hovered_entity == Some(DebugEntity::Component(component.id))
                 || graph_hover.components.contains(&component.id)
@@ -1407,7 +1505,7 @@ impl LogicEditor {
                             },
                         };
                         component_triangles.extend(
-                            DrawTriangle::component(&component, false)
+                            DrawTriangle::component_in_bounds(&component, false, board_bounds)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -1422,7 +1520,7 @@ impl LogicEditor {
                             kind: ComponentKind::Led,
                         };
                         component_triangles.extend(
-                            DrawTriangle::component(&component, false)
+                            DrawTriangle::component_in_bounds(&component, false, board_bounds)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -1444,7 +1542,51 @@ impl LogicEditor {
                             },
                         };
                         component_triangles.extend(
-                            DrawTriangle::component(&component, false)
+                            DrawTriangle::component_in_bounds(&component, false, board_bounds)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
+                    }
+                }
+                Some(Gesture::Input { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
+                        let component = Component {
+                            id: ComponentId(u64::MAX),
+                            position: oriented_component_position(
+                                *anchor,
+                                rotation,
+                                self.tool.scale,
+                            ),
+                            rotation,
+                            kind: ComponentKind::Input {
+                                scale: self.tool.scale,
+                                id: InputId(usize::MAX),
+                            },
+                        };
+                        component_triangles.extend(
+                            DrawTriangle::component_in_bounds(&component, false, board_bounds)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
+                    }
+                }
+                Some(Gesture::Output { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
+                        let component = Component {
+                            id: ComponentId(u64::MAX),
+                            position: oriented_component_position(
+                                *anchor,
+                                rotation,
+                                self.tool.scale,
+                            ),
+                            rotation,
+                            kind: ComponentKind::Output {
+                                scale: self.tool.scale,
+                                id: OutputId(usize::MAX),
+                            },
+                        };
+                        component_triangles.extend(
+                            DrawTriangle::component_in_bounds(&component, false, board_bounds)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -1467,7 +1609,7 @@ impl LogicEditor {
                         let mut component = original.clone();
                         component.position = position;
                         component_triangles.extend(
-                            DrawTriangle::component(&component, false)
+                            DrawTriangle::component_in_bounds(&component, false, board_bounds)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -1490,7 +1632,7 @@ impl LogicEditor {
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
             grid_scale: self.tool.scale.get() as f32,
-            board_bounds: self.board_bounds,
+            board_bounds: board_bounds.as_f32(),
             triangles: wire_triangles,
         }
     }
@@ -1526,13 +1668,26 @@ fn boundary_edge_at(
         .map(|(edge, _)| edge)
 }
 
-fn resize_boundary(bounds: &mut [f32; 4], edge: BoundaryEdge, point: [f32; 2]) {
+fn resize_boundary(bounds: BoardBounds, edge: BoundaryEdge, point: [f32; 2]) -> BoardBounds {
+    let mut values = [bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y];
     match edge {
-        BoundaryEdge::Left => bounds[0] = point[0].round().min(bounds[2] - MIN_BOARD_SIZE),
-        BoundaryEdge::Top => bounds[1] = point[1].round().min(bounds[3] - MIN_BOARD_SIZE),
-        BoundaryEdge::Right => bounds[2] = point[0].round().max(bounds[0] + MIN_BOARD_SIZE),
-        BoundaryEdge::Bottom => bounds[3] = point[1].round().max(bounds[1] + MIN_BOARD_SIZE),
+        BoundaryEdge::Left => {
+            values[0] = (point[0].round() as i64).min(values[2] - MIN_BOARD_SIZE as i64)
+        }
+        BoundaryEdge::Top => {
+            values[1] = (point[1].round() as i64).min(values[3] - MIN_BOARD_SIZE as i64)
+        }
+        BoundaryEdge::Right => {
+            values[2] = (point[0].round() as i64).max(values[0] + MIN_BOARD_SIZE as i64)
+        }
+        BoundaryEdge::Bottom => {
+            values[3] = (point[1].round() as i64).max(values[1] + MIN_BOARD_SIZE as i64)
+        }
     }
+    BoardBounds::new(
+        Point::new(values[0], values[1]),
+        Point::new(values[2], values[3]),
+    )
 }
 
 fn component_kind_name(kind: &ComponentKind) -> &'static str {
@@ -1540,6 +1695,8 @@ fn component_kind_name(kind: &ComponentKind) -> &'static str {
         ComponentKind::Not { .. } => "NOT gate",
         ComponentKind::Led => "LED",
         ComponentKind::Storage { .. } => "Storage",
+        ComponentKind::Input { .. } => "Input",
+        ComponentKind::Output { .. } => "Output",
         ComponentKind::Subcomponent { .. } => "Subcomponent",
     }
 }
@@ -1569,6 +1726,12 @@ fn format_instruction(instruction: &Instruction) -> String {
         }
         Instruction::SaveStorage { storage, input } => {
             format!("SAVE m{input} -> s{storage}")
+        }
+        Instruction::ReadInput { input, output, .. } => {
+            format!("INPUT i{} -> m{output}", input.0)
+        }
+        Instruction::WriteOutput { output, input, .. } => {
+            format!("OUTPUT m{input} -> o{}", output.0)
         }
     }
 }
@@ -1982,15 +2145,15 @@ mod tests {
 
     #[test]
     fn resizing_boundary_snaps_and_preserves_a_minimum_size() {
-        let mut bounds = [-5.0, -5.0, 5.0, 5.0];
+        let mut bounds = BoardBounds::default();
 
-        resize_boundary(&mut bounds, BoundaryEdge::Right, [8.6, 0.0]);
-        resize_boundary(&mut bounds, BoundaryEdge::Top, [0.0, -2.4]);
-        assert_eq!(bounds, [-5.0, -2.0, 9.0, 5.0]);
+        bounds = resize_boundary(bounds, BoundaryEdge::Right, [8.6, 0.0]);
+        bounds = resize_boundary(bounds, BoundaryEdge::Top, [0.0, -2.4]);
+        assert_eq!(bounds.as_f32(), [-5.0, -2.0, 9.0, 5.0]);
 
-        resize_boundary(&mut bounds, BoundaryEdge::Left, [20.0, 0.0]);
-        resize_boundary(&mut bounds, BoundaryEdge::Bottom, [0.0, -20.0]);
-        assert_eq!(bounds, [8.0, -2.0, 9.0, -1.0]);
+        bounds = resize_boundary(bounds, BoundaryEdge::Left, [20.0, 0.0]);
+        bounds = resize_boundary(bounds, BoundaryEdge::Bottom, [0.0, -20.0]);
+        assert_eq!(bounds.as_f32(), [8.0, -2.0, 9.0, -1.0]);
     }
 
     #[test]
@@ -2069,6 +2232,7 @@ mod tests {
                     output: 1,
                 },
             ],
+            ..Vm::default()
         });
 
         assert!(editor.begin_simulation_tick());
