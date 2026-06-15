@@ -5,7 +5,7 @@ use logicgame::grid::{
     Component, ComponentId, ComponentKind, LogicGrid, Point, Rotation, Scale, ValidationError, Wire,
 };
 
-use crate::renderer::{DrawInstance, GridCallback, RenderFrame};
+use crate::renderer::{DrawTriangle, GridCallback, RenderFrame};
 
 const MIN_ZOOM: f32 = 4.0;
 const MAX_ZOOM: f32 = 96.0;
@@ -251,22 +251,22 @@ impl LogicEditor {
             }
         }
 
-        let mut component_instances = Vec::new();
-        let mut wire_instances = Vec::new();
+        let mut component_triangles = Vec::new();
+        let mut wire_triangles = Vec::new();
         for component in self.grid.components() {
-            if let Some(instance) =
-                DrawInstance::component(component, bad_components.contains(&component.id))
+            if let Some(triangle) =
+                DrawTriangle::component(component, bad_components.contains(&component.id))
             {
-                component_instances.push(instance);
+                component_triangles.push(triangle);
             }
         }
         for wire in self.grid.wires() {
-            wire_instances.push(DrawInstance::wire(
+            wire_triangles.extend(DrawTriangle::wire(
                 *wire,
                 if bad_wires.contains(wire) {
-                    DrawInstance::ERROR_COLOR
+                    DrawTriangle::ERROR_COLOR
                 } else {
-                    DrawInstance::WIRE_COLOR
+                    DrawTriangle::WIRE_COLOR
                 },
             ));
         }
@@ -276,7 +276,8 @@ impl LogicEditor {
             match self.gesture {
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(start, snapped, self.tool.scale) {
-                        wire_instances.push(DrawInstance::wire(wire, DrawInstance::PREVIEW_COLOR));
+                        wire_triangles
+                            .extend(DrawTriangle::wire(wire, DrawTriangle::PREVIEW_COLOR));
                     }
                 }
                 Some(Gesture::Not { anchor, drag_start }) => {
@@ -289,23 +290,23 @@ impl LogicEditor {
                                 scale: self.tool.scale,
                             },
                         };
-                        if let Some(instance) = DrawInstance::component(&component, false) {
-                            component_instances
-                                .push(instance.with_color(DrawInstance::PREVIEW_COLOR));
+                        if let Some(triangle) = DrawTriangle::component(&component, false) {
+                            component_triangles
+                                .push(triangle.with_color(DrawTriangle::PREVIEW_COLOR));
                         }
                     }
                 }
                 None => {}
             }
         }
-        component_instances.extend(wire_instances);
+        component_triangles.extend(wire_triangles);
 
         RenderFrame {
             viewport_size: [rect.width(), rect.height()],
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
             grid_scale: self.tool.scale.get() as f32,
-            instances: component_instances,
+            triangles: component_triangles,
         }
     }
 }
