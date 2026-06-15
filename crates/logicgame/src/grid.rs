@@ -190,7 +190,7 @@ impl ComponentKind {
         }
     }
 
-    fn snap(&self) -> Scale {
+    pub fn snap(&self) -> Scale {
         match self {
             Self::Not { scale } | Self::Storage { scale } => *scale,
             Self::Led => Scale::ONE,
@@ -317,6 +317,14 @@ impl LogicGrid {
 
     pub fn remove_component(&mut self, id: ComponentId) -> Option<Component> {
         self.components.remove(&id)
+    }
+
+    pub fn set_component_position(&mut self, id: ComponentId, position: Point) -> bool {
+        let Some(component) = self.components.get_mut(&id) else {
+            return false;
+        };
+        component.position = position;
+        true
     }
 
     pub fn add_wire(&mut self, wire: Wire) -> &[Wire] {
