@@ -589,11 +589,6 @@ impl LogicGrid {
         let mut rects = self
             .components
             .values()
-            .filter(|c| match c.kind {
-                ComponentKind::Input { .. } => false,
-                ComponentKind::Output { .. } => false,
-                _ => true,
-            })
             .map(Component::rect)
             .chain(self.wires.iter().copied().map(Wire::rect));
         let first = rects.next()??;
