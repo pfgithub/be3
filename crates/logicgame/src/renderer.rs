@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use eframe::egui_wgpu::{self, wgpu};
 use logicgame::grid::{
     Component, ComponentKind, ComponentLead, ComponentSide, ConnectionDirection, ConnectionSlot,
-    Orientation, Rotation, Wire,
+    GridBounds, Orientation, Rotation, Wire,
 };
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
@@ -36,6 +36,7 @@ impl DrawTriangle {
     pub const PREVIEW_COLOR: [f32; 4] = [0.98, 0.78, 0.24, 0.78];
     pub const ERROR_COLOR: [f32; 4] = [0.95, 0.22, 0.25, 1.0];
     pub const HIGHLIGHT_COLOR: [f32; 4] = [1.0, 0.78, 0.15, 1.0];
+    pub const BOUNDS_COLOR: [f32; 4] = [0.72, 0.50, 0.96, 1.0];
 
     fn new(positions: [[f32; 2]; 3], color: [f32; 4]) -> Self {
         Self { positions, color }
@@ -273,6 +274,21 @@ impl DrawTriangle {
             ComponentSide::Left => [left - thickness * 0.5, start, left + thickness * 0.5, end],
         };
         rectangle(rect, Self::HIGHLIGHT_COLOR).to_vec()
+    }
+
+    pub fn bounds(bounds: GridBounds, thickness: f32) -> Vec<Self> {
+        let half_thickness = thickness * 0.5;
+        outline(
+            [
+                bounds.min.x as f32 - half_thickness,
+                bounds.min.y as f32 - half_thickness,
+                bounds.max.x as f32 + half_thickness,
+                bounds.max.y as f32 + half_thickness,
+            ],
+            thickness,
+            Self::BOUNDS_COLOR,
+        )
+        .to_vec()
     }
 
     pub fn with_color(mut self, color: [f32; 4]) -> Self {

@@ -783,6 +783,7 @@ impl LogicEditor {
         hovered_square: Option<Point>,
     ) -> Option<DebugEntity> {
         let errors = self.grid.validate();
+        let bounds = self.grid.bounds();
         let mut hovered_entity = None;
 
         egui::Window::new("Grid Debugger")
@@ -797,6 +798,39 @@ impl LogicEditor {
                         ui.end_row();
                         ui.label("Wires");
                         ui.monospace(self.grid.wires().len().to_string());
+                        ui.end_row();
+                        ui.label("Bounds");
+                        match bounds {
+                            Some(bounds) => {
+                                ui.monospace(format!(
+                                    "({}, {}) to ({}, {})",
+                                    bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y
+                                ));
+                            }
+                            None => {
+                                ui.weak("none");
+                            }
+                        }
+                        ui.end_row();
+                        ui.label("Bounds size");
+                        match bounds {
+                            Some(bounds) => {
+                                ui.monospace(format!("{} x {}", bounds.width(), bounds.height()));
+                            }
+                            None => {
+                                ui.weak("none");
+                            }
+                        }
+                        ui.end_row();
+                        ui.label("Bounds area");
+                        match bounds {
+                            Some(bounds) => {
+                                ui.monospace(bounds.area().to_string());
+                            }
+                            None => {
+                                ui.weak("none");
+                            }
+                        }
                         ui.end_row();
                         ui.label("Validation errors");
                         ui.monospace(errors.len().to_string());
@@ -1605,6 +1639,9 @@ impl LogicEditor {
             }
         }
         wire_triangles.extend(component_triangles);
+        if let Some(bounds) = self.grid.bounds() {
+            wire_triangles.extend(DrawTriangle::bounds(bounds, 2.0 / self.camera.zoom));
+        }
 
         RenderFrame {
             viewport_size: [rect.width(), rect.height()],

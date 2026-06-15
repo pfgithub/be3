@@ -460,6 +460,33 @@ pub enum ValidationError {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GridBounds {
+    pub min: Point,
+    pub max: Point,
+}
+
+impl GridBounds {
+    pub fn width(self) -> u128 {
+        (self.max.x as i128 - self.min.x as i128) as u128
+    }
+
+    pub fn height(self) -> u128 {
+        (self.max.y as i128 - self.min.y as i128) as u128
+    }
+
+    pub fn area(self) -> u128 {
+        self.width() * self.height()
+    }
+
+    fn include(&mut self, rect: Rect) {
+        self.min.x = self.min.x.min(rect.min.x);
+        self.min.y = self.min.y.min(rect.min.y);
+        self.max.x = self.max.x.max(rect.max.x);
+        self.max.y = self.max.y.max(rect.max.y);
+    }
+}
+
 pub struct LogicGrid {
     wires: Vec<Wire>,
     components: BTreeMap<ComponentId, Component>,
@@ -555,6 +582,28 @@ impl LogicGrid {
 
     pub fn components(&self) -> impl Iterator<Item = &Component> {
         self.components.values()
+    }
+
+    pub fn bounds(&self) -> Option<GridBounds> {
+        let mut rects = self
+            .components
+            .values()
+            .filter(|c| match c.kind {
+                ComponentKind::Input { .. } => false,
+                ComponentKind::Output { .. } => false,
+                _ => true,
+            })
+            .map(Component::rect)
+            .chain(self.wires.iter().copied().map(Wire::rect));
+        let first = rects.next()??;
+        let mut bounds = GridBounds {
+            min: first.min,
+            max: first.max,
+        };
+        for rect in rects {
+            bounds.include(rect?);
+        }
+        Some(bounds)
     }
 
     pub fn component(&self, id: ComponentId) -> Option<&Component> {
@@ -1524,6 +1573,29 @@ mod tests {
             kind: ComponentKind::Not { scale: scale(4) },
         };
         assert_eq!(component.size(), Some(Size::new(8, 4)));
+    }
+
+    #[test]
+    fn calculates_bounds_from_components_and_scaled_wires() {
+        let mut grid = LogicGrid::new();
+        grid.add_component(
+            Point::new(-6, -4),
+            Rotation::Right,
+            ComponentKind::Not { scale: scale(2) },
+        );
+        grid.add_wire(wire((3, 5), (11, 5), 4));
+
+        let bounds = grid.bounds().unwrap();
+        assert_eq!(bounds.min, Point::new(-6, -4));
+        assert_eq!(bounds.max, Point::new(15, 9));
+        assert_eq!(bounds.width(), 21);
+        assert_eq!(bounds.height(), 13);
+        assert_eq!(bounds.area(), 273);
+    }
+
+    #[test]
+    fn empty_grid_has_no_bounds() {
+        assert_eq!(LogicGrid::new().bounds(), None);
     }
 
     #[test]
