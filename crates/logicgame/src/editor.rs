@@ -230,8 +230,13 @@ impl LogicEditor {
             .2
             .map(|pointer| snap_point(pointer, self.tool.scale));
         let hovered_entity = self.show_grid_debugger(&context, hovered_square);
-        self.show_generated_graph(&context);
-        let frame = self.render_frame(canvas.inner.0.rect, canvas.inner.2, hovered_entity);
+        let hovered_graph_wires = self.show_generated_graph(&context);
+        let frame = self.render_frame(
+            canvas.inner.0.rect,
+            canvas.inner.2,
+            hovered_entity,
+            &hovered_graph_wires,
+        );
         canvas
             .inner
             .1
@@ -405,8 +410,9 @@ impl LogicEditor {
         hovered_entity
     }
 
-    fn show_generated_graph(&self, context: &egui::Context) {
+    fn show_generated_graph(&self, context: &egui::Context) -> BTreeSet<Wire> {
         let graph = self.grid.generate_graph();
+        let mut hovered_wires = BTreeSet::new();
 
         egui::Window::new("Generated Graph")
             .default_pos([360.0, 16.0])
@@ -427,12 +433,19 @@ impl LogicEditor {
                 }
 
                 egui::ScrollArea::both().show(ui, |ui| {
-                    self.paint_generated_graph(ui, &graph);
+                    self.paint_generated_graph(ui, &graph, &mut hovered_wires);
                 });
             });
+
+        hovered_wires
     }
 
-    fn paint_generated_graph(&self, ui: &mut egui::Ui, graph: &CircuitGraph) {
+    fn paint_generated_graph(
+        &self,
+        ui: &mut egui::Ui,
+        graph: &CircuitGraph,
+        hovered_wires: &mut BTreeSet<Wire>,
+    ) {
         let (positions, size) = graph_layout(graph);
         let (response, painter) = ui.allocate_painter(size, egui::Sense::hover());
         let origin = response.rect.min.to_vec2();
@@ -477,9 +490,11 @@ impl LogicEditor {
                 ui.id().with(("generated-graph-node", index)),
                 egui::Sense::hover(),
             );
-            node_response.on_hover_ui(|ui| {
-                ui.monospace(format!("{node:#?}"));
-            });
+            if node_response.hovered() {
+                if let GraphNode::WireNet { wires } = node {
+                    hovered_wires.extend(wires.iter().copied());
+                }
+            }
         }
     }
 
@@ -712,6 +727,7 @@ impl LogicEditor {
         rect: egui::Rect,
         pointer_world: Option<[f32; 2]>,
         hovered_entity: Option<DebugEntity>,
+        hovered_graph_wires: &BTreeSet<Wire>,
     ) -> RenderFrame {
         let errors = self.grid.validate();
         let mut bad_wires = BTreeSet::new();
@@ -755,6 +771,7 @@ impl LogicEditor {
             wire_triangles.extend(DrawTriangle::wire(
                 *wire,
                 if hovered_entity == Some(DebugEntity::Wire(*wire))
+                    || hovered_graph_wires.contains(wire)
                     || self.selection.wires.contains(wire)
                 {
                     DrawTriangle::HIGHLIGHT_COLOR
