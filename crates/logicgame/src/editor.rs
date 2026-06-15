@@ -13,6 +13,8 @@ const MIN_ZOOM: f32 = 4.0;
 const MAX_ZOOM: f32 = 96.0;
 const DEFAULT_ZOOM: f32 = 24.0;
 const WIRE_HIT_RADIUS: f32 = 7.0;
+const BOUNDARY_HIT_RADIUS: f32 = 7.0;
+const MIN_BOARD_SIZE: f32 = 1.0;
 const SCALES: [u8; 7] = [1, 2, 4, 8, 16, 32, 64];
 const GRAPH_NODE_SIZE: egui::Vec2 = egui::vec2(150.0, 48.0);
 const GRAPH_COLUMN_GAP: f32 = 70.0;
@@ -83,6 +85,9 @@ impl Camera {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Gesture {
+    ResizeBoundary {
+        edge: BoundaryEdge,
+    },
     Wire {
         start: Point,
     },
@@ -108,6 +113,14 @@ enum Gesture {
         components: Vec<(ComponentId, Point)>,
         wires: Vec<SelectedWire>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BoundaryEdge {
+    Left,
+    Top,
+    Right,
+    Bottom,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,6 +320,7 @@ impl Selection {
 
 pub struct LogicEditor {
     grid: LogicGrid,
+    board_bounds: [f32; 4],
     tool: Tool,
     camera: Camera,
     gesture: Option<Gesture>,
@@ -319,6 +333,7 @@ impl Default for LogicEditor {
     fn default() -> Self {
         Self {
             grid: LogicGrid::new(),
+            board_bounds: [-5.0, -5.0, 5.0, 5.0],
             tool: Tool {
                 kind: ToolKind::Select,
                 scale: Scale::ONE,
@@ -339,6 +354,26 @@ impl LogicEditor {
             let (response, painter) =
                 ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
             self.handle_canvas_input(&response);
+            if let Some(pointer) = response.hover_pos() {
+                let world = self.camera.screen_to_world(pointer, response.rect);
+                if let Some(edge) = self
+                    .gesture
+                    .as_ref()
+                    .and_then(|gesture| match gesture {
+                        Gesture::ResizeBoundary { edge } => Some(*edge),
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        boundary_edge_at(
+                            self.board_bounds,
+                            world,
+                            BOUNDARY_HIT_RADIUS / self.camera.zoom,
+                        )
+                    })
+                {
+                    response.ctx.set_cursor_icon(edge.cursor_icon());
+                }
+            }
 
             let pointer_world = response
                 .hovered()
@@ -991,6 +1026,10 @@ impl LogicEditor {
         let world = self.camera.screen_to_world(pointer, response.rect);
         let snapped = snap_point(world, self.tool.scale);
 
+        if let Some(Gesture::ResizeBoundary { edge }) = self.gesture.as_ref() {
+            resize_boundary(&mut self.board_bounds, *edge, world);
+        }
+
         if response.clicked_by(PointerButton::Secondary) && self.tool.kind == ToolKind::Wire {
             if let Some(wire) =
                 nearest_wire(self.grid.wires(), world, WIRE_HIT_RADIUS / self.camera.zoom)
@@ -1003,6 +1042,14 @@ impl LogicEditor {
             .ctx
             .input(|input| input.pointer.button_pressed(PointerButton::Primary));
         if primary_pressed && response.hovered() {
+            if let Some(edge) = boundary_edge_at(
+                self.board_bounds,
+                world,
+                BOUNDARY_HIT_RADIUS / self.camera.zoom,
+            ) {
+                self.gesture = Some(Gesture::ResizeBoundary { edge });
+                return;
+            }
             self.gesture = match self.tool.kind {
                 ToolKind::Select => {
                     let additive = response.ctx.input(|input| input.modifiers.shift);
@@ -1060,6 +1107,9 @@ impl LogicEditor {
             .input(|input| input.pointer.button_released(PointerButton::Primary));
         if primary_released {
             match self.gesture.take() {
+                Some(Gesture::ResizeBoundary { edge }) => {
+                    resize_boundary(&mut self.board_bounds, edge, world);
+                }
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(start, snapped, self.tool.scale) {
                         self.grid.add_wire(wire);
@@ -1335,6 +1385,7 @@ impl LogicEditor {
         if let Some(pointer) = pointer_world {
             let snapped = snap_point(pointer, self.tool.scale);
             match self.gesture.as_ref() {
+                Some(Gesture::ResizeBoundary { .. }) => {}
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(*start, snapped, self.tool.scale) {
                         wire_triangles
@@ -1439,9 +1490,48 @@ impl LogicEditor {
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
             grid_scale: self.tool.scale.get() as f32,
-            board_bounds: [-5.0, -5.0, 5.0, 5.0],
+            board_bounds: self.board_bounds,
             triangles: wire_triangles,
         }
+    }
+}
+
+impl BoundaryEdge {
+    fn cursor_icon(self) -> egui::CursorIcon {
+        match self {
+            Self::Left | Self::Right => egui::CursorIcon::ResizeHorizontal,
+            Self::Top | Self::Bottom => egui::CursorIcon::ResizeVertical,
+        }
+    }
+}
+
+fn boundary_edge_at(
+    [left, top, right, bottom]: [f32; 4],
+    point: [f32; 2],
+    radius: f32,
+) -> Option<BoundaryEdge> {
+    let mut edges = Vec::new();
+    if point[1] >= top - radius && point[1] <= bottom + radius {
+        edges.push((BoundaryEdge::Left, (point[0] - left).abs()));
+        edges.push((BoundaryEdge::Right, (point[0] - right).abs()));
+    }
+    if point[0] >= left - radius && point[0] <= right + radius {
+        edges.push((BoundaryEdge::Top, (point[1] - top).abs()));
+        edges.push((BoundaryEdge::Bottom, (point[1] - bottom).abs()));
+    }
+    edges
+        .into_iter()
+        .filter(|(_, distance)| *distance <= radius)
+        .min_by(|(_, first), (_, second)| first.total_cmp(second))
+        .map(|(edge, _)| edge)
+}
+
+fn resize_boundary(bounds: &mut [f32; 4], edge: BoundaryEdge, point: [f32; 2]) {
+    match edge {
+        BoundaryEdge::Left => bounds[0] = point[0].round().min(bounds[2] - MIN_BOARD_SIZE),
+        BoundaryEdge::Top => bounds[1] = point[1].round().min(bounds[3] - MIN_BOARD_SIZE),
+        BoundaryEdge::Right => bounds[2] = point[0].round().max(bounds[0] + MIN_BOARD_SIZE),
+        BoundaryEdge::Bottom => bounds[3] = point[1].round().max(bounds[1] + MIN_BOARD_SIZE),
     }
 }
 
@@ -1832,7 +1922,7 @@ mod tests {
     }
 
     #[test]
-    fn component_bounds_are_fixed_during_placement_preview() {
+    fn boundary_bounds_are_stable_during_placement_preview() {
         let mut editor = LogicEditor::default();
         editor.tool = Tool {
             kind: ToolKind::Led,
@@ -1851,6 +1941,56 @@ mod tests {
         );
 
         assert_eq!(frame.board_bounds, [-5.0, -5.0, 5.0, 5.0]);
+    }
+
+    #[test]
+    fn boundary_edges_can_be_hit_from_either_side() {
+        let bounds = [-5.0, -4.0, 6.0, 7.0];
+
+        assert_eq!(
+            boundary_edge_at(bounds, [-5.2, 0.0], 0.25),
+            Some(BoundaryEdge::Left)
+        );
+        assert_eq!(
+            boundary_edge_at(bounds, [6.2, 0.0], 0.25),
+            Some(BoundaryEdge::Right)
+        );
+        assert_eq!(
+            boundary_edge_at(bounds, [0.0, -3.8], 0.25),
+            Some(BoundaryEdge::Top)
+        );
+        assert_eq!(
+            boundary_edge_at(bounds, [0.0, 7.2], 0.25),
+            Some(BoundaryEdge::Bottom)
+        );
+        assert_eq!(boundary_edge_at(bounds, [0.0, 0.0], 0.25), None);
+    }
+
+    #[test]
+    fn boundary_corners_select_the_nearest_edge() {
+        let bounds = [-5.0, -5.0, 5.0, 5.0];
+
+        assert_eq!(
+            boundary_edge_at(bounds, [-4.95, -4.8], 0.25),
+            Some(BoundaryEdge::Left)
+        );
+        assert_eq!(
+            boundary_edge_at(bounds, [-4.8, -4.95], 0.25),
+            Some(BoundaryEdge::Top)
+        );
+    }
+
+    #[test]
+    fn resizing_boundary_snaps_and_preserves_a_minimum_size() {
+        let mut bounds = [-5.0, -5.0, 5.0, 5.0];
+
+        resize_boundary(&mut bounds, BoundaryEdge::Right, [8.6, 0.0]);
+        resize_boundary(&mut bounds, BoundaryEdge::Top, [0.0, -2.4]);
+        assert_eq!(bounds, [-5.0, -2.0, 9.0, 5.0]);
+
+        resize_boundary(&mut bounds, BoundaryEdge::Left, [20.0, 0.0]);
+        resize_boundary(&mut bounds, BoundaryEdge::Bottom, [0.0, -20.0]);
+        assert_eq!(bounds, [8.0, -2.0, 9.0, -1.0]);
     }
 
     #[test]
