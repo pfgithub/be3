@@ -106,7 +106,7 @@ enum Gesture {
         start: [f32; 2],
         scale: Scale,
         components: Vec<(ComponentId, Point)>,
-        wires: Vec<Wire>,
+        wires: Vec<SelectedWire>,
     },
 }
 
@@ -114,12 +114,41 @@ enum Gesture {
 enum DebugEntity {
     Component(ComponentId),
     Wire(Wire),
+    WireEndpoint(WireEndpoint),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum WireEnd {
+    Start,
+    End,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct WireEndpoint {
+    wire: Wire,
+    end: WireEnd,
+}
+
+impl WireEndpoint {
+    fn point(self) -> Point {
+        match self.end {
+            WireEnd::Start => self.wire.start,
+            WireEnd::End => self.wire.end,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SelectedWire {
+    wire: Wire,
+    start: bool,
+    end: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Selection {
     components: BTreeSet<ComponentId>,
-    wires: BTreeSet<Wire>,
+    wire_endpoints: BTreeSet<WireEndpoint>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -180,18 +209,22 @@ impl GraphHover {
 
 impl Selection {
     fn is_empty(&self) -> bool {
-        self.components.is_empty() && self.wires.is_empty()
+        self.components.is_empty() && self.wire_endpoints.is_empty()
     }
 
     fn clear(&mut self) {
         self.components.clear();
-        self.wires.clear();
+        self.wire_endpoints.clear();
     }
 
     fn contains(&self, entity: DebugEntity) -> bool {
         match entity {
             DebugEntity::Component(id) => self.components.contains(&id),
-            DebugEntity::Wire(wire) => self.wires.contains(&wire),
+            DebugEntity::Wire(wire) => self
+                .wire_endpoints
+                .iter()
+                .any(|endpoint| endpoint.wire == wire),
+            DebugEntity::WireEndpoint(endpoint) => self.wire_endpoints.contains(&endpoint),
         }
     }
 
@@ -201,7 +234,19 @@ impl Selection {
                 self.components.insert(id);
             }
             DebugEntity::Wire(wire) => {
-                self.wires.insert(wire);
+                self.wire_endpoints.extend([
+                    WireEndpoint {
+                        wire,
+                        end: WireEnd::Start,
+                    },
+                    WireEndpoint {
+                        wire,
+                        end: WireEnd::End,
+                    },
+                ]);
+            }
+            DebugEntity::WireEndpoint(endpoint) => {
+                self.wire_endpoints.insert(endpoint);
             }
         }
     }
@@ -214,11 +259,49 @@ impl Selection {
                 }
             }
             DebugEntity::Wire(wire) => {
-                if !self.wires.remove(&wire) {
-                    self.wires.insert(wire);
+                let endpoints = [
+                    WireEndpoint {
+                        wire,
+                        end: WireEnd::Start,
+                    },
+                    WireEndpoint {
+                        wire,
+                        end: WireEnd::End,
+                    },
+                ];
+                if endpoints
+                    .iter()
+                    .any(|endpoint| self.wire_endpoints.contains(endpoint))
+                {
+                    for endpoint in endpoints {
+                        self.wire_endpoints.remove(&endpoint);
+                    }
+                } else {
+                    self.wire_endpoints.extend(endpoints);
+                }
+            }
+            DebugEntity::WireEndpoint(endpoint) => {
+                if !self.wire_endpoints.remove(&endpoint) {
+                    self.wire_endpoints.insert(endpoint);
                 }
             }
         }
+    }
+
+    fn selected_wires(&self) -> Vec<SelectedWire> {
+        let mut wires = BTreeMap::<Wire, SelectedWire>::new();
+        for endpoint in &self.wire_endpoints {
+            let selected = wires.entry(endpoint.wire).or_insert(SelectedWire {
+                wire: endpoint.wire,
+                start: false,
+                end: false,
+            });
+            match endpoint.end {
+                WireEnd::Start => selected.start = true,
+                WireEnd::End => selected.end = true,
+            }
+        }
+        wires.into_values().collect()
     }
 }
 
@@ -1044,11 +1127,11 @@ impl LogicEditor {
             .map(|component| DebugEntity::Component(component.id))
             .max_by_key(|entity| match entity {
                 DebugEntity::Component(id) => *id,
-                DebugEntity::Wire(_) => unreachable!(),
+                DebugEntity::Wire(_) | DebugEntity::WireEndpoint(_) => unreachable!(),
             })
             .or_else(|| {
-                nearest_wire(self.grid.wires(), point, WIRE_HIT_RADIUS / self.camera.zoom)
-                    .map(DebugEntity::Wire)
+                nearest_wire_endpoint(self.grid.wires(), point, WIRE_HIT_RADIUS / self.camera.zoom)
+                    .map(DebugEntity::WireEndpoint)
             })
     }
 
@@ -1066,12 +1149,12 @@ impl LogicEditor {
                     .map(|component| (*id, component.position))
             })
             .collect();
-        let wires: Vec<_> = self.selection.wires.iter().copied().collect();
+        let wires = self.selection.selected_wires();
         let scale = components
             .iter()
             .filter_map(|(id, _)| self.grid.component(*id))
             .map(|component| component.kind.snap())
-            .chain(wires.iter().map(|wire| wire.scale))
+            .chain(wires.iter().map(|wire| wire.wire.scale))
             .max()
             .unwrap_or(Scale::ONE);
         Some(Gesture::MoveSelection {
@@ -1090,16 +1173,22 @@ impl LogicEditor {
                 .filter(|component| component_intersects(component, rect))
                 .map(|component| component.id),
         );
-        self.selection.wires.extend(
-            self.grid
-                .wires()
-                .iter()
-                .copied()
-                .filter(|wire| wire_intersects(*wire, rect)),
-        );
+        for wire in self.grid.wires().iter().copied() {
+            for end in [WireEnd::Start, WireEnd::End] {
+                let endpoint = WireEndpoint { wire, end };
+                if point_cell_intersects(endpoint.point(), wire.scale, rect) {
+                    self.selection.wire_endpoints.insert(endpoint);
+                }
+            }
+        }
     }
 
-    fn apply_move(&mut self, components: &[(ComponentId, Point)], wires: &[Wire], delta: Point) {
+    fn apply_move(
+        &mut self,
+        components: &[(ComponentId, Point)],
+        wires: &[SelectedWire],
+        delta: Point,
+    ) {
         if delta == Point::new(0, 0) {
             return;
         }
@@ -1107,17 +1196,17 @@ impl LogicEditor {
             .iter()
             .map(|(id, position)| translate_point(*position, delta).map(|point| (*id, point)))
             .collect();
-        let moved_wires: Option<Vec<_>> = wires
+        let moved_wires: Vec<_> = wires
             .iter()
-            .map(|wire| translate_wire(*wire, delta))
+            .filter_map(|wire| move_selected_wire(*wire, delta))
             .collect();
-        let (Some(moved_components), Some(moved_wires)) = (moved_components, moved_wires) else {
+        let Some(moved_components) = moved_components else {
             return;
         };
 
         self.edit_grid_preserving_edge_attachments(|grid| {
             for wire in wires {
-                grid.remove_wire(*wire);
+                grid.remove_wire(wire.wire);
             }
             for (id, position) in moved_components {
                 grid.set_component_position(id, position);
@@ -1127,12 +1216,34 @@ impl LogicEditor {
             }
         });
 
-        self.selection.wires = self
+        let selected_points: BTreeSet<_> = wires
+            .iter()
+            .filter_map(|wire| {
+                move_selected_wire(*wire, delta).map(|moved| {
+                    let mut points = Vec::new();
+                    if wire.start {
+                        points.push((
+                            translate_point(wire.wire.start, delta).unwrap(),
+                            moved.scale,
+                        ));
+                    }
+                    if wire.end {
+                        points.push((translate_point(wire.wire.end, delta).unwrap(), moved.scale));
+                    }
+                    points
+                })
+            })
+            .flatten()
+            .collect();
+        self.selection.wire_endpoints = self
             .grid
             .wires()
             .iter()
             .copied()
-            .filter(|wire| moved_wires.iter().any(|moved| wires_overlap(*wire, *moved)))
+            .flat_map(|wire| {
+                [WireEnd::Start, WireEnd::End].map(move |end| WireEndpoint { wire, end })
+            })
+            .filter(|endpoint| selected_points.contains(&(endpoint.point(), endpoint.wire.scale)))
             .collect();
     }
 
@@ -1180,7 +1291,11 @@ impl LogicEditor {
         for id in std::mem::take(&mut self.selection.components) {
             self.grid.remove_component(id);
         }
-        for wire in std::mem::take(&mut self.selection.wires) {
+        let wires: BTreeSet<_> = std::mem::take(&mut self.selection.wire_endpoints)
+            .into_iter()
+            .map(|endpoint| endpoint.wire)
+            .collect();
+        for wire in wires {
             self.grid.remove_wire(wire);
         }
         self.gesture = None;
@@ -1246,7 +1361,6 @@ impl LogicEditor {
                 *wire,
                 if hovered_entity == Some(DebugEntity::Wire(*wire))
                     || graph_hover.wires.contains(wire)
-                    || self.selection.wires.contains(wire)
                 {
                     DrawTriangle::HIGHLIGHT_COLOR
                 } else if bad_wires.contains(wire) {
@@ -1255,6 +1369,17 @@ impl LogicEditor {
                     DrawTriangle::WIRE_COLOR
                 },
             ));
+            for end in [WireEnd::Start, WireEnd::End] {
+                let endpoint = WireEndpoint { wire: *wire, end };
+                if hovered_entity == Some(DebugEntity::WireEndpoint(endpoint))
+                    || self.selection.wire_endpoints.contains(&endpoint)
+                {
+                    wire_triangles.extend(DrawTriangle::wire_endpoint_highlight(
+                        *wire,
+                        endpoint.point(),
+                    ));
+                }
+            }
         }
 
         if let Some(pointer) = pointer_world {
@@ -1352,7 +1477,7 @@ impl LogicEditor {
                         );
                     }
                     for wire in wires {
-                        if let Some(wire) = translate_wire(*wire, delta) {
+                        if let Some(wire) = move_selected_wire(*wire, delta) {
                             preview_wires.push(wire);
                             wire_triangles
                                 .extend(DrawTriangle::wire(wire, DrawTriangle::PREVIEW_COLOR));
@@ -1444,13 +1569,18 @@ fn translate_point(point: Point, delta: Point) -> Option<Point> {
     ))
 }
 
-fn translate_wire(wire: Wire, delta: Point) -> Option<Wire> {
-    Wire::new(
-        translate_point(wire.start, delta)?,
-        translate_point(wire.end, delta)?,
-        wire.scale,
-    )
-    .ok()
+fn move_selected_wire(selected: SelectedWire, delta: Point) -> Option<Wire> {
+    let start = if selected.start {
+        translate_point(selected.wire.start, delta)?
+    } else {
+        selected.wire.start
+    };
+    let end = if selected.end {
+        translate_point(selected.wire.end, delta)?
+    } else {
+        selected.wire.end
+    };
+    Wire::new(start, end, selected.wire.scale).ok()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1798,40 +1928,12 @@ fn component_intersects(component: &Component, rect: WorldRect) -> bool {
     )
 }
 
-fn wire_bounds(wire: Wire) -> ([f32; 2], [f32; 2]) {
-    let scale = wire.scale.get() as f32;
-    match wire.orientation() {
-        logicgame::grid::Orientation::Horizontal => (
-            [wire.start.x as f32, wire.start.y as f32],
-            [wire.end.x as f32 + scale, wire.start.y as f32 + scale],
-        ),
-        logicgame::grid::Orientation::Vertical => (
-            [wire.start.x as f32, wire.start.y as f32],
-            [wire.start.x as f32 + scale, wire.end.y as f32 + scale],
-        ),
-    }
-}
-
-fn wire_intersects(wire: Wire, rect: WorldRect) -> bool {
-    let (min, max) = wire_bounds(wire);
-    rect.intersects(min, max)
-}
-
-fn wires_overlap(first: Wire, second: Wire) -> bool {
-    first.scale == second.scale
-        && first.orientation() == second.orientation()
-        && match first.orientation() {
-            logicgame::grid::Orientation::Horizontal => {
-                first.start.y == second.start.y
-                    && first.start.x <= second.end.x
-                    && second.start.x <= first.end.x
-            }
-            logicgame::grid::Orientation::Vertical => {
-                first.start.x == second.start.x
-                    && first.start.y <= second.end.y
-                    && second.start.y <= first.end.y
-            }
-        }
+fn point_cell_intersects(point: Point, scale: Scale, rect: WorldRect) -> bool {
+    let scale = scale.get() as f32;
+    rect.intersects(
+        [point.x as f32, point.y as f32],
+        [point.x as f32 + scale, point.y as f32 + scale],
+    )
 }
 
 fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<Wire> {
@@ -1908,6 +2010,29 @@ fn nearest_wire(wires: &[Wire], point: [f32; 2], radius: f32) -> Option<Wire> {
                 .then_with(|| first.cmp(second))
         })
         .map(|(_, wire)| wire)
+}
+
+fn nearest_wire_endpoint(wires: &[Wire], point: [f32; 2], radius: f32) -> Option<WireEndpoint> {
+    wires
+        .iter()
+        .copied()
+        .flat_map(|wire| [WireEnd::Start, WireEnd::End].map(move |end| WireEndpoint { wire, end }))
+        .filter_map(|endpoint| {
+            let scale = endpoint.wire.scale.get() as f32;
+            let endpoint_point = endpoint.point();
+            let center = [
+                endpoint_point.x as f32 + scale * 0.5,
+                endpoint_point.y as f32 + scale * 0.5,
+            ];
+            let distance = ((point[0] - center[0]).powi(2) + (point[1] - center[1]).powi(2)).sqrt();
+            (distance <= radius + scale * 0.5).then_some((distance, endpoint))
+        })
+        .min_by(|(first_distance, first), (second_distance, second)| {
+            first_distance
+                .total_cmp(second_distance)
+                .then_with(|| first.cmp(second))
+        })
+        .map(|(_, endpoint)| endpoint)
 }
 
 fn graph_layout(graph: &CircuitGraph) -> (Vec<egui::Pos2>, egui::Vec2) {
@@ -2447,14 +2572,17 @@ mod tests {
     }
 
     #[test]
-    fn wire_hit_testing_selects_nearest_segment() {
+    fn wire_endpoint_hit_testing_ignores_segment_bodies() {
         let horizontal = wire((0, 0), (10, 0), 1);
         let vertical = wire((5, -5), (5, 5), 1);
         assert_eq!(
-            nearest_wire(&[vertical, horizontal], [2.0, 0.5], 0.6),
-            Some(horizontal)
+            nearest_wire_endpoint(&[vertical, horizontal], [0.5, 0.5], 0.1),
+            Some(WireEndpoint {
+                wire: horizontal,
+                end: WireEnd::Start
+            })
         );
-        assert_eq!(nearest_wire(&[horizontal], [2.0, 3.0], 0.5), None);
+        assert_eq!(nearest_wire_endpoint(&[horizontal], [5.0, 0.5], 0.6), None);
     }
 
     #[test]
@@ -2480,7 +2608,16 @@ mod tests {
         let original_wire = wire((0, 8), (16, 8), 8);
         editor.grid.add_wire(original_wire);
         editor.selection.components.insert(component);
-        editor.selection.wires.insert(original_wire);
+        editor.selection.wire_endpoints.extend([
+            WireEndpoint {
+                wire: original_wire,
+                end: WireEnd::Start,
+            },
+            WireEndpoint {
+                wire: original_wire,
+                end: WireEnd::End,
+            },
+        ]);
 
         let gesture = editor.move_gesture([0.0, 0.0]).unwrap();
         let Gesture::MoveSelection {
@@ -2509,7 +2646,7 @@ mod tests {
     }
 
     #[test]
-    fn box_selection_finds_intersecting_components_and_wire_segments() {
+    fn box_selection_finds_components_and_individual_wire_endpoints() {
         let mut editor = LogicEditor::default();
         let inside = editor.grid.add_component(
             Point::new(0, 0),
@@ -2524,10 +2661,53 @@ mod tests {
         let selected_wire = wire((0, 6), (8, 6), 2);
         editor.grid.add_wire(selected_wire);
 
-        editor.select_in_rect([-1.0, -1.0], [9.0, 9.0]);
+        editor.select_in_rect([-1.0, -1.0], [2.5, 8.0]);
 
         assert!(editor.selection.components.contains(&inside));
         assert!(!editor.selection.components.contains(&outside));
-        assert!(editor.selection.wires.contains(&selected_wire));
+        assert!(editor.selection.wire_endpoints.contains(&WireEndpoint {
+            wire: selected_wire,
+            end: WireEnd::Start,
+        }));
+        assert!(!editor.selection.wire_endpoints.contains(&WireEndpoint {
+            wire: selected_wire,
+            end: WireEnd::End,
+        }));
+    }
+
+    #[test]
+    fn moving_one_wire_endpoint_resizes_or_deletes_the_segment() {
+        let mut editor = LogicEditor::default();
+        let original = wire((0, 0), (8, 0), 1);
+        editor.grid.add_wire(original);
+        editor.selection.wire_endpoints.insert(WireEndpoint {
+            wire: original,
+            end: WireEnd::End,
+        });
+
+        let Gesture::MoveSelection { wires, .. } =
+            editor.move_gesture([8.5, 0.5]).expect("move gesture")
+        else {
+            panic!("expected a move gesture");
+        };
+        editor.apply_move(&[], &wires, Point::new(4, 0));
+        assert_eq!(editor.grid.wires(), &[wire((0, 0), (12, 0), 1)]);
+
+        let Gesture::MoveSelection { wires, .. } =
+            editor.move_gesture([12.5, 0.5]).expect("move gesture")
+        else {
+            panic!("expected a move gesture");
+        };
+        editor.apply_move(&[], &wires, Point::new(-6, 0));
+        assert_eq!(editor.grid.wires(), &[wire((0, 0), (6, 0), 1)]);
+
+        let Gesture::MoveSelection { wires, .. } =
+            editor.move_gesture([6.5, 0.5]).expect("move gesture")
+        else {
+            panic!("expected a move gesture");
+        };
+        editor.apply_move(&[], &wires, Point::new(0, 1));
+        assert!(editor.grid.wires().is_empty());
+        assert!(editor.selection.is_empty());
     }
 }

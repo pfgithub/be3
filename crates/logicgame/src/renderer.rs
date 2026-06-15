@@ -92,6 +92,19 @@ impl DrawTriangle {
         triangles
     }
 
+    pub fn wire_endpoint_highlight(wire: Wire, endpoint: logicgame::grid::Point) -> Vec<Self> {
+        let scale = wire.scale.get() as f32;
+        diamond(
+            [
+                endpoint.x as f32 + scale * 0.5,
+                endpoint.y as f32 + scale * 0.5,
+            ],
+            scale * 0.5,
+            Self::HIGHLIGHT_COLOR,
+        )
+        .to_vec()
+    }
+
     pub fn component(component: &Component, invalid: bool) -> Vec<Self> {
         let Some(size) = component.size() else {
             return Vec::new();
