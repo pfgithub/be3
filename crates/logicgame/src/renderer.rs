@@ -83,26 +83,43 @@ impl DrawTriangle {
         triangles
     }
 
-    pub fn component(component: &Component, invalid: bool) -> Option<Self> {
-        let ComponentKind::Not { .. } = component.kind else {
-            return None;
+    pub fn component(component: &Component, invalid: bool) -> Vec<Self> {
+        let Some(size) = component.size() else {
+            return Vec::new();
         };
-        let size = component.size()?;
         let min = [component.position.x as f32, component.position.y as f32];
         let extent = [size.width as f32, size.height as f32];
-        let canonical = [[0.12, 0.82], [0.88, 0.82], [0.5, 0.12]];
-        let positions = canonical.map(|point| {
-            let point = rotate_point(point, component.rotation);
-            [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
-        });
-        Some(Self::new(
-            positions,
-            if invalid {
-                Self::ERROR_COLOR
-            } else {
-                Self::GATE_COLOR
-            },
-        ))
+        let color = if invalid {
+            Self::ERROR_COLOR
+        } else {
+            Self::GATE_COLOR
+        };
+
+        match component.kind {
+            ComponentKind::Not { .. } => {
+                let canonical = [[0.12, 0.82], [0.88, 0.82], [0.5, 0.12]];
+                let positions = canonical.map(|point| {
+                    let point = rotate_point(point, component.rotation);
+                    [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
+                });
+                vec![Self::new(positions, color)]
+            }
+            ComponentKind::Led => {
+                let center = [min[0] + extent[0] * 0.5, min[1] + extent[1] * 0.5];
+                diamond(center, extent[0].min(extent[1]) * 0.38, color).to_vec()
+            }
+            ComponentKind::Storage { .. } => rectangle(
+                [
+                    min[0] + extent[0] * 0.12,
+                    min[1] + extent[1] * 0.08,
+                    min[0] + extent[0] * 0.88,
+                    min[1] + extent[1] * 0.92,
+                ],
+                color,
+            )
+            .to_vec(),
+            ComponentKind::Subcomponent { .. } => Vec::new(),
+        }
     }
 
     pub fn component_highlight(component: &Component) -> Vec<Self> {
@@ -418,11 +435,28 @@ mod tests {
             rotation: Rotation::Right,
             kind: ComponentKind::Not { scale: Scale::ONE },
         };
-        let gate_triangle = DrawTriangle::component(&gate, false).unwrap();
+        let gate_triangles = DrawTriangle::component(&gate, false);
+        let gate_triangle = gate_triangles[0];
         let tip = gate_triangle.positions[2];
         assert!(tip[0] > gate_triangle.positions[0][0]);
         assert!(tip[0] > gate_triangle.positions[1][0]);
         assert_eq!(gate_triangle.color, DrawTriangle::GATE_COLOR);
+
+        let led = Component {
+            id: ComponentId(1),
+            position: Point::new(0, 0),
+            rotation: Rotation::Up,
+            kind: ComponentKind::Led,
+        };
+        assert_eq!(DrawTriangle::component(&led, false).len(), 4);
+
+        let storage = Component {
+            id: ComponentId(2),
+            position: Point::new(0, 0),
+            rotation: Rotation::Right,
+            kind: ComponentKind::Storage { scale: Scale::ONE },
+        };
+        assert_eq!(DrawTriangle::component(&storage, false).len(), 2);
 
         let highlight = DrawTriangle::component_highlight(&gate);
         assert_eq!(highlight.len(), 8);

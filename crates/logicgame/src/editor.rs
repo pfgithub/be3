@@ -23,6 +23,8 @@ enum ToolKind {
     Select,
     Wire,
     Not,
+    Led,
+    Storage,
 }
 
 impl ToolKind {
@@ -31,6 +33,8 @@ impl ToolKind {
             Self::Select => "Select",
             Self::Wire => "Wire",
             Self::Not => "NOT gate",
+            Self::Led => "LED",
+            Self::Storage => "Storage",
         }
     }
 }
@@ -80,6 +84,13 @@ enum Gesture {
         start: Point,
     },
     Not {
+        anchor: Point,
+        drag_start: [f32; 2],
+    },
+    Led {
+        position: Point,
+    },
+    Storage {
         anchor: Point,
         drag_start: [f32; 2],
     },
@@ -194,7 +205,13 @@ impl LogicEditor {
             .default_pos([16.0, 16.0])
             .resizable(false)
             .show(&context, |ui| {
-                for kind in [ToolKind::Select, ToolKind::Wire, ToolKind::Not] {
+                for kind in [
+                    ToolKind::Select,
+                    ToolKind::Wire,
+                    ToolKind::Not,
+                    ToolKind::Led,
+                    ToolKind::Storage,
+                ] {
                     if ui
                         .selectable_label(self.tool.kind == kind, kind.label())
                         .clicked()
@@ -592,6 +609,11 @@ impl LogicEditor {
                     anchor: snapped,
                     drag_start: world,
                 }),
+                ToolKind::Led => Some(Gesture::Led { position: snapped }),
+                ToolKind::Storage => Some(Gesture::Storage {
+                    anchor: snapped,
+                    drag_start: world,
+                }),
             };
         }
 
@@ -608,9 +630,24 @@ impl LogicEditor {
                 Some(Gesture::Not { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         self.grid.add_component(
-                            not_gate_position(anchor, rotation, self.tool.scale),
+                            oriented_component_position(anchor, rotation, self.tool.scale),
                             rotation,
                             ComponentKind::Not {
+                                scale: self.tool.scale,
+                            },
+                        );
+                    }
+                }
+                Some(Gesture::Led { position }) => {
+                    self.grid
+                        .add_component(position, Rotation::Up, ComponentKind::Led);
+                }
+                Some(Gesture::Storage { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, world) {
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, self.tool.scale),
+                            rotation,
+                            ComponentKind::Storage {
                                 scale: self.tool.scale,
                             },
                         );
@@ -782,11 +819,10 @@ impl LogicEditor {
             {
                 component_triangles.extend(DrawTriangle::component_highlight(component));
             }
-            if let Some(triangle) =
-                DrawTriangle::component(component, bad_components.contains(&component.id))
-            {
-                component_triangles.push(triangle);
-            }
+            component_triangles.extend(DrawTriangle::component(
+                component,
+                bad_components.contains(&component.id),
+            ));
         }
         for wire in self.grid.wires() {
             wire_triangles.extend(DrawTriangle::wire(
@@ -817,16 +853,55 @@ impl LogicEditor {
                     if let Some(rotation) = drag_rotation(*drag_start, pointer) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
-                            position: not_gate_position(*anchor, rotation, self.tool.scale),
+                            position: oriented_component_position(
+                                *anchor,
+                                rotation,
+                                self.tool.scale,
+                            ),
                             rotation,
                             kind: ComponentKind::Not {
                                 scale: self.tool.scale,
                             },
                         };
-                        if let Some(triangle) = DrawTriangle::component(&component, false) {
-                            component_triangles
-                                .push(triangle.with_color(DrawTriangle::PREVIEW_COLOR));
-                        }
+                        component_triangles.extend(
+                            DrawTriangle::component(&component, false)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
+                    }
+                }
+                Some(Gesture::Led { position }) => {
+                    let component = Component {
+                        id: ComponentId(u64::MAX),
+                        position: *position,
+                        rotation: Rotation::Up,
+                        kind: ComponentKind::Led,
+                    };
+                    component_triangles.extend(
+                        DrawTriangle::component(&component, false)
+                            .into_iter()
+                            .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                    );
+                }
+                Some(Gesture::Storage { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
+                        let component = Component {
+                            id: ComponentId(u64::MAX),
+                            position: oriented_component_position(
+                                *anchor,
+                                rotation,
+                                self.tool.scale,
+                            ),
+                            rotation,
+                            kind: ComponentKind::Storage {
+                                scale: self.tool.scale,
+                            },
+                        };
+                        component_triangles.extend(
+                            DrawTriangle::component(&component, false)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
                     }
                 }
                 Some(Gesture::MoveSelection {
@@ -845,10 +920,11 @@ impl LogicEditor {
                         };
                         let mut component = original.clone();
                         component.position = position;
-                        if let Some(triangle) = DrawTriangle::component(&component, false) {
-                            component_triangles
-                                .push(triangle.with_color(DrawTriangle::PREVIEW_COLOR));
-                        }
+                        component_triangles.extend(
+                            DrawTriangle::component(&component, false)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
                     }
                     for wire in wires {
                         if let Some(wire) = translate_wire(*wire, delta) {
@@ -1050,7 +1126,7 @@ fn drag_rotation(start: [f32; 2], pointer: [f32; 2]) -> Option<Rotation> {
     })
 }
 
-fn not_gate_position(anchor: Point, rotation: Rotation, scale: Scale) -> Point {
+fn oriented_component_position(anchor: Point, rotation: Rotation, scale: Scale) -> Point {
     let scale = scale.get();
     match rotation {
         Rotation::Up => Point::new(anchor.x, anchor.y - scale),
@@ -1235,19 +1311,19 @@ mod tests {
         );
         assert_eq!(drag_rotation([9.5, 9.5], [9.5, 9.5]), None);
         assert_eq!(
-            not_gate_position(anchor, Rotation::Right, scale(2)),
+            oriented_component_position(anchor, Rotation::Right, scale(2)),
             Point::new(8, 8)
         );
         assert_eq!(
-            not_gate_position(anchor, Rotation::Down, scale(2)),
+            oriented_component_position(anchor, Rotation::Down, scale(2)),
             Point::new(8, 8)
         );
         assert_eq!(
-            not_gate_position(anchor, Rotation::Up, scale(2)),
+            oriented_component_position(anchor, Rotation::Up, scale(2)),
             Point::new(8, 6)
         );
         assert_eq!(
-            not_gate_position(anchor, Rotation::Left, scale(2)),
+            oriented_component_position(anchor, Rotation::Left, scale(2)),
             Point::new(6, 8)
         );
     }
