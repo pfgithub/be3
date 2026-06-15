@@ -88,7 +88,8 @@ enum Gesture {
         drag_start: [f32; 2],
     },
     Led {
-        position: Point,
+        anchor: Point,
+        drag_start: [f32; 2],
     },
     Storage {
         anchor: Point,
@@ -137,6 +138,7 @@ impl GraphHover {
             GraphNode::Connection {
                 component,
                 slot,
+                direction,
                 side,
                 start,
                 end,
@@ -145,6 +147,7 @@ impl GraphHover {
                     *component,
                     ConnectionSlot {
                         id: *slot,
+                        direction: *direction,
                         side: *side,
                         start: *start,
                         end: *end,
@@ -644,7 +647,10 @@ impl LogicEditor {
                     anchor: snapped,
                     drag_start: world,
                 }),
-                ToolKind::Led => Some(Gesture::Led { position: snapped }),
+                ToolKind::Led => Some(Gesture::Led {
+                    anchor: snapped,
+                    drag_start: world,
+                }),
                 ToolKind::Storage => Some(Gesture::Storage {
                     anchor: snapped,
                     drag_start: world,
@@ -673,9 +679,14 @@ impl LogicEditor {
                         );
                     }
                 }
-                Some(Gesture::Led { position }) => {
-                    self.grid
-                        .add_component(position, Rotation::Up, ComponentKind::Led);
+                Some(Gesture::Led { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, world) {
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, Scale::ONE),
+                            rotation,
+                            ComponentKind::Led,
+                        );
+                    }
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
@@ -849,16 +860,16 @@ impl LogicEditor {
         let mut component_triangles = Vec::new();
         let mut wire_triangles = Vec::new();
         for component in self.grid.components() {
+            component_triangles.extend(DrawTriangle::component(
+                component,
+                bad_components.contains(&component.id),
+            ));
             if hovered_entity == Some(DebugEntity::Component(component.id))
                 || graph_hover.components.contains(&component.id)
                 || self.selection.components.contains(&component.id)
             {
                 component_triangles.extend(DrawTriangle::component_highlight(component));
             }
-            component_triangles.extend(DrawTriangle::component(
-                component,
-                bad_components.contains(&component.id),
-            ));
             for (_, connection) in graph_hover
                 .connections
                 .iter()
@@ -914,18 +925,20 @@ impl LogicEditor {
                         );
                     }
                 }
-                Some(Gesture::Led { position }) => {
-                    let component = Component {
-                        id: ComponentId(u64::MAX),
-                        position: *position,
-                        rotation: Rotation::Up,
-                        kind: ComponentKind::Led,
-                    };
-                    component_triangles.extend(
-                        DrawTriangle::component(&component, false)
-                            .into_iter()
-                            .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
-                    );
+                Some(Gesture::Led { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
+                        let component = Component {
+                            id: ComponentId(u64::MAX),
+                            position: oriented_component_position(*anchor, rotation, Scale::ONE),
+                            rotation,
+                            kind: ComponentKind::Led,
+                        };
+                        component_triangles.extend(
+                            DrawTriangle::component(&component, false)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
+                    }
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(*drag_start, pointer) {
@@ -1264,13 +1277,17 @@ fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String)
         GraphNode::Connection {
             component,
             slot,
+            direction,
             side,
             start,
             end,
         } => (
             egui::Color32::from_rgb(155, 95, 45),
             "Connection",
-            format!("#{} slot {} {side:?} [{start}, {end})", component.0, slot.0),
+            format!(
+                "#{} slot {} {direction:?} {side:?} [{start}, {end})",
+                component.0, slot.0
+            ),
         ),
     }
 }
@@ -1278,7 +1295,7 @@ fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use logicgame::grid::{ComponentSide, ConnectionSlotId};
+    use logicgame::grid::{ComponentSide, ConnectionDirection, ConnectionSlotId};
 
     fn scale(value: u8) -> Scale {
         Scale::new(value).unwrap()
@@ -1299,6 +1316,7 @@ mod tests {
         let wire = wire((0, 0), (8, 0), 1);
         let connection = ConnectionSlot {
             id: ConnectionSlotId(2),
+            direction: ConnectionDirection::Output,
             side: ComponentSide::Bottom,
             start: 4,
             end: 8,
@@ -1310,6 +1328,7 @@ mod tests {
         hover.include_node(&GraphNode::Connection {
             component,
             slot: connection.id,
+            direction: connection.direction,
             side: connection.side,
             start: connection.start,
             end: connection.end,

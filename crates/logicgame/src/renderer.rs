@@ -3,7 +3,8 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 use eframe::egui_wgpu::{self, wgpu};
 use logicgame::grid::{
-    Component, ComponentKind, ComponentSide, ConnectionSlot, Orientation, Rotation, Wire,
+    Component, ComponentKind, ComponentSide, ConnectionDirection, ConnectionSlot, Orientation,
+    Rotation, Wire,
 };
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
@@ -29,6 +30,9 @@ pub struct DrawTriangle {
 impl DrawTriangle {
     pub const WIRE_COLOR: [f32; 4] = [0.18, 0.78, 0.91, 1.0];
     pub const GATE_COLOR: [f32; 4] = [0.91, 0.91, 0.95, 1.0];
+    pub const COMPONENT_BACKGROUND_COLOR: [f32; 4] = [0.11, 0.14, 0.19, 1.0];
+    pub const INPUT_COLOR: [f32; 4] = [0.28, 0.78, 0.48, 1.0];
+    pub const OUTPUT_COLOR: [f32; 4] = [0.98, 0.55, 0.22, 1.0];
     pub const PREVIEW_COLOR: [f32; 4] = [0.98, 0.78, 0.24, 0.78];
     pub const ERROR_COLOR: [f32; 4] = [0.95, 0.22, 0.25, 1.0];
     pub const HIGHLIGHT_COLOR: [f32; 4] = [1.0, 0.78, 0.15, 1.0];
@@ -91,11 +95,23 @@ impl DrawTriangle {
         };
         let min = [component.position.x as f32, component.position.y as f32];
         let extent = [size.width as f32, size.height as f32];
-        let color = if invalid {
+        let outline_color = if invalid {
             Self::ERROR_COLOR
         } else {
             Self::GATE_COLOR
         };
+        let bounds = [min[0], min[1], min[0] + extent[0], min[1] + extent[1]];
+        let thickness = (extent[0].min(extent[1]) * 0.08).clamp(0.06, 0.16);
+        let mut triangles = Vec::new();
+        triangles.extend(rectangle(bounds, Self::COMPONENT_BACKGROUND_COLOR));
+        triangles.extend(outline(bounds, thickness, outline_color));
+        for connection in component.connection_slots() {
+            triangles.extend(connection_marker(
+                component,
+                connection,
+                (extent[0].min(extent[1]) * 0.14).clamp(0.1, 0.24),
+            ));
+        }
 
         match component.kind {
             ComponentKind::Not { .. } => {
@@ -104,24 +120,29 @@ impl DrawTriangle {
                     let point = rotate_point(point, component.rotation);
                     [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
                 });
-                vec![Self::new(positions, color)]
+                triangles.push(Self::new(positions, outline_color));
             }
             ComponentKind::Led => {
                 let center = [min[0] + extent[0] * 0.5, min[1] + extent[1] * 0.5];
-                diamond(center, extent[0].min(extent[1]) * 0.38, color).to_vec()
+                triangles.extend(diamond(
+                    center,
+                    extent[0].min(extent[1]) * 0.32,
+                    outline_color,
+                ));
             }
-            ComponentKind::Storage { .. } => rectangle(
+            ComponentKind::Storage { .. } => triangles.extend(rectangle(
                 [
-                    min[0] + extent[0] * 0.12,
-                    min[1] + extent[1] * 0.08,
-                    min[0] + extent[0] * 0.88,
-                    min[1] + extent[1] * 0.92,
+                    min[0] + extent[0] * 0.22,
+                    min[1] + extent[1] * 0.18,
+                    min[0] + extent[0] * 0.78,
+                    min[1] + extent[1] * 0.82,
                 ],
-                color,
-            )
-            .to_vec(),
-            ComponentKind::Subcomponent { .. } => Vec::new(),
+                outline_color,
+            )),
+            ComponentKind::Subcomponent { .. } => {}
         }
+
+        triangles
     }
 
     pub fn component_highlight(component: &Component) -> Vec<Self> {
@@ -200,6 +221,64 @@ fn rectangle(rect: [f32; 4], color: [f32; 4]) -> [DrawTriangle; 2] {
         DrawTriangle::new([[left, top], [right, top], [left, bottom]], color),
         DrawTriangle::new([[left, bottom], [right, top], [right, bottom]], color),
     ]
+}
+
+fn outline(rect: [f32; 4], thickness: f32, color: [f32; 4]) -> [DrawTriangle; 8] {
+    let [left, top, right, bottom] = rect;
+    let [top_a, top_b] = rectangle([left, top, right, top + thickness], color);
+    let [bottom_a, bottom_b] = rectangle([left, bottom - thickness, right, bottom], color);
+    let [left_a, left_b] = rectangle(
+        [left, top + thickness, left + thickness, bottom - thickness],
+        color,
+    );
+    let [right_a, right_b] = rectangle(
+        [
+            right - thickness,
+            top + thickness,
+            right,
+            bottom - thickness,
+        ],
+        color,
+    );
+    [
+        top_a, top_b, bottom_a, bottom_b, left_a, left_b, right_a, right_b,
+    ]
+}
+
+fn connection_marker(
+    component: &Component,
+    connection: ConnectionSlot,
+    radius: f32,
+) -> [DrawTriangle; 4] {
+    let center = match connection.side {
+        ComponentSide::Top | ComponentSide::Bottom => [
+            (connection.start + connection.end) as f32 * 0.5,
+            match connection.side {
+                ComponentSide::Top => component.position.y as f32,
+                ComponentSide::Bottom => {
+                    component.position.y as f32
+                        + component.size().map_or(0.0, |size| size.height as f32)
+                }
+                _ => unreachable!(),
+            },
+        ],
+        ComponentSide::Right | ComponentSide::Left => [
+            match connection.side {
+                ComponentSide::Right => {
+                    component.position.x as f32
+                        + component.size().map_or(0.0, |size| size.width as f32)
+                }
+                ComponentSide::Left => component.position.x as f32,
+                _ => unreachable!(),
+            },
+            (connection.start + connection.end) as f32 * 0.5,
+        ],
+    };
+    let color = match connection.direction {
+        ConnectionDirection::Input => DrawTriangle::INPUT_COLOR,
+        ConnectionDirection::Output => DrawTriangle::OUTPUT_COLOR,
+    };
+    diamond(center, radius, color)
 }
 
 fn diamond(center: [f32; 2], radius: f32, color: [f32; 4]) -> [DrawTriangle; 4] {
@@ -444,11 +523,12 @@ fn add_axis_lines(triangles: &mut Vec<DrawTriangle>, bounds: [f32; 4], width: f3
 mod tests {
     use super::*;
     use logicgame::grid::{
-        ComponentId, ComponentSide, ConnectionSlot, ConnectionSlotId, Point, Scale,
+        ComponentId, ComponentSide, ConnectionDirection, ConnectionSlot, ConnectionSlotId, Point,
+        Scale,
     };
 
     #[test]
-    fn wires_and_gates_are_emitted_as_filled_triangles() {
+    fn wires_and_components_are_emitted_as_filled_triangles() {
         let wire = Wire::new(Point::new(0, 0), Point::new(4, 0), Scale::ONE).unwrap();
         let wire_triangles = DrawTriangle::wire(wire, DrawTriangle::WIRE_COLOR);
         assert_eq!(wire_triangles.len(), 10);
@@ -465,7 +545,17 @@ mod tests {
             kind: ComponentKind::Not { scale: Scale::ONE },
         };
         let gate_triangles = DrawTriangle::component(&gate, false);
-        let gate_triangle = gate_triangles[0];
+        assert_eq!(gate_triangles.len(), 19);
+        assert!(gate_triangles[..2]
+            .iter()
+            .all(|triangle| triangle.color == DrawTriangle::COMPONENT_BACKGROUND_COLOR));
+        assert!(gate_triangles
+            .iter()
+            .any(|triangle| triangle.color == DrawTriangle::INPUT_COLOR));
+        assert!(gate_triangles
+            .iter()
+            .any(|triangle| triangle.color == DrawTriangle::OUTPUT_COLOR));
+        let gate_triangle = gate_triangles[18];
         let tip = gate_triangle.positions[2];
         assert!(tip[0] > gate_triangle.positions[0][0]);
         assert!(tip[0] > gate_triangle.positions[1][0]);
@@ -477,7 +567,11 @@ mod tests {
             rotation: Rotation::Up,
             kind: ComponentKind::Led,
         };
-        assert_eq!(DrawTriangle::component(&led, false).len(), 4);
+        let led_triangles = DrawTriangle::component(&led, false);
+        assert_eq!(led_triangles.len(), 18);
+        assert!(led_triangles
+            .iter()
+            .any(|triangle| triangle.color == DrawTriangle::INPUT_COLOR));
 
         let storage = Component {
             id: ComponentId(2),
@@ -485,7 +579,19 @@ mod tests {
             rotation: Rotation::Right,
             kind: ComponentKind::Storage { scale: Scale::ONE },
         };
-        assert_eq!(DrawTriangle::component(&storage, false).len(), 2);
+        let storage_triangles = DrawTriangle::component(&storage, false);
+        assert_eq!(storage_triangles.len(), 20);
+        assert!(storage_triangles
+            .iter()
+            .any(|triangle| triangle.color == DrawTriangle::INPUT_COLOR));
+        assert!(storage_triangles
+            .iter()
+            .any(|triangle| triangle.color == DrawTriangle::OUTPUT_COLOR));
+
+        let invalid_gate = DrawTriangle::component(&gate, true);
+        assert!(invalid_gate[2..10]
+            .iter()
+            .all(|triangle| triangle.color == DrawTriangle::ERROR_COLOR));
 
         let highlight = DrawTriangle::component_highlight(&gate);
         assert_eq!(highlight.len(), 8);
@@ -497,6 +603,7 @@ mod tests {
             &gate,
             ConnectionSlot {
                 id: ConnectionSlotId(0),
+                direction: ConnectionDirection::Input,
                 side: ComponentSide::Bottom,
                 start: 10,
                 end: 12,

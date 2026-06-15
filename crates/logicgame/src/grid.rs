@@ -68,6 +68,8 @@ pub enum GeometryError {
     InvalidScale(u8),
     InvalidWire,
     InvalidSubcomponentSize(Size),
+    InvalidSubcomponentPort { size: Size, port: ComponentPort },
+    TooManySubcomponentPorts(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -175,19 +177,36 @@ impl Wire {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ComponentKind {
-    Not { scale: Scale },
+    Not {
+        scale: Scale,
+    },
     Led,
-    Storage { scale: Scale },
-    Subcomponent { size: Size, snap: Scale },
+    Storage {
+        scale: Scale,
+    },
+    Subcomponent {
+        size: Size,
+        snap: Scale,
+        ports: Vec<ComponentPort>,
+    },
 }
 
 impl ComponentKind {
-    pub fn subcomponent(size: Size, snap: Scale) -> Result<Self, GeometryError> {
+    pub fn subcomponent(
+        size: Size,
+        snap: Scale,
+        ports: Vec<ComponentPort>,
+    ) -> Result<Self, GeometryError> {
         if size.width <= 0 || size.height <= 0 {
-            Err(GeometryError::InvalidSubcomponentSize(size))
-        } else {
-            Ok(Self::Subcomponent { size, snap })
+            return Err(GeometryError::InvalidSubcomponentSize(size));
         }
+        if ports.len() > usize::from(u16::MAX) + 1 {
+            return Err(GeometryError::TooManySubcomponentPorts(ports.len()));
+        }
+        if let Some(port) = ports.iter().copied().find(|port| !port.is_valid_for(size)) {
+            return Err(GeometryError::InvalidSubcomponentPort { size, port });
+        }
+        Ok(Self::Subcomponent { size, snap, ports })
     }
 
     pub fn snap(&self) -> Scale {
@@ -204,7 +223,7 @@ impl ComponentKind {
                 let scale = scale.get();
                 Some(Size::new(scale, scale.checked_mul(2)?))
             }
-            Self::Led => Some(Size::new(1, 1)),
+            Self::Led => Some(Size::new(1, 2)),
             Self::Subcomponent { size, .. } => Some(*size),
         }
     }
@@ -213,21 +232,60 @@ impl ComponentKind {
         let Some(size) = self.unrotated_size() else {
             return Vec::new();
         };
-        let full_boundary = || {
-            vec![
-                ConnectionSlotDefinition::new(0, ComponentSide::Top, 0, size.width),
-                ConnectionSlotDefinition::new(1, ComponentSide::Right, 0, size.height),
-                ConnectionSlotDefinition::new(2, ComponentSide::Bottom, 0, size.width),
-                ConnectionSlotDefinition::new(3, ComponentSide::Left, 0, size.height),
-            ]
-        };
 
         match self {
             Self::Not { .. } => vec![
-                ConnectionSlotDefinition::new(0, ComponentSide::Bottom, 0, size.width),
-                ConnectionSlotDefinition::new(1, ComponentSide::Top, 0, size.width),
+                ConnectionSlotDefinition::new(
+                    0,
+                    ConnectionDirection::Input,
+                    ComponentSide::Bottom,
+                    0,
+                    size.width,
+                ),
+                ConnectionSlotDefinition::new(
+                    1,
+                    ConnectionDirection::Output,
+                    ComponentSide::Top,
+                    0,
+                    size.width,
+                ),
             ],
-            Self::Led | Self::Storage { .. } | Self::Subcomponent { .. } => full_boundary(),
+            Self::Led => vec![ConnectionSlotDefinition::new(
+                0,
+                ConnectionDirection::Input,
+                ComponentSide::Bottom,
+                0,
+                size.width,
+            )],
+            Self::Storage { .. } => vec![
+                ConnectionSlotDefinition::new(
+                    0,
+                    ConnectionDirection::Input,
+                    ComponentSide::Bottom,
+                    0,
+                    size.width,
+                ),
+                ConnectionSlotDefinition::new(
+                    1,
+                    ConnectionDirection::Output,
+                    ComponentSide::Top,
+                    0,
+                    size.width,
+                ),
+            ],
+            Self::Subcomponent { ports, .. } => ports
+                .iter()
+                .enumerate()
+                .map(|(id, port)| {
+                    ConnectionSlotDefinition::new(
+                        id as u16,
+                        port.direction,
+                        port.side,
+                        port.start,
+                        port.end,
+                    )
+                })
+                .collect(),
         }
     }
 }
@@ -562,6 +620,7 @@ impl LogicGrid {
             nodes.push(GraphNode::Connection {
                 component,
                 slot: slot.id,
+                direction: slot.direction,
                 side: slot.side,
                 start: slot.start,
                 end: slot.end,
@@ -772,11 +831,54 @@ pub enum ComponentSide {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConnectionDirection {
+    Input,
+    Output,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ComponentPort {
+    pub direction: ConnectionDirection,
+    pub side: ComponentSide,
+    pub start: i64,
+    pub end: i64,
+}
+
+impl ComponentPort {
+    pub const fn input(side: ComponentSide, start: i64, end: i64) -> Self {
+        Self {
+            direction: ConnectionDirection::Input,
+            side,
+            start,
+            end,
+        }
+    }
+
+    pub const fn output(side: ComponentSide, start: i64, end: i64) -> Self {
+        Self {
+            direction: ConnectionDirection::Output,
+            side,
+            start,
+            end,
+        }
+    }
+
+    fn is_valid_for(self, size: Size) -> bool {
+        let boundary_length = match self.side {
+            ComponentSide::Top | ComponentSide::Bottom => size.width,
+            ComponentSide::Right | ComponentSide::Left => size.height,
+        };
+        0 <= self.start && self.start < self.end && self.end <= boundary_length
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConnectionSlotId(pub u16);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConnectionSlot {
     pub id: ConnectionSlotId,
+    pub direction: ConnectionDirection,
     pub side: ComponentSide,
     pub start: i64,
     pub end: i64,
@@ -785,15 +887,23 @@ pub struct ConnectionSlot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ConnectionSlotDefinition {
     id: ConnectionSlotId,
+    direction: ConnectionDirection,
     side: ComponentSide,
     start: i64,
     end: i64,
 }
 
 impl ConnectionSlotDefinition {
-    const fn new(id: u16, side: ComponentSide, start: i64, end: i64) -> Self {
+    const fn new(
+        id: u16,
+        direction: ConnectionDirection,
+        side: ComponentSide,
+        start: i64,
+        end: i64,
+    ) -> Self {
         Self {
             id: ConnectionSlotId(id),
+            direction,
             side,
             start,
             end,
@@ -837,6 +947,7 @@ impl ConnectionSlotDefinition {
             };
             Some(ConnectionSlot {
                 id: self.id,
+                direction: self.direction,
                 side,
                 start: first.x.min(second.x),
                 end: first.x.max(second.x),
@@ -849,6 +960,7 @@ impl ConnectionSlotDefinition {
             };
             Some(ConnectionSlot {
                 id: self.id,
+                direction: self.direction,
                 side,
                 start: first.y.min(second.y),
                 end: first.y.max(second.y),
@@ -1038,6 +1150,7 @@ pub enum GraphNode {
     Connection {
         component: ComponentId,
         slot: ConnectionSlotId,
+        direction: ConnectionDirection,
         side: ComponentSide,
         start: i64,
         end: i64,
@@ -1221,24 +1334,21 @@ mod tests {
     }
 
     #[test]
-    fn accepts_wire_endpoints_in_leds_but_rejects_wires_through_leds() {
+    fn led_has_a_bottom_input_and_rejects_other_contacts() {
         let mut grid = LogicGrid::new();
         let led = grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
-        grid.add_wire(wire((0, 0), (9, 0), 1));
-        assert!(grid.validate().is_empty());
-
-        let output = wire((10, 0), (12, 0), 1);
-        grid.add_wire(output);
+        grid.add_wire(wire((10, 2), (10, 4), 1));
         assert!(grid.validate().is_empty());
         assert!(grid.generate_graph().nodes.iter().any(|node| {
             matches!(
                 node,
                 GraphNode::Connection {
                     component,
-                    slot: _,
-                    side: ComponentSide::Right,
-                    start: 0,
-                    end: 1,
+                    slot: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Input,
+                    side: ComponentSide::Bottom,
+                    start: 10,
+                    end: 11,
                 } if *component == led
             )
         }));
@@ -1246,7 +1356,7 @@ mod tests {
         let mut crossing_grid = LogicGrid::new();
         let crossed_led =
             crossing_grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
-        let crossing = wire((9, 0), (11, 0), 1);
+        let crossing = wire((8, 0), (10, 0), 1);
         crossing_grid.add_wire(crossing);
         assert!(crossing_grid
             .validate()
@@ -1254,6 +1364,28 @@ mod tests {
                 wire: crossing,
                 component: crossed_led,
             }));
+    }
+
+    #[test]
+    fn led_rotation_moves_its_input_with_its_short_edge() {
+        let component = Component {
+            id: ComponentId(0),
+            position: Point::new(10, 20),
+            rotation: Rotation::Right,
+            kind: ComponentKind::Led,
+        };
+
+        assert_eq!(component.size(), Some(Size::new(2, 1)));
+        assert_eq!(
+            component.connection_slots(),
+            vec![ConnectionSlot {
+                id: ConnectionSlotId(0),
+                direction: ConnectionDirection::Input,
+                side: ComponentSide::Left,
+                start: 20,
+                end: 21,
+            }]
+        );
     }
 
     #[test]
@@ -1276,6 +1408,7 @@ mod tests {
                 GraphNode::Connection {
                     component,
                     slot: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Input,
                     side: ComponentSide::Top,
                     start: 1,
                     end: 2,
@@ -1298,12 +1431,14 @@ mod tests {
             vec![
                 ConnectionSlot {
                     id: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Input,
                     side: ComponentSide::Left,
                     start: 20,
                     end: 22,
                 },
                 ConnectionSlot {
                     id: ConnectionSlotId(1),
+                    direction: ConnectionDirection::Output,
                     side: ComponentSide::Right,
                     start: 20,
                     end: 22,
@@ -1373,7 +1508,7 @@ mod tests {
         );
         let storage = grid.add_component(
             Point::new(10, 0),
-            Rotation::Up,
+            Rotation::Right,
             ComponentKind::Storage { scale: scale(2) },
         );
         grid.add_wire(wire((2, 0), (9, 0), 1));
@@ -1430,11 +1565,75 @@ mod tests {
     }
 
     #[test]
-    fn arbitrary_subcomponent_size_and_snap_are_supported() {
-        let kind = ComponentKind::subcomponent(Size::new(7, 11), scale(2)).unwrap();
+    fn storage_has_bottom_input_and_top_output() {
+        let component = Component {
+            id: ComponentId(0),
+            position: Point::new(10, 20),
+            rotation: Rotation::Up,
+            kind: ComponentKind::Storage { scale: scale(2) },
+        };
+
+        assert_eq!(
+            component.connection_slots(),
+            vec![
+                ConnectionSlot {
+                    id: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Input,
+                    side: ComponentSide::Bottom,
+                    start: 10,
+                    end: 12,
+                },
+                ConnectionSlot {
+                    id: ConnectionSlotId(1),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Top,
+                    start: 10,
+                    end: 12,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn subcomponent_ports_are_validated_and_rotate_with_the_component() {
+        let size = Size::new(7, 11);
+        let ports = vec![
+            ComponentPort::input(ComponentSide::Left, 2, 5),
+            ComponentPort::output(ComponentSide::Bottom, 3, 7),
+        ];
+        let kind = ComponentKind::subcomponent(size, scale(2), ports).unwrap();
         let mut grid = LogicGrid::new();
         let id = grid.add_component(Point::new(6, 4), Rotation::Left, kind);
-        assert_eq!(grid.component(id).unwrap().size(), Some(Size::new(11, 7)));
+        let component = grid.component(id).unwrap();
+        assert_eq!(component.size(), Some(Size::new(11, 7)));
+        assert_eq!(
+            component.connection_slots(),
+            vec![
+                ConnectionSlot {
+                    id: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Input,
+                    side: ComponentSide::Bottom,
+                    start: 8,
+                    end: 11,
+                },
+                ConnectionSlot {
+                    id: ConnectionSlotId(1),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Right,
+                    start: 4,
+                    end: 8,
+                },
+            ]
+        );
         assert!(grid.validate().is_empty());
+
+        let invalid = ComponentPort::input(ComponentSide::Top, 6, 8);
+        assert_eq!(
+            ComponentKind::subcomponent(size, scale(2), vec![invalid]),
+            Err(GeometryError::InvalidSubcomponentPort {
+                size,
+                port: invalid,
+            })
+        );
     }
 }
