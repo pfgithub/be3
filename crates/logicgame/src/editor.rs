@@ -359,6 +359,19 @@ impl Default for LogicEditor {
 }
 
 impl LogicEditor {
+    pub fn grid(&self) -> &LogicGrid {
+        &self.grid
+    }
+
+    pub fn replace_grid(&mut self, grid: LogicGrid) {
+        self.grid = grid;
+        self.camera = Camera::default();
+        self.gesture = None;
+        self.selection.clear();
+        self.configured_storage = None;
+        self.simulation = Simulation::default();
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
         let canvas = egui::Frame::central_panel(ui.style()).show(ui, |ui| {
@@ -808,7 +821,7 @@ impl LogicEditor {
         let mut hovered_entity = None;
 
         egui::Window::new("Grid Debugger")
-            .default_pos([700.0, 16.0])
+            .default_pos([700.0, 260.0])
             .default_width(240.0)
             .show(context, |ui| {
                 egui::Grid::new("logic-grid-debug-summary")

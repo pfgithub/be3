@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Point {
     pub x: i64,
     pub y: i64,
@@ -12,13 +14,13 @@ impl Point {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Size {
     pub width: i64,
     pub height: i64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardBounds {
     pub min: Point,
     pub max: Point,
@@ -51,7 +53,7 @@ impl Size {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Scale(u8);
 
 impl Scale {
@@ -70,7 +72,7 @@ impl Scale {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Rotation {
     Up,
     Right,
@@ -99,7 +101,7 @@ pub enum GeometryError {
     TooManySubcomponentPorts(usize),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Wire {
     pub start: Point,
     pub end: Point,
@@ -202,7 +204,7 @@ impl Wire {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComponentKind {
     Not {
         scale: Scale,
@@ -346,16 +348,16 @@ impl ComponentKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ComponentId(pub u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct InputId(pub usize);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct OutputId(pub usize);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Component {
     pub id: ComponentId,
     pub position: Point,
@@ -510,6 +512,14 @@ pub struct LogicGrid {
     next_input_id: usize,
     next_output_id: usize,
     board_bounds: BoardBounds,
+    revision: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogicGridSnapshot {
+    pub board_bounds: BoardBounds,
+    pub components: Vec<Component>,
+    pub wires: Vec<Wire>,
 }
 
 impl Default for LogicGrid {
@@ -521,6 +531,7 @@ impl Default for LogicGrid {
             next_input_id: 0,
             next_output_id: 0,
             board_bounds: BoardBounds::default(),
+            revision: 0,
         }
     }
 }
@@ -534,15 +545,77 @@ impl LogicGrid {
         &self.wires
     }
 
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn snapshot(&self) -> LogicGridSnapshot {
+        LogicGridSnapshot {
+            board_bounds: self.board_bounds,
+            components: self.components.values().cloned().collect(),
+            wires: self.wires.clone(),
+        }
+    }
+
+    pub fn from_snapshot(snapshot: LogicGridSnapshot) -> Self {
+        let next_component_id = snapshot
+            .components
+            .iter()
+            .map(|component| component.id.0)
+            .max()
+            .map_or(0, |id| {
+                id.checked_add(1).expect("component ID space exhausted")
+            });
+        let next_input_id = snapshot
+            .components
+            .iter()
+            .filter_map(|component| match component.kind {
+                ComponentKind::Input { id, .. } => Some(id.0),
+                _ => None,
+            })
+            .max()
+            .map_or(0, |id| id.checked_add(1).expect("input ID space exhausted"));
+        let next_output_id = snapshot
+            .components
+            .iter()
+            .filter_map(|component| match component.kind {
+                ComponentKind::Output { id, .. } => Some(id.0),
+                _ => None,
+            })
+            .max()
+            .map_or(0, |id| {
+                id.checked_add(1).expect("output ID space exhausted")
+            });
+        let components = snapshot
+            .components
+            .into_iter()
+            .map(|component| (component.id, component))
+            .collect();
+
+        Self {
+            wires: snapshot.wires,
+            components,
+            next_component_id,
+            next_input_id,
+            next_output_id,
+            board_bounds: snapshot.board_bounds,
+            revision: 0,
+        }
+    }
+
     pub fn board_bounds(&self) -> BoardBounds {
         self.board_bounds
     }
 
     pub fn set_board_bounds(&mut self, bounds: BoardBounds) -> bool {
-        if bounds.min.x >= bounds.max.x || bounds.min.y >= bounds.max.y {
+        if bounds.min.x >= bounds.max.x
+            || bounds.min.y >= bounds.max.y
+            || bounds == self.board_bounds
+        {
             return false;
         }
         self.board_bounds = bounds;
+        self.mark_changed();
         true
     }
 
@@ -594,18 +667,27 @@ impl LogicGrid {
                 kind,
             },
         );
+        self.mark_changed();
         id
     }
 
     pub fn remove_component(&mut self, id: ComponentId) -> Option<Component> {
-        self.components.remove(&id)
+        let removed = self.components.remove(&id);
+        if removed.is_some() {
+            self.mark_changed();
+        }
+        removed
     }
 
     pub fn set_component_position(&mut self, id: ComponentId, position: Point) -> bool {
         let Some(component) = self.components.get_mut(&id) else {
             return false;
         };
+        if component.position == position {
+            return false;
+        }
         component.position = position;
+        self.mark_changed();
         true
     }
 
@@ -621,7 +703,12 @@ impl LogicGrid {
         else {
             return false;
         };
-        *stored = value & value_mask(*scale);
+        let value = value & value_mask(*scale);
+        if *stored == value {
+            return false;
+        }
+        *stored = value;
+        self.mark_changed();
         true
     }
 
@@ -637,16 +724,22 @@ impl LogicGrid {
             return false;
         }
         *value ^= 1_u64 << bit;
+        self.mark_changed();
         true
     }
 
     pub fn add_wire(&mut self, wire: Wire) -> &[Wire] {
+        let original = self.wires.clone();
         self.wires.push(wire);
         self.normalize_wires();
+        if self.wires != original {
+            self.mark_changed();
+        }
         &self.wires
     }
 
     pub fn remove_wire(&mut self, removal: Wire) -> &[Wire] {
+        let original = self.wires.clone();
         let orientation = removal.orientation();
         let fixed = removal.fixed();
         let scale = removal.scale;
@@ -693,6 +786,9 @@ impl LogicGrid {
 
         self.wires = result;
         self.normalize_wires();
+        if self.wires != original {
+            self.mark_changed();
+        }
         &self.wires
     }
 
@@ -955,6 +1051,10 @@ impl LogicGrid {
         normalized.sort();
         self.wires = normalized;
     }
+
+    fn mark_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
 }
 
 pub fn value_mask(scale: Scale) -> u64 {
@@ -1073,7 +1173,7 @@ fn add_cut_from_endpoint(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ComponentSide {
     Top,
     Right,
@@ -1081,13 +1181,13 @@ pub enum ComponentSide {
     Left,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ConnectionDirection {
     Input,
     Output,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ComponentPort {
     pub direction: ConnectionDirection,
     pub side: ComponentSide,
@@ -2071,5 +2171,103 @@ mod tests {
                 port: invalid,
             })
         );
+    }
+
+    #[test]
+    fn serialized_snapshot_round_trips_and_regenerates_ids() {
+        let snapshot = LogicGridSnapshot {
+            board_bounds: BoardBounds::new(Point::new(-20, -12), Point::new(30, 18)),
+            components: vec![
+                Component {
+                    id: ComponentId(2),
+                    position: Point::new(-8, 0),
+                    rotation: Rotation::Up,
+                    kind: ComponentKind::Not { scale: scale(2) },
+                },
+                Component {
+                    id: ComponentId(4),
+                    position: Point::new(0, 0),
+                    rotation: Rotation::Right,
+                    kind: ComponentKind::Led,
+                },
+                Component {
+                    id: ComponentId(6),
+                    position: Point::new(4, 0),
+                    rotation: Rotation::Down,
+                    kind: ComponentKind::Storage {
+                        scale: scale(4),
+                        value: 0b1010,
+                    },
+                },
+                Component {
+                    id: ComponentId(8),
+                    position: Point::new(8, 0),
+                    rotation: Rotation::Left,
+                    kind: ComponentKind::Input {
+                        scale: scale(2),
+                        id: InputId(5),
+                    },
+                },
+                Component {
+                    id: ComponentId(10),
+                    position: Point::new(12, 0),
+                    rotation: Rotation::Up,
+                    kind: ComponentKind::Output {
+                        scale: scale(2),
+                        id: OutputId(7),
+                    },
+                },
+                Component {
+                    id: ComponentId(12),
+                    position: Point::new(16, 0),
+                    rotation: Rotation::Right,
+                    kind: ComponentKind::subcomponent(
+                        Size::new(4, 6),
+                        scale(2),
+                        vec![
+                            ComponentPort::input(ComponentSide::Left, 0, 2),
+                            ComponentPort::output(ComponentSide::Right, 2, 4),
+                        ],
+                    )
+                    .unwrap(),
+                },
+            ],
+            wires: vec![wire((-4, 8), (4, 8), 2)],
+        };
+        let json = serde_json::to_vec_pretty(&snapshot).unwrap();
+        let decoded: LogicGridSnapshot = serde_json::from_slice(&json).unwrap();
+        let mut grid = LogicGrid::from_snapshot(decoded);
+        assert_eq!(grid.snapshot(), snapshot);
+        assert_eq!(grid.revision(), 0);
+
+        let component = grid.add_component(Point::new(0, 12), Rotation::Up, ComponentKind::Led);
+        assert_eq!(component, ComponentId(13));
+        let input = grid.add_component(
+            Point::new(4, 12),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(usize::MAX),
+            },
+        );
+        assert!(matches!(
+            grid.component(input).unwrap().kind,
+            ComponentKind::Input { id: InputId(6), .. }
+        ));
+        let output = grid.add_component(
+            Point::new(8, 12),
+            Rotation::Up,
+            ComponentKind::Output {
+                scale: Scale::ONE,
+                id: OutputId(usize::MAX),
+            },
+        );
+        assert!(matches!(
+            grid.component(output).unwrap().kind,
+            ComponentKind::Output {
+                id: OutputId(8),
+                ..
+            }
+        ));
     }
 }
