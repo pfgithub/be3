@@ -1172,7 +1172,7 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Input { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world) {
+                    if let Some(rotation) = drag_rotation(drag_start, world).map(|r| r.flip()) {
                         let scale = self.tool.scale;
                         self.grid.add_component(
                             oriented_component_position(anchor, rotation, scale),
@@ -1522,7 +1522,7 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Input { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
+                    if let Some(rotation) = drag_rotation(*drag_start, pointer).map(|r| r.flip()) {
                         let component = Component {
                             id: ComponentId(u64::MAX),
                             position: oriented_component_position(

@@ -57,6 +57,14 @@ impl Rotation {
     fn swaps_axes(self) -> bool {
         matches!(self, Self::Right | Self::Left)
     }
+    pub fn flip(self) -> Rotation {
+        match self {
+            Rotation::Up => Rotation::Down,
+            Rotation::Right => Rotation::Left,
+            Rotation::Down => Rotation::Up,
+            Rotation::Left => Rotation::Right,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
