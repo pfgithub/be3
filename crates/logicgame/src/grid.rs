@@ -208,6 +208,28 @@ impl ComponentKind {
             Self::Subcomponent { size, .. } => Some(*size),
         }
     }
+
+    fn connection_slot_definitions(&self) -> Vec<ConnectionSlotDefinition> {
+        let Some(size) = self.unrotated_size() else {
+            return Vec::new();
+        };
+        let full_boundary = || {
+            vec![
+                ConnectionSlotDefinition::new(0, ComponentSide::Top, 0, size.width),
+                ConnectionSlotDefinition::new(1, ComponentSide::Right, 0, size.height),
+                ConnectionSlotDefinition::new(2, ComponentSide::Bottom, 0, size.width),
+                ConnectionSlotDefinition::new(3, ComponentSide::Left, 0, size.height),
+            ]
+        };
+
+        match self {
+            Self::Not { .. } => vec![
+                ConnectionSlotDefinition::new(0, ComponentSide::Bottom, 0, size.width),
+                ConnectionSlotDefinition::new(1, ComponentSide::Top, 0, size.width),
+            ],
+            Self::Led | Self::Storage { .. } | Self::Subcomponent { .. } => full_boundary(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -240,6 +262,20 @@ impl Component {
                 self.position.y.checked_add(size.height)?,
             ),
         })
+    }
+
+    pub fn connection_slots(&self) -> Vec<ConnectionSlot> {
+        let Some(unrotated_size) = self.kind.unrotated_size() else {
+            return Vec::new();
+        };
+
+        self.kind
+            .connection_slot_definitions()
+            .into_iter()
+            .filter_map(|slot| {
+                slot.rotate_and_translate(unrotated_size, self.rotation, self.position)
+            })
+            .collect()
     }
 }
 
@@ -439,9 +475,10 @@ impl LogicGrid {
                 continue;
             };
             for component in &components {
+                let slots = component.connection_slots();
                 if component.rect().is_some_and(|component_rect| {
                     wire_rect.overlaps_area(component_rect)
-                        && !wire_component_intersection_is_contact(*wire, component_rect)
+                        && !wire_component_intersection_is_contact(*wire, component_rect, &slots)
                 }) {
                     errors.insert(ValidationError::WireComponentIntersection {
                         wire: *wire,
@@ -497,40 +534,42 @@ impl LogicGrid {
             let Some(rect) = component.rect() else {
                 continue;
             };
-            for (net_index, wires) in nets.iter().enumerate() {
-                let mut intervals = Vec::new();
-                for wire in wires {
-                    intervals.extend(wire_component_contacts(*wire, rect));
-                }
-                intervals.sort();
-                let mut merged: Vec<Contact> = Vec::new();
-                for contact in intervals {
-                    if let Some(last) = merged.last_mut() {
-                        if last.side == contact.side && contact.start <= last.end {
-                            last.end = last.end.max(contact.end);
-                            continue;
-                        }
-                    }
-                    merged.push(contact);
-                }
-                for contact in merged {
-                    contacts.push((component.id, net_index, contact));
+            for slot in component.connection_slots() {
+                let connected_nets: Vec<_> = nets
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(net_index, wires)| {
+                        wires
+                            .iter()
+                            .any(|wire| {
+                                wire_component_contacts(*wire, rect)
+                                    .into_iter()
+                                    .any(|contact| contact.overlaps(slot))
+                            })
+                            .then_some(net_index)
+                    })
+                    .collect();
+                if !connected_nets.is_empty() {
+                    contacts.push((component.id, slot, connected_nets));
                 }
             }
         }
         contacts.sort();
 
         let mut edges = Vec::new();
-        for (component, net_index, contact) in contacts {
+        for (component, slot, connected_nets) in contacts {
             let connection = GraphNodeId(nodes.len());
             nodes.push(GraphNode::Connection {
                 component,
-                side: contact.side,
-                start: contact.start,
-                end: contact.end,
+                slot: slot.id,
+                side: slot.side,
+                start: slot.start,
+                end: slot.end,
             });
             edges.push(GraphEdge::new(component_nodes[&component], connection));
-            edges.push(GraphEdge::new(connection, net_nodes[net_index]));
+            for net_index in connected_nets {
+                edges.push(GraphEdge::new(connection, net_nodes[net_index]));
+            }
         }
         edges.sort();
 
@@ -732,11 +771,117 @@ pub enum ComponentSide {
     Left,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConnectionSlotId(pub u16);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConnectionSlot {
+    pub id: ConnectionSlotId,
+    pub side: ComponentSide,
+    pub start: i64,
+    pub end: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConnectionSlotDefinition {
+    id: ConnectionSlotId,
+    side: ComponentSide,
+    start: i64,
+    end: i64,
+}
+
+impl ConnectionSlotDefinition {
+    const fn new(id: u16, side: ComponentSide, start: i64, end: i64) -> Self {
+        Self {
+            id: ConnectionSlotId(id),
+            side,
+            start,
+            end,
+        }
+    }
+
+    fn rotate_and_translate(
+        self,
+        size: Size,
+        rotation: Rotation,
+        position: Point,
+    ) -> Option<ConnectionSlot> {
+        let (first, second) = match self.side {
+            ComponentSide::Top => (Point::new(self.start, 0), Point::new(self.end, 0)),
+            ComponentSide::Right => (
+                Point::new(size.width, self.start),
+                Point::new(size.width, self.end),
+            ),
+            ComponentSide::Bottom => (
+                Point::new(self.start, size.height),
+                Point::new(self.end, size.height),
+            ),
+            ComponentSide::Left => (Point::new(0, self.start), Point::new(0, self.end)),
+        };
+        let first = rotate_local_point(first, size, rotation)?;
+        let second = rotate_local_point(second, size, rotation)?;
+        let first = Point::new(
+            position.x.checked_add(first.x)?,
+            position.y.checked_add(first.y)?,
+        );
+        let second = Point::new(
+            position.x.checked_add(second.x)?,
+            position.y.checked_add(second.y)?,
+        );
+
+        if first.y == second.y {
+            let side = if first.y == position.y {
+                ComponentSide::Top
+            } else {
+                ComponentSide::Bottom
+            };
+            Some(ConnectionSlot {
+                id: self.id,
+                side,
+                start: first.x.min(second.x),
+                end: first.x.max(second.x),
+            })
+        } else if first.x == second.x {
+            let side = if first.x == position.x {
+                ComponentSide::Left
+            } else {
+                ComponentSide::Right
+            };
+            Some(ConnectionSlot {
+                id: self.id,
+                side,
+                start: first.y.min(second.y),
+                end: first.y.max(second.y),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+fn rotate_local_point(point: Point, size: Size, rotation: Rotation) -> Option<Point> {
+    match rotation {
+        Rotation::Up => Some(point),
+        Rotation::Right => Some(Point::new(size.height.checked_sub(point.y)?, point.x)),
+        Rotation::Down => Some(Point::new(
+            size.width.checked_sub(point.x)?,
+            size.height.checked_sub(point.y)?,
+        )),
+        Rotation::Left => Some(Point::new(point.y, size.width.checked_sub(point.x)?)),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Contact {
     side: ComponentSide,
     start: i64,
     end: i64,
+}
+
+impl Contact {
+    fn overlaps(self, slot: ConnectionSlot) -> bool {
+        self.side == slot.side && self.start < slot.end && slot.start < self.end
+    }
 }
 
 fn wire_endpoint_rect(wire: Wire, endpoint: Point) -> Option<Rect> {
@@ -750,7 +895,11 @@ fn wire_endpoint_rect(wire: Wire, endpoint: Point) -> Option<Rect> {
     })
 }
 
-fn wire_component_intersection_is_contact(wire: Wire, component: Rect) -> bool {
+fn wire_component_intersection_is_contact(
+    wire: Wire,
+    component: Rect,
+    slots: &[ConnectionSlot],
+) -> bool {
     let Some(wire_rect) = wire.rect() else {
         return false;
     };
@@ -769,7 +918,11 @@ fn wire_component_intersection_is_contact(wire: Wire, component: Rect) -> bool {
                 endpoint_rect.min.y == component.min.y || endpoint_rect.max.y == component.max.y
             }
         };
-        on_terminal_side && endpoint_rect.intersection(component) == Some(intersection)
+        on_terminal_side
+            && endpoint_rect.intersection(component) == Some(intersection)
+            && wire_component_contacts(wire, component)
+                .into_iter()
+                .any(|contact| slots.iter().any(|slot| contact.overlaps(*slot)))
     })
 }
 
@@ -884,6 +1037,7 @@ pub enum GraphNode {
     },
     Connection {
         component: ComponentId,
+        slot: ConnectionSlotId,
         side: ComponentSide,
         start: i64,
         end: i64,
@@ -1081,6 +1235,7 @@ mod tests {
                 node,
                 GraphNode::Connection {
                     component,
+                    slot: _,
                     side: ComponentSide::Right,
                     start: 0,
                     end: 1,
@@ -1120,12 +1275,63 @@ mod tests {
                 node,
                 GraphNode::Connection {
                     component,
+                    slot: ConnectionSlotId(0),
                     side: ComponentSide::Top,
                     start: 1,
                     end: 2,
                 } if *component == not
             )
         }));
+    }
+
+    #[test]
+    fn not_gate_defines_rotated_input_and_output_slots() {
+        let component = Component {
+            id: ComponentId(0),
+            position: Point::new(10, 20),
+            rotation: Rotation::Right,
+            kind: ComponentKind::Not { scale: scale(2) },
+        };
+
+        assert_eq!(
+            component.connection_slots(),
+            vec![
+                ConnectionSlot {
+                    id: ConnectionSlotId(0),
+                    side: ComponentSide::Left,
+                    start: 20,
+                    end: 22,
+                },
+                ConnectionSlot {
+                    id: ConnectionSlotId(1),
+                    side: ComponentSide::Right,
+                    start: 20,
+                    end: 22,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn wire_endpoint_on_not_gate_non_slot_side_is_an_intersection() {
+        let mut grid = LogicGrid::new();
+        let not = grid.add_component(
+            Point::new(4, 4),
+            Rotation::Up,
+            ComponentKind::Not { scale: scale(2) },
+        );
+        let wire = wire((2, 4), (4, 4), 1);
+        grid.add_wire(wire);
+
+        assert!(grid
+            .validate()
+            .contains(&ValidationError::WireComponentIntersection {
+                wire,
+                component: not,
+            }));
+        assert!(!grid.generate_graph().nodes.iter().any(
+            |node| matches!(node, GraphNode::Connection { component, .. } if *component == not)
+        ));
     }
 
     #[test]
@@ -1160,7 +1366,7 @@ mod tests {
     #[test]
     fn graph_collapses_branches_and_keeps_separate_component_contacts() {
         let mut grid = LogicGrid::new();
-        let not = grid.add_component(
+        let _not = grid.add_component(
             Point::new(0, 0),
             Rotation::Up,
             ComponentKind::Not { scale: scale(2) },
@@ -1200,8 +1406,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(contacts, vec![not, not, storage, storage]);
-        assert_eq!(graph.edges.len(), 8);
+        assert_eq!(contacts, vec![storage]);
+        assert_eq!(graph.edges.len(), 2);
         assert_eq!(graph, grid.generate_graph());
     }
 

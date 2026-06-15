@@ -1219,13 +1219,14 @@ fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String)
         ),
         GraphNode::Connection {
             component,
+            slot,
             side,
             start,
             end,
         } => (
             egui::Color32::from_rgb(155, 95, 45),
             "Connection",
-            format!("#{} {side:?} [{start}, {end})", component.0),
+            format!("#{} slot {} {side:?} [{start}, {end})", component.0, slot.0),
         ),
     }
 }
