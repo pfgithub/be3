@@ -122,6 +122,7 @@ mod compiled_vm {
             inputs: vec![0; vm.inputs],
             outputs: vec![0; vm.outputs],
             instructions: vm.instructions,
+            components: Vec::new(),
         })
     }
 }
@@ -131,6 +132,7 @@ pub struct ComponentFileDrag {
     pub name: String,
 }
 
+#[derive(Clone)]
 pub struct ComponentFiles {
     root: PathBuf,
     compiled_root: PathBuf,
@@ -229,9 +231,15 @@ impl ComponentFiles {
         Ok(ComponentKind::subcomponent(hash, size, ports)?)
     }
 
-    #[cfg(test)]
     fn compiled_path(&self, hash: &ComponentHash) -> PathBuf {
         self.compiled_root.join(format!("{hash}.json"))
+    }
+
+    pub fn load_components(&self, vm: &mut Vm) -> Result<(), ComponentFileError> {
+        vm.load_components(|hash| {
+            let bytes = fs::read(self.compiled_path(hash))?;
+            Ok(serde_json::from_slice::<CompiledComponent>(&bytes)?.vm)
+        })
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -440,6 +448,7 @@ mod tests {
                     output: 2,
                     mask: 0xff,
                 }],
+                components: Vec::new(),
             },
         };
 

@@ -65,6 +65,18 @@ pub struct Vm {
     pub inputs: Vec<u64>,
     pub outputs: Vec<u64>,
     pub instructions: Vec<Instruction>,
+    #[serde(skip)]
+    pub components: Vec<Option<Component>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Component {
+    pub memory: Vec<u64>,
+    pub storage: Vec<StorageId>,
+    pub inputs: Vec<u64>,
+    pub outputs: Vec<u64>,
+    pub instructions: Vec<Instruction>,
+    pub components: Vec<Option<Component>>,
 }
 
 impl Vm {
@@ -422,7 +434,17 @@ impl Vm {
             inputs: vec![0; input_count],
             outputs: vec![0; output_count],
             instructions,
+            components: Vec::new(),
         })
+    }
+
+    pub fn load_components<E>(
+        &mut self,
+        mut load: impl FnMut(&ComponentHash) -> Result<Vm, E>,
+    ) -> Result<(), E> {
+        self.components =
+            load_component_instances(&self.instructions, &mut self.storage, &mut load)?;
+        Ok(())
     }
 
     pub fn begin_tick(&mut self) {
@@ -438,8 +460,17 @@ impl Vm {
 
     pub fn execute_instruction(&mut self, index: usize) {
         match self.instructions[index].clone() {
-            Instruction::Call { component, .. } => {
-                panic!("calling component {component} is not implemented")
+            Instruction::Call {
+                component,
+                inputs,
+                outputs,
+            } => {
+                let instance = self
+                    .components
+                    .get_mut(index)
+                    .and_then(Option::as_mut)
+                    .unwrap_or_else(|| panic!("component {component} is not loaded"));
+                instance.call(&mut self.storage, &mut self.memory, &inputs, &outputs);
             }
             Instruction::Not { input, output } => {
                 self.memory[output] |= !self.memory[input];
@@ -479,6 +510,125 @@ impl Vm {
             }
         }
     }
+}
+
+impl Component {
+    fn from_vm<E>(
+        vm: Vm,
+        root_storage: &mut Vec<u64>,
+        load: &mut impl FnMut(&ComponentHash) -> Result<Vm, E>,
+    ) -> Result<Self, E> {
+        let storage_start = root_storage.len();
+        let storage_end = storage_start + vm.storage.len();
+        root_storage.extend_from_slice(&vm.storage);
+        let components = load_component_instances(&vm.instructions, root_storage, load)?;
+        Ok(Self {
+            memory: vm.memory,
+            storage: (storage_start..storage_end).collect(),
+            inputs: vm.inputs,
+            outputs: vm.outputs,
+            instructions: vm.instructions,
+            components,
+        })
+    }
+
+    fn call(
+        &mut self,
+        root_storage: &mut [u64],
+        parent_memory: &mut [u64],
+        input_bindings: &[Option<MemoryAddress>],
+        output_bindings: &[Vec<MemoryAddress>],
+    ) {
+        self.memory.fill(0);
+        self.inputs.fill(0);
+        for (input, binding) in self.inputs.iter_mut().zip(input_bindings) {
+            if let Some(address) = binding {
+                *input = parent_memory[*address];
+            }
+        }
+        self.outputs.fill(0);
+
+        for instruction in 0..self.instructions.len() {
+            self.execute_instruction(instruction, root_storage);
+        }
+
+        for (output, bindings) in self.outputs.iter().zip(output_bindings) {
+            for &address in bindings {
+                parent_memory[address] |= *output;
+            }
+        }
+    }
+
+    fn execute_instruction(&mut self, index: usize, root_storage: &mut [u64]) {
+        match self.instructions[index].clone() {
+            Instruction::Call {
+                component,
+                inputs,
+                outputs,
+            } => {
+                let instance = self
+                    .components
+                    .get_mut(index)
+                    .and_then(Option::as_mut)
+                    .unwrap_or_else(|| panic!("component {component} is not loaded"));
+                instance.call(root_storage, &mut self.memory, &inputs, &outputs);
+            }
+            Instruction::Not { input, output } => {
+                self.memory[output] |= !self.memory[input];
+            }
+            Instruction::CopyBits {
+                input,
+                output,
+                shift,
+                mask,
+            } => {
+                let value = self.memory[input] & mask;
+                self.memory[output] |= if shift >= 0 {
+                    value << shift
+                } else {
+                    self.memory[input] >> -shift & mask
+                };
+            }
+            Instruction::ReadStorage { storage, output } => {
+                self.memory[output] |= root_storage[self.storage[storage]];
+            }
+            Instruction::SaveStorage { storage, input } => {
+                root_storage[self.storage[storage]] = self.memory[input];
+            }
+            Instruction::ReadInput {
+                input,
+                output,
+                mask,
+            } => {
+                self.memory[output] |= self.inputs[input.0] & mask;
+            }
+            Instruction::WriteOutput {
+                output,
+                input,
+                mask,
+            } => {
+                self.outputs[output.0] = self.memory[input] & mask;
+            }
+        }
+    }
+}
+
+fn load_component_instances<E>(
+    instructions: &[Instruction],
+    root_storage: &mut Vec<u64>,
+    load: &mut impl FnMut(&ComponentHash) -> Result<Vm, E>,
+) -> Result<Vec<Option<Component>>, E> {
+    let mut components = Vec::with_capacity(instructions.len());
+    for instruction in instructions {
+        let instance = match instruction {
+            Instruction::Call { component, .. } => {
+                Some(Component::from_vm(load(component)?, root_storage, load)?)
+            }
+            _ => None,
+        };
+        components.push(instance);
+    }
+    Ok(components)
 }
 
 #[derive(Clone, Debug)]
@@ -674,8 +824,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "is not implemented")]
-    fn call_is_not_implemented() {
+    #[should_panic(expected = "is not loaded")]
+    fn unloaded_call_panics() {
         let mut vm = Vm {
             instructions: vec![Instruction::Call {
                 component: ComponentHash::new("0".repeat(64)).unwrap(),
@@ -686,6 +836,218 @@ mod tests {
         };
 
         vm.execute();
+    }
+
+    #[test]
+    fn call_clears_memory_writes_inputs_and_clears_outputs() {
+        let hash = ComponentHash::new("1".repeat(64)).unwrap();
+        let mut vm = Vm {
+            memory: vec![5, 0],
+            instructions: vec![Instruction::Call {
+                component: hash,
+                inputs: vec![Some(0)],
+                outputs: vec![vec![1]],
+            }],
+            ..Vm::default()
+        };
+        vm.load_components(|_| {
+            Ok::<_, ()>(Vm {
+                memory: vec![u64::MAX, u64::MAX],
+                inputs: vec![u64::MAX],
+                outputs: vec![u64::MAX],
+                instructions: vec![
+                    Instruction::ReadInput {
+                        input: InputId(0),
+                        output: 0,
+                        mask: u64::MAX,
+                    },
+                    Instruction::WriteOutput {
+                        output: OutputId(0),
+                        input: 0,
+                        mask: u64::MAX,
+                    },
+                ],
+                ..Vm::default()
+            })
+        })
+        .unwrap();
+
+        vm.execute();
+        assert_eq!(vm.memory, vec![5, 5]);
+
+        vm.memory.copy_from_slice(&[0, 0]);
+        vm.execute();
+        assert_eq!(vm.memory, vec![0, 0]);
+        let component = vm.components[0].as_ref().unwrap();
+        assert_eq!(component.memory, vec![0, 0]);
+        assert_eq!(component.inputs, vec![0]);
+        assert_eq!(component.outputs, vec![0]);
+    }
+
+    #[test]
+    fn subcomponent_storage_persists_in_the_root_vm() {
+        let hash = ComponentHash::new("2".repeat(64)).unwrap();
+        let mut vm = Vm {
+            memory: vec![7, 0],
+            storage: vec![99],
+            instructions: vec![Instruction::Call {
+                component: hash,
+                inputs: vec![Some(0)],
+                outputs: vec![vec![1]],
+            }],
+            ..Vm::default()
+        };
+        vm.load_components(|_| {
+            Ok::<_, ()>(Vm {
+                memory: vec![0, 0],
+                storage: vec![3],
+                inputs: vec![0],
+                outputs: vec![0],
+                instructions: vec![
+                    Instruction::ReadStorage {
+                        storage: 0,
+                        output: 0,
+                    },
+                    Instruction::WriteOutput {
+                        output: OutputId(0),
+                        input: 0,
+                        mask: u64::MAX,
+                    },
+                    Instruction::ReadInput {
+                        input: InputId(0),
+                        output: 1,
+                        mask: u64::MAX,
+                    },
+                    Instruction::SaveStorage {
+                        storage: 0,
+                        input: 1,
+                    },
+                ],
+                ..Vm::default()
+            })
+        })
+        .unwrap();
+
+        assert_eq!(vm.storage, vec![99, 3]);
+        assert_eq!(vm.components[0].as_ref().unwrap().storage, vec![1]);
+
+        vm.execute();
+        assert_eq!(vm.memory[1], 3);
+        assert_eq!(vm.storage, vec![99, 7]);
+
+        vm.memory.copy_from_slice(&[11, 0]);
+        vm.execute();
+        assert_eq!(vm.memory[1], 7);
+        assert_eq!(vm.storage, vec![99, 11]);
+    }
+
+    #[test]
+    fn repeated_subcomponents_have_independent_storage() {
+        let hash = ComponentHash::new("3".repeat(64)).unwrap();
+        let mut vm = Vm {
+            memory: vec![1, 2],
+            instructions: vec![
+                Instruction::Call {
+                    component: hash.clone(),
+                    inputs: vec![Some(0)],
+                    outputs: vec![],
+                },
+                Instruction::Call {
+                    component: hash,
+                    inputs: vec![Some(1)],
+                    outputs: vec![],
+                },
+            ],
+            ..Vm::default()
+        };
+        vm.load_components(|_| {
+            Ok::<_, ()>(Vm {
+                memory: vec![0],
+                storage: vec![0],
+                inputs: vec![0],
+                instructions: vec![
+                    Instruction::ReadInput {
+                        input: InputId(0),
+                        output: 0,
+                        mask: u64::MAX,
+                    },
+                    Instruction::SaveStorage {
+                        storage: 0,
+                        input: 0,
+                    },
+                ],
+                ..Vm::default()
+            })
+        })
+        .unwrap();
+
+        vm.execute();
+
+        assert_eq!(vm.storage, vec![1, 2]);
+        assert_eq!(vm.components[0].as_ref().unwrap().storage, vec![0]);
+        assert_eq!(vm.components[1].as_ref().unwrap().storage, vec![1]);
+    }
+
+    #[test]
+    fn nested_subcomponent_storage_is_owned_by_the_root_vm() {
+        let middle_hash = ComponentHash::new("4".repeat(64)).unwrap();
+        let leaf_hash = ComponentHash::new("5".repeat(64)).unwrap();
+        let mut vm = Vm {
+            memory: vec![13],
+            instructions: vec![Instruction::Call {
+                component: middle_hash.clone(),
+                inputs: vec![Some(0)],
+                outputs: vec![],
+            }],
+            ..Vm::default()
+        };
+        vm.load_components(|hash| {
+            if hash == &middle_hash {
+                Ok::<_, ()>(Vm {
+                    memory: vec![0],
+                    inputs: vec![0],
+                    instructions: vec![
+                        Instruction::ReadInput {
+                            input: InputId(0),
+                            output: 0,
+                            mask: u64::MAX,
+                        },
+                        Instruction::Call {
+                            component: leaf_hash.clone(),
+                            inputs: vec![Some(0)],
+                            outputs: vec![],
+                        },
+                    ],
+                    ..Vm::default()
+                })
+            } else {
+                Ok(Vm {
+                    memory: vec![0],
+                    storage: vec![8],
+                    inputs: vec![0],
+                    instructions: vec![
+                        Instruction::ReadInput {
+                            input: InputId(0),
+                            output: 0,
+                            mask: u64::MAX,
+                        },
+                        Instruction::SaveStorage {
+                            storage: 0,
+                            input: 0,
+                        },
+                    ],
+                    ..Vm::default()
+                })
+            }
+        })
+        .unwrap();
+
+        vm.execute();
+
+        assert_eq!(vm.storage, vec![13]);
+        let middle = vm.components[0].as_ref().unwrap();
+        assert!(middle.storage.is_empty());
+        assert_eq!(middle.components[1].as_ref().unwrap().storage, vec![0]);
     }
 
     #[test]

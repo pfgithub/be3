@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use eframe::egui::{self, PointerButton};
-use logicgame::execution::{GenerationError, Instruction, Vm};
+use logicgame::execution::{Instruction, Vm};
 use logicgame::grid::{
     CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode, InputId,
     LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
 };
 
 use crate::{
-    component_files::ComponentFileDrag,
+    component_files::{ComponentFileDrag, ComponentFiles},
     renderer::{DrawTriangle, GridCallback, RenderFrame},
 };
 
@@ -207,7 +207,7 @@ struct SimulationSnapshot {
 struct Simulation {
     snapshot: Option<SimulationSnapshot>,
     vm: Option<Vm>,
-    error: Option<GenerationError>,
+    error: Option<String>,
     steps: u64,
     next_instruction: usize,
     tick_in_progress: bool,
@@ -353,6 +353,7 @@ pub struct LogicEditor {
     selection: Selection,
     configured_storage: Option<ComponentId>,
     simulation: Simulation,
+    component_files: Option<ComponentFiles>,
 }
 
 pub struct ComponentFileDrop {
@@ -374,11 +375,16 @@ impl Default for LogicEditor {
             selection: Selection::default(),
             configured_storage: None,
             simulation: Simulation::default(),
+            component_files: None,
         }
     }
 }
 
 impl LogicEditor {
+    pub fn set_component_files(&mut self, component_files: Option<ComponentFiles>) {
+        self.component_files = component_files;
+    }
+
     pub fn grid(&self) -> &LogicGrid {
         &self.grid
     }
@@ -556,10 +562,7 @@ impl LogicEditor {
 
                 ui.separator();
                 if let Some(error) = &self.simulation.error {
-                    ui.colored_label(
-                        ui.visuals().error_fg_color,
-                        format!("Cannot run: {error:?}"),
-                    );
+                    ui.colored_label(ui.visuals().error_fg_color, format!("Cannot run: {error}"));
                     return;
                 }
 
@@ -742,8 +745,21 @@ impl LogicEditor {
     }
 
     fn compile_simulation(&mut self, snapshot: SimulationSnapshot) {
-        match Vm::from_graph(&self.grid, &snapshot.graph) {
-            Ok(vm) => {
+        match Vm::from_graph(&self.grid, &snapshot.graph).map_err(|error| format!("{error:?}")) {
+            Ok(mut vm) => {
+                if let Some(files) = &self.component_files {
+                    if let Err(error) = files.load_components(&mut vm) {
+                        self.simulation = Simulation {
+                            snapshot: Some(snapshot),
+                            vm: None,
+                            error: Some(error.to_string()),
+                            steps: 0,
+                            next_instruction: 0,
+                            tick_in_progress: false,
+                        };
+                        return;
+                    }
+                }
                 self.simulation = Simulation {
                     snapshot: Some(snapshot),
                     vm: Some(vm),

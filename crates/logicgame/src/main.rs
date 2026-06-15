@@ -59,8 +59,10 @@ impl LogicGame {
 
         let component_files =
             eframe::storage_dir(APP_ID).map(|root| ComponentFiles::new(root.join("components")));
+        let mut editor = LogicEditor::default();
+        editor.set_component_files(component_files.clone());
         let mut game = Self {
-            editor: LogicEditor::default(),
+            editor,
             component_files,
             component_names: Vec::new(),
             active_component: None,
