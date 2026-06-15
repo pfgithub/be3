@@ -306,7 +306,7 @@ impl LogicEditor {
 
 fn snap_coordinate(value: f32, scale: Scale) -> i64 {
     let scale = scale.get();
-    (value / scale as f32).round() as i64 * scale
+    (value / scale as f32).floor() as i64 * scale
 }
 
 fn snap_point(point: [f32; 2], scale: Scale) -> Point {
@@ -348,12 +348,10 @@ fn drag_rotation(anchor: Point, pointer: [f32; 2], scale: Scale) -> Option<Rotat
 
 fn not_gate_position(anchor: Point, rotation: Rotation, scale: Scale) -> Point {
     let scale = scale.get();
-    let half = scale / 2;
     match rotation {
-        Rotation::Up => Point::new(anchor.x - half, anchor.y - scale * 2),
-        Rotation::Right => Point::new(anchor.x, anchor.y - half),
-        Rotation::Down => Point::new(anchor.x - half, anchor.y),
-        Rotation::Left => Point::new(anchor.x - scale * 2, anchor.y - half),
+        Rotation::Up => Point::new(anchor.x, anchor.y - scale * 2),
+        Rotation::Right | Rotation::Down => anchor,
+        Rotation::Left => Point::new(anchor.x - scale * 2, anchor.y),
     }
 }
 
@@ -423,9 +421,12 @@ mod tests {
     }
 
     #[test]
-    fn snapping_handles_negative_coordinates() {
-        assert_eq!(snap_point([-5.1, -2.0], scale(4)), Point::new(-4, -4));
-        assert_eq!(snap_point([-6.1, 2.1], scale(4)), Point::new(-8, 4));
+    fn snapping_selects_the_containing_grid_cell() {
+        assert_eq!(snap_point([0.0, 0.0], scale(4)), Point::new(0, 0));
+        assert_eq!(snap_point([3.99, 3.99], scale(4)), Point::new(0, 0));
+        assert_eq!(snap_point([4.0, 4.0], scale(4)), Point::new(4, 4));
+        assert_eq!(snap_point([-0.01, -0.01], scale(4)), Point::new(-4, -4));
+        assert_eq!(snap_point([-4.0, -4.0], scale(4)), Point::new(-4, -4));
     }
 
     #[test]
@@ -449,11 +450,15 @@ mod tests {
         );
         assert_eq!(
             not_gate_position(anchor, Rotation::Right, scale(2)),
-            Point::new(8, 7)
+            Point::new(8, 8)
         );
         assert_eq!(
             not_gate_position(anchor, Rotation::Up, scale(2)),
-            Point::new(7, 4)
+            Point::new(8, 4)
+        );
+        assert_eq!(
+            not_gate_position(anchor, Rotation::Left, scale(2)),
+            Point::new(4, 8)
         );
     }
 

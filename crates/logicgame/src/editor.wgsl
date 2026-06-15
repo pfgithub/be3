@@ -134,8 +134,6 @@ fn shape_fs(input: ShapeVertexOutput) -> @location(0) vec4<f32> {
     let output_stem = segment_distance(uv, vec2<f32>(0.5, 0.0), vec2<f32>(0.5, 0.055));
     let distance = min(min(triangle, bubble), min(input_stem, output_stem));
     let alpha = 1.0 - smoothstep(stroke, stroke + 0.012, distance);
-    if alpha <= 0.0 {
-        discard;
-    }
-    return vec4<f32>(input.color.rgb, input.color.a * alpha);
+    let background = vec4<f32>(0.035, 0.043, 0.055, input.color.a);
+    return mix(background, input.color, alpha);
 }

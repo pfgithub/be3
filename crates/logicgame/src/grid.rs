@@ -94,7 +94,12 @@ impl Wire {
         } else {
             return Err(GeometryError::InvalidWire);
         };
-        Ok(Self { start, end, scale })
+        let wire = Self { start, end, scale };
+        if wire.length() < scale.get() * 2 {
+            Err(GeometryError::InvalidWire)
+        } else {
+            Ok(wire)
+        }
     }
 
     pub fn orientation(self) -> Orientation {
@@ -850,6 +855,9 @@ mod tests {
     fn validates_scales_wire_shapes_and_rotated_dimensions() {
         assert!(Scale::new(3).is_err());
         assert!(Wire::new(Point::new(0, 0), Point::new(1, 1), Scale::ONE).is_err());
+        assert!(Wire::new(Point::new(0, 0), Point::new(1, 0), Scale::ONE).is_err());
+        assert!(Wire::new(Point::new(0, 0), Point::new(2, 0), scale(2)).is_err());
+        assert!(Wire::new(Point::new(0, 0), Point::new(4, 0), scale(2)).is_ok());
 
         let component = Component {
             id: ComponentId(0),
@@ -868,7 +876,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Storage { scale: scale(4) },
         );
-        grid.add_wire(wire((i64::MAX - 1, 0), (i64::MAX - 1, 4), 4));
+        grid.add_wire(wire((i64::MAX - 1, 0), (i64::MAX - 1, 8), 4));
 
         let errors = grid.validate();
         assert!(errors.contains(&ValidationError::ComponentNotSnapped {

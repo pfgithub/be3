@@ -122,14 +122,19 @@ impl egui_wgpu::CallbackTrait for GridCallback {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let renderer = callback_resources
             .get_mut::<GridRenderer>()
             .expect("grid renderer was not initialized");
-        renderer.prepare(device, queue, &self.frame);
+        renderer.prepare(
+            device,
+            queue,
+            &self.frame,
+            screen_descriptor.pixels_per_point,
+        );
         Vec::new()
     }
 
@@ -259,11 +264,20 @@ impl GridRenderer {
         }
     }
 
-    fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &RenderFrame) {
+    fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &RenderFrame,
+        pixels_per_point: f32,
+    ) {
         let uniform = GridUniform {
-            viewport_size: frame.viewport_size,
+            viewport_size: [
+                frame.viewport_size[0] * pixels_per_point,
+                frame.viewport_size[1] * pixels_per_point,
+            ],
             camera_center: frame.camera_center,
-            zoom: frame.zoom,
+            zoom: frame.zoom * pixels_per_point,
             grid_scale: frame.grid_scale,
             _padding: [0.0; 2],
         };
