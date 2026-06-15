@@ -502,14 +502,13 @@ fn snap_point(point: [f32; 2], scale: Scale) -> Point {
 fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<Wire> {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
-    let scale_value = scale.get();
     let (start, end) = if dx.abs() >= dy.abs() {
         let min_x = start.x.min(end.x);
-        let max_x = start.x.max(end.x).checked_add(scale_value)?;
+        let max_x = start.x.max(end.x);
         (Point::new(min_x, start.y), Point::new(max_x, start.y))
     } else {
         let min_y = start.y.min(end.y);
-        let max_y = start.y.max(end.y).checked_add(scale_value)?;
+        let max_y = start.y.max(end.y);
         (Point::new(start.x, min_y), Point::new(start.x, max_y))
     };
     Wire::new(start, end, scale).ok()
@@ -552,7 +551,7 @@ fn nearest_wire(wires: &[Wire], point: [f32; 2], radius: f32) -> Option<Wire> {
             let (min_x, max_x, min_y, max_y) = match wire.orientation() {
                 logicgame::grid::Orientation::Horizontal => (
                     wire.start.x as f32,
-                    wire.end.x as f32,
+                    wire.end.x as f32 + scale,
                     wire.start.y as f32,
                     wire.start.y as f32 + scale,
                 ),
@@ -560,7 +559,7 @@ fn nearest_wire(wires: &[Wire], point: [f32; 2], radius: f32) -> Option<Wire> {
                     wire.start.x as f32,
                     wire.start.x as f32 + scale,
                     wire.start.y as f32,
-                    wire.end.y as f32,
+                    wire.end.y as f32 + scale,
                 ),
             };
             let closest_x = point[0].clamp(min_x, max_x);
@@ -620,20 +619,24 @@ mod tests {
     #[test]
     fn wire_projection_uses_the_dominant_axis() {
         assert_eq!(
+            projected_wire(Point::new(1, 1), Point::new(2, 1), scale(1)),
+            Some(wire((1, 1), (2, 1), 1))
+        );
+        assert_eq!(
             projected_wire(Point::new(0, 0), Point::new(8, 3), scale(1)),
-            Some(wire((0, 0), (9, 0), 1))
+            Some(wire((0, 0), (8, 0), 1))
         );
         assert_eq!(
             projected_wire(Point::new(8, 3), Point::new(0, 0), scale(1)),
-            Some(wire((0, 3), (9, 3), 1))
+            Some(wire((0, 3), (8, 3), 1))
         );
         assert_eq!(
             projected_wire(Point::new(0, 0), Point::new(2, -9), scale(1)),
-            Some(wire((0, -9), (0, 1), 1))
+            Some(wire((0, -9), (0, 0), 1))
         );
         assert_eq!(
             projected_wire(Point::new(2, -9), Point::new(0, 0), scale(1)),
-            Some(wire((2, -9), (2, 1), 1))
+            Some(wire((2, -9), (2, 0), 1))
         );
     }
 

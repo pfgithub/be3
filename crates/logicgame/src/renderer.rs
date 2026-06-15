@@ -45,7 +45,7 @@ impl DrawTriangle {
                     wire.start.y as f32 + half_scale,
                 ],
                 [
-                    wire.end.x as f32 - half_scale,
+                    wire.end.x as f32 + half_scale,
                     wire.start.y as f32 + half_scale,
                 ],
             ),
@@ -56,7 +56,7 @@ impl DrawTriangle {
                 ],
                 [
                     wire.start.x as f32 + half_scale,
-                    wire.end.y as f32 - half_scale,
+                    wire.end.y as f32 + half_scale,
                 ],
             ),
         };
@@ -410,7 +410,7 @@ mod tests {
             .iter()
             .all(|triangle| triangle.color == DrawTriangle::WIRE_COLOR));
         assert_eq!(wire_triangles[2].positions[0], [0.5, 0.5]);
-        assert_eq!(wire_triangles[6].positions[0], [3.5, 0.5]);
+        assert_eq!(wire_triangles[6].positions[0], [4.5, 0.5]);
 
         let gate = Component {
             id: ComponentId(0),

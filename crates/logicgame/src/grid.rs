@@ -95,7 +95,7 @@ impl Wire {
             return Err(GeometryError::InvalidWire);
         };
         let wire = Self { start, end, scale };
-        if wire.length() < scale.get() * 2 {
+        if wire.length() < scale.get() {
             Err(GeometryError::InvalidWire)
         } else {
             Ok(wire)
@@ -157,11 +157,17 @@ impl Wire {
         match self.orientation() {
             Orientation::Horizontal => Some(Rect {
                 min: self.start,
-                max: Point::new(self.end.x, self.start.y.checked_add(scale)?),
+                max: Point::new(
+                    self.end.x.checked_add(scale)?,
+                    self.start.y.checked_add(scale)?,
+                ),
             }),
             Orientation::Vertical => Some(Rect {
                 min: self.start,
-                max: Point::new(self.start.x.checked_add(scale)?, self.end.y),
+                max: Point::new(
+                    self.start.x.checked_add(scale)?,
+                    self.end.y.checked_add(scale)?,
+                ),
             }),
         }
     }
@@ -332,27 +338,35 @@ impl LogicGrid {
                 continue;
             }
             let (start, end) = wire.interval();
-            if remove_end <= start || end <= remove_start {
+            if remove_end < start || end < remove_start {
                 result.push(wire);
                 continue;
             }
             if start < remove_start {
-                result.push(Wire::from_parts(
-                    orientation,
-                    fixed,
-                    start,
-                    remove_start.min(end),
-                    scale,
-                ));
+                if let Some(remaining_end) = remove_start.checked_sub(scale.get()) {
+                    if remaining_end - start >= scale.get() {
+                        result.push(Wire::from_parts(
+                            orientation,
+                            fixed,
+                            start,
+                            remaining_end.min(end),
+                            scale,
+                        ));
+                    }
+                }
             }
             if remove_end < end {
-                result.push(Wire::from_parts(
-                    orientation,
-                    fixed,
-                    remove_end.max(start),
-                    end,
-                    scale,
-                ));
+                if let Some(remaining_start) = remove_end.checked_add(scale.get()) {
+                    if end - remaining_start >= scale.get() {
+                        result.push(Wire::from_parts(
+                            orientation,
+                            fixed,
+                            remaining_start.max(start),
+                            end,
+                            scale,
+                        ));
+                    }
+                }
             }
         }
 
@@ -531,7 +545,9 @@ impl LogicGrid {
             let mut current: Option<(i64, i64)> = None;
             for (start, end) in intervals {
                 match current {
-                    Some((current_start, current_end)) if start <= current_end => {
+                    Some((current_start, current_end))
+                        if start <= current_end.saturating_add(scale.get()) =>
+                    {
                         current = Some((current_start, current_end.max(end)));
                     }
                     Some((current_start, current_end)) => {
@@ -650,7 +666,7 @@ fn endpoint_touches_wire(endpoint_wire: Wire, other: Wire) -> bool {
                 .into_iter()
                 .any(|x| {
                     other_rect.min.x <= x
-                        && x <= other_rect.max.x
+                        && x < other_rect.max.x
                         && overlaps(y_start, y_end, other_rect.min.y, other_rect.max.y)
                 })
         }
@@ -663,7 +679,7 @@ fn endpoint_touches_wire(endpoint_wire: Wire, other: Wire) -> bool {
                 .into_iter()
                 .any(|y| {
                     other_rect.min.y <= y
-                        && y <= other_rect.max.y
+                        && y < other_rect.max.y
                         && overlaps(x_start, x_end, other_rect.min.x, other_rect.max.x)
                 })
         }
@@ -715,7 +731,10 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
     let mut contacts = Vec::new();
     match wire.orientation() {
         Orientation::Horizontal => {
-            for x in [wire.start.x, wire.end.x] {
+            let Some(end_x) = wire.end.x.checked_add(wire.scale.get()) else {
+                return Vec::new();
+            };
+            for x in [wire.start.x, end_x] {
                 let start = rect.min.y.max(component.min.y);
                 let end = rect.max.y.min(component.max.y);
                 if start < end && x == component.min.x {
@@ -735,7 +754,10 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
             }
         }
         Orientation::Vertical => {
-            for y in [wire.start.y, wire.end.y] {
+            let Some(end_y) = wire.end.y.checked_add(wire.scale.get()) else {
+                return Vec::new();
+            };
+            for y in [wire.start.y, end_y] {
                 let start = rect.min.x.max(component.min.x);
                 let end = rect.max.x.min(component.max.x);
                 if start < end && y == component.min.y {
@@ -855,9 +877,9 @@ mod tests {
     fn validates_scales_wire_shapes_and_rotated_dimensions() {
         assert!(Scale::new(3).is_err());
         assert!(Wire::new(Point::new(0, 0), Point::new(1, 1), Scale::ONE).is_err());
-        assert!(Wire::new(Point::new(0, 0), Point::new(1, 0), Scale::ONE).is_err());
-        assert!(Wire::new(Point::new(0, 0), Point::new(2, 0), scale(2)).is_err());
-        assert!(Wire::new(Point::new(0, 0), Point::new(4, 0), scale(2)).is_ok());
+        assert!(Wire::new(Point::new(0, 0), Point::new(1, 0), Scale::ONE).is_ok());
+        assert!(Wire::new(Point::new(0, 0), Point::new(2, 0), scale(2)).is_ok());
+        assert!(Wire::new(Point::new(0, 0), Point::new(1, 0), scale(2)).is_err());
 
         let component = Component {
             id: ComponentId(0),
@@ -898,7 +920,7 @@ mod tests {
         grid.remove_wire(wire((5, 0), (15, 0), 1));
         assert_eq!(
             grid.wires(),
-            &[wire((0, 0), (5, 0), 1), wire((15, 0), (20, 0), 1)]
+            &[wire((0, 0), (4, 0), 1), wire((16, 0), (20, 0), 1)]
         );
     }
 
@@ -945,7 +967,7 @@ mod tests {
     fn distinguishes_boundary_contacts_from_component_intersections() {
         let mut grid = LogicGrid::new();
         let led = grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
-        grid.add_wire(wire((0, 0), (10, 0), 1));
+        grid.add_wire(wire((0, 0), (9, 0), 1));
         assert!(grid.validate().is_empty());
 
         grid.add_wire(wire((10, 0), (12, 0), 1));
@@ -980,10 +1002,10 @@ mod tests {
             Rotation::Up,
             ComponentKind::Storage { scale: scale(2) },
         );
-        grid.add_wire(wire((2, 0), (10, 0), 1));
+        grid.add_wire(wire((2, 0), (9, 0), 1));
         grid.add_wire(wire((5, -5), (5, 0), 1));
         grid.add_wire(wire((5, 0), (5, 2), 1));
-        grid.add_wire(wire((2, 2), (10, 2), 1));
+        grid.add_wire(wire((2, 2), (9, 2), 1));
 
         let graph = grid.generate_graph();
         assert_eq!(
