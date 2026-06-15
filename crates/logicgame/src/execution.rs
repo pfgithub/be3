@@ -32,6 +32,12 @@ pub enum Instruction {
         input: MemoryAddress,
         output: MemoryAddress,
     },
+    CopyBits {
+        input: MemoryAddress,
+        output: MemoryAddress,
+        shift: i8,
+        mask: u64,
+    },
     ReadStorage {
         storage: StorageId,
         output: MemoryAddress,
@@ -159,6 +165,73 @@ impl Vm {
                                     .collect(),
                             });
                         }
+                    }
+                }
+                ComponentKind::MergerSplitter {
+                    input_scale,
+                    output_scale,
+                } => {
+                    let width = input_scale.get().max(output_scale.get());
+                    let input_count = width / input_scale.get();
+                    let output_count = width / output_scale.get();
+                    let mut input_slots = Vec::new();
+                    let mut outputs = Vec::new();
+                    let mut instructions = Vec::new();
+                    for slot in 0..input_count {
+                        let addresses = connection_addresses(
+                            &connections,
+                            component.id,
+                            ConnectionDirection::Input,
+                            ConnectionSlotId(slot as u16),
+                        );
+                        if addresses.len() > 1 {
+                            return Err(GenerationError::AmbiguousInput {
+                                component: component.id,
+                                slot: ConnectionSlotId(slot as u16),
+                            });
+                        }
+                        if let Some(&input) = addresses.first() {
+                            input_slots.push((slot, input));
+                        }
+                    }
+                    for slot in 0..output_count {
+                        outputs.extend_from_slice(connection_addresses(
+                            &connections,
+                            component.id,
+                            ConnectionDirection::Output,
+                            ConnectionSlotId((input_count + slot) as u16),
+                        ));
+                    }
+                    if input_scale <= output_scale {
+                        for &(slot, input) in &input_slots {
+                            for &output in &outputs {
+                                instructions.push(Instruction::CopyBits {
+                                    input,
+                                    output,
+                                    shift: (slot * input_scale.get()) as i8,
+                                    mask: value_mask(*input_scale),
+                                });
+                            }
+                        }
+                    } else if let Some(&(_, input)) = input_slots.first() {
+                        for (slot, &output) in outputs.iter().enumerate() {
+                            instructions.push(Instruction::CopyBits {
+                                input,
+                                output,
+                                shift: -(slot as i64 * output_scale.get()) as i8,
+                                mask: value_mask(*output_scale),
+                            });
+                        }
+                    }
+                    if !instructions.is_empty() {
+                        operations.push(Operation {
+                            inputs: input_slots
+                                .into_iter()
+                                .map(|(_, address)| address)
+                                .collect(),
+                            outputs,
+                            instructions,
+                        });
                     }
                 }
                 ComponentKind::Storage { .. } => {
@@ -323,6 +396,19 @@ impl Vm {
             Instruction::Not { input, output } => {
                 self.memory[output] |= !self.memory[input];
             }
+            Instruction::CopyBits {
+                input,
+                output,
+                shift,
+                mask,
+            } => {
+                let value = self.memory[input] & mask;
+                self.memory[output] |= if shift >= 0 {
+                    value << shift
+                } else {
+                    self.memory[input] >> -shift & mask
+                };
+            }
             Instruction::ReadStorage { storage, output } => {
                 self.memory[output] |= self.storage[storage];
             }
@@ -391,6 +477,7 @@ mod tests {
                 side: ComponentSide::Top,
                 start: 0,
                 end: 1,
+                scale: Scale::ONE,
             });
             edges.push(GraphEdge {
                 first: GraphNodeId(net),
@@ -744,5 +831,91 @@ mod tests {
         assert_eq!(vm.inputs[1], 0xff);
         assert_eq!(vm.memory, vec![0]);
         assert_eq!(vm.outputs, vec![0, 0]);
+    }
+
+    #[test]
+    fn splitter_extracts_low_to_high_chunks_in_slot_order() {
+        let mut grid = LogicGrid::new();
+        let splitter = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Right,
+            ComponentKind::MergerSplitter {
+                input_scale: Scale::new(16).unwrap(),
+                output_scale: Scale::new(4).unwrap(),
+            },
+        );
+        let graph = graph(
+            5,
+            &[
+                (splitter, ConnectionDirection::Input, 0, 0),
+                (splitter, ConnectionDirection::Output, 1, 1),
+                (splitter, ConnectionDirection::Output, 2, 2),
+                (splitter, ConnectionDirection::Output, 3, 3),
+                (splitter, ConnectionDirection::Output, 4, 4),
+            ],
+        );
+        let mut vm = Vm::from_graph(&grid, &graph).unwrap();
+        vm.memory[0] = 0xabcd;
+
+        vm.execute();
+
+        assert_eq!(vm.memory, vec![0xabcd, 0xd, 0xc, 0xb, 0xa]);
+    }
+
+    #[test]
+    fn merger_packs_low_to_high_chunks_in_slot_order() {
+        let mut grid = LogicGrid::new();
+        let merger = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Right,
+            ComponentKind::MergerSplitter {
+                input_scale: Scale::new(4).unwrap(),
+                output_scale: Scale::new(16).unwrap(),
+            },
+        );
+        let graph = graph(
+            5,
+            &[
+                (merger, ConnectionDirection::Input, 0, 0),
+                (merger, ConnectionDirection::Input, 1, 1),
+                (merger, ConnectionDirection::Input, 2, 2),
+                (merger, ConnectionDirection::Input, 3, 3),
+                (merger, ConnectionDirection::Output, 4, 4),
+            ],
+        );
+        let mut vm = Vm::from_graph(&grid, &graph).unwrap();
+        vm.memory[..4].copy_from_slice(&[0xd, 0xc, 0xb, 0xa]);
+
+        vm.execute();
+
+        assert_eq!(vm.memory[4], 0xabcd);
+    }
+
+    #[test]
+    fn merger_preserves_bit_positions_when_an_input_is_unconnected() {
+        let mut grid = LogicGrid::new();
+        let merger = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Right,
+            ComponentKind::MergerSplitter {
+                input_scale: Scale::new(4).unwrap(),
+                output_scale: Scale::new(16).unwrap(),
+            },
+        );
+        let graph = graph(
+            4,
+            &[
+                (merger, ConnectionDirection::Input, 1, 0),
+                (merger, ConnectionDirection::Input, 2, 1),
+                (merger, ConnectionDirection::Input, 3, 2),
+                (merger, ConnectionDirection::Output, 4, 3),
+            ],
+        );
+        let mut vm = Vm::from_graph(&grid, &graph).unwrap();
+        vm.memory[..3].copy_from_slice(&[0xc, 0xb, 0xa]);
+
+        vm.execute();
+
+        assert_eq!(vm.memory[3], 0xabc0);
     }
 }

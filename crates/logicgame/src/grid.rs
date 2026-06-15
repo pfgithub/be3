@@ -190,6 +190,10 @@ pub enum ComponentKind {
     Not {
         scale: Scale,
     },
+    MergerSplitter {
+        input_scale: Scale,
+        output_scale: Scale,
+    },
     Led,
     Storage {
         scale: Scale,
@@ -234,6 +238,10 @@ impl ComponentKind {
             | Self::Storage { scale, .. }
             | Self::Input { scale, .. }
             | Self::Output { scale, .. } => *scale,
+            Self::MergerSplitter {
+                input_scale,
+                output_scale,
+            } => (*input_scale).max(*output_scale),
             Self::Led => Scale::ONE,
             Self::Subcomponent { snap, .. } => *snap,
         }
@@ -245,9 +253,16 @@ impl ComponentKind {
                 let scale = scale.get();
                 Some(Size::new(scale, scale.checked_mul(2)?))
             }
+            Self::MergerSplitter {
+                input_scale,
+                output_scale,
+            } => {
+                let scale = input_scale.get().max(output_scale.get());
+                Some(Size::new(scale, scale))
+            }
             Self::Input { scale, .. } | Self::Output { scale, .. } => {
                 let scale = scale.get();
-                Some(Size::new(scale, scale))
+                Some(Size::new(scale, scale.checked_mul(2)?))
             }
             Self::Led => Some(Size::new(1, 2)),
             Self::Subcomponent { size, .. } => Some(*size),
@@ -260,13 +275,14 @@ impl ComponentKind {
         };
 
         match self {
-            Self::Not { .. } => vec![
+            Self::Not { scale } => vec![
                 ConnectionSlotDefinition::new(
                     0,
                     ConnectionDirection::Input,
                     ComponentSide::Bottom,
                     0,
                     size.width,
+                    *scale,
                 ),
                 ConnectionSlotDefinition::new(
                     1,
@@ -274,22 +290,57 @@ impl ComponentKind {
                     ComponentSide::Top,
                     0,
                     size.width,
+                    *scale,
                 ),
             ],
+            Self::MergerSplitter {
+                input_scale,
+                output_scale,
+            } => {
+                let input_scale_value = input_scale.get();
+                let output_scale_value = output_scale.get();
+                let input_count = size.width / input_scale_value;
+                let mut slots = (0..input_count)
+                    .map(|index| {
+                        ConnectionSlotDefinition::new(
+                            index as u16,
+                            ConnectionDirection::Input,
+                            ComponentSide::Bottom,
+                            index * input_scale_value,
+                            (index + 1) * input_scale_value,
+                            *input_scale,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let output_count = size.width / output_scale_value;
+                slots.extend((0..output_count).map(|index| {
+                    ConnectionSlotDefinition::new(
+                        (input_count + index) as u16,
+                        ConnectionDirection::Output,
+                        ComponentSide::Top,
+                        index * output_scale_value,
+                        (index + 1) * output_scale_value,
+                        *output_scale,
+                    )
+                }));
+                slots
+            }
             Self::Led => vec![ConnectionSlotDefinition::new(
                 0,
                 ConnectionDirection::Input,
                 ComponentSide::Bottom,
                 0,
                 size.width,
+                Scale::ONE,
             )],
-            Self::Storage { .. } => vec![
+            Self::Storage { scale, .. } => vec![
                 ConnectionSlotDefinition::new(
                     0,
                     ConnectionDirection::Input,
                     ComponentSide::Bottom,
                     0,
                     size.width,
+                    *scale,
                 ),
                 ConnectionSlotDefinition::new(
                     1,
@@ -297,23 +348,26 @@ impl ComponentKind {
                     ComponentSide::Top,
                     0,
                     size.width,
+                    *scale,
                 ),
             ],
-            Self::Input { .. } => vec![ConnectionSlotDefinition::new(
+            Self::Input { scale, .. } => vec![ConnectionSlotDefinition::new(
                 0,
                 ConnectionDirection::Output,
                 ComponentSide::Bottom,
                 0,
                 size.width,
+                *scale,
             )],
-            Self::Output { .. } => vec![ConnectionSlotDefinition::new(
+            Self::Output { scale, .. } => vec![ConnectionSlotDefinition::new(
                 0,
                 ConnectionDirection::Input,
                 ComponentSide::Bottom,
                 0,
                 size.width,
+                *scale,
             )],
-            Self::Subcomponent { ports, .. } => ports
+            Self::Subcomponent { snap, ports, .. } => ports
                 .iter()
                 .enumerate()
                 .map(|(id, port)| {
@@ -323,6 +377,7 @@ impl ComponentKind {
                         port.side,
                         port.start,
                         port.end,
+                        *snap,
                     )
                 })
                 .collect(),
@@ -934,6 +989,7 @@ impl LogicGrid {
                 side: slot.side,
                 start: slot.start,
                 end: slot.end,
+                scale: slot.scale,
             });
             edges.push(GraphEdge::new(component_nodes[&component], connection));
             for net_index in connected_nets {
@@ -1205,6 +1261,7 @@ pub struct ConnectionSlot {
     pub side: ComponentSide,
     pub start: i64,
     pub end: i64,
+    pub scale: Scale,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1214,6 +1271,7 @@ struct ConnectionSlotDefinition {
     side: ComponentSide,
     start: i64,
     end: i64,
+    scale: Scale,
 }
 
 impl ConnectionSlotDefinition {
@@ -1223,6 +1281,7 @@ impl ConnectionSlotDefinition {
         side: ComponentSide,
         start: i64,
         end: i64,
+        scale: Scale,
     ) -> Self {
         Self {
             id: ConnectionSlotId(id),
@@ -1230,6 +1289,7 @@ impl ConnectionSlotDefinition {
             side,
             start,
             end,
+            scale,
         }
     }
 
@@ -1274,6 +1334,7 @@ impl ConnectionSlotDefinition {
                 side,
                 start: first.x.min(second.x),
                 end: first.x.max(second.x),
+                scale: self.scale,
             })
         } else if first.x == second.x {
             let side = if first.x == position.x {
@@ -1287,6 +1348,7 @@ impl ConnectionSlotDefinition {
                 side,
                 start: first.y.min(second.y),
                 end: first.y.max(second.y),
+                scale: self.scale,
             })
         } else {
             None
@@ -1311,11 +1373,15 @@ struct Contact {
     side: ComponentSide,
     start: i64,
     end: i64,
+    scale: Scale,
 }
 
 impl Contact {
     fn overlaps(self, slot: ConnectionSlot) -> bool {
-        self.side == slot.side && self.start < slot.end && slot.start < self.end
+        self.scale == slot.scale
+            && self.side == slot.side
+            && self.start < slot.end
+            && slot.start < self.end
     }
 }
 
@@ -1379,6 +1445,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Left,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
                 if start < end && x == component.max.x {
@@ -1386,6 +1453,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Right,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
             }
@@ -1400,6 +1468,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Left,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
                 if start < end && endpoint_rect.max.x == component.max.x {
@@ -1407,6 +1476,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Right,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
             }
@@ -1423,6 +1493,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Top,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
                 if start < end && y == component.max.y {
@@ -1430,6 +1501,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Bottom,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
             }
@@ -1444,6 +1516,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Top,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
                 if start < end && endpoint_rect.max.y == component.max.y {
@@ -1451,6 +1524,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         side: ComponentSide::Bottom,
                         start,
                         end,
+                        scale: wire.scale,
                     });
                 }
             }
@@ -1477,6 +1551,7 @@ pub enum GraphNode {
         side: ComponentSide,
         start: i64,
         end: i64,
+        scale: Scale,
     },
 }
 
@@ -1748,6 +1823,7 @@ mod tests {
                 side: ComponentSide::Left,
                 start: 20,
                 end: 22,
+                scale: scale(2),
             }]
         );
         assert_eq!(
@@ -1870,6 +1946,7 @@ mod tests {
                     side: ComponentSide::Bottom,
                     start: 10,
                     end: 11,
+                    ..
                 } if *component == led
             )
         }));
@@ -1905,6 +1982,7 @@ mod tests {
                 side: ComponentSide::Left,
                 start: 20,
                 end: 21,
+                scale: Scale::ONE,
             }]
         );
     }
@@ -1933,6 +2011,7 @@ mod tests {
                     side: ComponentSide::Top,
                     start: 1,
                     end: 2,
+                    ..
                 } if *component == not
             )
         }));
@@ -1956,6 +2035,7 @@ mod tests {
                     side: ComponentSide::Left,
                     start: 20,
                     end: 22,
+                    scale: scale(2),
                 },
                 ConnectionSlot {
                     id: ConnectionSlotId(1),
@@ -1963,9 +2043,133 @@ mod tests {
                     side: ComponentSide::Right,
                     start: 20,
                     end: 22,
+                    scale: scale(2),
                 },
             ]
         );
+    }
+
+    #[test]
+    fn splitter_partitions_a_wide_input_into_smaller_outputs() {
+        let component = Component {
+            id: ComponentId(0),
+            position: Point::new(0, 0),
+            rotation: Rotation::Right,
+            kind: ComponentKind::MergerSplitter {
+                input_scale: scale(16),
+                output_scale: scale(4),
+            },
+        };
+
+        assert_eq!(component.size(), Some(Size::new(16, 16)));
+        assert_eq!(
+            component.connection_slots(),
+            vec![
+                ConnectionSlot {
+                    id: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Input,
+                    side: ComponentSide::Left,
+                    start: 0,
+                    end: 16,
+                    scale: scale(16),
+                },
+                ConnectionSlot {
+                    id: ConnectionSlotId(1),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Right,
+                    start: 0,
+                    end: 4,
+                    scale: scale(4),
+                },
+                ConnectionSlot {
+                    id: ConnectionSlotId(2),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Right,
+                    start: 4,
+                    end: 8,
+                    scale: scale(4),
+                },
+                ConnectionSlot {
+                    id: ConnectionSlotId(3),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Right,
+                    start: 8,
+                    end: 12,
+                    scale: scale(4),
+                },
+                ConnectionSlot {
+                    id: ConnectionSlotId(4),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Right,
+                    start: 12,
+                    end: 16,
+                    scale: scale(4),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn merger_combines_smaller_inputs_into_a_wide_output() {
+        let component = Component {
+            id: ComponentId(0),
+            position: Point::new(0, 0),
+            rotation: Rotation::Right,
+            kind: ComponentKind::MergerSplitter {
+                input_scale: scale(4),
+                output_scale: scale(16),
+            },
+        };
+        let slots = component.connection_slots();
+
+        assert_eq!(slots.len(), 5);
+        assert!(slots[..4].iter().all(|slot| {
+            slot.direction == ConnectionDirection::Input && slot.side == ComponentSide::Left
+        }));
+        assert_eq!(
+            slots[4],
+            ConnectionSlot {
+                id: ConnectionSlotId(4),
+                direction: ConnectionDirection::Output,
+                side: ComponentSide::Right,
+                start: 0,
+                end: 16,
+                scale: scale(16),
+            }
+        );
+    }
+
+    #[test]
+    fn component_slots_only_connect_to_wires_at_the_same_scale() {
+        let kind = ComponentKind::MergerSplitter {
+            input_scale: scale(16),
+            output_scale: scale(4),
+        };
+        let mut matching = LogicGrid::new();
+        let component = matching.add_component(Point::new(0, 0), Rotation::Right, kind.clone());
+        matching.add_wire(wire((-32, 0), (0, 0), 16));
+        assert!(matching.validate().is_empty());
+        assert!(matching.generate_graph().nodes.iter().any(|node| {
+            matches!(
+                node,
+                GraphNode::Connection {
+                    component: connected,
+                    scale: connection_scale,
+                    ..
+                } if *connected == component && *connection_scale == scale(16)
+            )
+        }));
+
+        let mut mismatched = LogicGrid::new();
+        let component = mismatched.add_component(Point::new(0, 0), Rotation::Right, kind);
+        let wire = wire((-8, 0), (0, 0), 4);
+        mismatched.add_wire(wire);
+        assert!(mismatched
+            .validate()
+            .contains(&ValidationError::WireComponentIntersection { wire, component }));
+        assert!(!mismatched.generate_graph().nodes.iter().any(
+            |node| matches!(node, GraphNode::Connection { component: connected, .. } if *connected == component)
+        ));
     }
 
     #[test]
@@ -2025,13 +2229,13 @@ mod tests {
         let _not = grid.add_component(
             Point::new(0, 0),
             Rotation::Up,
-            ComponentKind::Not { scale: scale(2) },
+            ComponentKind::Not { scale: Scale::ONE },
         );
         let storage = grid.add_component(
             Point::new(10, 0),
             Rotation::Right,
             ComponentKind::Storage {
-                scale: scale(2),
+                scale: Scale::ONE,
                 value: 0,
             },
         );
@@ -2109,6 +2313,7 @@ mod tests {
                     side: ComponentSide::Bottom,
                     start: 10,
                     end: 12,
+                    scale: scale(2),
                 },
                 ConnectionSlot {
                     id: ConnectionSlotId(1),
@@ -2116,6 +2321,7 @@ mod tests {
                     side: ComponentSide::Top,
                     start: 10,
                     end: 12,
+                    scale: scale(2),
                 },
             ]
         );
@@ -2142,6 +2348,7 @@ mod tests {
                     side: ComponentSide::Bottom,
                     start: 8,
                     end: 11,
+                    scale: scale(2),
                 },
                 ConnectionSlot {
                     id: ConnectionSlotId(1),
@@ -2149,6 +2356,7 @@ mod tests {
                     side: ComponentSide::Right,
                     start: 4,
                     end: 8,
+                    scale: scale(2),
                 },
             ]
         );

@@ -24,6 +24,7 @@ enum ToolKind {
     Select,
     Wire,
     Not,
+    MergerSplitter,
     Led,
     Storage,
     Input,
@@ -37,6 +38,7 @@ impl ToolKind {
             Self::Select => "Select",
             Self::Wire => "Wire",
             Self::Not => "NOT gate",
+            Self::MergerSplitter => "Merger/Splitter",
             Self::Led => "LED",
             Self::Storage => "Storage",
             Self::Input => "Input",
@@ -50,6 +52,23 @@ impl ToolKind {
 struct Tool {
     kind: ToolKind,
     scale: Scale,
+    merger_out_scale: Scale,
+}
+
+impl Tool {
+    fn conversion_scales(self) -> (Scale, Scale) {
+        match self.kind {
+            ToolKind::MergerSplitter => (self.scale, self.merger_out_scale),
+            _ => (self.scale, self.scale),
+        }
+    }
+
+    fn snap(self) -> Scale {
+        match self.kind {
+            ToolKind::MergerSplitter => self.scale.max(self.merger_out_scale),
+            _ => self.scale,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,6 +110,10 @@ enum Gesture {
         start: Point,
     },
     Not {
+        anchor: Point,
+        drag_start: [f32; 2],
+    },
+    MergerSplitter {
         anchor: Point,
         drag_start: [f32; 2],
     },
@@ -203,6 +226,7 @@ impl GraphHover {
                 side,
                 start,
                 end,
+                scale,
             } => {
                 self.connections.insert((
                     *component,
@@ -212,6 +236,7 @@ impl GraphHover {
                         side: *side,
                         start: *start,
                         end: *end,
+                        scale: *scale,
                     },
                 ));
             }
@@ -334,6 +359,7 @@ impl Default for LogicEditor {
             tool: Tool {
                 kind: ToolKind::Select,
                 scale: Scale::ONE,
+                merger_out_scale: Scale::new(4).expect("default scale is valid"),
             },
             camera: Camera::default(),
             gesture: None,
@@ -381,6 +407,7 @@ impl LogicEditor {
                     ToolKind::Select,
                     ToolKind::Wire,
                     ToolKind::Not,
+                    ToolKind::MergerSplitter,
                     ToolKind::Led,
                     ToolKind::Storage,
                     ToolKind::Input,
@@ -401,7 +428,11 @@ impl LogicEditor {
                 }
 
                 ui.separator();
-                ui.label("Scale");
+                if matches!(self.tool.kind, ToolKind::MergerSplitter) {
+                    ui.label("Input scale");
+                } else {
+                    ui.label("Scale");
+                }
                 egui::ComboBox::from_id_salt("logic-tool-scale")
                     .selected_text(format!("{}x", self.tool.scale.get()))
                     .show_ui(ui, |ui| {
@@ -410,6 +441,21 @@ impl LogicEditor {
                             ui.selectable_value(&mut self.tool.scale, scale, format!("{value}x"));
                         }
                     });
+                if matches!(self.tool.kind, ToolKind::MergerSplitter) {
+                    ui.label("Output scale");
+                    egui::ComboBox::from_id_salt("logic-tool-output-scale")
+                        .selected_text(format!("{}x", self.tool.merger_out_scale.get()))
+                        .show_ui(ui, |ui| {
+                            for value in SCALES {
+                                let scale = Scale::new(value).expect("tool scale is valid");
+                                ui.selectable_value(
+                                    &mut self.tool.merger_out_scale,
+                                    scale,
+                                    format!("{value}x"),
+                                );
+                            }
+                        });
+                }
                 ui.separator();
                 ui.small("Middle drag: pan");
                 ui.small("Wheel: zoom");
@@ -424,7 +470,7 @@ impl LogicEditor {
         let hovered_square = canvas
             .inner
             .2
-            .map(|pointer| snap_point(pointer, self.tool.scale));
+            .map(|pointer| snap_point(pointer, self.tool.snap()));
         let hovered_entity = self.show_grid_debugger(&context, hovered_square);
         let graph_hover = self.show_generated_graph(&context);
         let frame = self.render_frame(
@@ -1092,7 +1138,7 @@ impl LogicEditor {
         }
 
         let world = self.camera.screen_to_world(pointer, response.rect);
-        let snapped = snap_point(world, self.tool.scale);
+        let snapped = snap_point(world, self.tool.snap());
 
         if response.clicked_by(PointerButton::Secondary) && self.tool.kind == ToolKind::Wire {
             if let Some(wire) =
@@ -1130,6 +1176,10 @@ impl LogicEditor {
                 }
                 ToolKind::Wire => Some(Gesture::Wire { start: snapped }),
                 ToolKind::Not => Some(Gesture::Not {
+                    anchor: snapped,
+                    drag_start: world,
+                }),
+                ToolKind::MergerSplitter => Some(Gesture::MergerSplitter {
                     anchor: snapped,
                     drag_start: world,
                 }),
@@ -1183,6 +1233,19 @@ impl LogicEditor {
                             oriented_component_position(anchor, rotation, scale),
                             rotation,
                             ComponentKind::Not { scale },
+                        );
+                    }
+                }
+                Some(Gesture::MergerSplitter { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, world) {
+                        let (input_scale, output_scale) = self.tool.conversion_scales();
+                        self.grid.add_component(
+                            oriented_component_position(anchor, rotation, output_scale),
+                            rotation,
+                            ComponentKind::MergerSplitter {
+                                input_scale,
+                                output_scale,
+                            },
                         );
                     }
                 }
@@ -1483,7 +1546,7 @@ impl LogicEditor {
         }
 
         if let Some(pointer) = pointer_world {
-            let snapped = snap_point(pointer, self.tool.scale);
+            let snapped = snap_point(pointer, self.tool.snap());
             match self.gesture.as_ref() {
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(*start, snapped, self.tool.scale) {
@@ -1509,6 +1572,25 @@ impl LogicEditor {
                             DrawTriangle::component_lead(&component, viewport)
                                 .into_iter()
                                 .chain(DrawTriangle::component(&component, false))
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
+                    }
+                }
+                Some(Gesture::MergerSplitter { anchor, drag_start }) => {
+                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
+                        let (input_scale, output_scale) = self.tool.conversion_scales();
+                        let component = Component {
+                            id: ComponentId(u64::MAX),
+                            position: oriented_component_position(*anchor, rotation, output_scale),
+                            rotation,
+                            kind: ComponentKind::MergerSplitter {
+                                input_scale,
+                                output_scale,
+                            },
+                        };
+                        component_triangles.extend(
+                            DrawTriangle::component(&component, false)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -1647,7 +1729,7 @@ impl LogicEditor {
             viewport_size: [rect.width(), rect.height()],
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
-            grid_scale: self.tool.scale.get() as f32,
+            grid_scale: self.tool.snap().get() as f32,
             triangles: wire_triangles,
         }
     }
@@ -1656,6 +1738,11 @@ impl LogicEditor {
 fn component_kind_name(kind: &ComponentKind) -> &'static str {
     match kind {
         ComponentKind::Not { .. } => "NOT gate",
+        ComponentKind::MergerSplitter {
+            input_scale,
+            output_scale,
+        } if input_scale <= output_scale => "Merger",
+        ComponentKind::MergerSplitter { .. } => "Splitter",
         ComponentKind::Led => "LED",
         ComponentKind::Storage { .. } => "Storage",
         ComponentKind::Input { .. } => "Input",
@@ -1684,6 +1771,12 @@ fn format_instruction(instruction: &Instruction) -> String {
             outputs,
         } => format!("CALL {component} {inputs:?} -> {outputs:?}"),
         Instruction::Not { input, output } => format!("NOT m{input} -> m{output}"),
+        Instruction::CopyBits {
+            input,
+            output,
+            shift,
+            mask,
+        } => format!("BITS m{input} shift {shift} mask {mask:#x} -> m{output}"),
         Instruction::ReadStorage { storage, output } => {
             format!("READ s{storage} -> m{output}")
         }
@@ -1965,12 +2058,15 @@ fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String)
             side,
             start,
             end,
+            scale,
         } => (
             egui::Color32::from_rgb(155, 95, 45),
             "Connection",
             format!(
-                "#{} slot {} {direction:?} {side:?} [{start}, {end})",
-                component.0, slot.0
+                "#{} slot {} {direction:?} {side:?} [{start}, {end}) {}x",
+                component.0,
+                slot.0,
+                scale.get()
             ),
         ),
     }
@@ -2004,6 +2100,7 @@ mod tests {
             side: ComponentSide::Bottom,
             start: 4,
             end: 8,
+            scale: scale(4),
         };
         let mut hover = GraphHover::default();
 
@@ -2016,6 +2113,7 @@ mod tests {
             side: connection.side,
             start: connection.start,
             end: connection.end,
+            scale: connection.scale,
         });
 
         assert_eq!(hover.components, BTreeSet::from([component]));

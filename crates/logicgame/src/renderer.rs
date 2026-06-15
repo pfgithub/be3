@@ -123,7 +123,7 @@ impl DrawTriangle {
             triangles.extend(connection_marker(
                 component,
                 connection,
-                extent[0].min(extent[1]) * 0.4,
+                connection.scale.get() as f32 * 0.4,
             ));
         }
 
@@ -135,6 +135,33 @@ impl DrawTriangle {
                     [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
                 });
                 triangles.push(Self::new(positions, outline_color));
+            }
+            ComponentKind::MergerSplitter {
+                input_scale,
+                output_scale,
+            } if input_scale <= output_scale => {
+                for canonical in [
+                    [[0.12, 0.82], [0.88, 0.82], [0.62, 0.5]],
+                    [[0.12, 0.18], [0.62, 0.5], [0.88, 0.18]],
+                ] {
+                    let positions = canonical.map(|point| {
+                        let point = rotate_point(point, component.rotation);
+                        [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
+                    });
+                    triangles.push(Self::new(positions, outline_color));
+                }
+            }
+            ComponentKind::MergerSplitter { .. } => {
+                for canonical in [
+                    [[0.12, 0.82], [0.38, 0.5], [0.88, 0.82]],
+                    [[0.12, 0.18], [0.88, 0.18], [0.38, 0.5]],
+                ] {
+                    let positions = canonical.map(|point| {
+                        let point = rotate_point(point, component.rotation);
+                        [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
+                    });
+                    triangles.push(Self::new(positions, outline_color));
+                }
             }
             ComponentKind::Led => {
                 let center = [min[0] + extent[0] * 0.5, min[1] + extent[1] * 0.5];
@@ -719,6 +746,7 @@ mod tests {
                 side: ComponentSide::Bottom,
                 start: 10,
                 end: 12,
+                scale: Scale::ONE,
             },
         );
         assert_eq!(connection.len(), 2);
@@ -772,6 +800,7 @@ mod tests {
                         side,
                         start,
                         end,
+                        scale: Scale::ONE,
                     },
                     radius,
                 )[0];
