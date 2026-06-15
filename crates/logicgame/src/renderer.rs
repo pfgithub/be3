@@ -577,7 +577,10 @@ mod tests {
             id: ComponentId(2),
             position: Point::new(0, 0),
             rotation: Rotation::Right,
-            kind: ComponentKind::Storage { scale: Scale::ONE },
+            kind: ComponentKind::Storage {
+                scale: Scale::ONE,
+                value: 0,
+            },
         };
         let storage_triangles = DrawTriangle::component(&storage, false);
         assert_eq!(storage_triangles.len(), 20);

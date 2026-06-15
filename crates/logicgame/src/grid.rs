@@ -183,6 +183,7 @@ pub enum ComponentKind {
     Led,
     Storage {
         scale: Scale,
+        value: u64,
     },
     Subcomponent {
         size: Size,
@@ -211,7 +212,7 @@ impl ComponentKind {
 
     pub fn snap(&self) -> Scale {
         match self {
-            Self::Not { scale } | Self::Storage { scale } => *scale,
+            Self::Not { scale } | Self::Storage { scale, .. } => *scale,
             Self::Led => Scale::ONE,
             Self::Subcomponent { snap, .. } => *snap,
         }
@@ -219,7 +220,7 @@ impl ComponentKind {
 
     fn unrotated_size(&self) -> Option<Size> {
         match self {
-            Self::Not { scale } | Self::Storage { scale } => {
+            Self::Not { scale } | Self::Storage { scale, .. } => {
                 let scale = scale.get();
                 Some(Size::new(scale, scale.checked_mul(2)?))
             }
@@ -390,8 +391,11 @@ impl LogicGrid {
         &mut self,
         position: Point,
         rotation: Rotation,
-        kind: ComponentKind,
+        mut kind: ComponentKind,
     ) -> ComponentId {
+        if let ComponentKind::Storage { scale, value } = &mut kind {
+            *value &= storage_value_mask(*scale);
+        }
         let id = ComponentId(self.next_component_id);
         self.next_component_id = self
             .next_component_id
@@ -418,6 +422,37 @@ impl LogicGrid {
             return false;
         };
         component.position = position;
+        true
+    }
+
+    pub fn set_storage_value(&mut self, id: ComponentId, value: u64) -> bool {
+        let Some(Component {
+            kind:
+                ComponentKind::Storage {
+                    scale,
+                    value: stored,
+                },
+            ..
+        }) = self.components.get_mut(&id)
+        else {
+            return false;
+        };
+        *stored = value & storage_value_mask(*scale);
+        true
+    }
+
+    pub fn toggle_storage_bit(&mut self, id: ComponentId, bit: u32) -> bool {
+        let Some(Component {
+            kind: ComponentKind::Storage { scale, value },
+            ..
+        }) = self.components.get_mut(&id)
+        else {
+            return false;
+        };
+        if bit >= scale.get() as u32 {
+            return false;
+        }
+        *value ^= 1_u64 << bit;
         true
     }
 
@@ -712,6 +747,15 @@ impl LogicGrid {
         }
         normalized.sort();
         self.wires = normalized;
+    }
+}
+
+fn storage_value_mask(scale: Scale) -> u64 {
+    let bits = scale.get() as u32;
+    if bits == u64::BITS {
+        u64::MAX
+    } else {
+        (1_u64 << bits) - 1
     }
 }
 
@@ -1254,7 +1298,10 @@ mod tests {
         let component = grid.add_component(
             Point::new(-6, 3),
             Rotation::Up,
-            ComponentKind::Storage { scale: scale(4) },
+            ComponentKind::Storage {
+                scale: scale(4),
+                value: 0,
+            },
         );
         grid.add_wire(wire((i64::MAX - 1, 0), (i64::MAX - 1, 8), 4));
 
@@ -1266,6 +1313,74 @@ mod tests {
         assert!(errors
             .iter()
             .any(|error| matches!(error, ValidationError::WireOverflow { .. })));
+    }
+
+    #[test]
+    fn storage_values_are_initialized_and_masked_to_their_scale() {
+        let mut grid = LogicGrid::new();
+        let narrow = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Storage {
+                scale: scale(4),
+                value: 0,
+            },
+        );
+        let wide = grid.add_component(
+            Point::new(64, 0),
+            Rotation::Up,
+            ComponentKind::Storage {
+                scale: scale(64),
+                value: 0,
+            },
+        );
+
+        assert!(matches!(
+            &grid.component(narrow).unwrap().kind,
+            ComponentKind::Storage { value: 0, .. }
+        ));
+        assert!(grid.set_storage_value(narrow, u64::MAX));
+        assert!(grid.set_storage_value(wide, u64::MAX));
+        assert!(matches!(
+            &grid.component(narrow).unwrap().kind,
+            ComponentKind::Storage { value: 0b1111, .. }
+        ));
+        assert!(matches!(
+            &grid.component(wide).unwrap().kind,
+            ComponentKind::Storage {
+                value: u64::MAX,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn storage_bits_toggle_independently_and_reject_out_of_range_bits() {
+        let mut grid = LogicGrid::new();
+        let storage = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Storage {
+                scale: scale(4),
+                value: 0,
+            },
+        );
+        let led = grid.add_component(Point::new(8, 0), Rotation::Up, ComponentKind::Led);
+
+        assert!(grid.toggle_storage_bit(storage, 3));
+        assert!(grid.toggle_storage_bit(storage, 0));
+        assert!(!grid.toggle_storage_bit(storage, 4));
+        assert!(!grid.toggle_storage_bit(led, 0));
+        assert!(matches!(
+            &grid.component(storage).unwrap().kind,
+            ComponentKind::Storage { value: 0b1001, .. }
+        ));
+
+        assert!(grid.toggle_storage_bit(storage, 3));
+        assert!(matches!(
+            &grid.component(storage).unwrap().kind,
+            ComponentKind::Storage { value: 0b0001, .. }
+        ));
     }
 
     #[test]
@@ -1509,7 +1624,10 @@ mod tests {
         let storage = grid.add_component(
             Point::new(10, 0),
             Rotation::Right,
-            ComponentKind::Storage { scale: scale(2) },
+            ComponentKind::Storage {
+                scale: scale(2),
+                value: 0,
+            },
         );
         grid.add_wire(wire((2, 0), (9, 0), 1));
         grid.add_wire(wire((5, -5), (5, 0), 1));
@@ -1570,7 +1688,10 @@ mod tests {
             id: ComponentId(0),
             position: Point::new(10, 20),
             rotation: Rotation::Up,
-            kind: ComponentKind::Storage { scale: scale(2) },
+            kind: ComponentKind::Storage {
+                scale: scale(2),
+                value: 0,
+            },
         };
 
         assert_eq!(

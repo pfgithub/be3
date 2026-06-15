@@ -25,6 +25,7 @@ enum ToolKind {
     Not,
     Led,
     Storage,
+    ConfigureStorage,
 }
 
 impl ToolKind {
@@ -35,6 +36,7 @@ impl ToolKind {
             Self::Not => "NOT gate",
             Self::Led => "LED",
             Self::Storage => "Storage",
+            Self::ConfigureStorage => "Configure storage",
         }
     }
 }
@@ -208,6 +210,7 @@ pub struct LogicEditor {
     camera: Camera,
     gesture: Option<Gesture>,
     selection: Selection,
+    configured_storage: Option<ComponentId>,
 }
 
 impl Default for LogicEditor {
@@ -221,6 +224,7 @@ impl Default for LogicEditor {
             camera: Camera::default(),
             gesture: None,
             selection: Selection::default(),
+            configured_storage: None,
         }
     }
 }
@@ -251,6 +255,7 @@ impl LogicEditor {
                     ToolKind::Not,
                     ToolKind::Led,
                     ToolKind::Storage,
+                    ToolKind::ConfigureStorage,
                 ] {
                     if ui
                         .selectable_label(self.tool.kind == kind, kind.label())
@@ -258,6 +263,7 @@ impl LogicEditor {
                     {
                         self.tool.kind = kind;
                         self.gesture = None;
+                        self.configured_storage = None;
                         if kind != ToolKind::Select {
                             self.selection.clear();
                         }
@@ -281,6 +287,8 @@ impl LogicEditor {
                 ui.small("Delete: remove selection");
                 ui.small("Esc: cancel");
             });
+
+        self.show_storage_configuration(&context);
 
         let hovered_square = canvas
             .inner
@@ -325,6 +333,42 @@ impl LogicEditor {
         }
 
         context.request_repaint();
+    }
+
+    fn show_storage_configuration(&mut self, context: &egui::Context) {
+        let Some(id) = self.configured_storage else {
+            return;
+        };
+        let Some((scale, value)) = self.grid.component(id).and_then(|component| {
+            if let ComponentKind::Storage { scale, value } = &component.kind {
+                Some((*scale, *value))
+            } else {
+                None
+            }
+        }) else {
+            self.configured_storage = None;
+            return;
+        };
+
+        let mut open = true;
+        egui::Window::new(format!("Configure storage #{}", id.0))
+            .open(&mut open)
+            .default_width(180.0)
+            .show(context, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(480.0)
+                    .show(ui, |ui| {
+                        for bit in storage_bit_indices(scale) {
+                            let state = (value >> bit) & 1;
+                            if ui.button(format!("Bit {bit}: {state}")).clicked() {
+                                self.grid.toggle_storage_bit(id, bit);
+                            }
+                        }
+                    });
+            });
+        if !open {
+            self.configured_storage = None;
+        }
     }
 
     fn show_grid_debugger(
@@ -655,6 +699,20 @@ impl LogicEditor {
                     anchor: snapped,
                     drag_start: world,
                 }),
+                ToolKind::ConfigureStorage => {
+                    if let Some(DebugEntity::Component(id)) = self.entity_at(world) {
+                        if let Some(ComponentKind::Storage { scale, .. }) =
+                            self.grid.component(id).map(|component| &component.kind)
+                        {
+                            if *scale == Scale::ONE {
+                                self.grid.toggle_storage_bit(id, 0);
+                            } else {
+                                self.configured_storage = Some(id);
+                            }
+                        }
+                    }
+                    None
+                }
             };
         }
 
@@ -695,6 +753,7 @@ impl LogicEditor {
                             rotation,
                             ComponentKind::Storage {
                                 scale: self.tool.scale,
+                                value: 0,
                             },
                         );
                     }
@@ -952,6 +1011,7 @@ impl LogicEditor {
                             rotation,
                             kind: ComponentKind::Storage {
                                 scale: self.tool.scale,
+                                value: 0,
                             },
                         };
                         component_triangles.extend(
@@ -1013,6 +1073,10 @@ fn component_kind_name(kind: &ComponentKind) -> &'static str {
         ComponentKind::Storage { .. } => "Storage",
         ComponentKind::Subcomponent { .. } => "Subcomponent",
     }
+}
+
+fn storage_bit_indices(scale: Scale) -> Vec<u32> {
+    (0..scale.get() as u32).rev().collect()
 }
 
 fn snap_coordinate(value: f32, scale: Scale) -> i64 {
@@ -1361,6 +1425,16 @@ mod tests {
         assert_eq!(snap_point([4.0, 4.0], scale(4)), Point::new(4, 4));
         assert_eq!(snap_point([-0.01, -0.01], scale(4)), Point::new(-4, -4));
         assert_eq!(snap_point([-4.0, -4.0], scale(4)), Point::new(-4, -4));
+    }
+
+    #[test]
+    fn storage_bits_are_displayed_from_most_to_least_significant() {
+        assert_eq!(storage_bit_indices(scale(1)), vec![0]);
+        assert_eq!(storage_bit_indices(scale(4)), vec![3, 2, 1, 0]);
+        assert_eq!(
+            storage_bit_indices(scale(64)),
+            (0_u32..64).rev().collect::<Vec<_>>()
+        );
     }
 
     #[test]
