@@ -241,12 +241,13 @@ impl ComponentKind {
 
     fn unrotated_size(&self) -> Option<Size> {
         match self {
-            Self::Not { scale }
-            | Self::Storage { scale, .. }
-            | Self::Input { scale, .. }
-            | Self::Output { scale, .. } => {
+            Self::Not { scale } | Self::Storage { scale, .. } => {
                 let scale = scale.get();
                 Some(Size::new(scale, scale.checked_mul(2)?))
+            }
+            Self::Input { scale, .. } | Self::Output { scale, .. } => {
+                let scale = scale.get();
+                Some(Size::new(scale, scale))
             }
             Self::Led => Some(Size::new(1, 2)),
             Self::Subcomponent { size, .. } => Some(*size),
