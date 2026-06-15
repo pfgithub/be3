@@ -9,7 +9,7 @@ use logicgame::grid::{
 
 use crate::renderer::{DrawTriangle, GridCallback, RenderFrame};
 
-const MIN_ZOOM: f32 = 4.0;
+const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 96.0;
 const DEFAULT_ZOOM: f32 = 24.0;
 const WIRE_HIT_RADIUS: f32 = 7.0;
