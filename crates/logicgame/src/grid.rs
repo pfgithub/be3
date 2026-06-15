@@ -553,9 +553,7 @@ impl LogicGrid {
             let mut current: Option<(i64, i64)> = None;
             for (start, end) in intervals {
                 match current {
-                    Some((current_start, current_end))
-                        if start <= current_end.saturating_add(scale.get()) =>
-                    {
+                    Some((current_start, current_end)) if start <= current_end => {
                         current = Some((current_start, current_end.max(end)));
                     }
                     Some((current_start, current_end)) => {
@@ -933,6 +931,18 @@ mod tests {
     }
 
     #[test]
+    fn does_not_merge_collinear_wires_whose_endpoints_only_touch() {
+        let mut grid = LogicGrid::new();
+        grid.add_wire(wire((1, 1), (1, 2), 1));
+        grid.add_wire(wire((1, 3), (1, 4), 1));
+
+        assert_eq!(
+            grid.wires(),
+            &[wire((1, 1), (1, 2), 1), wire((1, 3), (1, 4), 1)]
+        );
+    }
+
+    #[test]
     fn preserves_a_split_at_a_perpendicular_endpoint_junction() {
         let mut grid = LogicGrid::new();
         grid.add_wire(wire((0, 4), (12, 4), 1));
@@ -982,7 +992,7 @@ mod tests {
         assert!(grid
             .validate()
             .contains(&ValidationError::WireComponentIntersection {
-                wire: wire((0, 0), (12, 0), 1),
+                wire: wire((10, 0), (12, 0), 1),
                 component: led,
             }));
     }
