@@ -714,6 +714,55 @@ impl Component {
         }
     }
 
+    pub fn total_instruction_count(&self) -> usize {
+        self.instructions
+            .iter()
+            .map(|instruction| match instruction {
+                Instruction::Call { component, .. } => {
+                    1 + self.components[*component].total_instruction_count()
+                }
+                _ => 1,
+            })
+            .sum()
+    }
+
+    pub fn total_latency(&self) -> usize {
+        let mut ready = vec![0; self.memory_size];
+        let mut total = 0;
+        for instruction in &self.instructions {
+            let (inputs, outputs, cost) = match instruction {
+                Instruction::Call {
+                    component,
+                    inputs,
+                    outputs,
+                    ..
+                } => (
+                    inputs.iter().flatten().copied().collect::<Vec<_>>(),
+                    outputs.iter().flatten().copied().collect::<Vec<_>>(),
+                    self.components[*component].total_latency(),
+                ),
+                Instruction::Not { input, output } => (vec![*input], vec![*output], 1),
+                Instruction::CopyBits { input, output, .. } => (vec![*input], vec![*output], 1),
+                Instruction::ReadStorage { output, .. } => (Vec::new(), vec![*output], 1),
+                Instruction::SaveStorage { input, .. } => (vec![*input], Vec::new(), 1),
+            };
+            let start = inputs
+                .iter()
+                .filter_map(|&input| ready.get(input))
+                .copied()
+                .max()
+                .unwrap_or_default();
+            let finish = start + cost;
+            total = total.max(finish);
+            for output in outputs {
+                if let Some(output_ready) = ready.get_mut(output) {
+                    *output_ready = (*output_ready).max(finish);
+                }
+            }
+        }
+        total
+    }
+
     fn unresolved_hash(&self) -> Option<&ComponentHash> {
         (self.source_hash.is_some()
             && self.memory_size == 0
@@ -902,6 +951,158 @@ mod tests {
         let mut vm = Vm::from_unlinked_component(root);
         vm.begin_tick();
         vm
+    }
+
+    #[test]
+    fn total_instruction_count_includes_called_components_per_call() {
+        let child = component(
+            1,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            (0..10)
+                .map(|_| Instruction::Not {
+                    input: 0,
+                    output: 0,
+                })
+                .collect(),
+        );
+        let root = component_with_children(
+            1,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![child],
+            vec![
+                Instruction::Not {
+                    input: 0,
+                    output: 0,
+                },
+                Instruction::Not {
+                    input: 0,
+                    output: 0,
+                },
+                Instruction::Call {
+                    component: 0,
+                    storage_offset: 0,
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                },
+                Instruction::Call {
+                    component: 0,
+                    storage_offset: 0,
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                },
+                Instruction::Not {
+                    input: 0,
+                    output: 0,
+                },
+            ],
+        );
+
+        assert_eq!(root.total_instruction_count(), 25);
+    }
+
+    #[test]
+    fn total_latency_counts_dependent_gate_chain() {
+        let root = component(
+            3,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![
+                Instruction::Not {
+                    input: 0,
+                    output: 1,
+                },
+                Instruction::Not {
+                    input: 1,
+                    output: 2,
+                },
+            ],
+        );
+
+        assert_eq!(root.total_latency(), 2);
+    }
+
+    #[test]
+    fn total_latency_uses_parallel_branch_depth() {
+        let root = component(
+            4,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![
+                Instruction::Not {
+                    input: 0,
+                    output: 2,
+                },
+                Instruction::Not {
+                    input: 1,
+                    output: 3,
+                },
+            ],
+        );
+
+        assert_eq!(root.total_latency(), 1);
+    }
+
+    #[test]
+    fn total_latency_includes_subcomponent_latency() {
+        let child = component(
+            3,
+            Vec::new(),
+            vec![0],
+            vec![2],
+            vec![
+                Instruction::Not {
+                    input: 0,
+                    output: 1,
+                },
+                Instruction::Not {
+                    input: 1,
+                    output: 2,
+                },
+            ],
+        );
+        let root = component_with_children(
+            2,
+            Vec::new(),
+            vec![0],
+            vec![1],
+            vec![child],
+            vec![
+                Instruction::Call {
+                    component: 0,
+                    storage_offset: 0,
+                    inputs: vec![Some(0)],
+                    outputs: vec![Some(0)],
+                },
+                Instruction::Not {
+                    input: 0,
+                    output: 1,
+                },
+            ],
+        );
+
+        assert_eq!(root.total_latency(), 3);
+    }
+
+    #[test]
+    fn total_latency_counts_save_storage_as_terminal_work() {
+        let root = component(
+            1,
+            vec![0],
+            Vec::new(),
+            Vec::new(),
+            vec![Instruction::SaveStorage {
+                storage: 0,
+                input: 0,
+            }],
+        );
+
+        assert_eq!(root.total_latency(), 1);
     }
 
     #[test]

@@ -492,6 +492,7 @@ impl LogicEditor {
             });
 
         self.update_simulation_preview();
+        self.show_metrics(&context);
         self.show_storage_configuration(&context);
         self.show_simulation(&context);
 
@@ -555,6 +556,67 @@ impl LogicEditor {
             position.y.div_euclid(snap) * snap,
         );
         self.grid.add_component(position, Rotation::Up, kind);
+    }
+
+    fn show_metrics(&self, context: &egui::Context) {
+        let bounds = self.grid.bounds();
+
+        egui::Window::new("Metrics")
+            .default_pos([700.0, 16.0])
+            .default_width(240.0)
+            .show(context, |ui| {
+                if let Some(error) = &self.simulation.error {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        format!("Cannot compile: {error}"),
+                    );
+                    ui.separator();
+                }
+
+                egui::Grid::new("logic-metrics-summary")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Total instructions");
+                        match &self.simulation.vm {
+                            Some(vm) => {
+                                ui.monospace(
+                                    vm.root_component.total_instruction_count().to_string(),
+                                );
+                            }
+                            None => {
+                                ui.weak("none");
+                            }
+                        }
+                        ui.end_row();
+
+                        ui.label("Total latency");
+                        match &self.simulation.vm {
+                            Some(vm) => {
+                                ui.monospace(vm.root_component.total_latency().to_string());
+                            }
+                            None => {
+                                ui.weak("none");
+                            }
+                        }
+                        ui.end_row();
+
+                        ui.label("Total area");
+                        match bounds {
+                            Some(bounds) => {
+                                ui.monospace(format!(
+                                    "{} ({} x {})",
+                                    bounds.area(),
+                                    bounds.width(),
+                                    bounds.height()
+                                ));
+                            }
+                            None => {
+                                ui.weak("none");
+                            }
+                        }
+                        ui.end_row();
+                    });
+            });
     }
 
     fn show_simulation(&mut self, context: &egui::Context) {
@@ -1057,26 +1119,6 @@ impl LogicEditor {
                                     "({}, {}) to ({}, {})",
                                     bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y
                                 ));
-                            }
-                            None => {
-                                ui.weak("none");
-                            }
-                        }
-                        ui.end_row();
-                        ui.label("Bounds size");
-                        match bounds {
-                            Some(bounds) => {
-                                ui.monospace(format!("{} x {}", bounds.width(), bounds.height()));
-                            }
-                            None => {
-                                ui.weak("none");
-                            }
-                        }
-                        ui.end_row();
-                        ui.label("Bounds area");
-                        match bounds {
-                            Some(bounds) => {
-                                ui.monospace(bounds.area().to_string());
                             }
                             None => {
                                 ui.weak("none");
