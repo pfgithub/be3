@@ -18,7 +18,42 @@ pub struct RenderFrame {
     pub camera_center: [f32; 2],
     pub zoom: f32,
     pub grid_scale: f32,
+    pub wires: Vec<DrawWire>,
+    pub wire_values: Vec<WireValue>,
     pub triangles: Vec<DrawTriangle>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DrawWire {
+    wire: Wire,
+    color: [f32; 4],
+    value_index: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct WireValue {
+    low: u32,
+    high: u32,
+}
+
+impl DrawWire {
+    pub fn new(wire: Wire, color: [f32; 4], value_index: u32) -> Self {
+        Self {
+            wire,
+            color,
+            value_index,
+        }
+    }
+}
+
+impl WireValue {
+    pub fn new(value: u64) -> Self {
+        Self {
+            low: value as u32,
+            high: (value >> 32) as u32,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -438,10 +473,37 @@ struct RenderVertex {
     fill_color: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct WireVertex {
+    position: [f32; 2],
+    bit_coord: f32,
+    scale: f32,
+    value_index: u32,
+    fill_color: [f32; 4],
+}
+
 impl RenderVertex {
     fn layout() -> wgpu::VertexBufferLayout<'static> {
         const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
             wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &ATTRIBUTES,
+        }
+    }
+}
+
+impl WireVertex {
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+            0 => Float32x2,
+            2 => Float32,
+            3 => Float32,
+            4 => Uint32,
+            5 => Float32x4
+        ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -484,23 +546,54 @@ impl egui_wgpu::CallbackTrait for GridCallback {
 }
 
 pub struct GridRenderer {
-    pipeline: wgpu::RenderPipeline,
+    triangle_pipeline: wgpu::RenderPipeline,
+    wire_pipeline: wgpu::RenderPipeline,
+    wire_value_bind_group_layout: wgpu::BindGroupLayout,
+    wire_value_bind_group: wgpu::BindGroup,
+    background_vertex_buffer: Arc<wgpu::Buffer>,
     vertex_buffer: Arc<wgpu::Buffer>,
+    wire_vertex_buffer: Arc<wgpu::Buffer>,
+    wire_value_buffer: Arc<wgpu::Buffer>,
+    background_vertex_capacity: usize,
     vertex_capacity: usize,
+    wire_vertex_capacity: usize,
+    wire_value_capacity: usize,
+    background_vertex_count: u32,
     vertex_count: u32,
+    wire_vertex_count: u32,
 }
 
 impl GridRenderer {
     pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("editor.wgsl"));
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("logic triangle pipeline layout"),
-            bind_group_layouts: &[],
+        let triangle_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("logic triangle pipeline layout"),
+                bind_group_layouts: &[],
+                immediate_size: 0,
+            });
+        let wire_value_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("logic wire value bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let wire_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("logic wire pipeline layout"),
+            bind_group_layouts: &[Some(&wire_value_bind_group_layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let triangle_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("logic triangle pipeline"),
-            layout: Some(&pipeline_layout),
+            layout: Some(&triangle_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vertex"),
@@ -523,54 +616,186 @@ impl GridRenderer {
             multiview_mask: None,
             cache: None,
         });
+        let wire_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("logic wire pipeline"),
+            layout: Some(&wire_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("wire_vertex"),
+                compilation_options: Default::default(),
+                buffers: &[WireVertex::layout()],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("wire_fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let vertex_capacity = 1;
+        let background_vertex_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("logic background vertex buffer"),
+            size: std::mem::size_of::<RenderVertex>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
         let vertex_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("logic triangle vertex buffer"),
             size: std::mem::size_of::<RenderVertex>() as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
+        let wire_vertex_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("logic wire vertex buffer"),
+            size: std::mem::size_of::<WireVertex>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        let wire_value_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("logic wire value buffer"),
+            size: std::mem::size_of::<WireValue>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        let wire_value_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("logic wire value bind group"),
+            layout: &wire_value_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wire_value_buffer.as_entire_binding(),
+            }],
+        });
 
         Self {
-            pipeline,
+            triangle_pipeline,
+            wire_pipeline,
+            wire_value_bind_group_layout,
+            wire_value_bind_group,
+            background_vertex_buffer,
             vertex_buffer,
+            wire_vertex_buffer,
+            wire_value_buffer,
+            background_vertex_capacity: vertex_capacity,
             vertex_capacity,
+            wire_vertex_capacity: vertex_capacity,
+            wire_value_capacity: vertex_capacity,
+            background_vertex_count: 0,
             vertex_count: 0,
+            wire_vertex_count: 0,
         }
     }
 
     fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &RenderFrame) {
-        let triangles = frame_triangles(frame);
-        let mut vertices = Vec::with_capacity(triangles.len() * 3);
-        for triangle in triangles {
-            vertices.extend(triangle.positions.map(|position| RenderVertex {
-                position: world_to_clip(position, frame),
-                fill_color: triangle.color,
-            }));
-        }
+        let background_vertices = triangle_vertices(background_triangles(frame), frame);
+        prepare_vertex_buffer(
+            device,
+            queue,
+            "logic background vertex buffer",
+            &background_vertices,
+            &mut self.background_vertex_buffer,
+            &mut self.background_vertex_capacity,
+        );
+        self.background_vertex_count = background_vertices.len() as u32;
 
-        if vertices.len() > self.vertex_capacity {
-            self.vertex_capacity = vertices.len().next_power_of_two();
-            self.vertex_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("logic triangle vertex buffer"),
-                size: (self.vertex_capacity * std::mem::size_of::<RenderVertex>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        let vertices = triangle_vertices(frame.triangles.clone(), frame);
+        prepare_vertex_buffer(
+            device,
+            queue,
+            "logic triangle vertex buffer",
+            &vertices,
+            &mut self.vertex_buffer,
+            &mut self.vertex_capacity,
+        );
+        self.vertex_count = vertices.len() as u32;
+
+        let wire_vertices = wire_vertices(&frame.wires, frame);
+        prepare_vertex_buffer(
+            device,
+            queue,
+            "logic wire vertex buffer",
+            &wire_vertices,
+            &mut self.wire_vertex_buffer,
+            &mut self.wire_vertex_capacity,
+        );
+        self.wire_vertex_count = wire_vertices.len() as u32;
+
+        let wire_values = if frame.wire_values.is_empty() {
+            vec![WireValue::new(0)]
+        } else {
+            frame.wire_values.clone()
+        };
+        if wire_values.len() > self.wire_value_capacity {
+            self.wire_value_capacity = wire_values.len().next_power_of_two();
+            self.wire_value_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("logic wire value buffer"),
+                size: (self.wire_value_capacity * std::mem::size_of::<WireValue>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
+            self.wire_value_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("logic wire value bind group"),
+                layout: &self.wire_value_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.wire_value_buffer.as_entire_binding(),
+                }],
+            });
         }
-        if !vertices.is_empty() {
-            queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
-        }
-        self.vertex_count = vertices.len() as u32;
+        queue.write_buffer(
+            &self.wire_value_buffer,
+            0,
+            bytemuck::cast_slice(&wire_values),
+        );
     }
 
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>) {
-        if self.vertex_count == 0 {
-            return;
+        if self.background_vertex_count > 0 {
+            render_pass.set_pipeline(&self.triangle_pipeline);
+            render_pass.set_vertex_buffer(0, self.background_vertex_buffer.slice(..));
+            render_pass.draw(0..self.background_vertex_count, 0..1);
         }
-        render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.draw(0..self.vertex_count, 0..1);
+        if self.wire_vertex_count > 0 {
+            render_pass.set_pipeline(&self.wire_pipeline);
+            render_pass.set_bind_group(0, &self.wire_value_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.wire_vertex_buffer.slice(..));
+            render_pass.draw(0..self.wire_vertex_count, 0..1);
+        }
+        if self.vertex_count > 0 {
+            render_pass.set_pipeline(&self.triangle_pipeline);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..self.vertex_count, 0..1);
+        }
+    }
+}
+
+fn prepare_vertex_buffer<T: Pod>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &'static str,
+    vertices: &[T],
+    buffer: &mut Arc<wgpu::Buffer>,
+    capacity: &mut usize,
+) {
+    if vertices.len() > *capacity {
+        *capacity = vertices.len().next_power_of_two();
+        *buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: (*capacity * std::mem::size_of::<T>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+    }
+    if !vertices.is_empty() {
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(vertices));
     }
 }
 
@@ -583,7 +808,14 @@ fn world_to_clip(position: [f32; 2], frame: &RenderFrame) -> [f32; 2] {
     ]
 }
 
+#[cfg(test)]
 fn frame_triangles(frame: &RenderFrame) -> Vec<DrawTriangle> {
+    let mut triangles = background_triangles(frame);
+    triangles.extend_from_slice(&frame.triangles);
+    triangles
+}
+
+fn background_triangles(frame: &RenderFrame) -> Vec<DrawTriangle> {
     let half_width = frame.viewport_size[0] / frame.zoom * 0.5;
     let half_height = frame.viewport_size[1] / frame.zoom * 0.5;
     let bounds = [
@@ -609,8 +841,93 @@ fn frame_triangles(frame: &RenderFrame) -> Vec<DrawTriangle> {
         MAJOR_GRID_COLOR,
     );
     add_axis_lines(&mut triangles, bounds, 3.0 / frame.zoom);
-    triangles.extend_from_slice(&frame.triangles);
     triangles
+}
+
+fn triangle_vertices(triangles: Vec<DrawTriangle>, frame: &RenderFrame) -> Vec<RenderVertex> {
+    let mut vertices = Vec::with_capacity(triangles.len() * 3);
+    for triangle in triangles {
+        vertices.extend(triangle.positions.map(|position| RenderVertex {
+            position: world_to_clip(position, frame),
+            fill_color: triangle.color,
+        }));
+    }
+    vertices
+}
+
+fn wire_vertices(wires: &[DrawWire], frame: &RenderFrame) -> Vec<WireVertex> {
+    let mut vertices = Vec::with_capacity(wires.len() * 6);
+    for draw in wires {
+        let scale = draw.wire.scale.get() as f32;
+        let half_scale = scale * 0.5;
+        let half_thickness = (scale * 0.36).max(0.08);
+        let (left, top, right, bottom) = match draw.wire.orientation() {
+            Orientation::Horizontal => {
+                let start_x = draw.wire.start.x as f32 + half_scale;
+                let end_x = draw.wire.end.x as f32 + half_scale;
+                let center_y = draw.wire.start.y as f32 + half_scale;
+                (
+                    start_x,
+                    center_y - half_thickness,
+                    end_x,
+                    center_y + half_thickness,
+                )
+            }
+            Orientation::Vertical => {
+                let center_x = draw.wire.start.x as f32 + half_scale;
+                let start_y = draw.wire.start.y as f32 + half_scale;
+                let end_y = draw.wire.end.y as f32 + half_scale;
+                (
+                    center_x - half_thickness,
+                    start_y,
+                    center_x + half_thickness,
+                    end_y,
+                )
+            }
+        };
+        let horizontal = draw.wire.orientation() == Orientation::Horizontal;
+        let top_left = wire_vertex([left, top], 0.0, scale, draw, frame);
+        let top_right = wire_vertex(
+            [right, top],
+            if horizontal { 0.0 } else { scale },
+            scale,
+            draw,
+            frame,
+        );
+        let bottom_left = wire_vertex(
+            [left, bottom],
+            if horizontal { scale } else { 0.0 },
+            scale,
+            draw,
+            frame,
+        );
+        let bottom_right = wire_vertex([right, bottom], scale, scale, draw, frame);
+        vertices.extend([
+            top_left,
+            top_right,
+            bottom_left,
+            bottom_left,
+            top_right,
+            bottom_right,
+        ]);
+    }
+    vertices
+}
+
+fn wire_vertex(
+    position: [f32; 2],
+    bit_coord: f32,
+    scale: f32,
+    draw: &DrawWire,
+    frame: &RenderFrame,
+) -> WireVertex {
+    WireVertex {
+        position: world_to_clip(position, frame),
+        bit_coord,
+        scale,
+        value_index: draw.value_index,
+        fill_color: draw.color,
+    }
 }
 
 fn add_grid_lines(
@@ -862,12 +1179,38 @@ mod tests {
     }
 
     #[test]
+    fn wire_vertices_carry_segment_coordinates_and_value_indices() {
+        let wire = Wire::new(Point::new(0, 0), Point::new(8, 0), Scale::new(4).unwrap()).unwrap();
+        let frame = RenderFrame {
+            viewport_size: [80.0, 80.0],
+            camera_center: [0.0, 0.0],
+            zoom: 10.0,
+            grid_scale: 1.0,
+            wires: Vec::new(),
+            wire_values: vec![WireValue::new(0b1010)],
+            triangles: Vec::new(),
+        };
+        let vertices = wire_vertices(&[DrawWire::new(wire, DrawTriangle::WIRE_COLOR, 7)], &frame);
+
+        assert_eq!(vertices.len(), 6);
+        assert_eq!(vertices[0].bit_coord, 0.0);
+        assert_eq!(vertices[2].bit_coord, 4.0);
+        assert!(vertices
+            .iter()
+            .all(|vertex| vertex.value_index == 7 && vertex.scale == 4.0));
+        assert_eq!(frame.wire_values[0].low, 0b1010);
+        assert_eq!(frame.wire_values[0].high, 0);
+    }
+
+    #[test]
     fn one_x_grid_emits_lines_one_world_unit_apart() {
         let frame = RenderFrame {
             viewport_size: [80.0, 80.0],
             camera_center: [0.0, 0.0],
             zoom: 10.0,
             grid_scale: 1.0,
+            wires: Vec::new(),
+            wire_values: Vec::new(),
             triangles: Vec::new(),
         };
         let triangles = frame_triangles(&frame);
@@ -890,6 +1233,8 @@ mod tests {
             camera_center: [0.0, 0.0],
             zoom: 10.0,
             grid_scale: 1.0,
+            wires: Vec::new(),
+            wire_values: Vec::new(),
             triangles: vec![entity],
         };
 

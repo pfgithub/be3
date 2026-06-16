@@ -12,7 +12,7 @@ use logicgame::grid::{
 
 use crate::{
     component_files::{ComponentFileDrag, ComponentFiles},
-    renderer::{DrawTriangle, GridCallback, RenderFrame},
+    renderer::{DrawTriangle, DrawWire, GridCallback, RenderFrame, WireValue},
 };
 
 const MIN_ZOOM: f32 = 0.1;
@@ -950,6 +950,42 @@ impl LogicEditor {
         }
     }
 
+    fn wire_value_indices(
+        &self,
+        snapshot: &SimulationSnapshot,
+    ) -> (BTreeMap<Wire, u32>, Vec<WireValue>) {
+        let root_memory = self
+            .simulation
+            .snapshot
+            .as_ref()
+            .filter(|simulation_snapshot| *simulation_snapshot == snapshot)
+            .and_then(|_| self.simulation.vm.as_ref())
+            .map(Vm::root_memory)
+            .unwrap_or_default();
+
+        let mut values = Vec::new();
+        let mut indices = BTreeMap::new();
+        let mut address = 0;
+        for node in &snapshot.graph.nodes {
+            let GraphNode::WireNet { wires } = node else {
+                continue;
+            };
+            let value_index = values.len() as u32;
+            values.push(WireValue::new(
+                root_memory.get(address).copied().unwrap_or_default(),
+            ));
+            for wire in wires {
+                indices.insert(*wire, value_index);
+            }
+            address += 1;
+        }
+
+        if values.is_empty() {
+            values.push(WireValue::new(0));
+        }
+        (indices, values)
+    }
+
     fn show_storage_configuration(&mut self, context: &egui::Context) {
         let Some(id) = self.configured_storage else {
             return;
@@ -1647,6 +1683,8 @@ impl LogicEditor {
             self.camera.center[1] + half_height,
         ];
         let errors = self.grid.validate();
+        let snapshot = self.simulation_snapshot();
+        let (wire_value_indices, wire_values) = self.wire_value_indices(&snapshot);
         let mut bad_wires = BTreeSet::new();
         let mut bad_components = BTreeSet::new();
         for error in errors {
@@ -1675,6 +1713,7 @@ impl LogicEditor {
         }
 
         let mut component_triangles = Vec::new();
+        let mut draw_wires = Vec::new();
         let mut wire_triangles = Vec::new();
         for component in self.grid.components() {
             component_triangles.extend(DrawTriangle::component_lead(component, viewport));
@@ -1698,17 +1737,19 @@ impl LogicEditor {
             }
         }
         for wire in self.grid.wires() {
-            wire_triangles.extend(DrawTriangle::wire(
+            let color = if hovered_entity == Some(DebugEntity::Wire(*wire))
+                || graph_hover.wires.contains(wire)
+            {
+                DrawTriangle::HIGHLIGHT_COLOR
+            } else if bad_wires.contains(wire) {
+                DrawTriangle::ERROR_COLOR
+            } else {
+                DrawTriangle::WIRE_COLOR
+            };
+            draw_wires.push(DrawWire::new(
                 *wire,
-                if hovered_entity == Some(DebugEntity::Wire(*wire))
-                    || graph_hover.wires.contains(wire)
-                {
-                    DrawTriangle::HIGHLIGHT_COLOR
-                } else if bad_wires.contains(wire) {
-                    DrawTriangle::ERROR_COLOR
-                } else {
-                    DrawTriangle::WIRE_COLOR
-                },
+                color,
+                wire_value_indices.get(wire).copied().unwrap_or_default(),
             ));
             for end in [WireEnd::Start, WireEnd::End] {
                 let endpoint = WireEndpoint { wire: *wire, end };
@@ -1922,6 +1963,8 @@ impl LogicEditor {
             camera_center: self.camera.center,
             zoom: self.camera.zoom,
             grid_scale: self.tool.snap().get() as f32,
+            wires: draw_wires,
+            wire_values,
             triangles: wire_triangles,
         }
     }
