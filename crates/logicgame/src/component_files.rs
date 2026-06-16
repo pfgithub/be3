@@ -1,13 +1,15 @@
 use std::{
+    collections::BTreeMap,
     fmt,
     fs::{self, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use logicgame::{
-    execution::{GenerationError, Instruction, Vm},
+    execution::{Component, GenerationError, UnlinkedComponent, Vm},
     grid::{
         ComponentHash, ComponentKind, ComponentPort, ComponentSide, GeometryError, LogicGrid,
         LogicGridSnapshot, Point, Size,
@@ -70,61 +72,7 @@ impl From<GeometryError> for ComponentFileError {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledComponent {
     pub snapshot: LogicGridSnapshot,
-    #[serde(with = "compiled_vm")]
-    pub vm: Vm,
-}
-
-mod compiled_vm {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use super::{Instruction, Vm};
-
-    #[derive(Serialize)]
-    struct SerializedVm<'a> {
-        memory: usize,
-        storage: &'a [u64],
-        inputs: &'a [usize],
-        outputs: &'a [usize],
-        instructions: &'a [Instruction],
-    }
-
-    #[derive(Deserialize)]
-    struct DeserializedVm {
-        memory: usize,
-        storage: Vec<u64>,
-        inputs: Vec<usize>,
-        outputs: Vec<usize>,
-        instructions: Vec<Instruction>,
-    }
-
-    pub fn serialize<S>(vm: &Vm, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        SerializedVm {
-            memory: vm.memory.len(),
-            storage: &vm.storage,
-            inputs: &vm.inputs,
-            outputs: &vm.outputs,
-            instructions: &vm.instructions,
-        }
-        .serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vm, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let vm = DeserializedVm::deserialize(deserializer)?;
-        Ok(Vm {
-            memory: vec![0; vm.memory],
-            storage: vm.storage,
-            inputs: vm.inputs,
-            outputs: vm.outputs,
-            instructions: vm.instructions,
-            components: Vec::new(),
-        })
-    }
+    pub component: UnlinkedComponent,
 }
 
 #[derive(Clone, Debug)]
@@ -217,8 +165,11 @@ impl ComponentFiles {
         let size = Size::new(width, height);
         let ports = subcomponent_ports(&grid, bounds.min, bounds.max)?;
         let snapshot = grid.snapshot();
-        let vm = Vm::from_graph(&grid, &grid.generate_graph())?;
-        let bytes = serde_json::to_vec_pretty(&CompiledComponent { snapshot, vm })?;
+        let component = UnlinkedComponent::from_graph(&grid, &grid.generate_graph())?;
+        let bytes = serde_json::to_vec_pretty(&CompiledComponent {
+            snapshot,
+            component,
+        })?;
         let hash = ComponentHash::new(format!("{:x}", Sha256::digest(&bytes)))
             .expect("SHA-256 is a valid component hash");
 
@@ -236,10 +187,27 @@ impl ComponentFiles {
     }
 
     pub fn load_components(&self, vm: &mut Vm) -> Result<(), ComponentFileError> {
-        vm.load_components(|hash| {
-            let bytes = fs::read(self.compiled_path(hash))?;
-            Ok(serde_json::from_slice::<CompiledComponent>(&bytes)?.vm)
-        })
+        let mut cache = BTreeMap::<ComponentHash, Rc<Component>>::new();
+        vm.load_components(|hash| self.load_component(hash, &mut cache))
+    }
+
+    fn load_component(
+        &self,
+        hash: &ComponentHash,
+        cache: &mut BTreeMap<ComponentHash, Rc<Component>>,
+    ) -> Result<Rc<Component>, ComponentFileError> {
+        if let Some(component) = cache.get(hash) {
+            return Ok(Rc::clone(component));
+        }
+        let bytes = fs::read(self.compiled_path(hash))?;
+        let compiled = serde_json::from_slice::<CompiledComponent>(&bytes)?;
+        let component = compiled
+            .component
+            .link_with_hash(hash.clone(), |child_hash| {
+                self.load_component(child_hash, cache)
+            })?;
+        cache.insert(hash.clone(), Rc::clone(&component));
+        Ok(component)
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -361,7 +329,10 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use logicgame::grid::{ComponentKind, ComponentSide, Point, Rotation, Scale};
+    use logicgame::{
+        execution::UnlinkedInstruction,
+        grid::{ComponentKind, ComponentSide, Point, Rotation, Scale},
+    };
 
     use super::*;
 
@@ -432,33 +403,31 @@ mod tests {
     }
 
     #[test]
-    fn compiled_vm_serializes_io_bindings() {
+    fn compiled_component_serializes_unlinked_component() {
         let compiled = CompiledComponent {
             snapshot: LogicGrid::new().snapshot(),
-            vm: Vm {
-                memory: vec![3, 4, 5],
-                storage: vec![6, 7],
+            component: UnlinkedComponent {
+                memory_size: 3,
+                storage_init: vec![6, 7],
                 inputs: vec![2],
                 outputs: vec![1],
-                instructions: Vec::new(),
-                components: Vec::new(),
+                instructions: vec![UnlinkedInstruction::Not {
+                    input: 2,
+                    output: 1,
+                }],
             },
         };
 
         let json = serde_json::to_value(&compiled).unwrap();
-        assert_eq!(json["vm"]["memory"], 3);
-        assert_eq!(json["vm"]["storage"], serde_json::json!([6, 7]));
-        assert_eq!(json["vm"]["inputs"], serde_json::json!([2]));
-        assert_eq!(json["vm"]["outputs"], serde_json::json!([1]));
-        assert!(json["vm"]["instructions"].is_array());
+        assert_eq!(json["component"]["memory_size"], 3);
+        assert_eq!(json["component"]["storage_init"], serde_json::json!([6, 7]));
+        assert_eq!(json["component"]["inputs"], serde_json::json!([2]));
+        assert_eq!(json["component"]["outputs"], serde_json::json!([1]));
+        assert!(json["component"]["instructions"].is_array());
 
         let decoded: CompiledComponent = serde_json::from_value(json).unwrap();
         assert_eq!(decoded.snapshot, compiled.snapshot);
-        assert_eq!(decoded.vm.memory, vec![0; 3]);
-        assert_eq!(decoded.vm.storage, compiled.vm.storage);
-        assert_eq!(decoded.vm.inputs, compiled.vm.inputs);
-        assert_eq!(decoded.vm.outputs, compiled.vm.outputs);
-        assert_eq!(decoded.vm.instructions, compiled.vm.instructions);
+        assert_eq!(decoded.component, compiled.component);
     }
 
     #[test]
@@ -508,8 +477,8 @@ mod tests {
         let bytes = fs::read(&path).unwrap();
         let compiled: CompiledComponent = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(compiled.snapshot, grid.snapshot());
-        assert_eq!(compiled.vm.inputs.len(), 1);
-        assert_eq!(compiled.vm.outputs.len(), 1);
+        assert_eq!(compiled.component.inputs.len(), 1);
+        assert_eq!(compiled.component.outputs.len(), 1);
         assert_eq!(component.as_str(), format!("{:x}", Sha256::digest(&bytes)));
 
         grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);

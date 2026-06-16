@@ -582,17 +582,17 @@ impl LogicEditor {
                         ui.monospace(self.simulation.steps.to_string());
                         ui.end_row();
                         ui.label("Instructions");
-                        ui.monospace(vm.instructions.len().to_string());
+                        ui.monospace(vm.root_instructions().len().to_string());
                         ui.end_row();
                         ui.label("Next instruction");
-                        if self.simulation.next_instruction < vm.instructions.len() {
+                        if self.simulation.next_instruction < vm.root_instructions().len() {
                             ui.monospace(format!(
                                 "{} / {}",
                                 self.simulation.next_instruction + 1,
-                                vm.instructions.len()
+                                vm.root_instructions().len()
                             ));
                         } else {
-                            if vm.instructions.is_empty() {
+                            if vm.root_instructions().is_empty() {
                                 ui.weak("none");
                             } else {
                                 ui.weak("tick complete");
@@ -603,18 +603,18 @@ impl LogicEditor {
 
                 ui.separator();
                 ui.strong("Instructions");
-                if vm.instructions.is_empty() {
+                if vm.root_instructions().is_empty() {
                     ui.weak("No instructions");
                 } else {
                     egui::ScrollArea::vertical()
                         .id_salt("logic-simulation-instructions")
                         .max_height(180.0)
                         .show(ui, |ui| {
-                            for (index, instruction) in vm.instructions.iter().enumerate() {
+                            for (index, instruction) in vm.root_instructions().iter().enumerate() {
                                 let next = self.simulation.next_instruction == index
                                     || index == 0
                                         && self.simulation.next_instruction
-                                            >= vm.instructions.len();
+                                            >= vm.root_instructions().len();
                                 let response = ui.selectable_label(
                                     next,
                                     egui::RichText::new(format!(
@@ -632,11 +632,11 @@ impl LogicEditor {
 
                 ui.separator();
                 ui.strong("Inputs");
-                if vm.inputs.is_empty() {
+                if vm.input_addresses().is_empty() {
                     ui.weak("No input components");
                 } else {
-                    for input in 0..vm.inputs.len() {
-                        let address = vm.inputs[input];
+                    for input in 0..vm.input_addresses().len() {
+                        let address = vm.input_addresses()[input];
                         let value = &mut self.simulation.input_values[input];
                         let scale =
                             snapshot
@@ -655,7 +655,7 @@ impl LogicEditor {
                                     let state = (*value >> bit) & 1;
                                     if ui.small_button(format!("{bit}:{state}")).clicked() {
                                         *value ^= 1_u64 << bit;
-                                        vm.memory[address] |= *value;
+                                        vm.root_memory_mut()[address] |= *value;
                                     }
                                 }
                             } else {
@@ -667,15 +667,19 @@ impl LogicEditor {
 
                 ui.separator();
                 ui.strong("Outputs");
-                if vm.outputs.is_empty() {
+                if vm.output_addresses().is_empty() {
                     ui.weak("No output components");
                 } else {
-                    for (output, &address) in vm.outputs.iter().enumerate() {
+                    for (output, &address) in vm.output_addresses().iter().enumerate() {
                         let exists = snapshot.components.iter().any(|component| {
                             matches!(component.kind, ComponentKind::Output { id, .. } if id.0 == output)
                         });
                         if exists {
-                            simulation_value_row(ui, format!("Output {output}"), vm.memory[address]);
+                            simulation_value_row(
+                                ui,
+                                format!("Output {output}"),
+                                vm.root_memory()[address],
+                            );
                         } else {
                             ui.horizontal(|ui| {
                                 ui.label(format!("Output {output}"));
@@ -687,14 +691,14 @@ impl LogicEditor {
 
                 ui.separator();
                 ui.strong("Wire groups");
-                if vm.memory.is_empty() {
+                if vm.root_memory().is_empty() {
                     ui.weak("No connected wire groups");
                 } else {
                     egui::ScrollArea::vertical()
                         .id_salt("logic-simulation-wires")
                         .max_height(180.0)
                         .show(ui, |ui| {
-                            for (address, value) in vm.memory.iter().copied().enumerate() {
+                            for (address, value) in vm.root_memory().iter().copied().enumerate() {
                                 let segment_count = snapshot
                                     .graph
                                     .nodes
@@ -777,7 +781,7 @@ impl LogicEditor {
                 }
                 self.simulation = Simulation {
                     snapshot: Some(snapshot),
-                    input_values: vec![0; vm.inputs.len()],
+                    input_values: vec![0; vm.input_addresses().len()],
                     vm: Some(vm),
                     error: None,
                     steps: 0,
@@ -817,7 +821,7 @@ impl LogicEditor {
         vm.begin_tick();
         apply_input_values(vm, &self.simulation.input_values);
         self.simulation.next_instruction = 0;
-        if vm.instructions.is_empty() {
+        if vm.root_instructions().is_empty() {
             self.simulation.steps += 1;
             return false;
         }
@@ -829,10 +833,16 @@ impl LogicEditor {
         let Some(vm) = &mut self.simulation.vm else {
             return;
         };
-        let instruction = self.simulation.next_instruction;
-        vm.execute_instruction(instruction);
-        self.simulation.next_instruction += 1;
-        if self.simulation.next_instruction == vm.instructions.len() {
+        vm.execute_instruction();
+        self.simulation.next_instruction = if vm.returns.is_empty() && vm.pc.memory_offset == 0 {
+            vm.pc.instruction_index
+        } else {
+            vm.returns
+                .first()
+                .map(|pc| pc.instruction_index)
+                .unwrap_or(vm.pc.instruction_index)
+        };
+        if vm.is_tick_complete() {
             self.simulation.steps += 1;
             self.simulation.tick_in_progress = false;
         }
@@ -1852,8 +1862,8 @@ fn simulation_value_row(ui: &mut egui::Ui, label: String, value: u64) {
 }
 
 fn apply_input_values(vm: &mut Vm, values: &[u64]) {
-    for (&address, value) in vm.inputs.iter().zip(values) {
-        vm.memory[address] |= *value;
+    for (&address, value) in vm.input_addresses().to_vec().iter().zip(values) {
+        vm.root_memory_mut()[address] |= *value;
     }
 }
 
@@ -1863,7 +1873,15 @@ fn format_instruction(instruction: &Instruction) -> String {
             component,
             inputs,
             outputs,
-        } => format!("CALL {component} {inputs:?} -> {outputs:?}"),
+            ..
+        } => {
+            let component = component
+                .source_hash
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "component".to_owned());
+            format!("CALL {component} {inputs:?} -> {outputs:?}")
+        }
         Instruction::Not { input, output } => format!("NOT m{input} -> m{output}"),
         Instruction::CopyBits {
             input,
@@ -2175,6 +2193,7 @@ fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use logicgame::execution::Component as ExecutionComponent;
     use logicgame::grid::{ComponentSide, ConnectionDirection, ConnectionSlotId};
 
     fn scale(value: u8) -> Scale {
@@ -2308,21 +2327,25 @@ mod tests {
     #[test]
     fn simulation_tracks_the_next_instruction() {
         let mut editor = LogicEditor::default();
-        editor.simulation.vm = Some(Vm {
-            memory: vec![0, 0],
-            storage: vec![7],
-            instructions: vec![
-                Instruction::ReadStorage {
-                    storage: 0,
-                    output: 0,
-                },
-                Instruction::Not {
-                    input: 0,
-                    output: 1,
-                },
-            ],
-            ..Vm::default()
-        });
+        editor.simulation.vm = Some(Vm::from_unlinked_component(std::rc::Rc::new(
+            ExecutionComponent {
+                memory_size: 2,
+                storage_init: vec![7],
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                instructions: vec![
+                    Instruction::ReadStorage {
+                        storage: 0,
+                        output: 0,
+                    },
+                    Instruction::Not {
+                        input: 0,
+                        output: 1,
+                    },
+                ],
+                source_hash: None,
+            },
+        )));
 
         assert!(editor.begin_simulation_tick());
         assert_eq!(editor.simulation.next_instruction, 0);
@@ -2330,13 +2353,19 @@ mod tests {
         assert_eq!(editor.simulation.next_instruction, 1);
         assert_eq!(editor.simulation.steps, 0);
         assert!(editor.simulation.tick_in_progress);
-        assert_eq!(editor.simulation.vm.as_ref().unwrap().memory, vec![7, 0]);
+        assert_eq!(
+            editor.simulation.vm.as_ref().unwrap().root_memory(),
+            &[7, 0]
+        );
 
         editor.execute_next_simulation_instruction();
         assert_eq!(editor.simulation.next_instruction, 2);
         assert_eq!(editor.simulation.steps, 1);
         assert!(!editor.simulation.tick_in_progress);
-        assert_eq!(editor.simulation.vm.as_ref().unwrap().memory, vec![7, !7]);
+        assert_eq!(
+            editor.simulation.vm.as_ref().unwrap().root_memory(),
+            &[7, !7]
+        );
     }
 
     #[test]
