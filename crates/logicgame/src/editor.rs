@@ -564,8 +564,8 @@ impl LogicEditor {
             .vscroll(true)
             .show(context, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Run step").clicked() {
-                        self.run_simulation_step();
+                    if ui.button("Run tick").clicked() {
+                        self.run_simulation_tick();
                     }
                     if ui.button("Step instruction").clicked() {
                         self.run_simulation_instruction();
@@ -842,7 +842,7 @@ impl LogicEditor {
             });
     }
 
-    fn run_simulation_step(&mut self) {
+    fn run_simulation_tick(&mut self) {
         if !self.prepare_simulation() || !self.begin_simulation_tick() {
             return;
         }
@@ -2421,7 +2421,7 @@ mod tests {
             },
         );
 
-        editor.run_simulation_step();
+        editor.run_simulation_tick();
         assert_eq!(editor.simulation.steps, 1);
         assert_eq!(editor.simulation.vm.as_ref().unwrap().storage, vec![1]);
 
@@ -2433,7 +2433,7 @@ mod tests {
                 value: 0,
             },
         );
-        editor.run_simulation_step();
+        editor.run_simulation_tick();
 
         assert_eq!(editor.simulation.steps, 1);
         assert_eq!(editor.simulation.vm.as_ref().unwrap().storage, vec![1, 0]);
@@ -2450,7 +2450,7 @@ mod tests {
                 value: 1,
             },
         );
-        editor.run_simulation_step();
+        editor.run_simulation_tick();
         editor.simulation.vm.as_mut().unwrap().storage[0] = 0;
 
         editor.restart_simulation();
