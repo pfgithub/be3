@@ -491,6 +491,7 @@ impl LogicEditor {
                 ui.small("Esc: cancel");
             });
 
+        self.update_simulation_preview();
         self.show_storage_configuration(&context);
         self.show_simulation(&context);
 
@@ -569,9 +570,6 @@ impl LogicEditor {
                     }
                     if ui.button("Step instruction").clicked() {
                         self.run_simulation_instruction();
-                    }
-                    if ui.button("Restart").clicked() {
-                        self.restart_simulation();
                     }
                 });
 
@@ -858,12 +856,8 @@ impl LogicEditor {
         self.execute_next_simulation_instruction();
     }
 
-    fn restart_simulation(&mut self) {
-        let snapshot = self.simulation_snapshot();
-        self.compile_simulation(snapshot);
-    }
-
     fn compile_simulation(&mut self, snapshot: SimulationSnapshot) {
+        let previous_input_values = self.simulation.input_values.clone();
         match Vm::from_graph(&self.grid, &snapshot.graph).map_err(|error| format!("{error:?}")) {
             Ok(mut vm) => {
                 if let Some(files) = &self.component_files {
@@ -880,9 +874,13 @@ impl LogicEditor {
                         return;
                     }
                 }
+                let mut input_values = vec![0; vm.input_addresses().len()];
+                for (input, value) in input_values.iter_mut().zip(previous_input_values) {
+                    *input = value;
+                }
                 self.simulation = Simulation {
                     snapshot: Some(snapshot),
-                    input_values: vec![0; vm.input_addresses().len()],
+                    input_values,
                     vm: Some(vm),
                     error: None,
                     steps: 0,
@@ -910,6 +908,14 @@ impl LogicEditor {
             self.compile_simulation(snapshot);
         }
         self.simulation.vm.is_some()
+    }
+
+    fn update_simulation_preview(&mut self) {
+        let snapshot = self.simulation_snapshot();
+        if self.simulation.snapshot.as_ref() != Some(&snapshot) {
+            self.compile_simulation(snapshot);
+            self.run_simulation_tick();
+        }
     }
 
     fn begin_simulation_tick(&mut self) -> bool {
@@ -2484,7 +2490,7 @@ mod tests {
     }
 
     #[test]
-    fn restarting_simulation_restores_grid_storage_values() {
+    fn simulation_preview_updates_when_the_grid_changes_without_writing_storage() {
         let mut editor = LogicEditor::default();
         editor.grid.add_component(
             Point::new(0, 0),
@@ -2494,13 +2500,35 @@ mod tests {
                 value: 1,
             },
         );
-        editor.run_simulation_tick();
-        editor.simulation.vm.as_mut().unwrap().storage[0] = 0;
 
-        editor.restart_simulation();
+        editor.update_simulation_preview();
 
-        assert_eq!(editor.simulation.steps, 0);
+        assert_eq!(editor.simulation.steps, 1);
         assert_eq!(editor.simulation.vm.as_ref().unwrap().storage, vec![1]);
+
+        editor.grid.add_component(
+            Point::new(4, 0),
+            Rotation::Up,
+            ComponentKind::Storage {
+                scale: scale(1),
+                value: 0,
+            },
+        );
+        editor.update_simulation_preview();
+
+        assert_eq!(editor.simulation.steps, 1);
+        assert_eq!(editor.simulation.vm.as_ref().unwrap().storage, vec![1, 0]);
+        assert_eq!(
+            editor
+                .grid
+                .components()
+                .filter_map(|component| match component.kind {
+                    ComponentKind::Storage { value, .. } => Some(value),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![1, 0]
+        );
     }
 
     #[test]
