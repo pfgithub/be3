@@ -330,7 +330,7 @@ mod tests {
     };
 
     use logicgame::{
-        execution::UnlinkedInstruction,
+        execution::Instruction,
         grid::{ComponentKind, ComponentSide, Point, Rotation, Scale},
     };
 
@@ -411,7 +411,8 @@ mod tests {
                 storage_init: vec![6, 7],
                 inputs: vec![2],
                 outputs: vec![1],
-                instructions: vec![UnlinkedInstruction::Not {
+                components: Vec::new(),
+                instructions: vec![Instruction::Not {
                     input: 2,
                     output: 1,
                 }],

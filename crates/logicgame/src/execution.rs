@@ -25,36 +25,10 @@ pub enum GenerationError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum UnlinkedInstruction {
-    Call {
-        component: ComponentHash,
-        inputs: Vec<Option<MemoryAddress>>,
-        outputs: Vec<Option<MemoryAddress>>,
-    },
-    Not {
-        input: MemoryAddress,
-        output: MemoryAddress,
-    },
-    CopyBits {
-        input: MemoryAddress,
-        output: MemoryAddress,
-        shift: i8,
-        mask: u64,
-    },
-    ReadStorage {
-        storage: StorageId,
-        output: MemoryAddress,
-    },
-    SaveStorage {
-        storage: StorageId,
-        input: MemoryAddress,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Instruction {
     Call {
-        component: Rc<Component>,
+        component: usize,
+        #[serde(default, skip_serializing)]
         storage_offset: StorageId,
         inputs: Vec<Option<MemoryAddress>>,
         outputs: Vec<Option<MemoryAddress>>,
@@ -83,7 +57,8 @@ pub enum Instruction {
 pub struct UnlinkedComponent {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
-    pub instructions: Vec<UnlinkedInstruction>,
+    pub components: Vec<ComponentHash>,
+    pub instructions: Vec<Instruction>,
     pub memory_size: usize,
     pub storage_init: Vec<u64>,
 }
@@ -92,6 +67,7 @@ pub struct UnlinkedComponent {
 pub struct Component {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
+    pub components: Vec<Rc<Component>>,
     pub instructions: Vec<Instruction>,
     pub memory_size: usize,
     pub storage_init: Vec<u64>,
@@ -120,6 +96,7 @@ impl Default for UnlinkedComponent {
         Self {
             inputs: Vec::new(),
             outputs: Vec::new(),
+            components: Vec::new(),
             instructions: Vec::new(),
             memory_size: 0,
             storage_init: Vec::new(),
@@ -132,6 +109,7 @@ impl Default for Component {
         Self {
             inputs: Vec::new(),
             outputs: Vec::new(),
+            components: Vec::new(),
             instructions: Vec::new(),
             memory_size: 0,
             storage_init: Vec::new(),
@@ -161,6 +139,8 @@ impl Default for Vm {
 
 impl UnlinkedComponent {
     pub fn from_graph(grid: &LogicGrid, graph: &CircuitGraph) -> Result<Self, GenerationError> {
+        let mut components = Vec::new();
+        let mut component_indices = BTreeMap::new();
         let memory_addresses: BTreeMap<_, _> = graph
             .nodes
             .iter()
@@ -253,7 +233,7 @@ impl UnlinkedComponent {
                                 outputs: outputs.to_vec(),
                                 instructions: outputs
                                     .iter()
-                                    .map(|&output| UnlinkedInstruction::Not { input, output })
+                                    .map(|&output| Instruction::Not { input, output })
                                     .collect(),
                             });
                         }
@@ -297,7 +277,7 @@ impl UnlinkedComponent {
                     if input_scale <= output_scale {
                         for &(slot, input) in &input_slots {
                             for &output in &outputs {
-                                instructions.push(UnlinkedInstruction::CopyBits {
+                                instructions.push(Instruction::CopyBits {
                                     input,
                                     output,
                                     shift: (slot * input_scale.get()) as i8,
@@ -307,7 +287,7 @@ impl UnlinkedComponent {
                         }
                     } else if let Some(&(_, input)) = input_slots.first() {
                         for (slot, &output) in outputs.iter().enumerate() {
-                            instructions.push(UnlinkedInstruction::CopyBits {
+                            instructions.push(Instruction::CopyBits {
                                 input,
                                 output,
                                 shift: -(slot as i64 * output_scale.get()) as i8,
@@ -340,7 +320,7 @@ impl UnlinkedComponent {
                             outputs: outputs.to_vec(),
                             instructions: outputs
                                 .iter()
-                                .map(|&output| UnlinkedInstruction::ReadStorage { storage, output })
+                                .map(|&output| Instruction::ReadStorage { storage, output })
                                 .collect(),
                         });
                     }
@@ -361,7 +341,7 @@ impl UnlinkedComponent {
                         operations.push(Operation {
                             inputs: vec![input],
                             outputs: Vec::new(),
-                            instructions: vec![UnlinkedInstruction::SaveStorage { storage, input }],
+                            instructions: vec![Instruction::SaveStorage { storage, input }],
                         });
                     }
                 }
@@ -447,11 +427,19 @@ impl UnlinkedComponent {
                             }
                         }
                     }
+                    let component = *component_indices
+                        .entry(component_hash.clone())
+                        .or_insert_with(|| {
+                            let index = components.len();
+                            components.push(component_hash.clone());
+                            index
+                        });
                     operations.push(Operation {
                         inputs: inputs.iter().flatten().copied().collect(),
                         outputs: outputs.iter().flatten().copied().collect(),
-                        instructions: vec![UnlinkedInstruction::Call {
-                            component: component_hash.clone(),
+                        instructions: vec![Instruction::Call {
+                            component,
+                            storage_offset: 0,
                             inputs,
                             outputs,
                         }],
@@ -504,6 +492,7 @@ impl UnlinkedComponent {
         Ok(Self {
             inputs,
             outputs,
+            components,
             instructions,
             memory_size: memory_addresses.len(),
             storage_init,
@@ -613,14 +602,15 @@ impl Vm {
                 inputs,
                 ..
             } => {
-                if let Some(hash) = component.unresolved_hash() {
+                let child = Rc::clone(&self.pc.component.components[component]);
+                if let Some(hash) = child.unresolved_hash() {
                     panic!("component {hash} is not loaded");
                 }
                 let parent_memory_offset = self.pc.memory_offset;
                 let child_memory_offset = self.memory_stack.len();
                 self.memory_stack
-                    .resize(child_memory_offset + component.memory_size, 0);
-                for (&input, binding) in component.inputs.iter().zip(&inputs) {
+                    .resize(child_memory_offset + child.memory_size, 0);
+                for (&input, binding) in child.inputs.iter().zip(&inputs) {
                     if let Some(address) = binding {
                         let value = self.memory_stack[parent_memory_offset + *address];
                         self.memory_stack[child_memory_offset + input] |= value;
@@ -631,7 +621,7 @@ impl Vm {
                     instruction_index: 0,
                     memory_offset: child_memory_offset,
                     storage_offset: self.pc.storage_offset + storage_offset,
-                    component,
+                    component: child,
                 };
             }
             Instruction::Not { input, output } => {
@@ -679,6 +669,7 @@ impl Vm {
         else {
             unreachable!("return PC must point at a call");
         };
+        let component = &caller.component.components[*component];
         for (&output, binding) in component.outputs.iter().zip(outputs) {
             if let Some(address) = binding {
                 let value = self.memory_stack[self.pc.memory_offset + output];
@@ -737,54 +728,19 @@ impl Component {
         UnlinkedComponent {
             inputs: self.inputs.clone(),
             outputs: self.outputs.clone(),
-            memory_size: self.memory_size,
-            storage_init: self.direct_storage_init().to_vec(),
-            instructions: self
-                .instructions
+            components: self
+                .components
                 .iter()
-                .map(|instruction| match instruction {
-                    Instruction::Call {
-                        component,
-                        inputs,
-                        outputs,
-                        ..
-                    } => UnlinkedInstruction::Call {
-                        component: component
-                            .source_hash
-                            .clone()
-                            .expect("linked components loaded from files keep their source hash"),
-                        inputs: inputs.clone(),
-                        outputs: outputs.clone(),
-                    },
-                    Instruction::Not { input, output } => UnlinkedInstruction::Not {
-                        input: *input,
-                        output: *output,
-                    },
-                    Instruction::CopyBits {
-                        input,
-                        output,
-                        shift,
-                        mask,
-                    } => UnlinkedInstruction::CopyBits {
-                        input: *input,
-                        output: *output,
-                        shift: *shift,
-                        mask: *mask,
-                    },
-                    Instruction::ReadStorage { storage, output } => {
-                        UnlinkedInstruction::ReadStorage {
-                            storage: *storage,
-                            output: *output,
-                        }
-                    }
-                    Instruction::SaveStorage { storage, input } => {
-                        UnlinkedInstruction::SaveStorage {
-                            storage: *storage,
-                            input: *input,
-                        }
-                    }
+                .map(|component| {
+                    component
+                        .source_hash
+                        .clone()
+                        .expect("linked components loaded from files keep their source hash")
                 })
                 .collect(),
+            memory_size: self.memory_size,
+            storage_init: self.direct_storage_init().to_vec(),
+            instructions: self.instructions.clone(),
         }
     }
 
@@ -805,52 +761,27 @@ fn link_unlinked_component<E>(
     load: &mut impl FnMut(&ComponentHash) -> Result<Rc<Component>, E>,
 ) -> Result<Rc<Component>, E> {
     let mut storage_init = component.storage_init.clone();
-    let mut instructions = Vec::with_capacity(component.instructions.len());
-    for instruction in &component.instructions {
-        instructions.push(match instruction {
-            UnlinkedInstruction::Call {
-                component,
-                inputs,
-                outputs,
-            } => {
-                let child = load(component)?;
-                let storage_offset = storage_init.len();
-                storage_init.extend_from_slice(&child.storage_init);
-                Instruction::Call {
-                    component: child,
-                    storage_offset,
-                    inputs: inputs.clone(),
-                    outputs: outputs.clone(),
-                }
-            }
-            UnlinkedInstruction::Not { input, output } => Instruction::Not {
-                input: *input,
-                output: *output,
-            },
-            UnlinkedInstruction::CopyBits {
-                input,
-                output,
-                shift,
-                mask,
-            } => Instruction::CopyBits {
-                input: *input,
-                output: *output,
-                shift: *shift,
-                mask: *mask,
-            },
-            UnlinkedInstruction::ReadStorage { storage, output } => Instruction::ReadStorage {
-                storage: *storage,
-                output: *output,
-            },
-            UnlinkedInstruction::SaveStorage { storage, input } => Instruction::SaveStorage {
-                storage: *storage,
-                input: *input,
-            },
-        });
+    let mut components = Vec::with_capacity(component.components.len());
+    for hash in &component.components {
+        components.push(load(hash)?);
+    }
+    let mut instructions = component.instructions.clone();
+    for instruction in &mut instructions {
+        if let Instruction::Call {
+            component,
+            storage_offset,
+            ..
+        } = instruction
+        {
+            let child = &components[*component];
+            *storage_offset = storage_init.len();
+            storage_init.extend_from_slice(&child.storage_init);
+        }
     }
     Ok(Rc::new(Component {
         inputs: component.inputs.clone(),
         outputs: component.outputs.clone(),
+        components,
         instructions,
         memory_size: component.memory_size,
         storage_init,
@@ -862,7 +793,7 @@ fn link_unlinked_component<E>(
 struct Operation {
     inputs: Vec<MemoryAddress>,
     outputs: Vec<MemoryAddress>,
-    instructions: Vec<UnlinkedInstruction>,
+    instructions: Vec<Instruction>,
 }
 
 fn connection_addresses(
@@ -938,11 +869,30 @@ mod tests {
         outputs: Vec<usize>,
         instructions: Vec<Instruction>,
     ) -> Rc<Component> {
+        component_with_children(
+            memory_size,
+            storage_init,
+            inputs,
+            outputs,
+            Vec::new(),
+            instructions,
+        )
+    }
+
+    fn component_with_children(
+        memory_size: usize,
+        storage_init: Vec<u64>,
+        inputs: Vec<usize>,
+        outputs: Vec<usize>,
+        components: Vec<Rc<Component>>,
+        instructions: Vec<Instruction>,
+    ) -> Rc<Component> {
         Rc::new(Component {
             memory_size,
             storage_init,
             inputs,
             outputs,
+            components,
             instructions,
             source_hash: None,
         })
@@ -1029,13 +979,14 @@ mod tests {
     #[should_panic(expected = "is not loaded")]
     fn unloaded_call_panics() {
         let hash = ComponentHash::new("0".repeat(64)).unwrap();
-        let mut vm = vm_with_root(component(
+        let mut vm = vm_with_root(component_with_children(
             0,
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            vec![Rc::new(Component::unresolved(hash))],
             vec![Instruction::Call {
-                component: Rc::new(Component::unresolved(hash)),
+                component: 0,
                 storage_offset: 0,
                 inputs: vec![],
                 outputs: vec![],
@@ -1048,13 +999,14 @@ mod tests {
     #[test]
     fn call_clears_memory_writes_inputs_and_outputs_through_bindings() {
         let child = component(2, Vec::new(), vec![0], vec![0], Vec::new());
-        let root = component(
+        let root = component_with_children(
             2,
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            vec![child],
             vec![Instruction::Call {
-                component: child,
+                component: 0,
                 storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![Some(1)],
@@ -1079,7 +1031,8 @@ mod tests {
             storage_init: vec![0],
             inputs: vec![0],
             outputs: Vec::new(),
-            instructions: vec![UnlinkedInstruction::SaveStorage {
+            components: Vec::new(),
+            instructions: vec![Instruction::SaveStorage {
                 storage: 0,
                 input: 0,
             }],
@@ -1089,14 +1042,17 @@ mod tests {
             storage_init: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            components: vec![hash.clone()],
             instructions: vec![
-                UnlinkedInstruction::Call {
-                    component: hash.clone(),
+                Instruction::Call {
+                    component: 0,
+                    storage_offset: 0,
                     inputs: vec![Some(0)],
                     outputs: vec![],
                 },
-                UnlinkedInstruction::Call {
-                    component: hash.clone(),
+                Instruction::Call {
+                    component: 0,
+                    storage_offset: 0,
                     inputs: vec![Some(1)],
                     outputs: vec![],
                 },
@@ -1122,15 +1078,7 @@ mod tests {
                 )
             })
             .unwrap();
-        let [Instruction::Call {
-            component: first, ..
-        }, Instruction::Call {
-            component: second, ..
-        }] = root.instructions.as_slice()
-        else {
-            panic!("expected two calls");
-        };
-        assert!(Rc::ptr_eq(first, second));
+        assert_eq!(root.components.len(), 1);
 
         let mut vm = vm_with_root(root);
         vm.memory_stack.copy_from_slice(&[1, 2]);
@@ -1147,7 +1095,8 @@ mod tests {
             storage_init: vec![8],
             inputs: vec![0],
             outputs: Vec::new(),
-            instructions: vec![UnlinkedInstruction::SaveStorage {
+            components: Vec::new(),
+            instructions: vec![Instruction::SaveStorage {
                 storage: 0,
                 input: 0,
             }],
@@ -1157,8 +1106,10 @@ mod tests {
             storage_init: Vec::new(),
             inputs: vec![0],
             outputs: Vec::new(),
-            instructions: vec![UnlinkedInstruction::Call {
-                component: leaf_hash.clone(),
+            components: vec![leaf_hash.clone()],
+            instructions: vec![Instruction::Call {
+                component: 0,
+                storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![],
             }],
@@ -1169,13 +1120,14 @@ mod tests {
                 leaf.link_with_hash(hash.clone(), |_| panic!("leaf has no child components"))
             })
             .unwrap();
-        let root = component(
+        let root = component_with_children(
             1,
             middle.storage_init.clone(),
             Vec::new(),
             Vec::new(),
+            vec![middle],
             vec![Instruction::Call {
-                component: middle,
+                component: 0,
                 storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![],
@@ -1215,19 +1167,19 @@ mod tests {
         assert_eq!(
             component.instructions,
             vec![
-                UnlinkedInstruction::ReadStorage {
+                Instruction::ReadStorage {
                     storage: 0,
                     output: 0,
                 },
-                UnlinkedInstruction::Not {
+                Instruction::Not {
                     input: 0,
                     output: 1,
                 },
-                UnlinkedInstruction::Not {
+                Instruction::Not {
                     input: 1,
                     output: 2,
                 },
-                UnlinkedInstruction::SaveStorage {
+                Instruction::SaveStorage {
                     storage: 1,
                     input: 2,
                 },
@@ -1381,10 +1333,12 @@ mod tests {
 
         let component = UnlinkedComponent::from_graph(&grid, &graph).unwrap();
 
+        assert_eq!(component.components, vec![component_hash]);
         assert_eq!(
             component.instructions,
-            vec![UnlinkedInstruction::Call {
-                component: component_hash,
+            vec![Instruction::Call {
+                component: 0,
+                storage_offset: 0,
                 inputs: vec![None, Some(0)],
                 outputs: vec![None, None, Some(1)],
             }]

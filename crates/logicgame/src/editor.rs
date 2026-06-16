@@ -696,11 +696,17 @@ impl LogicEditor {
                                         .monospace(),
                                     );
                                     if let Instruction::Call { component, .. } = instruction {
-                                        if ui.small_button("target").clicked() {
-                                            self.simulation.instruction_selection =
-                                                SimulationInstructionSelection::Component(
-                                                    Rc::clone(component),
-                                                );
+                                        if let Some(component) =
+                                            instruction_view.component.components.get(*component)
+                                        {
+                                            if ui.small_button("target").clicked() {
+                                                self.simulation.instruction_selection =
+                                                    SimulationInstructionSelection::Component(
+                                                        Rc::clone(component),
+                                                    );
+                                            }
+                                        } else {
+                                            ui.add_enabled(false, egui::Button::new("target"));
                                         }
                                     }
                                     response
@@ -717,9 +723,15 @@ impl LogicEditor {
                 if vm.input_addresses().is_empty() {
                     ui.weak("No input components");
                 } else {
-                    for input in 0..vm.input_addresses().len() {
-                        let address = vm.input_addresses()[input];
-                        let value = &mut self.simulation.input_values[input];
+                    let input_addresses = vm.input_addresses().to_vec();
+                    for (input, address) in input_addresses.into_iter().enumerate() {
+                        let Some(value) = self.simulation.input_values.get_mut(input) else {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Input {input}"));
+                                ui.weak("deleted");
+                            });
+                            continue;
+                        };
                         let scale =
                             snapshot
                                 .components
@@ -733,6 +745,10 @@ impl LogicEditor {
                         ui.horizontal(|ui| {
                             ui.label(format!("Input {input}"));
                             if let Some(scale) = scale {
+                                if address >= vm.root_component.memory_size {
+                                    ui.weak("deleted");
+                                    return;
+                                }
                                 for bit in storage_bit_indices(scale) {
                                     let state = (*value >> bit) & 1;
                                     if ui.small_button(format!("{bit}:{state}")).clicked() {
@@ -757,11 +773,14 @@ impl LogicEditor {
                             matches!(component.kind, ComponentKind::Output { id, .. } if id.0 == output)
                         });
                         if exists {
-                            simulation_value_row(
-                                ui,
-                                format!("Output {output}"),
-                                vm.root_memory()[address],
-                            );
+                            if let Some(&value) = vm.root_memory().get(address) {
+                                simulation_value_row(ui, format!("Output {output}"), value);
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("Output {output}"));
+                                    ui.weak("deleted");
+                                });
+                            }
                         } else {
                             ui.horizontal(|ui| {
                                 ui.label(format!("Output {output}"));
@@ -1998,14 +2017,7 @@ fn format_instruction(instruction: &Instruction) -> String {
             inputs,
             outputs,
             ..
-        } => {
-            let component = component
-                .source_hash
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| "component".to_owned());
-            format!("CALL {component} {inputs:?} -> {outputs:?}")
-        }
+        } => format!("CALL c{component} {inputs:?} -> {outputs:?}"),
         Instruction::Not { input, output } => format!("NOT m{input} -> m{output}"),
         Instruction::CopyBits {
             input,
@@ -2456,6 +2468,7 @@ mod tests {
                 storage_init: vec![7],
                 inputs: Vec::new(),
                 outputs: Vec::new(),
+                components: Vec::new(),
                 instructions: vec![
                     Instruction::ReadStorage {
                         storage: 0,
@@ -2522,6 +2535,7 @@ mod tests {
             storage_init: Vec::new(),
             inputs: vec![0],
             outputs: vec![1],
+            components: Vec::new(),
             instructions: vec![Instruction::Not {
                 input: 0,
                 output: 1,
@@ -2533,8 +2547,9 @@ mod tests {
             storage_init: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            components: vec![Rc::clone(&child)],
             instructions: vec![Instruction::Call {
-                component: Rc::clone(&child),
+                component: 0,
                 storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![Some(1)],
