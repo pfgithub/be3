@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::{
     value_mask, CircuitGraph, ComponentHash, ComponentId, ComponentKind, ConnectionDirection,
-    ConnectionSlotId, GraphNode, GraphNodeId, InputId, LogicGrid, OutputId,
+    ConnectionSlotId, GraphNode, GraphNodeId, LogicGrid,
 };
 
 pub type MemoryAddress = usize;
@@ -26,7 +26,7 @@ pub enum Instruction {
     Call {
         component: ComponentHash,
         inputs: Vec<Option<MemoryAddress>>,
-        outputs: Vec<Vec<MemoryAddress>>,
+        outputs: Vec<Option<MemoryAddress>>,
     },
     Not {
         input: MemoryAddress,
@@ -46,24 +46,14 @@ pub enum Instruction {
         storage: StorageId,
         input: MemoryAddress,
     },
-    ReadInput {
-        input: InputId,
-        output: MemoryAddress,
-        mask: u64,
-    },
-    WriteOutput {
-        output: OutputId,
-        input: MemoryAddress,
-        mask: u64,
-    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Vm {
     pub memory: Vec<u64>,
     pub storage: Vec<u64>,
-    pub inputs: Vec<u64>,
-    pub outputs: Vec<u64>,
+    pub inputs: Vec<MemoryAddress>,
+    pub outputs: Vec<MemoryAddress>,
     pub instructions: Vec<Instruction>,
     #[serde(skip)]
     pub components: Vec<Option<Component>>,
@@ -73,8 +63,8 @@ pub struct Vm {
 pub struct Component {
     pub memory: Vec<u64>,
     pub storage: Vec<StorageId>,
-    pub inputs: Vec<u64>,
-    pub outputs: Vec<u64>,
+    pub inputs: Vec<MemoryAddress>,
+    pub outputs: Vec<MemoryAddress>,
     pub instructions: Vec<Instruction>,
     pub components: Vec<Option<Component>>,
 }
@@ -130,16 +120,16 @@ impl Vm {
 
         let mut storage_ids = BTreeMap::new();
         let mut storage = Vec::new();
-        let mut input_count = 0;
-        let mut output_count = 0;
+        let mut inputs = Vec::<MemoryAddress>::new();
+        let mut outputs = Vec::<MemoryAddress>::new();
         for component in grid.components() {
             match &component.kind {
                 ComponentKind::Storage { value, .. } => {
                     storage_ids.insert(component.id, storage.len());
                     storage.push(*value);
                 }
-                ComponentKind::Input { id, .. } => input_count = input_count.max(id.0 + 1),
-                ComponentKind::Output { id, .. } => output_count = output_count.max(id.0 + 1),
+                ComponentKind::Input { id, .. } => inputs.resize(id.0 + 1, 0),
+                ComponentKind::Output { id, .. } => outputs.resize_with(id.0 + 1, Default::default),
                 _ => {}
             }
         }
@@ -285,51 +275,38 @@ impl Vm {
                         });
                     }
                 }
-                ComponentKind::Input { scale, id } => {
-                    let outputs = connection_addresses(
+                ComponentKind::Input { id, .. } => {
+                    let addresses = connection_addresses(
                         &connections,
                         component.id,
                         ConnectionDirection::Output,
                         ConnectionSlotId(0),
                     );
-                    if !outputs.is_empty() {
-                        operations.push(Operation {
-                            inputs: Vec::new(),
-                            outputs: outputs.to_vec(),
-                            instructions: outputs
-                                .iter()
-                                .map(|&output| Instruction::ReadInput {
-                                    input: *id,
-                                    output,
-                                    mask: value_mask(*scale),
-                                })
-                                .collect(),
-                        });
-                    }
-                }
-                ComponentKind::Output { scale, id } => {
-                    let inputs = connection_addresses(
-                        &connections,
-                        component.id,
-                        ConnectionDirection::Input,
-                        ConnectionSlotId(0),
-                    );
-                    if inputs.len() > 1 {
+                    if addresses.len() > 1 {
                         return Err(GenerationError::AmbiguousInput {
                             component: component.id,
                             slot: ConnectionSlotId(0),
                         });
                     }
-                    if let Some(&input) = inputs.first() {
-                        operations.push(Operation {
-                            inputs: vec![input],
-                            outputs: Vec::new(),
-                            instructions: vec![Instruction::WriteOutput {
-                                output: *id,
-                                input,
-                                mask: value_mask(*scale),
-                            }],
+                    if let Some(&address) = addresses.first() {
+                        inputs[id.0] = address;
+                    }
+                }
+                ComponentKind::Output { id, .. } => {
+                    let addresses = connection_addresses(
+                        &connections,
+                        component.id,
+                        ConnectionDirection::Input,
+                        ConnectionSlotId(0),
+                    );
+                    if addresses.len() > 1 {
+                        return Err(GenerationError::AmbiguousInput {
+                            component: component.id,
+                            slot: ConnectionSlotId(0),
                         });
+                    }
+                    if let Some(&address) = addresses.first() {
+                        outputs[id.0] = address;
                     }
                 }
                 ComponentKind::Led => {}
@@ -351,7 +328,7 @@ impl Vm {
                         .max()
                         .unwrap_or(0);
                     let mut inputs = vec![None; input_count];
-                    let mut outputs = vec![Vec::new(); output_count];
+                    let mut outputs = vec![None; output_count];
                     for (slot, port) in ports.iter().enumerate() {
                         let addresses = connection_addresses(
                             &connections,
@@ -370,7 +347,13 @@ impl Vm {
                                 inputs[port.index] = addresses.first().copied();
                             }
                             ConnectionDirection::Output => {
-                                outputs[port.index].extend_from_slice(addresses);
+                                if addresses.len() > 1 {
+                                    return Err(GenerationError::AmbiguousInput {
+                                        component: component.id,
+                                        slot: ConnectionSlotId(slot as u16),
+                                    });
+                                }
+                                outputs[port.index] = addresses.first().copied();
                             }
                         }
                     }
@@ -431,8 +414,8 @@ impl Vm {
         Ok(Self {
             memory: vec![0; memory_addresses.len()],
             storage,
-            inputs: vec![0; input_count],
-            outputs: vec![0; output_count],
+            inputs,
+            outputs,
             instructions,
             components: Vec::new(),
         })
@@ -449,7 +432,6 @@ impl Vm {
 
     pub fn begin_tick(&mut self) {
         self.memory.fill(0);
-        self.outputs.fill(0);
     }
 
     pub fn execute(&mut self) {
@@ -494,20 +476,6 @@ impl Vm {
             Instruction::SaveStorage { storage, input } => {
                 self.storage[storage] = self.memory[input];
             }
-            Instruction::ReadInput {
-                input,
-                output,
-                mask,
-            } => {
-                self.memory[output] |= self.inputs[input.0] & mask;
-            }
-            Instruction::WriteOutput {
-                output,
-                input,
-                mask,
-            } => {
-                self.outputs[output.0] = self.memory[input] & mask;
-            }
         }
     }
 }
@@ -537,24 +505,22 @@ impl Component {
         root_storage: &mut [u64],
         parent_memory: &mut [u64],
         input_bindings: &[Option<MemoryAddress>],
-        output_bindings: &[Vec<MemoryAddress>],
+        output_bindings: &[Option<MemoryAddress>],
     ) {
         self.memory.fill(0);
-        self.inputs.fill(0);
-        for (input, binding) in self.inputs.iter_mut().zip(input_bindings) {
+        for (&input, binding) in self.inputs.iter().zip(input_bindings) {
             if let Some(address) = binding {
-                *input = parent_memory[*address];
+                self.memory[input] |= parent_memory[*address];
             }
         }
-        self.outputs.fill(0);
 
         for instruction in 0..self.instructions.len() {
             self.execute_instruction(instruction, root_storage);
         }
 
-        for (output, bindings) in self.outputs.iter().zip(output_bindings) {
-            for &address in bindings {
-                parent_memory[address] |= *output;
+        for (&output, binding) in self.outputs.iter().zip(output_bindings) {
+            if let Some(address) = binding {
+                parent_memory[*address] |= self.memory[output];
             }
         }
     }
@@ -594,20 +560,6 @@ impl Component {
             }
             Instruction::SaveStorage { storage, input } => {
                 root_storage[self.storage[storage]] = self.memory[input];
-            }
-            Instruction::ReadInput {
-                input,
-                output,
-                mask,
-            } => {
-                self.memory[output] |= self.inputs[input.0] & mask;
-            }
-            Instruction::WriteOutput {
-                output,
-                input,
-                mask,
-            } => {
-                self.outputs[output.0] = self.memory[input] & mask;
             }
         }
     }
@@ -839,34 +791,22 @@ mod tests {
     }
 
     #[test]
-    fn call_clears_memory_writes_inputs_and_clears_outputs() {
+    fn call_clears_memory_writes_inputs_and_outputs_through_bindings() {
         let hash = ComponentHash::new("1".repeat(64)).unwrap();
         let mut vm = Vm {
             memory: vec![5, 0],
             instructions: vec![Instruction::Call {
                 component: hash,
                 inputs: vec![Some(0)],
-                outputs: vec![vec![1]],
+                outputs: vec![Some(1)],
             }],
             ..Vm::default()
         };
         vm.load_components(|_| {
             Ok::<_, ()>(Vm {
                 memory: vec![u64::MAX, u64::MAX],
-                inputs: vec![u64::MAX],
-                outputs: vec![u64::MAX],
-                instructions: vec![
-                    Instruction::ReadInput {
-                        input: InputId(0),
-                        output: 0,
-                        mask: u64::MAX,
-                    },
-                    Instruction::WriteOutput {
-                        output: OutputId(0),
-                        input: 0,
-                        mask: u64::MAX,
-                    },
-                ],
+                inputs: vec![0],
+                outputs: vec![0],
                 ..Vm::default()
             })
         })
@@ -880,8 +820,6 @@ mod tests {
         assert_eq!(vm.memory, vec![0, 0]);
         let component = vm.components[0].as_ref().unwrap();
         assert_eq!(component.memory, vec![0, 0]);
-        assert_eq!(component.inputs, vec![0]);
-        assert_eq!(component.outputs, vec![0]);
     }
 
     #[test]
@@ -893,7 +831,7 @@ mod tests {
             instructions: vec![Instruction::Call {
                 component: hash,
                 inputs: vec![Some(0)],
-                outputs: vec![vec![1]],
+                outputs: vec![Some(1)],
             }],
             ..Vm::default()
         };
@@ -901,22 +839,12 @@ mod tests {
             Ok::<_, ()>(Vm {
                 memory: vec![0, 0],
                 storage: vec![3],
-                inputs: vec![0],
+                inputs: vec![1],
                 outputs: vec![0],
                 instructions: vec![
                     Instruction::ReadStorage {
                         storage: 0,
                         output: 0,
-                    },
-                    Instruction::WriteOutput {
-                        output: OutputId(0),
-                        input: 0,
-                        mask: u64::MAX,
-                    },
-                    Instruction::ReadInput {
-                        input: InputId(0),
-                        output: 1,
-                        mask: u64::MAX,
                     },
                     Instruction::SaveStorage {
                         storage: 0,
@@ -965,17 +893,10 @@ mod tests {
                 memory: vec![0],
                 storage: vec![0],
                 inputs: vec![0],
-                instructions: vec![
-                    Instruction::ReadInput {
-                        input: InputId(0),
-                        output: 0,
-                        mask: u64::MAX,
-                    },
-                    Instruction::SaveStorage {
-                        storage: 0,
-                        input: 0,
-                    },
-                ],
+                instructions: vec![Instruction::SaveStorage {
+                    storage: 0,
+                    input: 0,
+                }],
                 ..Vm::default()
             })
         })
@@ -1006,18 +927,11 @@ mod tests {
                 Ok::<_, ()>(Vm {
                     memory: vec![0],
                     inputs: vec![0],
-                    instructions: vec![
-                        Instruction::ReadInput {
-                            input: InputId(0),
-                            output: 0,
-                            mask: u64::MAX,
-                        },
-                        Instruction::Call {
-                            component: leaf_hash.clone(),
-                            inputs: vec![Some(0)],
-                            outputs: vec![],
-                        },
-                    ],
+                    instructions: vec![Instruction::Call {
+                        component: leaf_hash.clone(),
+                        inputs: vec![Some(0)],
+                        outputs: vec![],
+                    }],
                     ..Vm::default()
                 })
             } else {
@@ -1025,17 +939,10 @@ mod tests {
                     memory: vec![0],
                     storage: vec![8],
                     inputs: vec![0],
-                    instructions: vec![
-                        Instruction::ReadInput {
-                            input: InputId(0),
-                            output: 0,
-                            mask: u64::MAX,
-                        },
-                        Instruction::SaveStorage {
-                            storage: 0,
-                            input: 0,
-                        },
-                    ],
+                    instructions: vec![Instruction::SaveStorage {
+                        storage: 0,
+                        input: 0,
+                    }],
                     ..Vm::default()
                 })
             }
@@ -1047,7 +954,7 @@ mod tests {
         assert_eq!(vm.storage, vec![13]);
         let middle = vm.components[0].as_ref().unwrap();
         assert!(middle.storage.is_empty());
-        assert_eq!(middle.components[1].as_ref().unwrap().storage, vec![0]);
+        assert_eq!(middle.components[0].as_ref().unwrap().storage, vec![0]);
     }
 
     #[test]
@@ -1166,7 +1073,7 @@ mod tests {
     }
 
     #[test]
-    fn inputs_and_outputs_execute_in_dependency_order() {
+    fn inputs_and_outputs_compile_to_memory_bindings() {
         let mut grid = LogicGrid::new();
         let removed_input = grid.add_component(
             Point::new(0, 0),
@@ -1213,34 +1120,64 @@ mod tests {
         let mut vm = Vm::from_graph(&grid, &graph).unwrap();
         assert_eq!(vm.inputs, vec![0, 0]);
         assert_eq!(vm.outputs, vec![0, 0]);
-        assert!(matches!(
-            vm.instructions.as_slice(),
-            [
-                Instruction::ReadInput {
-                    input: InputId(1),
-                    output: 0,
-                    ..
-                },
-                Instruction::WriteOutput {
-                    output: OutputId(1),
-                    input: 0,
-                    ..
-                }
-            ]
-        ));
+        assert!(vm.instructions.is_empty());
 
-        vm.inputs[1] = 0xff;
         vm.begin_tick();
+        vm.memory[vm.inputs[1]] |= 0xff;
         vm.execute();
-        assert_eq!(vm.memory, vec![0x0f]);
-        assert_eq!(vm.outputs, vec![0, 0x0f]);
+        assert_eq!(vm.memory, vec![0xff]);
+        assert_eq!(vm.memory[vm.outputs[1]], 0xff);
 
         vm.memory[0] = u64::MAX;
-        vm.outputs[1] = u64::MAX;
         vm.begin_tick();
-        assert_eq!(vm.inputs[1], 0xff);
         assert_eq!(vm.memory, vec![0]);
-        assert_eq!(vm.outputs, vec![0, 0]);
+        assert_eq!(vm.memory[vm.outputs[1]], 0);
+    }
+
+    #[test]
+    fn input_component_rejects_multiple_wire_nets_on_one_slot() {
+        let mut grid = LogicGrid::new();
+        let input = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(0),
+            },
+        );
+        let graph = CircuitGraph {
+            nodes: vec![
+                GraphNode::WireNet { wires: Vec::new() },
+                GraphNode::WireNet { wires: Vec::new() },
+                GraphNode::Connection {
+                    component: input,
+                    slot: ConnectionSlotId(0),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Top,
+                    start: 0,
+                    end: 1,
+                    scale: Scale::ONE,
+                },
+            ],
+            edges: vec![
+                GraphEdge {
+                    first: GraphNodeId(0),
+                    second: GraphNodeId(2),
+                },
+                GraphEdge {
+                    first: GraphNodeId(1),
+                    second: GraphNodeId(2),
+                },
+            ],
+        };
+
+        assert_eq!(
+            Vm::from_graph(&grid, &graph),
+            Err(GenerationError::AmbiguousInput {
+                component: input,
+                slot: ConnectionSlotId(0),
+            })
+        );
     }
 
     #[test]
@@ -1330,7 +1267,7 @@ mod tests {
     }
 
     #[test]
-    fn subcomponents_compile_sparse_bindings_and_output_fanout() {
+    fn subcomponents_compile_sparse_bindings() {
         let mut grid = LogicGrid::new();
         let component_hash = ComponentHash::new("a".repeat(64)).unwrap();
         let subcomponent = grid.add_component(
@@ -1348,7 +1285,6 @@ mod tests {
         );
         let graph = CircuitGraph {
             nodes: vec![
-                GraphNode::WireNet { wires: Vec::new() },
                 GraphNode::WireNet { wires: Vec::new() },
                 GraphNode::WireNet { wires: Vec::new() },
                 GraphNode::Connection {
@@ -1373,15 +1309,11 @@ mod tests {
             edges: vec![
                 GraphEdge {
                     first: GraphNodeId(0),
-                    second: GraphNodeId(3),
+                    second: GraphNodeId(2),
                 },
                 GraphEdge {
                     first: GraphNodeId(1),
-                    second: GraphNodeId(4),
-                },
-                GraphEdge {
-                    first: GraphNodeId(2),
-                    second: GraphNodeId(4),
+                    second: GraphNodeId(3),
                 },
             ],
         };
@@ -1393,7 +1325,7 @@ mod tests {
             vec![Instruction::Call {
                 component: component_hash,
                 inputs: vec![None, Some(0)],
-                outputs: vec![vec![], vec![], vec![1, 2]],
+                outputs: vec![None, None, Some(1)],
             }]
         );
     }

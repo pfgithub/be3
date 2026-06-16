@@ -83,8 +83,8 @@ mod compiled_vm {
     struct SerializedVm<'a> {
         memory: usize,
         storage: &'a [u64],
-        inputs: usize,
-        outputs: usize,
+        inputs: &'a [usize],
+        outputs: &'a [usize],
         instructions: &'a [Instruction],
     }
 
@@ -92,8 +92,8 @@ mod compiled_vm {
     struct DeserializedVm {
         memory: usize,
         storage: Vec<u64>,
-        inputs: usize,
-        outputs: usize,
+        inputs: Vec<usize>,
+        outputs: Vec<usize>,
         instructions: Vec<Instruction>,
     }
 
@@ -104,8 +104,8 @@ mod compiled_vm {
         SerializedVm {
             memory: vm.memory.len(),
             storage: &vm.storage,
-            inputs: vm.inputs.len(),
-            outputs: vm.outputs.len(),
+            inputs: &vm.inputs,
+            outputs: &vm.outputs,
             instructions: &vm.instructions,
         }
         .serialize(serializer)
@@ -119,8 +119,8 @@ mod compiled_vm {
         Ok(Vm {
             memory: vec![0; vm.memory],
             storage: vm.storage,
-            inputs: vec![0; vm.inputs],
-            outputs: vec![0; vm.outputs],
+            inputs: vm.inputs,
+            outputs: vm.outputs,
             instructions: vm.instructions,
             components: Vec::new(),
         })
@@ -361,10 +361,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use logicgame::{
-        execution::Instruction,
-        grid::{ComponentKind, ComponentSide, InputId, Point, Rotation, Scale},
-    };
+    use logicgame::grid::{ComponentKind, ComponentSide, Point, Rotation, Scale};
 
     use super::*;
 
@@ -435,19 +432,15 @@ mod tests {
     }
 
     #[test]
-    fn compiled_vm_serializes_runtime_buffers_as_lengths() {
+    fn compiled_vm_serializes_io_bindings() {
         let compiled = CompiledComponent {
             snapshot: LogicGrid::new().snapshot(),
             vm: Vm {
                 memory: vec![3, 4, 5],
                 storage: vec![6, 7],
-                inputs: vec![8],
-                outputs: vec![9, 10],
-                instructions: vec![Instruction::ReadInput {
-                    input: InputId(0),
-                    output: 2,
-                    mask: 0xff,
-                }],
+                inputs: vec![2],
+                outputs: vec![1],
+                instructions: Vec::new(),
                 components: Vec::new(),
             },
         };
@@ -455,16 +448,16 @@ mod tests {
         let json = serde_json::to_value(&compiled).unwrap();
         assert_eq!(json["vm"]["memory"], 3);
         assert_eq!(json["vm"]["storage"], serde_json::json!([6, 7]));
-        assert_eq!(json["vm"]["inputs"], 1);
-        assert_eq!(json["vm"]["outputs"], 2);
+        assert_eq!(json["vm"]["inputs"], serde_json::json!([2]));
+        assert_eq!(json["vm"]["outputs"], serde_json::json!([1]));
         assert!(json["vm"]["instructions"].is_array());
 
         let decoded: CompiledComponent = serde_json::from_value(json).unwrap();
         assert_eq!(decoded.snapshot, compiled.snapshot);
         assert_eq!(decoded.vm.memory, vec![0; 3]);
         assert_eq!(decoded.vm.storage, compiled.vm.storage);
-        assert_eq!(decoded.vm.inputs, vec![0; 1]);
-        assert_eq!(decoded.vm.outputs, vec![0; 2]);
+        assert_eq!(decoded.vm.inputs, compiled.vm.inputs);
+        assert_eq!(decoded.vm.outputs, compiled.vm.outputs);
         assert_eq!(decoded.vm.instructions, compiled.vm.instructions);
     }
 

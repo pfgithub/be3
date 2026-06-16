@@ -208,6 +208,7 @@ struct Simulation {
     snapshot: Option<SimulationSnapshot>,
     vm: Option<Vm>,
     error: Option<String>,
+    input_values: Vec<u64>,
     steps: u64,
     next_instruction: usize,
     tick_in_progress: bool,
@@ -634,7 +635,9 @@ impl LogicEditor {
                 if vm.inputs.is_empty() {
                     ui.weak("No input components");
                 } else {
-                    for (input, value) in vm.inputs.iter_mut().enumerate() {
+                    for input in 0..vm.inputs.len() {
+                        let address = vm.inputs[input];
+                        let value = &mut self.simulation.input_values[input];
                         let scale =
                             snapshot
                                 .components
@@ -652,6 +655,7 @@ impl LogicEditor {
                                     let state = (*value >> bit) & 1;
                                     if ui.small_button(format!("{bit}:{state}")).clicked() {
                                         *value ^= 1_u64 << bit;
+                                        vm.memory[address] |= *value;
                                     }
                                 }
                             } else {
@@ -666,8 +670,18 @@ impl LogicEditor {
                 if vm.outputs.is_empty() {
                     ui.weak("No output components");
                 } else {
-                    for (output, value) in vm.outputs.iter().copied().enumerate() {
-                        simulation_value_row(ui, format!("Output {output}"), value);
+                    for (output, &address) in vm.outputs.iter().enumerate() {
+                        let exists = snapshot.components.iter().any(|component| {
+                            matches!(component.kind, ComponentKind::Output { id, .. } if id.0 == output)
+                        });
+                        if exists {
+                            simulation_value_row(ui, format!("Output {output}"), vm.memory[address]);
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Output {output}"));
+                                ui.weak("deleted");
+                            });
+                        }
                     }
                 }
 
@@ -753,6 +767,7 @@ impl LogicEditor {
                             snapshot: Some(snapshot),
                             vm: None,
                             error: Some(error.to_string()),
+                            input_values: Vec::new(),
                             steps: 0,
                             next_instruction: 0,
                             tick_in_progress: false,
@@ -762,6 +777,7 @@ impl LogicEditor {
                 }
                 self.simulation = Simulation {
                     snapshot: Some(snapshot),
+                    input_values: vec![0; vm.inputs.len()],
                     vm: Some(vm),
                     error: None,
                     steps: 0,
@@ -774,6 +790,7 @@ impl LogicEditor {
                     snapshot: Some(snapshot),
                     vm: None,
                     error: Some(error),
+                    input_values: Vec::new(),
                     steps: 0,
                     next_instruction: 0,
                     tick_in_progress: false,
@@ -798,6 +815,7 @@ impl LogicEditor {
             return false;
         };
         vm.begin_tick();
+        apply_input_values(vm, &self.simulation.input_values);
         self.simulation.next_instruction = 0;
         if vm.instructions.is_empty() {
             self.simulation.steps += 1;
@@ -1833,6 +1851,12 @@ fn simulation_value_row(ui: &mut egui::Ui, label: String, value: u64) {
     });
 }
 
+fn apply_input_values(vm: &mut Vm, values: &[u64]) {
+    for (&address, value) in vm.inputs.iter().zip(values) {
+        vm.memory[address] |= *value;
+    }
+}
+
 fn format_instruction(instruction: &Instruction) -> String {
     match instruction {
         Instruction::Call {
@@ -1852,12 +1876,6 @@ fn format_instruction(instruction: &Instruction) -> String {
         }
         Instruction::SaveStorage { storage, input } => {
             format!("SAVE m{input} -> s{storage}")
-        }
-        Instruction::ReadInput { input, output, .. } => {
-            format!("INPUT i{} -> m{output}", input.0)
-        }
-        Instruction::WriteOutput { output, input, .. } => {
-            format!("OUTPUT m{input} -> o{}", output.0)
         }
     }
 }
