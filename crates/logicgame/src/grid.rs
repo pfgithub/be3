@@ -772,6 +772,46 @@ impl LogicGrid {
         id
     }
 
+    pub fn add_component_with_explicit_io(
+        &mut self,
+        position: Point,
+        rotation: Rotation,
+        mut kind: ComponentKind,
+    ) -> ComponentId {
+        match &mut kind {
+            ComponentKind::Storage { scale, value } => {
+                *value &= value_mask(*scale);
+            }
+            ComponentKind::Input { id, .. } => {
+                self.next_input_id = self
+                    .next_input_id
+                    .max(id.0.checked_add(1).expect("input ID space exhausted"));
+            }
+            ComponentKind::Output { id, .. } => {
+                self.next_output_id = self
+                    .next_output_id
+                    .max(id.0.checked_add(1).expect("output ID space exhausted"));
+            }
+            _ => {}
+        }
+        let id = ComponentId(self.next_component_id);
+        self.next_component_id = self
+            .next_component_id
+            .checked_add(1)
+            .expect("component ID space exhausted");
+        self.components.insert(
+            id,
+            Component {
+                id,
+                position,
+                rotation,
+                kind,
+            },
+        );
+        self.mark_changed();
+        id
+    }
+
     pub fn remove_component(&mut self, id: ComponentId) -> Option<Component> {
         let removed = self.components.remove(&id);
         if removed.is_some() {

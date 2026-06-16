@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use component_files::{ComponentFileDrag, ComponentFiles};
 use editor::LogicEditor;
 use eframe::egui;
+use logicgame::challenges;
 use renderer::GridRenderer;
 
 const APP_ID: &str = "Logic Game";
@@ -95,12 +96,22 @@ impl LogicGame {
 
     fn show_components(&mut self, context: &egui::Context) {
         let mut requested_component = None;
+        let mut requested_challenge = None;
         egui::Window::new("Components")
             .default_pos([700.0, 16.0])
             .default_width(220.0)
             .hscroll(true)
             .vscroll(true)
             .show(context, |ui| {
+                ui.strong("Challenges");
+                for challenge in challenges::CHALLENGES {
+                    let active = self.editor.active_challenge_id() == Some(challenge.id);
+                    if ui.selectable_label(active, challenge.name).clicked() {
+                        requested_challenge = Some(challenge.id);
+                    }
+                }
+                ui.separator();
+                ui.strong("Components");
                 if ui
                     .add_enabled(self.component_files.is_some(), egui::Button::new("New"))
                     .clicked()
@@ -140,6 +151,9 @@ impl LogicGame {
 
         if let Some(name) = requested_component {
             self.open_component(&name);
+        }
+        if let Some(id) = requested_challenge {
+            self.open_challenge(id);
         }
     }
 
@@ -221,6 +235,18 @@ impl LogicGame {
         }
     }
 
+    fn open_challenge(&mut self, id: challenges::ChallengeId) {
+        if self.editor.active_challenge_id() == Some(id) || !self.force_save() {
+            return;
+        }
+        self.editor.start_challenge(id);
+        self.active_component = None;
+        self.observed_revision = self.editor.grid().revision();
+        self.saved_revision = self.editor.grid().revision();
+        self.save_due = None;
+        self.persistence_error = None;
+    }
+
     fn observe_changes(&mut self) {
         let revision = self.editor.grid().revision();
         if self.active_component.is_some() && revision != self.observed_revision {
@@ -266,6 +292,11 @@ impl LogicGame {
     }
 
     fn drop_component_file(&mut self, name: &str, position: logicgame::grid::Point) {
+        if self.editor.active_challenge_id().is_some() {
+            self.persistence_error =
+                Some("Subcomponents are not available in challenges".to_owned());
+            return;
+        }
         if self.active_component.as_deref() == Some(name) {
             self.persistence_error =
                 Some("A component cannot contain the file currently being edited".to_owned());
@@ -286,7 +317,7 @@ impl LogicGame {
 
 impl eframe::App for LogicGame {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.active_component.is_some() {
+        if self.active_component.is_some() || self.editor.active_challenge_id().is_some() {
             if let Some(dropped) = self.editor.ui(ui) {
                 self.drop_component_file(&dropped.name, dropped.position);
             }

@@ -4,6 +4,9 @@ use std::{
 };
 
 use eframe::egui::{self, PointerButton};
+use logicgame::challenges::{
+    self, input_id, output_id, ChallengeId, ChallengePortKind, ChallengeTestResult,
+};
 use logicgame::execution::{Component as ExecutionComponent, Instruction, Pc, Vm};
 use logicgame::grid::{
     CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode, InputId,
@@ -24,6 +27,24 @@ const GRAPH_NODE_SIZE: egui::Vec2 = egui::vec2(150.0, 48.0);
 const GRAPH_COLUMN_GAP: f32 = 70.0;
 const GRAPH_ROW_GAP: f32 = 18.0;
 const GRAPH_MARGIN: f32 = 24.0;
+const FREE_TOOLS: [ToolKind; 9] = [
+    ToolKind::Select,
+    ToolKind::Wire,
+    ToolKind::Not,
+    ToolKind::MergerSplitter,
+    ToolKind::Led,
+    ToolKind::Storage,
+    ToolKind::Input,
+    ToolKind::Output,
+    ToolKind::ConfigureStorage,
+];
+const CHALLENGE_TOOLS: [ToolKind; 5] = [
+    ToolKind::Select,
+    ToolKind::Wire,
+    ToolKind::Not,
+    ToolKind::Input,
+    ToolKind::Output,
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ToolKind {
@@ -217,6 +238,14 @@ struct Simulation {
     tick_in_progress: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ChallengeState {
+    id: ChallengeId,
+    selected_input: Option<String>,
+    selected_output: Option<String>,
+    results: Option<Vec<ChallengeTestResult>>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 enum SimulationInstructionSelection {
     #[default]
@@ -366,6 +395,7 @@ pub struct LogicEditor {
     configured_storage: Option<ComponentId>,
     simulation: Simulation,
     component_files: Option<ComponentFiles>,
+    challenge: Option<ChallengeState>,
 }
 
 pub struct ComponentFileDrop {
@@ -388,6 +418,7 @@ impl Default for LogicEditor {
             configured_storage: None,
             simulation: Simulation::default(),
             component_files: None,
+            challenge: None,
         }
     }
 }
@@ -408,6 +439,26 @@ impl LogicEditor {
         self.selection.clear();
         self.configured_storage = None;
         self.simulation = Simulation::default();
+        self.challenge = None;
+    }
+
+    pub fn start_challenge(&mut self, id: ChallengeId) {
+        self.replace_grid(LogicGrid::new());
+        self.tool = Tool {
+            kind: ToolKind::Select,
+            scale: Scale::ONE,
+            merger_out_scale: Scale::ONE,
+        };
+        self.challenge = Some(ChallengeState {
+            id,
+            selected_input: None,
+            selected_output: None,
+            results: None,
+        });
+    }
+
+    pub fn active_challenge_id(&self) -> Option<ChallengeId> {
+        self.challenge.as_ref().map(|challenge| challenge.id)
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ComponentFileDrop> {
@@ -430,17 +481,16 @@ impl LogicEditor {
             .hscroll(true)
             .vscroll(true)
             .show(&context, |ui| {
-                for kind in [
-                    ToolKind::Select,
-                    ToolKind::Wire,
-                    ToolKind::Not,
-                    ToolKind::MergerSplitter,
-                    ToolKind::Led,
-                    ToolKind::Storage,
-                    ToolKind::Input,
-                    ToolKind::Output,
-                    ToolKind::ConfigureStorage,
-                ] {
+                let tools = if self.challenge.is_some() {
+                    &CHALLENGE_TOOLS[..]
+                } else {
+                    &FREE_TOOLS[..]
+                };
+                if !tools.contains(&self.tool.kind) {
+                    self.tool.kind = ToolKind::Select;
+                    self.gesture = None;
+                }
+                for &kind in tools {
                     if ui
                         .selectable_label(self.tool.kind == kind, kind.label())
                         .clicked()
@@ -455,20 +505,26 @@ impl LogicEditor {
                 }
 
                 ui.separator();
-                if matches!(self.tool.kind, ToolKind::MergerSplitter) {
-                    ui.label("Input scale");
-                } else {
+                if self.challenge.is_some() {
+                    self.tool.scale = Scale::ONE;
+                    self.tool.merger_out_scale = Scale::ONE;
                     ui.label("Scale");
-                }
-                egui::ComboBox::from_id_salt("logic-tool-scale")
-                    .selected_text(format!("{}x", self.tool.scale.get()))
-                    .show_ui(ui, |ui| {
-                        for value in SCALES {
-                            let scale = Scale::new(value).expect("tool scale is valid");
-                            ui.selectable_value(&mut self.tool.scale, scale, format!("{value}x"));
-                        }
-                    });
-                if matches!(self.tool.kind, ToolKind::MergerSplitter) {
+                    ui.monospace("1x");
+                    self.show_challenge_port_tool(ui);
+                } else if matches!(self.tool.kind, ToolKind::MergerSplitter) {
+                    ui.label("Input scale");
+                    egui::ComboBox::from_id_salt("logic-tool-scale")
+                        .selected_text(format!("{}x", self.tool.scale.get()))
+                        .show_ui(ui, |ui| {
+                            for value in SCALES {
+                                let scale = Scale::new(value).expect("tool scale is valid");
+                                ui.selectable_value(
+                                    &mut self.tool.scale,
+                                    scale,
+                                    format!("{value}x"),
+                                );
+                            }
+                        });
                     ui.label("Output scale");
                     egui::ComboBox::from_id_salt("logic-tool-output-scale")
                         .selected_text(format!("{}x", self.tool.merger_out_scale.get()))
@@ -477,6 +533,20 @@ impl LogicEditor {
                                 let scale = Scale::new(value).expect("tool scale is valid");
                                 ui.selectable_value(
                                     &mut self.tool.merger_out_scale,
+                                    scale,
+                                    format!("{value}x"),
+                                );
+                            }
+                        });
+                } else {
+                    ui.label("Scale");
+                    egui::ComboBox::from_id_salt("logic-tool-scale")
+                        .selected_text(format!("{}x", self.tool.scale.get()))
+                        .show_ui(ui, |ui| {
+                            for value in SCALES {
+                                let scale = Scale::new(value).expect("tool scale is valid");
+                                ui.selectable_value(
+                                    &mut self.tool.scale,
                                     scale,
                                     format!("{value}x"),
                                 );
@@ -495,6 +565,7 @@ impl LogicEditor {
         self.show_metrics(&context);
         self.show_storage_configuration(&context);
         self.show_simulation(&context);
+        self.show_challenge(&context);
 
         let hovered_square = canvas
             .inner
@@ -550,12 +621,225 @@ impl LogicEditor {
     }
 
     pub fn insert_subcomponent(&mut self, position: Point, kind: ComponentKind) {
+        if self.challenge.is_some() {
+            return;
+        }
         let snap = kind.snap().get();
         let position = Point::new(
             position.x.div_euclid(snap) * snap,
             position.y.div_euclid(snap) * snap,
         );
         self.grid.add_component(position, Rotation::Up, kind);
+    }
+
+    fn active_challenge(&self) -> Option<&'static challenges::Challenge> {
+        self.challenge
+            .as_ref()
+            .map(|state| challenges::challenge(state.id))
+    }
+
+    fn missing_input_labels(&self) -> Vec<&'static str> {
+        let Some(challenge) = self.active_challenge() else {
+            return Vec::new();
+        };
+        challenge
+            .ports
+            .iter()
+            .filter(|port| port.kind == ChallengePortKind::Input)
+            .filter(|port| {
+                let id = input_id(challenge, port.label).expect("challenge input label is valid");
+                !self.grid.components().any(|component| {
+                    matches!(component.kind, ComponentKind::Input { id: existing, .. } if existing == id)
+                })
+            })
+            .map(|port| port.label)
+            .collect()
+    }
+
+    fn missing_output_labels(&self) -> Vec<&'static str> {
+        let Some(challenge) = self.active_challenge() else {
+            return Vec::new();
+        };
+        challenge
+            .ports
+            .iter()
+            .filter(|port| port.kind == ChallengePortKind::Output)
+            .filter(|port| {
+                let id = output_id(challenge, port.label).expect("challenge output label is valid");
+                !self.grid.components().any(|component| {
+                    matches!(component.kind, ComponentKind::Output { id: existing, .. } if existing == id)
+                })
+            })
+            .map(|port| port.label)
+            .collect()
+    }
+
+    fn selected_challenge_input(&mut self) -> Option<&'static str> {
+        let labels = self.missing_input_labels();
+        let selected = self
+            .challenge
+            .as_ref()
+            .and_then(|state| state.selected_input.as_deref());
+        let label = selected
+            .and_then(|selected| labels.iter().copied().find(|label| *label == selected))
+            .or_else(|| labels.first().copied())?;
+        if let Some(state) = &mut self.challenge {
+            state.selected_input = Some(label.to_owned());
+        }
+        Some(label)
+    }
+
+    fn selected_challenge_output(&mut self) -> Option<&'static str> {
+        let labels = self.missing_output_labels();
+        let selected = self
+            .challenge
+            .as_ref()
+            .and_then(|state| state.selected_output.as_deref());
+        let label = selected
+            .and_then(|selected| labels.iter().copied().find(|label| *label == selected))
+            .or_else(|| labels.first().copied())?;
+        if let Some(state) = &mut self.challenge {
+            state.selected_output = Some(label.to_owned());
+        }
+        Some(label)
+    }
+
+    fn show_challenge_port_tool(&mut self, ui: &mut egui::Ui) {
+        match self.tool.kind {
+            ToolKind::Input => {
+                let labels = self.missing_input_labels();
+                self.show_challenge_label_picker(ui, "Input", labels);
+            }
+            ToolKind::Output => {
+                let labels = self.missing_output_labels();
+                self.show_challenge_label_picker(ui, "Output", labels);
+            }
+            _ => {}
+        }
+    }
+
+    fn show_challenge_label_picker(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &'static str,
+        labels: Vec<&'static str>,
+    ) {
+        if labels.is_empty() {
+            ui.weak(format!("All {title} labels are placed"));
+            return;
+        }
+        let is_input = title == "Input";
+        let selected = if is_input {
+            self.selected_challenge_input()
+        } else {
+            self.selected_challenge_output()
+        }
+        .unwrap_or(labels[0]);
+        ui.label(title);
+        egui::ComboBox::from_id_salt(("challenge-port-label", title))
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for label in labels {
+                    let mut checked = selected == label;
+                    if ui.selectable_label(checked, label).clicked() {
+                        checked = true;
+                        if let Some(state) = &mut self.challenge {
+                            if is_input {
+                                state.selected_input = Some(label.to_owned());
+                            } else {
+                                state.selected_output = Some(label.to_owned());
+                            }
+                        }
+                    }
+                    let _ = checked;
+                }
+            });
+    }
+
+    fn show_challenge(&mut self, context: &egui::Context) {
+        let Some(id) = self.challenge.as_ref().map(|state| state.id) else {
+            return;
+        };
+        let challenge = challenges::challenge(id);
+        let mut run_tests = false;
+        egui::Window::new("Challenge")
+            .default_pos([700.0, 240.0])
+            .default_width(300.0)
+            .hscroll(true)
+            .vscroll(true)
+            .show(context, |ui| {
+                ui.heading(challenge.name);
+                ui.label(challenge.goal);
+                ui.separator();
+                ui.strong("Ports");
+                for port in challenge.ports {
+                    let placed = match port.kind {
+                        ChallengePortKind::Input => input_id(challenge, port.label).is_some_and(|id| {
+                            self.grid.components().any(|component| {
+                                matches!(component.kind, ComponentKind::Input { id: existing, .. } if existing == id)
+                            })
+                        }),
+                        ChallengePortKind::Output => output_id(challenge, port.label).is_some_and(|id| {
+                            self.grid.components().any(|component| {
+                                matches!(component.kind, ComponentKind::Output { id: existing, .. } if existing == id)
+                            })
+                        }),
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(port.label);
+                        ui.monospace(format!("{}x", port.scale.get()));
+                        if placed {
+                            ui.weak("placed");
+                        } else {
+                            ui.colored_label(ui.visuals().warn_fg_color, "missing");
+                        }
+                    });
+                }
+                ui.separator();
+                ui.strong("Tests");
+                for test in challenge.tests {
+                    ui.monospace(test.name);
+                }
+                if ui.button("Run Tests").clicked() {
+                    run_tests = true;
+                }
+                if let Some(results) = self
+                    .challenge
+                    .as_ref()
+                    .and_then(|state| state.results.as_ref())
+                {
+                    ui.separator();
+                    for result in results {
+                        ui.horizontal(|ui| {
+                            if result.passed {
+                                ui.colored_label(egui::Color32::from_rgb(80, 180, 120), "pass");
+                            } else {
+                                ui.colored_label(ui.visuals().error_fg_color, "fail");
+                            }
+                            ui.monospace(&result.name);
+                        });
+                        for (label, expected) in &result.expected_outputs {
+                            let actual = result
+                                .actual_outputs
+                                .iter()
+                                .find_map(|(actual_label, value)| {
+                                    (actual_label == label).then_some(*value)
+                                })
+                                .flatten();
+                            ui.small(format!("{label}: expected {expected}, actual {actual:?}"));
+                        }
+                        if let Some(error) = &result.error {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                    }
+                }
+            });
+        if run_tests {
+            let results = challenges::run_challenge_tests(challenge, &self.grid);
+            if let Some(state) = &mut self.challenge {
+                state.results = Some(results);
+            }
+        }
     }
 
     fn show_metrics(&self, context: &egui::Context) {
@@ -1352,6 +1636,15 @@ impl LogicEditor {
     }
 
     fn handle_canvas_input(&mut self, response: &egui::Response) {
+        if self.challenge.is_some() {
+            self.tool.scale = Scale::ONE;
+            self.tool.merger_out_scale = Scale::ONE;
+            if !CHALLENGE_TOOLS.contains(&self.tool.kind) {
+                self.tool.kind = ToolKind::Select;
+                self.gesture = None;
+            }
+        }
+
         if self.tool.kind == ToolKind::Select
             && response.ctx.input(|input| {
                 input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
@@ -1533,27 +1826,67 @@ impl LogicEditor {
                 Some(Gesture::Input { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world).map(|r| r.flip()) {
                         let scale = self.tool.scale;
-                        self.grid.add_component(
-                            component_placement_position(anchor, rotation, scale, ToolKind::Input),
-                            rotation,
-                            ComponentKind::Input {
-                                scale,
-                                id: InputId(usize::MAX),
-                            },
-                        );
+                        if let Some(label) = self.selected_challenge_input() {
+                            let challenge = self.active_challenge().expect("challenge is active");
+                            let id = input_id(challenge, label).expect("challenge input exists");
+                            self.grid.add_component_with_explicit_io(
+                                component_placement_position(
+                                    anchor,
+                                    rotation,
+                                    scale,
+                                    ToolKind::Input,
+                                ),
+                                rotation,
+                                ComponentKind::Input { scale, id },
+                            );
+                        } else if self.challenge.is_none() {
+                            self.grid.add_component(
+                                component_placement_position(
+                                    anchor,
+                                    rotation,
+                                    scale,
+                                    ToolKind::Input,
+                                ),
+                                rotation,
+                                ComponentKind::Input {
+                                    scale,
+                                    id: InputId(usize::MAX),
+                                },
+                            );
+                        }
                     }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
-                        self.grid.add_component(
-                            component_placement_position(anchor, rotation, scale, ToolKind::Output),
-                            rotation,
-                            ComponentKind::Output {
-                                scale,
-                                id: OutputId(usize::MAX),
-                            },
-                        );
+                        if let Some(label) = self.selected_challenge_output() {
+                            let challenge = self.active_challenge().expect("challenge is active");
+                            let id = output_id(challenge, label).expect("challenge output exists");
+                            self.grid.add_component_with_explicit_io(
+                                component_placement_position(
+                                    anchor,
+                                    rotation,
+                                    scale,
+                                    ToolKind::Output,
+                                ),
+                                rotation,
+                                ComponentKind::Output { scale, id },
+                            );
+                        } else if self.challenge.is_none() {
+                            self.grid.add_component(
+                                component_placement_position(
+                                    anchor,
+                                    rotation,
+                                    scale,
+                                    ToolKind::Output,
+                                ),
+                                rotation,
+                                ComponentKind::Output {
+                                    scale,
+                                    id: OutputId(usize::MAX),
+                                },
+                            );
+                        }
                     }
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
@@ -2098,7 +2431,9 @@ fn simulation_value_row(ui: &mut egui::Ui, label: String, value: u64) {
 
 fn apply_input_values(vm: &mut Vm, values: &[u64]) {
     for (&address, value) in vm.input_addresses().to_vec().iter().zip(values) {
-        vm.root_memory_mut()[address] |= *value;
+        if address < vm.root_component.memory_size {
+            vm.root_memory_mut()[address] |= *value;
+        }
     }
 }
 
@@ -2938,5 +3273,44 @@ mod tests {
         editor.apply_move(&[], &wires, Point::new(0, 1));
         assert!(editor.grid.wires().is_empty());
         assert!(editor.selection.is_empty());
+    }
+
+    #[test]
+    fn deleting_challenge_port_makes_its_label_available_again() {
+        let mut editor = LogicEditor::default();
+        editor.start_challenge(ChallengeId::Nor);
+        assert_eq!(editor.missing_input_labels(), vec!["A", "B"]);
+
+        let a = editor.grid.add_component_with_explicit_io(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(0),
+            },
+        );
+        assert_eq!(editor.missing_input_labels(), vec!["B"]);
+
+        editor.selection.components.insert(a);
+        editor.delete_selection();
+        assert_eq!(editor.missing_input_labels(), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn simulation_preview_skips_unconnected_challenge_inputs() {
+        let mut editor = LogicEditor::default();
+        editor.start_challenge(ChallengeId::Nor);
+        editor.grid.add_component_with_explicit_io(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: InputId(0),
+            },
+        );
+
+        editor.update_simulation_preview();
+
+        assert!(editor.simulation.vm.is_some());
     }
 }
