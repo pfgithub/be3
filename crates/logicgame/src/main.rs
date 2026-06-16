@@ -98,6 +98,8 @@ impl LogicGame {
         egui::Window::new("Components")
             .default_pos([700.0, 16.0])
             .default_width(220.0)
+            .hscroll(true)
+            .vscroll(true)
             .show(context, |ui| {
                 if ui
                     .add_enabled(self.component_files.is_some(), egui::Button::new("New"))
@@ -112,28 +114,22 @@ impl LogicGame {
                 if self.component_names.is_empty() {
                     ui.weak("No component files");
                 } else {
-                    egui::ScrollArea::vertical()
-                        .max_height(180.0)
-                        .show(ui, |ui| {
-                            for name in &self.component_names {
-                                let active = self.active_component.as_ref() == Some(name);
-                                if active {
-                                    if ui.selectable_label(true, name).clicked() {
-                                        requested_component = Some(name.clone());
-                                    }
-                                } else {
-                                    let response = ui
-                                        .selectable_label(false, name)
-                                        .interact(egui::Sense::click_and_drag());
-                                    response.dnd_set_drag_payload(ComponentFileDrag {
-                                        name: name.clone(),
-                                    });
-                                    if response.clicked() {
-                                        requested_component = Some(name.clone());
-                                    }
-                                }
+                    for name in &self.component_names {
+                        let active = self.active_component.as_ref() == Some(name);
+                        if active {
+                            if ui.selectable_label(true, name).clicked() {
+                                requested_component = Some(name.clone());
                             }
-                        });
+                        } else {
+                            let response = ui
+                                .selectable_label(false, name)
+                                .interact(egui::Sense::click_and_drag());
+                            response.dnd_set_drag_payload(ComponentFileDrag { name: name.clone() });
+                            if response.clicked() {
+                                requested_component = Some(name.clone());
+                            }
+                        }
+                    }
                 }
 
                 if let Some(error) = &self.persistence_error {

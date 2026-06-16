@@ -427,7 +427,8 @@ impl LogicEditor {
 
         egui::Window::new("Tools")
             .default_pos([16.0, 16.0])
-            .resizable(false)
+            .hscroll(true)
+            .vscroll(true)
             .show(&context, |ui| {
                 for kind in [
                     ToolKind::Select,
@@ -559,6 +560,8 @@ impl LogicEditor {
         egui::Window::new("Simulation")
             .default_pos([16.0, 390.0])
             .default_width(300.0)
+            .hscroll(true)
+            .vscroll(true)
             .show(context, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Run step").clicked() {
@@ -947,17 +950,15 @@ impl LogicEditor {
         egui::Window::new(format!("Configure storage #{}", id.0))
             .open(&mut open)
             .default_width(180.0)
+            .hscroll(true)
+            .vscroll(true)
             .show(context, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(480.0)
-                    .show(ui, |ui| {
-                        for bit in storage_bit_indices(scale) {
-                            let state = (value >> bit) & 1;
-                            if ui.button(format!("Bit {bit}: {state}")).clicked() {
-                                self.grid.toggle_storage_bit(id, bit);
-                            }
-                        }
-                    });
+                for bit in storage_bit_indices(scale) {
+                    let state = (value >> bit) & 1;
+                    if ui.button(format!("Bit {bit}: {state}")).clicked() {
+                        self.grid.toggle_storage_bit(id, bit);
+                    }
+                }
             });
         if !open {
             self.configured_storage = None;
@@ -976,6 +977,8 @@ impl LogicEditor {
         egui::Window::new("Grid Debugger")
             .default_pos([700.0, 260.0])
             .default_width(240.0)
+            .hscroll(true)
+            .vscroll(true)
             .show(context, |ui| {
                 egui::Grid::new("logic-grid-debug-summary")
                     .num_columns(2)
@@ -1166,6 +1169,8 @@ impl LogicEditor {
         egui::Window::new("Generated Graph")
             .default_pos([360.0, 16.0])
             .default_size([560.0, 400.0])
+            .hscroll(true)
+            .vscroll(true)
             .show(context, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Nodes");
@@ -1181,9 +1186,7 @@ impl LogicEditor {
                     return;
                 }
 
-                egui::ScrollArea::both().show(ui, |ui| {
-                    self.paint_generated_graph(ui, &graph, &mut hover);
-                });
+                self.paint_generated_graph(ui, &graph, &mut hover);
             });
 
         hover
