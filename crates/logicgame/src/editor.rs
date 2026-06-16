@@ -1751,6 +1751,7 @@ impl LogicEditor {
                 color,
                 wire_value_indices.get(wire).copied().unwrap_or_default(),
             ));
+            wire_triangles.extend(DrawTriangle::wire_endpoints(*wire, color));
             for end in [WireEnd::Start, WireEnd::End] {
                 let endpoint = WireEndpoint { wire: *wire, end };
                 if hovered_entity == Some(DebugEntity::WireEndpoint(endpoint))

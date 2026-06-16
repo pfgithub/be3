@@ -125,6 +125,24 @@ impl DrawTriangle {
         triangles
     }
 
+    pub fn wire_endpoints(wire: Wire, color: [f32; 4]) -> Vec<Self> {
+        let scale = wire.scale.get() as f32;
+        let half_scale = scale * 0.5;
+        let start = [
+            wire.start.x as f32 + half_scale,
+            wire.start.y as f32 + half_scale,
+        ];
+        let end = [
+            wire.end.x as f32 + half_scale,
+            wire.end.y as f32 + half_scale,
+        ];
+
+        let mut triangles = Vec::with_capacity(8);
+        triangles.extend(diamond(start, scale * 0.38, color));
+        triangles.extend(diamond(end, scale * 0.38, color));
+        triangles
+    }
+
     pub fn wire_endpoint_highlight(wire: Wire, endpoint: logicgame::grid::Point) -> Vec<Self> {
         let scale = wire.scale.get() as f32;
         diamond(
@@ -990,6 +1008,10 @@ mod tests {
             .all(|triangle| triangle.color == DrawTriangle::WIRE_COLOR));
         assert_eq!(wire_triangles[2].positions[0], [0.5, 0.5]);
         assert_eq!(wire_triangles[6].positions[0], [4.5, 0.5]);
+        let endpoint_triangles = DrawTriangle::wire_endpoints(wire, DrawTriangle::WIRE_COLOR);
+        assert_eq!(endpoint_triangles.len(), 8);
+        assert_eq!(endpoint_triangles[0].positions[0], [0.5, 0.5]);
+        assert_eq!(endpoint_triangles[4].positions[0], [4.5, 0.5]);
 
         let gate = Component {
             id: ComponentId(0),
