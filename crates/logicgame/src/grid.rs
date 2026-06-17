@@ -1530,35 +1530,9 @@ fn wire_component_intersection_is_contact(
 }
 
 fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
-    let Some(rect) = wire.rect() else {
-        return Vec::new();
-    };
     let mut contacts = Vec::new();
     match wire.orientation() {
         Orientation::Horizontal => {
-            let Some(end_x) = wire.end.x.checked_add(wire.scale.get()) else {
-                return Vec::new();
-            };
-            for x in [wire.start.x, end_x] {
-                let start = rect.min.y.max(component.min.y);
-                let end = rect.max.y.min(component.max.y);
-                if start < end && x == component.min.x {
-                    contacts.push(Contact {
-                        side: ComponentSide::Left,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-                if start < end && x == component.max.x {
-                    contacts.push(Contact {
-                        side: ComponentSide::Right,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-            }
             for endpoint in [wire.start, wire.end] {
                 let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
                     continue;
@@ -1584,29 +1558,6 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
             }
         }
         Orientation::Vertical => {
-            let Some(end_y) = wire.end.y.checked_add(wire.scale.get()) else {
-                return Vec::new();
-            };
-            for y in [wire.start.y, end_y] {
-                let start = rect.min.x.max(component.min.x);
-                let end = rect.max.x.min(component.max.x);
-                if start < end && y == component.min.y {
-                    contacts.push(Contact {
-                        side: ComponentSide::Top,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-                if start < end && y == component.max.y {
-                    contacts.push(Contact {
-                        side: ComponentSide::Bottom,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-            }
             for endpoint in [wire.start, wire.end] {
                 let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
                     continue;
@@ -2046,7 +1997,7 @@ mod tests {
     fn led_has_a_bottom_input_and_rejects_other_contacts() {
         let mut grid = LogicGrid::new();
         let led = grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
-        grid.add_wire(wire((10, 2), (10, 4), 1));
+        grid.add_wire(wire((10, 1), (10, 4), 1));
         assert!(grid.validate().is_empty());
         assert!(grid.generate_graph().nodes.iter().any(|node| {
             matches!(
@@ -2123,6 +2074,45 @@ mod tests {
                     side: ComponentSide::Top,
                     start: 1,
                     end: 2,
+                    ..
+                } if *component == not
+            )
+        }));
+    }
+
+    #[test]
+    fn wire_must_enter_component_to_connect_to_not_gate_terminal() {
+        let mut outside = LogicGrid::new();
+        let not = outside.add_component(
+            Point::new(3, 2),
+            Rotation::Down,
+            ComponentKind::Not { scale: Scale::ONE },
+        );
+        outside.add_wire(wire((3, 4), (3, 5), 1));
+
+        assert!(!outside.generate_graph().nodes.iter().any(
+            |node| matches!(node, GraphNode::Connection { component, .. } if *component == not)
+        ));
+
+        let mut inside = LogicGrid::new();
+        let not = inside.add_component(
+            Point::new(3, 2),
+            Rotation::Down,
+            ComponentKind::Not { scale: Scale::ONE },
+        );
+        inside.add_wire(wire((3, 3), (3, 5), 1));
+
+        assert!(inside.validate().is_empty());
+        assert!(inside.generate_graph().nodes.iter().any(|node| {
+            matches!(
+                node,
+                GraphNode::Connection {
+                    component,
+                    slot: ConnectionSlotId(1),
+                    direction: ConnectionDirection::Output,
+                    side: ComponentSide::Bottom,
+                    start: 3,
+                    end: 4,
                     ..
                 } if *component == not
             )
@@ -2351,7 +2341,7 @@ mod tests {
                 value: 0,
             },
         );
-        grid.add_wire(wire((2, 0), (9, 0), 1));
+        grid.add_wire(wire((2, 0), (10, 0), 1));
         grid.add_wire(wire((5, -5), (5, 0), 1));
         grid.add_wire(wire((5, 0), (5, 2), 1));
         grid.add_wire(wire((2, 2), (9, 2), 1));

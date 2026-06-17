@@ -3674,9 +3674,11 @@ mod tests {
                 id: output_id(&challenges::NOR_CHALLENGE, "OUT").unwrap(),
             },
         );
-        grid.add_wire(wire((0, 5), (4, 5), 1));
-        grid.add_wire(wire((4, 3), (4, 5), 1));
-        grid.add_wire(wire((4, -1), (4, 1), 1));
+        grid.add_wire(wire((0, 4), (0, 6), 1));
+        grid.add_wire(wire((2, 4), (2, 6), 1));
+        grid.add_wire(wire((0, 6), (4, 6), 1));
+        grid.add_wire(wire((4, 2), (4, 6), 1));
+        grid.add_wire(wire((4, -2), (4, 1), 1));
         grid
     }
 
