@@ -151,6 +151,8 @@ impl UnlinkedComponent {
             .enumerate()
             .map(|(address, node)| (node, address))
             .collect();
+        let zero_address = memory_addresses.len();
+        let mut uses_zero_address = false;
 
         let mut connections = BTreeMap::<
             (ComponentId, ConnectionDirection, ConnectionSlotId),
@@ -226,17 +228,22 @@ impl UnlinkedComponent {
                             slot: ConnectionSlotId(0),
                         });
                     }
-                    if let Some(&input) = inputs.first() {
-                        if !outputs.is_empty() {
-                            operations.push(Operation {
-                                inputs: vec![input],
-                                outputs: outputs.to_vec(),
-                                instructions: outputs
-                                    .iter()
-                                    .map(|&output| Instruction::Not { input, output })
-                                    .collect(),
-                            });
-                        }
+                    if !outputs.is_empty() {
+                        let input = match inputs.first() {
+                            Some(&input) => input,
+                            None => {
+                                uses_zero_address = true;
+                                zero_address
+                            }
+                        };
+                        operations.push(Operation {
+                            inputs: vec![input],
+                            outputs: outputs.to_vec(),
+                            instructions: outputs
+                                .iter()
+                                .map(|&output| Instruction::Not { input, output })
+                                .collect(),
+                        });
                     }
                 }
                 ComponentKind::MergerSplitter {
@@ -452,7 +459,8 @@ impl UnlinkedComponent {
             }
         }
 
-        let mut writers = vec![Vec::new(); memory_addresses.len()];
+        let memory_size = memory_addresses.len() + usize::from(uses_zero_address);
+        let mut writers = vec![Vec::new(); memory_size];
         for (operation_index, operation) in operations.iter().enumerate() {
             for &output in &operation.outputs {
                 writers[output].push(operation_index);
@@ -498,7 +506,7 @@ impl UnlinkedComponent {
             outputs,
             components,
             instructions,
-            memory_size: memory_addresses.len(),
+            memory_size,
             storage_init,
         })
     }
@@ -1420,6 +1428,28 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn not_with_unconnected_input_reads_zero() {
+        let mut grid = LogicGrid::new();
+        let not = add_not(&mut grid);
+        let graph = graph(1, &[(not, ConnectionDirection::Output, 1, 0)]);
+
+        let mut vm = Vm::from_graph(&grid, &graph).unwrap();
+
+        assert_eq!(
+            vm.root_instructions(),
+            &[Instruction::Not {
+                input: 1,
+                output: 0,
+            }]
+        );
+
+        vm.begin_tick();
+        vm.execute();
+
+        assert_eq!(vm.root_memory(), &[u64::MAX, 0]);
     }
 
     #[test]
