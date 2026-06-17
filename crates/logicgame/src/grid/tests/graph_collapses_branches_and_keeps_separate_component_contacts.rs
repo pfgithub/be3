@@ -16,7 +16,7 @@ fn graph_collapses_branches_and_keeps_separate_component_contacts() {
             value: 0,
         },
     );
-    grid.add_wire(wire((2, 0), (10, 0), 1));
+    grid.add_wire(wire((2, 0), (9, 0), 1));
     grid.add_wire(wire((5, -5), (5, 0), 1));
     grid.add_wire(wire((5, 0), (5, 2), 1));
     grid.add_wire(wire((2, 2), (9, 2), 1));

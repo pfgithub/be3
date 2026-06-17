@@ -1010,11 +1010,10 @@ impl LogicGrid {
                 continue;
             };
             for component in &components {
-                let slots = component.connection_slots();
-                if component.rect().is_some_and(|component_rect| {
-                    wire_rect.overlaps_area(component_rect)
-                        && !wire_component_intersection_is_contact(*wire, component_rect, &slots)
-                }) {
+                if component
+                    .rect()
+                    .is_some_and(|component_rect| wire_rect.overlaps_area(component_rect))
+                {
                     errors.insert(ValidationError::WireComponentIntersection {
                         wire: *wire,
                         component: component.id,
@@ -1064,35 +1063,79 @@ impl LogicGrid {
             net_nodes.push(node);
         }
 
-        let mut contacts = Vec::new();
+        let mut slot_infos: Vec<(ComponentId, ConnectionSlot, Rect)> = Vec::new();
         for component in self.components.values() {
             let Some(rect) = component.rect() else {
                 continue;
             };
             for slot in component.connection_slots() {
-                let connected_nets: Vec<_> = nets
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(net_index, wires)| {
-                        wires
-                            .iter()
-                            .any(|wire| {
-                                wire_component_contacts(*wire, rect)
-                                    .into_iter()
-                                    .any(|contact| contact.overlaps(slot))
-                            })
-                            .then_some(net_index)
-                    })
-                    .collect();
-                if !connected_nets.is_empty() {
-                    contacts.push((component.id, slot, connected_nets));
+                slot_infos.push((component.id, slot, rect));
+            }
+        }
+
+        // Ports on touching components connect directly, forming wireless nets.
+        let mut port_sets = DisjointSets::new(slot_infos.len());
+        for first in 0..slot_infos.len() {
+            for second in first + 1..slot_infos.len() {
+                let (first_component, first_slot, first_rect) = slot_infos[first];
+                let (second_component, second_slot, second_rect) = slot_infos[second];
+                if first_component != second_component
+                    && ports_connect(first_rect, first_slot, second_rect, second_slot)
+                {
+                    port_sets.union(first, second);
                 }
+            }
+        }
+        let mut port_groups = BTreeMap::<usize, Vec<usize>>::new();
+        for index in 0..slot_infos.len() {
+            port_groups
+                .entry(port_sets.find(index))
+                .or_default()
+                .push(index);
+        }
+        let port_nets: Vec<Vec<usize>> = port_groups
+            .into_values()
+            .filter(|group| group.len() >= 2)
+            .collect();
+        let mut slot_port_net = vec![None; slot_infos.len()];
+        for (net_index, group) in port_nets.iter().enumerate() {
+            for &slot_index in group {
+                slot_port_net[slot_index] = Some(net_index);
+            }
+        }
+
+        let mut port_net_nodes = Vec::new();
+        for _ in &port_nets {
+            let node = GraphNodeId(nodes.len());
+            nodes.push(GraphNode::WireNet { wires: Vec::new() });
+            port_net_nodes.push(node);
+        }
+
+        let mut contacts = Vec::new();
+        for (slot_index, &(component, slot, rect)) in slot_infos.iter().enumerate() {
+            let connected_nets: Vec<_> = nets
+                .iter()
+                .enumerate()
+                .filter_map(|(net_index, wires)| {
+                    wires
+                        .iter()
+                        .any(|wire| {
+                            wire_component_contacts(*wire, rect)
+                                .into_iter()
+                                .any(|contact| contact.overlaps(slot))
+                        })
+                        .then_some(net_index)
+                })
+                .collect();
+            let port_net = slot_port_net[slot_index];
+            if !connected_nets.is_empty() || port_net.is_some() {
+                contacts.push((component, slot, connected_nets, port_net));
             }
         }
         contacts.sort();
 
         let mut edges = Vec::new();
-        for (component, slot, connected_nets) in contacts {
+        for (component, slot, connected_nets, port_net) in contacts {
             let connection = GraphNodeId(nodes.len());
             nodes.push(GraphNode::Connection {
                 component,
@@ -1106,6 +1149,9 @@ impl LogicGrid {
             edges.push(GraphEdge::new(component_nodes[&component], connection));
             for net_index in connected_nets {
                 edges.push(GraphEdge::new(connection, net_nodes[net_index]));
+            }
+            if let Some(port_net_index) = port_net {
+                edges.push(GraphEdge::new(connection, port_net_nodes[port_net_index]));
             }
         }
         edges.sort();
@@ -1216,15 +1262,6 @@ impl Rect {
     fn overlaps_area(self, other: Self) -> bool {
         overlaps(self.min.x, self.max.x, other.min.x, other.max.x)
             && overlaps(self.min.y, self.max.y, other.min.y, other.max.y)
-    }
-
-    fn intersection(self, other: Self) -> Option<Self> {
-        let intersection = Self {
-            min: Point::new(self.min.x.max(other.min.x), self.min.y.max(other.min.y)),
-            max: Point::new(self.max.x.min(other.max.x), self.max.y.min(other.max.y)),
-        };
-        (intersection.min.x < intersection.max.x && intersection.min.y < intersection.max.y)
-            .then_some(intersection)
     }
 }
 
@@ -1552,35 +1589,23 @@ fn wire_endpoint_rect(wire: Wire, endpoint: Point) -> Option<Rect> {
     })
 }
 
-fn wire_component_intersection_is_contact(
-    wire: Wire,
-    component: Rect,
-    slots: &[ConnectionSlot],
+fn ports_connect(
+    first_rect: Rect,
+    first: ConnectionSlot,
+    second_rect: Rect,
+    second: ConnectionSlot,
 ) -> bool {
-    let Some(wire_rect) = wire.rect() else {
+    if first.scale != second.scale || first.direction == second.direction {
         return false;
+    }
+    let touching = match (first.side, second.side) {
+        (ComponentSide::Top, ComponentSide::Bottom) => first_rect.min.y == second_rect.max.y,
+        (ComponentSide::Bottom, ComponentSide::Top) => first_rect.max.y == second_rect.min.y,
+        (ComponentSide::Left, ComponentSide::Right) => first_rect.min.x == second_rect.max.x,
+        (ComponentSide::Right, ComponentSide::Left) => first_rect.max.x == second_rect.min.x,
+        _ => return false,
     };
-    let Some(intersection) = wire_rect.intersection(component) else {
-        return false;
-    };
-    [wire.start, wire.end].into_iter().any(|endpoint| {
-        let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
-            return false;
-        };
-        let on_terminal_side = match wire.orientation() {
-            Orientation::Horizontal => {
-                endpoint_rect.min.x == component.min.x || endpoint_rect.max.x == component.max.x
-            }
-            Orientation::Vertical => {
-                endpoint_rect.min.y == component.min.y || endpoint_rect.max.y == component.max.y
-            }
-        };
-        on_terminal_side
-            && endpoint_rect.intersection(component) == Some(intersection)
-            && wire_component_contacts(wire, component)
-                .into_iter()
-                .any(|contact| slots.iter().any(|slot| contact.overlaps(*slot)))
-    })
+    touching && first.start < second.end && second.start < first.end
 }
 
 fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
@@ -1593,7 +1618,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                 };
                 let start = endpoint_rect.min.y.max(component.min.y);
                 let end = endpoint_rect.max.y.min(component.max.y);
-                if start < end && endpoint_rect.min.x == component.min.x {
+                if start < end && endpoint_rect.max.x == component.min.x {
                     contacts.push(Contact {
                         side: ComponentSide::Left,
                         start,
@@ -1601,7 +1626,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         scale: wire.scale,
                     });
                 }
-                if start < end && endpoint_rect.max.x == component.max.x {
+                if start < end && endpoint_rect.min.x == component.max.x {
                     contacts.push(Contact {
                         side: ComponentSide::Right,
                         start,
@@ -1618,7 +1643,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                 };
                 let start = endpoint_rect.min.x.max(component.min.x);
                 let end = endpoint_rect.max.x.min(component.max.x);
-                if start < end && endpoint_rect.min.y == component.min.y {
+                if start < end && endpoint_rect.max.y == component.min.y {
                     contacts.push(Contact {
                         side: ComponentSide::Top,
                         start,
@@ -1626,7 +1651,7 @@ fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
                         scale: wire.scale,
                     });
                 }
-                if start < end && endpoint_rect.max.y == component.max.y {
+                if start < end && endpoint_rect.min.y == component.max.y {
                     contacts.push(Contact {
                         side: ComponentSide::Bottom,
                         start,

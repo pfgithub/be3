@@ -8,7 +8,7 @@ fn wire_endpoint_on_not_gate_terminal_is_a_valid_connection() {
         Rotation::Down,
         ComponentKind::Not { scale: Scale::ONE },
     );
-    let input = wire((1, 1), (1, 3), 1);
+    let input = wire((1, 1), (1, 2), 1);
     grid.add_wire(input);
 
     assert!(grid.validate().is_empty());
