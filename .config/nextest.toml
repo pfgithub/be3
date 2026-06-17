@@ -1,0 +1,5 @@
+[profile.default]
+status-level = "slow"
+
+[profile.ci]
+status-level = "all"
