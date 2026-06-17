@@ -76,42 +76,36 @@ impl PartialEq for Challenge {
 
 impl Eq for Challenge {}
 
-const NOR_INPUTS: [ChallengePort; 2] = [
-    ChallengePort {
-        input_id: Some(InputId::from_u128(1)),
-        output_id: None,
-        label: "A",
-        scale: Scale::ONE,
-    },
-    ChallengePort {
-        input_id: Some(InputId::from_u128(2)),
-        output_id: None,
-        label: "B",
-        scale: Scale::ONE,
-    },
-];
-
-const NOR_OUTPUTS: [ChallengePort; 1] = [ChallengePort {
-    input_id: None,
-    output_id: Some(OutputId::from_u128(1)),
-    label: "OUT",
-    scale: Scale::ONE,
-}];
-
-const NOR_DISALLOWED_COMPONENTS: [ChallengeComponentKind; 4] = [
-    ChallengeComponentKind::MergerSplitter,
-    ChallengeComponentKind::Led,
-    ChallengeComponentKind::Storage,
-    ChallengeComponentKind::Subcomponent,
-];
-
 pub const NOR_CHALLENGE: Challenge = Challenge {
     id: ChallengeId::Nor,
     name: "NOR",
     goal: "Build a circuit where OUT is on only when A and B are both off.",
-    inputs: &NOR_INPUTS,
-    outputs: &NOR_OUTPUTS,
-    disallowed_components: &NOR_DISALLOWED_COMPONENTS,
+    inputs: &[
+        ChallengePort {
+            input_id: Some(InputId::from_u128(1)),
+            output_id: None,
+            label: "A",
+            scale: Scale::ONE,
+        },
+        ChallengePort {
+            input_id: Some(InputId::from_u128(2)),
+            output_id: None,
+            label: "B",
+            scale: Scale::ONE,
+        },
+    ],
+    outputs: &[ChallengePort {
+        input_id: None,
+        output_id: Some(OutputId::from_u128(1)),
+        label: "OUT",
+        scale: Scale::ONE,
+    }],
+    disallowed_components: &[
+        ChallengeComponentKind::MergerSplitter,
+        ChallengeComponentKind::Led,
+        ChallengeComponentKind::Storage,
+        ChallengeComponentKind::Subcomponent,
+    ],
     validation_ticks: 1000,
     generate: generate_nor_tick,
 };
