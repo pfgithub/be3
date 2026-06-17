@@ -1578,17 +1578,6 @@ impl Contact {
     }
 }
 
-fn wire_endpoint_rect(wire: Wire, endpoint: Point) -> Option<Rect> {
-    let scale = wire.scale.get();
-    Some(Rect {
-        min: endpoint,
-        max: Point::new(
-            endpoint.x.checked_add(scale)?,
-            endpoint.y.checked_add(scale)?,
-        ),
-    })
-}
-
 fn ports_connect(
     first_rect: Rect,
     first: ConnectionSlot,
@@ -1608,60 +1597,58 @@ fn ports_connect(
     touching && first.start < second.end && second.start < first.end
 }
 
+// A port connects to any part of a wire that runs flush against the
+// component's edge, regardless of which way the wire faces. The wire's whole
+// body is considered, so the contact may fall anywhere along the wire rather
+// than only at its endpoints.
 fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
+    let Some(wire_rect) = wire.rect() else {
+        return Vec::new();
+    };
     let mut contacts = Vec::new();
-    match wire.orientation() {
-        Orientation::Horizontal => {
-            for endpoint in [wire.start, wire.end] {
-                let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
-                    continue;
-                };
-                let start = endpoint_rect.min.y.max(component.min.y);
-                let end = endpoint_rect.max.y.min(component.max.y);
-                if start < end && endpoint_rect.max.x == component.min.x {
-                    contacts.push(Contact {
-                        side: ComponentSide::Left,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-                if start < end && endpoint_rect.min.x == component.max.x {
-                    contacts.push(Contact {
-                        side: ComponentSide::Right,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-            }
+
+    let vertical_start = wire_rect.min.y.max(component.min.y);
+    let vertical_end = wire_rect.max.y.min(component.max.y);
+    if vertical_start < vertical_end {
+        if wire_rect.max.x == component.min.x {
+            contacts.push(Contact {
+                side: ComponentSide::Left,
+                start: vertical_start,
+                end: vertical_end,
+                scale: wire.scale,
+            });
         }
-        Orientation::Vertical => {
-            for endpoint in [wire.start, wire.end] {
-                let Some(endpoint_rect) = wire_endpoint_rect(wire, endpoint) else {
-                    continue;
-                };
-                let start = endpoint_rect.min.x.max(component.min.x);
-                let end = endpoint_rect.max.x.min(component.max.x);
-                if start < end && endpoint_rect.max.y == component.min.y {
-                    contacts.push(Contact {
-                        side: ComponentSide::Top,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-                if start < end && endpoint_rect.min.y == component.max.y {
-                    contacts.push(Contact {
-                        side: ComponentSide::Bottom,
-                        start,
-                        end,
-                        scale: wire.scale,
-                    });
-                }
-            }
+        if wire_rect.min.x == component.max.x {
+            contacts.push(Contact {
+                side: ComponentSide::Right,
+                start: vertical_start,
+                end: vertical_end,
+                scale: wire.scale,
+            });
         }
     }
+
+    let horizontal_start = wire_rect.min.x.max(component.min.x);
+    let horizontal_end = wire_rect.max.x.min(component.max.x);
+    if horizontal_start < horizontal_end {
+        if wire_rect.max.y == component.min.y {
+            contacts.push(Contact {
+                side: ComponentSide::Top,
+                start: horizontal_start,
+                end: horizontal_end,
+                scale: wire.scale,
+            });
+        }
+        if wire_rect.min.y == component.max.y {
+            contacts.push(Contact {
+                side: ComponentSide::Bottom,
+                start: horizontal_start,
+                end: horizontal_end,
+                scale: wire.scale,
+            });
+        }
+    }
+
     contacts
 }
 

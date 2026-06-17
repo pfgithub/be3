@@ -4,6 +4,7 @@ use logicgame::grid::{
     OutputId, Point, Scale,
 };
 
+mod connection_indicator_sits_on_the_wired_port_boundary;
 mod connection_markers_are_inward_and_stay_inside_component_bounds;
 mod input_and_output_leads_extend_to_the_viewport_edge;
 mod one_x_grid_emits_lines_one_world_unit_apart;

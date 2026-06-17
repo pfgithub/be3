@@ -2479,6 +2479,36 @@ impl LogicEditor {
                     .extend(DrawTriangle::connection_highlight(component, *connection));
             }
         }
+        // Mark every port that the circuit graph reports as actually wired up,
+        // so a connection is visible no matter where along the wire it was made.
+        for node in &snapshot.graph.nodes {
+            let GraphNode::Connection {
+                component,
+                slot,
+                direction,
+                side,
+                start,
+                end,
+                scale,
+            } = node
+            else {
+                continue;
+            };
+            let Some(component) = self.grid.component(*component) else {
+                continue;
+            };
+            component_triangles.extend(DrawTriangle::connection_indicator(
+                component,
+                ConnectionSlot {
+                    id: *slot,
+                    direction: *direction,
+                    side: *side,
+                    start: *start,
+                    end: *end,
+                    scale: *scale,
+                },
+            ));
+        }
         for wire in self.grid.wires() {
             let color = if hovered_entity == Some(DebugEntity::Wire(*wire))
                 || graph_hover.wires.contains(wire)

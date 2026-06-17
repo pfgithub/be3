@@ -321,6 +321,19 @@ impl DrawTriangle {
         rectangle(rect, Self::HIGHLIGHT_COLOR).to_vec()
     }
 
+    /// A filled marker drawn on a port that is actually wired up, sitting on
+    /// the component boundary so the connection is visible regardless of where
+    /// along the wire it was made.
+    pub fn connection_indicator(component: &Component, connection: ConnectionSlot) -> Vec<Self> {
+        let radius = connection.scale.get() as f32 * 0.28;
+        let center = connection_boundary_center(component, connection);
+        let color = match connection.direction {
+            ConnectionDirection::Input => Self::INPUT_COLOR,
+            ConnectionDirection::Output => Self::OUTPUT_COLOR,
+        };
+        diamond(center, radius, color).to_vec()
+    }
+
     pub fn bounds(bounds: GridBounds, thickness: f32) -> Vec<Self> {
         let half_thickness = thickness * 0.5;
         outline(
@@ -381,12 +394,8 @@ fn outline(rect: [f32; 4], thickness: f32, color: [f32; 4]) -> [DrawTriangle; 8]
     ]
 }
 
-fn connection_marker(
-    component: &Component,
-    connection: ConnectionSlot,
-    radius: f32,
-) -> [DrawTriangle; 1] {
-    let center = match connection.side {
+fn connection_boundary_center(component: &Component, connection: ConnectionSlot) -> [f32; 2] {
+    match connection.side {
         ComponentSide::Top | ComponentSide::Bottom => [
             (connection.start + connection.end) as f32 * 0.5,
             match connection.side {
@@ -409,7 +418,15 @@ fn connection_marker(
             },
             (connection.start + connection.end) as f32 * 0.5,
         ],
-    };
+    }
+}
+
+fn connection_marker(
+    component: &Component,
+    connection: ConnectionSlot,
+    radius: f32,
+) -> [DrawTriangle; 1] {
+    let center = connection_boundary_center(component, connection);
     let color = match connection.direction {
         ConnectionDirection::Input => DrawTriangle::INPUT_COLOR,
         ConnectionDirection::Output => DrawTriangle::OUTPUT_COLOR,
