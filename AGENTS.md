@@ -6,3 +6,5 @@ After making changes, always run at least:
 - cargo fmt
 - cargo check
 - cargo test -p ...
+
+Keep test files seperate from code files. Give every test its own seperate file.
