@@ -20,6 +20,7 @@ pub struct RenderFrame {
     pub grid_scale: f32,
     pub wires: Vec<DrawWire>,
     pub wire_values: Vec<WireValue>,
+    pub rays: Vec<DrawRay>,
     pub triangles: Vec<DrawTriangle>,
 }
 
@@ -35,6 +36,31 @@ pub struct DrawWire {
 pub struct WireValue {
     low: u32,
     high: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DrawRay {
+    pub lead: ComponentLead,
+    pub scale: f32,
+    pub color: [f32; 4],
+    pub value_index: u32,
+}
+
+impl DrawRay {
+    pub fn from_component(
+        component: &Component,
+        color: [f32; 4],
+        value_index: u32,
+    ) -> Option<Self> {
+        let lead = component.lead()?;
+        let scale = component.kind.snap().get() as f32;
+        Some(Self {
+            lead,
+            scale,
+            color,
+            value_index,
+        })
+    }
 }
 
 impl DrawWire {
@@ -238,67 +264,6 @@ impl DrawTriangle {
         }
 
         triangles
-    }
-
-    pub fn component_lead(component: &Component, viewport: [f32; 4]) -> Vec<Self> {
-        let color = match component.kind {
-            ComponentKind::Input { .. } => Self::INPUT_COLOR,
-            ComponentKind::Output { .. } => Self::OUTPUT_COLOR,
-            _ => return Vec::new(),
-        };
-        let Some(lead) = component.lead() else {
-            return Vec::new();
-        };
-        let radius = (component.kind.snap().get() as f32 * 0.08).clamp(0.06, 0.16);
-        let [viewport_left, viewport_top, viewport_right, viewport_bottom] = viewport;
-        let center = (lead.start + lead.end) as f32 * 0.5;
-        let rect = match lead {
-            ComponentLead {
-                side: ComponentSide::Top,
-                axis,
-                ..
-            } => [
-                center - radius,
-                viewport_top,
-                center + radius,
-                (axis as f32).min(viewport_bottom),
-            ],
-            ComponentLead {
-                side: ComponentSide::Right,
-                axis,
-                ..
-            } => [
-                (axis as f32).max(viewport_left),
-                center - radius,
-                viewport_right,
-                center + radius,
-            ],
-            ComponentLead {
-                side: ComponentSide::Bottom,
-                axis,
-                ..
-            } => [
-                center - radius,
-                (axis as f32).max(viewport_top),
-                center + radius,
-                viewport_bottom,
-            ],
-            ComponentLead {
-                side: ComponentSide::Left,
-                axis,
-                ..
-            } => [
-                viewport_left,
-                center - radius,
-                (axis as f32).min(viewport_right),
-                center + radius,
-            ],
-        };
-        if rect[0] < rect[2] && rect[1] < rect[3] {
-            rectangle(rect, color).to_vec()
-        } else {
-            Vec::new()
-        }
     }
 
     pub fn component_highlight(component: &Component) -> Vec<Self> {
@@ -735,16 +700,17 @@ impl GridRenderer {
         );
         self.vertex_count = vertices.len() as u32;
 
-        let wire_vertices = wire_vertices(&frame.wires, frame);
+        let mut wire_verts = wire_vertices(&frame.wires, frame);
+        wire_verts.extend(ray_vertices(&frame.rays, frame));
         prepare_vertex_buffer(
             device,
             queue,
             "logic wire vertex buffer",
-            &wire_vertices,
+            &wire_verts,
             &mut self.wire_vertex_buffer,
             &mut self.wire_vertex_capacity,
         );
-        self.wire_vertex_count = wire_vertices.len() as u32;
+        self.wire_vertex_count = wire_verts.len() as u32;
 
         let wire_values = if frame.wire_values.is_empty() {
             vec![WireValue::new(0)]
@@ -904,22 +870,31 @@ fn wire_vertices(wires: &[DrawWire], frame: &RenderFrame) -> Vec<WireVertex> {
             }
         };
         let horizontal = draw.wire.orientation() == Orientation::Horizontal;
-        let top_left = wire_vertex([left, top], 0.0, scale, draw, frame);
+        let top_left = wire_vertex([left, top], 0.0, scale, draw.color, draw.value_index, frame);
         let top_right = wire_vertex(
             [right, top],
             if horizontal { 0.0 } else { scale },
             scale,
-            draw,
+            draw.color,
+            draw.value_index,
             frame,
         );
         let bottom_left = wire_vertex(
             [left, bottom],
             if horizontal { scale } else { 0.0 },
             scale,
-            draw,
+            draw.color,
+            draw.value_index,
             frame,
         );
-        let bottom_right = wire_vertex([right, bottom], scale, scale, draw, frame);
+        let bottom_right = wire_vertex(
+            [right, bottom],
+            scale,
+            scale,
+            draw.color,
+            draw.value_index,
+            frame,
+        );
         vertices.extend([
             top_left,
             top_right,
@@ -932,19 +907,90 @@ fn wire_vertices(wires: &[DrawWire], frame: &RenderFrame) -> Vec<WireVertex> {
     vertices
 }
 
+fn ray_vertices(rays: &[DrawRay], frame: &RenderFrame) -> Vec<WireVertex> {
+    let half_width = frame.viewport_size[0] / frame.zoom * 0.5;
+    let half_height = frame.viewport_size[1] / frame.zoom * 0.5;
+    let vp_left = frame.camera_center[0] - half_width;
+    let vp_top = frame.camera_center[1] - half_height;
+    let vp_right = frame.camera_center[0] + half_width;
+    let vp_bottom = frame.camera_center[1] + half_height;
+
+    let mut vertices = Vec::with_capacity(rays.len() * 6);
+    for ray in rays {
+        let ComponentLead {
+            side,
+            axis,
+            start,
+            end,
+        } = ray.lead;
+        let (left, top, right, bottom) = match side {
+            ComponentSide::Top => (start as f32, vp_top, end as f32, axis as f32),
+            ComponentSide::Bottom => (start as f32, axis as f32, end as f32, vp_bottom),
+            ComponentSide::Left => (vp_left, start as f32, axis as f32, end as f32),
+            ComponentSide::Right => (axis as f32, start as f32, vp_right, end as f32),
+        };
+        if left >= right || top >= bottom {
+            continue;
+        }
+        let scale = ray.scale;
+        // bit_coord varies along the band's width (perpendicular to the ray direction):
+        // Top/Bottom rays: band runs in x, bit 0 at left, bit scale at right
+        // Left/Right rays: band runs in y, bit 0 at top, bit scale at bottom
+        let (tl_bit, tr_bit, bl_bit, br_bit) = match side {
+            ComponentSide::Top | ComponentSide::Bottom => (0.0, scale, 0.0, scale),
+            ComponentSide::Left | ComponentSide::Right => (0.0, 0.0, scale, scale),
+        };
+        let tl = wire_vertex(
+            [left, top],
+            tl_bit,
+            scale,
+            ray.color,
+            ray.value_index,
+            frame,
+        );
+        let tr = wire_vertex(
+            [right, top],
+            tr_bit,
+            scale,
+            ray.color,
+            ray.value_index,
+            frame,
+        );
+        let bl = wire_vertex(
+            [left, bottom],
+            bl_bit,
+            scale,
+            ray.color,
+            ray.value_index,
+            frame,
+        );
+        let br = wire_vertex(
+            [right, bottom],
+            br_bit,
+            scale,
+            ray.color,
+            ray.value_index,
+            frame,
+        );
+        vertices.extend([tl, tr, bl, bl, tr, br]);
+    }
+    vertices
+}
+
 fn wire_vertex(
     position: [f32; 2],
     bit_coord: f32,
     scale: f32,
-    draw: &DrawWire,
+    color: [f32; 4],
+    value_index: u32,
     frame: &RenderFrame,
 ) -> WireVertex {
     WireVertex {
         position: world_to_clip(position, frame),
         bit_coord,
         scale,
-        value_index: draw.value_index,
-        fill_color: draw.color,
+        value_index,
+        fill_color: color,
     }
 }
 

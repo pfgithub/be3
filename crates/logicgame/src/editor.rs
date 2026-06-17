@@ -7,7 +7,7 @@ use eframe::egui::{self, PointerButton};
 use logicgame::execution::{Component as ExecutionComponent, Instruction, Pc, Vm};
 use logicgame::grid::{
     value_mask, CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
-    InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
+    GraphNodeId, InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
 };
 use logicgame::{
     challenges::{self, input_id, output_id, ChallengeComponentKind, ChallengeId},
@@ -16,7 +16,7 @@ use logicgame::{
 
 use crate::{
     component_files::{ComponentFileDrag, ComponentFiles},
-    renderer::{DrawTriangle, DrawWire, GridCallback, RenderFrame, WireValue},
+    renderer::{DrawRay, DrawTriangle, DrawWire, GridCallback, RenderFrame, WireValue},
 };
 
 const MIN_ZOOM: f32 = 0.1;
@@ -1622,7 +1622,11 @@ impl LogicEditor {
     fn wire_value_indices(
         &self,
         snapshot: &SimulationSnapshot,
-    ) -> (BTreeMap<Wire, u32>, Vec<WireValue>) {
+    ) -> (
+        BTreeMap<Wire, u32>,
+        BTreeMap<ComponentId, u32>,
+        Vec<WireValue>,
+    ) {
         let root_memory = self
             .simulation
             .snapshot
@@ -1649,10 +1653,38 @@ impl LogicEditor {
             address += 1;
         }
 
+        let mut net_value: BTreeMap<usize, u32> = BTreeMap::new();
+        for (i, node) in snapshot.graph.nodes.iter().enumerate() {
+            if let GraphNode::WireNet { wires } = node {
+                if let Some(&vi) = wires.first().and_then(|w| indices.get(w)) {
+                    net_value.insert(i, vi);
+                }
+            }
+        }
+        let mut component_indices: BTreeMap<ComponentId, u32> = BTreeMap::new();
+        for (i, node) in snapshot.graph.nodes.iter().enumerate() {
+            let GraphNode::Connection { component, .. } = node else {
+                continue;
+            };
+            for edge in &snapshot.graph.edges {
+                let other = if edge.first == GraphNodeId(i) {
+                    Some(edge.second.0)
+                } else if edge.second == GraphNodeId(i) {
+                    Some(edge.first.0)
+                } else {
+                    None
+                };
+                if let Some(vi) = other.and_then(|j| net_value.get(&j)) {
+                    component_indices.insert(*component, *vi);
+                    break;
+                }
+            }
+        }
+
         if values.is_empty() {
             values.push(WireValue::new(0));
         }
-        (indices, values)
+        (indices, component_indices, values)
     }
 
     fn show_storage_configuration(&mut self, context: &egui::Context) {
@@ -2378,17 +2410,10 @@ impl LogicEditor {
         hovered_entity: Option<DebugEntity>,
         graph_hover: &GraphHover,
     ) -> RenderFrame {
-        let half_width = rect.width() / self.camera.zoom * 0.5;
-        let half_height = rect.height() / self.camera.zoom * 0.5;
-        let viewport = [
-            self.camera.center[0] - half_width,
-            self.camera.center[1] - half_height,
-            self.camera.center[0] + half_width,
-            self.camera.center[1] + half_height,
-        ];
         let errors = self.grid.validate();
         let snapshot = self.simulation_snapshot();
-        let (wire_value_indices, wire_values) = self.wire_value_indices(&snapshot);
+        let (wire_value_indices, component_value_indices, wire_values) =
+            self.wire_value_indices(&snapshot);
         let mut bad_wires = BTreeSet::new();
         let mut bad_components = BTreeSet::new();
         for error in errors {
@@ -2418,9 +2443,23 @@ impl LogicEditor {
 
         let mut component_triangles = Vec::new();
         let mut draw_wires = Vec::new();
+        let mut draw_rays = Vec::new();
         let mut wire_triangles = Vec::new();
         for component in self.grid.components() {
-            component_triangles.extend(DrawTriangle::component_lead(component, viewport));
+            let ray_color = match &component.kind {
+                ComponentKind::Input { .. } => DrawTriangle::INPUT_COLOR,
+                ComponentKind::Output { .. } => DrawTriangle::OUTPUT_COLOR,
+                _ => DrawTriangle::WIRE_COLOR,
+            };
+            let ray_value_index = component_value_indices
+                .get(&component.id)
+                .copied()
+                .unwrap_or_default();
+            draw_rays.extend(DrawRay::from_component(
+                component,
+                ray_color,
+                ray_value_index,
+            ));
             component_triangles.extend(DrawTriangle::component(
                 component,
                 bad_components.contains(&component.id),
@@ -2494,9 +2533,7 @@ impl LogicEditor {
                             },
                         };
                         component_triangles.extend(
-                            DrawTriangle::component_lead(&component, viewport)
-                                .into_iter()
-                                .chain(DrawTriangle::component(&component, false))
+                            DrawTriangle::component(&component, false)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -2540,9 +2577,7 @@ impl LogicEditor {
                             kind: ComponentKind::Led,
                         };
                         component_triangles.extend(
-                            DrawTriangle::component_lead(&component, viewport)
-                                .into_iter()
-                                .chain(DrawTriangle::component(&component, false))
+                            DrawTriangle::component(&component, false)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -2565,9 +2600,7 @@ impl LogicEditor {
                             },
                         };
                         component_triangles.extend(
-                            DrawTriangle::component_lead(&component, viewport)
-                                .into_iter()
-                                .chain(DrawTriangle::component(&component, false))
+                            DrawTriangle::component(&component, false)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -2589,10 +2622,13 @@ impl LogicEditor {
                                 id: InputId::from_u128(u128::MAX),
                             },
                         };
+                        draw_rays.extend(DrawRay::from_component(
+                            &component,
+                            DrawTriangle::PREVIEW_COLOR,
+                            0,
+                        ));
                         component_triangles.extend(
-                            DrawTriangle::component_lead(&component, viewport)
-                                .into_iter()
-                                .chain(DrawTriangle::component(&component, false))
+                            DrawTriangle::component(&component, false)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -2614,10 +2650,13 @@ impl LogicEditor {
                                 id: OutputId::from_u128(u128::MAX),
                             },
                         };
+                        draw_rays.extend(DrawRay::from_component(
+                            &component,
+                            DrawTriangle::PREVIEW_COLOR,
+                            0,
+                        ));
                         component_triangles.extend(
-                            DrawTriangle::component_lead(&component, viewport)
-                                .into_iter()
-                                .chain(DrawTriangle::component(&component, false))
+                            DrawTriangle::component(&component, false)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -2639,10 +2678,13 @@ impl LogicEditor {
                         };
                         let mut component = original.clone();
                         component.position = position;
+                        draw_rays.extend(DrawRay::from_component(
+                            &component,
+                            DrawTriangle::PREVIEW_COLOR,
+                            0,
+                        ));
                         component_triangles.extend(
-                            DrawTriangle::component_lead(&component, viewport)
-                                .into_iter()
-                                .chain(DrawTriangle::component(&component, false))
+                            DrawTriangle::component(&component, false)
                                 .into_iter()
                                 .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
                         );
@@ -2670,6 +2712,7 @@ impl LogicEditor {
             grid_scale: self.tool.snap().get() as f32,
             wires: draw_wires,
             wire_values,
+            rays: draw_rays,
             triangles: wire_triangles,
         }
     }

@@ -13,6 +13,7 @@ fn viewport_grid_and_entities_are_layered_and_bounded() {
         grid_scale: 1.0,
         wires: Vec::new(),
         wire_values: Vec::new(),
+        rays: Vec::new(),
         triangles: vec![entity],
     };
 

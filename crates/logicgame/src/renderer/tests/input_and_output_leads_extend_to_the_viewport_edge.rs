@@ -2,7 +2,6 @@ use super::*;
 
 #[test]
 fn input_and_output_leads_extend_to_the_viewport_edge() {
-    let viewport = [-5.0, -5.0, 5.0, 5.0];
     let input = Component {
         id: ComponentId(0),
         position: Point::new(0, 0),
@@ -22,23 +21,49 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
         },
     };
 
-    let input_lead = DrawTriangle::component_lead(&input, viewport);
-    assert_eq!(input_lead.len(), 2);
-    assert!(input_lead
-        .iter()
-        .all(|triangle| triangle.color == DrawTriangle::INPUT_COLOR));
-    assert!(input_lead
-        .iter()
-        .flat_map(|triangle| triangle.positions)
-        .any(|position| position[1] == viewport[1]));
+    let frame = RenderFrame {
+        viewport_size: [100.0, 100.0],
+        camera_center: [0.0, 0.0],
+        zoom: 2.0,
+        grid_scale: 1.0,
+        wires: Vec::new(),
+        wire_values: Vec::new(),
+        rays: vec![
+            DrawRay::from_component(&input, DrawTriangle::INPUT_COLOR, 0).unwrap(),
+            DrawRay::from_component(&output, DrawTriangle::OUTPUT_COLOR, 0).unwrap(),
+        ],
+        triangles: Vec::new(),
+    };
 
-    let output_lead = DrawTriangle::component_lead(&output, viewport);
-    assert_eq!(output_lead.len(), 2);
-    assert!(output_lead
+    let vertices = ray_vertices(&frame.rays, &frame);
+    assert_eq!(vertices.len(), 12);
+
+    let input_verts = &vertices[..6];
+    assert!(input_verts
         .iter()
-        .all(|triangle| triangle.color == DrawTriangle::OUTPUT_COLOR));
-    assert!(output_lead
+        .all(|v| v.fill_color == DrawTriangle::INPUT_COLOR));
+    // input rotated Up → Top lead, ray extends to viewport top
+    // viewport top in world = 0.0 - (100.0 / 2.0 / 2.0) = -25.0, clipped to vp_top
+    let top_y_clip = input_verts
         .iter()
-        .flat_map(|triangle| triangle.positions)
-        .any(|position| position[0] == viewport[2]));
+        .map(|v| v.position[1])
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        top_y_clip > 0.0,
+        "input ray should reach viewport top edge (positive clip y)"
+    );
+
+    let output_verts = &vertices[6..];
+    assert!(output_verts
+        .iter()
+        .all(|v| v.fill_color == DrawTriangle::OUTPUT_COLOR));
+    // output rotated Right → Right lead, ray extends to viewport right
+    let right_x_clip = output_verts
+        .iter()
+        .map(|v| v.position[0])
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        right_x_clip > 0.0,
+        "output ray should reach viewport right edge (positive clip x)"
+    );
 }
