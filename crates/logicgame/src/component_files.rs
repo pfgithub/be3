@@ -461,14 +461,18 @@ fn subcomponent_ports(
     min: Point,
     max: Point,
 ) -> Result<Vec<ComponentPort>, ComponentFileError> {
+    let input_indices = dense_input_indices(grid);
+    let output_indices = dense_output_indices(grid);
     let mut ports = Vec::new();
     for component in grid.components() {
         let (direction, index, scale) = match component.kind {
             ComponentKind::Input { id, scale } => {
-                (logicgame::grid::ConnectionDirection::Input, id.0, scale)
+                let index = input_indices[&id];
+                (logicgame::grid::ConnectionDirection::Input, index, scale)
             }
             ComponentKind::Output { id, scale } => {
-                (logicgame::grid::ConnectionDirection::Output, id.0, scale)
+                let index = output_indices[&id];
+                (logicgame::grid::ConnectionDirection::Output, index, scale)
             }
             _ => continue,
         };
@@ -503,6 +507,36 @@ fn subcomponent_ports(
     }
     ports.sort_by_key(|port| (port.direction, port.index));
     Ok(ports)
+}
+
+fn dense_input_indices(grid: &LogicGrid) -> BTreeMap<logicgame::grid::InputId, usize> {
+    dense_port_indices(
+        grid.components()
+            .filter_map(|component| match component.kind {
+                ComponentKind::Input { id, .. } => Some(id),
+                _ => None,
+            }),
+    )
+}
+
+fn dense_output_indices(grid: &LogicGrid) -> BTreeMap<logicgame::grid::OutputId, usize> {
+    dense_port_indices(
+        grid.components()
+            .filter_map(|component| match component.kind {
+                ComponentKind::Output { id, .. } => Some(id),
+                _ => None,
+            }),
+    )
+}
+
+fn dense_port_indices<T: Ord>(ids: impl IntoIterator<Item = T>) -> BTreeMap<T, usize> {
+    let mut ids = ids.into_iter().collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids.into_iter()
+        .enumerate()
+        .map(|(index, id)| (id, index))
+        .collect()
 }
 
 pub fn validate_name(name: &str) -> Result<&str, ComponentFileError> {
@@ -750,7 +784,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::new(2).unwrap(),
-                id: logicgame::grid::InputId(usize::MAX),
+                id: logicgame::grid::InputId::from_u128(u128::MAX),
             },
         );
         grid.add_component(
@@ -758,7 +792,7 @@ mod tests {
             Rotation::Down,
             ComponentKind::Output {
                 scale: Scale::new(4).unwrap(),
-                id: logicgame::grid::OutputId(usize::MAX),
+                id: logicgame::grid::OutputId::from_u128(u128::MAX),
             },
         );
         files.save(&source, &grid).unwrap();
@@ -826,7 +860,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: logicgame::grid::InputId(usize::MAX),
+                id: logicgame::grid::InputId::from_u128(u128::MAX),
             },
         );
         grid.add_component(Point::new(4, -4), Rotation::Up, ComponentKind::Led);
@@ -930,7 +964,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: logicgame::grid::InputId(0),
+                id: logicgame::grid::InputId::from_u128(1),
             },
         );
         grid.add_component(
@@ -938,7 +972,7 @@ mod tests {
             Rotation::Down,
             ComponentKind::Output {
                 scale: Scale::ONE,
-                id: logicgame::grid::OutputId(0),
+                id: logicgame::grid::OutputId::from_u128(1),
             },
         );
         files

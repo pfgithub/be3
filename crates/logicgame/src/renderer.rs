@@ -1166,7 +1166,7 @@ mod tests {
             rotation: Rotation::Up,
             kind: ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(0),
+                id: InputId::from_u128(0),
             },
         };
         let output = Component {
@@ -1175,7 +1175,7 @@ mod tests {
             rotation: Rotation::Right,
             kind: ComponentKind::Output {
                 scale: Scale::ONE,
-                id: OutputId(0),
+                id: OutputId::from_u128(0),
             },
         };
 

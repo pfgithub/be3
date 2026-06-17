@@ -1021,7 +1021,9 @@ impl LogicEditor {
                 ComponentKind::Input { scale, id } => {
                     match challenges::input_label(challenge, id) {
                         Some(label) => {
-                            let expected = challenge.inputs[id.0].scale;
+                            let index = challenges::input_index(challenge, id)
+                                .expect("labeled challenge input has an index");
+                            let expected = challenge.inputs[index].scale;
                             if scale != expected {
                                 errors.push(format!(
                                     "Input {label} must be {}x but is {}x",
@@ -1035,13 +1037,15 @@ impl LogicEditor {
                                 errors.push(format!("Input {label} appears more than once"));
                             }
                         }
-                        None => errors.push(format!("Input {} is not part of the challenge", id.0)),
+                        None => errors.push(format!("Input {id:?} is not part of the challenge")),
                     }
                 }
                 ComponentKind::Output { scale, id } => {
                     match challenges::output_label(challenge, id) {
                         Some(label) => {
-                            let expected = challenge.outputs[id.0].scale;
+                            let index = challenges::output_index(challenge, id)
+                                .expect("labeled challenge output has an index");
+                            let expected = challenge.outputs[index].scale;
                             if scale != expected {
                                 errors.push(format!(
                                     "Output {label} must be {}x but is {}x",
@@ -1055,9 +1059,7 @@ impl LogicEditor {
                                 errors.push(format!("Output {label} appears more than once"));
                             }
                         }
-                        None => {
-                            errors.push(format!("Output {} is not part of the challenge", id.0))
-                        }
+                        None => errors.push(format!("Output {id:?} is not part of the challenge")),
                     }
                 }
                 ComponentKind::Not { scale } => {
@@ -1109,10 +1111,11 @@ impl LogicEditor {
             let Some(id) = input_id(challenge, input.label) else {
                 return Err(format!("Unknown input {}", input.label));
             };
-            let Some(port) = challenge.inputs.get(id.0) else {
+            let Some(index) = challenges::input_index(challenge, id) else {
                 return Err(format!("Unknown input {}", input.label));
             };
-            let Some(value) = values.get_mut(id.0) else {
+            let port = &challenge.inputs[index];
+            let Some(value) = values.get_mut(index) else {
                 return Err(format!("Missing input {}", input.label));
             };
             *value = input.value & value_mask(port.scale);
@@ -1284,12 +1287,11 @@ impl LogicEditor {
                         SimulationInstructionSelection::Active
                     );
                 if ui.selectable_label(root_active, "Root").clicked() {
-                    self.simulation.instruction_selection =
-                        if vm.returns.is_empty() {
-                            SimulationInstructionSelection::Active
-                        } else {
-                            SimulationInstructionSelection::ReturnFrame(0)
-                        };
+                    self.simulation.instruction_selection = if vm.returns.is_empty() {
+                        SimulationInstructionSelection::Active
+                    } else {
+                        SimulationInstructionSelection::ReturnFrame(0)
+                    };
                 }
                 for (index, pc) in vm.returns.iter().enumerate().skip(1) {
                     if ui
@@ -1299,7 +1301,10 @@ impl LogicEditor {
                                 SimulationInstructionSelection::ReturnFrame(selected)
                                     if selected == index
                             ),
-                            format!("Caller {index}: {}", simulation_component_name(&pc.component)),
+                            format!(
+                                "Caller {index}: {}",
+                                simulation_component_name(&pc.component)
+                            ),
                         )
                         .clicked()
                     {
@@ -1318,7 +1323,8 @@ impl LogicEditor {
                         )
                         .clicked()
                     {
-                        self.simulation.instruction_selection = SimulationInstructionSelection::Active;
+                        self.simulation.instruction_selection =
+                            SimulationInstructionSelection::Active;
                     }
                 }
 
@@ -1373,6 +1379,15 @@ impl LogicEditor {
                     ui.weak("No input components");
                 } else {
                     let input_addresses = vm.input_addresses().to_vec();
+                    let mut input_ports = snapshot
+                        .components
+                        .iter()
+                        .filter_map(|component| match component.kind {
+                            ComponentKind::Input { scale, id } => Some((id, scale)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    input_ports.sort_by_key(|(id, _)| *id);
                     for (input, address) in input_addresses.into_iter().enumerate() {
                         let Some(value) = self.simulation.input_values.get_mut(input) else {
                             ui.horizontal(|ui| {
@@ -1381,16 +1396,7 @@ impl LogicEditor {
                             });
                             continue;
                         };
-                        let scale =
-                            snapshot
-                                .components
-                                .iter()
-                                .find_map(|component| match component.kind {
-                                    ComponentKind::Input { scale, id } if id.0 == input => {
-                                        Some(scale)
-                                    }
-                                    _ => None,
-                                });
+                        let scale = input_ports.get(input).map(|(_, scale)| *scale);
                         ui.horizontal(|ui| {
                             ui.label(format!("Input {input}"));
                             if let Some(scale) = scale {
@@ -1417,10 +1423,13 @@ impl LogicEditor {
                 if vm.output_addresses().is_empty() {
                     ui.weak("No output components");
                 } else {
+                    let output_count = snapshot
+                        .components
+                        .iter()
+                        .filter(|component| matches!(component.kind, ComponentKind::Output { .. }))
+                        .count();
                     for (output, &address) in vm.output_addresses().iter().enumerate() {
-                        let exists = snapshot.components.iter().any(|component| {
-                            matches!(component.kind, ComponentKind::Output { id, .. } if id.0 == output)
-                        });
+                        let exists = output < output_count;
                         if exists {
                             if let Some(&value) = vm.root_memory().get(address) {
                                 simulation_value_row(ui, format!("Output {output}"), value);
@@ -2158,7 +2167,7 @@ impl LogicEditor {
                                 rotation,
                                 ComponentKind::Input {
                                     scale,
-                                    id: InputId(usize::MAX),
+                                    id: InputId::from_u128(u128::MAX),
                                 },
                             );
                         }
@@ -2194,7 +2203,7 @@ impl LogicEditor {
                                 rotation,
                                 ComponentKind::Output {
                                     scale,
-                                    id: OutputId(usize::MAX),
+                                    id: OutputId::from_u128(u128::MAX),
                                 },
                             );
                         }
@@ -2574,7 +2583,7 @@ impl LogicEditor {
                             rotation,
                             kind: ComponentKind::Input {
                                 scale: self.tool.scale,
-                                id: InputId(usize::MAX),
+                                id: InputId::from_u128(u128::MAX),
                             },
                         };
                         component_triangles.extend(
@@ -2599,7 +2608,7 @@ impl LogicEditor {
                             rotation,
                             kind: ComponentKind::Output {
                                 scale: self.tool.scale,
-                                id: OutputId(usize::MAX),
+                                id: OutputId::from_u128(u128::MAX),
                             },
                         };
                         component_triangles.extend(
@@ -2755,7 +2764,8 @@ fn challenge_rng(id: ChallengeId) -> rand_chacha::ChaCha8Rng {
 
 fn challenge_output_mask(challenge: &challenges::Challenge, label: &str) -> u64 {
     output_id(challenge, label)
-        .and_then(|id| challenge.outputs.get(id.0))
+        .and_then(|id| challenges::output_index(challenge, id))
+        .and_then(|index| challenge.outputs.get(index))
         .map(|port| value_mask(port.scale))
         .unwrap_or(u64::MAX)
 }
@@ -3640,7 +3650,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(0),
+                id: input_id(&challenges::NOR_CHALLENGE, "A").unwrap(),
             },
         );
         grid.add_component_with_explicit_io(
@@ -3648,7 +3658,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(1),
+                id: input_id(&challenges::NOR_CHALLENGE, "B").unwrap(),
             },
         );
         grid.add_component(
@@ -3661,7 +3671,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Output {
                 scale: Scale::ONE,
-                id: OutputId(0),
+                id: output_id(&challenges::NOR_CHALLENGE, "OUT").unwrap(),
             },
         );
         grid.add_wire(wire((0, 5), (4, 5), 1));
@@ -3677,7 +3687,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(0),
+                id: input_id(&challenges::NOR_CHALLENGE, "A").unwrap(),
             },
         );
         grid.add_component_with_explicit_io(
@@ -3685,7 +3695,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(1),
+                id: input_id(&challenges::NOR_CHALLENGE, "B").unwrap(),
             },
         );
         grid.add_component_with_explicit_io(
@@ -3693,7 +3703,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Output {
                 scale: Scale::ONE,
-                id: OutputId(0),
+                id: output_id(&challenges::NOR_CHALLENGE, "OUT").unwrap(),
             },
         );
         grid.add_wire(wire((0, 5), (4, 5), 1));
@@ -3775,7 +3785,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(0),
+                id: input_id(&challenges::NOR_CHALLENGE, "A").unwrap(),
             },
         );
         assert_eq!(editor.missing_input_labels(), vec!["B"]);
@@ -3794,7 +3804,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(0),
+                id: input_id(&challenges::NOR_CHALLENGE, "A").unwrap(),
             },
         );
 

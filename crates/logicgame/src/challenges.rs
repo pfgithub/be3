@@ -17,6 +17,8 @@ pub enum ChallengeComponentKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChallengePort {
+    pub input_id: Option<InputId>,
+    pub output_id: Option<OutputId>,
     pub label: &'static str,
     pub scale: Scale,
 }
@@ -76,16 +78,22 @@ impl Eq for Challenge {}
 
 const NOR_INPUTS: [ChallengePort; 2] = [
     ChallengePort {
+        input_id: Some(InputId::from_u128(1)),
+        output_id: None,
         label: "A",
         scale: Scale::ONE,
     },
     ChallengePort {
+        input_id: Some(InputId::from_u128(2)),
+        output_id: None,
         label: "B",
         scale: Scale::ONE,
     },
 ];
 
 const NOR_OUTPUTS: [ChallengePort; 1] = [ChallengePort {
+    input_id: None,
+    output_id: Some(OutputId::from_u128(1)),
     label: "OUT",
     scale: Scale::ONE,
 }];
@@ -120,24 +128,46 @@ pub fn input_id(challenge: &Challenge, label: &str) -> Option<InputId> {
     challenge
         .inputs
         .iter()
-        .position(|port| port.label == label)
-        .map(InputId)
+        .find(|port| port.label == label)
+        .and_then(|port| port.input_id)
 }
 
 pub fn output_id(challenge: &Challenge, label: &str) -> Option<OutputId> {
     challenge
         .outputs
         .iter()
-        .position(|port| port.label == label)
-        .map(OutputId)
+        .find(|port| port.label == label)
+        .and_then(|port| port.output_id)
+}
+
+pub fn input_index(challenge: &Challenge, id: InputId) -> Option<usize> {
+    challenge
+        .inputs
+        .iter()
+        .position(|port| port.input_id == Some(id))
+}
+
+pub fn output_index(challenge: &Challenge, id: OutputId) -> Option<usize> {
+    challenge
+        .outputs
+        .iter()
+        .position(|port| port.output_id == Some(id))
 }
 
 pub fn input_label(challenge: &Challenge, id: InputId) -> Option<&'static str> {
-    challenge.inputs.get(id.0).map(|port| port.label)
+    challenge
+        .inputs
+        .iter()
+        .find(|port| port.input_id == Some(id))
+        .map(|port| port.label)
 }
 
 pub fn output_label(challenge: &Challenge, id: OutputId) -> Option<&'static str> {
-    challenge.outputs.get(id.0).map(|port| port.label)
+    challenge
+        .outputs
+        .iter()
+        .find(|port| port.output_id == Some(id))
+        .map(|port| port.label)
 }
 
 fn generate_nor_tick(rng: &mut dyn RngCore) -> ChallengeTick {
@@ -173,9 +203,12 @@ mod tests {
     fn nor_challenge_defines_ports_and_generator() {
         assert_eq!(NOR_CHALLENGE.inputs.len(), 2);
         assert_eq!(NOR_CHALLENGE.outputs.len(), 1);
-        assert_eq!(input_id(&NOR_CHALLENGE, "A"), Some(InputId(0)));
-        assert_eq!(input_id(&NOR_CHALLENGE, "B"), Some(InputId(1)));
-        assert_eq!(output_id(&NOR_CHALLENGE, "OUT"), Some(OutputId(0)));
+        assert_eq!(input_id(&NOR_CHALLENGE, "A"), Some(InputId::from_u128(1)));
+        assert_eq!(input_id(&NOR_CHALLENGE, "B"), Some(InputId::from_u128(2)));
+        assert_eq!(
+            output_id(&NOR_CHALLENGE, "OUT"),
+            Some(OutputId::from_u128(1))
+        );
         assert!(NOR_CHALLENGE
             .inputs
             .iter()

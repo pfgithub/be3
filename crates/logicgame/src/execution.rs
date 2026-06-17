@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::{
     value_mask, CircuitGraph, ComponentHash, ComponentId, ComponentKind, ConnectionDirection,
-    ConnectionSlotId, GraphNode, GraphNodeId, LogicGrid,
+    ConnectionSlotId, GraphNode, GraphNodeId, InputId, LogicGrid, OutputId,
 };
 
 pub type MemoryAddress = usize;
@@ -190,16 +190,16 @@ impl UnlinkedComponent {
 
         let mut storage_ids = BTreeMap::new();
         let mut storage_init = Vec::new();
-        let mut inputs = Vec::<MemoryAddress>::new();
-        let mut outputs = Vec::<MemoryAddress>::new();
+        let input_indices = dense_input_indices(grid);
+        let output_indices = dense_output_indices(grid);
+        let mut inputs = vec![0; input_indices.len()];
+        let mut outputs = vec![0; output_indices.len()];
         for component in grid.components() {
             match &component.kind {
                 ComponentKind::Storage { value, .. } => {
                     storage_ids.insert(component.id, storage_init.len());
                     storage_init.push(*value);
                 }
-                ComponentKind::Input { id, .. } => inputs.resize(id.0 + 1, 0),
-                ComponentKind::Output { id, .. } => outputs.resize_with(id.0 + 1, Default::default),
                 _ => {}
             }
         }
@@ -358,8 +358,10 @@ impl UnlinkedComponent {
                             slot: ConnectionSlotId(0),
                         });
                     }
-                    if let Some(&address) = addresses.first() {
-                        inputs[id.0] = address;
+                    if let (Some(&index), Some(&address)) =
+                        (input_indices.get(id), addresses.first())
+                    {
+                        inputs[index] = address;
                     }
                 }
                 ComponentKind::Output { id, .. } => {
@@ -375,8 +377,10 @@ impl UnlinkedComponent {
                             slot: ConnectionSlotId(0),
                         });
                     }
-                    if let Some(&address) = addresses.first() {
-                        outputs[id.0] = address;
+                    if let (Some(&index), Some(&address)) =
+                        (output_indices.get(id), addresses.first())
+                    {
+                        outputs[index] = address;
                     }
                 }
                 ComponentKind::Led => {}
@@ -843,6 +847,36 @@ struct Operation {
     inputs: Vec<MemoryAddress>,
     outputs: Vec<MemoryAddress>,
     instructions: Vec<Instruction>,
+}
+
+fn dense_input_indices(grid: &LogicGrid) -> BTreeMap<InputId, usize> {
+    dense_port_indices(
+        grid.components()
+            .filter_map(|component| match component.kind {
+                ComponentKind::Input { id, .. } => Some(id),
+                _ => None,
+            }),
+    )
+}
+
+fn dense_output_indices(grid: &LogicGrid) -> BTreeMap<OutputId, usize> {
+    dense_port_indices(
+        grid.components()
+            .filter_map(|component| match component.kind {
+                ComponentKind::Output { id, .. } => Some(id),
+                _ => None,
+            }),
+    )
+}
+
+fn dense_port_indices<T: Ord>(ids: impl IntoIterator<Item = T>) -> BTreeMap<T, usize> {
+    let mut ids = ids.into_iter().collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids.into_iter()
+        .enumerate()
+        .map(|(index, id)| (id, index))
+        .collect()
 }
 
 fn connection_addresses(
@@ -1389,14 +1423,14 @@ mod tests {
     }
 
     #[test]
-    fn inputs_and_outputs_compile_to_memory_bindings() {
+    fn inputs_and_outputs_compile_to_dense_memory_bindings() {
         let mut grid = LogicGrid::new();
         let removed_input = grid.add_component(
             Point::new(0, 0),
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(99),
+                id: InputId::from_u128(99),
             },
         );
         grid.remove_component(removed_input);
@@ -1405,7 +1439,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::new(4).unwrap(),
-                id: InputId(99),
+                id: InputId::from_u128(99),
             },
         );
         let removed_output = grid.add_component(
@@ -1413,7 +1447,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Output {
                 scale: Scale::ONE,
-                id: OutputId(99),
+                id: OutputId::from_u128(99),
             },
         );
         grid.remove_component(removed_output);
@@ -1422,7 +1456,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Output {
                 scale: Scale::new(4).unwrap(),
-                id: OutputId(99),
+                id: OutputId::from_u128(99),
             },
         );
         let graph = graph(
@@ -1434,20 +1468,59 @@ mod tests {
         );
 
         let mut vm = Vm::from_graph(&grid, &graph).unwrap();
-        assert_eq!(vm.input_addresses(), &[0, 0]);
-        assert_eq!(vm.output_addresses(), &[0, 0]);
+        assert_eq!(vm.input_addresses(), &[0]);
+        assert_eq!(vm.output_addresses(), &[0]);
         assert!(vm.root_instructions().is_empty());
 
         vm.begin_tick();
-        let input_address = vm.input_addresses()[1];
+        let input_address = vm.input_addresses()[0];
         vm.root_memory_mut()[input_address] |= 0xff;
         vm.execute();
         assert_eq!(vm.root_memory(), &[0xff]);
-        assert_eq!(vm.root_memory()[vm.output_addresses()[1]], 0xff);
+        assert_eq!(vm.root_memory()[vm.output_addresses()[0]], 0xff);
 
         vm.root_memory_mut()[0] = u64::MAX;
         vm.begin_tick();
         assert_eq!(vm.root_memory(), &[0]);
+    }
+
+    #[test]
+    fn explicit_uuid_ports_compile_to_dense_memory_bindings() {
+        let mut grid = LogicGrid::new();
+        let input = grid.add_component_with_explicit_io(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::new(4).unwrap(),
+                id: InputId::from_u128(2),
+            },
+        );
+        let output = grid.add_component_with_explicit_io(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Output {
+                scale: Scale::new(4).unwrap(),
+                id: OutputId::from_u128(7),
+            },
+        );
+        let graph = graph(
+            1,
+            &[
+                (input, ConnectionDirection::Output, 0, 0),
+                (output, ConnectionDirection::Input, 0, 0),
+            ],
+        );
+
+        let mut vm = Vm::from_graph(&grid, &graph).unwrap();
+        assert_eq!(vm.input_addresses(), &[0]);
+        assert_eq!(vm.output_addresses(), &[0]);
+
+        vm.begin_tick();
+        let input_address = vm.input_addresses()[0];
+        vm.root_memory_mut()[input_address] = 0xab;
+        vm.execute();
+
+        assert_eq!(vm.root_memory()[vm.output_addresses()[0]], 0xab);
     }
 
     #[test]

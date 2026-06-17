@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentHash(String);
@@ -456,10 +457,30 @@ impl ComponentKind {
 pub struct ComponentId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct InputId(pub usize);
+pub struct InputId(pub Uuid);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct OutputId(pub usize);
+pub struct OutputId(pub Uuid);
+
+impl InputId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    pub const fn from_u128(value: u128) -> Self {
+        Self(Uuid::from_u128(value))
+    }
+}
+
+impl OutputId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    pub const fn from_u128(value: u128) -> Self {
+        Self(Uuid::from_u128(value))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Component {
@@ -614,8 +635,6 @@ pub struct LogicGrid {
     wires: Vec<Wire>,
     components: BTreeMap<ComponentId, Component>,
     next_component_id: u64,
-    next_input_id: usize,
-    next_output_id: usize,
     revision: u64,
 }
 
@@ -631,8 +650,6 @@ impl Default for LogicGrid {
             wires: Vec::new(),
             components: BTreeMap::new(),
             next_component_id: 0,
-            next_input_id: 0,
-            next_output_id: 0,
             revision: 0,
         }
     }
@@ -667,26 +684,6 @@ impl LogicGrid {
             .map_or(0, |id| {
                 id.checked_add(1).expect("component ID space exhausted")
             });
-        let next_input_id = snapshot
-            .components
-            .iter()
-            .filter_map(|component| match component.kind {
-                ComponentKind::Input { id, .. } => Some(id.0),
-                _ => None,
-            })
-            .max()
-            .map_or(0, |id| id.checked_add(1).expect("input ID space exhausted"));
-        let next_output_id = snapshot
-            .components
-            .iter()
-            .filter_map(|component| match component.kind {
-                ComponentKind::Output { id, .. } => Some(id.0),
-                _ => None,
-            })
-            .max()
-            .map_or(0, |id| {
-                id.checked_add(1).expect("output ID space exhausted")
-            });
         let components = snapshot
             .components
             .into_iter()
@@ -697,8 +694,6 @@ impl LogicGrid {
             wires: snapshot.wires,
             components,
             next_component_id,
-            next_input_id,
-            next_output_id,
             revision: 0,
         }
     }
@@ -739,18 +734,10 @@ impl LogicGrid {
                 *value &= value_mask(*scale);
             }
             ComponentKind::Input { id, .. } => {
-                *id = InputId(self.next_input_id);
-                self.next_input_id = self
-                    .next_input_id
-                    .checked_add(1)
-                    .expect("input ID space exhausted");
+                *id = InputId::new();
             }
             ComponentKind::Output { id, .. } => {
-                *id = OutputId(self.next_output_id);
-                self.next_output_id = self
-                    .next_output_id
-                    .checked_add(1)
-                    .expect("output ID space exhausted");
+                *id = OutputId::new();
             }
             _ => {}
         }
@@ -781,16 +768,6 @@ impl LogicGrid {
         match &mut kind {
             ComponentKind::Storage { scale, value } => {
                 *value &= value_mask(*scale);
-            }
-            ComponentKind::Input { id, .. } => {
-                self.next_input_id = self
-                    .next_input_id
-                    .max(id.0.checked_add(1).expect("input ID space exhausted"));
-            }
-            ComponentKind::Output { id, .. } => {
-                self.next_output_id = self
-                    .next_output_id
-                    .max(id.0.checked_add(1).expect("output ID space exhausted"));
             }
             _ => {}
         }
@@ -1890,14 +1867,14 @@ mod tests {
     }
 
     #[test]
-    fn input_and_output_ids_are_separate_monotonic_namespaces() {
+    fn input_and_output_ids_are_unique_uuid_namespaces() {
         let mut grid = LogicGrid::new();
         let first_input = grid.add_component(
             Point::new(0, 0),
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(99),
+                id: InputId::from_u128(99),
             },
         );
         let first_output = grid.add_component(
@@ -1905,7 +1882,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Output {
                 scale: Scale::ONE,
-                id: OutputId(99),
+                id: OutputId::from_u128(99),
             },
         );
         grid.remove_component(first_input);
@@ -1914,21 +1891,27 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(99),
+                id: InputId::from_u128(99),
             },
         );
 
-        assert!(matches!(
-            grid.component(first_output).unwrap().kind,
-            ComponentKind::Output {
-                id: OutputId(0),
-                ..
-            }
-        ));
-        assert!(matches!(
-            grid.component(second_input).unwrap().kind,
-            ComponentKind::Input { id: InputId(1), .. }
-        ));
+        let ComponentKind::Output {
+            id: first_output_id,
+            ..
+        } = grid.component(first_output).unwrap().kind
+        else {
+            panic!("expected output");
+        };
+        let ComponentKind::Input {
+            id: second_input_id,
+            ..
+        } = grid.component(second_input).unwrap().kind
+        else {
+            panic!("expected input");
+        };
+        assert_ne!(first_output_id.0, second_input_id.0);
+        assert_ne!(first_output_id, OutputId::from_u128(99));
+        assert_ne!(second_input_id, InputId::from_u128(99));
     }
 
     #[test]
@@ -1939,7 +1922,7 @@ mod tests {
             rotation: Rotation::Right,
             kind: ComponentKind::Input {
                 scale: scale(2),
-                id: InputId(0),
+                id: InputId::from_u128(0),
             },
         };
 
@@ -1974,7 +1957,7 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(0),
+                id: InputId::from_u128(0),
             },
         );
         let blocker = grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
@@ -2532,7 +2515,7 @@ mod tests {
                     rotation: Rotation::Left,
                     kind: ComponentKind::Input {
                         scale: scale(2),
-                        id: InputId(5),
+                        id: InputId::from_u128(5),
                     },
                 },
                 Component {
@@ -2541,7 +2524,7 @@ mod tests {
                     rotation: Rotation::Up,
                     kind: ComponentKind::Output {
                         scale: scale(2),
-                        id: OutputId(7),
+                        id: OutputId::from_u128(7),
                     },
                 },
                 Component {
@@ -2574,27 +2557,25 @@ mod tests {
             Rotation::Up,
             ComponentKind::Input {
                 scale: Scale::ONE,
-                id: InputId(usize::MAX),
+                id: InputId::from_u128(u128::MAX),
             },
         );
-        assert!(matches!(
-            grid.component(input).unwrap().kind,
-            ComponentKind::Input { id: InputId(6), .. }
-        ));
+        let ComponentKind::Input { id: input_id, .. } = grid.component(input).unwrap().kind else {
+            panic!("expected input");
+        };
+        assert_ne!(input_id, InputId::from_u128(u128::MAX));
         let output = grid.add_component(
             Point::new(8, 12),
             Rotation::Up,
             ComponentKind::Output {
                 scale: Scale::ONE,
-                id: OutputId(usize::MAX),
+                id: OutputId::from_u128(u128::MAX),
             },
         );
-        assert!(matches!(
-            grid.component(output).unwrap().kind,
-            ComponentKind::Output {
-                id: OutputId(8),
-                ..
-            }
-        ));
+        let ComponentKind::Output { id: output_id, .. } = grid.component(output).unwrap().kind
+        else {
+            panic!("expected output");
+        };
+        assert_ne!(output_id, OutputId::from_u128(u128::MAX));
     }
 }
