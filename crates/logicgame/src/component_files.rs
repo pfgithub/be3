@@ -12,8 +12,8 @@ use logicgame::{
     challenges::ChallengeId,
     execution::{Component, GenerationError, UnlinkedComponent, Vm},
     grid::{
-        ComponentHash, ComponentKind, ComponentPort, ComponentSide, GeometryError, LogicGrid,
-        LogicGridSnapshot, Point, Size,
+        ComponentHash, ComponentKind, ComponentPort, ComponentSide, ComponentSubgraph,
+        GeometryError, LogicGrid, LogicGridSnapshot, Point, Size,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -345,6 +345,14 @@ impl ComponentFiles {
         let ports = subcomponent_ports(&grid, bounds.min, bounds.max)?;
         let snapshot = grid.snapshot();
         let component = UnlinkedComponent::from_graph(&grid, &grid.generate_graph())?;
+        let subgraphs = component
+            .subgraphs
+            .iter()
+            .map(|subgraph| ComponentSubgraph {
+                inputs: subgraph.inputs.clone(),
+                outputs: subgraph.outputs.clone(),
+            })
+            .collect();
         let bytes = serde_json::to_vec_pretty(&CompiledComponent {
             source_file_id: file.id(),
             snapshot,
@@ -359,7 +367,9 @@ impl ComponentFiles {
             atomic_write(&path, &bytes)?;
         }
 
-        Ok(ComponentKind::subcomponent(hash, size, ports)?)
+        Ok(ComponentKind::subcomponent_with_subgraphs(
+            hash, size, ports, subgraphs,
+        )?)
     }
 
     fn compiled_path(&self, hash: &ComponentHash) -> PathBuf {
@@ -756,6 +766,14 @@ mod tests {
                     input: 2,
                     output: 1,
                 }],
+                subgraphs: vec![logicgame::execution::UnlinkedSubgraph {
+                    inputs: vec![0],
+                    outputs: vec![0],
+                    instructions: vec![Instruction::Not {
+                        input: 2,
+                        output: 1,
+                    }],
+                }],
             },
         };
 
@@ -766,6 +784,7 @@ mod tests {
         assert_eq!(json["component"]["inputs"], serde_json::json!([2]));
         assert_eq!(json["component"]["outputs"], serde_json::json!([1]));
         assert!(json["component"]["instructions"].is_array());
+        assert!(json["component"]["subgraphs"].is_array());
 
         let decoded: CompiledComponent = serde_json::from_value(json).unwrap();
         assert_eq!(decoded.source_file_id, compiled.source_file_id);

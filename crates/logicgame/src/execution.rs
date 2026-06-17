@@ -28,6 +28,10 @@ pub enum GenerationError {
 pub enum Instruction {
     Call {
         component: usize,
+        #[serde(default)]
+        instance: usize,
+        #[serde(default)]
+        subgraph: usize,
         #[serde(default, skip_serializing)]
         storage_offset: StorageId,
         inputs: Vec<Option<MemoryAddress>>,
@@ -59,8 +63,17 @@ pub struct UnlinkedComponent {
     pub outputs: Vec<MemoryAddress>,
     pub components: Vec<ComponentHash>,
     pub instructions: Vec<Instruction>,
+    #[serde(default)]
+    pub subgraphs: Vec<UnlinkedSubgraph>,
     pub memory_size: usize,
     pub storage_init: Vec<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnlinkedSubgraph {
+    pub inputs: Vec<usize>,
+    pub outputs: Vec<usize>,
+    pub instructions: Vec<Instruction>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,14 +82,23 @@ pub struct Component {
     pub outputs: Vec<MemoryAddress>,
     pub components: Vec<Rc<Component>>,
     pub instructions: Vec<Instruction>,
+    pub subgraphs: Vec<ComponentExecutionSubgraph>,
     pub memory_size: usize,
     pub storage_init: Vec<u64>,
     pub source_hash: Option<ComponentHash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComponentExecutionSubgraph {
+    pub inputs: Vec<usize>,
+    pub outputs: Vec<usize>,
+    pub instructions: Vec<Instruction>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pc {
     pub instruction_index: usize,
+    pub subgraph: Option<usize>,
     pub memory_offset: usize,
     pub storage_offset: usize,
     pub component: Rc<Component>,
@@ -98,6 +120,7 @@ impl Default for UnlinkedComponent {
             outputs: Vec::new(),
             components: Vec::new(),
             instructions: Vec::new(),
+            subgraphs: Vec::new(),
             memory_size: 0,
             storage_init: Vec::new(),
         }
@@ -111,6 +134,7 @@ impl Default for Component {
             outputs: Vec::new(),
             components: Vec::new(),
             instructions: Vec::new(),
+            subgraphs: Vec::new(),
             memory_size: 0,
             storage_init: Vec::new(),
             source_hash: None,
@@ -123,6 +147,7 @@ impl Default for Vm {
         let root_component = Rc::new(Component::default());
         let pc = Pc {
             instruction_index: 0,
+            subgraph: None,
             memory_offset: 0,
             storage_offset: 0,
             component: Rc::clone(&root_component),
@@ -394,6 +419,7 @@ impl UnlinkedComponent {
                 ComponentKind::Subcomponent {
                     component: component_hash,
                     ports,
+                    subgraphs,
                     ..
                 } => {
                     let input_count = ports
@@ -438,23 +464,44 @@ impl UnlinkedComponent {
                             }
                         }
                     }
-                    let component = *component_indices
+                    let child_component = *component_indices
                         .entry(component_hash.clone())
                         .or_insert_with(|| {
                             let index = components.len();
                             components.push(component_hash.clone());
                             index
                         });
-                    operations.push(Operation {
-                        inputs: inputs.iter().flatten().copied().collect(),
-                        outputs: outputs.iter().flatten().copied().collect(),
-                        instructions: vec![Instruction::Call {
-                            component,
-                            storage_offset: 0,
-                            inputs,
-                            outputs,
-                        }],
-                    });
+                    let instance = component.id.0 as usize;
+                    for (subgraph_index, subgraph) in subgraphs.iter().enumerate() {
+                        let call_inputs = subgraph
+                            .inputs
+                            .iter()
+                            .filter_map(|&input| inputs.get(input).copied().flatten())
+                            .collect::<Vec<_>>();
+                        let call_outputs = subgraph
+                            .outputs
+                            .iter()
+                            .filter_map(|&output| outputs.get(output).copied().flatten())
+                            .collect::<Vec<_>>();
+                        let has_connected_output = !call_outputs.is_empty();
+                        let has_connected_input = !call_inputs.is_empty();
+                        if has_connected_output
+                            || (subgraph.outputs.is_empty() && has_connected_input)
+                        {
+                            operations.push(Operation {
+                                inputs: call_inputs,
+                                outputs: call_outputs,
+                                instructions: vec![Instruction::Call {
+                                    component: child_component,
+                                    instance,
+                                    subgraph: subgraph_index,
+                                    storage_offset: 0,
+                                    inputs: inputs.clone(),
+                                    outputs: outputs.clone(),
+                                }],
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -497,8 +544,10 @@ impl UnlinkedComponent {
             return Err(GenerationError::Cycle);
         }
 
+        let subgraphs = build_subgraphs(&operations, &order, &inputs, &outputs);
         let instructions = order
-            .into_iter()
+            .iter()
+            .copied()
             .flat_map(|operation| operations[operation].instructions.clone())
             .collect();
         Ok(Self {
@@ -506,6 +555,7 @@ impl UnlinkedComponent {
             outputs,
             components,
             instructions,
+            subgraphs,
             memory_size,
             storage_init,
         })
@@ -539,6 +589,7 @@ impl Vm {
     pub fn from_unlinked_component(component: Rc<Component>) -> Self {
         let pc = Pc {
             instruction_index: 0,
+            subgraph: None,
             memory_offset: 0,
             storage_offset: 0,
             component: Rc::clone(&component),
@@ -561,6 +612,7 @@ impl Vm {
         self.storage = self.root_component.storage_init.clone();
         self.pc = Pc {
             instruction_index: 0,
+            subgraph: None,
             memory_offset: 0,
             storage_offset: 0,
             component: Rc::clone(&self.root_component),
@@ -576,6 +628,7 @@ impl Vm {
         self.returns.clear();
         self.pc = Pc {
             instruction_index: 0,
+            subgraph: None,
             memory_offset: 0,
             storage_offset: 0,
             component: Rc::clone(&self.root_component),
@@ -602,14 +655,15 @@ impl Vm {
             self.memory_stack
                 .resize(self.pc.memory_offset + self.pc.component.memory_size, 0);
         }
-        if self.pc.instruction_index >= self.pc.component.instructions.len() {
+        if self.pc.instruction_index >= self.pc.instructions().len() {
             self.return_from_component();
             return;
         }
 
-        match self.pc.component.instructions[self.pc.instruction_index].clone() {
+        match self.pc.instructions()[self.pc.instruction_index].clone() {
             Instruction::Call {
                 component,
+                subgraph,
                 storage_offset,
                 inputs,
                 ..
@@ -618,12 +672,18 @@ impl Vm {
                 if let Some(hash) = child.unresolved_hash() {
                     panic!("component {hash} is not loaded");
                 }
+                let program = child
+                    .subgraphs
+                    .get(subgraph)
+                    .unwrap_or_else(|| panic!("component subgraph {subgraph} is not loaded"));
                 let parent_memory_offset = self.pc.memory_offset;
                 let child_memory_offset = self.memory_stack.len();
                 self.memory_stack
                     .resize(child_memory_offset + child.memory_size, 0);
-                for (&input, binding) in child.inputs.iter().zip(&inputs) {
-                    if let Some(address) = binding {
+                for &input_port in &program.inputs {
+                    if let (Some(&input), Some(Some(address))) =
+                        (child.inputs.get(input_port), inputs.get(input_port))
+                    {
                         let value = self.memory_stack[parent_memory_offset + *address];
                         self.memory_stack[child_memory_offset + input] |= value;
                     }
@@ -631,6 +691,7 @@ impl Vm {
                 self.returns.push(self.pc.clone());
                 self.pc = Pc {
                     instruction_index: 0,
+                    subgraph: Some(subgraph),
                     memory_offset: child_memory_offset,
                     storage_offset: self.pc.storage_offset + storage_offset,
                     component: child,
@@ -676,16 +737,22 @@ impl Vm {
             return;
         };
         let Instruction::Call {
-            component, outputs, ..
-        } = &caller.component.instructions[caller.instruction_index]
+            component,
+            subgraph,
+            outputs,
+            ..
+        } = caller.instructions()[caller.instruction_index].clone()
         else {
             unreachable!("return PC must point at a call");
         };
-        let component = &caller.component.components[*component];
-        for (&output, binding) in component.outputs.iter().zip(outputs) {
-            if let Some(address) = binding {
+        let component = &caller.component.components[component];
+        let program = &component.subgraphs[subgraph];
+        for &output_port in &program.outputs {
+            if let (Some(&output), Some(Some(address))) =
+                (component.outputs.get(output_port), outputs.get(output_port))
+            {
                 let value = self.memory_stack[self.pc.memory_offset + output];
-                self.memory_stack[caller.memory_offset + *address] |= value;
+                self.memory_stack[caller.memory_offset + address] |= value;
             }
         }
         self.memory_stack.truncate(self.pc.memory_offset);
@@ -727,31 +794,50 @@ impl Component {
     }
 
     pub fn total_instruction_count(&self) -> usize {
-        self.instructions
+        self.instruction_count_for(&self.instructions)
+    }
+
+    fn subgraph_instruction_count(&self, subgraph: usize) -> usize {
+        self.instruction_count_for(&self.subgraphs[subgraph].instructions)
+    }
+
+    fn instruction_count_for(&self, instructions: &[Instruction]) -> usize {
+        instructions
             .iter()
             .map(|instruction| match instruction {
-                Instruction::Call { component, .. } => {
-                    1 + self.components[*component].total_instruction_count()
-                }
+                Instruction::Call {
+                    component,
+                    subgraph,
+                    ..
+                } => 1 + self.components[*component].subgraph_instruction_count(*subgraph),
                 _ => 1,
             })
             .sum()
     }
 
     pub fn total_latency(&self) -> usize {
+        self.latency_for(&self.instructions)
+    }
+
+    fn subgraph_latency(&self, subgraph: usize) -> usize {
+        self.latency_for(&self.subgraphs[subgraph].instructions)
+    }
+
+    fn latency_for(&self, instructions: &[Instruction]) -> usize {
         let mut ready = vec![0; self.memory_size];
         let mut total = 0;
-        for instruction in &self.instructions {
+        for instruction in instructions {
             let (inputs, outputs, cost) = match instruction {
                 Instruction::Call {
                     component,
+                    subgraph,
                     inputs,
                     outputs,
                     ..
                 } => (
                     inputs.iter().flatten().copied().collect::<Vec<_>>(),
                     outputs.iter().flatten().copied().collect::<Vec<_>>(),
-                    self.components[*component].total_latency(),
+                    self.components[*component].subgraph_latency(*subgraph),
                 ),
                 Instruction::Not { input, output } => (vec![*input], vec![*output], 1),
                 Instruction::CopyBits { input, output, .. } => (vec![*input], vec![*output], 1),
@@ -781,7 +867,8 @@ impl Component {
             && self.storage_init.is_empty()
             && self.inputs.is_empty()
             && self.outputs.is_empty()
-            && self.instructions.is_empty())
+            && self.instructions.is_empty()
+            && self.subgraphs.is_empty())
         .then(|| self.source_hash.as_ref().unwrap())
     }
 
@@ -802,6 +889,15 @@ impl Component {
             memory_size: self.memory_size,
             storage_init: self.direct_storage_init().to_vec(),
             instructions: self.instructions.clone(),
+            subgraphs: self
+                .subgraphs
+                .iter()
+                .map(|subgraph| UnlinkedSubgraph {
+                    inputs: subgraph.inputs.clone(),
+                    outputs: subgraph.outputs.clone(),
+                    instructions: subgraph.instructions.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -816,6 +912,15 @@ impl Component {
     }
 }
 
+impl Pc {
+    pub fn instructions(&self) -> &[Instruction] {
+        match self.subgraph {
+            Some(subgraph) => &self.component.subgraphs[subgraph].instructions,
+            None => &self.component.instructions,
+        }
+    }
+}
+
 fn link_unlinked_component<E>(
     component: &UnlinkedComponent,
     source_hash: Option<ComponentHash>,
@@ -827,27 +932,64 @@ fn link_unlinked_component<E>(
         components.push(load(hash)?);
     }
     let mut instructions = component.instructions.clone();
-    for instruction in &mut instructions {
-        if let Instruction::Call {
-            component,
-            storage_offset,
-            ..
-        } = instruction
-        {
-            let child = &components[*component];
-            *storage_offset = storage_init.len();
-            storage_init.extend_from_slice(&child.storage_init);
-        }
+    let mut storage_offsets = BTreeMap::<(usize, usize), StorageId>::new();
+    link_instruction_storage(
+        &mut instructions,
+        &components,
+        &mut storage_init,
+        &mut storage_offsets,
+    );
+    let mut subgraphs = component
+        .subgraphs
+        .iter()
+        .map(|subgraph| ComponentExecutionSubgraph {
+            inputs: subgraph.inputs.clone(),
+            outputs: subgraph.outputs.clone(),
+            instructions: subgraph.instructions.clone(),
+        })
+        .collect::<Vec<_>>();
+    for subgraph in &mut subgraphs {
+        link_instruction_storage(
+            &mut subgraph.instructions,
+            &components,
+            &mut storage_init,
+            &mut storage_offsets,
+        );
     }
     Ok(Rc::new(Component {
         inputs: component.inputs.clone(),
         outputs: component.outputs.clone(),
         components,
         instructions,
+        subgraphs,
         memory_size: component.memory_size,
         storage_init,
         source_hash,
     }))
+}
+
+fn link_instruction_storage(
+    instructions: &mut [Instruction],
+    components: &[Rc<Component>],
+    storage_init: &mut Vec<u64>,
+    storage_offsets: &mut BTreeMap<(usize, usize), StorageId>,
+) {
+    for instruction in instructions {
+        if let Instruction::Call {
+            component,
+            instance,
+            storage_offset,
+            ..
+        } = instruction
+        {
+            let key = (*component, *instance);
+            *storage_offset = *storage_offsets.entry(key).or_insert_with(|| {
+                let offset = storage_init.len();
+                storage_init.extend_from_slice(&components[*component].storage_init);
+                offset
+            });
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -855,6 +997,114 @@ struct Operation {
     inputs: Vec<MemoryAddress>,
     outputs: Vec<MemoryAddress>,
     instructions: Vec<Instruction>,
+}
+
+fn build_subgraphs(
+    operations: &[Operation],
+    order: &[usize],
+    public_inputs: &[MemoryAddress],
+    public_outputs: &[MemoryAddress],
+) -> Vec<UnlinkedSubgraph> {
+    let mut writers = BTreeMap::<MemoryAddress, Vec<usize>>::new();
+    for (operation_index, operation) in operations.iter().enumerate() {
+        for &output in &operation.outputs {
+            writers.entry(output).or_default().push(operation_index);
+        }
+    }
+
+    let input_ports = public_inputs
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(port, address)| (address, port))
+        .collect::<BTreeMap<_, _>>();
+    let output_ports = public_outputs
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(port, address)| (address, port))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut groups = BTreeMap::<Vec<usize>, (BTreeSet<usize>, BTreeSet<usize>)>::new();
+    for (output_port, &output_address) in public_outputs.iter().enumerate() {
+        for &writer in writers.get(&output_address).into_iter().flatten() {
+            let cone = dependency_cone(operations, &writers, writer);
+            groups.entry(cone).or_default().1.insert(output_port);
+        }
+    }
+    for (operation_index, operation) in operations.iter().enumerate() {
+        if operation.outputs.is_empty() {
+            let cone = dependency_cone(operations, &writers, operation_index);
+            groups.entry(cone).or_default();
+        }
+    }
+
+    let order_index = order
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, operation)| (operation, index))
+        .collect::<BTreeMap<_, _>>();
+    let mut subgraphs = groups
+        .into_iter()
+        .map(|(mut cone, (mut explicit_inputs, mut explicit_outputs))| {
+            cone.sort_by_key(|operation| order_index[operation]);
+            for &operation_index in &cone {
+                let operation = &operations[operation_index];
+                for &input in &operation.inputs {
+                    if let Some(&port) = input_ports.get(&input) {
+                        explicit_inputs.insert(port);
+                    }
+                }
+                for &output in &operation.outputs {
+                    if let Some(&port) = output_ports.get(&output) {
+                        explicit_outputs.insert(port);
+                    }
+                }
+            }
+            UnlinkedSubgraph {
+                inputs: explicit_inputs.into_iter().collect(),
+                outputs: explicit_outputs.into_iter().collect(),
+                instructions: cone
+                    .into_iter()
+                    .flat_map(|operation| operations[operation].instructions.clone())
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+    subgraphs.sort_by(|left, right| {
+        left.outputs
+            .cmp(&right.outputs)
+            .then_with(|| left.inputs.cmp(&right.inputs))
+    });
+    if subgraphs.is_empty() && (!public_inputs.is_empty() || !public_outputs.is_empty()) {
+        subgraphs.push(UnlinkedSubgraph {
+            inputs: (0..public_inputs.len()).collect(),
+            outputs: (0..public_outputs.len()).collect(),
+            instructions: Vec::new(),
+        });
+    }
+    subgraphs
+}
+
+fn dependency_cone(
+    operations: &[Operation],
+    writers: &BTreeMap<MemoryAddress, Vec<usize>>,
+    root: usize,
+) -> Vec<usize> {
+    let mut pending = vec![root];
+    let mut cone = BTreeSet::new();
+    while let Some(operation_index) = pending.pop() {
+        if !cone.insert(operation_index) {
+            continue;
+        }
+        for &input in &operations[operation_index].inputs {
+            for &writer in writers.get(&input).into_iter().flatten() {
+                pending.push(writer);
+            }
+        }
+    }
+    cone.into_iter().collect()
 }
 
 fn dense_input_indices(grid: &LogicGrid) -> BTreeMap<InputId, usize> {
@@ -905,7 +1155,10 @@ fn connection_addresses(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grid::{ComponentSide, GraphEdge, InputId, OutputId, Point, Rotation, Scale};
+    use crate::grid::{
+        ComponentSide, ComponentSubgraph, GraphEdge, InputId, OutputId, Point, Rotation, Scale,
+        Size,
+    };
 
     fn graph(
         net_count: usize,
@@ -978,6 +1231,9 @@ mod tests {
         components: Vec<Rc<Component>>,
         instructions: Vec<Instruction>,
     ) -> Rc<Component> {
+        let subgraph_instructions = instructions.clone();
+        let subgraph_inputs = (0..inputs.len()).collect();
+        let subgraph_outputs = (0..outputs.len()).collect();
         Rc::new(Component {
             memory_size,
             storage_init,
@@ -985,6 +1241,31 @@ mod tests {
             outputs,
             components,
             instructions,
+            subgraphs: vec![ComponentExecutionSubgraph {
+                inputs: subgraph_inputs,
+                outputs: subgraph_outputs,
+                instructions: subgraph_instructions,
+            }],
+            source_hash: None,
+        })
+    }
+
+    fn component_with_subgraphs(
+        memory_size: usize,
+        storage_init: Vec<u64>,
+        inputs: Vec<usize>,
+        outputs: Vec<usize>,
+        instructions: Vec<Instruction>,
+        subgraphs: Vec<ComponentExecutionSubgraph>,
+    ) -> Rc<Component> {
+        Rc::new(Component {
+            memory_size,
+            storage_init,
+            inputs,
+            outputs,
+            components: Vec::new(),
+            instructions,
+            subgraphs,
             source_hash: None,
         })
     }
@@ -1026,12 +1307,16 @@ mod tests {
                 },
                 Instruction::Call {
                     component: 0,
+                    instance: 0,
+                    subgraph: 0,
                     storage_offset: 0,
                     inputs: Vec::new(),
                     outputs: Vec::new(),
                 },
                 Instruction::Call {
                     component: 0,
+                    instance: 1,
+                    subgraph: 0,
                     storage_offset: 0,
                     inputs: Vec::new(),
                     outputs: Vec::new(),
@@ -1117,6 +1402,8 @@ mod tests {
             vec![
                 Instruction::Call {
                     component: 0,
+                    instance: 0,
+                    subgraph: 0,
                     storage_offset: 0,
                     inputs: vec![Some(0)],
                     outputs: vec![Some(0)],
@@ -1230,6 +1517,8 @@ mod tests {
             vec![Rc::new(Component::unresolved(hash))],
             vec![Instruction::Call {
                 component: 0,
+                instance: 0,
+                subgraph: 0,
                 storage_offset: 0,
                 inputs: vec![],
                 outputs: vec![],
@@ -1250,6 +1539,8 @@ mod tests {
             vec![child],
             vec![Instruction::Call {
                 component: 0,
+                instance: 0,
+                subgraph: 0,
                 storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![Some(1)],
@@ -1279,6 +1570,14 @@ mod tests {
                 storage: 0,
                 input: 0,
             }],
+            subgraphs: vec![UnlinkedSubgraph {
+                inputs: vec![0],
+                outputs: Vec::new(),
+                instructions: vec![Instruction::SaveStorage {
+                    storage: 0,
+                    input: 0,
+                }],
+            }],
         };
         let root_unlinked = UnlinkedComponent {
             memory_size: 2,
@@ -1289,17 +1588,22 @@ mod tests {
             instructions: vec![
                 Instruction::Call {
                     component: 0,
+                    instance: 0,
+                    subgraph: 0,
                     storage_offset: 0,
                     inputs: vec![Some(0)],
                     outputs: vec![],
                 },
                 Instruction::Call {
                     component: 0,
+                    instance: 1,
+                    subgraph: 0,
                     storage_offset: 0,
                     inputs: vec![Some(1)],
                     outputs: vec![],
                 },
             ],
+            subgraphs: Vec::new(),
         };
         let mut cache = BTreeMap::<ComponentHash, Rc<Component>>::new();
         let root = root_unlinked
@@ -1343,6 +1647,14 @@ mod tests {
                 storage: 0,
                 input: 0,
             }],
+            subgraphs: vec![UnlinkedSubgraph {
+                inputs: vec![0],
+                outputs: Vec::new(),
+                instructions: vec![Instruction::SaveStorage {
+                    storage: 0,
+                    input: 0,
+                }],
+            }],
         };
         let middle = UnlinkedComponent {
             memory_size: 1,
@@ -1352,9 +1664,23 @@ mod tests {
             components: vec![leaf_hash.clone()],
             instructions: vec![Instruction::Call {
                 component: 0,
+                instance: 0,
+                subgraph: 0,
                 storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![],
+            }],
+            subgraphs: vec![UnlinkedSubgraph {
+                inputs: vec![0],
+                outputs: Vec::new(),
+                instructions: vec![Instruction::Call {
+                    component: 0,
+                    instance: 0,
+                    subgraph: 0,
+                    storage_offset: 0,
+                    inputs: vec![Some(0)],
+                    outputs: vec![],
+                }],
             }],
         };
         let middle = middle
@@ -1371,6 +1697,8 @@ mod tests {
             vec![middle],
             vec![Instruction::Call {
                 component: 0,
+                instance: 0,
+                subgraph: 0,
                 storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![],
@@ -1642,10 +1970,358 @@ mod tests {
             component.instructions,
             vec![Instruction::Call {
                 component: 0,
+                instance: subcomponent.0 as usize,
+                subgraph: 0,
                 storage_offset: 0,
                 inputs: vec![None, Some(0)],
                 outputs: vec![None, None, Some(1)],
             }]
+        );
+    }
+
+    #[test]
+    fn split_subcomponent_outputs_can_feed_later_inputs() {
+        let child_hash = ComponentHash::new("b".repeat(64)).unwrap();
+        let child = {
+            let mut grid = LogicGrid::new();
+            let input_a = grid.add_component(
+                Point::new(0, 0),
+                Rotation::Up,
+                ComponentKind::Input {
+                    scale: Scale::ONE,
+                    id: InputId::from_u128(1),
+                },
+            );
+            let input_c = grid.add_component(
+                Point::new(0, 0),
+                Rotation::Up,
+                ComponentKind::Input {
+                    scale: Scale::ONE,
+                    id: InputId::from_u128(2),
+                },
+            );
+            let output_b = grid.add_component(
+                Point::new(0, 0),
+                Rotation::Up,
+                ComponentKind::Output {
+                    scale: Scale::ONE,
+                    id: OutputId::from_u128(1),
+                },
+            );
+            let output_d = grid.add_component(
+                Point::new(0, 0),
+                Rotation::Up,
+                ComponentKind::Output {
+                    scale: Scale::ONE,
+                    id: OutputId::from_u128(2),
+                },
+            );
+            let not_ab = add_not(&mut grid);
+            let not_cd = add_not(&mut grid);
+            UnlinkedComponent::from_graph(
+                &grid,
+                &graph(
+                    4,
+                    &[
+                        (input_a, ConnectionDirection::Output, 0, 0),
+                        (not_ab, ConnectionDirection::Input, 0, 0),
+                        (not_ab, ConnectionDirection::Output, 1, 1),
+                        (output_b, ConnectionDirection::Input, 0, 1),
+                        (input_c, ConnectionDirection::Output, 0, 2),
+                        (not_cd, ConnectionDirection::Input, 0, 2),
+                        (not_cd, ConnectionDirection::Output, 1, 3),
+                        (output_d, ConnectionDirection::Input, 0, 3),
+                    ],
+                ),
+            )
+            .unwrap()
+            .link_with_hash(child_hash.clone(), |_| -> Result<Rc<Component>, ()> {
+                panic!("child has no dependencies")
+            })
+            .unwrap()
+        };
+        let child_subgraphs = child
+            .subgraphs
+            .iter()
+            .map(|subgraph| ComponentSubgraph {
+                inputs: subgraph.inputs.clone(),
+                outputs: subgraph.outputs.clone(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            child_subgraphs
+                .iter()
+                .map(|subgraph| subgraph.outputs.as_slice())
+                .collect::<Vec<_>>(),
+            vec![&[0][..], &[1][..]]
+        );
+        let first_input = child_subgraphs[0].inputs[0];
+        let second_input = child_subgraphs[1].inputs[0];
+
+        let mut root_grid = LogicGrid::new();
+        let source = add_storage(&mut root_grid, 0x55);
+        let destination = add_storage(&mut root_grid, 0);
+        let subcomponent = root_grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::subcomponent_with_subgraphs(
+                child_hash.clone(),
+                Size::new(4, 4),
+                vec![
+                    crate::grid::ComponentPort::input(0, Scale::ONE, ComponentSide::Left, 0, 1),
+                    crate::grid::ComponentPort::output(0, Scale::ONE, ComponentSide::Right, 0, 1),
+                    crate::grid::ComponentPort::input(1, Scale::ONE, ComponentSide::Left, 1, 2),
+                    crate::grid::ComponentPort::output(1, Scale::ONE, ComponentSide::Right, 1, 2),
+                ],
+                child_subgraphs,
+            )
+            .unwrap(),
+        );
+        let input_slot = |input| if input == 0 { 0 } else { 2 };
+        let root = UnlinkedComponent::from_graph(
+            &root_grid,
+            &graph(
+                3,
+                &[
+                    (source, ConnectionDirection::Output, 1, 0),
+                    (
+                        subcomponent,
+                        ConnectionDirection::Input,
+                        input_slot(first_input),
+                        0,
+                    ),
+                    (subcomponent, ConnectionDirection::Output, 1, 1),
+                    (
+                        subcomponent,
+                        ConnectionDirection::Input,
+                        input_slot(second_input),
+                        1,
+                    ),
+                    (subcomponent, ConnectionDirection::Output, 3, 2),
+                    (destination, ConnectionDirection::Input, 0, 2),
+                ],
+            ),
+        )
+        .unwrap()
+        .link(|hash| -> Result<Rc<Component>, ()> {
+            assert_eq!(hash, &child_hash);
+            Ok(Rc::clone(&child))
+        })
+        .unwrap();
+
+        assert!(matches!(
+            root.instructions.as_slice(),
+            [
+                Instruction::ReadStorage { .. },
+                Instruction::Call { subgraph: 0, .. },
+                Instruction::Call { subgraph: 1, .. },
+                Instruction::SaveStorage { .. },
+            ]
+        ));
+        let mut vm = vm_with_root(root);
+        vm.execute();
+
+        assert_eq!(vm.storage, vec![1, 1]);
+    }
+
+    #[test]
+    fn split_calls_for_one_subcomponent_instance_share_storage() {
+        let hash = ComponentHash::new("c".repeat(64)).unwrap();
+        let child = component_with_subgraphs(
+            1,
+            vec![0],
+            vec![0],
+            vec![0],
+            Vec::new(),
+            vec![
+                ComponentExecutionSubgraph {
+                    inputs: vec![0],
+                    outputs: Vec::new(),
+                    instructions: vec![Instruction::SaveStorage {
+                        storage: 0,
+                        input: 0,
+                    }],
+                },
+                ComponentExecutionSubgraph {
+                    inputs: Vec::new(),
+                    outputs: vec![0],
+                    instructions: vec![Instruction::ReadStorage {
+                        storage: 0,
+                        output: 0,
+                    }],
+                },
+            ],
+        );
+        let mut grid = LogicGrid::new();
+        let source = add_storage(&mut grid, 1);
+        let destination = add_storage(&mut grid, 0);
+        let subcomponent = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::subcomponent_with_subgraphs(
+                hash.clone(),
+                Size::new(2, 2),
+                vec![
+                    crate::grid::ComponentPort::input(0, Scale::ONE, ComponentSide::Left, 0, 1),
+                    crate::grid::ComponentPort::output(0, Scale::ONE, ComponentSide::Right, 0, 1),
+                ],
+                vec![
+                    ComponentSubgraph {
+                        inputs: vec![0],
+                        outputs: Vec::new(),
+                    },
+                    ComponentSubgraph {
+                        inputs: Vec::new(),
+                        outputs: vec![0],
+                    },
+                ],
+            )
+            .unwrap(),
+        );
+        let root = UnlinkedComponent::from_graph(
+            &grid,
+            &graph(
+                2,
+                &[
+                    (source, ConnectionDirection::Output, 1, 0),
+                    (subcomponent, ConnectionDirection::Input, 0, 0),
+                    (subcomponent, ConnectionDirection::Output, 1, 1),
+                    (destination, ConnectionDirection::Input, 0, 1),
+                ],
+            ),
+        )
+        .unwrap()
+        .link(|requested| -> Result<Rc<Component>, ()> {
+            assert_eq!(requested, &hash);
+            Ok(Rc::clone(&child))
+        })
+        .unwrap();
+        let mut vm = vm_with_root(root);
+        vm.execute();
+
+        assert_eq!(vm.storage, vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn separate_subcomponent_instances_keep_independent_storage() {
+        let hash = ComponentHash::new("d".repeat(64)).unwrap();
+        let child = component_with_subgraphs(
+            1,
+            vec![0],
+            vec![0],
+            vec![0],
+            Vec::new(),
+            vec![
+                ComponentExecutionSubgraph {
+                    inputs: vec![0],
+                    outputs: Vec::new(),
+                    instructions: vec![Instruction::SaveStorage {
+                        storage: 0,
+                        input: 0,
+                    }],
+                },
+                ComponentExecutionSubgraph {
+                    inputs: Vec::new(),
+                    outputs: vec![0],
+                    instructions: vec![Instruction::ReadStorage {
+                        storage: 0,
+                        output: 0,
+                    }],
+                },
+            ],
+        );
+        let kind = ComponentKind::subcomponent_with_subgraphs(
+            hash.clone(),
+            Size::new(2, 2),
+            vec![
+                crate::grid::ComponentPort::input(0, Scale::ONE, ComponentSide::Left, 0, 1),
+                crate::grid::ComponentPort::output(0, Scale::ONE, ComponentSide::Right, 0, 1),
+            ],
+            vec![
+                ComponentSubgraph {
+                    inputs: vec![0],
+                    outputs: Vec::new(),
+                },
+                ComponentSubgraph {
+                    inputs: Vec::new(),
+                    outputs: vec![0],
+                },
+            ],
+        )
+        .unwrap();
+        let mut grid = LogicGrid::new();
+        let source = add_storage(&mut grid, 1);
+        let destination = add_storage(&mut grid, 0);
+        let writer = grid.add_component(Point::new(0, 0), Rotation::Up, kind.clone());
+        let reader = grid.add_component(Point::new(4, 0), Rotation::Up, kind);
+        let root = UnlinkedComponent::from_graph(
+            &grid,
+            &graph(
+                2,
+                &[
+                    (source, ConnectionDirection::Output, 1, 0),
+                    (writer, ConnectionDirection::Input, 0, 0),
+                    (reader, ConnectionDirection::Output, 1, 1),
+                    (destination, ConnectionDirection::Input, 0, 1),
+                ],
+            ),
+        )
+        .unwrap()
+        .link(|requested| -> Result<Rc<Component>, ()> {
+            assert_eq!(requested, &hash);
+            Ok(Rc::clone(&child))
+        })
+        .unwrap();
+        let mut vm = vm_with_root(root);
+        vm.execute();
+
+        assert_eq!(vm.storage, vec![1, 0, 1, 0]);
+    }
+
+    #[test]
+    fn real_cycle_across_subcomponent_subgraphs_is_rejected() {
+        let mut grid = LogicGrid::new();
+        let hash = ComponentHash::new("e".repeat(64)).unwrap();
+        let subcomponent = grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::subcomponent_with_subgraphs(
+                hash,
+                Size::new(4, 4),
+                vec![
+                    crate::grid::ComponentPort::input(0, Scale::ONE, ComponentSide::Left, 0, 1),
+                    crate::grid::ComponentPort::output(0, Scale::ONE, ComponentSide::Right, 0, 1),
+                    crate::grid::ComponentPort::input(1, Scale::ONE, ComponentSide::Left, 1, 2),
+                    crate::grid::ComponentPort::output(1, Scale::ONE, ComponentSide::Right, 1, 2),
+                ],
+                vec![
+                    ComponentSubgraph {
+                        inputs: vec![0],
+                        outputs: vec![0],
+                    },
+                    ComponentSubgraph {
+                        inputs: vec![1],
+                        outputs: vec![1],
+                    },
+                ],
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            UnlinkedComponent::from_graph(
+                &grid,
+                &graph(
+                    2,
+                    &[
+                        (subcomponent, ConnectionDirection::Input, 0, 1),
+                        (subcomponent, ConnectionDirection::Output, 1, 0),
+                        (subcomponent, ConnectionDirection::Input, 2, 0),
+                        (subcomponent, ConnectionDirection::Output, 3, 1),
+                    ],
+                ),
+            ),
+            Err(GenerationError::Cycle)
         );
     }
 }

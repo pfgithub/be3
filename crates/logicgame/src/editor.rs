@@ -1254,7 +1254,7 @@ impl LogicEditor {
                         ui.monospace(self.simulation.steps.to_string());
                         ui.end_row();
                         ui.label("Instructions");
-                        ui.monospace(instruction_view.component.instructions.len().to_string());
+                        ui.monospace(instruction_view.instructions.len().to_string());
                         ui.end_row();
                         ui.label("Viewing");
                         ui.monospace(&instruction_view.name);
@@ -1264,10 +1264,10 @@ impl LogicEditor {
                             ui.monospace(format!(
                                 "{} / {}",
                                 next_instruction + 1,
-                                instruction_view.component.instructions.len()
+                                instruction_view.instructions.len()
                             ));
                         } else {
-                            if instruction_view.component.instructions.is_empty() {
+                            if instruction_view.instructions.is_empty() {
                                 ui.weak("none");
                             } else {
                                 ui.weak("not active");
@@ -1330,7 +1330,7 @@ impl LogicEditor {
 
                 ui.separator();
                 ui.strong("Instructions");
-                if instruction_view.component.instructions.is_empty() {
+                if instruction_view.instructions.is_empty() {
                     ui.weak("No instructions");
                 } else {
                     egui::ScrollArea::vertical()
@@ -1338,7 +1338,7 @@ impl LogicEditor {
                         .max_height(180.0)
                         .show(ui, |ui| {
                             for (index, instruction) in
-                                instruction_view.component.instructions.iter().enumerate()
+                                instruction_view.instructions.iter().enumerate()
                             {
                                 let next = instruction_view.next_instruction == Some(index);
                                 let response = ui.horizontal(|ui| {
@@ -2695,6 +2695,7 @@ fn storage_bit_indices(scale: Scale) -> Vec<u32> {
 struct SimulationInstructionView<'a> {
     name: String,
     component: &'a Rc<ExecutionComponent>,
+    instructions: &'a [Instruction],
     next_instruction: Option<usize>,
 }
 
@@ -2712,6 +2713,7 @@ fn simulation_instruction_view<'a>(
         SimulationInstructionSelection::Component(component) => SimulationInstructionView {
             name: format!("Target: {}", simulation_component_name(component)),
             component,
+            instructions: &component.instructions,
             next_instruction: None,
         },
         SimulationInstructionSelection::Active => {
@@ -2728,7 +2730,8 @@ fn simulation_pc_instruction_view<'a>(
     SimulationInstructionView {
         name: format!("{name}: {}", simulation_component_name(&pc.component)),
         component: &pc.component,
-        next_instruction: (active && pc.instruction_index < pc.component.instructions.len())
+        instructions: pc.instructions(),
+        next_instruction: (active && pc.instruction_index < pc.instructions().len())
             .then_some(pc.instruction_index),
     }
 }
@@ -2809,10 +2812,12 @@ fn format_instruction(instruction: &Instruction) -> String {
     match instruction {
         Instruction::Call {
             component,
+            instance,
+            subgraph,
             inputs,
             outputs,
             ..
-        } => format!("CALL c{component} {inputs:?} -> {outputs:?}"),
+        } => format!("CALL c{component} i{instance} g{subgraph} {inputs:?} -> {outputs:?}"),
         Instruction::Not { input, output } => format!("NOT m{input} -> m{output}"),
         Instruction::CopyBits {
             input,
@@ -3124,6 +3129,7 @@ fn graph_node_display(node: &GraphNode) -> (egui::Color32, &'static str, String)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use logicgame::execution::ComponentExecutionSubgraph;
     use logicgame::grid::{ComponentSide, ConnectionDirection, ConnectionSlotId};
 
     fn scale(value: u8) -> Scale {
@@ -3296,6 +3302,7 @@ mod tests {
                         output: 1,
                     },
                 ],
+                subgraphs: Vec::new(),
                 source_hash: None,
             },
         )));
@@ -3357,6 +3364,14 @@ mod tests {
                 input: 0,
                 output: 1,
             }],
+            subgraphs: vec![ComponentExecutionSubgraph {
+                inputs: vec![0],
+                outputs: vec![0],
+                instructions: vec![Instruction::Not {
+                    input: 0,
+                    output: 1,
+                }],
+            }],
             source_hash: None,
         });
         let root = Rc::new(ExecutionComponent {
@@ -3367,10 +3382,13 @@ mod tests {
             components: vec![Rc::clone(&child)],
             instructions: vec![Instruction::Call {
                 component: 0,
+                instance: 0,
+                subgraph: 0,
                 storage_offset: 0,
                 inputs: vec![Some(0)],
                 outputs: vec![Some(1)],
             }],
+            subgraphs: Vec::new(),
             source_hash: None,
         });
         let mut editor = LogicEditor::default();

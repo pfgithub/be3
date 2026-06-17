@@ -269,6 +269,7 @@ pub enum ComponentKind {
         size: Size,
         snap: Scale,
         ports: Vec<ComponentPort>,
+        subgraphs: Vec<ComponentSubgraph>,
     },
 }
 
@@ -292,12 +293,30 @@ impl ComponentKind {
             .map(|port| port.scale)
             .max()
             .unwrap_or(Scale::ONE);
+        let subgraphs = vec![ComponentSubgraph::all_ports(&ports)];
         Ok(Self::Subcomponent {
             component,
             size,
             snap,
             ports,
+            subgraphs,
         })
+    }
+
+    pub fn subcomponent_with_subgraphs(
+        component: ComponentHash,
+        size: Size,
+        ports: Vec<ComponentPort>,
+        subgraphs: Vec<ComponentSubgraph>,
+    ) -> Result<Self, GeometryError> {
+        let mut kind = Self::subcomponent(component, size, ports)?;
+        if let Self::Subcomponent {
+            subgraphs: target, ..
+        } = &mut kind
+        {
+            *target = subgraphs;
+        }
+        Ok(kind)
     }
 
     pub fn snap(&self) -> Scale {
@@ -1350,6 +1369,32 @@ impl ComponentPort {
             ComponentSide::Right | ComponentSide::Left => size.height,
         };
         0 <= self.start && self.start < self.end && self.end <= boundary_length
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ComponentSubgraph {
+    pub inputs: Vec<usize>,
+    pub outputs: Vec<usize>,
+}
+
+impl ComponentSubgraph {
+    pub fn all_ports(ports: &[ComponentPort]) -> Self {
+        let mut inputs = ports
+            .iter()
+            .filter(|port| port.direction == ConnectionDirection::Input)
+            .map(|port| port.index)
+            .collect::<Vec<_>>();
+        inputs.sort_unstable();
+        inputs.dedup();
+        let mut outputs = ports
+            .iter()
+            .filter(|port| port.direction == ConnectionDirection::Output)
+            .map(|port| port.index)
+            .collect::<Vec<_>>();
+        outputs.sort_unstable();
+        outputs.dedup();
+        Self { inputs, outputs }
     }
 }
 
