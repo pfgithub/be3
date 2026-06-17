@@ -4,11 +4,14 @@ use std::{
 };
 
 use eframe::egui::{self, PointerButton};
-use logicgame::challenges::{self, input_id, output_id, ChallengeComponentKind, ChallengeId};
 use logicgame::execution::{Component as ExecutionComponent, Instruction, Pc, Vm};
 use logicgame::grid::{
     value_mask, CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
     InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
+};
+use logicgame::{
+    challenges::{self, input_id, output_id, ChallengeComponentKind, ChallengeId},
+    grid::ComponentFileRef,
 };
 
 use crate::{
@@ -409,7 +412,7 @@ pub struct LogicEditor {
 }
 
 pub struct ComponentFileDrop {
-    pub file: crate::component_files::ComponentFileRef,
+    pub file: ComponentFileRef,
     pub position: Point,
 }
 

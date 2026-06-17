@@ -12,8 +12,8 @@ use logicgame::{
     challenges::ChallengeId,
     execution::{Component, GenerationError, UnlinkedComponent, Vm},
     grid::{
-        ComponentHash, ComponentKind, ComponentPort, ComponentSide, ComponentSubgraph,
-        GeometryError, LogicGrid, LogicGridSnapshot, Point, Size,
+        ComponentFileRef, ComponentHash, ComponentKind, ComponentPort, ComponentSide,
+        ComponentSubgraph, GeometryError, LogicGrid, LogicGridSnapshot, Point, Size,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -79,17 +79,9 @@ pub struct CompiledComponent {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum ComponentFileRef {
-    Component { id: Uuid },
-    ChallengeSolution { challenge: ChallengeId, id: Uuid },
-}
-
-impl ComponentFileRef {
-    pub fn id(&self) -> Uuid {
-        match self {
-            Self::Component { id } | Self::ChallengeSolution { id, .. } => *id,
-        }
-    }
+pub enum ComponentFileSource {
+    Component,
+    ChallengeSolution { challenge: ChallengeId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -259,7 +251,7 @@ impl ComponentFiles {
     }
 
     pub fn load_ref(&self, file: &ComponentFileRef) -> Result<LogicGrid, ComponentFileError> {
-        Ok(LogicGrid::from_snapshot(self.load_snapshot(file.id())?))
+        Ok(LogicGrid::from_snapshot(self.load_snapshot(file.id)?))
     }
 
     pub fn save(
@@ -267,7 +259,7 @@ impl ComponentFiles {
         file: &ComponentFileRef,
         grid: &LogicGrid,
     ) -> Result<(), ComponentFileError> {
-        self.save_grid(file.id(), grid)
+        self.save_grid(file.id, grid)
     }
 
     pub fn save_challenge_solution(
@@ -293,13 +285,15 @@ impl ComponentFiles {
 
     pub fn rename(
         &self,
+        source: &ComponentFileSource,
         file: &ComponentFileRef,
         new_name: &str,
     ) -> Result<(), ComponentFileError> {
         let new_name = validate_name(new_name)?.to_owned();
         let mut index = self.load_index()?;
-        match file {
-            ComponentFileRef::Component { id } => {
+        let id = &file.id;
+        match source {
+            ComponentFileSource::Component => {
                 reject_duplicate(&index.component_files, *id, &new_name)?;
                 let file = index
                     .component_files
@@ -310,7 +304,7 @@ impl ComponentFiles {
                     ))?;
                 file.name = new_name;
             }
-            ComponentFileRef::ChallengeSolution { challenge, id } => {
+            ComponentFileSource::ChallengeSolution { challenge } => {
                 let challenge_index = index.challenges.entry(*challenge).or_default();
                 reject_duplicate(&challenge_index.files, *id, &new_name)?;
                 let file = challenge_index
@@ -354,7 +348,7 @@ impl ComponentFiles {
             })
             .collect();
         let bytes = serde_json::to_vec_pretty(&CompiledComponent {
-            source_file_id: file.id(),
+            source_file_id: file.id,
             snapshot,
             component,
         })?;
@@ -368,7 +362,7 @@ impl ComponentFiles {
         }
 
         Ok(ComponentKind::subcomponent_with_subgraphs(
-            hash, size, ports, subgraphs,
+            *file, hash, size, ports, subgraphs,
         )?)
     }
 
@@ -690,7 +684,7 @@ mod tests {
                 scale: Scale::new(2).unwrap(),
             },
         );
-        let file = ComponentFileRef::Component { id: zed_id };
+        let file = ComponentFileRef { id: zed_id };
         files.save(&file, &grid).unwrap();
         assert_eq!(files.load_ref(&file).unwrap().snapshot(), grid.snapshot());
 
@@ -705,7 +699,7 @@ mod tests {
         let (id, _) = files.create("broken").unwrap();
         fs::write(root.join(format!("{id}.json")), b"{").unwrap();
         assert!(matches!(
-            files.load_ref(&ComponentFileRef::Component { id }),
+            files.load_ref(&ComponentFileRef { id }),
             Err(ComponentFileError::Json(_))
         ));
         remove_test_root(&root);
@@ -717,12 +711,14 @@ mod tests {
         let files = ComponentFiles::new(root.clone());
         let (id, mut grid) = files.create("Before").unwrap();
         grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
-        let file = ComponentFileRef::Component { id };
+        let file = ComponentFileRef { id };
         files.save(&file, &grid).unwrap();
         let path = root.join(format!("{id}.json"));
         let before = fs::read(&path).unwrap();
 
-        files.rename(&file, "After").unwrap();
+        files
+            .rename(&ComponentFileSource::Component, &file, "After")
+            .unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), before);
         assert_eq!(files.list().unwrap()[0].name, "After");
@@ -739,11 +735,19 @@ mod tests {
         files.create("Second").unwrap();
 
         assert!(matches!(
-            files.rename(&ComponentFileRef::Component { id: first }, "Second"),
+            files.rename(
+                &ComponentFileSource::Component,
+                &ComponentFileRef { id: first },
+                "Second"
+            ),
             Err(ComponentFileError::AlreadyExists(_))
         ));
         assert!(matches!(
-            files.rename(&ComponentFileRef::Component { id: first }, "../escape"),
+            files.rename(
+                &ComponentFileSource::Component,
+                &ComponentFileRef { id: first },
+                "../escape"
+            ),
             Err(ComponentFileError::InvalidName(_))
         ));
 
@@ -797,7 +801,7 @@ mod tests {
         let root = test_root();
         let files = ComponentFiles::new(root.clone());
         let (source_id, mut grid) = files.create("source").unwrap();
-        let source = ComponentFileRef::Component { id: source_id };
+        let source = ComponentFileRef { id: source_id };
         grid.add_component(
             Point::new(0, 0),
             Rotation::Up,
@@ -867,12 +871,12 @@ mod tests {
         let files = ComponentFiles::new(root.clone());
         let (empty, _) = files.create("empty").unwrap();
         assert!(matches!(
-            files.compile_subcomponent(&ComponentFileRef::Component { id: empty }),
+            files.compile_subcomponent(&ComponentFileRef { id: empty }),
             Err(ComponentFileError::InvalidSubcomponent(_))
         ));
 
         let (internal_port, mut grid) = files.create("internal-port").unwrap();
-        let file = ComponentFileRef::Component { id: internal_port };
+        let file = ComponentFileRef { id: internal_port };
         grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
         grid.add_component(
             Point::new(4, 4),
@@ -928,10 +932,7 @@ mod tests {
         );
         assert_eq!(
             files
-                .load_ref(&ComponentFileRef::ChallengeSolution {
-                    challenge: ChallengeId::Nor,
-                    id: first_id,
-                })
+                .load_ref(&ComponentFileRef { id: first_id })
                 .unwrap()
                 .snapshot(),
             first_grid.snapshot()
@@ -974,10 +975,7 @@ mod tests {
         let root = test_root();
         let files = ComponentFiles::new(root.clone());
         let (id, _, mut grid) = files.create_challenge_solution(ChallengeId::Nor).unwrap();
-        let file = ComponentFileRef::ChallengeSolution {
-            challenge: ChallengeId::Nor,
-            id,
-        };
+        let file = ComponentFileRef { id };
         grid.add_component(
             Point::new(0, 0),
             Rotation::Up,

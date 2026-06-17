@@ -6,14 +6,16 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use component_files::{
-    ChallengeProgress, ChallengeSolutionFile, ComponentFile, ComponentFileDrag, ComponentFileRef,
-    ComponentFiles,
+    ChallengeProgress, ChallengeSolutionFile, ComponentFile, ComponentFileDrag, ComponentFiles,
 };
 use editor::LogicEditor;
 use eframe::egui;
 use logicgame::challenges;
+use logicgame::grid::ComponentFileRef;
 use renderer::GridRenderer;
 use uuid::Uuid;
+
+use crate::component_files::ComponentFileSource;
 
 const APP_ID: &str = "Logic Game";
 const AUTOSAVE_DELAY: Duration = Duration::from_millis(300);
@@ -66,17 +68,16 @@ enum ActiveFile {
 impl ActiveFile {
     fn file_ref(&self) -> ComponentFileRef {
         match self {
-            Self::Component { id } => ComponentFileRef::Component { id: *id },
-            Self::ChallengeSolution { challenge, id, .. } => ComponentFileRef::ChallengeSolution {
-                challenge: *challenge,
-                id: *id,
-            },
+            Self::Component { id } | Self::ChallengeSolution { id, .. } => {
+                ComponentFileRef { id: *id }
+            }
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RenameState {
+    path: ComponentFileSource,
     file: ComponentFileRef,
     name: String,
     error: Option<String>,
@@ -188,10 +189,7 @@ impl LogicGame {
                         .into_iter()
                         .flatten()
                     {
-                        let file = ComponentFileRef::ChallengeSolution {
-                            challenge: challenge.id,
-                            id: solution.id,
-                        };
+                        let file = ComponentFileRef { id: solution.id };
                         let active = self
                             .active_file
                             .as_ref()
@@ -215,7 +213,13 @@ impl LogicGame {
                             }
                             response.context_menu(|ui| {
                                 if ui.button("Rename").clicked() {
-                                    requested_rename = Some((file, solution.name.clone()));
+                                    requested_rename = Some((
+                                        ComponentFileSource::ChallengeSolution {
+                                            challenge: challenge.id,
+                                        },
+                                        file,
+                                        solution.name.clone(),
+                                    ));
                                     ui.close();
                                 }
                             });
@@ -238,7 +242,7 @@ impl LogicGame {
                     ui.weak("No component files");
                 } else {
                     for component in &self.component_files_list {
-                        let file = ComponentFileRef::Component { id: component.id };
+                        let file = ComponentFileRef { id: component.id };
                         let active = self
                             .active_file
                             .as_ref()
@@ -257,7 +261,11 @@ impl LogicGame {
                         }
                         response.context_menu(|ui| {
                             if ui.button("Rename").clicked() {
-                                requested_rename = Some((file, component.name.clone()));
+                                requested_rename = Some((
+                                    ComponentFileSource::Component,
+                                    file,
+                                    component.name.clone(),
+                                ));
                                 ui.close();
                             }
                         });
@@ -270,8 +278,9 @@ impl LogicGame {
                 }
             });
 
-        if let Some((file, name)) = requested_rename {
+        if let Some((path, file, name)) = requested_rename {
             self.rename = Some(RenameState {
+                path,
                 file,
                 name,
                 error: None,
@@ -378,7 +387,7 @@ impl LogicGame {
     }
 
     fn open_component(&mut self, id: Uuid) {
-        let file = ComponentFileRef::Component { id };
+        let file = ComponentFileRef { id };
         if self
             .active_file
             .as_ref()
@@ -429,10 +438,7 @@ impl LogicGame {
     }
 
     fn open_challenge_solution(&mut self, id: challenges::ChallengeId, file_id: Uuid) {
-        let file = ComponentFileRef::ChallengeSolution {
-            challenge: id,
-            id: file_id,
-        };
+        let file = ComponentFileRef { id: file_id };
         if self
             .active_file
             .as_ref()
@@ -547,7 +553,7 @@ impl LogicGame {
         };
         let result = match active {
             ActiveFile::Component { id } => {
-                files.save(&ComponentFileRef::Component { id }, self.editor.grid())
+                files.save(&ComponentFileRef { id }, self.editor.grid())
             }
             ActiveFile::ChallengeSolution {
                 challenge,
@@ -587,7 +593,7 @@ impl LogicGame {
         let Some(files) = &self.component_files else {
             return;
         };
-        match files.rename(&rename.file, &rename.name) {
+        match files.rename(&rename.path, &rename.file, &rename.name) {
             Ok(()) => {
                 self.persistence_error = None;
                 self.rename = None;

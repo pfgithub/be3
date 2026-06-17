@@ -8,6 +8,11 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentHash(String);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ComponentFileRef {
+    pub id: Uuid,
+}
+
 impl ComponentHash {
     pub fn new(value: String) -> Result<Self, ComponentHashError> {
         if value.len() == 64
@@ -265,6 +270,7 @@ pub enum ComponentKind {
         id: OutputId,
     },
     Subcomponent {
+        source_file_id: ComponentFileRef,
         component: ComponentHash,
         size: Size,
         snap: Scale,
@@ -275,6 +281,7 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     pub fn subcomponent(
+        source_file_id: ComponentFileRef,
         component: ComponentHash,
         size: Size,
         ports: Vec<ComponentPort>,
@@ -295,6 +302,7 @@ impl ComponentKind {
             .unwrap_or(Scale::ONE);
         let subgraphs = vec![ComponentSubgraph::all_ports(&ports)];
         Ok(Self::Subcomponent {
+            source_file_id,
             component,
             size,
             snap,
@@ -304,12 +312,13 @@ impl ComponentKind {
     }
 
     pub fn subcomponent_with_subgraphs(
+        source_file_id: ComponentFileRef,
         component: ComponentHash,
         size: Size,
         ports: Vec<ComponentPort>,
         subgraphs: Vec<ComponentSubgraph>,
     ) -> Result<Self, GeometryError> {
-        let mut kind = Self::subcomponent(component, size, ports)?;
+        let mut kind = Self::subcomponent(source_file_id, component, size, ports)?;
         if let Self::Subcomponent {
             subgraphs: target, ..
         } = &mut kind
@@ -1721,6 +1730,11 @@ mod tests {
     fn component_hash() -> ComponentHash {
         ComponentHash::new("0".repeat(64)).unwrap()
     }
+    fn file_id() -> ComponentFileRef {
+        ComponentFileRef {
+            id: Uuid::from_u128(0),
+        }
+    }
 
     fn wire(start: (i64, i64), end: (i64, i64), scale: u8) -> Wire {
         Wire::new(
@@ -2481,7 +2495,7 @@ mod tests {
             ComponentPort::input(0, scale(2), ComponentSide::Left, 2, 5),
             ComponentPort::output(0, scale(4), ComponentSide::Bottom, 3, 7),
         ];
-        let kind = ComponentKind::subcomponent(component_hash(), size, ports).unwrap();
+        let kind = ComponentKind::subcomponent(file_id(), component_hash(), size, ports).unwrap();
         let mut grid = LogicGrid::new();
         let id = grid.add_component(Point::new(8, 4), Rotation::Left, kind);
         let component = grid.component(id).unwrap();
@@ -2511,7 +2525,7 @@ mod tests {
 
         let invalid = ComponentPort::input(0, scale(2), ComponentSide::Top, 6, 8);
         assert_eq!(
-            ComponentKind::subcomponent(component_hash(), size, vec![invalid]),
+            ComponentKind::subcomponent(file_id(), component_hash(), size, vec![invalid]),
             Err(GeometryError::InvalidSubcomponentPort {
                 size,
                 port: invalid,
@@ -2567,6 +2581,7 @@ mod tests {
                     position: Point::new(16, 0),
                     rotation: Rotation::Right,
                     kind: ComponentKind::subcomponent(
+                        file_id(),
                         component_hash(),
                         Size::new(4, 6),
                         vec![

@@ -1154,10 +1154,12 @@ fn connection_addresses(
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::*;
     use crate::grid::{
-        ComponentSide, ComponentSubgraph, GraphEdge, InputId, OutputId, Point, Rotation, Scale,
-        Size,
+        ComponentFileRef, ComponentSide, ComponentSubgraph, GraphEdge, InputId, OutputId, Point,
+        Rotation, Scale, Size,
     };
 
     fn graph(
@@ -1914,11 +1916,15 @@ mod tests {
     #[test]
     fn subcomponents_compile_sparse_bindings() {
         let mut grid = LogicGrid::new();
+        let file_id = ComponentFileRef {
+            id: Uuid::from_u128(0xa),
+        };
         let component_hash = ComponentHash::new("a".repeat(64)).unwrap();
         let subcomponent = grid.add_component(
             Point::new(0, 0),
             Rotation::Up,
             ComponentKind::subcomponent(
+                file_id,
                 component_hash.clone(),
                 crate::grid::Size::new(4, 4),
                 vec![
@@ -1981,6 +1987,9 @@ mod tests {
 
     #[test]
     fn split_subcomponent_outputs_can_feed_later_inputs() {
+        let child_file_id = ComponentFileRef {
+            id: Uuid::from_u128(0xb),
+        };
         let child_hash = ComponentHash::new("b".repeat(64)).unwrap();
         let child = {
             let mut grid = LogicGrid::new();
@@ -2065,6 +2074,7 @@ mod tests {
             Point::new(0, 0),
             Rotation::Up,
             ComponentKind::subcomponent_with_subgraphs(
+                child_file_id,
                 child_hash.clone(),
                 Size::new(4, 4),
                 vec![
@@ -2126,6 +2136,9 @@ mod tests {
 
     #[test]
     fn split_calls_for_one_subcomponent_instance_share_storage() {
+        let file_id = ComponentFileRef {
+            id: Uuid::from_u128(0xc),
+        };
         let hash = ComponentHash::new("c".repeat(64)).unwrap();
         let child = component_with_subgraphs(
             1,
@@ -2159,6 +2172,7 @@ mod tests {
             Point::new(0, 0),
             Rotation::Up,
             ComponentKind::subcomponent_with_subgraphs(
+                file_id,
                 hash.clone(),
                 Size::new(2, 2),
                 vec![
@@ -2204,6 +2218,9 @@ mod tests {
 
     #[test]
     fn separate_subcomponent_instances_keep_independent_storage() {
+        let file_id = ComponentFileRef {
+            id: Uuid::from_u128(0xd),
+        };
         let hash = ComponentHash::new("d".repeat(64)).unwrap();
         let child = component_with_subgraphs(
             1,
@@ -2231,6 +2248,7 @@ mod tests {
             ],
         );
         let kind = ComponentKind::subcomponent_with_subgraphs(
+            file_id,
             hash.clone(),
             Size::new(2, 2),
             vec![
@@ -2281,11 +2299,15 @@ mod tests {
     #[test]
     fn real_cycle_across_subcomponent_subgraphs_is_rejected() {
         let mut grid = LogicGrid::new();
+        let file_id = ComponentFileRef {
+            id: Uuid::from_u128(0xe),
+        };
         let hash = ComponentHash::new("e".repeat(64)).unwrap();
         let subcomponent = grid.add_component(
             Point::new(0, 0),
             Rotation::Up,
             ComponentKind::subcomponent_with_subgraphs(
+                file_id,
                 hash,
                 Size::new(4, 4),
                 vec![
