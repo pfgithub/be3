@@ -336,7 +336,7 @@ impl ComponentFiles {
             ComponentFileError::InvalidSubcomponent("Component height is too large")
         })?;
         let size = Size::new(width, height);
-        let ports = subcomponent_ports(&grid, bounds.min, bounds.max)?;
+        let ports = subcomponent_ports(&grid, bounds.min)?;
         let snapshot = grid.snapshot();
         let component = UnlinkedComponent::from_graph(&grid, &grid.generate_graph())?;
         let subgraphs = component
@@ -463,7 +463,6 @@ fn reject_duplicate(
 fn subcomponent_ports(
     grid: &LogicGrid,
     min: Point,
-    max: Point,
 ) -> Result<Vec<ComponentPort>, ComponentFileError> {
     let input_indices = dense_input_indices(grid);
     let output_indices = dense_output_indices(grid);
@@ -485,17 +484,6 @@ fn subcomponent_ports(
             .ok_or(ComponentFileError::InvalidSubcomponent(
                 "Input or output component has no external lead",
             ))?;
-        let on_boundary = match lead.side {
-            ComponentSide::Top => lead.axis == min.y,
-            ComponentSide::Right => lead.axis == max.x,
-            ComponentSide::Bottom => lead.axis == max.y,
-            ComponentSide::Left => lead.axis == min.x,
-        };
-        if !on_boundary {
-            return Err(ComponentFileError::InvalidSubcomponent(
-                "Every input and output must lie on the component bounds",
-            ));
-        }
         let offset = match lead.side {
             ComponentSide::Top | ComponentSide::Bottom => min.x,
             ComponentSide::Right | ComponentSide::Left => min.y,
