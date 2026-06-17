@@ -244,6 +244,7 @@ struct ChallengeState {
     selected_input: Option<String>,
     selected_output: Option<String>,
     results: Option<Vec<ChallengeTestResult>>,
+    passed_this_frame: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -399,7 +400,7 @@ pub struct LogicEditor {
 }
 
 pub struct ComponentFileDrop {
-    pub name: String,
+    pub file: crate::component_files::ComponentFileRef,
     pub position: Point,
 }
 
@@ -442,8 +443,8 @@ impl LogicEditor {
         self.challenge = None;
     }
 
-    pub fn start_challenge(&mut self, id: ChallengeId) {
-        self.replace_grid(LogicGrid::new());
+    pub fn open_challenge_solution(&mut self, id: ChallengeId, grid: LogicGrid) {
+        self.replace_grid(grid);
         self.tool = Tool {
             kind: ToolKind::Select,
             scale: Scale::ONE,
@@ -454,11 +455,18 @@ impl LogicEditor {
             selected_input: None,
             selected_output: None,
             results: None,
+            passed_this_frame: false,
         });
     }
 
     pub fn active_challenge_id(&self) -> Option<ChallengeId> {
         self.challenge.as_ref().map(|challenge| challenge.id)
+    }
+
+    pub fn take_challenge_passed(&mut self) -> bool {
+        self.challenge
+            .as_mut()
+            .is_some_and(|state| std::mem::take(&mut state.passed_this_frame))
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ComponentFileDrop> {
@@ -615,7 +623,7 @@ impl LogicEditor {
         let pointer = context.pointer_interact_pos()?;
         let world = self.camera.screen_to_world(pointer, canvas.inner.0.rect);
         Some(ComponentFileDrop {
-            name: payload.name.clone(),
+            file: payload.file.clone(),
             position: Point::new(world[0].floor() as i64, world[1].floor() as i64),
         })
     }
@@ -836,8 +844,10 @@ impl LogicEditor {
             });
         if run_tests {
             let results = challenges::run_challenge_tests(challenge, &self.grid);
+            let passed = results.iter().all(|result| result.passed);
             if let Some(state) = &mut self.challenge {
                 state.results = Some(results);
+                state.passed_this_frame = passed;
             }
         }
     }
@@ -3278,7 +3288,7 @@ mod tests {
     #[test]
     fn deleting_challenge_port_makes_its_label_available_again() {
         let mut editor = LogicEditor::default();
-        editor.start_challenge(ChallengeId::Nor);
+        editor.open_challenge_solution(ChallengeId::Nor, LogicGrid::new());
         assert_eq!(editor.missing_input_labels(), vec!["A", "B"]);
 
         let a = editor.grid.add_component_with_explicit_io(
@@ -3299,7 +3309,7 @@ mod tests {
     #[test]
     fn simulation_preview_skips_unconnected_challenge_inputs() {
         let mut editor = LogicEditor::default();
-        editor.start_challenge(ChallengeId::Nor);
+        editor.open_challenge_solution(ChallengeId::Nor, LogicGrid::new());
         editor.grid.add_component_with_explicit_io(
             Point::new(0, 0),
             Rotation::Up,
@@ -3312,5 +3322,17 @@ mod tests {
         editor.update_simulation_preview();
 
         assert!(editor.simulation.vm.is_some());
+    }
+
+    #[test]
+    fn opening_challenge_solution_preserves_challenge_mode() {
+        let mut grid = LogicGrid::new();
+        grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
+
+        let mut editor = LogicEditor::default();
+        editor.open_challenge_solution(ChallengeId::Nor, grid);
+
+        assert_eq!(editor.active_challenge_id(), Some(ChallengeId::Nor));
+        assert_eq!(editor.grid.components().count(), 1);
     }
 }

@@ -9,6 +9,7 @@ use std::{
 };
 
 use logicgame::{
+    challenges::ChallengeId,
     execution::{Component, GenerationError, UnlinkedComponent, Vm},
     grid::{
         ComponentHash, ComponentKind, ComponentPort, ComponentSide, GeometryError, LogicGrid,
@@ -75,9 +76,48 @@ pub struct CompiledComponent {
     pub component: UnlinkedComponent,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ComponentFileRef {
+    Component(String),
+    ChallengeSolution {
+        challenge: ChallengeId,
+        name: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentFileDrag {
+    pub file: ComponentFileRef,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChallengeSolutionFile {
     pub name: String,
+    pub passing: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChallengeProgress {
+    pub passed: BTreeMap<ChallengeId, bool>,
+}
+
+impl ChallengeProgress {
+    pub fn is_passed(&self, id: ChallengeId) -> bool {
+        self.passed.get(&id).copied().unwrap_or(false)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct StoredFile {
+    kind: StoredFileKind,
+    grid: LogicGridSnapshot,
+    passing: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum StoredFileKind {
+    Component,
+    ChallengeSolution { challenge: ChallengeId },
 }
 
 #[derive(Clone)]
@@ -104,19 +144,68 @@ impl ComponentFiles {
                 let mut names = Vec::new();
                 for entry in entries {
                     let entry = entry?;
+                    let path = entry.path();
                     if !entry.file_type()?.is_file()
-                        || entry.path().extension().and_then(|value| value.to_str()) != Some("json")
+                        || path.extension().and_then(|value| value.to_str()) != Some("json")
                     {
                         continue;
                     }
-                    if let Some(name) = entry.path().file_stem().and_then(|value| value.to_str()) {
-                        if validate_name(name).is_ok() {
+                    if let Some(name) = path.file_stem().and_then(|value| value.to_str()) {
+                        if validate_name(name).is_ok()
+                            && self
+                                .load_stored(&ComponentFileRef::Component(name.to_owned()))
+                                .is_ok_and(|stored| {
+                                    matches!(stored.kind, StoredFileKind::Component)
+                                })
+                        {
                             names.push(name.to_owned());
                         }
                     }
                 }
                 names.sort_by_key(|name| name.to_lowercase());
                 Ok(names)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn list_challenge_solutions(
+        &self,
+        challenge: ChallengeId,
+    ) -> Result<Vec<ChallengeSolutionFile>, ComponentFileError> {
+        let root = self.challenge_root(challenge);
+        match fs::read_dir(&root) {
+            Ok(entries) => {
+                let mut solutions = Vec::new();
+                for entry in entries {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if !entry.file_type()?.is_file()
+                        || path.extension().and_then(|value| value.to_str()) != Some("json")
+                    {
+                        continue;
+                    }
+                    let Some(name) = path.file_stem().and_then(|value| value.to_str()) else {
+                        continue;
+                    };
+                    if validate_name(name).is_err() {
+                        continue;
+                    }
+                    let stored = self.load_stored(&ComponentFileRef::ChallengeSolution {
+                        challenge,
+                        name: name.to_owned(),
+                    })?;
+                    if stored.kind != (StoredFileKind::ChallengeSolution { challenge }) {
+                        continue;
+                    }
+                    solutions.push(ChallengeSolutionFile {
+                        name: name.to_owned(),
+                        passing: stored.passing,
+                    });
+                }
+                solutions.sort_by_key(|solution| solution.name.to_lowercase());
+                Ok(solutions)
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
             Err(error) => Err(error.into()),
@@ -135,23 +224,74 @@ impl ComponentFiles {
         Ok(grid)
     }
 
+    pub fn create_challenge_solution(
+        &self,
+        challenge: ChallengeId,
+    ) -> Result<(String, LogicGrid), ComponentFileError> {
+        fs::create_dir_all(self.challenge_root(challenge))?;
+        let existing = self.list_challenge_solutions(challenge)?;
+        let mut index = 1;
+        loop {
+            let name = format!("Solution {index}");
+            if !existing.iter().any(|solution| solution.name == name) {
+                let grid = LogicGrid::new();
+                self.save_challenge_solution(challenge, &name, &grid, false)?;
+                return Ok((name, grid));
+            }
+            index += 1;
+        }
+    }
+
     pub fn load(&self, name: &str) -> Result<LogicGrid, ComponentFileError> {
         let name = validate_name(name)?;
-        let bytes = fs::read(self.path(name))?;
-        let snapshot = serde_json::from_slice::<LogicGridSnapshot>(&bytes)?;
-        Ok(LogicGrid::from_snapshot(snapshot))
+        let stored = self.load_stored(&ComponentFileRef::Component(name.to_owned()))?;
+        Ok(LogicGrid::from_snapshot(stored.grid))
+    }
+
+    pub fn load_ref(&self, file: &ComponentFileRef) -> Result<LogicGrid, ComponentFileError> {
+        Ok(LogicGrid::from_snapshot(self.load_stored(file)?.grid))
     }
 
     pub fn save(&self, name: &str, grid: &LogicGrid) -> Result<(), ComponentFileError> {
         let name = validate_name(name)?;
         fs::create_dir_all(&self.root)?;
-        let bytes = serde_json::to_vec_pretty(&grid.snapshot())?;
-        atomic_write(&self.path(name), &bytes)?;
+        self.save_stored(
+            &ComponentFileRef::Component(name.to_owned()),
+            &StoredFile {
+                kind: StoredFileKind::Component,
+                grid: grid.snapshot(),
+                passing: false,
+            },
+        )?;
         Ok(())
     }
 
-    pub fn compile_subcomponent(&self, name: &str) -> Result<ComponentKind, ComponentFileError> {
-        let grid = self.load(name)?;
+    pub fn save_challenge_solution(
+        &self,
+        challenge: ChallengeId,
+        name: &str,
+        grid: &LogicGrid,
+        passing: bool,
+    ) -> Result<(), ComponentFileError> {
+        let name = validate_name(name)?;
+        self.save_stored(
+            &ComponentFileRef::ChallengeSolution {
+                challenge,
+                name: name.to_owned(),
+            },
+            &StoredFile {
+                kind: StoredFileKind::ChallengeSolution { challenge },
+                grid: grid.snapshot(),
+                passing,
+            },
+        )
+    }
+
+    pub fn compile_subcomponent(
+        &self,
+        file: &ComponentFileRef,
+    ) -> Result<ComponentKind, ComponentFileError> {
+        let grid = self.load_ref(file)?;
         let bounds = grid
             .bounds()
             .ok_or(ComponentFileError::InvalidSubcomponent(
@@ -191,6 +331,23 @@ impl ComponentFiles {
         vm.load_components(|hash| self.load_component(hash, &mut cache))
     }
 
+    pub fn load_progress(&self) -> Result<ChallengeProgress, ComponentFileError> {
+        match fs::read(self.progress_path()) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                Ok(ChallengeProgress::default())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn save_progress(&self, progress: &ChallengeProgress) -> Result<(), ComponentFileError> {
+        fs::create_dir_all(&self.root)?;
+        let bytes = serde_json::to_vec_pretty(progress)?;
+        atomic_write(&self.progress_path(), &bytes)?;
+        Ok(())
+    }
+
     fn load_component(
         &self,
         hash: &ComponentHash,
@@ -212,6 +369,59 @@ impl ComponentFiles {
 
     fn path(&self, name: &str) -> PathBuf {
         self.root.join(format!("{name}.json"))
+    }
+
+    fn challenge_root(&self, challenge: ChallengeId) -> PathBuf {
+        self.root.join("challenges").join(format!("{challenge:?}"))
+    }
+
+    fn challenge_path(&self, challenge: ChallengeId, name: &str) -> PathBuf {
+        self.challenge_root(challenge).join(format!("{name}.json"))
+    }
+
+    fn progress_path(&self) -> PathBuf {
+        self.root.join("progress.json")
+    }
+
+    fn file_path(&self, file: &ComponentFileRef) -> Result<PathBuf, ComponentFileError> {
+        match file {
+            ComponentFileRef::Component(name) => Ok(self.path(validate_name(name)?)),
+            ComponentFileRef::ChallengeSolution { challenge, name } => {
+                Ok(self.challenge_path(*challenge, validate_name(name)?))
+            }
+        }
+    }
+
+    fn load_stored(&self, file: &ComponentFileRef) -> Result<StoredFile, ComponentFileError> {
+        let bytes = fs::read(self.file_path(file)?)?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    fn save_stored(
+        &self,
+        file: &ComponentFileRef,
+        stored: &StoredFile,
+    ) -> Result<(), ComponentFileError> {
+        let matches_file = match (file, &stored.kind) {
+            (ComponentFileRef::Component(_), StoredFileKind::Component) => true,
+            (
+                ComponentFileRef::ChallengeSolution { challenge, .. },
+                StoredFileKind::ChallengeSolution {
+                    challenge: stored_challenge,
+                },
+            ) => challenge == stored_challenge,
+            _ => false,
+        };
+        if !matches_file {
+            return Err(ComponentFileError::InvalidSubcomponent(
+                "File reference does not match stored file kind",
+            ));
+        }
+        let path = self.file_path(file)?;
+        fs::create_dir_all(path.parent().expect("component path has a parent"))?;
+        let bytes = serde_json::to_vec_pretty(stored)?;
+        atomic_write(&path, &bytes)?;
+        Ok(())
     }
 }
 
@@ -454,8 +664,9 @@ mod tests {
         );
         files.save("source", &grid).unwrap();
 
-        let first = files.compile_subcomponent("source").unwrap();
-        let second = files.compile_subcomponent("source").unwrap();
+        let source = ComponentFileRef::Component("source".to_owned());
+        let first = files.compile_subcomponent(&source).unwrap();
+        let second = files.compile_subcomponent(&source).unwrap();
         assert_eq!(first, second);
         let ComponentKind::Subcomponent {
             component,
@@ -484,7 +695,7 @@ mod tests {
 
         grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
         files.save("source", &grid).unwrap();
-        let changed = files.compile_subcomponent("source").unwrap();
+        let changed = files.compile_subcomponent(&source).unwrap();
         let ComponentKind::Subcomponent {
             component: changed_hash,
             ..
@@ -504,7 +715,7 @@ mod tests {
         let files = ComponentFiles::new(root.clone());
         files.create("empty").unwrap();
         assert!(matches!(
-            files.compile_subcomponent("empty"),
+            files.compile_subcomponent(&ComponentFileRef::Component("empty".to_owned())),
             Err(ComponentFileError::InvalidSubcomponent(_))
         ));
 
@@ -521,9 +732,118 @@ mod tests {
         grid.add_component(Point::new(4, -4), Rotation::Up, ComponentKind::Led);
         files.save("internal-port", &grid).unwrap();
         assert!(matches!(
-            files.compile_subcomponent("internal-port"),
+            files.compile_subcomponent(&ComponentFileRef::Component("internal-port".to_owned())),
             Err(ComponentFileError::InvalidSubcomponent(_))
         ));
+
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn creates_lists_saves_and_loads_challenge_solutions() {
+        let root = test_root();
+        let files = ComponentFiles::new(root.clone());
+
+        let (first_name, mut first_grid) =
+            files.create_challenge_solution(ChallengeId::Nor).unwrap();
+        let (second_name, _) = files.create_challenge_solution(ChallengeId::Nor).unwrap();
+        assert_eq!(first_name, "Solution 1");
+        assert_eq!(second_name, "Solution 2");
+
+        first_grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
+        files
+            .save_challenge_solution(ChallengeId::Nor, &first_name, &first_grid, true)
+            .unwrap();
+
+        let solutions = files.list_challenge_solutions(ChallengeId::Nor).unwrap();
+        assert_eq!(
+            solutions,
+            vec![
+                ChallengeSolutionFile {
+                    name: "Solution 1".to_owned(),
+                    passing: true,
+                },
+                ChallengeSolutionFile {
+                    name: "Solution 2".to_owned(),
+                    passing: false,
+                },
+            ]
+        );
+        assert_eq!(
+            files
+                .load_ref(&ComponentFileRef::ChallengeSolution {
+                    challenge: ChallengeId::Nor,
+                    name: first_name,
+                })
+                .unwrap()
+                .snapshot(),
+            first_grid.snapshot()
+        );
+
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn saves_challenge_progress_independently_from_solution_passing() {
+        let root = test_root();
+        let files = ComponentFiles::new(root.clone());
+        let (name, grid) = files.create_challenge_solution(ChallengeId::Nor).unwrap();
+        files
+            .save_challenge_solution(ChallengeId::Nor, &name, &grid, true)
+            .unwrap();
+        let mut progress = ChallengeProgress::default();
+        progress.passed.insert(ChallengeId::Nor, true);
+        files.save_progress(&progress).unwrap();
+
+        files
+            .save_challenge_solution(ChallengeId::Nor, &name, &grid, false)
+            .unwrap();
+
+        assert!(
+            !files
+                .list_challenge_solutions(ChallengeId::Nor)
+                .unwrap()
+                .first()
+                .unwrap()
+                .passing
+        );
+        assert!(files.load_progress().unwrap().is_passed(ChallengeId::Nor));
+
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn compiles_challenge_solution_as_subcomponent() {
+        let root = test_root();
+        let files = ComponentFiles::new(root.clone());
+        let (name, mut grid) = files.create_challenge_solution(ChallengeId::Nor).unwrap();
+        grid.add_component(
+            Point::new(0, 0),
+            Rotation::Up,
+            ComponentKind::Input {
+                scale: Scale::ONE,
+                id: logicgame::grid::InputId(0),
+            },
+        );
+        grid.add_component(
+            Point::new(4, 4),
+            Rotation::Down,
+            ComponentKind::Output {
+                scale: Scale::ONE,
+                id: logicgame::grid::OutputId(0),
+            },
+        );
+        files
+            .save_challenge_solution(ChallengeId::Nor, &name, &grid, false)
+            .unwrap();
+
+        let kind = files
+            .compile_subcomponent(&ComponentFileRef::ChallengeSolution {
+                challenge: ChallengeId::Nor,
+                name,
+            })
+            .unwrap();
+        assert!(matches!(kind, ComponentKind::Subcomponent { .. }));
 
         remove_test_root(&root);
     }

@@ -4,8 +4,9 @@ use crate::{
     execution::Vm,
     grid::{value_mask, ComponentKind, InputId, LogicGrid, OutputId, Scale, ValidationError},
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ChallengeId {
     Nor,
 }
