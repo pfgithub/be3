@@ -191,3 +191,6 @@ fn generate_nor_tick(rng: &mut dyn RngCore) -> ChallengeTick {
         }],
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,1 +1,3 @@
+use super::*;
+
 mod nor_defines_ports_and_generator;

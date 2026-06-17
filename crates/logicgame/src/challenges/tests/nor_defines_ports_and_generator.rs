@@ -1,10 +1,7 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::{
-    challenges::{input_id, output_id, ChallengeComponentKind, NOR_CHALLENGE},
-    grid::{InputId, OutputId, Scale},
-};
+use super::*;
 
 #[test]
 fn nor_challenge_defines_ports_and_generator() {
