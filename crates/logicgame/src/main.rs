@@ -136,10 +136,10 @@ impl LogicGame {
             Err(error) => self.persistence_error = Some(error.to_string()),
         }
         self.challenge_solutions.clear();
-        for challenge in challenges::CHALLENGES {
-            match files.list_challenge_solutions(challenge.id) {
+        for challenge_id in challenges::CHALLENGES {
+            match files.list_challenge_solutions(challenge_id) {
                 Ok(solutions) => {
-                    self.challenge_solutions.insert(challenge.id, solutions);
+                    self.challenge_solutions.insert(challenge_id, solutions);
                 }
                 Err(error) => self.persistence_error = Some(error.to_string()),
             }
@@ -162,30 +162,30 @@ impl LogicGame {
             .vscroll(true)
             .show(context, |ui| {
                 ui.strong("Challenges");
-                for challenge in challenges::CHALLENGES {
-                    let active = self.editor.active_challenge_id() == Some(challenge.id);
-                    let passed = self.challenge_progress.is_passed(challenge.id);
+                for challenge_id in challenges::CHALLENGES {
+                    let active = self.editor.active_challenge_id() == Some(challenge_id);
+                    let passed = self.challenge_progress.is_passed(challenge_id);
                     ui.horizontal(|ui| {
                         let label = if passed {
-                            format!("{} pass", challenge.name)
+                            format!("{} pass", challenge_id.name())
                         } else {
-                            challenge.name.to_owned()
+                            challenge_id.name().to_owned()
                         };
                         if ui.selectable_label(active, label).clicked()
                             && self
                                 .challenge_solutions
-                                .get(&challenge.id)
+                                .get(&challenge_id)
                                 .is_none_or(Vec::is_empty)
                         {
-                            requested_new_solution = Some(challenge.id);
+                            requested_new_solution = Some(challenge_id);
                         }
                         if ui.button("New Solution").clicked() {
-                            requested_new_solution = Some(challenge.id);
+                            requested_new_solution = Some(challenge_id);
                         }
                     });
                     for solution in self
                         .challenge_solutions
-                        .get(&challenge.id)
+                        .get(&challenge_id)
                         .into_iter()
                         .flatten()
                     {
@@ -209,13 +209,13 @@ impl LogicGame {
                                     .dnd_set_drag_payload(ComponentFileDrag { file: file.clone() });
                             }
                             if response.clicked() {
-                                requested_solution = Some((challenge.id, solution.id));
+                                requested_solution = Some((challenge_id, solution.id));
                             }
                             response.context_menu(|ui| {
                                 if ui.button("Rename").clicked() {
                                     requested_rename = Some((
                                         ComponentFileSource::ChallengeSolution {
-                                            challenge: challenge.id,
+                                            challenge: challenge_id,
                                         },
                                         file,
                                         solution.name.clone(),
@@ -476,6 +476,7 @@ impl LogicGame {
         }
     }
 
+    #[allow(dead_code)]
     fn mark_active_challenge_passed(&mut self) {
         let Some(ActiveFile::ChallengeSolution {
             challenge,
@@ -643,12 +644,9 @@ impl LogicGame {
 
 impl eframe::App for LogicGame {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.active_file.is_some() || self.editor.active_challenge_id().is_some() {
+        if self.active_file.is_some() {
             if let Some(dropped) = self.editor.ui(ui) {
                 self.drop_component_file(&dropped.file, dropped.position);
-            }
-            if self.editor.take_challenge_passed() {
-                self.mark_active_challenge_passed();
             }
             self.observe_changes();
             self.autosave();

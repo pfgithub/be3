@@ -4,15 +4,18 @@ use std::{
 };
 
 use eframe::egui::{self, PointerButton};
-use logicgame::execution::{Component as ExecutionComponent, Instruction, Pc, Vm};
-use logicgame::grid::{
-    value_mask, CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
-    GraphNodeId, InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
+use logicgame::{
+    challenges::generate_challenge,
+    execution::{Component as ExecutionComponent, Instruction, Pc, Vm},
 };
 use logicgame::{
-    challenges::{self, input_id, output_id, ChallengeComponentKind, ChallengeId},
-    grid::ComponentFileRef,
+    challenges::Challenge,
+    grid::{
+        CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
+        GraphNodeId, InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
+    },
 };
+use logicgame::{challenges::ChallengeId, grid::ComponentFileRef};
 
 use crate::{
     component_files::{ComponentFileDrag, ComponentFiles},
@@ -64,15 +67,6 @@ impl ToolKind {
             Self::Input => "Input",
             Self::Output => "Output",
             Self::ConfigureStorage => "Configure storage",
-        }
-    }
-
-    fn challenge_component_kind(self) -> Option<ChallengeComponentKind> {
-        match self {
-            Self::MergerSplitter => Some(ChallengeComponentKind::MergerSplitter),
-            Self::Led => Some(ChallengeComponentKind::Led),
-            Self::Storage | Self::ConfigureStorage => Some(ChallengeComponentKind::Storage),
-            _ => None,
         }
     }
 }
@@ -240,23 +234,11 @@ struct Simulation {
     tick_in_progress: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct ChallengeState {
     id: ChallengeId,
-    selected_input: Option<String>,
-    selected_output: Option<String>,
-    results: Option<Vec<ChallengeValidationResult>>,
-    passed_this_frame: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ChallengeValidationResult {
-    tick: Option<usize>,
-    inputs: Vec<(String, u64)>,
-    expected_outputs: Vec<(String, u64)>,
-    actual_outputs: Vec<(String, Option<u64>)>,
-    passed: bool,
-    error: Option<String>,
+    #[allow(dead_code)]
+    data: Challenge,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -462,23 +444,15 @@ impl LogicEditor {
             scale: Scale::ONE,
             merger_out_scale: Scale::ONE,
         };
+        let challenge_data = generate_challenge(id);
         self.challenge = Some(ChallengeState {
             id,
-            selected_input: None,
-            selected_output: None,
-            results: None,
-            passed_this_frame: false,
+            data: challenge_data,
         });
     }
 
     pub fn active_challenge_id(&self) -> Option<ChallengeId> {
         self.challenge.as_ref().map(|challenge| challenge.id)
-    }
-
-    pub fn take_challenge_passed(&mut self) -> bool {
-        self.challenge
-            .as_mut()
-            .is_some_and(|state| std::mem::take(&mut state.passed_this_frame))
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ComponentFileDrop> {
@@ -502,19 +476,7 @@ impl LogicEditor {
             .vscroll(true)
             .show(&context, |ui| {
                 let tools = &FREE_TOOLS[..];
-                if !tools
-                    .iter()
-                    .copied()
-                    .any(|kind| self.tool_allowed_in_active_challenge(kind))
-                    || !self.tool_allowed_in_active_challenge(self.tool.kind)
-                {
-                    self.tool.kind = ToolKind::Select;
-                    self.gesture = None;
-                }
                 for &kind in tools {
-                    if !self.tool_allowed_in_active_challenge(kind) {
-                        continue;
-                    }
                     if ui
                         .selectable_label(self.tool.kind == kind, kind.label())
                         .clicked()
@@ -529,13 +491,7 @@ impl LogicEditor {
                 }
 
                 ui.separator();
-                if self.challenge.is_some() {
-                    self.tool.scale = Scale::ONE;
-                    self.tool.merger_out_scale = Scale::ONE;
-                    self.show_challenge_port_tool(ui);
-                    ui.label("Scale");
-                    ui.monospace(format!("{}x", self.selected_challenge_tool_scale().get()));
-                } else if matches!(self.tool.kind, ToolKind::MergerSplitter) {
+                if matches!(self.tool.kind, ToolKind::MergerSplitter) {
                     ui.label("Input scale");
                     egui::ComboBox::from_id_salt("logic-tool-scale")
                         .selected_text(format!("{}x", self.tool.scale.get()))
@@ -589,7 +545,6 @@ impl LogicEditor {
         self.show_metrics(&context);
         self.show_storage_configuration(&context);
         self.show_simulation(&context);
-        self.show_challenge(&context);
 
         let hovered_square = canvas
             .inner
@@ -645,512 +600,12 @@ impl LogicEditor {
     }
 
     pub fn insert_subcomponent(&mut self, position: Point, kind: ComponentKind) {
-        if self.challenge.is_some() {
-            return;
-        }
         let snap = kind.snap().get();
         let position = Point::new(
             position.x.div_euclid(snap) * snap,
             position.y.div_euclid(snap) * snap,
         );
         self.grid.add_component(position, Rotation::Up, kind);
-    }
-
-    fn active_challenge(&self) -> Option<&'static challenges::Challenge> {
-        self.challenge
-            .as_ref()
-            .map(|state| challenges::challenge(state.id))
-    }
-
-    fn tool_allowed_in_active_challenge(&self, kind: ToolKind) -> bool {
-        let Some(challenge) = self.active_challenge() else {
-            return true;
-        };
-        kind.challenge_component_kind()
-            .is_none_or(|component_kind| !challenge.disallowed_components.contains(&component_kind))
-    }
-
-    fn missing_input_labels(&self) -> Vec<&'static str> {
-        let Some(challenge) = self.active_challenge() else {
-            return Vec::new();
-        };
-        challenge
-            .inputs
-            .iter()
-            .filter(|port| {
-                let id = input_id(challenge, port.label).expect("challenge input label is valid");
-                !self.grid.components().any(|component| {
-                    matches!(component.kind, ComponentKind::Input { id: existing, .. } if existing == id)
-                })
-            })
-            .map(|port| port.label)
-            .collect()
-    }
-
-    fn missing_output_labels(&self) -> Vec<&'static str> {
-        let Some(challenge) = self.active_challenge() else {
-            return Vec::new();
-        };
-        challenge
-            .outputs
-            .iter()
-            .filter(|port| {
-                let id = output_id(challenge, port.label).expect("challenge output label is valid");
-                !self.grid.components().any(|component| {
-                    matches!(component.kind, ComponentKind::Output { id: existing, .. } if existing == id)
-                })
-            })
-            .map(|port| port.label)
-            .collect()
-    }
-
-    fn selected_challenge_input(&mut self) -> Option<&'static str> {
-        let labels = self.missing_input_labels();
-        let selected = self
-            .challenge
-            .as_ref()
-            .and_then(|state| state.selected_input.as_deref());
-        let label = selected
-            .and_then(|selected| labels.iter().copied().find(|label| *label == selected))
-            .or_else(|| labels.first().copied())?;
-        if let Some(state) = &mut self.challenge {
-            state.selected_input = Some(label.to_owned());
-        }
-        Some(label)
-    }
-
-    fn selected_challenge_output(&mut self) -> Option<&'static str> {
-        let labels = self.missing_output_labels();
-        let selected = self
-            .challenge
-            .as_ref()
-            .and_then(|state| state.selected_output.as_deref());
-        let label = selected
-            .and_then(|selected| labels.iter().copied().find(|label| *label == selected))
-            .or_else(|| labels.first().copied())?;
-        if let Some(state) = &mut self.challenge {
-            state.selected_output = Some(label.to_owned());
-        }
-        Some(label)
-    }
-
-    fn challenge_input_scale(&self, label: &str) -> Option<Scale> {
-        let challenge = self.active_challenge()?;
-        challenge
-            .inputs
-            .iter()
-            .find_map(|port| (port.label == label).then_some(port.scale))
-    }
-
-    fn challenge_output_scale(&self, label: &str) -> Option<Scale> {
-        let challenge = self.active_challenge()?;
-        challenge
-            .outputs
-            .iter()
-            .find_map(|port| (port.label == label).then_some(port.scale))
-    }
-
-    fn selected_challenge_tool_scale(&mut self) -> Scale {
-        match self.tool.kind {
-            ToolKind::Input => self
-                .selected_challenge_input()
-                .and_then(|label| self.challenge_input_scale(label))
-                .unwrap_or(Scale::ONE),
-            ToolKind::Output => self
-                .selected_challenge_output()
-                .and_then(|label| self.challenge_output_scale(label))
-                .unwrap_or(Scale::ONE),
-            _ => Scale::ONE,
-        }
-    }
-
-    fn show_challenge_port_tool(&mut self, ui: &mut egui::Ui) {
-        match self.tool.kind {
-            ToolKind::Input => {
-                let labels = self.missing_input_labels();
-                self.show_challenge_label_picker(ui, "Input", labels);
-            }
-            ToolKind::Output => {
-                let labels = self.missing_output_labels();
-                self.show_challenge_label_picker(ui, "Output", labels);
-            }
-            _ => {}
-        }
-    }
-
-    fn show_challenge_label_picker(
-        &mut self,
-        ui: &mut egui::Ui,
-        title: &'static str,
-        labels: Vec<&'static str>,
-    ) {
-        if labels.is_empty() {
-            ui.weak(format!("All {title} labels are placed"));
-            return;
-        }
-        let is_input = title == "Input";
-        let selected = if is_input {
-            self.selected_challenge_input()
-        } else {
-            self.selected_challenge_output()
-        }
-        .unwrap_or(labels[0]);
-        ui.label(title);
-        egui::ComboBox::from_id_salt(("challenge-port-label", title))
-            .selected_text(selected)
-            .show_ui(ui, |ui| {
-                for label in labels {
-                    let mut checked = selected == label;
-                    if ui.selectable_label(checked, label).clicked() {
-                        checked = true;
-                        if let Some(state) = &mut self.challenge {
-                            if is_input {
-                                state.selected_input = Some(label.to_owned());
-                            } else {
-                                state.selected_output = Some(label.to_owned());
-                            }
-                        }
-                    }
-                    let _ = checked;
-                }
-            });
-    }
-
-    fn show_challenge(&mut self, context: &egui::Context) {
-        let Some(id) = self.challenge.as_ref().map(|state| state.id) else {
-            return;
-        };
-        let challenge = challenges::challenge(id);
-        let mut validate = false;
-        egui::Window::new("Challenge")
-            .default_pos([700.0, 240.0])
-            .default_width(300.0)
-            .hscroll(true)
-            .vscroll(true)
-            .show(context, |ui| {
-                ui.heading(challenge.name);
-                ui.label(challenge.goal);
-                ui.separator();
-                ui.strong("Inputs");
-                for port in challenge.inputs {
-                    let placed = input_id(challenge, port.label).is_some_and(|id| {
-                        self.grid.components().any(|component| {
-                            matches!(component.kind, ComponentKind::Input { id: existing, .. } if existing == id)
-                        })
-                    });
-                    challenge_port_row(ui, port.label, port.scale, placed);
-                }
-                ui.separator();
-                ui.strong("Outputs");
-                for port in challenge.outputs {
-                    let placed = output_id(challenge, port.label).is_some_and(|id| {
-                        self.grid.components().any(|component| {
-                            matches!(component.kind, ComponentKind::Output { id: existing, .. } if existing == id)
-                        })
-                    });
-                    challenge_port_row(ui, port.label, port.scale, placed);
-                }
-                ui.separator();
-                ui.strong("Validation");
-                ui.label(format!("{} ticks", challenge.validation_ticks));
-                if ui.button("Validate").clicked() {
-                    validate = true;
-                }
-                if let Some(results) = self
-                    .challenge
-                    .as_ref()
-                    .and_then(|state| state.results.as_ref())
-                {
-                    ui.separator();
-                    for result in results {
-                        ui.horizontal(|ui| {
-                            if result.passed {
-                                ui.colored_label(egui::Color32::from_rgb(80, 180, 120), "pass");
-                            } else {
-                                ui.colored_label(ui.visuals().error_fg_color, "fail");
-                            }
-                            match result.tick {
-                                Some(tick) => ui.monospace(format!("tick {tick}")),
-                                None => ui.monospace(format!("{} ticks", challenge.validation_ticks)),
-                            };
-                        });
-                        for (label, expected) in &result.expected_outputs {
-                            let actual = result
-                                .actual_outputs
-                                .iter()
-                                .find_map(|(actual_label, value)| {
-                                    (actual_label == label).then_some(*value)
-                                })
-                                .flatten();
-                            ui.small(format!("{label}: expected {expected}, actual {actual:?}"));
-                        }
-                        if let Some(error) = &result.error {
-                            ui.colored_label(ui.visuals().error_fg_color, error);
-                        }
-                    }
-                }
-            });
-        if validate {
-            let results = vec![self.validate_challenge(challenge)];
-            let passed = results.iter().all(|result| result.passed);
-            if let Some(state) = &mut self.challenge {
-                state.results = Some(results);
-                state.passed_this_frame = passed;
-            }
-        }
-    }
-
-    fn validate_challenge(
-        &mut self,
-        challenge: &'static challenges::Challenge,
-    ) -> ChallengeValidationResult {
-        let structure_errors = self.challenge_structure_errors(challenge);
-        if !structure_errors.is_empty() {
-            return ChallengeValidationResult {
-                tick: Some(0),
-                inputs: Vec::new(),
-                expected_outputs: Vec::new(),
-                actual_outputs: challenge
-                    .outputs
-                    .iter()
-                    .map(|output| (output.label.to_owned(), None))
-                    .collect(),
-                passed: false,
-                error: Some(structure_errors.join("; ")),
-            };
-        }
-
-        if !self.prepare_simulation() {
-            return ChallengeValidationResult {
-                tick: Some(0),
-                inputs: Vec::new(),
-                expected_outputs: Vec::new(),
-                actual_outputs: challenge
-                    .outputs
-                    .iter()
-                    .map(|output| (output.label.to_owned(), None))
-                    .collect(),
-                passed: false,
-                error: self
-                    .simulation
-                    .error
-                    .clone()
-                    .or_else(|| Some("Cannot compile challenge solution".to_owned())),
-            };
-        }
-
-        let mut rng = challenge_rng(challenge.id);
-        for tick_index in 0..challenge.validation_ticks {
-            let tick = (challenge.generate)(&mut rng);
-            let inputs = tick
-                .inputs
-                .iter()
-                .map(|input| (input.label.to_owned(), input.value))
-                .collect::<Vec<_>>();
-            let expected_outputs = tick
-                .outputs
-                .iter()
-                .map(|output| (output.label.to_owned(), output.value))
-                .collect::<Vec<_>>();
-
-            if let Err(error) = self.set_challenge_inputs(challenge, &tick.inputs) {
-                return ChallengeValidationResult {
-                    tick: Some(tick_index),
-                    inputs,
-                    expected_outputs,
-                    actual_outputs: challenge
-                        .outputs
-                        .iter()
-                        .map(|output| (output.label.to_owned(), None))
-                        .collect(),
-                    passed: false,
-                    error: Some(error),
-                };
-            }
-
-            self.run_simulation_tick();
-
-            let actual_outputs = self.challenge_actual_outputs(challenge);
-            let passed = tick.outputs.iter().all(|expected| {
-                actual_outputs
-                    .iter()
-                    .find_map(|(label, actual)| (label == expected.label).then_some(*actual))
-                    .flatten()
-                    == Some(expected.value & challenge_output_mask(challenge, expected.label))
-            });
-            if !passed {
-                return ChallengeValidationResult {
-                    tick: Some(tick_index),
-                    inputs,
-                    expected_outputs,
-                    actual_outputs,
-                    passed: false,
-                    error: None,
-                };
-            }
-        }
-
-        ChallengeValidationResult {
-            tick: None,
-            inputs: Vec::new(),
-            expected_outputs: Vec::new(),
-            actual_outputs: self.challenge_actual_outputs(challenge),
-            passed: true,
-            error: None,
-        }
-    }
-
-    fn challenge_structure_errors(&self, challenge: &challenges::Challenge) -> Vec<String> {
-        let mut errors = self
-            .grid
-            .validate()
-            .into_iter()
-            .map(|error| format!("{error:?}"))
-            .collect::<Vec<_>>();
-        let mut inputs = BTreeMap::<&'static str, usize>::new();
-        let mut outputs = BTreeMap::<&'static str, usize>::new();
-
-        for component in self.grid.components() {
-            if let Some(kind) = challenge_component_kind(&component.kind) {
-                if challenge.disallowed_components.contains(&kind) {
-                    errors.push(format!(
-                        "{} is not available",
-                        challenge_component_kind_name(kind)
-                    ));
-                }
-            }
-
-            match component.kind {
-                ComponentKind::Input { scale, id } => {
-                    match challenges::input_label(challenge, id) {
-                        Some(label) => {
-                            let index = challenges::input_index(challenge, id)
-                                .expect("labeled challenge input has an index");
-                            let expected = challenge.inputs[index].scale;
-                            if scale != expected {
-                                errors.push(format!(
-                                    "Input {label} must be {}x but is {}x",
-                                    expected.get(),
-                                    scale.get()
-                                ));
-                            }
-                            let count = inputs.entry(label).or_default();
-                            *count += 1;
-                            if *count > 1 {
-                                errors.push(format!("Input {label} appears more than once"));
-                            }
-                        }
-                        None => errors.push(format!("Input {id:?} is not part of the challenge")),
-                    }
-                }
-                ComponentKind::Output { scale, id } => {
-                    match challenges::output_label(challenge, id) {
-                        Some(label) => {
-                            let index = challenges::output_index(challenge, id)
-                                .expect("labeled challenge output has an index");
-                            let expected = challenge.outputs[index].scale;
-                            if scale != expected {
-                                errors.push(format!(
-                                    "Output {label} must be {}x but is {}x",
-                                    expected.get(),
-                                    scale.get()
-                                ));
-                            }
-                            let count = outputs.entry(label).or_default();
-                            *count += 1;
-                            if *count > 1 {
-                                errors.push(format!("Output {label} appears more than once"));
-                            }
-                        }
-                        None => errors.push(format!("Output {id:?} is not part of the challenge")),
-                    }
-                }
-                ComponentKind::Not { scale } => {
-                    if scale != Scale::ONE {
-                        errors.push(format!(
-                            "NOT gate must be {}x but is {}x",
-                            Scale::ONE.get(),
-                            scale.get()
-                        ));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        for port in challenge.inputs {
-            if !inputs.contains_key(port.label) {
-                errors.push(format!("Input {} is missing", port.label));
-            }
-        }
-        for port in challenge.outputs {
-            if !outputs.contains_key(port.label) {
-                errors.push(format!("Output {} is missing", port.label));
-            }
-        }
-        for wire in self.grid.wires() {
-            if wire.scale != Scale::ONE {
-                errors.push(format!(
-                    "Wire must be {}x but is {}x",
-                    Scale::ONE.get(),
-                    wire.scale.get()
-                ));
-            }
-        }
-
-        errors
-    }
-
-    fn set_challenge_inputs(
-        &mut self,
-        challenge: &challenges::Challenge,
-        inputs: &[challenges::ChallengeValue],
-    ) -> Result<(), String> {
-        let Some(vm) = &self.simulation.vm else {
-            return Err("Cannot run challenge solution".to_owned());
-        };
-        let mut values = vec![0; vm.input_addresses().len()];
-        for input in inputs {
-            let Some(id) = input_id(challenge, input.label) else {
-                return Err(format!("Unknown input {}", input.label));
-            };
-            let Some(index) = challenges::input_index(challenge, id) else {
-                return Err(format!("Unknown input {}", input.label));
-            };
-            let port = &challenge.inputs[index];
-            let Some(value) = values.get_mut(index) else {
-                return Err(format!("Missing input {}", input.label));
-            };
-            *value = input.value & value_mask(port.scale);
-        }
-        self.simulation.input_values = values;
-        Ok(())
-    }
-
-    fn challenge_actual_outputs(
-        &self,
-        challenge: &challenges::Challenge,
-    ) -> Vec<(String, Option<u64>)> {
-        let Some(vm) = &self.simulation.vm else {
-            return challenge
-                .outputs
-                .iter()
-                .map(|output| (output.label.to_owned(), None))
-                .collect();
-        };
-        challenge
-            .outputs
-            .iter()
-            .enumerate()
-            .map(|(index, output)| {
-                let actual = vm
-                    .output_addresses()
-                    .get(index)
-                    .and_then(|&address| vm.root_memory().get(address).copied())
-                    .map(|value| value & value_mask(output.scale));
-                (output.label.to_owned(), actual)
-            })
-            .collect()
     }
 
     fn show_metrics(&self, context: &egui::Context) {
@@ -1988,10 +1443,6 @@ impl LogicEditor {
         if self.challenge.is_some() {
             self.tool.scale = Scale::ONE;
             self.tool.merger_out_scale = Scale::ONE;
-            if !self.tool_allowed_in_active_challenge(self.tool.kind) {
-                self.tool.kind = ToolKind::Select;
-                self.gesture = None;
-            }
         }
 
         if self.tool.kind == ToolKind::Select
@@ -2175,73 +1626,27 @@ impl LogicEditor {
                 Some(Gesture::Input { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world).map(|r| r.flip()) {
                         let scale = self.tool.scale;
-                        if let Some(label) = self.selected_challenge_input() {
-                            let challenge = self.active_challenge().expect("challenge is active");
-                            let id = input_id(challenge, label).expect("challenge input exists");
-                            let scale = self
-                                .challenge_input_scale(label)
-                                .expect("challenge input scale exists");
-                            self.grid.add_component_with_explicit_io(
-                                component_placement_position(
-                                    anchor,
-                                    rotation,
-                                    scale,
-                                    ToolKind::Input,
-                                ),
-                                rotation,
-                                ComponentKind::Input { scale, id },
-                            );
-                        } else if self.challenge.is_none() {
-                            self.grid.add_component(
-                                component_placement_position(
-                                    anchor,
-                                    rotation,
-                                    scale,
-                                    ToolKind::Input,
-                                ),
-                                rotation,
-                                ComponentKind::Input {
-                                    scale,
-                                    id: InputId::from_u128(u128::MAX),
-                                },
-                            );
-                        }
+                        self.grid.add_component(
+                            component_placement_position(anchor, rotation, scale, ToolKind::Input),
+                            rotation,
+                            ComponentKind::Input {
+                                scale,
+                                id: InputId::from_u128(u128::MAX),
+                            },
+                        );
                     }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
-                        if let Some(label) = self.selected_challenge_output() {
-                            let challenge = self.active_challenge().expect("challenge is active");
-                            let id = output_id(challenge, label).expect("challenge output exists");
-                            let scale = self
-                                .challenge_output_scale(label)
-                                .expect("challenge output scale exists");
-                            self.grid.add_component_with_explicit_io(
-                                component_placement_position(
-                                    anchor,
-                                    rotation,
-                                    scale,
-                                    ToolKind::Output,
-                                ),
-                                rotation,
-                                ComponentKind::Output { scale, id },
-                            );
-                        } else if self.challenge.is_none() {
-                            self.grid.add_component(
-                                component_placement_position(
-                                    anchor,
-                                    rotation,
-                                    scale,
-                                    ToolKind::Output,
-                                ),
-                                rotation,
-                                ComponentKind::Output {
-                                    scale,
-                                    id: OutputId::from_u128(u128::MAX),
-                                },
-                            );
-                        }
+                        self.grid.add_component(
+                            component_placement_position(anchor, rotation, scale, ToolKind::Output),
+                            rotation,
+                            ComponentKind::Output {
+                                scale,
+                                id: OutputId::from_u128(u128::MAX),
+                            },
+                        );
                     }
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
@@ -2845,54 +2250,6 @@ fn simulation_component_name(component: &ExecutionComponent) -> String {
         .as_ref()
         .map(ToString::to_string)
         .unwrap_or_else(|| "component".to_owned())
-}
-
-fn challenge_port_row(ui: &mut egui::Ui, label: &'static str, scale: Scale, placed: bool) {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        ui.monospace(format!("{}x", scale.get()));
-        if placed {
-            ui.weak("placed");
-        } else {
-            ui.colored_label(ui.visuals().warn_fg_color, "missing");
-        }
-    });
-}
-
-fn challenge_rng(id: ChallengeId) -> rand_chacha::ChaCha8Rng {
-    use rand::SeedableRng;
-
-    let seed = match id {
-        ChallengeId::Nor => 0x4e4f_5221,
-    };
-    rand_chacha::ChaCha8Rng::seed_from_u64(seed)
-}
-
-fn challenge_output_mask(challenge: &challenges::Challenge, label: &str) -> u64 {
-    output_id(challenge, label)
-        .and_then(|id| challenges::output_index(challenge, id))
-        .and_then(|index| challenge.outputs.get(index))
-        .map(|port| value_mask(port.scale))
-        .unwrap_or(u64::MAX)
-}
-
-fn challenge_component_kind(kind: &ComponentKind) -> Option<ChallengeComponentKind> {
-    match kind {
-        ComponentKind::MergerSplitter { .. } => Some(ChallengeComponentKind::MergerSplitter),
-        ComponentKind::Led => Some(ChallengeComponentKind::Led),
-        ComponentKind::Storage { .. } => Some(ChallengeComponentKind::Storage),
-        ComponentKind::Subcomponent { .. } => Some(ChallengeComponentKind::Subcomponent),
-        _ => None,
-    }
-}
-
-fn challenge_component_kind_name(kind: ChallengeComponentKind) -> &'static str {
-    match kind {
-        ChallengeComponentKind::MergerSplitter => "Merger/Splitter",
-        ChallengeComponentKind::Led => "LED",
-        ChallengeComponentKind::Storage => "Storage",
-        ChallengeComponentKind::Subcomponent => "Subcomponent",
-    }
 }
 
 fn simulation_value_row(ui: &mut egui::Ui, label: String, value: u64) {

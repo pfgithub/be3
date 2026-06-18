@@ -124,7 +124,7 @@ impl Default for SaveIndex {
     fn default() -> Self {
         let challenges = logicgame::challenges::CHALLENGES
             .into_iter()
-            .map(|challenge| (challenge.id, SaveChallenge::default()))
+            .map(|challenge| (challenge, SaveChallenge::default()))
             .collect();
         Self {
             component_files: Vec::new(),

@@ -1,4 +1,4 @@
-use crate::grid::{InputId, OutputId, Scale};
+use crate::grid::Scale;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -7,184 +7,69 @@ pub enum ChallengeId {
     Nor,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChallengeComponentKind {
-    MergerSplitter,
-    Led,
-    Storage,
-    Subcomponent,
+impl ChallengeId {
+    pub fn name(self) -> &'static str {
+        match self {
+            ChallengeId::Nor => "NOR",
+        }
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct ChallengePort {
-    pub input_id: Option<InputId>,
-    pub output_id: Option<OutputId>,
     pub label: &'static str,
     pub scale: Scale,
+    pub values: Vec<u64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChallengeValue {
-    pub label: &'static str,
-    pub value: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChallengeTick {
-    pub inputs: Vec<ChallengeValue>,
-    pub outputs: Vec<ChallengeValue>,
-}
-
-#[derive(Clone, Copy)]
+#[derive(Debug)]
 pub struct Challenge {
-    pub id: ChallengeId,
-    pub name: &'static str,
-    pub goal: &'static str,
-    pub inputs: &'static [ChallengePort],
-    pub outputs: &'static [ChallengePort],
-    pub disallowed_components: &'static [ChallengeComponentKind],
-    pub validation_ticks: usize,
-    pub generate: fn(&mut dyn RngCore) -> ChallengeTick,
+    pub goal: String,
+    pub inputs: Vec<ChallengePort>,
+    pub outputs: Vec<ChallengePort>,
+    pub ticks: usize,
 }
 
-impl std::fmt::Debug for Challenge {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Challenge")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("goal", &self.goal)
-            .field("inputs", &self.inputs)
-            .field("outputs", &self.outputs)
-            .field("disallowed_components", &self.disallowed_components)
-            .field("validation_ticks", &self.validation_ticks)
-            .finish_non_exhaustive()
+pub fn generate_challenge(challenge: ChallengeId) -> Challenge {
+    use rand::SeedableRng;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
+
+    match challenge {
+        ChallengeId::Nor => {
+            let mut input_a: Vec<u64> = vec![];
+            let mut input_b: Vec<u64> = vec![];
+            let mut output: Vec<u64> = vec![];
+            for _ in 0..1000 {
+                let a = rng.next_u64() & 1;
+                let b = rng.next_u64() & 1;
+                let out = u64::from((a | b) == 0);
+                input_a.push(a);
+                input_b.push(b);
+                output.push(out);
+            }
+            Challenge {
+                goal: "Build a circuit where OUT is on only when A and B are both off.".to_string(),
+                inputs: vec![
+                    ChallengePort {
+                        label: "A",
+                        scale: Scale::ONE,
+                        values: input_a,
+                    },
+                    ChallengePort {
+                        label: "B",
+                        scale: Scale::ONE,
+                        values: input_b,
+                    },
+                ],
+                outputs: vec![ChallengePort {
+                    label: "OUT",
+                    scale: Scale::ONE,
+                    values: output,
+                }],
+                ticks: 1000,
+            }
+        }
     }
 }
 
-impl PartialEq for Challenge {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.name == other.name
-            && self.goal == other.goal
-            && self.inputs == other.inputs
-            && self.outputs == other.outputs
-            && self.disallowed_components == other.disallowed_components
-            && self.validation_ticks == other.validation_ticks
-    }
-}
-
-impl Eq for Challenge {}
-
-pub const NOR_CHALLENGE: Challenge = Challenge {
-    id: ChallengeId::Nor,
-    name: "NOR",
-    goal: "Build a circuit where OUT is on only when A and B are both off.",
-    inputs: &[
-        ChallengePort {
-            input_id: Some(InputId::from_u128(1)),
-            output_id: None,
-            label: "A",
-            scale: Scale::ONE,
-        },
-        ChallengePort {
-            input_id: Some(InputId::from_u128(2)),
-            output_id: None,
-            label: "B",
-            scale: Scale::ONE,
-        },
-    ],
-    outputs: &[ChallengePort {
-        input_id: None,
-        output_id: Some(OutputId::from_u128(1)),
-        label: "OUT",
-        scale: Scale::ONE,
-    }],
-    disallowed_components: &[
-        ChallengeComponentKind::MergerSplitter,
-        ChallengeComponentKind::Led,
-        ChallengeComponentKind::Storage,
-        ChallengeComponentKind::Subcomponent,
-    ],
-    validation_ticks: 1000,
-    generate: generate_nor_tick,
-};
-
-pub const CHALLENGES: [Challenge; 1] = [NOR_CHALLENGE];
-
-pub fn challenge(id: ChallengeId) -> &'static Challenge {
-    match id {
-        ChallengeId::Nor => &NOR_CHALLENGE,
-    }
-}
-
-pub fn input_id(challenge: &Challenge, label: &str) -> Option<InputId> {
-    challenge
-        .inputs
-        .iter()
-        .find(|port| port.label == label)
-        .and_then(|port| port.input_id)
-}
-
-pub fn output_id(challenge: &Challenge, label: &str) -> Option<OutputId> {
-    challenge
-        .outputs
-        .iter()
-        .find(|port| port.label == label)
-        .and_then(|port| port.output_id)
-}
-
-pub fn input_index(challenge: &Challenge, id: InputId) -> Option<usize> {
-    challenge
-        .inputs
-        .iter()
-        .position(|port| port.input_id == Some(id))
-}
-
-pub fn output_index(challenge: &Challenge, id: OutputId) -> Option<usize> {
-    challenge
-        .outputs
-        .iter()
-        .position(|port| port.output_id == Some(id))
-}
-
-pub fn input_label(challenge: &Challenge, id: InputId) -> Option<&'static str> {
-    challenge
-        .inputs
-        .iter()
-        .find(|port| port.input_id == Some(id))
-        .map(|port| port.label)
-}
-
-pub fn output_label(challenge: &Challenge, id: OutputId) -> Option<&'static str> {
-    challenge
-        .outputs
-        .iter()
-        .find(|port| port.output_id == Some(id))
-        .map(|port| port.label)
-}
-
-fn generate_nor_tick(rng: &mut dyn RngCore) -> ChallengeTick {
-    let a = rng.next_u64() & 1;
-    let b = rng.next_u64() & 1;
-    let out = u64::from((a | b) == 0);
-    ChallengeTick {
-        inputs: vec![
-            ChallengeValue {
-                label: "A",
-                value: a,
-            },
-            ChallengeValue {
-                label: "B",
-                value: b,
-            },
-        ],
-        outputs: vec![ChallengeValue {
-            label: "OUT",
-            value: out,
-        }],
-    }
-}
-
-#[cfg(test)]
-mod tests;
+pub const CHALLENGES: [ChallengeId; 1] = [ChallengeId::Nor];
