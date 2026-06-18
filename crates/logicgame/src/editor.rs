@@ -11,7 +11,7 @@ use logicgame::{
 use logicgame::{
     challenges::Challenge,
     grid::{
-        CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
+        value_mask, CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
         GraphNodeId, InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
     },
 };
@@ -76,6 +76,10 @@ struct Tool {
     kind: ToolKind,
     scale: Scale,
     merger_out_scale: Scale,
+    // When placing an Input/Output inside a challenge, the port index it binds
+    // to (its identity becomes `InputId`/`OutputId::from_u128(port)`). `None`
+    // for ordinary placement, which generates a fresh id.
+    challenge_port: Option<usize>,
 }
 
 impl Tool {
@@ -237,8 +241,31 @@ struct Simulation {
 #[derive(Debug)]
 struct ChallengeState {
     id: ChallengeId,
-    #[allow(dead_code)]
     data: Challenge,
+    test: ChallengeTest,
+    /// One-shot flag, set the frame the test transitions to a full pass and
+    /// cleared by `take_challenge_passed`.
+    passed_event: bool,
+}
+
+/// Runs the open challenge solution against the challenge's expected values.
+#[derive(Debug, Default)]
+struct ChallengeTest {
+    /// The grid state the `vm` was compiled from; used to detect edits.
+    snapshot: Option<SimulationSnapshot>,
+    vm: Option<Vm>,
+    error: Option<String>,
+    /// Maps each input port index to its slot in `vm.input_addresses()`.
+    input_slots: Vec<Option<usize>>,
+    /// Maps each output port index to its slot in `vm.output_addresses()`.
+    output_slots: Vec<Option<usize>>,
+    /// Number of ticks executed so far.
+    next_tick: usize,
+    /// Actual output values, indexed `[output_port][tick]`; each inner vec has
+    /// length `next_tick`.
+    actual: Vec<Vec<u64>>,
+    /// Whether any executed tick produced a wrong output.
+    mismatched: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -406,6 +433,7 @@ impl Default for LogicEditor {
                 kind: ToolKind::Select,
                 scale: Scale::ONE,
                 merger_out_scale: Scale::new(4).expect("default scale is valid"),
+                challenge_port: None,
             },
             camera: Camera::default(),
             gesture: None,
@@ -443,11 +471,14 @@ impl LogicEditor {
             kind: ToolKind::Select,
             scale: Scale::ONE,
             merger_out_scale: Scale::ONE,
+            challenge_port: None,
         };
         let challenge_data = generate_challenge(id);
         self.challenge = Some(ChallengeState {
             id,
             data: challenge_data,
+            test: ChallengeTest::default(),
+            passed_event: false,
         });
     }
 
@@ -470,23 +501,77 @@ impl LogicEditor {
             (response, painter, pointer_world)
         });
 
+        // Per-port placement tools shown only inside a challenge: (port index,
+        // label, scale) for inputs and outputs. Collected up front so the Tools
+        // closure does not borrow `self.challenge` while mutating `self.tool`.
+        let challenge_ports: Option<(Vec<(usize, String, Scale)>, Vec<(usize, String, Scale)>)> =
+            self.challenge.as_ref().map(|challenge| {
+                let ports = |list: &[logicgame::challenges::ChallengePort]| {
+                    list.iter()
+                        .enumerate()
+                        .map(|(index, port)| (index, port.label.to_string(), port.scale))
+                        .collect::<Vec<_>>()
+                };
+                (
+                    ports(&challenge.data.inputs),
+                    ports(&challenge.data.outputs),
+                )
+            });
+
         egui::Window::new("Tools")
             .default_pos([16.0, 16.0])
             .hscroll(true)
             .vscroll(true)
             .show(&context, |ui| {
-                let tools = &FREE_TOOLS[..];
-                for &kind in tools {
-                    if ui
-                        .selectable_label(self.tool.kind == kind, kind.label())
-                        .clicked()
+                for &kind in &FREE_TOOLS {
+                    // In a challenge the generic Input/Output tools are replaced
+                    // by per-port buttons rendered below.
+                    if challenge_ports.is_some()
+                        && matches!(kind, ToolKind::Input | ToolKind::Output)
                     {
+                        continue;
+                    }
+                    let selected = self.tool.kind == kind && self.tool.challenge_port.is_none();
+                    if ui.selectable_label(selected, kind.label()).clicked() {
                         self.tool.kind = kind;
+                        self.tool.challenge_port = None;
                         self.gesture = None;
                         self.configured_storage = None;
                         if kind != ToolKind::Select {
                             self.selection.clear();
                         }
+                    }
+                }
+
+                if let Some((inputs, outputs)) = &challenge_ports {
+                    ui.separator();
+                    ui.label("Challenge ports");
+                    let mut clicked_port: Option<(ToolKind, usize, Scale)> = None;
+                    let ports = inputs
+                        .iter()
+                        .map(|port| (ToolKind::Input, port))
+                        .chain(outputs.iter().map(|port| (ToolKind::Output, port)));
+                    for (kind, (index, label, scale)) in ports {
+                        let selected =
+                            self.tool.kind == kind && self.tool.challenge_port == Some(*index);
+                        let prefix = match kind {
+                            ToolKind::Output => "Output",
+                            _ => "Input",
+                        };
+                        if ui
+                            .selectable_label(selected, format!("{prefix} {label}"))
+                            .clicked()
+                        {
+                            clicked_port = Some((kind, *index, *scale));
+                        }
+                    }
+                    if let Some((kind, index, scale)) = clicked_port {
+                        self.tool.kind = kind;
+                        self.tool.challenge_port = Some(index);
+                        self.tool.scale = scale;
+                        self.gesture = None;
+                        self.configured_storage = None;
+                        self.selection.clear();
                     }
                 }
 
@@ -545,6 +630,7 @@ impl LogicEditor {
         self.show_metrics(&context);
         self.show_storage_configuration(&context);
         self.show_simulation(&context);
+        self.show_challenge(&context);
 
         let hovered_square = canvas
             .inner
@@ -1036,6 +1122,248 @@ impl LogicEditor {
         }
     }
 
+    /// Returns and clears the one-shot flag set when the challenge test passes.
+    pub fn take_challenge_passed(&mut self) -> bool {
+        match self.challenge.as_mut() {
+            Some(challenge) => std::mem::take(&mut challenge.passed_event),
+            None => false,
+        }
+    }
+
+    /// Recompiles the challenge test VM if the grid changed since it was built,
+    /// resetting any results. Cheap when the grid is unchanged.
+    fn ensure_challenge_test(&mut self) {
+        if self.challenge.is_none() {
+            return;
+        }
+        let snapshot = self.simulation_snapshot();
+        let up_to_date = self
+            .challenge
+            .as_ref()
+            .is_some_and(|challenge| challenge.test.snapshot.as_ref() == Some(&snapshot));
+        if up_to_date {
+            return;
+        }
+        let (input_count, output_count) = match &self.challenge {
+            Some(challenge) => (challenge.data.inputs.len(), challenge.data.outputs.len()),
+            None => return,
+        };
+        let test = self.compile_challenge_test(snapshot, input_count, output_count);
+        if let Some(challenge) = self.challenge.as_mut() {
+            challenge.test = test;
+        }
+    }
+
+    fn compile_challenge_test(
+        &self,
+        snapshot: SimulationSnapshot,
+        input_count: usize,
+        output_count: usize,
+    ) -> ChallengeTest {
+        let input_slots = challenge_port_slots(
+            self.grid
+                .components()
+                .filter_map(|component| match component.kind {
+                    ComponentKind::Input { id, .. } => Some(id),
+                    _ => None,
+                }),
+            input_count,
+            InputId::from_u128,
+        );
+        let output_slots = challenge_port_slots(
+            self.grid
+                .components()
+                .filter_map(|component| match component.kind {
+                    ComponentKind::Output { id, .. } => Some(id),
+                    _ => None,
+                }),
+            output_count,
+            OutputId::from_u128,
+        );
+
+        let mut vm = match Vm::from_graph(&self.grid, &snapshot.graph) {
+            Ok(vm) => vm,
+            Err(error) => {
+                return ChallengeTest {
+                    snapshot: Some(snapshot),
+                    error: Some(format!("{error:?}")),
+                    input_slots,
+                    output_slots,
+                    actual: vec![Vec::new(); output_count],
+                    ..ChallengeTest::default()
+                };
+            }
+        };
+        if let Some(files) = &self.component_files {
+            if let Err(error) = files.load_components(&mut vm) {
+                return ChallengeTest {
+                    snapshot: Some(snapshot),
+                    error: Some(error.to_string()),
+                    input_slots,
+                    output_slots,
+                    actual: vec![Vec::new(); output_count],
+                    ..ChallengeTest::default()
+                };
+            }
+        }
+        ChallengeTest {
+            snapshot: Some(snapshot),
+            vm: Some(vm),
+            error: None,
+            input_slots,
+            output_slots,
+            next_tick: 0,
+            actual: vec![Vec::new(); output_count],
+            mismatched: false,
+        }
+    }
+
+    fn challenge_test_reset(&mut self) {
+        if let Some(challenge) = self.challenge.as_mut() {
+            // Drop the stale snapshot so the next `ensure` recompiles from scratch.
+            challenge.test.snapshot = None;
+        }
+        self.ensure_challenge_test();
+    }
+
+    fn challenge_test_step(&mut self) {
+        self.ensure_challenge_test();
+        self.advance_challenge_test_tick();
+    }
+
+    fn challenge_test_run_all(&mut self) {
+        self.ensure_challenge_test();
+        loop {
+            let more = self.challenge.as_ref().is_some_and(|challenge| {
+                let test = &challenge.test;
+                test.error.is_none() && test.vm.is_some() && test.next_tick < challenge.data.ticks
+            });
+            if !more {
+                break;
+            }
+            self.advance_challenge_test_tick();
+        }
+    }
+
+    /// Executes the next challenge tick: drives the bound input ports with the
+    /// expected values, runs the circuit, and records each output port's actual
+    /// value against the expected one.
+    fn advance_challenge_test_tick(&mut self) {
+        let Some(challenge) = self.challenge.as_mut() else {
+            return;
+        };
+        let data = &challenge.data;
+        let test = &mut challenge.test;
+        let Some(vm) = test.vm.as_mut() else {
+            return;
+        };
+        if test.error.is_some() || test.next_tick >= data.ticks {
+            return;
+        }
+        let tick = test.next_tick;
+
+        vm.begin_tick();
+        let input_addresses = vm.input_addresses().to_vec();
+        for (port, slot) in test.input_slots.iter().enumerate() {
+            let Some(address) = slot.and_then(|slot| input_addresses.get(slot).copied()) else {
+                continue;
+            };
+            if address >= vm.root_component.memory_size {
+                continue;
+            }
+            let scale = data.inputs[port].scale;
+            let value =
+                data.inputs[port].values.get(tick).copied().unwrap_or(0) & value_mask(scale);
+            vm.root_memory_mut()[address] |= value;
+        }
+        vm.execute();
+
+        let output_addresses = vm.output_addresses().to_vec();
+        for (port, slot) in test.output_slots.iter().enumerate() {
+            let mask = value_mask(data.outputs[port].scale);
+            let actual = slot
+                .and_then(|slot| output_addresses.get(slot).copied())
+                .and_then(|address| vm.root_memory().get(address).copied())
+                .map(|value| value & mask)
+                .unwrap_or(0);
+            let expected = data.outputs[port].values.get(tick).copied().unwrap_or(0) & mask;
+            if actual != expected {
+                test.mismatched = true;
+            }
+            test.actual[port].push(actual);
+        }
+        test.next_tick += 1;
+
+        let all_ports = test.input_slots.iter().all(Option::is_some)
+            && test.output_slots.iter().all(Option::is_some);
+        let passed = test.next_tick == data.ticks && !test.mismatched && all_ports;
+        if passed {
+            challenge.passed_event = true;
+        }
+    }
+
+    fn show_challenge(&mut self, context: &egui::Context) {
+        if self.challenge.is_none() {
+            return;
+        }
+        self.ensure_challenge_test();
+
+        let mut do_step = false;
+        let mut do_run = false;
+        let mut do_reset = false;
+
+        egui::Window::new("Challenge")
+            .default_pos([360.0, 16.0])
+            .default_size([320.0, 440.0])
+            .show(context, |ui| {
+                let Some(challenge) = self.challenge.as_ref() else {
+                    return;
+                };
+                ui.label(&challenge.data.goal);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    do_step = ui.button("Step test").clicked();
+                    do_run = ui.button("Run all tests").clicked();
+                    do_reset = ui.button("Reset").clicked();
+                });
+
+                let data = &challenge.data;
+                let test = &challenge.test;
+                if let Some(error) = &test.error {
+                    ui.colored_label(ui.visuals().error_fg_color, format!("Cannot run: {error}"));
+                    return;
+                }
+
+                let all_ports = test.input_slots.iter().all(Option::is_some)
+                    && test.output_slots.iter().all(Option::is_some);
+                let status = if !all_ports {
+                    "Place every challenge port to run the test".to_owned()
+                } else if test.mismatched {
+                    "Failed".to_owned()
+                } else if test.next_tick == 0 {
+                    "Not run".to_owned()
+                } else if test.next_tick < data.ticks {
+                    format!("Running {}/{}", test.next_tick, data.ticks)
+                } else {
+                    "Passed".to_owned()
+                };
+                ui.label(status);
+                ui.separator();
+
+                challenge_test_table(ui, data, test);
+            });
+
+        if do_reset {
+            self.challenge_test_reset();
+        }
+        if do_step {
+            self.challenge_test_step();
+        }
+        if do_run {
+            self.challenge_test_run_all();
+        }
+    }
+
     fn begin_simulation_tick(&mut self) -> bool {
         if self.simulation.tick_in_progress {
             return true;
@@ -1440,7 +1768,9 @@ impl LogicEditor {
     }
 
     fn handle_canvas_input(&mut self, response: &egui::Response) {
-        if self.challenge.is_some() {
+        // Challenges are wired at single-bit scale, except for port tools, which
+        // carry their port's scale so larger challenge ports place correctly.
+        if self.challenge.is_some() && self.tool.challenge_port.is_none() {
             self.tool.scale = Scale::ONE;
             self.tool.merger_out_scale = Scale::ONE;
         }
@@ -1626,27 +1956,59 @@ impl LogicEditor {
                 Some(Gesture::Input { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world).map(|r| r.flip()) {
                         let scale = self.tool.scale;
-                        self.grid.add_component(
-                            component_placement_position(anchor, rotation, scale, ToolKind::Input),
-                            rotation,
-                            ComponentKind::Input {
-                                scale,
-                                id: InputId::from_u128(u128::MAX),
-                            },
-                        );
+                        let position =
+                            component_placement_position(anchor, rotation, scale, ToolKind::Input);
+                        match self.tool.challenge_port {
+                            Some(port) => {
+                                self.grid.add_component_with_explicit_io(
+                                    position,
+                                    rotation,
+                                    ComponentKind::Input {
+                                        scale,
+                                        id: InputId::from_u128(port as u128),
+                                    },
+                                );
+                            }
+                            None => {
+                                self.grid.add_component(
+                                    position,
+                                    rotation,
+                                    ComponentKind::Input {
+                                        scale,
+                                        id: InputId::from_u128(u128::MAX),
+                                    },
+                                );
+                            }
+                        }
                     }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
                     if let Some(rotation) = drag_rotation(drag_start, world) {
                         let scale = self.tool.scale;
-                        self.grid.add_component(
-                            component_placement_position(anchor, rotation, scale, ToolKind::Output),
-                            rotation,
-                            ComponentKind::Output {
-                                scale,
-                                id: OutputId::from_u128(u128::MAX),
-                            },
-                        );
+                        let position =
+                            component_placement_position(anchor, rotation, scale, ToolKind::Output);
+                        match self.tool.challenge_port {
+                            Some(port) => {
+                                self.grid.add_component_with_explicit_io(
+                                    position,
+                                    rotation,
+                                    ComponentKind::Output {
+                                        scale,
+                                        id: OutputId::from_u128(port as u128),
+                                    },
+                                );
+                            }
+                            None => {
+                                self.grid.add_component(
+                                    position,
+                                    rotation,
+                                    ComponentKind::Output {
+                                        scale,
+                                        id: OutputId::from_u128(u128::MAX),
+                                    },
+                                );
+                            }
+                        }
                     }
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
@@ -2266,6 +2628,86 @@ fn apply_input_values(vm: &mut Vm, values: &[u64]) {
             vm.root_memory_mut()[address] |= *value;
         }
     }
+}
+
+/// Maps each challenge port index to its slot in the VM's input/output address
+/// list. Ports placed with `from_index(port)` as their id resolve to their dense
+/// (sorted-id) position; a missing port maps to `None`.
+fn challenge_port_slots<T: Ord + Copy>(
+    ids: impl Iterator<Item = T>,
+    count: usize,
+    from_index: impl Fn(u128) -> T,
+) -> Vec<Option<usize>> {
+    let mut ids: Vec<T> = ids.collect();
+    ids.sort();
+    ids.dedup();
+    (0..count)
+        .map(|port| ids.binary_search(&from_index(port as u128)).ok())
+        .collect()
+}
+
+/// Renders the expected/actual table: ticks as rows, ports as columns. Output
+/// cells show the actual value (red when wrong) once a tick has run, otherwise
+/// the expected value, dimmed.
+fn challenge_test_table(ui: &mut egui::Ui, data: &Challenge, test: &ChallengeTest) {
+    const CELL_WIDTH: f32 = 52.0;
+    let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+    let error_color = ui.visuals().error_fg_color;
+    let weak_color = ui.visuals().weak_text_color();
+
+    let cell = |ui: &mut egui::Ui, text: String, color: Option<egui::Color32>, strong: bool| {
+        let mut rich = egui::RichText::new(text).monospace();
+        if strong {
+            rich = rich.strong();
+        }
+        if let Some(color) = color {
+            rich = rich.color(color);
+        }
+        ui.add_sized(
+            [CELL_WIDTH, row_height],
+            egui::Label::new(rich).wrap_mode(egui::TextWrapMode::Extend),
+        );
+    };
+
+    ui.horizontal(|ui| {
+        cell(ui, "Tick".to_owned(), None, true);
+        for port in &data.inputs {
+            cell(ui, port.label.to_owned(), None, true);
+        }
+        for port in &data.outputs {
+            cell(ui, port.label.to_owned(), None, true);
+        }
+    });
+
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .max_height(320.0)
+        .show_rows(ui, row_height, data.ticks, |ui, range| {
+            for tick in range {
+                ui.horizontal(|ui| {
+                    cell(ui, tick.to_string(), None, false);
+                    for port in &data.inputs {
+                        let value = port.values.get(tick).copied().unwrap_or(0);
+                        cell(ui, value.to_string(), None, false);
+                    }
+                    for (index, port) in data.outputs.iter().enumerate() {
+                        let expected = port.values.get(tick).copied().unwrap_or(0);
+                        if tick < test.next_tick {
+                            let actual = test
+                                .actual
+                                .get(index)
+                                .and_then(|values| values.get(tick))
+                                .copied()
+                                .unwrap_or(expected);
+                            let color = (actual != expected).then_some(error_color);
+                            cell(ui, actual.to_string(), color, false);
+                        } else {
+                            cell(ui, expected.to_string(), Some(weak_color), false);
+                        }
+                    }
+                });
+            }
+        });
 }
 
 fn format_instruction(instruction: &Instruction) -> String {

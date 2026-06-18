@@ -15,7 +15,53 @@ fn wire(start: (i64, i64), end: (i64, i64), scale: u8) -> Wire {
     .unwrap()
 }
 
+/// An editor opened on the NOR challenge with a correct solution: inputs `A`
+/// (port 0) and `B` (port 1) drive a shared wired-OR net feeding a NOT gate
+/// whose output reaches the `OUT` port (port 0). The grid validates cleanly and
+/// computes NOR.
+fn nor_challenge_editor() -> LogicEditor {
+    let mut grid = LogicGrid::new();
+    grid.add_component(
+        Point::new(0, 0),
+        Rotation::Up,
+        ComponentKind::Not { scale: Scale::ONE },
+    );
+    grid.add_component_with_explicit_io(
+        Point::new(0, -1),
+        Rotation::Up,
+        ComponentKind::Output {
+            scale: Scale::ONE,
+            id: OutputId::from_u128(0),
+        },
+    );
+    grid.add_component_with_explicit_io(
+        Point::new(1, 1),
+        Rotation::Up,
+        ComponentKind::Input {
+            scale: Scale::ONE,
+            id: InputId::from_u128(0),
+        },
+    );
+    grid.add_component_with_explicit_io(
+        Point::new(2, 1),
+        Rotation::Up,
+        ComponentKind::Input {
+            scale: Scale::ONE,
+            id: InputId::from_u128(1),
+        },
+    );
+    grid.add_wire(wire((0, 2), (3, 2), 1));
+
+    let mut editor = LogicEditor::default();
+    editor.open_challenge_solution(ChallengeId::Nor, grid);
+    editor
+}
+
 mod box_selection_finds_components_and_individual_wire_endpoints;
+mod challenge_port_slots_map_each_port_to_its_dense_slot;
+mod challenge_test_flags_wrong_outputs;
+mod challenge_test_passes_for_a_correct_nor_solution;
+mod editing_resets_challenge_test_results;
 mod gate_drag_maps_to_rotation_and_placement_anchor;
 mod graph_hover_maps_each_node_to_its_grid_geometry;
 mod instructions_have_compact_display_names;

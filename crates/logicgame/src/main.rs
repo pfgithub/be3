@@ -476,7 +476,6 @@ impl LogicGame {
         }
     }
 
-    #[allow(dead_code)]
     fn mark_active_challenge_passed(&mut self) {
         let Some(ActiveFile::ChallengeSolution {
             challenge,
@@ -649,6 +648,9 @@ impl eframe::App for LogicGame {
                 self.drop_component_file(&dropped.file, dropped.position);
             }
             self.observe_changes();
+            if self.editor.take_challenge_passed() {
+                self.mark_active_challenge_passed();
+            }
             self.autosave();
         } else {
             egui::Frame::central_panel(ui.style()).show(ui, |ui| {
