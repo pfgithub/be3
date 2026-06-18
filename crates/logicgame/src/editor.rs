@@ -281,13 +281,13 @@ struct ChallengeState {
 /// Runs the open challenge solution against the challenge's expected values.
 #[derive(Debug, Default)]
 struct ChallengeTest {
-    /// The grid state the `vm` was compiled from; used to detect edits.
+    /// The grid state the shared simulation VM was compiled from; used to
+    /// detect edits.
     snapshot: Option<SimulationSnapshot>,
-    vm: Option<Vm>,
     error: Option<String>,
-    /// Maps each input port index to its slot in `vm.input_addresses()`.
+    /// Maps each input port index to its slot in the VM's input addresses.
     input_slots: Vec<Option<usize>>,
-    /// Maps each output port index to its slot in `vm.output_addresses()`.
+    /// Maps each output port index to its slot in the VM's output addresses.
     output_slots: Vec<Option<usize>>,
     /// Number of ticks executed so far.
     next_tick: usize,
@@ -1346,8 +1346,9 @@ impl LogicEditor {
         }
     }
 
-    /// Recompiles the challenge test VM if the grid changed since it was built,
-    /// resetting any results. Cheap when the grid is unchanged.
+    /// Recompiles the shared simulation VM for challenge testing if the grid
+    /// changed since it was built, resetting any results. Cheap when the grid
+    /// is unchanged.
     fn ensure_challenge_test(&mut self) {
         if self.challenge.is_none() {
             return;
@@ -1371,7 +1372,7 @@ impl LogicEditor {
     }
 
     fn compile_challenge_test(
-        &self,
+        &mut self,
         snapshot: SimulationSnapshot,
         input_count: usize,
         output_count: usize,
@@ -1397,34 +1398,20 @@ impl LogicEditor {
             OutputId::from_u128,
         );
 
-        let mut vm = match Vm::from_graph(&self.grid, &snapshot.graph) {
-            Ok(vm) => vm,
-            Err(error) => {
-                return ChallengeTest {
-                    snapshot: Some(snapshot),
-                    error: Some(format!("{error:?}")),
-                    input_slots,
-                    output_slots,
-                    actual: vec![Vec::new(); output_count],
-                    ..ChallengeTest::default()
-                };
-            }
-        };
-        if let Some(files) = &self.component_files {
-            if let Err(error) = files.load_components(&mut vm) {
-                return ChallengeTest {
-                    snapshot: Some(snapshot),
-                    error: Some(error.to_string()),
-                    input_slots,
-                    output_slots,
-                    actual: vec![Vec::new(); output_count],
-                    ..ChallengeTest::default()
-                };
-            }
+        self.compile_simulation(snapshot.clone());
+        if let Some(error) = self.simulation.error.clone() {
+            return ChallengeTest {
+                snapshot: Some(snapshot),
+                error: Some(error),
+                input_slots,
+                output_slots,
+                actual: vec![Vec::new(); output_count],
+                ..ChallengeTest::default()
+            };
         }
+
         ChallengeTest {
             snapshot: Some(snapshot),
-            vm: Some(vm),
             error: None,
             input_slots,
             output_slots,
@@ -1461,7 +1448,9 @@ impl LogicEditor {
         loop {
             let more = self.challenge.as_ref().is_some_and(|challenge| {
                 let test = &challenge.test;
-                test.error.is_none() && test.vm.is_some() && test.next_tick < challenge.data.ticks
+                test.error.is_none()
+                    && self.simulation.vm.is_some()
+                    && test.next_tick < challenge.data.ticks
             });
             if !more {
                 break;
@@ -1474,54 +1463,79 @@ impl LogicEditor {
     /// expected values, runs the circuit, and records each output port's actual
     /// value against the expected one.
     fn advance_challenge_test_tick(&mut self) {
-        let Some(challenge) = self.challenge.as_mut() else {
+        let Some(challenge) = self.challenge.as_ref() else {
             return;
         };
-        let data = &challenge.data;
-        let test = &mut challenge.test;
-        let Some(vm) = test.vm.as_mut() else {
+        let Some(vm) = self.simulation.vm.as_mut() else {
             return;
         };
-        if test.error.is_some() || test.next_tick >= data.ticks {
+        let test = &challenge.test;
+        let data_ticks = challenge.data.ticks;
+        if test.error.is_some() || test.next_tick >= data_ticks {
             return;
         }
         let tick = test.next_tick;
+        let input_slots = test.input_slots.clone();
+        let output_slots = test.output_slots.clone();
+        let input_values = challenge
+            .data
+            .inputs
+            .iter()
+            .map(|port| {
+                let mask = value_mask(port.scale);
+                port.values.get(tick).copied().unwrap_or(0) & mask
+            })
+            .collect::<Vec<_>>();
+        let output_expected = challenge
+            .data
+            .outputs
+            .iter()
+            .map(|port| {
+                let mask = value_mask(port.scale);
+                (mask, port.values.get(tick).copied().unwrap_or(0) & mask)
+            })
+            .collect::<Vec<_>>();
 
         vm.begin_tick();
         let input_addresses = vm.input_addresses().to_vec();
-        for (port, slot) in test.input_slots.iter().enumerate() {
+        for (port, slot) in input_slots.iter().enumerate() {
             let Some(address) = slot.and_then(|slot| input_addresses.get(slot).copied()) else {
                 continue;
             };
             if address >= vm.root_component.memory_size {
                 continue;
             }
-            let scale = data.inputs[port].scale;
-            let value =
-                data.inputs[port].values.get(tick).copied().unwrap_or(0) & value_mask(scale);
-            vm.root_memory_mut()[address] |= value;
+            vm.root_memory_mut()[address] |= input_values[port];
         }
         vm.execute();
 
         let output_addresses = vm.output_addresses().to_vec();
-        for (port, slot) in test.output_slots.iter().enumerate() {
-            let mask = value_mask(data.outputs[port].scale);
-            let actual = slot
+        let mut actual = Vec::with_capacity(output_slots.len());
+        let mut mismatched = false;
+        for (port, slot) in output_slots.iter().enumerate() {
+            let (mask, expected) = output_expected[port];
+            let value = slot
                 .and_then(|slot| output_addresses.get(slot).copied())
                 .and_then(|address| vm.root_memory().get(address).copied())
                 .map(|value| value & mask)
                 .unwrap_or(0);
-            let expected = data.outputs[port].values.get(tick).copied().unwrap_or(0) & mask;
-            if actual != expected {
-                test.mismatched = true;
-            }
-            test.actual[port].push(actual);
+            mismatched |= value != expected;
+            actual.push(value);
+        }
+
+        let Some(challenge) = self.challenge.as_mut() else {
+            return;
+        };
+        let test = &mut challenge.test;
+        test.mismatched |= mismatched;
+        for (port, value) in actual.into_iter().enumerate() {
+            test.actual[port].push(value);
         }
         test.next_tick += 1;
 
         let all_ports = test.input_slots.iter().all(Option::is_some)
             && test.output_slots.iter().all(Option::is_some);
-        let passed = test.next_tick == data.ticks && !test.mismatched && all_ports;
+        let passed = test.next_tick == data_ticks && !test.mismatched && all_ports;
         if passed {
             challenge.passed_event = true;
         }
@@ -1640,24 +1654,15 @@ impl LogicEditor {
         BTreeMap<ComponentId, u32>,
         Vec<WireValue>,
     ) {
-        // In challenge mode, the wires should reflect the challenge test VM so
-        // that stepping the test visibly drives the circuit. Fall back to the
-        // live simulation VM when there is no matching challenge test state.
-        let challenge_vm = self
-            .challenge
-            .as_ref()
-            .filter(|challenge| challenge.test.snapshot.as_ref() == Some(snapshot))
-            .and_then(|challenge| challenge.test.vm.as_ref());
+        // In challenge mode, the wires should reflect the shared simulation VM so
+        // that stepping the test visibly drives the circuit.
         let simulation_vm = self
             .simulation
             .snapshot
             .as_ref()
             .filter(|simulation_snapshot| *simulation_snapshot == snapshot)
             .and_then(|_| self.simulation.vm.as_ref());
-        let root_memory = challenge_vm
-            .or(simulation_vm)
-            .map(Vm::root_memory)
-            .unwrap_or_default();
+        let root_memory = simulation_vm.map(Vm::root_memory).unwrap_or_default();
 
         let mut values = Vec::new();
         let mut indices = BTreeMap::new();
