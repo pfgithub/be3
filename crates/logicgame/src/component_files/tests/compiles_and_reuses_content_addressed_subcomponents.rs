@@ -6,8 +6,18 @@ fn compiles_and_reuses_content_addressed_subcomponents() {
     let files = ComponentFiles::new(root.clone());
     let (source_id, mut grid) = files.create("source").unwrap();
     let source = ComponentFileRef { id: source_id };
+    // The body defines the bounds; Input and Output pins sit flush against its
+    // edges and are excluded from the bounds.
     grid.add_component(
         Point::new(0, 0),
+        Rotation::Up,
+        ComponentKind::MergerSplitter {
+            input_scale: Scale::new(8).unwrap(),
+            output_scale: Scale::new(8).unwrap(),
+        },
+    );
+    grid.add_component(
+        Point::new(0, -2),
         Rotation::Up,
         ComponentKind::Input {
             scale: Scale::new(2).unwrap(),
@@ -15,7 +25,7 @@ fn compiles_and_reuses_content_addressed_subcomponents() {
         },
     );
     grid.add_component(
-        Point::new(4, 4),
+        Point::new(4, 8),
         Rotation::Down,
         ComponentKind::Output {
             scale: Scale::new(4).unwrap(),

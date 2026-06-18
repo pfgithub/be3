@@ -528,6 +528,13 @@ impl Component {
         }
     }
 
+    fn include_in_bounds(&self) -> bool {
+        match self.kind {
+            ComponentKind::Input { .. } | ComponentKind::Output { .. } => false,
+            _ => true,
+        }
+    }
+
     fn rect(&self) -> Option<Rect> {
         let size = self.size()?;
         Some(Rect {
@@ -734,6 +741,7 @@ impl LogicGrid {
         let mut rects = self
             .components
             .values()
+            .filter(|c| c.include_in_bounds())
             .map(Component::rect)
             .chain(self.wires.iter().copied().map(Wire::rect));
         let first = rects.next()??;
