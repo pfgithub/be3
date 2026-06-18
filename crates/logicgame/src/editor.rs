@@ -1231,6 +1231,15 @@ impl LogicEditor {
         self.advance_challenge_test_tick();
     }
 
+    /// Re-runs the test from the start through `tick` (inclusive) so the wires
+    /// reflect the inputs of that row.
+    fn challenge_test_seek(&mut self, tick: usize) {
+        self.challenge_test_reset();
+        for _ in 0..=tick {
+            self.advance_challenge_test_tick();
+        }
+    }
+
     fn challenge_test_run_all(&mut self) {
         self.ensure_challenge_test();
         loop {
@@ -1311,10 +1320,12 @@ impl LogicEditor {
         let mut do_step = false;
         let mut do_run = false;
         let mut do_reset = false;
+        let mut do_seek = None;
 
         egui::Window::new("Challenge")
             .default_pos([360.0, 16.0])
             .default_size([320.0, 440.0])
+            .resizable(true)
             .show(context, |ui| {
                 let Some(challenge) = self.challenge.as_ref() else {
                     return;
@@ -1350,7 +1361,7 @@ impl LogicEditor {
                 ui.label(status);
                 ui.separator();
 
-                challenge_test_table(ui, data, test);
+                do_seek = challenge_test_table(ui, data, test);
             });
 
         if do_reset {
@@ -1361,6 +1372,9 @@ impl LogicEditor {
         }
         if do_run {
             self.challenge_test_run_all();
+        }
+        if let Some(tick) = do_seek {
+            self.challenge_test_seek(tick);
         }
     }
 
@@ -1410,12 +1424,22 @@ impl LogicEditor {
         BTreeMap<ComponentId, u32>,
         Vec<WireValue>,
     ) {
-        let root_memory = self
+        // In challenge mode, the wires should reflect the challenge test VM so
+        // that stepping the test visibly drives the circuit. Fall back to the
+        // live simulation VM when there is no matching challenge test state.
+        let challenge_vm = self
+            .challenge
+            .as_ref()
+            .filter(|challenge| challenge.test.snapshot.as_ref() == Some(snapshot))
+            .and_then(|challenge| challenge.test.vm.as_ref());
+        let simulation_vm = self
             .simulation
             .snapshot
             .as_ref()
             .filter(|simulation_snapshot| *simulation_snapshot == snapshot)
-            .and_then(|_| self.simulation.vm.as_ref())
+            .and_then(|_| self.simulation.vm.as_ref());
+        let root_memory = challenge_vm
+            .or(simulation_vm)
             .map(Vm::root_memory)
             .unwrap_or_default();
 
@@ -2649,11 +2673,20 @@ fn challenge_port_slots<T: Ord + Copy>(
 /// Renders the expected/actual table: ticks as rows, ports as columns. Output
 /// cells show the actual value (red when wrong) once a tick has run, otherwise
 /// the expected value, dimmed.
-fn challenge_test_table(ui: &mut egui::Ui, data: &Challenge, test: &ChallengeTest) {
+/// Renders the challenge test table. The row whose inputs are currently driven
+/// onto the wires (the last executed tick) is highlighted. Returns the tick of a
+/// row the user clicked, if any, so the caller can seek the test to it.
+fn challenge_test_table(
+    ui: &mut egui::Ui,
+    data: &Challenge,
+    test: &ChallengeTest,
+) -> Option<usize> {
     const CELL_WIDTH: f32 = 52.0;
     let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
     let error_color = ui.visuals().error_fg_color;
     let weak_color = ui.visuals().weak_text_color();
+    let active_tick = test.next_tick.checked_sub(1);
+    let mut clicked = None;
 
     let cell = |ui: &mut egui::Ui, text: String, color: Option<egui::Color32>, strong: bool| {
         let mut rich = egui::RichText::new(text).monospace();
@@ -2679,35 +2712,54 @@ fn challenge_test_table(ui: &mut egui::Ui, data: &Challenge, test: &ChallengeTes
         }
     });
 
+    let highlight_color = ui.visuals().selection.bg_fill;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
-        .max_height(320.0)
         .show_rows(ui, row_height, data.ticks, |ui, range| {
             for tick in range {
-                ui.horizontal(|ui| {
-                    cell(ui, tick.to_string(), None, false);
-                    for port in &data.inputs {
-                        let value = port.values.get(tick).copied().unwrap_or(0);
-                        cell(ui, value.to_string(), None, false);
-                    }
-                    for (index, port) in data.outputs.iter().enumerate() {
-                        let expected = port.values.get(tick).copied().unwrap_or(0);
-                        if tick < test.next_tick {
-                            let actual = test
-                                .actual
-                                .get(index)
-                                .and_then(|values| values.get(tick))
-                                .copied()
-                                .unwrap_or(expected);
-                            let color = (actual != expected).then_some(error_color);
-                            cell(ui, actual.to_string(), color, false);
-                        } else {
-                            cell(ui, expected.to_string(), Some(weak_color), false);
+                // Reserve a shape slot so the highlight paints behind the cells.
+                let background = ui.painter().add(egui::Shape::Noop);
+                let row = ui
+                    .horizontal(|ui| {
+                        cell(ui, tick.to_string(), None, false);
+                        for port in &data.inputs {
+                            let value = port.values.get(tick).copied().unwrap_or(0);
+                            cell(ui, value.to_string(), None, false);
                         }
-                    }
-                });
+                        for (index, port) in data.outputs.iter().enumerate() {
+                            let expected = port.values.get(tick).copied().unwrap_or(0);
+                            if tick < test.next_tick {
+                                let actual = test
+                                    .actual
+                                    .get(index)
+                                    .and_then(|values| values.get(tick))
+                                    .copied()
+                                    .unwrap_or(expected);
+                                let color = (actual != expected).then_some(error_color);
+                                cell(ui, actual.to_string(), color, false);
+                            } else {
+                                cell(ui, expected.to_string(), Some(weak_color), false);
+                            }
+                        }
+                    })
+                    .response
+                    .interact(egui::Sense::click());
+                if active_tick == Some(tick) {
+                    ui.painter().set(
+                        background,
+                        egui::Shape::rect_filled(row.rect, 2.0, highlight_color),
+                    );
+                }
+                if row.clicked() {
+                    clicked = Some(tick);
+                }
+                if row.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
             }
         });
+
+    clicked
 }
 
 fn format_instruction(instruction: &Instruction) -> String {
