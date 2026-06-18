@@ -20,6 +20,7 @@ fn connection_stub_extends_outward_from_the_wired_port() {
         wire_values: vec![WireValue::new(0b1)],
         rays: Vec::new(),
         stubs: Vec::new(),
+        value_triangles: Vec::new(),
         triangles: Vec::new(),
     };
 

@@ -22,12 +22,22 @@ pub struct RenderFrame {
     pub wire_values: Vec<WireValue>,
     pub rays: Vec<DrawRay>,
     pub stubs: Vec<DrawStub>,
+    pub value_triangles: Vec<DrawValueTriangle>,
     pub triangles: Vec<DrawTriangle>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct DrawWire {
     wire: Wire,
+    color: [f32; 4],
+    value_index: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DrawValueTriangle {
+    positions: [[f32; 2]; 3],
+    bit_coords: [f32; 3],
+    scale: f32,
     color: [f32; 4],
     value_index: u32,
 }
@@ -105,6 +115,69 @@ impl DrawWire {
     }
 }
 
+impl DrawValueTriangle {
+    pub fn new(
+        positions: [[f32; 2]; 3],
+        bit_coords: [f32; 3],
+        scale: f32,
+        color: [f32; 4],
+        value_index: u32,
+    ) -> Self {
+        Self {
+            positions,
+            bit_coords,
+            scale,
+            color,
+            value_index,
+        }
+    }
+
+    pub fn connection_marker(
+        component: &Component,
+        connection: ConnectionSlot,
+        radius: f32,
+        value_index: u32,
+    ) -> Self {
+        let marker = connection_marker(component, connection, radius)[0];
+        let color = match connection.direction {
+            ConnectionDirection::Input => DrawTriangle::INPUT_COLOR,
+            ConnectionDirection::Output => DrawTriangle::OUTPUT_COLOR,
+        };
+        let bit_coords = connection_marker_bit_coords(connection, radius, marker.positions);
+        Self::new(
+            marker.positions,
+            bit_coords,
+            connection.scale.get() as f32,
+            color,
+            value_index,
+        )
+    }
+
+    pub fn storage_state(component: &Component, value_index: u32) -> Vec<Self> {
+        let Some(size) = component.size() else {
+            return Vec::new();
+        };
+        let ComponentKind::Storage { scale, .. } = component.kind else {
+            return Vec::new();
+        };
+        let min = [component.position.x as f32, component.position.y as f32];
+        let extent = [size.width as f32, size.height as f32];
+        let rect = [
+            min[0] + extent[0] * 0.22,
+            min[1] + extent[1] * 0.18,
+            min[0] + extent[0] * 0.78,
+            min[1] + extent[1] * 0.82,
+        ];
+        value_rectangle(
+            rect,
+            scale.get() as f32,
+            DrawTriangle::WIRE_COLOR,
+            value_index,
+        )
+        .to_vec()
+    }
+}
+
 impl WireValue {
     pub fn new(value: u64) -> Self {
         Self {
@@ -126,6 +199,7 @@ impl DrawTriangle {
     pub const COMPONENT_BACKGROUND_COLOR: [f32; 4] = [0.11, 0.14, 0.19, 1.0];
     pub const INPUT_COLOR: [f32; 4] = [0.28, 0.78, 0.48, 1.0];
     pub const OUTPUT_COLOR: [f32; 4] = [0.98, 0.55, 0.22, 1.0];
+    pub const WIRE_ENDPOINT_COLOR: [f32; 4] = [0.95, 0.86, 0.42, 1.0];
     pub const PREVIEW_COLOR: [f32; 4] = [0.98, 0.78, 0.24, 0.78];
     pub const ERROR_COLOR: [f32; 4] = [0.95, 0.22, 0.25, 1.0];
     pub const HIGHLIGHT_COLOR: [f32; 4] = [1.0, 0.78, 0.15, 1.0];
@@ -178,12 +252,12 @@ impl DrawTriangle {
 
         let mut triangles = Vec::with_capacity(10);
         triangles.extend(rectangle(line, color));
-        triangles.extend(diamond(start, scale * 0.38, color));
-        triangles.extend(diamond(end, scale * 0.38, color));
+        triangles.extend(square(start, scale * 0.38, color));
+        triangles.extend(square(end, scale * 0.38, color));
         triangles
     }
 
-    pub fn wire_endpoints(wire: Wire, color: [f32; 4]) -> Vec<Self> {
+    pub fn wire_endpoints(wire: Wire) -> Vec<Self> {
         let scale = wire.scale.get() as f32;
         let half_scale = scale * 0.5;
         let start = [
@@ -195,9 +269,9 @@ impl DrawTriangle {
             wire.end.y as f32 + half_scale,
         ];
 
-        let mut triangles = Vec::with_capacity(8);
-        triangles.extend(diamond(start, scale * 0.38, color));
-        triangles.extend(diamond(end, scale * 0.38, color));
+        let mut triangles = Vec::with_capacity(4);
+        triangles.extend(square(start, scale * 0.38, Self::WIRE_ENDPOINT_COLOR));
+        triangles.extend(square(end, scale * 0.38, Self::WIRE_ENDPOINT_COLOR));
         triangles
     }
 
@@ -391,6 +465,36 @@ fn rectangle(rect: [f32; 4], color: [f32; 4]) -> [DrawTriangle; 2] {
     ]
 }
 
+fn square(center: [f32; 2], radius: f32, color: [f32; 4]) -> [DrawTriangle; 2] {
+    let [x, y] = center;
+    rectangle([x - radius, y - radius, x + radius, y + radius], color)
+}
+
+fn value_rectangle(
+    rect: [f32; 4],
+    scale: f32,
+    color: [f32; 4],
+    value_index: u32,
+) -> [DrawValueTriangle; 2] {
+    let [left, top, right, bottom] = rect;
+    [
+        DrawValueTriangle::new(
+            [[left, top], [right, top], [left, bottom]],
+            [0.0, scale, 0.0],
+            scale,
+            color,
+            value_index,
+        ),
+        DrawValueTriangle::new(
+            [[left, bottom], [right, top], [right, bottom]],
+            [0.0, scale, scale],
+            scale,
+            color,
+            value_index,
+        ),
+    ]
+}
+
 fn outline(rect: [f32; 4], thickness: f32, color: [f32; 4]) -> [DrawTriangle; 8] {
     let [left, top, right, bottom] = rect;
     let [top_a, top_b] = rectangle([left, top, right, top + thickness], color);
@@ -469,6 +573,23 @@ fn connection_marker(
     let base_end = [base_center[0] + tangent[0], base_center[1] + tangent[1]];
 
     [DrawTriangle::new([tip, base_start, base_end], color)]
+}
+
+fn connection_marker_bit_coords(
+    connection: ConnectionSlot,
+    radius: f32,
+    positions: [[f32; 2]; 3],
+) -> [f32; 3] {
+    let scale = connection.scale.get() as f32;
+    let axis = match connection.side {
+        ComponentSide::Top | ComponentSide::Bottom => 0,
+        ComponentSide::Right | ComponentSide::Left => 1,
+    };
+    let min = positions
+        .iter()
+        .map(|position| position[axis])
+        .fold(f32::INFINITY, f32::min);
+    positions.map(|position| ((position[axis] - min) / (radius * 2.0)) * scale)
 }
 
 fn diamond(center: [f32; 2], radius: f32, color: [f32; 4]) -> [DrawTriangle; 4] {
@@ -572,14 +693,17 @@ pub struct GridRenderer {
     background_vertex_buffer: Arc<wgpu::Buffer>,
     vertex_buffer: Arc<wgpu::Buffer>,
     wire_vertex_buffer: Arc<wgpu::Buffer>,
+    value_vertex_buffer: Arc<wgpu::Buffer>,
     wire_value_buffer: Arc<wgpu::Buffer>,
     background_vertex_capacity: usize,
     vertex_capacity: usize,
     wire_vertex_capacity: usize,
+    value_vertex_capacity: usize,
     wire_value_capacity: usize,
     background_vertex_count: u32,
     vertex_count: u32,
     wire_vertex_count: u32,
+    value_vertex_count: u32,
 }
 
 impl GridRenderer {
@@ -679,6 +803,12 @@ impl GridRenderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
+        let value_vertex_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("logic value vertex buffer"),
+            size: std::mem::size_of::<WireVertex>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
         let wire_value_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("logic wire value buffer"),
             size: std::mem::size_of::<WireValue>() as u64,
@@ -702,14 +832,17 @@ impl GridRenderer {
             background_vertex_buffer,
             vertex_buffer,
             wire_vertex_buffer,
+            value_vertex_buffer,
             wire_value_buffer,
             background_vertex_capacity: vertex_capacity,
             vertex_capacity,
             wire_vertex_capacity: vertex_capacity,
+            value_vertex_capacity: vertex_capacity,
             wire_value_capacity: vertex_capacity,
             background_vertex_count: 0,
             vertex_count: 0,
             wire_vertex_count: 0,
+            value_vertex_count: 0,
         }
     }
 
@@ -748,6 +881,17 @@ impl GridRenderer {
             &mut self.wire_vertex_capacity,
         );
         self.wire_vertex_count = wire_verts.len() as u32;
+
+        let value_verts = value_triangle_vertices(&frame.value_triangles, frame);
+        prepare_vertex_buffer(
+            device,
+            queue,
+            "logic value vertex buffer",
+            &value_verts,
+            &mut self.value_vertex_buffer,
+            &mut self.value_vertex_capacity,
+        );
+        self.value_vertex_count = value_verts.len() as u32;
 
         let wire_values = if frame.wire_values.is_empty() {
             vec![WireValue::new(0)]
@@ -794,6 +938,12 @@ impl GridRenderer {
             render_pass.set_pipeline(&self.triangle_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..self.vertex_count, 0..1);
+        }
+        if self.value_vertex_count > 0 {
+            render_pass.set_pipeline(&self.wire_pipeline);
+            render_pass.set_bind_group(0, &self.wire_value_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.value_vertex_buffer.slice(..));
+            render_pass.draw(0..self.value_vertex_count, 0..1);
         }
     }
 }
@@ -1067,6 +1217,26 @@ fn stub_vertices(stubs: &[DrawStub], frame: &RenderFrame) -> Vec<WireVertex> {
             frame,
         );
         vertices.extend([tl, tr, bl, bl, tr, br]);
+    }
+    vertices
+}
+
+fn value_triangle_vertices(
+    triangles: &[DrawValueTriangle],
+    frame: &RenderFrame,
+) -> Vec<WireVertex> {
+    let mut vertices = Vec::with_capacity(triangles.len() * 3);
+    for triangle in triangles {
+        for (position, bit_coord) in triangle.positions.into_iter().zip(triangle.bit_coords) {
+            vertices.push(wire_vertex(
+                position,
+                bit_coord,
+                triangle.scale,
+                triangle.color,
+                triangle.value_index,
+                frame,
+            ));
+        }
     }
     vertices
 }

@@ -20,7 +20,10 @@ use logicgame::{challenges::ChallengeId, grid::ComponentFileRef};
 
 use crate::{
     component_files::ComponentFiles,
-    renderer::{DrawRay, DrawStub, DrawTriangle, DrawWire, GridCallback, RenderFrame, WireValue},
+    renderer::{
+        DrawRay, DrawStub, DrawTriangle, DrawValueTriangle, DrawWire, GridCallback, RenderFrame,
+        WireValue,
+    },
 };
 
 const MIN_ZOOM: f32 = 0.1;
@@ -1651,6 +1654,8 @@ impl LogicEditor {
         snapshot: &SimulationSnapshot,
     ) -> (
         BTreeMap<Wire, u32>,
+        BTreeMap<(ComponentId, ConnectionSlot), u32>,
+        BTreeMap<ComponentId, u32>,
         BTreeMap<ComponentId, u32>,
         Vec<WireValue>,
     ) {
@@ -1664,12 +1669,14 @@ impl LogicEditor {
 
         let mut values = Vec::new();
         let mut indices = BTreeMap::new();
+        let mut net_value: BTreeMap<usize, u32> = BTreeMap::new();
         let mut address = 0;
-        for node in &snapshot.graph.nodes {
+        for (node_index, node) in snapshot.graph.nodes.iter().enumerate() {
             let GraphNode::WireNet { wires } = node else {
                 continue;
             };
             let value_index = values.len() as u32;
+            net_value.insert(node_index, value_index);
             values.push(WireValue::new(
                 root_memory.get(address).copied().unwrap_or_default(),
             ));
@@ -1679,17 +1686,19 @@ impl LogicEditor {
             address += 1;
         }
 
-        let mut net_value: BTreeMap<usize, u32> = BTreeMap::new();
-        for (i, node) in snapshot.graph.nodes.iter().enumerate() {
-            if let GraphNode::WireNet { wires } = node {
-                if let Some(&vi) = wires.first().and_then(|w| indices.get(w)) {
-                    net_value.insert(i, vi);
-                }
-            }
-        }
         let mut component_indices: BTreeMap<ComponentId, u32> = BTreeMap::new();
+        let mut connection_indices: BTreeMap<(ComponentId, ConnectionSlot), u32> = BTreeMap::new();
         for (i, node) in snapshot.graph.nodes.iter().enumerate() {
-            let GraphNode::Connection { component, .. } = node else {
+            let GraphNode::Connection {
+                component,
+                slot,
+                direction,
+                side,
+                start,
+                end,
+                scale,
+            } = node
+            else {
                 continue;
             };
             for edge in &snapshot.graph.edges {
@@ -1701,16 +1710,54 @@ impl LogicEditor {
                     None
                 };
                 if let Some(vi) = other.and_then(|j| net_value.get(&j)) {
+                    connection_indices.insert(
+                        (
+                            *component,
+                            ConnectionSlot {
+                                id: *slot,
+                                direction: *direction,
+                                side: *side,
+                                start: *start,
+                                end: *end,
+                                scale: *scale,
+                            },
+                        ),
+                        *vi,
+                    );
                     component_indices.insert(*component, *vi);
                     break;
                 }
             }
         }
 
+        let mut storage_indices = BTreeMap::new();
+        for (storage_index, component) in self
+            .grid
+            .components()
+            .filter(|component| matches!(component.kind, ComponentKind::Storage { .. }))
+            .enumerate()
+        {
+            let ComponentKind::Storage { value, .. } = component.kind else {
+                continue;
+            };
+            let value = simulation_vm
+                .and_then(|vm| vm.storage.get(storage_index).copied())
+                .unwrap_or(value);
+            let value_index = values.len() as u32;
+            values.push(WireValue::new(value));
+            storage_indices.insert(component.id, value_index);
+        }
+
         if values.is_empty() {
             values.push(WireValue::new(0));
         }
-        (indices, component_indices, values)
+        (
+            indices,
+            connection_indices,
+            component_indices,
+            storage_indices,
+            values,
+        )
     }
 
     fn show_storage_configuration(&mut self, context: &egui::Context) {
@@ -2446,8 +2493,13 @@ impl LogicEditor {
     ) -> RenderFrame {
         let errors = self.grid.validate();
         let snapshot = self.simulation_snapshot();
-        let (wire_value_indices, component_value_indices, wire_values) =
-            self.wire_value_indices(&snapshot);
+        let (
+            wire_value_indices,
+            connection_value_indices,
+            component_value_indices,
+            storage_value_indices,
+            wire_values,
+        ) = self.wire_value_indices(&snapshot);
         let mut bad_wires = BTreeSet::new();
         let mut bad_components = BTreeSet::new();
         for error in errors {
@@ -2479,6 +2531,7 @@ impl LogicEditor {
         let mut draw_wires = Vec::new();
         let mut draw_rays = Vec::new();
         let mut wire_triangles = Vec::new();
+        let mut value_triangles = Vec::new();
         for component in self.grid.components() {
             let ray_color = match &component.kind {
                 ComponentKind::Input { .. } => DrawTriangle::INPUT_COLOR,
@@ -2498,6 +2551,21 @@ impl LogicEditor {
                 component,
                 bad_components.contains(&component.id),
             ));
+            for connection in component.connection_slots() {
+                let value_index = connection_value_indices
+                    .get(&(component.id, connection))
+                    .copied()
+                    .unwrap_or_default();
+                value_triangles.push(DrawValueTriangle::connection_marker(
+                    component,
+                    connection,
+                    connection.scale.get() as f32 * 0.4,
+                    value_index,
+                ));
+            }
+            if let Some(value_index) = storage_value_indices.get(&component.id).copied() {
+                value_triangles.extend(DrawValueTriangle::storage_state(component, value_index));
+            }
             if hovered_entity == Some(DebugEntity::Component(component.id))
                 || graph_hover.components.contains(&component.id)
                 || self.selection.components.contains(&component.id)
@@ -2584,7 +2652,7 @@ impl LogicEditor {
                 color,
                 wire_value_indices.get(wire).copied().unwrap_or_default(),
             ));
-            wire_triangles.extend(DrawTriangle::wire_endpoints(*wire, color));
+            wire_triangles.extend(DrawTriangle::wire_endpoints(*wire));
             for end in [WireEnd::Start, WireEnd::End] {
                 let endpoint = WireEndpoint { wire: *wire, end };
                 if hovered_entity == Some(DebugEntity::WireEndpoint(endpoint))
@@ -2825,6 +2893,7 @@ impl LogicEditor {
             wire_values,
             rays: draw_rays,
             stubs: connection_stubs,
+            value_triangles,
             triangles: wire_triangles,
         }
     }

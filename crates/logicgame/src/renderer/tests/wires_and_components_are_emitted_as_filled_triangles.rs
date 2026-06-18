@@ -1,19 +1,27 @@
 use super::*;
 
+fn assert_position_near(actual: [f32; 2], expected: [f32; 2]) {
+    assert!((actual[0] - expected[0]).abs() < 0.00001);
+    assert!((actual[1] - expected[1]).abs() < 0.00001);
+}
+
 #[test]
 fn wires_and_components_are_emitted_as_filled_triangles() {
     let wire = Wire::new(Point::new(0, 0), Point::new(4, 0), Scale::ONE).unwrap();
     let wire_triangles = DrawTriangle::wire(wire, DrawTriangle::WIRE_COLOR);
-    assert_eq!(wire_triangles.len(), 10);
+    assert_eq!(wire_triangles.len(), 6);
     assert!(wire_triangles
         .iter()
         .all(|triangle| triangle.color == DrawTriangle::WIRE_COLOR));
-    assert_eq!(wire_triangles[2].positions[0], [0.5, 0.5]);
-    assert_eq!(wire_triangles[6].positions[0], [4.5, 0.5]);
-    let endpoint_triangles = DrawTriangle::wire_endpoints(wire, DrawTriangle::WIRE_COLOR);
-    assert_eq!(endpoint_triangles.len(), 8);
-    assert_eq!(endpoint_triangles[0].positions[0], [0.5, 0.5]);
-    assert_eq!(endpoint_triangles[4].positions[0], [4.5, 0.5]);
+    assert_position_near(wire_triangles[2].positions[0], [0.12, 0.12]);
+    assert_position_near(wire_triangles[4].positions[0], [4.12, 0.12]);
+    let endpoint_triangles = DrawTriangle::wire_endpoints(wire);
+    assert_eq!(endpoint_triangles.len(), 4);
+    assert!(endpoint_triangles
+        .iter()
+        .all(|triangle| triangle.color == DrawTriangle::WIRE_ENDPOINT_COLOR));
+    assert_position_near(endpoint_triangles[0].positions[0], [0.12, 0.12]);
+    assert_position_near(endpoint_triangles[2].positions[0], [4.12, 0.12]);
 
     let gate = Component {
         id: ComponentId(0),
