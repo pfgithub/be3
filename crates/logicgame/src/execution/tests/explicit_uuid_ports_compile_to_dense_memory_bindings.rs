@@ -9,6 +9,8 @@ fn explicit_uuid_ports_compile_to_dense_memory_bindings() {
         ComponentKind::Input {
             scale: Scale::new(4).unwrap(),
             id: InputId::from_u128(2),
+
+            label: String::new(),
         },
     );
     let output = grid.add_component_with_explicit_io(
@@ -17,6 +19,8 @@ fn explicit_uuid_ports_compile_to_dense_memory_bindings() {
         ComponentKind::Output {
             scale: Scale::new(4).unwrap(),
             id: OutputId::from_u128(7),
+
+            label: String::new(),
         },
     );
     let graph = graph(

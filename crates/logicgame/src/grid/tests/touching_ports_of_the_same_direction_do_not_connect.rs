@@ -11,6 +11,8 @@ fn touching_ports_of_the_same_direction_do_not_connect() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(0),
+
+            label: String::new(),
         },
     );
     grid.add_component(

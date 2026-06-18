@@ -649,7 +649,7 @@ impl LogicGame {
         let Some(files) = self.component_files.clone() else {
             return;
         };
-        match files.compile_subcomponent(&file) {
+        match files.compile_subcomponent(&file, &name) {
             Ok(kind) => {
                 if let Err(error) = files.add_hotbar(&name, &kind) {
                     self.persistence_error = Some(error.to_string());

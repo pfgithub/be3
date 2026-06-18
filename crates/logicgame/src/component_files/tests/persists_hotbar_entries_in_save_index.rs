@@ -19,6 +19,8 @@ fn pinnable(files: &ComponentFiles, name: &str) -> (ComponentFileRef, ComponentK
         ComponentKind::Input {
             scale: Scale::new(2).unwrap(),
             id: logicgame::grid::InputId::from_u128(u128::MAX),
+
+            label: String::new(),
         },
     );
     grid.add_component(
@@ -27,10 +29,12 @@ fn pinnable(files: &ComponentFiles, name: &str) -> (ComponentFileRef, ComponentK
         ComponentKind::Output {
             scale: Scale::new(4).unwrap(),
             id: logicgame::grid::OutputId::from_u128(u128::MAX),
+
+            label: String::new(),
         },
     );
     files.save(&source, &grid).unwrap();
-    let kind = files.compile_subcomponent(&source).unwrap();
+    let kind = files.compile_subcomponent(&source, "Sub").unwrap();
     (source, kind)
 }
 

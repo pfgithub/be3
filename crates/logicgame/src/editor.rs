@@ -11,8 +11,9 @@ use logicgame::{
 use logicgame::{
     challenges::Challenge,
     grid::{
-        value_mask, CircuitGraph, Component, ComponentId, ComponentKind, ConnectionSlot, GraphNode,
-        GraphNodeId, InputId, LogicGrid, OutputId, Point, Rotation, Scale, ValidationError, Wire,
+        value_mask, CircuitGraph, Component, ComponentId, ComponentKind, ComponentSide,
+        ConnectionSlot, GraphNode, GraphNodeId, InputId, LogicGrid, OutputId, Point, Rotation,
+        Scale, ValidationError, Wire,
     },
 };
 use logicgame::{challenges::ChallengeId, grid::ComponentFileRef};
@@ -28,6 +29,12 @@ const DEFAULT_ZOOM: f32 = 24.0;
 const WIRE_HIT_RADIUS: f32 = 7.0;
 const SCALES: [u8; 7] = [1, 2, 4, 8, 16, 32, 64];
 const HOTBAR_WIDTH: f32 = 92.0;
+/// Label drawn on an input/output component.
+const LABEL_COLOR: egui::Color32 = egui::Color32::from_rgb(232, 236, 245);
+/// Name drawn in the centre of a subcomponent.
+const NAME_COLOR: egui::Color32 = egui::Color32::from_rgb(232, 236, 245);
+/// Port label drawn next to a subcomponent's port.
+const PORT_LABEL_COLOR: egui::Color32 = egui::Color32::from_rgb(176, 188, 208);
 const HOTBAR_SLOT_SIZE: f32 = 64.0;
 const GRAPH_NODE_SIZE: egui::Vec2 = egui::vec2(150.0, 48.0);
 const GRAPH_COLUMN_GAP: f32 = 70.0;
@@ -446,6 +453,9 @@ pub struct LogicEditor {
     /// Index into `hotbar` of the selected custom slot, when `tool.kind` is
     /// `ToolKind::Custom`. `None` whenever a built-in tool is selected.
     active_custom: Option<usize>,
+    /// Label applied to freely placed input/output components (outside a
+    /// challenge, where labels come from the challenge port instead).
+    io_label: String,
 }
 
 fn default_hotbar() -> Vec<HotbarSlot> {
@@ -475,6 +485,7 @@ impl Default for LogicEditor {
             challenge: None,
             hotbar: default_hotbar(),
             active_custom: None,
+            io_label: String::new(),
         }
     }
 }
@@ -576,6 +587,98 @@ impl LogicEditor {
         self.challenge.as_ref().map(|challenge| challenge.id)
     }
 
+    /// The label the active challenge assigns to the input/output port at
+    /// `index`, or an empty string when there is no challenge or no such port.
+    fn challenge_port_label(&self, kind: ToolKind, index: usize) -> String {
+        let Some(challenge) = self.challenge.as_ref() else {
+            return String::new();
+        };
+        let ports = match kind {
+            ToolKind::Output => &challenge.data.outputs,
+            _ => &challenge.data.inputs,
+        };
+        ports
+            .get(index)
+            .map(|port| port.label.to_owned())
+            .unwrap_or_default()
+    }
+
+    /// Draws text labels over the grid: the label on each input/output, the
+    /// centre name of every subcomponent, and each subcomponent port's label
+    /// next to its port. Text is an egui overlay because the wgpu grid renderer
+    /// only draws triangles.
+    fn draw_component_labels(&self, painter: &egui::Painter, rect: egui::Rect) {
+        let zoom = self.camera.zoom;
+        for component in self.grid.components() {
+            let Some(size) = component.size() else {
+                continue;
+            };
+            let center = [
+                component.position.x as f32 + size.width as f32 * 0.5,
+                component.position.y as f32 + size.height as f32 * 0.5,
+            ];
+            match &component.kind {
+                ComponentKind::Input { label, .. } | ComponentKind::Output { label, .. } => {
+                    if label.is_empty() {
+                        continue;
+                    }
+                    painter.text(
+                        world_to_screen(center, self.camera, rect),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::FontId::proportional((zoom * 0.5).clamp(7.0, 28.0)),
+                        LABEL_COLOR,
+                    );
+                }
+                ComponentKind::Subcomponent { name, ports, .. } => {
+                    if !name.is_empty() {
+                        painter.text(
+                            world_to_screen(center, self.camera, rect),
+                            egui::Align2::CENTER_CENTER,
+                            name,
+                            egui::FontId::proportional((zoom * 0.45).clamp(8.0, 30.0)),
+                            NAME_COLOR,
+                        );
+                    }
+                    for slot in component.connection_slots() {
+                        let Some(port) = ports.get(slot.id.0 as usize) else {
+                            continue;
+                        };
+                        if port.label.is_empty() {
+                            continue;
+                        }
+                        let mid = (slot.start + slot.end) as f32 * 0.5;
+                        let left = component.position.x as f32;
+                        let top = component.position.y as f32;
+                        let right = left + size.width as f32;
+                        let bottom = top + size.height as f32;
+                        // Sit the text just inside the edge, anchored so it grows
+                        // toward the component's interior.
+                        let inset = 0.15;
+                        let (point, anchor) = match slot.side {
+                            ComponentSide::Top => ([mid, top + inset], egui::Align2::CENTER_TOP),
+                            ComponentSide::Bottom => {
+                                ([mid, bottom - inset], egui::Align2::CENTER_BOTTOM)
+                            }
+                            ComponentSide::Left => ([left + inset, mid], egui::Align2::LEFT_CENTER),
+                            ComponentSide::Right => {
+                                ([right - inset, mid], egui::Align2::RIGHT_CENTER)
+                            }
+                        };
+                        painter.text(
+                            world_to_screen(point, self.camera, rect),
+                            anchor,
+                            &port.label,
+                            egui::FontId::proportional((zoom * 0.32).clamp(6.0, 16.0)),
+                            PORT_LABEL_COLOR,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
 
@@ -643,6 +746,7 @@ impl LogicEditor {
                 canvas.inner.0.rect,
                 GridCallback { frame },
             ));
+        self.draw_component_labels(&canvas.inner.1, canvas.inner.0.rect);
         if let (Some(pointer), Some(Gesture::SelectBox { start, .. })) =
             (canvas.inner.2, self.gesture.as_ref())
         {
@@ -786,6 +890,16 @@ impl LogicEditor {
         } else {
             ui.small("Scale");
             scale_buttons(ui, &mut self.tool.scale);
+        }
+
+        // A label for freely placed inputs/outputs. Inside a challenge the label
+        // is fixed by the chosen port, so the field is not offered.
+        if matches!(self.tool.kind, ToolKind::Input | ToolKind::Output)
+            && self.tool.challenge_port.is_none()
+        {
+            ui.separator();
+            ui.small("Label");
+            ui.add(egui::TextEdit::singleline(&mut self.io_label).desired_width(f32::INFINITY));
         }
 
         ui.separator();
@@ -1029,7 +1143,7 @@ impl LogicEditor {
                         .components
                         .iter()
                         .filter_map(|component| match component.kind {
-                            ComponentKind::Input { scale, id } => Some((id, scale)),
+                            ComponentKind::Input { scale, id, .. } => Some((id, scale)),
                             _ => None,
                         })
                         .collect::<Vec<_>>();
@@ -2094,12 +2208,14 @@ impl LogicEditor {
                             component_placement_position(anchor, rotation, scale, ToolKind::Input);
                         match self.tool.challenge_port {
                             Some(port) => {
+                                let label = self.challenge_port_label(ToolKind::Input, port);
                                 self.grid.add_component_with_explicit_io(
                                     position,
                                     rotation,
                                     ComponentKind::Input {
                                         scale,
                                         id: InputId::from_u128(port as u128),
+                                        label,
                                     },
                                 );
                             }
@@ -2110,6 +2226,7 @@ impl LogicEditor {
                                     ComponentKind::Input {
                                         scale,
                                         id: InputId::from_u128(u128::MAX),
+                                        label: self.io_label.clone(),
                                     },
                                 );
                             }
@@ -2123,12 +2240,14 @@ impl LogicEditor {
                             component_placement_position(anchor, rotation, scale, ToolKind::Output);
                         match self.tool.challenge_port {
                             Some(port) => {
+                                let label = self.challenge_port_label(ToolKind::Output, port);
                                 self.grid.add_component_with_explicit_io(
                                     position,
                                     rotation,
                                     ComponentKind::Output {
                                         scale,
                                         id: OutputId::from_u128(port as u128),
+                                        label,
                                     },
                                 );
                             }
@@ -2139,6 +2258,7 @@ impl LogicEditor {
                                     ComponentKind::Output {
                                         scale,
                                         id: OutputId::from_u128(u128::MAX),
+                                        label: self.io_label.clone(),
                                     },
                                 );
                             }
@@ -2587,6 +2707,7 @@ impl LogicEditor {
                             kind: ComponentKind::Input {
                                 scale: self.tool.scale,
                                 id: InputId::from_u128(u128::MAX),
+                                label: String::new(),
                             },
                         };
                         draw_rays.extend(DrawRay::from_component(
@@ -2615,6 +2736,7 @@ impl LogicEditor {
                             kind: ComponentKind::Output {
                                 scale: self.tool.scale,
                                 id: OutputId::from_u128(u128::MAX),
+                                label: String::new(),
                             },
                         };
                         draw_rays.extend(DrawRay::from_component(

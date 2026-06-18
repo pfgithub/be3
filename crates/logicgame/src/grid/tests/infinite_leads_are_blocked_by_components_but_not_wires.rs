@@ -9,6 +9,8 @@ fn infinite_leads_are_blocked_by_components_but_not_wires() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(0),
+
+            label: String::new(),
         },
     );
     let blocker = grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);

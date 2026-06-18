@@ -135,7 +135,7 @@ pub enum Orientation {
     Vertical,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GeometryError {
     InvalidScale(u8),
     InvalidWire,
@@ -264,14 +264,20 @@ pub enum ComponentKind {
     Input {
         scale: Scale,
         id: InputId,
+        label: String,
     },
     Output {
         scale: Scale,
         id: OutputId,
+        label: String,
     },
     Subcomponent {
         source_file_id: ComponentFileRef,
         component: ComponentHash,
+        /// Display name of the subcomponent, shown in its centre. Sourced from
+        /// the component file's name at compile time; not part of the content
+        /// hash, so renaming a file does not change the compiled identity.
+        name: String,
         size: Size,
         snap: Scale,
         ports: Vec<ComponentPort>,
@@ -292,7 +298,7 @@ impl ComponentKind {
         if ports.len() > usize::from(u16::MAX) + 1 {
             return Err(GeometryError::TooManySubcomponentPorts(ports.len()));
         }
-        if let Some(port) = ports.iter().copied().find(|port| !port.is_valid_for(size)) {
+        if let Some(port) = ports.iter().find(|port| !port.is_valid_for(size)).cloned() {
             return Err(GeometryError::InvalidSubcomponentPort { size, port });
         }
         let snap = ports
@@ -304,6 +310,7 @@ impl ComponentKind {
         Ok(Self::Subcomponent {
             source_file_id,
             component,
+            name: String::new(),
             size,
             snap,
             ports,
@@ -1372,7 +1379,7 @@ pub enum ConnectionDirection {
     Output,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ComponentPort {
     pub direction: ConnectionDirection,
     pub index: usize,
@@ -1380,16 +1387,15 @@ pub struct ComponentPort {
     pub side: ComponentSide,
     pub start: i64,
     pub end: i64,
+    /// Label shown next to this port when the component is used as a
+    /// subcomponent. Carried over from the source input/output's label at
+    /// compile time; empty when unlabelled.
+    #[serde(default)]
+    pub label: String,
 }
 
 impl ComponentPort {
-    pub const fn input(
-        index: usize,
-        scale: Scale,
-        side: ComponentSide,
-        start: i64,
-        end: i64,
-    ) -> Self {
+    pub fn input(index: usize, scale: Scale, side: ComponentSide, start: i64, end: i64) -> Self {
         Self {
             direction: ConnectionDirection::Input,
             index,
@@ -1397,16 +1403,11 @@ impl ComponentPort {
             side,
             start,
             end,
+            label: String::new(),
         }
     }
 
-    pub const fn output(
-        index: usize,
-        scale: Scale,
-        side: ComponentSide,
-        start: i64,
-        end: i64,
-    ) -> Self {
+    pub fn output(index: usize, scale: Scale, side: ComponentSide, start: i64, end: i64) -> Self {
         Self {
             direction: ConnectionDirection::Output,
             index,
@@ -1414,10 +1415,11 @@ impl ComponentPort {
             side,
             start,
             end,
+            label: String::new(),
         }
     }
 
-    fn is_valid_for(self, size: Size) -> bool {
+    fn is_valid_for(&self, size: Size) -> bool {
         let boundary_length = match self.side {
             ComponentSide::Top | ComponentSide::Bottom => size.width,
             ComponentSide::Right | ComponentSide::Left => size.height,

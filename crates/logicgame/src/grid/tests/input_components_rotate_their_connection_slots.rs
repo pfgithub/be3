@@ -9,6 +9,8 @@ fn input_components_rotate_their_connection_slots() {
         kind: ComponentKind::Input {
             scale: scale(2),
             id: InputId::from_u128(0),
+
+            label: String::new(),
         },
     };
 

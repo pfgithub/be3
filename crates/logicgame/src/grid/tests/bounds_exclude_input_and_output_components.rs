@@ -14,6 +14,8 @@ fn bounds_exclude_input_and_output_components() {
         ComponentKind::Input {
             scale: scale(2),
             id: InputId::from_u128(1),
+
+            label: String::new(),
         },
     );
     grid.add_component(
@@ -22,6 +24,8 @@ fn bounds_exclude_input_and_output_components() {
         ComponentKind::Output {
             scale: scale(2),
             id: OutputId::from_u128(1),
+
+            label: String::new(),
         },
     );
 
@@ -41,6 +45,8 @@ fn grid_with_only_input_and_output_has_no_bounds() {
         ComponentKind::Input {
             scale: scale(2),
             id: InputId::from_u128(1),
+
+            label: String::new(),
         },
     );
     grid.add_component(
@@ -49,6 +55,8 @@ fn grid_with_only_input_and_output_has_no_bounds() {
         ComponentKind::Output {
             scale: scale(2),
             id: OutputId::from_u128(1),
+
+            label: String::new(),
         },
     );
 

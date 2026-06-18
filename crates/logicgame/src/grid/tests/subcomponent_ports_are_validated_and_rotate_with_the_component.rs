@@ -37,7 +37,7 @@ fn subcomponent_ports_are_validated_and_rotate_with_the_component() {
 
     let invalid = ComponentPort::input(0, scale(2), ComponentSide::Top, 6, 8);
     assert_eq!(
-        ComponentKind::subcomponent(file_id(), component_hash(), size, vec![invalid]),
+        ComponentKind::subcomponent(file_id(), component_hash(), size, vec![invalid.clone()]),
         Err(GeometryError::InvalidSubcomponentPort {
             size,
             port: invalid,

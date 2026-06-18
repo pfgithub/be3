@@ -32,6 +32,8 @@ fn nor_challenge_editor() -> LogicEditor {
         ComponentKind::Output {
             scale: Scale::ONE,
             id: OutputId::from_u128(0),
+
+            label: String::new(),
         },
     );
     grid.add_component_with_explicit_io(
@@ -40,6 +42,8 @@ fn nor_challenge_editor() -> LogicEditor {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(0),
+
+            label: String::new(),
         },
     );
     grid.add_component_with_explicit_io(
@@ -48,6 +52,8 @@ fn nor_challenge_editor() -> LogicEditor {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(1),
+
+            label: String::new(),
         },
     );
     grid.add_wire(wire((0, 2), (3, 2), 1));

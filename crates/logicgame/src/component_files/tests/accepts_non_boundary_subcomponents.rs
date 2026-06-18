@@ -14,11 +14,13 @@ fn accepts_non_boundary_subcomponents() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: logicgame::grid::InputId::from_u128(u128::MAX),
+
+            label: String::new(),
         },
     );
     grid.add_component(Point::new(4, -4), Rotation::Up, ComponentKind::Led);
     files.save(&file, &grid).unwrap();
-    assert!(matches!(files.compile_subcomponent(&file), Ok(_)));
+    assert!(matches!(files.compile_subcomponent(&file, "Sub"), Ok(_)));
 
     remove_test_root(&root);
 }

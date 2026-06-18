@@ -330,6 +330,7 @@ impl ComponentFiles {
     pub fn compile_subcomponent(
         &self,
         file: &ComponentFileRef,
+        name: &str,
     ) -> Result<ComponentKind, ComponentFileError> {
         let grid = self.load_ref(file)?;
         let bounds = grid
@@ -368,9 +369,12 @@ impl ComponentFiles {
             atomic_write(&path, &bytes)?;
         }
 
-        Ok(ComponentKind::subcomponent_with_subgraphs(
-            *file, hash, size, ports, subgraphs,
-        )?)
+        let mut kind =
+            ComponentKind::subcomponent_with_subgraphs(*file, hash, size, ports, subgraphs)?;
+        if let ComponentKind::Subcomponent { name: target, .. } = &mut kind {
+            *target = name.to_owned();
+        }
+        Ok(kind)
     }
 
     fn compiled_path(&self, hash: &ComponentHash) -> PathBuf {
@@ -530,14 +534,24 @@ fn subcomponent_ports(
     let output_indices = dense_output_indices(grid);
     let mut ports = Vec::new();
     for component in grid.components() {
-        let (direction, index, scale) = match component.kind {
-            ComponentKind::Input { id, scale } => {
-                let index = input_indices[&id];
-                (logicgame::grid::ConnectionDirection::Input, index, scale)
+        let (direction, index, scale, label) = match &component.kind {
+            ComponentKind::Input { id, scale, label } => {
+                let index = input_indices[id];
+                (
+                    logicgame::grid::ConnectionDirection::Input,
+                    index,
+                    *scale,
+                    label.clone(),
+                )
             }
-            ComponentKind::Output { id, scale } => {
-                let index = output_indices[&id];
-                (logicgame::grid::ConnectionDirection::Output, index, scale)
+            ComponentKind::Output { id, scale, label } => {
+                let index = output_indices[id];
+                (
+                    logicgame::grid::ConnectionDirection::Output,
+                    index,
+                    *scale,
+                    label.clone(),
+                )
             }
             _ => continue,
         };
@@ -557,6 +571,7 @@ fn subcomponent_ports(
             side: lead.side,
             start: lead.start - offset,
             end: lead.end - offset,
+            label,
         });
     }
     ports.sort_by_key(|port| (port.direction, port.index));

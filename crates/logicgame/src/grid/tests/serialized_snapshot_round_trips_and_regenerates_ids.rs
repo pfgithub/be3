@@ -32,6 +32,8 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
                 kind: ComponentKind::Input {
                     scale: scale(2),
                     id: InputId::from_u128(5),
+
+                    label: String::new(),
                 },
             },
             Component {
@@ -41,6 +43,8 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
                 kind: ComponentKind::Output {
                     scale: scale(2),
                     id: OutputId::from_u128(7),
+
+                    label: String::new(),
                 },
             },
             Component {
@@ -75,6 +79,8 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(u128::MAX),
+
+            label: String::new(),
         },
     );
     let ComponentKind::Input { id: input_id, .. } = grid.component(input).unwrap().kind else {
@@ -87,6 +93,8 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
         ComponentKind::Output {
             scale: Scale::ONE,
             id: OutputId::from_u128(u128::MAX),
+
+            label: String::new(),
         },
     );
     let ComponentKind::Output { id: output_id, .. } = grid.component(output).unwrap().kind else {

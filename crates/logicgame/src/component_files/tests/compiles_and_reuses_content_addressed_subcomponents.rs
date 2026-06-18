@@ -22,6 +22,8 @@ fn compiles_and_reuses_content_addressed_subcomponents() {
         ComponentKind::Input {
             scale: Scale::new(2).unwrap(),
             id: logicgame::grid::InputId::from_u128(u128::MAX),
+
+            label: String::new(),
         },
     );
     grid.add_component(
@@ -30,12 +32,14 @@ fn compiles_and_reuses_content_addressed_subcomponents() {
         ComponentKind::Output {
             scale: Scale::new(4).unwrap(),
             id: logicgame::grid::OutputId::from_u128(u128::MAX),
+
+            label: String::new(),
         },
     );
     files.save(&source, &grid).unwrap();
 
-    let first = files.compile_subcomponent(&source).unwrap();
-    let second = files.compile_subcomponent(&source).unwrap();
+    let first = files.compile_subcomponent(&source, "Sub").unwrap();
+    let second = files.compile_subcomponent(&source, "Sub").unwrap();
     assert_eq!(first, second);
     let ComponentKind::Subcomponent {
         component,
@@ -65,7 +69,7 @@ fn compiles_and_reuses_content_addressed_subcomponents() {
 
     grid.add_component(Point::new(10, 0), Rotation::Up, ComponentKind::Led);
     files.save(&source, &grid).unwrap();
-    let changed = files.compile_subcomponent(&source).unwrap();
+    let changed = files.compile_subcomponent(&source, "Sub").unwrap();
     let ComponentKind::Subcomponent {
         component: changed_hash,
         ..

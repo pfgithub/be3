@@ -27,6 +27,7 @@ fn remove_test_root(root: &Path) {
 }
 
 mod accepts_non_boundary_subcomponents;
+mod compile_carries_io_labels_into_ports_and_names_the_component;
 mod compiled_component_serializes_unlinked_component_and_source_id;
 mod compiles_and_reuses_content_addressed_subcomponents;
 mod compiles_challenge_solution_as_subcomponent;

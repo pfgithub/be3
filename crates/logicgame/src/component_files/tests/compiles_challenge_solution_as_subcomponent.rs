@@ -22,6 +22,8 @@ fn compiles_challenge_solution_as_subcomponent() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: logicgame::grid::InputId::from_u128(1),
+
+            label: String::new(),
         },
     );
     grid.add_component(
@@ -30,13 +32,15 @@ fn compiles_challenge_solution_as_subcomponent() {
         ComponentKind::Output {
             scale: Scale::ONE,
             id: logicgame::grid::OutputId::from_u128(1),
+
+            label: String::new(),
         },
     );
     files
         .save_challenge_solution(ChallengeId::Nor, id, &grid, false)
         .unwrap();
 
-    let kind = files.compile_subcomponent(&file).unwrap();
+    let kind = files.compile_subcomponent(&file, "Sub").unwrap();
     assert!(matches!(kind, ComponentKind::Subcomponent { .. }));
 
     remove_test_root(&root);

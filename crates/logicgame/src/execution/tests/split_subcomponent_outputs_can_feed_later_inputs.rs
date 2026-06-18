@@ -14,6 +14,8 @@ fn split_subcomponent_outputs_can_feed_later_inputs() {
             ComponentKind::Input {
                 scale: Scale::ONE,
                 id: InputId::from_u128(1),
+
+                label: String::new(),
             },
         );
         let input_c = grid.add_component(
@@ -22,6 +24,8 @@ fn split_subcomponent_outputs_can_feed_later_inputs() {
             ComponentKind::Input {
                 scale: Scale::ONE,
                 id: InputId::from_u128(2),
+
+                label: String::new(),
             },
         );
         let output_b = grid.add_component(
@@ -30,6 +34,8 @@ fn split_subcomponent_outputs_can_feed_later_inputs() {
             ComponentKind::Output {
                 scale: Scale::ONE,
                 id: OutputId::from_u128(1),
+
+                label: String::new(),
             },
         );
         let output_d = grid.add_component(
@@ -38,6 +44,8 @@ fn split_subcomponent_outputs_can_feed_later_inputs() {
             ComponentKind::Output {
                 scale: Scale::ONE,
                 id: OutputId::from_u128(2),
+
+                label: String::new(),
             },
         );
         let not_ab = add_not(&mut grid);

@@ -9,6 +9,8 @@ fn inputs_and_outputs_compile_to_dense_memory_bindings() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(99),
+
+            label: String::new(),
         },
     );
     grid.remove_component(removed_input);
@@ -18,6 +20,8 @@ fn inputs_and_outputs_compile_to_dense_memory_bindings() {
         ComponentKind::Input {
             scale: Scale::new(4).unwrap(),
             id: InputId::from_u128(99),
+
+            label: String::new(),
         },
     );
     let removed_output = grid.add_component(
@@ -26,6 +30,8 @@ fn inputs_and_outputs_compile_to_dense_memory_bindings() {
         ComponentKind::Output {
             scale: Scale::ONE,
             id: OutputId::from_u128(99),
+
+            label: String::new(),
         },
     );
     grid.remove_component(removed_output);
@@ -35,6 +41,8 @@ fn inputs_and_outputs_compile_to_dense_memory_bindings() {
         ComponentKind::Output {
             scale: Scale::new(4).unwrap(),
             id: OutputId::from_u128(99),
+
+            label: String::new(),
         },
     );
     let graph = graph(

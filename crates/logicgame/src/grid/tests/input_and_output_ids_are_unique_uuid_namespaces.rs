@@ -9,6 +9,8 @@ fn input_and_output_ids_are_unique_uuid_namespaces() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(99),
+
+            label: String::new(),
         },
     );
     let first_output = grid.add_component(
@@ -17,6 +19,8 @@ fn input_and_output_ids_are_unique_uuid_namespaces() {
         ComponentKind::Output {
             scale: Scale::ONE,
             id: OutputId::from_u128(99),
+
+            label: String::new(),
         },
     );
     grid.remove_component(first_input);
@@ -26,6 +30,8 @@ fn input_and_output_ids_are_unique_uuid_namespaces() {
         ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(99),
+
+            label: String::new(),
         },
     );
 

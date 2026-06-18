@@ -9,6 +9,8 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
         kind: ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(0),
+
+            label: String::new(),
         },
     };
     let output = Component {
@@ -18,6 +20,8 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
         kind: ComponentKind::Output {
             scale: Scale::ONE,
             id: OutputId::from_u128(0),
+
+            label: String::new(),
         },
     };
 
