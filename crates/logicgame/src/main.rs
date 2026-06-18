@@ -614,11 +614,6 @@ impl LogicGame {
     }
 
     fn drop_component_file(&mut self, file: &ComponentFileRef, position: logicgame::grid::Point) {
-        if self.editor.active_challenge_id().is_some() {
-            self.persistence_error =
-                Some("Subcomponents are not available in challenges".to_owned());
-            return;
-        }
         if self
             .active_file
             .as_ref()
