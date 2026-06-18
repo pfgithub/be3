@@ -1894,13 +1894,6 @@ impl LogicEditor {
     }
 
     fn handle_canvas_input(&mut self, response: &egui::Response) {
-        // Challenges are wired at single-bit scale, except for port tools, which
-        // carry their port's scale so larger challenge ports place correctly.
-        if self.challenge.is_some() && self.tool.challenge_port.is_none() {
-            self.tool.scale = Scale::ONE;
-            self.tool.merger_out_scale = Scale::ONE;
-        }
-
         if self.tool.kind == ToolKind::Select
             && response.ctx.input(|input| {
                 input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
