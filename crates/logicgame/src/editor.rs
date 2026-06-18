@@ -18,7 +18,7 @@ use logicgame::{
 use logicgame::{challenges::ChallengeId, grid::ComponentFileRef};
 
 use crate::{
-    component_files::{ComponentFileDrag, ComponentFiles},
+    component_files::ComponentFiles,
     renderer::{DrawRay, DrawStub, DrawTriangle, DrawWire, GridCallback, RenderFrame, WireValue},
 };
 
@@ -27,6 +27,8 @@ const MAX_ZOOM: f32 = 96.0;
 const DEFAULT_ZOOM: f32 = 24.0;
 const WIRE_HIT_RADIUS: f32 = 7.0;
 const SCALES: [u8; 7] = [1, 2, 4, 8, 16, 32, 64];
+const HOTBAR_WIDTH: f32 = 92.0;
+const HOTBAR_SLOT_SIZE: f32 = 64.0;
 const GRAPH_NODE_SIZE: egui::Vec2 = egui::vec2(150.0, 48.0);
 const GRAPH_COLUMN_GAP: f32 = 70.0;
 const GRAPH_ROW_GAP: f32 = 18.0;
@@ -53,6 +55,9 @@ enum ToolKind {
     Input,
     Output,
     ConfigureStorage,
+    /// A user-defined component selected from the hotbar. The actual component
+    /// to place is looked up via `LogicEditor::active_custom`.
+    Custom,
 }
 
 impl ToolKind {
@@ -67,8 +72,21 @@ impl ToolKind {
             Self::Input => "Input",
             Self::Output => "Output",
             Self::ConfigureStorage => "Configure storage",
+            Self::Custom => "Component",
         }
     }
+}
+
+/// A slot in the hotbar: either one of the built-in tools or a user-defined
+/// component compiled from a component file.
+#[derive(Clone, Debug)]
+enum HotbarSlot {
+    Builtin(ToolKind),
+    Custom {
+        name: String,
+        source: ComponentFileRef,
+        kind: ComponentKind,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,6 +177,11 @@ enum Gesture {
     Output {
         anchor: Point,
         drag_start: [f32; 2],
+    },
+    Subcomponent {
+        anchor: Point,
+        drag_start: [f32; 2],
+        kind: ComponentKind,
     },
     SelectBox {
         start: [f32; 2],
@@ -418,11 +441,19 @@ pub struct LogicEditor {
     simulation: Simulation,
     component_files: Option<ComponentFiles>,
     challenge: Option<ChallengeState>,
+    /// Built-in tools followed by any user-pinned custom components.
+    hotbar: Vec<HotbarSlot>,
+    /// Index into `hotbar` of the selected custom slot, when `tool.kind` is
+    /// `ToolKind::Custom`. `None` whenever a built-in tool is selected.
+    active_custom: Option<usize>,
 }
 
-pub struct ComponentFileDrop {
-    pub file: ComponentFileRef,
-    pub position: Point,
+fn default_hotbar() -> Vec<HotbarSlot> {
+    FREE_TOOLS
+        .iter()
+        .copied()
+        .map(HotbarSlot::Builtin)
+        .collect()
 }
 
 impl Default for LogicEditor {
@@ -442,6 +473,8 @@ impl Default for LogicEditor {
             simulation: Simulation::default(),
             component_files: None,
             challenge: None,
+            hotbar: default_hotbar(),
+            active_custom: None,
         }
     }
 }
@@ -449,6 +482,63 @@ impl Default for LogicEditor {
 impl LogicEditor {
     pub fn set_component_files(&mut self, component_files: Option<ComponentFiles>) {
         self.component_files = component_files;
+    }
+
+    /// Rebuilds the custom tail of the hotbar from persisted entries, keeping the
+    /// built-in tools at the front. Any selected custom slot is deselected.
+    pub fn set_custom_hotbar(&mut self, slots: Vec<(String, ComponentFileRef, ComponentKind)>) {
+        self.hotbar = default_hotbar();
+        self.hotbar.extend(
+            slots
+                .into_iter()
+                .map(|(name, source, kind)| HotbarSlot::Custom { name, source, kind }),
+        );
+        if self.tool.kind == ToolKind::Custom {
+            self.tool.kind = ToolKind::Select;
+            self.active_custom = None;
+        }
+    }
+
+    /// Appends a compiled custom component to the hotbar. If a slot for the same
+    /// source already exists it is updated in place instead of duplicated.
+    pub fn add_custom_hotbar_slot(
+        &mut self,
+        name: String,
+        source: ComponentFileRef,
+        kind: ComponentKind,
+    ) {
+        if let Some(slot) = self.hotbar.iter_mut().find(|slot| {
+            matches!(slot, HotbarSlot::Custom { source: existing, .. } if *existing == source)
+        }) {
+            *slot = HotbarSlot::Custom { name, source, kind };
+        } else {
+            self.hotbar.push(HotbarSlot::Custom { name, source, kind });
+        }
+    }
+
+    /// Unpins a custom hotbar slot, persisting the change and fixing up the
+    /// selected-custom index for the removed/shifted entries.
+    fn remove_hotbar_slot(&mut self, index: usize) {
+        let Some(HotbarSlot::Custom { source, .. }) = self.hotbar.get(index) else {
+            return;
+        };
+        let source = *source;
+        if let Some(files) = &self.component_files {
+            if let Err(error) = files.remove_hotbar(source) {
+                eprintln!("failed to unpin hotbar component: {error}");
+            }
+        }
+        self.hotbar.remove(index);
+        match self.active_custom {
+            Some(active) if active == index => {
+                self.active_custom = None;
+                if self.tool.kind == ToolKind::Custom {
+                    self.tool.kind = ToolKind::Select;
+                }
+            }
+            Some(active) if active > index => self.active_custom = Some(active - 1),
+            _ => {}
+        }
     }
 
     pub fn grid(&self) -> &LogicGrid {
@@ -486,23 +576,11 @@ impl LogicEditor {
         self.challenge.as_ref().map(|challenge| challenge.id)
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<ComponentFileDrop> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
-        let canvas = egui::Frame::central_panel(ui.style()).show(ui, |ui| {
-            let (response, painter) =
-                ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-            self.handle_canvas_input(&response);
-
-            let pointer_world = response
-                .hovered()
-                .then(|| context.pointer_hover_pos())
-                .flatten()
-                .map(|position| self.camera.screen_to_world(position, response.rect));
-            (response, painter, pointer_world)
-        });
 
         // Per-port placement tools shown only inside a challenge: (port index,
-        // label, scale) for inputs and outputs. Collected up front so the Tools
+        // label, scale) for inputs and outputs. Collected up front so the hotbar
         // closure does not borrow `self.challenge` while mutating `self.tool`.
         let challenge_ports: Option<(Vec<(usize, String, Scale)>, Vec<(usize, String, Scale)>)> =
             self.challenge.as_ref().map(|challenge| {
@@ -518,113 +596,27 @@ impl LogicEditor {
                 )
             });
 
-        egui::Window::new("Tools")
-            .default_pos([16.0, 16.0])
-            .hscroll(true)
-            .vscroll(true)
-            .show(&context, |ui| {
-                for &kind in &FREE_TOOLS {
-                    // In a challenge the generic Input/Output tools are replaced
-                    // by per-port buttons rendered below.
-                    if challenge_ports.is_some()
-                        && matches!(kind, ToolKind::Input | ToolKind::Output)
-                    {
-                        continue;
-                    }
-                    let selected = self.tool.kind == kind && self.tool.challenge_port.is_none();
-                    if ui.selectable_label(selected, kind.label()).clicked() {
-                        self.tool.kind = kind;
-                        self.tool.challenge_port = None;
-                        self.gesture = None;
-                        self.configured_storage = None;
-                        if kind != ToolKind::Select {
-                            self.selection.clear();
-                        }
-                    }
-                }
-
-                if let Some((inputs, outputs)) = &challenge_ports {
-                    ui.separator();
-                    ui.label("Challenge ports");
-                    let mut clicked_port: Option<(ToolKind, usize, Scale)> = None;
-                    let ports = inputs
-                        .iter()
-                        .map(|port| (ToolKind::Input, port))
-                        .chain(outputs.iter().map(|port| (ToolKind::Output, port)));
-                    for (kind, (index, label, scale)) in ports {
-                        let selected =
-                            self.tool.kind == kind && self.tool.challenge_port == Some(*index);
-                        let prefix = match kind {
-                            ToolKind::Output => "Output",
-                            _ => "Input",
-                        };
-                        if ui
-                            .selectable_label(selected, format!("{prefix} {label}"))
-                            .clicked()
-                        {
-                            clicked_port = Some((kind, *index, *scale));
-                        }
-                    }
-                    if let Some((kind, index, scale)) = clicked_port {
-                        self.tool.kind = kind;
-                        self.tool.challenge_port = Some(index);
-                        self.tool.scale = scale;
-                        self.gesture = None;
-                        self.configured_storage = None;
-                        self.selection.clear();
-                    }
-                }
-
-                ui.separator();
-                if matches!(self.tool.kind, ToolKind::MergerSplitter) {
-                    ui.label("Input scale");
-                    egui::ComboBox::from_id_salt("logic-tool-scale")
-                        .selected_text(format!("{}x", self.tool.scale.get()))
-                        .show_ui(ui, |ui| {
-                            for value in SCALES {
-                                let scale = Scale::new(value).expect("tool scale is valid");
-                                ui.selectable_value(
-                                    &mut self.tool.scale,
-                                    scale,
-                                    format!("{value}x"),
-                                );
-                            }
-                        });
-                    ui.label("Output scale");
-                    egui::ComboBox::from_id_salt("logic-tool-output-scale")
-                        .selected_text(format!("{}x", self.tool.merger_out_scale.get()))
-                        .show_ui(ui, |ui| {
-                            for value in SCALES {
-                                let scale = Scale::new(value).expect("tool scale is valid");
-                                ui.selectable_value(
-                                    &mut self.tool.merger_out_scale,
-                                    scale,
-                                    format!("{value}x"),
-                                );
-                            }
-                        });
-                } else {
-                    ui.label("Scale");
-                    egui::ComboBox::from_id_salt("logic-tool-scale")
-                        .selected_text(format!("{}x", self.tool.scale.get()))
-                        .show_ui(ui, |ui| {
-                            for value in SCALES {
-                                let scale = Scale::new(value).expect("tool scale is valid");
-                                ui.selectable_value(
-                                    &mut self.tool.scale,
-                                    scale,
-                                    format!("{value}x"),
-                                );
-                            }
-                        });
-                }
-                ui.separator();
-                ui.small("Middle drag: pan");
-                ui.small("Wheel: zoom");
-                ui.small("Shift: add/remove selection");
-                ui.small("Delete: remove selection");
-                ui.small("Esc: cancel");
+        egui::Panel::left("logic-hotbar")
+            .resizable(false)
+            .exact_size(HOTBAR_WIDTH)
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.show_hotbar(ui, &challenge_ports);
+                });
             });
+
+        let canvas = egui::Frame::central_panel(ui.style()).show(ui, |ui| {
+            let (response, painter) =
+                ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+            self.handle_canvas_input(&response);
+
+            let pointer_world = response
+                .hovered()
+                .then(|| context.pointer_hover_pos())
+                .flatten()
+                .map(|position| self.camera.screen_to_world(position, response.rect));
+            (response, painter, pointer_world)
+        });
 
         self.update_simulation_preview();
         self.show_metrics(&context);
@@ -675,23 +667,133 @@ impl LogicEditor {
         }
 
         context.request_repaint();
-
-        let payload = canvas.inner.0.dnd_release_payload::<ComponentFileDrag>()?;
-        let pointer = context.pointer_interact_pos()?;
-        let world = self.camera.screen_to_world(pointer, canvas.inner.0.rect);
-        Some(ComponentFileDrop {
-            file: payload.file.clone(),
-            position: Point::new(world[0].floor() as i64, world[1].floor() as i64),
-        })
     }
 
-    pub fn insert_subcomponent(&mut self, position: Point, kind: ComponentKind) {
-        let snap = kind.snap().get();
-        let position = Point::new(
-            position.x.div_euclid(snap) * snap,
-            position.y.div_euclid(snap) * snap,
-        );
-        self.grid.add_component(position, Rotation::Up, kind);
+    fn show_hotbar(
+        &mut self,
+        ui: &mut egui::Ui,
+        challenge_ports: &Option<(Vec<(usize, String, Scale)>, Vec<(usize, String, Scale)>)>,
+    ) {
+        let in_challenge = challenge_ports.is_some();
+        let mut action: Option<HotbarAction> = None;
+        let mut remove: Option<usize> = None;
+
+        // Built-in tools followed by user-pinned custom components.
+        for (index, slot) in self.hotbar.iter().enumerate() {
+            // In a challenge the generic Input/Output tools are replaced by the
+            // per-port buttons rendered below.
+            if in_challenge {
+                if let HotbarSlot::Builtin(ToolKind::Input | ToolKind::Output) = slot {
+                    continue;
+                }
+            }
+            let (label, selected) = match slot {
+                HotbarSlot::Builtin(kind) => (
+                    kind.label().to_string(),
+                    self.tool.kind == *kind
+                        && self.tool.challenge_port.is_none()
+                        && self.active_custom.is_none(),
+                ),
+                HotbarSlot::Custom { name, .. } => {
+                    (name.clone(), self.active_custom == Some(index))
+                }
+            };
+            let response = hotbar_button(ui, selected, &label, |painter, rect| {
+                paint_slot_preview(painter, rect, slot);
+            });
+            if response.clicked() {
+                action = Some(match slot {
+                    HotbarSlot::Builtin(kind) => HotbarAction::SelectBuiltin(*kind),
+                    HotbarSlot::Custom { .. } => HotbarAction::SelectCustom(index),
+                });
+            }
+            if matches!(slot, HotbarSlot::Custom { .. }) {
+                response.context_menu(|ui| {
+                    if ui.button("Remove from hotbar").clicked() {
+                        remove = Some(index);
+                        ui.close();
+                    }
+                });
+            }
+        }
+
+        if let Some(index) = remove {
+            self.remove_hotbar_slot(index);
+        }
+
+        if let Some((inputs, outputs)) = challenge_ports {
+            ui.separator();
+            ui.small("Challenge ports");
+            let ports = inputs
+                .iter()
+                .map(|port| (ToolKind::Input, port))
+                .chain(outputs.iter().map(|port| (ToolKind::Output, port)));
+            for (kind, (port_index, label, scale)) in ports {
+                let selected =
+                    self.tool.kind == kind && self.tool.challenge_port == Some(*port_index);
+                let prefix = match kind {
+                    ToolKind::Output => "Out",
+                    _ => "In",
+                };
+                let text = format!("{prefix} {label}");
+                let response = hotbar_button(ui, selected, &text, |painter, rect| {
+                    paint_port_glyph(painter, rect, kind);
+                });
+                if response.clicked() {
+                    action = Some(HotbarAction::SelectPort(kind, *port_index, *scale));
+                }
+            }
+        }
+
+        match action {
+            Some(HotbarAction::SelectBuiltin(kind)) => {
+                self.tool.kind = kind;
+                self.tool.challenge_port = None;
+                self.active_custom = None;
+                self.gesture = None;
+                self.configured_storage = None;
+                if kind != ToolKind::Select {
+                    self.selection.clear();
+                }
+            }
+            Some(HotbarAction::SelectCustom(index)) => {
+                self.tool.kind = ToolKind::Custom;
+                self.tool.challenge_port = None;
+                self.active_custom = Some(index);
+                self.gesture = None;
+                self.configured_storage = None;
+                self.selection.clear();
+            }
+            Some(HotbarAction::SelectPort(kind, index, scale)) => {
+                self.tool.kind = kind;
+                self.tool.challenge_port = Some(index);
+                self.tool.scale = scale;
+                self.active_custom = None;
+                self.gesture = None;
+                self.configured_storage = None;
+                self.selection.clear();
+            }
+            None => {}
+        }
+
+        // Scale controls. They have no effect on custom components for now.
+        ui.separator();
+        if matches!(self.tool.kind, ToolKind::MergerSplitter) {
+            ui.small("Input scale");
+            scale_buttons(ui, &mut self.tool.scale);
+            ui.small("Output scale");
+            scale_buttons(ui, &mut self.tool.merger_out_scale);
+        } else {
+            ui.small("Scale");
+            scale_buttons(ui, &mut self.tool.scale);
+        }
+
+        ui.separator();
+        ui.small("Middle drag: pan");
+        ui.small("Wheel: zoom");
+        ui.small("Shift: add/remove");
+        ui.small("Delete: remove");
+        ui.small("Esc: cancel");
     }
 
     fn show_metrics(&self, context: &egui::Context) {
@@ -1846,6 +1948,16 @@ impl LogicEditor {
             .ctx
             .input(|input| input.pointer.button_pressed(PointerButton::Primary));
         if primary_pressed && response.hovered() {
+            // The custom component to place, resolved before the match so the
+            // arm does not borrow `self` while assigning `self.gesture`.
+            let custom_kind = (self.tool.kind == ToolKind::Custom)
+                .then(|| self.active_custom)
+                .flatten()
+                .and_then(|index| self.hotbar.get(index))
+                .and_then(|slot| match slot {
+                    HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
+                    HotbarSlot::Builtin(_) => None,
+                });
             self.gesture = match self.tool.kind {
                 ToolKind::Select => {
                     let additive = response.ctx.input(|input| input.modifiers.shift);
@@ -1907,6 +2019,11 @@ impl LogicEditor {
                     }
                     None
                 }
+                ToolKind::Custom => custom_kind.map(|kind| Gesture::Subcomponent {
+                    anchor: snap_point(world, kind.snap()),
+                    drag_start: world,
+                    kind,
+                }),
             };
         }
 
@@ -2033,6 +2150,16 @@ impl LogicEditor {
                                 );
                             }
                         }
+                    }
+                }
+                Some(Gesture::Subcomponent {
+                    anchor,
+                    drag_start,
+                    kind,
+                }) => {
+                    if let Some(rotation) = drag_rotation(drag_start, world) {
+                        let position = subcomponent_placement_position(anchor, rotation, &kind);
+                        self.grid.add_component(position, rotation, kind);
                     }
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
@@ -2509,6 +2636,25 @@ impl LogicEditor {
                         );
                     }
                 }
+                Some(Gesture::Subcomponent {
+                    anchor,
+                    drag_start,
+                    kind,
+                }) => {
+                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
+                        let component = Component {
+                            id: ComponentId(u64::MAX),
+                            position: subcomponent_placement_position(*anchor, rotation, kind),
+                            rotation,
+                            kind: kind.clone(),
+                        };
+                        component_triangles.extend(
+                            DrawTriangle::component(&component, false)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
+                    }
+                }
                 Some(Gesture::MoveSelection {
                     start,
                     scale,
@@ -2914,6 +3060,242 @@ fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<Wire> {
     Wire::new(start, end, scale).ok()
 }
 
+enum HotbarAction {
+    SelectBuiltin(ToolKind),
+    SelectCustom(usize),
+    SelectPort(ToolKind, usize, Scale),
+}
+
+fn color32(color: [f32; 4]) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(
+        (color[0] * 255.0).round() as u8,
+        (color[1] * 255.0).round() as u8,
+        (color[2] * 255.0).round() as u8,
+        (color[3] * 255.0).round() as u8,
+    )
+}
+
+fn scale_buttons(ui: &mut egui::Ui, scale: &mut Scale) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for value in SCALES {
+            let candidate = Scale::new(value).expect("hotbar scale is valid");
+            if ui
+                .selectable_label(*scale == candidate, format!("{value}x"))
+                .clicked()
+            {
+                *scale = candidate;
+            }
+        }
+    });
+}
+
+/// A square hotbar slot: a framed button with a glyph preview painted in its top
+/// portion and a label across the bottom. Returns the click response.
+fn hotbar_button(
+    ui: &mut egui::Ui,
+    selected: bool,
+    label: &str,
+    paint_preview: impl FnOnce(&egui::Painter, egui::Rect),
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(HOTBAR_SLOT_SIZE, HOTBAR_SLOT_SIZE),
+        egui::Sense::click(),
+    );
+    let visuals = ui.visuals();
+    let (bg, stroke) = if selected {
+        (
+            visuals.selection.bg_fill,
+            egui::Stroke::new(1.5, visuals.selection.stroke.color),
+        )
+    } else if response.hovered() {
+        (
+            visuals.widgets.hovered.bg_fill,
+            egui::Stroke::new(1.0, visuals.widgets.hovered.bg_stroke.color),
+        )
+    } else {
+        (
+            visuals.widgets.inactive.bg_fill,
+            egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color),
+        )
+    };
+    let text_color = visuals.text_color();
+    let painter = ui.painter();
+    painter.rect(rect, 4.0, bg, stroke, egui::StrokeKind::Inside);
+    let inner = rect.shrink(4.0);
+    let preview_rect =
+        egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), inner.height() * 0.66));
+    let label_rect = egui::Rect::from_min_max(
+        egui::pos2(inner.min.x, preview_rect.max.y),
+        egui::pos2(inner.max.x, inner.max.y),
+    );
+    paint_preview(painter, preview_rect);
+    painter.text(
+        label_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(9.0),
+        text_color,
+    );
+    response.on_hover_text(label)
+}
+
+fn glyph_point(rect: egui::Rect, x: f32, y: f32) -> egui::Pos2 {
+    egui::pos2(
+        rect.min.x + x * rect.width(),
+        rect.min.y + y * rect.height(),
+    )
+}
+
+fn glyph_inset(rect: egui::Rect, x0: f32, y0: f32, x1: f32, y1: f32) -> egui::Rect {
+    egui::Rect::from_min_max(glyph_point(rect, x0, y0), glyph_point(rect, x1, y1))
+}
+
+fn paint_glyph_box(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    painter.rect_stroke(
+        glyph_inset(rect, 0.08, 0.08, 0.92, 0.92),
+        0.0,
+        egui::Stroke::new(1.5, color),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn paint_glyph_triangle(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    points: [[f32; 2]; 3],
+    color: egui::Color32,
+) {
+    painter.add(egui::Shape::convex_polygon(
+        points
+            .iter()
+            .map(|point| glyph_point(rect, point[0], point[1]))
+            .collect(),
+        color,
+        egui::Stroke::NONE,
+    ));
+}
+
+fn paint_glyph_diamond(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    color: egui::Color32,
+) {
+    let center = glyph_point(rect, cx, cy);
+    let rx = radius * rect.width();
+    let ry = radius * rect.height();
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(center.x, center.y - ry),
+            egui::pos2(center.x + rx, center.y),
+            egui::pos2(center.x, center.y + ry),
+            egui::pos2(center.x - rx, center.y),
+        ],
+        color,
+        egui::Stroke::NONE,
+    ));
+}
+
+fn paint_port_glyph(painter: &egui::Painter, rect: egui::Rect, kind: ToolKind) {
+    let accent = match kind {
+        ToolKind::Output => color32(DrawTriangle::OUTPUT_COLOR),
+        _ => color32(DrawTriangle::INPUT_COLOR),
+    };
+    paint_glyph_box(painter, rect, color32(DrawTriangle::GATE_COLOR));
+    paint_glyph_triangle(
+        painter,
+        rect,
+        [[0.28, 0.52], [0.72, 0.52], [0.5, 0.2]],
+        accent,
+    );
+    painter.rect_filled(glyph_inset(rect, 0.42, 0.52, 0.58, 0.82), 0.0, accent);
+}
+
+fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot: &HotbarSlot) {
+    let gate = color32(DrawTriangle::GATE_COLOR);
+    match slot {
+        HotbarSlot::Builtin(ToolKind::Select) => {
+            paint_glyph_triangle(painter, rect, [[0.3, 0.15], [0.3, 0.78], [0.46, 0.6]], gate);
+            paint_glyph_triangle(
+                painter,
+                rect,
+                [[0.3, 0.15], [0.46, 0.6], [0.62, 0.55]],
+                gate,
+            );
+        }
+        HotbarSlot::Builtin(ToolKind::Wire) => {
+            painter.line_segment(
+                [glyph_point(rect, 0.15, 0.85), glyph_point(rect, 0.85, 0.15)],
+                egui::Stroke::new(3.0, color32(DrawTriangle::WIRE_COLOR)),
+            );
+        }
+        HotbarSlot::Builtin(ToolKind::Not) => {
+            paint_glyph_box(painter, rect, gate);
+            paint_glyph_triangle(
+                painter,
+                rect,
+                [[0.12, 0.82], [0.88, 0.82], [0.5, 0.12]],
+                gate,
+            );
+        }
+        HotbarSlot::Builtin(ToolKind::MergerSplitter) => {
+            paint_glyph_box(painter, rect, gate);
+            for triangle in [
+                [[0.12, 0.82], [0.88, 0.82], [0.62, 0.5]],
+                [[0.12, 0.18], [0.62, 0.5], [0.88, 0.18]],
+            ] {
+                paint_glyph_triangle(painter, rect, triangle, gate);
+            }
+        }
+        HotbarSlot::Builtin(ToolKind::Led) => {
+            paint_glyph_box(painter, rect, gate);
+            paint_glyph_diamond(painter, rect, 0.5, 0.5, 0.3, gate);
+        }
+        HotbarSlot::Builtin(ToolKind::Storage) => {
+            paint_glyph_box(painter, rect, gate);
+            painter.rect_stroke(
+                glyph_inset(rect, 0.22, 0.18, 0.78, 0.82),
+                0.0,
+                egui::Stroke::new(1.5, gate),
+                egui::StrokeKind::Inside,
+            );
+        }
+        HotbarSlot::Builtin(ToolKind::ConfigureStorage) => {
+            paint_glyph_box(painter, rect, gate);
+            painter.rect_stroke(
+                glyph_inset(rect, 0.22, 0.18, 0.78, 0.82),
+                0.0,
+                egui::Stroke::new(1.5, gate),
+                egui::StrokeKind::Inside,
+            );
+            paint_glyph_diamond(
+                painter,
+                rect,
+                0.5,
+                0.5,
+                0.12,
+                color32(DrawTriangle::HIGHLIGHT_COLOR),
+            );
+        }
+        HotbarSlot::Builtin(ToolKind::Input) => paint_port_glyph(painter, rect, ToolKind::Input),
+        HotbarSlot::Builtin(ToolKind::Output) => paint_port_glyph(painter, rect, ToolKind::Output),
+        HotbarSlot::Builtin(ToolKind::Custom) => paint_glyph_box(painter, rect, gate),
+        HotbarSlot::Custom { .. } => {
+            paint_glyph_box(painter, rect, gate);
+            for (x, y) in [(0.5, 0.08), (0.5, 0.92)] {
+                painter.circle_filled(
+                    glyph_point(rect, x, y),
+                    2.5,
+                    color32(DrawTriangle::WIRE_COLOR),
+                );
+            }
+        }
+    }
+}
+
 fn drag_rotation(start: [f32; 2], pointer: [f32; 2]) -> Option<Rotation> {
     let dx = pointer[0] - start[0];
     let dy = pointer[1] - start[1];
@@ -2951,6 +3333,29 @@ fn component_placement_position(
         Rotation::Up => Point::new(anchor.x, anchor.y - scale),
         Rotation::Right | Rotation::Down => anchor,
         Rotation::Left => Point::new(anchor.x - scale, anchor.y),
+    }
+}
+
+/// Places a custom component so the snapped click anchor sits on its leading
+/// edge for the dragged facing, mirroring how the built-in tools anchor.
+fn subcomponent_placement_position(
+    anchor: Point,
+    rotation: Rotation,
+    kind: &ComponentKind,
+) -> Point {
+    let probe = Component {
+        id: ComponentId(u64::MAX),
+        position: anchor,
+        rotation,
+        kind: kind.clone(),
+    };
+    let Some(size) = probe.size() else {
+        return anchor;
+    };
+    match rotation {
+        Rotation::Up => Point::new(anchor.x, anchor.y - size.height),
+        Rotation::Right | Rotation::Down => anchor,
+        Rotation::Left => Point::new(anchor.x - size.width, anchor.y),
     }
 }
 

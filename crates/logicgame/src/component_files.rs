@@ -85,11 +85,6 @@ pub enum ComponentFileSource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ComponentFileDrag {
-    pub file: ComponentFileRef,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentFile {
     pub id: Uuid,
     pub name: String,
@@ -118,6 +113,17 @@ impl ChallengeProgress {
 struct SaveIndex {
     component_files: Vec<SaveFile>,
     challenges: BTreeMap<ChallengeId, SaveChallenge>,
+    /// Components the user has pinned to the hotbar, in display order. The
+    /// compiled `ComponentKind` is stored as-is so it is not recompiled on load;
+    /// compilation happens only when a component is first added.
+    #[serde(default)]
+    hotbar: Vec<SaveHotbarEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct SaveHotbarEntry {
+    name: String,
+    kind: ComponentKind,
 }
 
 impl Default for SaveIndex {
@@ -129,6 +135,7 @@ impl Default for SaveIndex {
         Self {
             component_files: Vec::new(),
             challenges,
+            hotbar: Vec::new(),
         }
     }
 }
@@ -393,6 +400,54 @@ impl ComponentFiles {
         self.save_index(&index)
     }
 
+    /// The pinned hotbar components, as `(name, compiled kind)` in display order.
+    /// The kinds are returned verbatim from the save index without recompiling.
+    pub fn load_hotbar(&self) -> Result<Vec<(String, ComponentKind)>, ComponentFileError> {
+        Ok(self
+            .load_index()?
+            .hotbar
+            .into_iter()
+            .map(|entry| (entry.name, entry.kind))
+            .collect())
+    }
+
+    /// Pins an already-compiled component to the hotbar. If the same source file
+    /// is already pinned its entry is replaced in place rather than duplicated.
+    /// Non-subcomponent kinds are ignored.
+    pub fn add_hotbar(&self, name: &str, kind: &ComponentKind) -> Result<(), ComponentFileError> {
+        let Some(source) = hotbar_entry_source(kind) else {
+            return Ok(());
+        };
+        let mut index = self.load_index()?;
+        let entry = SaveHotbarEntry {
+            name: name.to_owned(),
+            kind: kind.clone(),
+        };
+        if let Some(existing) = index
+            .hotbar
+            .iter_mut()
+            .find(|existing| hotbar_entry_source(&existing.kind) == Some(source))
+        {
+            *existing = entry;
+        } else {
+            index.hotbar.push(entry);
+        }
+        self.save_index(&index)
+    }
+
+    /// Unpins the hotbar entry for a source component file. No-op if not pinned.
+    pub fn remove_hotbar(&self, source: ComponentFileRef) -> Result<(), ComponentFileError> {
+        let mut index = self.load_index()?;
+        let before = index.hotbar.len();
+        index
+            .hotbar
+            .retain(|entry| hotbar_entry_source(&entry.kind) != Some(source));
+        if index.hotbar.len() != before {
+            self.save_index(&index)?;
+        }
+        Ok(())
+    }
+
     fn load_component(
         &self,
         hash: &ComponentHash,
@@ -443,6 +498,13 @@ impl ComponentFiles {
 
     fn path(&self, id: Uuid) -> PathBuf {
         self.root.join(format!("{id}.json"))
+    }
+}
+
+fn hotbar_entry_source(kind: &ComponentKind) -> Option<ComponentFileRef> {
+    match kind {
+        ComponentKind::Subcomponent { source_file_id, .. } => Some(*source_file_id),
+        _ => None,
     }
 }
 

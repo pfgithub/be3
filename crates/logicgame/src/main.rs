@@ -5,9 +5,7 @@ mod renderer;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use component_files::{
-    ChallengeProgress, ChallengeSolutionFile, ComponentFile, ComponentFileDrag, ComponentFiles,
-};
+use component_files::{ChallengeProgress, ChallengeSolutionFile, ComponentFile, ComponentFiles};
 use editor::LogicEditor;
 use eframe::egui;
 use logicgame::challenges;
@@ -123,8 +121,34 @@ impl LogicGame {
                 Some("The operating system application-data directory is unavailable".to_owned());
         } else {
             game.refresh_files();
+            game.refresh_hotbar();
         }
         game
+    }
+
+    /// Loads the editor's custom hotbar slots from the persisted, already-compiled
+    /// entries. Components are compiled only when first added, never on load.
+    fn refresh_hotbar(&mut self) {
+        let Some(files) = &self.component_files else {
+            return;
+        };
+        let entries = match files.load_hotbar() {
+            Ok(entries) => entries,
+            Err(error) => {
+                self.persistence_error = Some(error.to_string());
+                return;
+            }
+        };
+        let slots = entries
+            .into_iter()
+            .filter_map(|(name, kind)| match &kind {
+                logicgame::grid::ComponentKind::Subcomponent { source_file_id, .. } => {
+                    Some((name, *source_file_id, kind))
+                }
+                _ => None,
+            })
+            .collect();
+        self.editor.set_custom_hotbar(slots);
     }
 
     fn refresh_files(&mut self) {
@@ -155,6 +179,7 @@ impl LogicGame {
         let mut requested_solution = None;
         let mut requested_new_solution = None;
         let mut requested_rename = None;
+        let mut requested_add_hotbar: Option<(ComponentFileRef, String)> = None;
         egui::Window::new("Components")
             .default_pos([700.0, 16.0])
             .default_width(220.0)
@@ -201,17 +226,16 @@ impl LogicGame {
                             } else {
                                 solution.name.clone()
                             };
-                            let response = ui
-                                .selectable_label(active, text)
-                                .interact(egui::Sense::click_and_drag());
-                            if !active {
-                                response
-                                    .dnd_set_drag_payload(ComponentFileDrag { file: file.clone() });
-                            }
+                            let response = ui.selectable_label(active, text);
                             if response.clicked() {
                                 requested_solution = Some((challenge_id, solution.id));
                             }
                             response.context_menu(|ui| {
+                                if ui.button("Add to hotbar").clicked() {
+                                    requested_add_hotbar =
+                                        Some((file.clone(), solution.name.clone()));
+                                    ui.close();
+                                }
                                 if ui.button("Rename").clicked() {
                                     requested_rename = Some((
                                         ComponentFileSource::ChallengeSolution {
@@ -247,19 +271,15 @@ impl LogicGame {
                             .active_file
                             .as_ref()
                             .is_some_and(|active| active.file_ref() == file);
-                        let response = if active {
-                            ui.selectable_label(true, &component.name)
-                        } else {
-                            ui.selectable_label(false, &component.name)
-                                .interact(egui::Sense::click_and_drag())
-                        };
-                        if !active {
-                            response.dnd_set_drag_payload(ComponentFileDrag { file });
-                        }
+                        let response = ui.selectable_label(active, &component.name);
                         if response.clicked() {
                             requested_component = Some(component.id);
                         }
                         response.context_menu(|ui| {
+                            if ui.button("Add to hotbar").clicked() {
+                                requested_add_hotbar = Some((file, component.name.clone()));
+                                ui.close();
+                            }
                             if ui.button("Rename").clicked() {
                                 requested_rename = Some((
                                     ComponentFileSource::Component,
@@ -294,6 +314,9 @@ impl LogicGame {
         }
         if let Some(id) = requested_new_solution {
             self.create_challenge_solution(id);
+        }
+        if let Some((file, name)) = requested_add_hotbar {
+            self.add_component_to_hotbar(file, name);
         }
     }
 
@@ -613,22 +636,26 @@ impl LogicGame {
         false
     }
 
-    fn drop_component_file(&mut self, file: &ComponentFileRef, position: logicgame::grid::Point) {
+    fn add_component_to_hotbar(&mut self, file: ComponentFileRef, name: String) {
         if self
             .active_file
             .as_ref()
-            .is_some_and(|active| active.file_ref() == *file)
+            .is_some_and(|active| active.file_ref() == file)
         {
             self.persistence_error =
                 Some("A component cannot contain the file currently being edited".to_owned());
             return;
         }
-        let Some(files) = &self.component_files else {
+        let Some(files) = self.component_files.clone() else {
             return;
         };
-        match files.compile_subcomponent(file) {
+        match files.compile_subcomponent(&file) {
             Ok(kind) => {
-                self.editor.insert_subcomponent(position, kind);
+                if let Err(error) = files.add_hotbar(&name, &kind) {
+                    self.persistence_error = Some(error.to_string());
+                    return;
+                }
+                self.editor.add_custom_hotbar_slot(name, file, kind);
                 self.persistence_error = None;
             }
             Err(error) => self.persistence_error = Some(error.to_string()),
@@ -639,9 +666,7 @@ impl LogicGame {
 impl eframe::App for LogicGame {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.active_file.is_some() {
-            if let Some(dropped) = self.editor.ui(ui) {
-                self.drop_component_file(&dropped.file, dropped.position);
-            }
+            self.editor.ui(ui);
             self.observe_changes();
             if self.editor.take_challenge_passed() {
                 self.mark_active_challenge_passed();
