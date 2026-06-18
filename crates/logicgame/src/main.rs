@@ -179,6 +179,8 @@ impl LogicGame {
         let mut requested_solution = None;
         let mut requested_new_solution = None;
         let mut requested_rename = None;
+        let mut requested_delete_component = None;
+        let mut requested_delete_solution = None;
         let mut requested_add_hotbar: Option<(ComponentFileRef, String)> = None;
         egui::Window::new("Components")
             .default_pos([700.0, 16.0])
@@ -246,6 +248,10 @@ impl LogicGame {
                                     ));
                                     ui.close();
                                 }
+                                if ui.button("Delete").clicked() {
+                                    requested_delete_solution = Some((challenge_id, solution.id));
+                                    ui.close();
+                                }
                             });
                         });
                     }
@@ -288,6 +294,10 @@ impl LogicGame {
                                 ));
                                 ui.close();
                             }
+                            if ui.button("Delete").clicked() {
+                                requested_delete_component = Some(component.id);
+                                ui.close();
+                            }
                         });
                     }
                 }
@@ -314,6 +324,12 @@ impl LogicGame {
         }
         if let Some(id) = requested_new_solution {
             self.create_challenge_solution(id);
+        }
+        if let Some((challenge, id)) = requested_delete_solution {
+            self.delete_challenge_solution(challenge, id);
+        }
+        if let Some(id) = requested_delete_component {
+            self.delete_component(id);
         }
         if let Some((file, name)) = requested_add_hotbar {
             self.add_component_to_hotbar(file, name);
@@ -435,6 +451,33 @@ impl LogicGame {
         }
     }
 
+    fn delete_component(&mut self, id: Uuid) {
+        let file = ComponentFileRef { id };
+        let deleting_active = self.active_file.as_ref().is_some_and(
+            |active| matches!(active, ActiveFile::Component { id: active_id } if *active_id == id),
+        );
+        if deleting_active && !self.force_save() {
+            return;
+        }
+        let Some(files) = &self.component_files else {
+            return;
+        };
+        match files.delete(&file) {
+            Ok(()) => {
+                if deleting_active {
+                    self.active_file = None;
+                    self.observed_revision = 0;
+                    self.saved_revision = 0;
+                    self.save_due = None;
+                }
+                self.persistence_error = None;
+                self.refresh_files();
+                self.refresh_hotbar();
+            }
+            Err(error) => self.persistence_error = Some(error.to_string()),
+        }
+    }
+
     fn create_challenge_solution(&mut self, id: challenges::ChallengeId) {
         if !self.force_save() {
             return;
@@ -494,6 +537,39 @@ impl LogicGame {
                 self.saved_revision = self.editor.grid().revision();
                 self.save_due = None;
                 self.persistence_error = None;
+            }
+            Err(error) => self.persistence_error = Some(error.to_string()),
+        }
+    }
+
+    fn delete_challenge_solution(&mut self, challenge: challenges::ChallengeId, id: Uuid) {
+        let deleting_active = self.active_file.as_ref().is_some_and(|active| {
+            matches!(
+                active,
+                ActiveFile::ChallengeSolution {
+                    challenge: active_challenge,
+                    id: active_id,
+                    ..
+                } if *active_challenge == challenge && *active_id == id
+            )
+        });
+        if deleting_active && !self.force_save() {
+            return;
+        }
+        let Some(files) = &self.component_files else {
+            return;
+        };
+        match files.delete_challenge_solution(challenge, id) {
+            Ok(()) => {
+                if deleting_active {
+                    self.active_file = None;
+                    self.observed_revision = 0;
+                    self.saved_revision = 0;
+                    self.save_due = None;
+                }
+                self.persistence_error = None;
+                self.refresh_files();
+                self.refresh_hotbar();
             }
             Err(error) => self.persistence_error = Some(error.to_string()),
         }

@@ -269,6 +269,26 @@ impl ComponentFiles {
         self.save_grid(file.id, grid)
     }
 
+    pub fn delete(&self, file: &ComponentFileRef) -> Result<(), ComponentFileError> {
+        let mut index = self.load_index()?;
+        let before = index.component_files.len();
+        index.component_files.retain(|saved| saved.id != file.id);
+        if index.component_files.len() == before {
+            return Err(ComponentFileError::InvalidSubcomponent(
+                "Component metadata is missing",
+            ));
+        }
+        index
+            .hotbar
+            .retain(|entry| hotbar_entry_source(&entry.kind) != Some(*file));
+        self.save_index(&index)?;
+        match fs::remove_file(self.path(file.id)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     pub fn save_challenge_solution(
         &self,
         challenge: ChallengeId,
@@ -288,6 +308,31 @@ impl ComponentFiles {
             ))?;
         file.completed = completed;
         self.save_index(&index)
+    }
+
+    pub fn delete_challenge_solution(
+        &self,
+        challenge: ChallengeId,
+        id: Uuid,
+    ) -> Result<(), ComponentFileError> {
+        let mut index = self.load_index()?;
+        let challenge_index = index.challenges.entry(challenge).or_default();
+        let before = challenge_index.files.len();
+        challenge_index.files.retain(|file| file.id != id);
+        if challenge_index.files.len() == before {
+            return Err(ComponentFileError::InvalidSubcomponent(
+                "Challenge solution metadata is missing",
+            ));
+        }
+        index
+            .hotbar
+            .retain(|entry| hotbar_entry_source(&entry.kind) != Some(ComponentFileRef { id }));
+        self.save_index(&index)?;
+        match fs::remove_file(self.path(id)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn rename(
