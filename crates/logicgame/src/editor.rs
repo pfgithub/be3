@@ -1654,8 +1654,6 @@ impl LogicEditor {
         BTreeMap<ComponentId, u32>,
         Vec<WireValue>,
     ) {
-        // In challenge mode, the wires should reflect the shared simulation VM so
-        // that stepping the test visibly drives the circuit.
         let simulation_vm = self
             .simulation
             .snapshot
