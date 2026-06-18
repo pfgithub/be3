@@ -32,6 +32,7 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
             DrawRay::from_component(&input, DrawTriangle::INPUT_COLOR, 0).unwrap(),
             DrawRay::from_component(&output, DrawTriangle::OUTPUT_COLOR, 0).unwrap(),
         ],
+        stubs: Vec::new(),
         triangles: Vec::new(),
     };
 

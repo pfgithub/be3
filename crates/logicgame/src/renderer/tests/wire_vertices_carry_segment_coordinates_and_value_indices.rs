@@ -11,6 +11,7 @@ fn wire_vertices_carry_segment_coordinates_and_value_indices() {
         wires: Vec::new(),
         wire_values: vec![WireValue::new(0b1010)],
         rays: Vec::new(),
+        stubs: Vec::new(),
         triangles: Vec::new(),
     };
     let vertices = wire_vertices(&[DrawWire::new(wire, DrawTriangle::WIRE_COLOR, 7)], &frame);

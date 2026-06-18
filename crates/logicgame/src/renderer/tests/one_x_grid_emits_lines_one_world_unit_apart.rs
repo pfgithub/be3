@@ -10,6 +10,7 @@ fn one_x_grid_emits_lines_one_world_unit_apart() {
         wires: Vec::new(),
         wire_values: Vec::new(),
         rays: Vec::new(),
+        stubs: Vec::new(),
         triangles: Vec::new(),
     };
     let triangles = frame_triangles(&frame);

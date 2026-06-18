@@ -21,6 +21,7 @@ pub struct RenderFrame {
     pub wires: Vec<DrawWire>,
     pub wire_values: Vec<WireValue>,
     pub rays: Vec<DrawRay>,
+    pub stubs: Vec<DrawStub>,
     pub triangles: Vec<DrawTriangle>,
 }
 
@@ -60,6 +61,37 @@ impl DrawRay {
             color,
             value_index,
         })
+    }
+}
+
+/// A short wire stub drawn extending outward from a port wired to a wire net,
+/// so the connection reads as a wire entering the component. It runs through the
+/// wire pipeline, so it shows the net's live on/off value and matches a regular
+/// wire's width. The stub bridges the component boundary and the centerline of a
+/// wire lying flush against that edge, which is half a cell away.
+#[derive(Clone, Copy, Debug)]
+pub struct DrawStub {
+    center: [f32; 2],
+    side: ComponentSide,
+    scale: f32,
+    color: [f32; 4],
+    value_index: u32,
+}
+
+impl DrawStub {
+    pub fn for_connection(
+        component: &Component,
+        connection: ConnectionSlot,
+        color: [f32; 4],
+        value_index: u32,
+    ) -> Self {
+        Self {
+            center: connection_boundary_center(component, connection),
+            side: connection.side,
+            scale: connection.scale.get() as f32,
+            color,
+            value_index,
+        }
     }
 }
 
@@ -319,19 +351,6 @@ impl DrawTriangle {
             ComponentSide::Left => [left - thickness * 0.5, start, left + thickness * 0.5, end],
         };
         rectangle(rect, Self::HIGHLIGHT_COLOR).to_vec()
-    }
-
-    /// A filled marker drawn on a port that is actually wired up, sitting on
-    /// the component boundary so the connection is visible regardless of where
-    /// along the wire it was made.
-    pub fn connection_indicator(component: &Component, connection: ConnectionSlot) -> Vec<Self> {
-        let radius = connection.scale.get() as f32 * 0.28;
-        let center = connection_boundary_center(component, connection);
-        let color = match connection.direction {
-            ConnectionDirection::Input => Self::INPUT_COLOR,
-            ConnectionDirection::Output => Self::OUTPUT_COLOR,
-        };
-        diamond(center, radius, color).to_vec()
     }
 
     pub fn bounds(bounds: GridBounds, thickness: f32) -> Vec<Self> {
@@ -719,6 +738,7 @@ impl GridRenderer {
 
         let mut wire_verts = wire_vertices(&frame.wires, frame);
         wire_verts.extend(ray_vertices(&frame.rays, frame));
+        wire_verts.extend(stub_vertices(&frame.stubs, frame));
         prepare_vertex_buffer(
             device,
             queue,
@@ -987,6 +1007,63 @@ fn ray_vertices(rays: &[DrawRay], frame: &RenderFrame) -> Vec<WireVertex> {
             scale,
             ray.color,
             ray.value_index,
+            frame,
+        );
+        vertices.extend([tl, tr, bl, bl, tr, br]);
+    }
+    vertices
+}
+
+fn stub_vertices(stubs: &[DrawStub], frame: &RenderFrame) -> Vec<WireVertex> {
+    let mut vertices = Vec::with_capacity(stubs.len() * 6);
+    for stub in stubs {
+        let scale = stub.scale;
+        let half_thickness = (scale * 0.36).max(0.08);
+        let length = scale * 0.5;
+        let [cx, cy] = stub.center;
+        let (left, top, right, bottom) = match stub.side {
+            ComponentSide::Top => (cx - half_thickness, cy - length, cx + half_thickness, cy),
+            ComponentSide::Bottom => (cx - half_thickness, cy, cx + half_thickness, cy + length),
+            ComponentSide::Left => (cx - length, cy - half_thickness, cx, cy + half_thickness),
+            ComponentSide::Right => (cx, cy - half_thickness, cx + length, cy + half_thickness),
+        };
+        // bit_coord runs across the stub's width, matching a wire of the same
+        // orientation: vertical stubs (Top/Bottom) vary the bit in x, horizontal
+        // stubs (Left/Right) vary it in y.
+        let (tl_bit, tr_bit, bl_bit, br_bit) = match stub.side {
+            ComponentSide::Top | ComponentSide::Bottom => (0.0, scale, 0.0, scale),
+            ComponentSide::Left | ComponentSide::Right => (0.0, 0.0, scale, scale),
+        };
+        let tl = wire_vertex(
+            [left, top],
+            tl_bit,
+            scale,
+            stub.color,
+            stub.value_index,
+            frame,
+        );
+        let tr = wire_vertex(
+            [right, top],
+            tr_bit,
+            scale,
+            stub.color,
+            stub.value_index,
+            frame,
+        );
+        let bl = wire_vertex(
+            [left, bottom],
+            bl_bit,
+            scale,
+            stub.color,
+            stub.value_index,
+            frame,
+        );
+        let br = wire_vertex(
+            [right, bottom],
+            br_bit,
+            scale,
+            stub.color,
+            stub.value_index,
             frame,
         );
         vertices.extend([tl, tr, bl, bl, tr, br]);

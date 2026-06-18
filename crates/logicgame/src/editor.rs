@@ -16,7 +16,7 @@ use logicgame::{
 
 use crate::{
     component_files::{ComponentFileDrag, ComponentFiles},
-    renderer::{DrawRay, DrawTriangle, DrawWire, GridCallback, RenderFrame, WireValue},
+    renderer::{DrawRay, DrawStub, DrawTriangle, DrawWire, GridCallback, RenderFrame, WireValue},
 };
 
 const MIN_ZOOM: f32 = 0.1;
@@ -2479,9 +2479,14 @@ impl LogicEditor {
                     .extend(DrawTriangle::connection_highlight(component, *connection));
             }
         }
-        // Mark every port that the circuit graph reports as actually wired up,
-        // so a connection is visible no matter where along the wire it was made.
-        for node in &snapshot.graph.nodes {
+        // Draw a wire stub on every port the circuit graph reports as wired to
+        // an actual wire net, so the wire reads as entering the component no
+        // matter where along the wire the contact was made. The stub carries the
+        // connected net's value index so it shows the same on/off value as the
+        // wire. Ports joined directly to a touching neighbour belong to an empty
+        // (wireless) net and draw nothing, so abutting components have no stub.
+        let mut connection_stubs = Vec::new();
+        for (index, node) in snapshot.graph.nodes.iter().enumerate() {
             let GraphNode::Connection {
                 component,
                 slot,
@@ -2497,7 +2502,26 @@ impl LogicEditor {
             let Some(component) = self.grid.component(*component) else {
                 continue;
             };
-            component_triangles.extend(DrawTriangle::connection_indicator(
+            let node_id = GraphNodeId(index);
+            let net_value_index = snapshot.graph.edges.iter().find_map(|edge| {
+                let other = if edge.first == node_id {
+                    edge.second
+                } else if edge.second == node_id {
+                    edge.first
+                } else {
+                    return None;
+                };
+                let GraphNode::WireNet { wires } = &snapshot.graph.nodes[other.0] else {
+                    return None;
+                };
+                wires
+                    .first()
+                    .and_then(|wire| wire_value_indices.get(wire).copied())
+            });
+            let Some(value_index) = net_value_index else {
+                continue;
+            };
+            connection_stubs.push(DrawStub::for_connection(
                 component,
                 ConnectionSlot {
                     id: *slot,
@@ -2507,6 +2531,8 @@ impl LogicEditor {
                     end: *end,
                     scale: *scale,
                 },
+                DrawTriangle::WIRE_COLOR,
+                value_index,
             ));
         }
         for wire in self.grid.wires() {
@@ -2743,6 +2769,7 @@ impl LogicEditor {
             wires: draw_wires,
             wire_values,
             rays: draw_rays,
+            stubs: connection_stubs,
             triangles: wire_triangles,
         }
     }

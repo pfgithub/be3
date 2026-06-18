@@ -14,6 +14,7 @@ fn viewport_grid_and_entities_are_layered_and_bounded() {
         wires: Vec::new(),
         wire_values: Vec::new(),
         rays: Vec::new(),
+        stubs: Vec::new(),
         triangles: vec![entity],
     };
 
