@@ -43,16 +43,17 @@ const GRAPH_NODE_SIZE: egui::Vec2 = egui::vec2(150.0, 48.0);
 const GRAPH_COLUMN_GAP: f32 = 70.0;
 const GRAPH_ROW_GAP: f32 = 18.0;
 const GRAPH_MARGIN: f32 = 24.0;
-const FREE_TOOLS: [ToolKind; 9] = [
-    ToolKind::Select,
-    ToolKind::Wire,
-    ToolKind::Not,
-    ToolKind::MergerSplitter,
-    ToolKind::Led,
-    ToolKind::Storage,
-    ToolKind::Input,
-    ToolKind::Output,
-    ToolKind::ConfigureStorage,
+const HOTBAR_KEYS: [egui::Key; 10] = [
+    egui::Key::Num1,
+    egui::Key::Num2,
+    egui::Key::Num3,
+    egui::Key::Num4,
+    egui::Key::Num5,
+    egui::Key::Num6,
+    egui::Key::Num7,
+    egui::Key::Num8,
+    egui::Key::Num9,
+    egui::Key::Num0,
 ];
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ToolKind {
@@ -66,7 +67,7 @@ enum ToolKind {
     Output,
     ConfigureStorage,
     /// A user-defined component selected from the hotbar. The actual component
-    /// to place is looked up via `LogicEditor::active_custom`.
+    /// to place is looked up via `LogicEditor::active_hotbar_slot`.
     Custom,
 }
 
@@ -105,11 +106,27 @@ impl ToolKind {
 #[derive(Clone, Debug)]
 enum HotbarSlot {
     Builtin(ToolKind),
+    Locked {
+        name: String,
+    },
+    Folder {
+        name: String,
+        slots: Vec<HotbarSlot>,
+    },
     Custom {
         name: String,
         source: ComponentFileRef,
         kind: ComponentKind,
     },
+}
+
+impl HotbarSlot {
+    fn label(&self) -> &str {
+        match self {
+            Self::Builtin(kind) => kind.label(),
+            Self::Locked { name } | Self::Folder { name, .. } | Self::Custom { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -465,22 +482,72 @@ pub struct LogicEditor {
     simulation: Simulation,
     component_files: Option<ComponentFiles>,
     challenge: Option<ChallengeState>,
-    /// Built-in tools followed by any user-pinned custom components.
+    /// Root hotbar slots. Folders can contain any other hotbar slot.
     hotbar: Vec<HotbarSlot>,
-    /// Index into `hotbar` of the selected custom slot, when `tool.kind` is
-    /// `ToolKind::Custom`. `None` whenever a built-in tool is selected.
-    active_custom: Option<usize>,
+    /// Path into `hotbar` of the currently open folder. Empty means root.
+    active_hotbar_folder: Vec<usize>,
+    /// Path into `hotbar` of the selected item, when it came from the hotbar.
+    active_hotbar_slot: Option<Vec<usize>>,
+    /// Slot currently being dragged for hotbar reordering/nesting.
+    hotbar_drag: Option<Vec<usize>>,
     /// Label applied to freely placed input/output components (outside a
     /// challenge, where labels come from the challenge port instead).
     io_label: String,
 }
 
 fn default_hotbar() -> Vec<HotbarSlot> {
-    FREE_TOOLS
-        .iter()
-        .copied()
-        .map(HotbarSlot::Builtin)
-        .collect()
+    vec![
+        HotbarSlot::Builtin(ToolKind::Wire),
+        HotbarSlot::Builtin(ToolKind::MergerSplitter),
+        HotbarSlot::Folder {
+            name: "Logic".to_string(),
+            slots: vec![
+                HotbarSlot::Builtin(ToolKind::Not),
+                HotbarSlot::Locked {
+                    name: "And gate".to_string(),
+                },
+                HotbarSlot::Locked {
+                    name: "Or gate".to_string(),
+                },
+            ],
+        },
+        HotbarSlot::Folder {
+            name: "Storage".to_string(),
+            slots: vec![
+                HotbarSlot::Builtin(ToolKind::Storage),
+                HotbarSlot::Builtin(ToolKind::ConfigureStorage),
+                HotbarSlot::Locked {
+                    name: "Register".to_string(),
+                },
+                HotbarSlot::Locked {
+                    name: "Memory".to_string(),
+                },
+            ],
+        },
+        HotbarSlot::Folder {
+            name: "Display".to_string(),
+            slots: vec![
+                HotbarSlot::Builtin(ToolKind::Led),
+                HotbarSlot::Locked {
+                    name: "Seven Segment".to_string(),
+                },
+            ],
+        },
+        HotbarSlot::Folder {
+            name: "Organization".to_string(),
+            slots: vec![
+                HotbarSlot::Locked {
+                    name: "Comment".to_string(),
+                },
+                HotbarSlot::Locked {
+                    name: "Pattern".to_string(),
+                },
+                HotbarSlot::Locked {
+                    name: "Group".to_string(),
+                },
+            ],
+        },
+    ]
 }
 
 impl Default for LogicEditor {
@@ -502,7 +569,9 @@ impl Default for LogicEditor {
             component_files: None,
             challenge: None,
             hotbar: default_hotbar(),
-            active_custom: None,
+            active_hotbar_folder: Vec::new(),
+            active_hotbar_slot: None,
+            hotbar_drag: None,
             io_label: String::new(),
         }
     }
@@ -513,8 +582,45 @@ impl LogicEditor {
         self.component_files = component_files;
     }
 
-    /// Rebuilds the custom tail of the hotbar from persisted entries, keeping the
-    /// built-in tools at the front. Any selected custom slot is deselected.
+    fn select_tool(&mut self) {
+        self.tool.kind = ToolKind::Select;
+        self.tool.challenge_port = None;
+        self.active_hotbar_slot = None;
+        self.gesture = None;
+        self.configured_storage = None;
+    }
+
+    fn select_hotbar_path(&mut self, path: Vec<usize>) {
+        let Some(slot) = get_hotbar_slot(&self.hotbar, &path) else {
+            return;
+        };
+        match slot {
+            HotbarSlot::Builtin(kind) => {
+                self.tool.kind = *kind;
+                self.tool.challenge_port = None;
+                self.active_hotbar_slot = Some(path);
+                self.gesture = None;
+                self.configured_storage = None;
+                self.selection.clear();
+            }
+            HotbarSlot::Custom { .. } => {
+                self.tool.kind = ToolKind::Custom;
+                self.tool.challenge_port = None;
+                self.active_hotbar_slot = Some(path);
+                self.gesture = None;
+                self.configured_storage = None;
+                self.selection.clear();
+            }
+            HotbarSlot::Folder { .. } => {
+                self.active_hotbar_folder = path;
+            }
+            HotbarSlot::Locked { .. } => {}
+        }
+    }
+
+    /// Rebuilds the custom tail of the root hotbar from persisted entries,
+    /// keeping the built-in default tree at the front. Any selected custom slot
+    /// is deselected.
     pub fn set_custom_hotbar(&mut self, slots: Vec<(String, ComponentFileRef, ComponentKind)>) {
         self.hotbar = default_hotbar();
         self.hotbar.extend(
@@ -524,8 +630,9 @@ impl LogicEditor {
         );
         if self.tool.kind == ToolKind::Custom {
             self.tool.kind = ToolKind::Select;
-            self.active_custom = None;
+            self.active_hotbar_slot = None;
         }
+        self.active_hotbar_folder.clear();
     }
 
     /// Appends a compiled custom component to the hotbar. If a slot for the same
@@ -536,9 +643,7 @@ impl LogicEditor {
         source: ComponentFileRef,
         kind: ComponentKind,
     ) {
-        if let Some(slot) = self.hotbar.iter_mut().find(|slot| {
-            matches!(slot, HotbarSlot::Custom { source: existing, .. } if *existing == source)
-        }) {
+        if let Some(slot) = find_custom_hotbar_slot_mut(&mut self.hotbar, source) {
             *slot = HotbarSlot::Custom { name, source, kind };
         } else {
             self.hotbar.push(HotbarSlot::Custom { name, source, kind });
@@ -546,9 +651,9 @@ impl LogicEditor {
     }
 
     /// Unpins a custom hotbar slot, persisting the change and fixing up the
-    /// selected-custom index for the removed/shifted entries.
-    fn remove_hotbar_slot(&mut self, index: usize) {
-        let Some(HotbarSlot::Custom { source, .. }) = self.hotbar.get(index) else {
+    /// selected custom path when needed.
+    fn remove_hotbar_slot(&mut self, path: &[usize]) {
+        let Some(HotbarSlot::Custom { source, .. }) = get_hotbar_slot(&self.hotbar, path) else {
             return;
         };
         let source = *source;
@@ -557,16 +662,16 @@ impl LogicEditor {
                 eprintln!("failed to unpin hotbar component: {error}");
             }
         }
-        self.hotbar.remove(index);
-        match self.active_custom {
-            Some(active) if active == index => {
-                self.active_custom = None;
-                if self.tool.kind == ToolKind::Custom {
-                    self.tool.kind = ToolKind::Select;
-                }
+        remove_hotbar_slot_at(&mut self.hotbar, path);
+        if self
+            .active_hotbar_slot
+            .as_ref()
+            .is_some_and(|active| active.starts_with(path))
+        {
+            self.active_hotbar_slot = None;
+            if self.tool.kind == ToolKind::Custom {
+                self.select_tool();
             }
-            Some(active) if active > index => self.active_custom = Some(active - 1),
-            _ => {}
         }
     }
 
@@ -785,7 +890,7 @@ impl LogicEditor {
         }
 
         if context.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.gesture = None;
+            self.select_tool();
         }
 
         context.request_repaint();
@@ -798,10 +903,51 @@ impl LogicEditor {
     ) {
         let in_challenge = challenge_ports.is_some();
         let mut action: Option<HotbarAction> = None;
-        let mut remove: Option<usize> = None;
+        let mut remove: Option<Vec<usize>> = None;
+        let mut new_folder = false;
+        let mut drop_target: Option<Vec<usize>> = None;
+        let visible = visible_hotbar_entries(&self.hotbar, &self.active_hotbar_folder);
 
-        // Built-in tools followed by user-pinned custom components.
-        for (index, slot) in self.hotbar.iter().enumerate() {
+        if !ui.ctx().egui_wants_keyboard_input() {
+            ui.ctx().input(|input| {
+                for (index, key) in HOTBAR_KEYS.iter().enumerate() {
+                    if input.key_pressed(*key) {
+                        if let Some((path, _)) = visible.get(index) {
+                            action = Some(HotbarAction::SelectPath(path.clone()));
+                        }
+                    }
+                }
+                if input.key_pressed(egui::Key::Backtick) {
+                    self.active_hotbar_folder.pop();
+                }
+            });
+        }
+
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !self.active_hotbar_folder.is_empty(),
+                    egui::Button::new("Up"),
+                )
+                .clicked()
+            {
+                self.active_hotbar_folder.pop();
+            }
+            if !self.active_hotbar_folder.is_empty() {
+                ui.small(hotbar_folder_name(&self.hotbar, &self.active_hotbar_folder));
+            } else {
+                ui.small("Hotbar");
+            }
+        });
+
+        ui.menu_button("+", |ui| {
+            if ui.button("New folder").clicked() {
+                new_folder = true;
+                ui.close();
+            }
+        });
+
+        for (visible_index, (path, slot)) in visible.iter().enumerate() {
             // In a challenge the generic Input/Output tools are replaced by the
             // per-port buttons rendered below.
             if in_challenge {
@@ -809,38 +955,64 @@ impl LogicEditor {
                     continue;
                 }
             }
-            let (label, selected) = match slot {
-                HotbarSlot::Builtin(kind) => (
-                    kind.label().to_string(),
-                    self.tool.kind == *kind
-                        && self.tool.challenge_port.is_none()
-                        && self.active_custom.is_none(),
-                ),
-                HotbarSlot::Custom { name, .. } => {
-                    (name.clone(), self.active_custom == Some(index))
-                }
+            let hotkey = hotbar_key_label(visible_index);
+            let label = match hotkey {
+                Some(hotkey) => format!("{hotkey} {}", slot.label()),
+                None => slot.label().to_string(),
             };
+            let selected = self.active_hotbar_slot.as_ref() == Some(path);
             let response = hotbar_button(ui, selected, &label, |painter, rect| {
                 paint_slot_preview(painter, rect, slot);
             });
             if response.clicked() {
-                action = Some(match slot {
-                    HotbarSlot::Builtin(kind) => HotbarAction::SelectBuiltin(*kind),
-                    HotbarSlot::Custom { .. } => HotbarAction::SelectCustom(index),
-                });
+                action = Some(HotbarAction::SelectPath(path.clone()));
             }
-            if matches!(slot, HotbarSlot::Custom { .. }) {
+            if response.drag_started() {
+                self.hotbar_drag = Some(path.clone());
+            }
+            if response.hovered() && ui.ctx().input(|input| input.pointer.any_released()) {
+                drop_target = Some(path.clone());
+            }
+            if matches!(slot, HotbarSlot::Custom { .. } | HotbarSlot::Folder { .. }) {
                 response.context_menu(|ui| {
-                    if ui.button("Remove from hotbar").clicked() {
-                        remove = Some(index);
+                    if matches!(slot, HotbarSlot::Custom { .. })
+                        && ui.button("Remove from hotbar").clicked()
+                    {
+                        remove = Some(path.clone());
+                        ui.close();
+                    }
+                    if matches!(slot, HotbarSlot::Folder { .. })
+                        && ui.button("Open folder").clicked()
+                    {
+                        action = Some(HotbarAction::OpenFolder(path.clone()));
                         ui.close();
                     }
                 });
             }
         }
 
-        if let Some(index) = remove {
-            self.remove_hotbar_slot(index);
+        if let Some(path) = remove {
+            self.remove_hotbar_slot(&path);
+        }
+        if new_folder {
+            let slots = get_hotbar_slots_mut(&mut self.hotbar, &self.active_hotbar_folder);
+            slots.push(HotbarSlot::Folder {
+                name: "Folder".to_string(),
+                slots: Vec::new(),
+            });
+        }
+        if let (Some(source), Some(target)) = (self.hotbar_drag.take(), drop_target) {
+            move_hotbar_slot(&mut self.hotbar, &source, &target);
+            if self
+                .active_hotbar_slot
+                .as_ref()
+                .is_some_and(|active| active.starts_with(&source))
+            {
+                self.select_tool();
+            }
+            if self.active_hotbar_folder.starts_with(&source) {
+                self.active_hotbar_folder.clear();
+            }
         }
 
         if let Some((inputs, outputs)) = challenge_ports {
@@ -868,29 +1040,21 @@ impl LogicEditor {
         }
 
         match action {
-            Some(HotbarAction::SelectBuiltin(kind)) => {
-                self.tool.kind = kind;
-                self.tool.challenge_port = None;
-                self.active_custom = None;
-                self.gesture = None;
-                self.configured_storage = None;
-                if kind != ToolKind::Select {
-                    self.selection.clear();
+            Some(HotbarAction::SelectPath(path)) => {
+                if self.active_hotbar_slot.as_ref() == Some(&path) {
+                    self.select_tool();
+                } else {
+                    self.select_hotbar_path(path);
                 }
             }
-            Some(HotbarAction::SelectCustom(index)) => {
-                self.tool.kind = ToolKind::Custom;
-                self.tool.challenge_port = None;
-                self.active_custom = Some(index);
-                self.gesture = None;
-                self.configured_storage = None;
-                self.selection.clear();
+            Some(HotbarAction::OpenFolder(path)) => {
+                self.active_hotbar_folder = path;
             }
             Some(HotbarAction::SelectPort(kind, index, scale)) => {
                 self.tool.kind = kind;
                 self.tool.challenge_port = Some(index);
                 self.tool.scale = scale;
-                self.active_custom = None;
+                self.active_hotbar_slot = None;
                 self.gesture = None;
                 self.configured_storage = None;
                 self.selection.clear();
@@ -2140,12 +2304,12 @@ impl LogicEditor {
             // The custom component to place, resolved before the match so the
             // arm does not borrow `self` while assigning `self.gesture`.
             let custom_kind = (self.tool.kind == ToolKind::Custom)
-                .then(|| self.active_custom)
+                .then(|| self.active_hotbar_slot.as_deref())
                 .flatten()
-                .and_then(|index| self.hotbar.get(index))
+                .and_then(|path| get_hotbar_slot(&self.hotbar, path))
                 .and_then(|slot| match slot {
                     HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
-                    HotbarSlot::Builtin(_) => None,
+                    _ => None,
                 });
             self.gesture = match self.tool.kind {
                 ToolKind::Select => {
@@ -2536,12 +2700,12 @@ impl LogicEditor {
 
     fn selected_custom_kind(&self) -> Option<ComponentKind> {
         (self.tool.kind == ToolKind::Custom)
-            .then_some(self.active_custom)
+            .then_some(self.active_hotbar_slot.as_deref())
             .flatten()
-            .and_then(|index| self.hotbar.get(index))
+            .and_then(|path| get_hotbar_slot(&self.hotbar, path))
             .and_then(|slot| match slot {
                 HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
-                HotbarSlot::Builtin(_) => None,
+                _ => None,
             })
     }
 
@@ -3294,9 +3458,170 @@ fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<Wire> {
 }
 
 enum HotbarAction {
-    SelectBuiltin(ToolKind),
-    SelectCustom(usize),
+    SelectPath(Vec<usize>),
+    OpenFolder(Vec<usize>),
     SelectPort(ToolKind, usize, Scale),
+}
+
+fn hotbar_key_label(index: usize) -> Option<&'static str> {
+    match index {
+        0 => Some("1"),
+        1 => Some("2"),
+        2 => Some("3"),
+        3 => Some("4"),
+        4 => Some("5"),
+        5 => Some("6"),
+        6 => Some("7"),
+        7 => Some("8"),
+        8 => Some("9"),
+        9 => Some("0"),
+        _ => None,
+    }
+}
+
+fn visible_hotbar_entries(
+    slots: &[HotbarSlot],
+    folder_path: &[usize],
+) -> Vec<(Vec<usize>, HotbarSlot)> {
+    let slots = get_hotbar_slots(slots, folder_path).unwrap_or(slots);
+    slots
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, slot)| {
+            let mut path = folder_path.to_vec();
+            path.push(index);
+            (path, slot)
+        })
+        .collect()
+}
+
+fn hotbar_folder_name<'a>(slots: &'a [HotbarSlot], folder_path: &[usize]) -> &'a str {
+    match get_hotbar_slot(slots, folder_path) {
+        Some(HotbarSlot::Folder { name, .. }) => name,
+        _ => "Hotbar",
+    }
+}
+
+fn get_hotbar_slots<'a>(
+    slots: &'a [HotbarSlot],
+    folder_path: &[usize],
+) -> Option<&'a [HotbarSlot]> {
+    match folder_path.split_first() {
+        None => Some(slots),
+        Some((index, rest)) => match slots.get(*index)? {
+            HotbarSlot::Folder { slots, .. } => get_hotbar_slots(slots, rest),
+            _ => None,
+        },
+    }
+}
+
+fn get_hotbar_slots_mut<'a>(
+    slots: &'a mut Vec<HotbarSlot>,
+    folder_path: &[usize],
+) -> &'a mut Vec<HotbarSlot> {
+    match folder_path.split_first() {
+        None => slots,
+        Some((index, rest)) => match slots
+            .get_mut(*index)
+            .expect("active hotbar folder path is valid")
+        {
+            HotbarSlot::Folder { slots, .. } => get_hotbar_slots_mut(slots, rest),
+            _ => panic!("active hotbar folder path points to a non-folder"),
+        },
+    }
+}
+
+fn get_hotbar_slot<'a>(slots: &'a [HotbarSlot], path: &[usize]) -> Option<&'a HotbarSlot> {
+    let (index, rest) = path.split_first()?;
+    let slot = slots.get(*index)?;
+    if rest.is_empty() {
+        return Some(slot);
+    }
+    match slot {
+        HotbarSlot::Folder { slots, .. } => get_hotbar_slot(slots, rest),
+        _ => None,
+    }
+}
+
+fn find_custom_hotbar_slot_mut(
+    slots: &mut [HotbarSlot],
+    source: ComponentFileRef,
+) -> Option<&mut HotbarSlot> {
+    for slot in slots {
+        match slot {
+            HotbarSlot::Custom {
+                source: existing, ..
+            } if *existing == source => return Some(slot),
+            HotbarSlot::Folder { slots, .. } => {
+                if let Some(found) = find_custom_hotbar_slot_mut(slots, source) {
+                    return Some(found);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn remove_hotbar_slot_at(slots: &mut Vec<HotbarSlot>, path: &[usize]) -> Option<HotbarSlot> {
+    let (index, parent_path) = path.split_last()?;
+    let parent = get_hotbar_slots_mut(slots, parent_path);
+    (*index < parent.len()).then(|| parent.remove(*index))
+}
+
+fn move_hotbar_slot(slots: &mut Vec<HotbarSlot>, source: &[usize], target: &[usize]) {
+    if source == target || target.starts_with(source) {
+        return;
+    }
+    let target_is_folder = matches!(
+        get_hotbar_slot(slots, target),
+        Some(HotbarSlot::Folder { .. })
+    );
+    let Some(slot) = remove_hotbar_slot_at(slots, source) else {
+        return;
+    };
+
+    let mut adjusted_target = target.to_vec();
+    if source.len() == target.len()
+        && source[..source.len() - 1] == target[..target.len() - 1]
+        && source[source.len() - 1] < target[target.len() - 1]
+    {
+        *adjusted_target
+            .last_mut()
+            .expect("target path is non-empty") -= 1;
+    }
+
+    if target_is_folder {
+        if let Some(HotbarSlot::Folder {
+            slots: children, ..
+        }) = get_hotbar_slot_mut(slots, &adjusted_target)
+        {
+            children.push(slot);
+        }
+        return;
+    }
+
+    let Some((index, parent_path)) = adjusted_target.split_last() else {
+        return;
+    };
+    let parent = get_hotbar_slots_mut(slots, parent_path);
+    parent.insert((*index).min(parent.len()), slot);
+}
+
+fn get_hotbar_slot_mut<'a>(
+    slots: &'a mut [HotbarSlot],
+    path: &[usize],
+) -> Option<&'a mut HotbarSlot> {
+    let (index, rest) = path.split_first()?;
+    let slot = slots.get_mut(*index)?;
+    if rest.is_empty() {
+        return Some(slot);
+    }
+    match slot {
+        HotbarSlot::Folder { slots, .. } => get_hotbar_slot_mut(slots, rest),
+        _ => None,
+    }
 }
 
 fn color32(color: [f32; 4]) -> egui::Color32 {
@@ -3333,7 +3658,7 @@ fn hotbar_button(
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(HOTBAR_SLOT_SIZE, HOTBAR_SLOT_SIZE),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
     let visuals = ui.visuals();
     let (bg, stroke) = if selected {
@@ -3516,6 +3841,21 @@ fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot: &HotbarSl
         HotbarSlot::Builtin(ToolKind::Input) => paint_port_glyph(painter, rect, ToolKind::Input),
         HotbarSlot::Builtin(ToolKind::Output) => paint_port_glyph(painter, rect, ToolKind::Output),
         HotbarSlot::Builtin(ToolKind::Custom) => paint_glyph_box(painter, rect, gate),
+        HotbarSlot::Locked { .. } => {
+            paint_glyph_box(painter, rect, egui::Color32::DARK_GRAY);
+            let lock_rect = glyph_inset(rect, 0.32, 0.42, 0.68, 0.78);
+            painter.rect_filled(lock_rect, 1.5, egui::Color32::DARK_GRAY);
+            painter.circle_stroke(
+                glyph_point(rect, 0.5, 0.42),
+                rect.width() * 0.13,
+                egui::Stroke::new(2.0, egui::Color32::DARK_GRAY),
+            );
+        }
+        HotbarSlot::Folder { .. } => {
+            let folder = color32(DrawTriangle::HIGHLIGHT_COLOR);
+            painter.rect_filled(glyph_inset(rect, 0.12, 0.3, 0.88, 0.78), 2.0, folder);
+            painter.rect_filled(glyph_inset(rect, 0.18, 0.2, 0.52, 0.38), 2.0, folder);
+        }
         HotbarSlot::Custom { .. } => {
             paint_glyph_box(painter, rect, gate);
             for (x, y) in [(0.5, 0.08), (0.5, 0.92)] {
