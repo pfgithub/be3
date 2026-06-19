@@ -1,0 +1,352 @@
+use super::*;
+
+pub(super) fn snap_coordinate(value: f32, scale: Scale) -> i64 {
+    let scale = scale.get();
+    (value / scale as f32).floor() as i64 * scale
+}
+
+pub(super) fn snap_point(point: [f32; 2], scale: Scale) -> Point {
+    Point::new(
+        snap_coordinate(point[0], scale),
+        snap_coordinate(point[1], scale),
+    )
+}
+
+pub(super) fn snapped_delta(start: [f32; 2], end: [f32; 2], scale: Scale) -> Point {
+    let scale = scale.get() as f32;
+    Point::new(
+        ((end[0] - start[0]) / scale).round() as i64 * scale as i64,
+        ((end[1] - start[1]) / scale).round() as i64 * scale as i64,
+    )
+}
+
+pub(super) fn translate_point(point: Point, delta: Point) -> Option<Point> {
+    Some(Point::new(
+        point.x.checked_add(delta.x)?,
+        point.y.checked_add(delta.y)?,
+    ))
+}
+
+pub(super) fn move_selected_wire(selected: SelectedWire, delta: Point) -> Option<Wire> {
+    let start = if selected.start {
+        translate_point(selected.wire.start, delta)?
+    } else {
+        selected.wire.start
+    };
+    let end = if selected.end {
+        translate_point(selected.wire.end, delta)?
+    } else {
+        selected.wire.end
+    };
+    Wire::new(start, end, selected.wire.scale).ok()
+}
+
+pub(super) fn world_to_screen(world: [f32; 2], camera: Camera, rect: egui::Rect) -> egui::Pos2 {
+    rect.center()
+        + egui::vec2(
+            (world[0] - camera.center[0]) * camera.zoom,
+            (world[1] - camera.center[1]) * camera.zoom,
+        )
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct WorldRect {
+    min: [f32; 2],
+    max: [f32; 2],
+}
+
+impl WorldRect {
+    pub(super) fn from_points(first: [f32; 2], second: [f32; 2]) -> Self {
+        Self {
+            min: [first[0].min(second[0]), first[1].min(second[1])],
+            max: [first[0].max(second[0]), first[1].max(second[1])],
+        }
+    }
+
+    pub(super) fn intersects(self, min: [f32; 2], max: [f32; 2]) -> bool {
+        self.min[0] <= max[0]
+            && min[0] <= self.max[0]
+            && self.min[1] <= max[1]
+            && min[1] <= self.max[1]
+    }
+}
+
+pub(super) fn component_contains(component: &Component, point: [f32; 2]) -> bool {
+    let Some(size) = component.size() else {
+        return false;
+    };
+    let (Some(right), Some(bottom)) = (
+        component.position.x.checked_add(size.width),
+        component.position.y.checked_add(size.height),
+    ) else {
+        return false;
+    };
+    point[0] >= component.position.x as f32
+        && point[0] <= right as f32
+        && point[1] >= component.position.y as f32
+        && point[1] <= bottom as f32
+}
+
+pub(super) fn component_intersects(component: &Component, rect: WorldRect) -> bool {
+    let Some(size) = component.size() else {
+        return false;
+    };
+    let (Some(right), Some(bottom)) = (
+        component.position.x.checked_add(size.width),
+        component.position.y.checked_add(size.height),
+    ) else {
+        return false;
+    };
+    rect.intersects(
+        [component.position.x as f32, component.position.y as f32],
+        [right as f32, bottom as f32],
+    )
+}
+
+pub(super) fn point_cell_intersects(point: Point, scale: Scale, rect: WorldRect) -> bool {
+    let scale = scale.get() as f32;
+    rect.intersects(
+        [point.x as f32, point.y as f32],
+        [point.x as f32 + scale, point.y as f32 + scale],
+    )
+}
+
+pub(super) fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<Wire> {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let (start, end) = if dx.abs() >= dy.abs() {
+        let min_x = start.x.min(end.x);
+        let max_x = start.x.max(end.x);
+        (Point::new(min_x, start.y), Point::new(max_x, start.y))
+    } else {
+        let min_y = start.y.min(end.y);
+        let max_y = start.y.max(end.y);
+        (Point::new(start.x, min_y), Point::new(start.x, max_y))
+    };
+    Wire::new(start, end, scale).ok()
+}
+
+pub(super) fn rotate_left(rotation: Rotation) -> Rotation {
+    match rotation {
+        Rotation::Up => Rotation::Left,
+        Rotation::Right => Rotation::Up,
+        Rotation::Down => Rotation::Right,
+        Rotation::Left => Rotation::Down,
+    }
+}
+
+pub(super) fn rotate_right(rotation: Rotation) -> Rotation {
+    match rotation {
+        Rotation::Up => Rotation::Right,
+        Rotation::Right => Rotation::Down,
+        Rotation::Down => Rotation::Left,
+        Rotation::Left => Rotation::Up,
+    }
+}
+
+pub(super) fn previous_scale(scale: Scale) -> Scale {
+    let current = scale.get() as u8;
+    let value = SCALES
+        .iter()
+        .copied()
+        .rev()
+        .find(|value| *value < current)
+        .unwrap_or(current);
+    Scale::new(value).expect("scale shortcut uses valid scale")
+}
+
+pub(super) fn next_scale(scale: Scale) -> Scale {
+    let current = scale.get() as u8;
+    let value = SCALES
+        .iter()
+        .copied()
+        .find(|value| *value > current)
+        .unwrap_or(current);
+    Scale::new(value).expect("scale shortcut uses valid scale")
+}
+
+pub(super) fn placement_rotation(
+    drag_start: [f32; 2],
+    pointer: [f32; 2],
+    selected: Rotation,
+    kind: ToolKind,
+) -> Rotation {
+    match drag_rotation(drag_start, pointer) {
+        Some(rotation) if kind == ToolKind::Input => rotation.flip(),
+        Some(rotation) => rotation,
+        None => selected,
+    }
+}
+
+pub(super) fn component_preview(
+    tool: Tool,
+    anchor: Point,
+    rotation: Rotation,
+    custom_kind: Option<&ComponentKind>,
+) -> Option<Component> {
+    let kind = match tool.kind {
+        ToolKind::Select | ToolKind::Wire | ToolKind::ConfigureStorage => return None,
+        ToolKind::Not => ComponentKind::Not { scale: tool.scale },
+        ToolKind::MergerSplitter => {
+            let (input_scale, output_scale) = tool.conversion_scales();
+            ComponentKind::MergerSplitter {
+                input_scale,
+                output_scale,
+            }
+        }
+        ToolKind::Led => ComponentKind::Led,
+        ToolKind::Storage => ComponentKind::Storage {
+            scale: tool.scale,
+            value: 0,
+        },
+        ToolKind::Input => ComponentKind::Input {
+            scale: tool.scale,
+            id: InputId::from_u128(u128::MAX),
+            label: String::new(),
+        },
+        ToolKind::Output => ComponentKind::Output {
+            scale: tool.scale,
+            id: OutputId::from_u128(u128::MAX),
+            label: String::new(),
+        },
+        ToolKind::Custom => custom_kind.cloned()?,
+    };
+    let position = match tool.kind {
+        ToolKind::Custom => subcomponent_placement_position(anchor, rotation, &kind),
+        ToolKind::MergerSplitter => {
+            let (_, output_scale) = tool.conversion_scales();
+            component_placement_position(anchor, rotation, output_scale, tool.kind)
+        }
+        ToolKind::Led => component_placement_position(anchor, rotation, Scale::ONE, tool.kind),
+        _ => component_placement_position(anchor, rotation, tool.scale, tool.kind),
+    };
+    Some(Component {
+        id: ComponentId(u64::MAX),
+        position,
+        rotation,
+        kind,
+    })
+}
+
+pub(super) fn drag_rotation(start: [f32; 2], pointer: [f32; 2]) -> Option<Rotation> {
+    let dx = pointer[0] - start[0];
+    let dy = pointer[1] - start[1];
+    if dx == 0.0 && dy == 0.0 {
+        return None;
+    }
+    Some(if dx.abs() >= dy.abs() {
+        if dx >= 0.0 {
+            Rotation::Right
+        } else {
+            Rotation::Left
+        }
+    } else if dy >= 0.0 {
+        Rotation::Down
+    } else {
+        Rotation::Up
+    })
+}
+
+pub(super) fn component_placement_position(
+    anchor: Point,
+    rotation: Rotation,
+    scale: Scale,
+    kind: ToolKind,
+) -> Point {
+    if matches!(
+        kind,
+        ToolKind::MergerSplitter | ToolKind::Input | ToolKind::Output
+    ) {
+        return anchor;
+    }
+
+    let scale = scale.get();
+    match rotation {
+        Rotation::Up => Point::new(anchor.x, anchor.y - scale),
+        Rotation::Right | Rotation::Down => anchor,
+        Rotation::Left => Point::new(anchor.x - scale, anchor.y),
+    }
+}
+
+/// Places a custom component so the snapped click anchor sits on its leading
+/// edge for the dragged facing, mirroring how the built-in tools anchor.
+pub(super) fn subcomponent_placement_position(
+    anchor: Point,
+    rotation: Rotation,
+    kind: &ComponentKind,
+) -> Point {
+    let probe = Component {
+        id: ComponentId(u64::MAX),
+        position: anchor,
+        rotation,
+        kind: kind.clone(),
+    };
+    let Some(size) = probe.size() else {
+        return anchor;
+    };
+    match rotation {
+        Rotation::Up => Point::new(anchor.x, anchor.y - size.height),
+        Rotation::Right | Rotation::Down => anchor,
+        Rotation::Left => Point::new(anchor.x - size.width, anchor.y),
+    }
+}
+
+pub(super) fn nearest_wire(wires: &[Wire], point: [f32; 2], radius: f32) -> Option<Wire> {
+    wires
+        .iter()
+        .copied()
+        .filter_map(|wire| {
+            let scale = wire.scale.get() as f32;
+            let (min_x, max_x, min_y, max_y) = match wire.orientation() {
+                logicgame::grid::Orientation::Horizontal => (
+                    wire.start.x as f32,
+                    wire.end.x as f32 + scale,
+                    wire.start.y as f32,
+                    wire.start.y as f32 + scale,
+                ),
+                logicgame::grid::Orientation::Vertical => (
+                    wire.start.x as f32,
+                    wire.start.x as f32 + scale,
+                    wire.start.y as f32,
+                    wire.end.y as f32 + scale,
+                ),
+            };
+            let closest_x = point[0].clamp(min_x, max_x);
+            let closest_y = point[1].clamp(min_y, max_y);
+            let distance = ((point[0] - closest_x).powi(2) + (point[1] - closest_y).powi(2)).sqrt();
+            (distance <= radius).then_some((distance, wire))
+        })
+        .min_by(|(first_distance, first), (second_distance, second)| {
+            first_distance
+                .total_cmp(second_distance)
+                .then_with(|| first.cmp(second))
+        })
+        .map(|(_, wire)| wire)
+}
+
+pub(super) fn nearest_wire_endpoint(
+    wires: &[Wire],
+    point: [f32; 2],
+    radius: f32,
+) -> Option<WireEndpoint> {
+    wires
+        .iter()
+        .copied()
+        .flat_map(|wire| [WireEnd::Start, WireEnd::End].map(move |end| WireEndpoint { wire, end }))
+        .filter_map(|endpoint| {
+            let scale = endpoint.wire.scale.get() as f32;
+            let endpoint_point = endpoint.point();
+            let center = [
+                endpoint_point.x as f32 + scale * 0.5,
+                endpoint_point.y as f32 + scale * 0.5,
+            ];
+            let distance = ((point[0] - center[0]).powi(2) + (point[1] - center[1]).powi(2)).sqrt();
+            (distance <= radius + scale * 0.5).then_some((distance, endpoint))
+        })
+        .min_by(|(first_distance, first), (second_distance, second)| {
+            first_distance
+                .total_cmp(second_distance)
+                .then_with(|| first.cmp(second))
+        })
+        .map(|(_, endpoint)| endpoint)
+}
