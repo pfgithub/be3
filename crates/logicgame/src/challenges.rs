@@ -129,7 +129,7 @@ fn adder_challenge(width: u8, goal: &str) -> Challenge {
                 values: b_values,
             },
             ChallengePort {
-                label: "CARRY IN",
+                label: "CARRY",
                 scale: Scale::ONE,
                 values: carry_in,
             },
@@ -141,7 +141,7 @@ fn adder_challenge(width: u8, goal: &str) -> Challenge {
                 values: sum_values,
             },
             ChallengePort {
-                label: "CARRY OUT",
+                label: "CARRY",
                 scale: Scale::ONE,
                 values: carry_out,
             },
