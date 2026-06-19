@@ -19,6 +19,7 @@ pub enum ChallengeId {
     SrLatch,
     TFlipFlop,
     MemoryCell,
+    BinaryAddition,
 }
 
 impl ChallengeId {
@@ -39,7 +40,12 @@ impl ChallengeId {
             ChallengeId::SrLatch => "SR Latch",
             ChallengeId::TFlipFlop => "T Flip-Flop",
             ChallengeId::MemoryCell => "Memory Cell",
+            ChallengeId::BinaryAddition => "Binary Addition",
         }
+    }
+
+    pub fn is_special(self) -> bool {
+        matches!(self, Self::BinaryAddition)
     }
 }
 
@@ -437,10 +443,17 @@ pub fn generate_challenge(challenge: ChallengeId) -> Challenge {
             }
         }
         ChallengeId::MemoryCell => memory_cell_challenge(&mut rng),
+        ChallengeId::BinaryAddition => Challenge {
+            goal: "Fill in the carry bits and output bits for longhand binary addition."
+                .to_string(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            ticks: 0,
+        },
     }
 }
 
-pub const CHALLENGES: [ChallengeId; 15] = [
+pub const CHALLENGES: [ChallengeId; 16] = [
     ChallengeId::Nor,
     ChallengeId::Or,
     ChallengeId::Nand,
@@ -456,6 +469,7 @@ pub const CHALLENGES: [ChallengeId; 15] = [
     ChallengeId::SrLatch,
     ChallengeId::TFlipFlop,
     ChallengeId::MemoryCell,
+    ChallengeId::BinaryAddition,
 ];
 
 #[cfg(test)]

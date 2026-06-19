@@ -1,3 +1,4 @@
+mod binary_addition;
 mod component_files;
 mod editor;
 mod renderer;
@@ -13,6 +14,7 @@ use logicgame::grid::ComponentFileRef;
 use renderer::GridRenderer;
 use uuid::Uuid;
 
+use crate::binary_addition::BinaryAdditionQuiz;
 use crate::component_files::ComponentFileSource;
 
 const APP_ID: &str = "Logic Game";
@@ -40,6 +42,7 @@ struct LogicGame {
     component_files_list: Vec<ComponentFile>,
     challenge_solutions: BTreeMap<challenges::ChallengeId, Vec<ChallengeSolutionFile>>,
     challenge_progress: ChallengeProgress,
+    binary_addition: BinaryAdditionQuiz,
     active_file: Option<ActiveFile>,
     persistence_error: Option<String>,
     new_component_open: bool,
@@ -61,14 +64,18 @@ enum ActiveFile {
         id: Uuid,
         completed: bool,
     },
+    SpecialChallenge {
+        challenge: challenges::ChallengeId,
+    },
 }
 
 impl ActiveFile {
-    fn file_ref(&self) -> ComponentFileRef {
+    fn file_ref(&self) -> Option<ComponentFileRef> {
         match self {
             Self::Component { id } | Self::ChallengeSolution { id, .. } => {
-                ComponentFileRef { id: *id }
+                Some(ComponentFileRef { id: *id })
             }
+            Self::SpecialChallenge { .. } => None,
         }
     }
 }
@@ -106,6 +113,7 @@ impl LogicGame {
             component_files_list: Vec::new(),
             challenge_solutions: BTreeMap::new(),
             challenge_progress: ChallengeProgress::default(),
+            binary_addition: BinaryAdditionQuiz::default(),
             active_file: None,
             persistence_error: None,
             new_component_open: false,
@@ -190,7 +198,8 @@ impl LogicGame {
             .show(context, |ui| {
                 ui.strong("Challenges");
                 for challenge_id in challenges::CHALLENGES {
-                    let active = self.editor.active_challenge_id() == Some(challenge_id);
+                    let active = self.editor.active_challenge_id() == Some(challenge_id)
+                        || self.active_special_challenge() == Some(challenge_id);
                     let passed = self.challenge_progress.is_passed(challenge_id);
                     ui.horizontal(|ui| {
                         let label = if passed {
@@ -198,18 +207,28 @@ impl LogicGame {
                         } else {
                             challenge_id.name().to_owned()
                         };
-                        if ui.selectable_label(active, label).clicked()
-                            && self
+                        if ui.selectable_label(active, label).clicked() {
+                            if challenge_id.is_special() {
+                                requested_solution = None;
+                                requested_new_solution = Some(challenge_id);
+                            } else if self
                                 .challenge_solutions
                                 .get(&challenge_id)
                                 .is_none_or(Vec::is_empty)
-                        {
+                            {
+                                requested_new_solution = Some(challenge_id);
+                            }
+                        }
+                        if !challenge_id.is_special() && ui.button("New Solution").clicked() {
                             requested_new_solution = Some(challenge_id);
                         }
-                        if ui.button("New Solution").clicked() {
-                            requested_new_solution = Some(challenge_id);
+                        if challenge_id.is_special() {
+                            ui.weak("quiz");
                         }
                     });
+                    if challenge_id.is_special() {
+                        continue;
+                    }
                     for solution in self
                         .challenge_solutions
                         .get(&challenge_id)
@@ -220,7 +239,7 @@ impl LogicGame {
                         let active = self
                             .active_file
                             .as_ref()
-                            .is_some_and(|active| active.file_ref() == file);
+                            .is_some_and(|active| active.file_ref() == Some(file));
                         ui.horizontal(|ui| {
                             ui.add_space(12.0);
                             let text = if solution.completed {
@@ -276,7 +295,7 @@ impl LogicGame {
                         let active = self
                             .active_file
                             .as_ref()
-                            .is_some_and(|active| active.file_ref() == file);
+                            .is_some_and(|active| active.file_ref() == Some(file));
                         let response = ui.selectable_label(active, &component.name);
                         if response.clicked() {
                             requested_component = Some(component.id);
@@ -323,7 +342,11 @@ impl LogicGame {
             self.open_challenge_solution(challenge, id);
         }
         if let Some(id) = requested_new_solution {
-            self.create_challenge_solution(id);
+            if id.is_special() {
+                self.open_special_challenge(id);
+            } else {
+                self.create_challenge_solution(id);
+            }
         }
         if let Some((challenge, id)) = requested_delete_solution {
             self.delete_challenge_solution(challenge, id);
@@ -430,7 +453,7 @@ impl LogicGame {
         if self
             .active_file
             .as_ref()
-            .is_some_and(|active| active.file_ref() == file)
+            .is_some_and(|active| active.file_ref() == Some(file))
             || !self.force_save()
         {
             return;
@@ -448,6 +471,26 @@ impl LogicGame {
                 self.persistence_error = None;
             }
             Err(error) => self.persistence_error = Some(error.to_string()),
+        }
+    }
+
+    fn open_special_challenge(&mut self, challenge: challenges::ChallengeId) {
+        if self.active_special_challenge() == Some(challenge) || !self.force_save() {
+            return;
+        }
+        self.editor.replace_grid(logicgame::grid::LogicGrid::new());
+        self.binary_addition = BinaryAdditionQuiz::default();
+        self.active_file = Some(ActiveFile::SpecialChallenge { challenge });
+        self.observed_revision = 0;
+        self.saved_revision = 0;
+        self.save_due = None;
+        self.persistence_error = None;
+    }
+
+    fn active_special_challenge(&self) -> Option<challenges::ChallengeId> {
+        match self.active_file.as_ref() {
+            Some(ActiveFile::SpecialChallenge { challenge }) => Some(*challenge),
+            _ => None,
         }
     }
 
@@ -479,6 +522,10 @@ impl LogicGame {
     }
 
     fn create_challenge_solution(&mut self, id: challenges::ChallengeId) {
+        if id.is_special() {
+            self.open_special_challenge(id);
+            return;
+        }
         if !self.force_save() {
             return;
         }
@@ -508,7 +555,7 @@ impl LogicGame {
         if self
             .active_file
             .as_ref()
-            .is_some_and(|active| active.file_ref() == file)
+            .is_some_and(|active| active.file_ref() == Some(file))
             || !self.force_save()
         {
             return;
@@ -595,6 +642,18 @@ impl LogicGame {
         self.force_save();
     }
 
+    fn mark_special_challenge_passed(&mut self, challenge: challenges::ChallengeId) {
+        self.challenge_progress.passed.insert(challenge, true);
+        if let Some(files) = &self.component_files {
+            if let Err(error) = files.save_progress(&self.challenge_progress) {
+                self.persistence_error = Some(error.to_string());
+                return;
+            }
+        }
+        self.persistence_error = None;
+        self.refresh_files();
+    }
+
     fn set_cached_solution_completed(
         &mut self,
         challenge: challenges::ChallengeId,
@@ -668,6 +727,10 @@ impl LogicGame {
                 }
                 result
             }
+            ActiveFile::SpecialChallenge { .. } => {
+                self.save_due = None;
+                return true;
+            }
         };
         match result {
             Ok(()) => {
@@ -716,7 +779,7 @@ impl LogicGame {
         if self
             .active_file
             .as_ref()
-            .is_some_and(|active| active.file_ref() == file)
+            .is_some_and(|active| active.file_ref() == Some(file))
         {
             self.persistence_error =
                 Some("A component cannot contain the file currently being edited".to_owned());
@@ -741,19 +804,31 @@ impl LogicGame {
 
 impl eframe::App for LogicGame {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.active_file.is_some() {
-            self.editor.ui(ui);
-            self.observe_changes();
-            if self.editor.take_challenge_passed() {
-                self.mark_active_challenge_passed();
+        match self.active_file.clone() {
+            Some(ActiveFile::SpecialChallenge { challenge }) => {
+                match challenge {
+                    challenges::ChallengeId::BinaryAddition => self.binary_addition.ui(ui),
+                    _ => {}
+                }
+                if self.binary_addition.take_passed() {
+                    self.mark_special_challenge_passed(challenge);
+                }
             }
-            self.autosave();
-        } else {
-            egui::Frame::central_panel(ui.style()).show(ui, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.weak("Create or select a component to begin editing");
+            Some(_) => {
+                self.editor.ui(ui);
+                self.observe_changes();
+                if self.editor.take_challenge_passed() {
+                    self.mark_active_challenge_passed();
+                }
+                self.autosave();
+            }
+            None => {
+                egui::Frame::central_panel(ui.style()).show(ui, |ui| {
+                    ui.centered_and_justified(|ui| {
+                        ui.weak("Create or select a component to begin editing");
+                    });
                 });
-            });
+            }
         }
 
         let context = ui.ctx().clone();
