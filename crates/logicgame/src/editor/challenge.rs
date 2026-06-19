@@ -14,7 +14,6 @@ impl LogicEditor {
             test: ChallengeTest::default(),
             passed_event: false,
         });
-        self.set_context_hotbar_folder(("Challenge", default_component_slots()));
     }
 
     pub fn active_challenge_id(&self) -> Option<ChallengeId> {

@@ -585,7 +585,6 @@ impl LogicEditor {
         self.configured_storage = None;
         self.simulation = Simulation::default();
         self.challenge = None;
-        self.set_context_hotbar_folder(("Component", default_component_slots()));
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {

@@ -124,12 +124,6 @@ impl LogicEditor {
                 .filter_map(hotbar_slot_from_save)
                 .collect()
         };
-        self.set_context_hotbar_folder(
-            self.challenge
-                .as_ref()
-                .map(|_| ("Challenge", default_component_slots()))
-                .unwrap_or_else(|| ("Component", default_component_slots())),
-        );
         if self.tool.kind == ToolKind::Custom {
             self.tool.kind = ToolKind::Select;
             self.active_hotbar_slot = None;
@@ -216,22 +210,6 @@ impl LogicEditor {
         {
             eprintln!("failed to save hotbar: {error}");
         }
-    }
-
-    pub(super) fn set_context_hotbar_folder(&mut self, (name, slots): (&str, Vec<HotbarSlot>)) {
-        let Some(HotbarSlot::Folder {
-            name: folder_name,
-            slots: folder_slots,
-            ..
-        }) = self
-            .hotbar
-            .iter_mut()
-            .find(|slot| matches!(slot, HotbarSlot::Folder { name, .. } if name == "Component" || name == "Challenge"))
-        else {
-            return;
-        };
-        *folder_name = name.to_string();
-        *folder_slots = slots;
     }
 
     pub(super) fn show_hotbar(&mut self, ui: &mut egui::Ui) {
