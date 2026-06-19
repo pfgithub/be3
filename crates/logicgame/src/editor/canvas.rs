@@ -68,14 +68,7 @@ impl LogicEditor {
         if primary_pressed && response.hovered() {
             // The custom component to place, resolved before the match so the
             // arm does not borrow `self` while assigning `self.gesture`.
-            let custom_kind = (self.tool.kind == ToolKind::Custom)
-                .then(|| self.active_hotbar_slot.as_deref())
-                .flatten()
-                .and_then(|path| get_hotbar_slot(&self.hotbar, path))
-                .and_then(|slot| match slot {
-                    HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
-                    _ => None,
-                });
+            let custom_kind = self.selected_custom_kind();
             self.gesture = match self.tool.kind {
                 ToolKind::Select => {
                     let additive = response.ctx.input(|input| input.modifiers.shift);
@@ -425,11 +418,7 @@ impl LogicEditor {
         (self.tool.kind == ToolKind::Custom)
             .then_some(self.active_hotbar_slot.as_deref())
             .flatten()
-            .and_then(|path| get_hotbar_slot(&self.hotbar, path))
-            .and_then(|slot| match slot {
-                HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
-                _ => None,
-            })
+            .and_then(|path| self.selected_hotbar_kind(path))
     }
 
     pub(super) fn placement_preview_component(&self, pointer: [f32; 2]) -> Option<Component> {

@@ -144,6 +144,9 @@ enum HotbarSlot {
     Locked {
         name: String,
     },
+    ChallengeCompletion {
+        challenge: ChallengeId,
+    },
     Folder {
         name: String,
         slots: Vec<HotbarSlot>,
@@ -159,6 +162,7 @@ impl HotbarSlot {
     fn label(&self) -> &str {
         match self {
             Self::Builtin(kind) => kind.label(),
+            Self::ChallengeCompletion { challenge } => challenge.name(),
             Self::Locked { name } | Self::Folder { name, .. } | Self::Custom { name, .. } => name,
         }
     }

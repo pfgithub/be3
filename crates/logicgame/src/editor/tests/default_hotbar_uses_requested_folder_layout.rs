@@ -29,7 +29,15 @@ fn default_hotbar_uses_requested_folder_layout() {
     assert!(matches!(slots[0], HotbarSlot::Builtin(ToolKind::Not)));
     assert!(matches!(
         &slots[1],
-        HotbarSlot::Locked { name } if name == "And gate"
+        HotbarSlot::ChallengeCompletion {
+            challenge: ChallengeId::And
+        }
+    ));
+    assert!(matches!(
+        &slots[2],
+        HotbarSlot::ChallengeCompletion {
+            challenge: ChallengeId::Or
+        }
     ));
 
     assert!(hotbar

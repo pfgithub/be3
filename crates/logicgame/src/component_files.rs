@@ -128,6 +128,9 @@ pub enum SaveHotbarSlot {
     Locked {
         name: String,
     },
+    ChallengeCompletion {
+        challenge: ChallengeId,
+    },
     Folder {
         name: String,
         slots: Vec<SaveHotbarSlot>,
