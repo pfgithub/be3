@@ -8,13 +8,17 @@ pub enum ChallengeId {
     Or,
     Nand,
     And,
+    And3,
     Xor,
     Transistor,
+    TwoTickDelay,
+    FlipOneBit,
     Adder,
     Adder2,
     Adder4,
     SrLatch,
     TFlipFlop,
+    MemoryCell,
 }
 
 impl ChallengeId {
@@ -24,13 +28,17 @@ impl ChallengeId {
             ChallengeId::Or => "OR",
             ChallengeId::Nand => "NAND",
             ChallengeId::And => "AND",
+            ChallengeId::And3 => "3-AND",
             ChallengeId::Xor => "XOR",
             ChallengeId::Transistor => "Transistor",
+            ChallengeId::TwoTickDelay => "Two Tick Delay",
+            ChallengeId::FlipOneBit => "Flip One Bit",
             ChallengeId::Adder => "Adder",
             ChallengeId::Adder2 => "2-bit Adder",
             ChallengeId::Adder4 => "4-bit Adder",
             ChallengeId::SrLatch => "SR Latch",
             ChallengeId::TFlipFlop => "T Flip-Flop",
+            ChallengeId::MemoryCell => "Memory Cell",
         }
     }
 }
@@ -85,6 +93,155 @@ fn binary_gate_challenge(
             label: "OUT",
             scale: Scale::ONE,
             values: output,
+        }],
+        ticks: 1000,
+    }
+}
+
+/// Builds a combinational three-input, one-output challenge over random
+/// single-bit inputs.
+fn ternary_gate_challenge(
+    rng: &mut impl RngCore,
+    goal: &str,
+    op: impl Fn(u64, u64, u64) -> u64,
+) -> Challenge {
+    let mut input_a: Vec<u64> = vec![];
+    let mut input_b: Vec<u64> = vec![];
+    let mut input_c: Vec<u64> = vec![];
+    let mut output: Vec<u64> = vec![];
+    for _ in 0..1000 {
+        let a = rng.next_u64() & 1;
+        let b = rng.next_u64() & 1;
+        let c = rng.next_u64() & 1;
+        input_a.push(a);
+        input_b.push(b);
+        input_c.push(c);
+        output.push(op(a, b, c));
+    }
+    Challenge {
+        goal: goal.to_string(),
+        inputs: vec![
+            ChallengePort {
+                label: "A",
+                scale: Scale::ONE,
+                values: input_a,
+            },
+            ChallengePort {
+                label: "B",
+                scale: Scale::ONE,
+                values: input_b,
+            },
+            ChallengePort {
+                label: "C",
+                scale: Scale::ONE,
+                values: input_c,
+            },
+        ],
+        outputs: vec![ChallengePort {
+            label: "OUT",
+            scale: Scale::ONE,
+            values: output,
+        }],
+        ticks: 1000,
+    }
+}
+
+fn two_tick_delay_challenge(rng: &mut impl RngCore) -> Challenge {
+    let mut input: Vec<u64> = vec![];
+    let mut output: Vec<u64> = vec![];
+    for tick in 0..1000 {
+        let value = rng.next_u64() & 1;
+        input.push(value);
+        output.push(if tick >= 2 { input[tick - 2] } else { 0 });
+    }
+    Challenge {
+        goal: "Build a circuit where OUT repeats IN exactly two ticks later.".to_string(),
+        inputs: vec![ChallengePort {
+            label: "IN",
+            scale: Scale::ONE,
+            values: input,
+        }],
+        outputs: vec![ChallengePort {
+            label: "OUT",
+            scale: Scale::ONE,
+            values: output,
+        }],
+        ticks: 1000,
+    }
+}
+
+fn flip_one_bit_challenge(rng: &mut impl RngCore) -> Challenge {
+    let scale = Scale::new(2).expect("flip-one-bit width is a valid scale");
+    let mut input: Vec<u64> = vec![];
+    let mut output: Vec<u64> = vec![];
+    for _ in 0..1000 {
+        let value = rng.next_u64() & 0b11;
+        input.push(value);
+        output.push(value ^ 0b10);
+    }
+    Challenge {
+        goal:
+            "Build a circuit where OUT inverts VALUE's top bit and leaves the bottom bit unchanged."
+                .to_string(),
+        inputs: vec![ChallengePort {
+            label: "VALUE",
+            scale,
+            values: input,
+        }],
+        outputs: vec![ChallengePort {
+            label: "VALUE",
+            scale,
+            values: output,
+        }],
+        ticks: 1000,
+    }
+}
+
+fn memory_cell_challenge(rng: &mut impl RngCore) -> Challenge {
+    let value_scale = Scale::new(8).expect("memory cell width is a valid scale");
+    let mut input_value: Vec<u64> = vec![];
+    let mut set: Vec<u64> = vec![];
+    let mut get: Vec<u64> = vec![];
+    let mut output_value: Vec<u64> = vec![];
+    let mut stored = 0u64;
+    for _ in 0..1000 {
+        let value = rng.next_u64() & 0xff;
+        let set_value = rng.next_u64() & 1;
+        let get_value = rng.next_u64() & 1;
+        input_value.push(value);
+        set.push(set_value);
+        get.push(get_value);
+        output_value.push(if get_value == 1 { stored } else { 0 });
+        if set_value == 1 {
+            stored = value;
+        }
+    }
+    Challenge {
+        goal: "Build a memory cell: SET stores VALUE for later, GET outputs the stored \
+            VALUE, neither outputs 0, and SET plus GET outputs the old value before \
+            storing the new one."
+            .to_string(),
+        inputs: vec![
+            ChallengePort {
+                label: "VALUE",
+                scale: value_scale,
+                values: input_value,
+            },
+            ChallengePort {
+                label: "SET",
+                scale: Scale::ONE,
+                values: set,
+            },
+            ChallengePort {
+                label: "GET",
+                scale: Scale::ONE,
+                values: get,
+            },
+        ],
+        outputs: vec![ChallengePort {
+            label: "VALUE",
+            scale: value_scale,
+            values: output_value,
         }],
         ticks: 1000,
     }
@@ -175,6 +332,11 @@ pub fn generate_challenge(challenge: ChallengeId) -> Challenge {
             "Build a circuit where OUT is on only when A and B are both on.",
             |a, b| a & b,
         ),
+        ChallengeId::And3 => ternary_gate_challenge(
+            &mut rng,
+            "Build a circuit where OUT is on only when A, B, and C are all on.",
+            |a, b, c| a & b & c,
+        ),
         ChallengeId::Xor => binary_gate_challenge(
             &mut rng,
             "Build a circuit where OUT is on when exactly one of A and B is on.",
@@ -185,6 +347,8 @@ pub fn generate_challenge(challenge: ChallengeId) -> Challenge {
             "Build a circuit where OUT passes A through when the gate B is on, otherwise OUT is off.",
             |a, b| if b == 1 { a } else { 0 },
         ),
+        ChallengeId::TwoTickDelay => two_tick_delay_challenge(&mut rng),
+        ChallengeId::FlipOneBit => flip_one_bit_challenge(&mut rng),
         ChallengeId::Adder => adder_challenge(
             1,
             "Build a full adder: SUM and CARRY OUT must equal A + B + CARRY IN.",
@@ -272,19 +436,27 @@ pub fn generate_challenge(challenge: ChallengeId) -> Challenge {
                 ticks: 1000,
             }
         }
+        ChallengeId::MemoryCell => memory_cell_challenge(&mut rng),
     }
 }
 
-pub const CHALLENGES: [ChallengeId; 11] = [
+pub const CHALLENGES: [ChallengeId; 15] = [
     ChallengeId::Nor,
     ChallengeId::Or,
     ChallengeId::Nand,
     ChallengeId::And,
+    ChallengeId::And3,
     ChallengeId::Xor,
     ChallengeId::Transistor,
+    ChallengeId::TwoTickDelay,
+    ChallengeId::FlipOneBit,
     ChallengeId::Adder,
     ChallengeId::Adder2,
     ChallengeId::Adder4,
     ChallengeId::SrLatch,
     ChallengeId::TFlipFlop,
+    ChallengeId::MemoryCell,
 ];
+
+#[cfg(test)]
+mod tests;
