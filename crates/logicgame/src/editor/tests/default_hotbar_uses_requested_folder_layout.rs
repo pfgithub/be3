@@ -11,7 +11,19 @@ fn default_hotbar_uses_requested_folder_layout() {
     ));
 
     let HotbarSlot::Folder { name, slots } = &hotbar[2] else {
-        panic!("third default slot should be the Logic folder");
+        panic!("third default slot should be the Component folder");
+    };
+    assert_eq!(name, "Component");
+    assert!(matches!(
+        slots.as_slice(),
+        [
+            HotbarSlot::Builtin(ToolKind::Input),
+            HotbarSlot::Builtin(ToolKind::Output),
+        ]
+    ));
+
+    let HotbarSlot::Folder { name, slots } = &hotbar[3] else {
+        panic!("fourth default slot should be the Logic folder");
     };
     assert_eq!(name, "Logic");
     assert!(matches!(slots[0], HotbarSlot::Builtin(ToolKind::Not)));

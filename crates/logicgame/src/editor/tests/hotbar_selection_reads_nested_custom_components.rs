@@ -15,7 +15,7 @@ fn hotbar_selection_reads_nested_custom_components() {
         }],
     });
 
-    editor.select_hotbar_path(vec![6, 0]);
+    editor.select_hotbar_path(vec![7, 0]);
 
     assert_eq!(editor.tool.kind, ToolKind::Custom);
     assert_eq!(editor.selected_custom_kind(), Some(custom_kind));

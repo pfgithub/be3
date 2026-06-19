@@ -109,6 +109,12 @@ enum HotbarSlot {
     Locked {
         name: String,
     },
+    ChallengePort {
+        kind: ToolKind,
+        index: usize,
+        scale: Scale,
+        label: String,
+    },
     Folder {
         name: String,
         slots: Vec<HotbarSlot>,
@@ -124,7 +130,10 @@ impl HotbarSlot {
     fn label(&self) -> &str {
         match self {
             Self::Builtin(kind) => kind.label(),
-            Self::Locked { name } | Self::Folder { name, .. } | Self::Custom { name, .. } => name,
+            Self::Locked { name }
+            | Self::ChallengePort { label: name, .. }
+            | Self::Folder { name, .. }
+            | Self::Custom { name, .. } => name,
         }
     }
 }
@@ -500,6 +509,10 @@ fn default_hotbar() -> Vec<HotbarSlot> {
         HotbarSlot::Builtin(ToolKind::Wire),
         HotbarSlot::Builtin(ToolKind::MergerSplitter),
         HotbarSlot::Folder {
+            name: "Component".to_string(),
+            slots: default_component_slots(),
+        },
+        HotbarSlot::Folder {
             name: "Logic".to_string(),
             slots: vec![
                 HotbarSlot::Builtin(ToolKind::Not),
@@ -548,6 +561,35 @@ fn default_hotbar() -> Vec<HotbarSlot> {
             ],
         },
     ]
+}
+
+fn default_component_slots() -> Vec<HotbarSlot> {
+    vec![
+        HotbarSlot::Builtin(ToolKind::Input),
+        HotbarSlot::Builtin(ToolKind::Output),
+    ]
+}
+
+fn challenge_hotbar_slots(challenge: &Challenge) -> Vec<HotbarSlot> {
+    challenge
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(index, port)| HotbarSlot::ChallengePort {
+            kind: ToolKind::Input,
+            index,
+            scale: port.scale,
+            label: format!("In {}", port.label),
+        })
+        .chain(challenge.outputs.iter().enumerate().map(|(index, port)| {
+            HotbarSlot::ChallengePort {
+                kind: ToolKind::Output,
+                index,
+                scale: port.scale,
+                label: format!("Out {}", port.label),
+            }
+        }))
+        .collect()
 }
 
 impl Default for LogicEditor {
@@ -611,6 +653,17 @@ impl LogicEditor {
                 self.configured_storage = None;
                 self.selection.clear();
             }
+            HotbarSlot::ChallengePort {
+                kind, index, scale, ..
+            } => {
+                self.tool.kind = *kind;
+                self.tool.challenge_port = Some(*index);
+                self.tool.scale = *scale;
+                self.active_hotbar_slot = Some(path);
+                self.gesture = None;
+                self.configured_storage = None;
+                self.selection.clear();
+            }
             HotbarSlot::Folder { .. } => {
                 self.active_hotbar_folder = path;
             }
@@ -627,6 +680,15 @@ impl LogicEditor {
             slots
                 .into_iter()
                 .map(|(name, source, kind)| HotbarSlot::Custom { name, source, kind }),
+        );
+        let challenge_slots = self
+            .challenge
+            .as_ref()
+            .map(|challenge| challenge_hotbar_slots(&challenge.data));
+        self.set_context_hotbar_folder(
+            challenge_slots
+                .map(|slots| ("Challenge", slots))
+                .unwrap_or_else(|| ("Component", default_component_slots())),
         );
         if self.tool.kind == ToolKind::Custom {
             self.tool.kind = ToolKind::Select;
@@ -687,6 +749,7 @@ impl LogicEditor {
         self.configured_storage = None;
         self.simulation = Simulation::default();
         self.challenge = None;
+        self.set_context_hotbar_folder(("Component", default_component_slots()));
     }
 
     pub fn open_challenge_solution(&mut self, id: ChallengeId, grid: LogicGrid) {
@@ -698,16 +761,34 @@ impl LogicEditor {
             challenge_port: None,
         };
         let challenge_data = generate_challenge(id);
+        let challenge_slots = challenge_hotbar_slots(&challenge_data);
         self.challenge = Some(ChallengeState {
             id,
             data: challenge_data,
             test: ChallengeTest::default(),
             passed_event: false,
         });
+        self.set_context_hotbar_folder(("Challenge", challenge_slots));
     }
 
     pub fn active_challenge_id(&self) -> Option<ChallengeId> {
         self.challenge.as_ref().map(|challenge| challenge.id)
+    }
+
+    fn set_context_hotbar_folder(&mut self, (name, slots): (&str, Vec<HotbarSlot>)) {
+        let Some(HotbarSlot::Folder {
+            name: folder_name,
+            slots: folder_slots,
+            ..
+        }) = self
+            .hotbar
+            .iter_mut()
+            .find(|slot| matches!(slot, HotbarSlot::Folder { name, .. } if name == "Component" || name == "Challenge"))
+        else {
+            return;
+        };
+        *folder_name = name.to_string();
+        *folder_slots = slots;
     }
 
     /// The label the active challenge assigns to the input/output port at
@@ -805,29 +886,12 @@ impl LogicEditor {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
 
-        // Per-port placement tools shown only inside a challenge: (port index,
-        // label, scale) for inputs and outputs. Collected up front so the hotbar
-        // closure does not borrow `self.challenge` while mutating `self.tool`.
-        let challenge_ports: Option<(Vec<(usize, String, Scale)>, Vec<(usize, String, Scale)>)> =
-            self.challenge.as_ref().map(|challenge| {
-                let ports = |list: &[logicgame::challenges::ChallengePort]| {
-                    list.iter()
-                        .enumerate()
-                        .map(|(index, port)| (index, port.label.to_string(), port.scale))
-                        .collect::<Vec<_>>()
-                };
-                (
-                    ports(&challenge.data.inputs),
-                    ports(&challenge.data.outputs),
-                )
-            });
-
         egui::Panel::left("logic-hotbar")
             .resizable(false)
             .exact_size(HOTBAR_WIDTH)
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_hotbar(ui, &challenge_ports);
+                    self.show_hotbar(ui);
                 });
             });
 
@@ -896,12 +960,7 @@ impl LogicEditor {
         context.request_repaint();
     }
 
-    fn show_hotbar(
-        &mut self,
-        ui: &mut egui::Ui,
-        challenge_ports: &Option<(Vec<(usize, String, Scale)>, Vec<(usize, String, Scale)>)>,
-    ) {
-        let in_challenge = challenge_ports.is_some();
+    fn show_hotbar(&mut self, ui: &mut egui::Ui) {
         let mut action: Option<HotbarAction> = None;
         let mut remove: Option<Vec<usize>> = None;
         let mut new_folder = false;
@@ -948,13 +1007,6 @@ impl LogicEditor {
         });
 
         for (visible_index, (path, slot)) in visible.iter().enumerate() {
-            // In a challenge the generic Input/Output tools are replaced by the
-            // per-port buttons rendered below.
-            if in_challenge {
-                if let HotbarSlot::Builtin(ToolKind::Input | ToolKind::Output) = slot {
-                    continue;
-                }
-            }
             let hotkey = hotbar_key_label(visible_index);
             let label = match hotkey {
                 Some(hotkey) => format!("{hotkey} {}", slot.label()),
@@ -1015,30 +1067,6 @@ impl LogicEditor {
             }
         }
 
-        if let Some((inputs, outputs)) = challenge_ports {
-            ui.separator();
-            ui.small("Challenge ports");
-            let ports = inputs
-                .iter()
-                .map(|port| (ToolKind::Input, port))
-                .chain(outputs.iter().map(|port| (ToolKind::Output, port)));
-            for (kind, (port_index, label, scale)) in ports {
-                let selected =
-                    self.tool.kind == kind && self.tool.challenge_port == Some(*port_index);
-                let prefix = match kind {
-                    ToolKind::Output => "Out",
-                    _ => "In",
-                };
-                let text = format!("{prefix} {label}");
-                let response = hotbar_button(ui, selected, &text, |painter, rect| {
-                    paint_port_glyph(painter, rect, kind);
-                });
-                if response.clicked() {
-                    action = Some(HotbarAction::SelectPort(kind, *port_index, *scale));
-                }
-            }
-        }
-
         match action {
             Some(HotbarAction::SelectPath(path)) => {
                 if self.active_hotbar_slot.as_ref() == Some(&path) {
@@ -1049,15 +1077,6 @@ impl LogicEditor {
             }
             Some(HotbarAction::OpenFolder(path)) => {
                 self.active_hotbar_folder = path;
-            }
-            Some(HotbarAction::SelectPort(kind, index, scale)) => {
-                self.tool.kind = kind;
-                self.tool.challenge_port = Some(index);
-                self.tool.scale = scale;
-                self.active_hotbar_slot = None;
-                self.gesture = None;
-                self.configured_storage = None;
-                self.selection.clear();
             }
             None => {}
         }
@@ -3460,7 +3479,6 @@ fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<Wire> {
 enum HotbarAction {
     SelectPath(Vec<usize>),
     OpenFolder(Vec<usize>),
-    SelectPort(ToolKind, usize, Scale),
 }
 
 fn hotbar_key_label(index: usize) -> Option<&'static str> {
@@ -3841,6 +3859,7 @@ fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot: &HotbarSl
         HotbarSlot::Builtin(ToolKind::Input) => paint_port_glyph(painter, rect, ToolKind::Input),
         HotbarSlot::Builtin(ToolKind::Output) => paint_port_glyph(painter, rect, ToolKind::Output),
         HotbarSlot::Builtin(ToolKind::Custom) => paint_glyph_box(painter, rect, gate),
+        HotbarSlot::ChallengePort { kind, .. } => paint_port_glyph(painter, rect, *kind),
         HotbarSlot::Locked { .. } => {
             paint_glyph_box(painter, rect, egui::Color32::DARK_GRAY);
             let lock_rect = glyph_inset(rect, 0.32, 0.42, 0.68, 0.78);
