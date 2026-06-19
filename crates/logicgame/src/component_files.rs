@@ -113,17 +113,29 @@ impl ChallengeProgress {
 struct SaveIndex {
     component_files: Vec<SaveFile>,
     challenges: BTreeMap<ChallengeId, SaveChallenge>,
-    /// Components the user has pinned to the hotbar, in display order. The
-    /// compiled `ComponentKind` is stored as-is so it is not recompiled on load;
-    /// compilation happens only when a component is first added.
+    /// User-customized hotbar slots. The compiled `ComponentKind` for custom
+    /// components is stored as-is so it is not recompiled on load; compilation
+    /// happens only when a component is first added.
     #[serde(default)]
-    hotbar: Vec<SaveHotbarEntry>,
+    hotbar: Vec<SaveHotbarSlot>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct SaveHotbarEntry {
-    name: String,
-    kind: ComponentKind,
+pub enum SaveHotbarSlot {
+    Builtin {
+        tool: String,
+    },
+    Locked {
+        name: String,
+    },
+    Folder {
+        name: String,
+        slots: Vec<SaveHotbarSlot>,
+    },
+    Custom {
+        name: String,
+        kind: ComponentKind,
+    },
 }
 
 impl Default for SaveIndex {
@@ -278,9 +290,7 @@ impl ComponentFiles {
                 "Component metadata is missing",
             ));
         }
-        index
-            .hotbar
-            .retain(|entry| hotbar_entry_source(&entry.kind) != Some(*file));
+        remove_saved_hotbar_source(&mut index.hotbar, *file);
         self.save_index(&index)?;
         match fs::remove_file(self.path(file.id)) {
             Ok(()) => Ok(()),
@@ -324,9 +334,7 @@ impl ComponentFiles {
                 "Challenge solution metadata is missing",
             ));
         }
-        index
-            .hotbar
-            .retain(|entry| hotbar_entry_source(&entry.kind) != Some(ComponentFileRef { id }));
+        remove_saved_hotbar_source(&mut index.hotbar, ComponentFileRef { id });
         self.save_index(&index)?;
         match fs::remove_file(self.path(id)) {
             Ok(()) => Ok(()),
@@ -449,15 +457,16 @@ impl ComponentFiles {
         self.save_index(&index)
     }
 
-    /// The pinned hotbar components, as `(name, compiled kind)` in display order.
-    /// The kinds are returned verbatim from the save index without recompiling.
-    pub fn load_hotbar(&self) -> Result<Vec<(String, ComponentKind)>, ComponentFileError> {
-        Ok(self
-            .load_index()?
-            .hotbar
-            .into_iter()
-            .map(|entry| (entry.name, entry.kind))
-            .collect())
+    /// The saved hotbar tree. Custom component kinds are returned verbatim from
+    /// the save index without recompiling.
+    pub fn load_hotbar(&self) -> Result<Vec<SaveHotbarSlot>, ComponentFileError> {
+        Ok(self.load_index()?.hotbar)
+    }
+
+    pub fn save_hotbar(&self, hotbar: Vec<SaveHotbarSlot>) -> Result<(), ComponentFileError> {
+        let mut index = self.load_index()?;
+        index.hotbar = hotbar;
+        self.save_index(&index)
     }
 
     /// Pins an already-compiled component to the hotbar. If the same source file
@@ -468,15 +477,11 @@ impl ComponentFiles {
             return Ok(());
         };
         let mut index = self.load_index()?;
-        let entry = SaveHotbarEntry {
+        let entry = SaveHotbarSlot::Custom {
             name: name.to_owned(),
             kind: kind.clone(),
         };
-        if let Some(existing) = index
-            .hotbar
-            .iter_mut()
-            .find(|existing| hotbar_entry_source(&existing.kind) == Some(source))
-        {
+        if let Some(existing) = find_saved_hotbar_source_mut(&mut index.hotbar, source) {
             *existing = entry;
         } else {
             index.hotbar.push(entry);
@@ -487,11 +492,7 @@ impl ComponentFiles {
     /// Unpins the hotbar entry for a source component file. No-op if not pinned.
     pub fn remove_hotbar(&self, source: ComponentFileRef) -> Result<(), ComponentFileError> {
         let mut index = self.load_index()?;
-        let before = index.hotbar.len();
-        index
-            .hotbar
-            .retain(|entry| hotbar_entry_source(&entry.kind) != Some(source));
-        if index.hotbar.len() != before {
+        if remove_saved_hotbar_source(&mut index.hotbar, source) {
             self.save_index(&index)?;
         }
         Ok(())
@@ -555,6 +556,43 @@ fn hotbar_entry_source(kind: &ComponentKind) -> Option<ComponentFileRef> {
         ComponentKind::Subcomponent { source_file_id, .. } => Some(*source_file_id),
         _ => None,
     }
+}
+
+fn find_saved_hotbar_source_mut(
+    slots: &mut [SaveHotbarSlot],
+    source: ComponentFileRef,
+) -> Option<&mut SaveHotbarSlot> {
+    for slot in slots {
+        match slot {
+            SaveHotbarSlot::Custom { kind, .. } if hotbar_entry_source(kind) == Some(source) => {
+                return Some(slot);
+            }
+            SaveHotbarSlot::Folder { slots, .. } => {
+                if let Some(found) = find_saved_hotbar_source_mut(slots, source) {
+                    return Some(found);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn remove_saved_hotbar_source(slots: &mut Vec<SaveHotbarSlot>, source: ComponentFileRef) -> bool {
+    let before = slots.len();
+    slots.retain(|slot| {
+        !matches!(
+            slot,
+            SaveHotbarSlot::Custom { kind, .. } if hotbar_entry_source(kind) == Some(source)
+        )
+    });
+    let mut removed = slots.len() != before;
+    for slot in slots {
+        if let SaveHotbarSlot::Folder { slots, .. } = slot {
+            removed |= remove_saved_hotbar_source(slots, source);
+        }
+    }
+    removed
 }
 
 fn reject_duplicate(

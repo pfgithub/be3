@@ -134,29 +134,20 @@ impl LogicGame {
         game
     }
 
-    /// Loads the editor's custom hotbar slots from the persisted, already-compiled
+    /// Loads the editor's hotbar tree from the persisted, already-compiled
     /// entries. Components are compiled only when first added, never on load.
     fn refresh_hotbar(&mut self) {
         let Some(files) = &self.component_files else {
             return;
         };
-        let entries = match files.load_hotbar() {
+        let hotbar = match files.load_hotbar() {
             Ok(entries) => entries,
             Err(error) => {
                 self.persistence_error = Some(error.to_string());
                 return;
             }
         };
-        let slots = entries
-            .into_iter()
-            .filter_map(|(name, kind)| match &kind {
-                logicgame::grid::ComponentKind::Subcomponent { source_file_id, .. } => {
-                    Some((name, *source_file_id, kind))
-                }
-                _ => None,
-            })
-            .collect();
-        self.editor.set_custom_hotbar(slots);
+        self.editor.set_hotbar(hotbar);
     }
 
     fn refresh_files(&mut self) {

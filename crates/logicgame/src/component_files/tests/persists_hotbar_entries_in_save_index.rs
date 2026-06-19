@@ -55,8 +55,14 @@ fn persists_hotbar_entries_in_save_index() {
     assert_eq!(
         files.load_hotbar().unwrap(),
         vec![
-            ("First renamed".to_owned(), first_kind.clone()),
-            ("Second".to_owned(), second_kind.clone()),
+            SaveHotbarSlot::Custom {
+                name: "First renamed".to_owned(),
+                kind: first_kind.clone(),
+            },
+            SaveHotbarSlot::Custom {
+                name: "Second".to_owned(),
+                kind: second_kind.clone(),
+            },
         ]
     );
 
@@ -65,21 +71,33 @@ fn persists_hotbar_entries_in_save_index() {
     assert_eq!(
         reopened.load_hotbar().unwrap(),
         vec![
-            ("First renamed".to_owned(), first_kind.clone()),
-            ("Second".to_owned(), second_kind.clone()),
+            SaveHotbarSlot::Custom {
+                name: "First renamed".to_owned(),
+                kind: first_kind.clone(),
+            },
+            SaveHotbarSlot::Custom {
+                name: "Second".to_owned(),
+                kind: second_kind.clone(),
+            },
         ]
     );
 
     files.remove_hotbar(first).unwrap();
     assert_eq!(
         files.load_hotbar().unwrap(),
-        vec![("Second".to_owned(), second_kind.clone())]
+        vec![SaveHotbarSlot::Custom {
+            name: "Second".to_owned(),
+            kind: second_kind.clone(),
+        }]
     );
     // Removing an unpinned source is a no-op.
     files.remove_hotbar(first).unwrap();
     assert_eq!(
         files.load_hotbar().unwrap(),
-        vec![("Second".to_owned(), second_kind)]
+        vec![SaveHotbarSlot::Custom {
+            name: "Second".to_owned(),
+            kind: second_kind,
+        }]
     );
 
     remove_test_root(&root);

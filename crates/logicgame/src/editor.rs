@@ -19,7 +19,7 @@ use logicgame::{
 use logicgame::{challenges::ChallengeId, grid::ComponentFileRef};
 
 use crate::{
-    component_files::ComponentFiles,
+    component_files::{ComponentFiles, SaveHotbarSlot},
     renderer::{
         DrawRay, DrawStub, DrawTriangle, DrawValueTriangle, DrawWire, GridCallback, RenderFrame,
         WireValue,
@@ -72,6 +72,37 @@ enum ToolKind {
 }
 
 impl ToolKind {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Select => "select",
+            Self::Wire => "wire",
+            Self::Not => "not",
+            Self::MergerSplitter => "merger_splitter",
+            Self::Led => "led",
+            Self::Storage => "storage",
+            Self::Input => "input",
+            Self::Output => "output",
+            Self::ConfigureStorage => "configure_storage",
+            Self::Custom => "custom",
+        }
+    }
+
+    fn from_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "select" => Self::Select,
+            "wire" => Self::Wire,
+            "not" => Self::Not,
+            "merger_splitter" => Self::MergerSplitter,
+            "led" => Self::Led,
+            "storage" => Self::Storage,
+            "input" => Self::Input,
+            "output" => Self::Output,
+            "configure_storage" => Self::ConfigureStorage,
+            "custom" => Self::Custom,
+            _ => return None,
+        })
+    }
+
     fn label(self) -> &'static str {
         match self {
             Self::Select => "Select",
@@ -486,6 +517,7 @@ pub struct LogicEditor {
     active_hotbar_slot: Option<Vec<usize>>,
     /// Slot currently being dragged for hotbar reordering/nesting.
     hotbar_drag: Option<Vec<usize>>,
+    confirm_hotbar_reset: bool,
     /// Label applied to freely placed input/output components (outside a
     /// challenge, where labels come from the challenge port instead).
     io_label: String,
@@ -578,6 +610,7 @@ impl Default for LogicEditor {
             active_hotbar_folder: Vec::new(),
             active_hotbar_slot: None,
             hotbar_drag: None,
+            confirm_hotbar_reset: false,
             io_label: String::new(),
         }
     }
@@ -621,16 +654,17 @@ impl LogicEditor {
         }
     }
 
-    /// Rebuilds the custom tail of the root hotbar from persisted entries,
-    /// keeping the built-in default tree at the front. Any selected custom slot
-    /// is deselected.
-    pub fn set_custom_hotbar(&mut self, slots: Vec<(String, ComponentFileRef, ComponentKind)>) {
-        self.hotbar = default_hotbar();
-        self.hotbar.extend(
+    /// Rebuilds the hotbar from persisted entries. An empty save keeps the
+    /// default tree so new saves do not need to write default data eagerly.
+    pub fn set_hotbar(&mut self, slots: Vec<SaveHotbarSlot>) {
+        self.hotbar = if slots.is_empty() {
+            default_hotbar()
+        } else {
             slots
                 .into_iter()
-                .map(|(name, source, kind)| HotbarSlot::Custom { name, source, kind }),
-        );
+                .filter_map(hotbar_slot_from_save)
+                .collect()
+        };
         self.set_context_hotbar_folder(
             self.challenge
                 .as_ref()
@@ -657,6 +691,7 @@ impl LogicEditor {
         } else {
             self.hotbar.push(HotbarSlot::Custom { name, source, kind });
         }
+        self.persist_hotbar();
     }
 
     /// Unpins a custom hotbar slot, persisting the change and fixing up the
@@ -672,6 +707,7 @@ impl LogicEditor {
             }
         }
         remove_hotbar_slot_at(&mut self.hotbar, path);
+        self.persist_hotbar();
         if self
             .active_hotbar_slot
             .as_ref()
@@ -681,6 +717,45 @@ impl LogicEditor {
             if self.tool.kind == ToolKind::Custom {
                 self.select_tool();
             }
+        }
+    }
+
+    fn remove_hotbar_folder(&mut self, path: &[usize]) {
+        if !matches!(
+            get_hotbar_slot(&self.hotbar, path),
+            Some(HotbarSlot::Folder { .. })
+        ) || hotbar_slot_contains_unremovable(get_hotbar_slot(&self.hotbar, path).unwrap())
+        {
+            return;
+        }
+        remove_hotbar_slot_at(&mut self.hotbar, path);
+        self.persist_hotbar();
+        if self
+            .active_hotbar_slot
+            .as_ref()
+            .is_some_and(|active| active.starts_with(path))
+        {
+            self.select_tool();
+        }
+        if self.active_hotbar_folder.starts_with(path) {
+            self.active_hotbar_folder.clear();
+        }
+    }
+
+    fn reset_hotbar(&mut self) {
+        self.hotbar = default_hotbar();
+        self.active_hotbar_folder.clear();
+        self.select_tool();
+        self.persist_hotbar();
+    }
+
+    fn persist_hotbar(&self) {
+        let Some(files) = &self.component_files else {
+            return;
+        };
+        if let Err(error) = files.save_hotbar(self.hotbar.iter().map(hotbar_slot_to_save).collect())
+        {
+            eprintln!("failed to save hotbar: {error}");
         }
     }
 
@@ -991,8 +1066,16 @@ impl LogicEditor {
     fn show_hotbar(&mut self, ui: &mut egui::Ui) {
         let mut action: Option<HotbarAction> = None;
         let mut remove: Option<Vec<usize>> = None;
+        let mut remove_folder: Option<Vec<usize>> = None;
         let mut new_folder = false;
         let mut drop_target: Option<Vec<usize>> = None;
+        let pointer_released = ui.ctx().input(|input| input.pointer.any_released());
+        let dragging_hotbar = self.hotbar_drag.is_some();
+        let dragged_slot = self
+            .hotbar_drag
+            .as_ref()
+            .and_then(|path| get_hotbar_slot(&self.hotbar, path))
+            .cloned();
         let visible = visible_hotbar_entries(&self.hotbar, &self.active_hotbar_folder);
 
         if !ui.ctx().egui_wants_keyboard_input() {
@@ -1010,15 +1093,19 @@ impl LogicEditor {
             });
         }
 
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    !self.active_hotbar_folder.is_empty(),
-                    egui::Button::new("Up"),
-                )
-                .clicked()
-            {
+        let current_folder = self.active_hotbar_folder.clone();
+        let hotbar_header = ui.horizontal(|ui| {
+            let up_response = ui.add_enabled(
+                !self.active_hotbar_folder.is_empty(),
+                egui::Button::new("Up"),
+            );
+            if up_response.clicked() {
                 self.active_hotbar_folder.pop();
+            }
+            if up_response.hovered() && pointer_released {
+                let mut parent = current_folder.clone();
+                parent.pop();
+                drop_target = Some(parent);
             }
             if !self.active_hotbar_folder.is_empty() {
                 ui.small(hotbar_folder_name(&self.hotbar, &self.active_hotbar_folder));
@@ -1026,10 +1113,25 @@ impl LogicEditor {
                 ui.small("Hotbar");
             }
         });
+        if hotbar_header.response.hovered() && pointer_released {
+            drop_target = Some(current_folder);
+        }
+        if dragging_hotbar && hotbar_header.response.hovered() {
+            ui.painter().rect_stroke(
+                hotbar_header.response.rect.expand(2.0),
+                4.0,
+                egui::Stroke::new(1.5, ui.visuals().selection.stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
 
         ui.menu_button("+", |ui| {
             if ui.button("New folder").clicked() {
                 new_folder = true;
+                ui.close();
+            }
+            if ui.button("Reset hotbar").clicked() {
+                self.confirm_hotbar_reset = true;
                 ui.close();
             }
         });
@@ -1041,16 +1143,28 @@ impl LogicEditor {
                 None => slot.label().to_string(),
             };
             let selected = self.active_hotbar_slot.as_ref() == Some(path);
-            let response = hotbar_button(ui, selected, &label, |painter, rect| {
-                paint_slot_preview(painter, rect, slot);
-            });
+            let dragging = self.hotbar_drag.as_ref() == Some(path);
+            let drop_highlight = self
+                .hotbar_drag
+                .as_ref()
+                .is_some_and(|source| source != path && !path.starts_with(source));
+            let response = hotbar_button(
+                ui,
+                selected,
+                dragging,
+                drop_highlight,
+                &label,
+                |painter, rect| {
+                    paint_slot_preview(painter, rect, slot);
+                },
+            );
             if response.clicked() {
                 action = Some(HotbarAction::SelectPath(path.clone()));
             }
             if response.drag_started() {
                 self.hotbar_drag = Some(path.clone());
             }
-            if response.hovered() && ui.ctx().input(|input| input.pointer.any_released()) {
+            if response.hovered() && pointer_released {
                 drop_target = Some(path.clone());
             }
             if matches!(slot, HotbarSlot::Custom { .. } | HotbarSlot::Folder { .. }) {
@@ -1067,6 +1181,13 @@ impl LogicEditor {
                         action = Some(HotbarAction::OpenFolder(path.clone()));
                         ui.close();
                     }
+                    if matches!(slot, HotbarSlot::Folder { .. })
+                        && !hotbar_slot_contains_unremovable(slot)
+                        && ui.button("Remove folder").clicked()
+                    {
+                        remove_folder = Some(path.clone());
+                        ui.close();
+                    }
                 });
             }
         }
@@ -1074,25 +1195,36 @@ impl LogicEditor {
         if let Some(path) = remove {
             self.remove_hotbar_slot(&path);
         }
+        if let Some(path) = remove_folder {
+            self.remove_hotbar_folder(&path);
+        }
         if new_folder {
             let slots = get_hotbar_slots_mut(&mut self.hotbar, &self.active_hotbar_folder);
             slots.push(HotbarSlot::Folder {
                 name: "Folder".to_string(),
                 slots: Vec::new(),
             });
+            self.persist_hotbar();
         }
-        if let (Some(source), Some(target)) = (self.hotbar_drag.take(), drop_target) {
-            move_hotbar_slot(&mut self.hotbar, &source, &target);
-            if self
-                .active_hotbar_slot
-                .as_ref()
-                .is_some_and(|active| active.starts_with(&source))
-            {
-                self.select_tool();
+        if pointer_released {
+            if let (Some(source), Some(target)) = (self.hotbar_drag.take(), drop_target) {
+                move_hotbar_slot(&mut self.hotbar, &source, &target);
+                self.persist_hotbar();
+                if self
+                    .active_hotbar_slot
+                    .as_ref()
+                    .is_some_and(|active| active.starts_with(&source))
+                {
+                    self.select_tool();
+                }
+                if self.active_hotbar_folder.starts_with(&source) {
+                    self.active_hotbar_folder.clear();
+                }
+            } else {
+                self.hotbar_drag = None;
             }
-            if self.active_hotbar_folder.starts_with(&source) {
-                self.active_hotbar_folder.clear();
-            }
+        } else if let Some(slot) = dragged_slot.as_ref() {
+            paint_hotbar_drag_preview(ui.ctx(), slot);
         }
 
         match action {
@@ -1108,6 +1240,8 @@ impl LogicEditor {
             }
             None => {}
         }
+
+        self.show_hotbar_reset_confirmation(ui.ctx());
 
         // Scale controls. They have no effect on custom components for now.
         ui.separator();
@@ -1494,6 +1628,31 @@ impl LogicEditor {
         }
         while self.simulation.tick_in_progress {
             self.execute_next_simulation_instruction();
+        }
+    }
+
+    fn show_hotbar_reset_confirmation(&mut self, context: &egui::Context) {
+        if !self.confirm_hotbar_reset {
+            return;
+        }
+
+        let mut reset = false;
+        let mut cancel = false;
+        let response = egui::Modal::new("reset-hotbar-modal".into()).show(context, |ui| {
+            ui.set_min_width(300.0);
+            ui.heading("Reset hotbar?");
+            ui.label("This will restore the default hotbar layout.");
+            ui.horizontal(|ui| {
+                reset = ui.button("Reset").clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if response.should_close() || cancel {
+            self.confirm_hotbar_reset = false;
+        }
+        if reset {
+            self.confirm_hotbar_reset = false;
+            self.reset_hotbar();
         }
     }
 
@@ -3502,6 +3661,57 @@ fn hotbar_key_label(index: usize) -> Option<&'static str> {
     }
 }
 
+fn hotbar_slot_from_save(slot: SaveHotbarSlot) -> Option<HotbarSlot> {
+    Some(match slot {
+        SaveHotbarSlot::Builtin { tool } => HotbarSlot::Builtin(ToolKind::from_id(&tool)?),
+        SaveHotbarSlot::Locked { name } => HotbarSlot::Locked { name },
+        SaveHotbarSlot::Folder { name, slots } => HotbarSlot::Folder {
+            name,
+            slots: slots
+                .into_iter()
+                .filter_map(hotbar_slot_from_save)
+                .collect(),
+        },
+        SaveHotbarSlot::Custom { name, kind } => HotbarSlot::Custom {
+            name,
+            source: hotbar_kind_source(&kind)?,
+            kind,
+        },
+    })
+}
+
+fn hotbar_slot_to_save(slot: &HotbarSlot) -> SaveHotbarSlot {
+    match slot {
+        HotbarSlot::Builtin(kind) => SaveHotbarSlot::Builtin {
+            tool: kind.id().to_string(),
+        },
+        HotbarSlot::Locked { name } => SaveHotbarSlot::Locked { name: name.clone() },
+        HotbarSlot::Folder { name, slots } => SaveHotbarSlot::Folder {
+            name: name.clone(),
+            slots: slots.iter().map(hotbar_slot_to_save).collect(),
+        },
+        HotbarSlot::Custom { name, kind, .. } => SaveHotbarSlot::Custom {
+            name: name.clone(),
+            kind: kind.clone(),
+        },
+    }
+}
+
+fn hotbar_kind_source(kind: &ComponentKind) -> Option<ComponentFileRef> {
+    match kind {
+        ComponentKind::Subcomponent { source_file_id, .. } => Some(*source_file_id),
+        _ => None,
+    }
+}
+
+fn hotbar_slot_contains_unremovable(slot: &HotbarSlot) -> bool {
+    match slot {
+        HotbarSlot::Builtin(_) | HotbarSlot::Locked { .. } => true,
+        HotbarSlot::Folder { slots, .. } => slots.iter().any(hotbar_slot_contains_unremovable),
+        HotbarSlot::Custom { .. } => false,
+    }
+}
+
 fn visible_hotbar_entries(
     slots: &[HotbarSlot],
     folder_path: &[usize],
@@ -3605,6 +3815,11 @@ fn move_hotbar_slot(slots: &mut Vec<HotbarSlot>, source: &[usize], target: &[usi
         return;
     };
 
+    if target.is_empty() {
+        slots.push(slot);
+        return;
+    }
+
     let mut adjusted_target = target.to_vec();
     if source.len() == target.len()
         && source[..source.len() - 1] == target[..target.len() - 1]
@@ -3676,6 +3891,8 @@ fn scale_buttons(ui: &mut egui::Ui, scale: &mut Scale) {
 fn hotbar_button(
     ui: &mut egui::Ui,
     selected: bool,
+    dragging: bool,
+    drop_target: bool,
     label: &str,
     paint_preview: impl FnOnce(&egui::Painter, egui::Rect),
 ) -> egui::Response {
@@ -3684,7 +3901,17 @@ fn hotbar_button(
         egui::Sense::click_and_drag(),
     );
     let visuals = ui.visuals();
-    let (bg, stroke) = if selected {
+    let (bg, stroke) = if dragging {
+        (
+            visuals.widgets.inactive.bg_fill.gamma_multiply(0.65),
+            egui::Stroke::new(1.5, visuals.selection.stroke.color),
+        )
+    } else if drop_target && response.hovered() {
+        (
+            visuals.widgets.hovered.bg_fill,
+            egui::Stroke::new(2.0, visuals.selection.stroke.color),
+        )
+    } else if selected {
         (
             visuals.selection.bg_fill,
             egui::Stroke::new(1.5, visuals.selection.stroke.color),
@@ -3700,7 +3927,11 @@ fn hotbar_button(
             egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color),
         )
     };
-    let text_color = visuals.text_color();
+    let text_color = if dragging {
+        visuals.weak_text_color()
+    } else {
+        visuals.text_color()
+    };
     let painter = ui.painter();
     painter.rect(rect, 4.0, bg, stroke, egui::StrokeKind::Inside);
     let inner = rect.shrink(4.0);
@@ -3719,6 +3950,39 @@ fn hotbar_button(
         text_color,
     );
     response.on_hover_text(label)
+}
+
+fn paint_hotbar_drag_preview(context: &egui::Context, slot: &HotbarSlot) {
+    let Some(pointer) = context.pointer_hover_pos() else {
+        return;
+    };
+    let rect = egui::Rect::from_min_size(
+        pointer + egui::vec2(14.0, 14.0),
+        egui::vec2(HOTBAR_SLOT_SIZE, HOTBAR_SLOT_SIZE),
+    );
+    let painter = context.debug_painter();
+    painter.rect(
+        rect,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(24, 28, 36, 224),
+        egui::Stroke::new(1.5, egui::Color32::from_rgb(140, 190, 255)),
+        egui::StrokeKind::Inside,
+    );
+    let inner = rect.shrink(4.0);
+    let preview_rect =
+        egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), inner.height() * 0.66));
+    let label_rect = egui::Rect::from_min_max(
+        egui::pos2(inner.min.x, preview_rect.max.y),
+        egui::pos2(inner.max.x, inner.max.y),
+    );
+    paint_slot_preview(&painter, preview_rect, slot);
+    painter.text(
+        label_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        slot.label(),
+        egui::FontId::proportional(9.0),
+        egui::Color32::from_rgb(232, 236, 245),
+    );
 }
 
 fn glyph_point(rect: egui::Rect, x: f32, y: f32) -> egui::Pos2 {
