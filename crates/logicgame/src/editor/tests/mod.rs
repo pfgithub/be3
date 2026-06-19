@@ -68,6 +68,7 @@ mod challenge_port_slots_map_each_port_to_its_dense_slot;
 mod challenge_test_flags_wrong_outputs;
 mod challenge_test_passes_for_a_correct_nor_solution;
 mod challenge_test_uses_simulation_vm;
+mod component_preview_shortcuts;
 mod editing_resets_challenge_test_results;
 mod gate_drag_maps_to_rotation_and_placement_anchor;
 mod graph_hover_maps_each_node_to_its_grid_geometry;

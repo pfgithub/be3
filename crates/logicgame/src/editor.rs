@@ -85,6 +85,19 @@ impl ToolKind {
             Self::Custom => "Component",
         }
     }
+
+    fn places_component(self) -> bool {
+        matches!(
+            self,
+            Self::Not
+                | Self::MergerSplitter
+                | Self::Led
+                | Self::Storage
+                | Self::Input
+                | Self::Output
+                | Self::Custom
+        )
+    }
 }
 
 /// A slot in the hotbar: either one of the built-in tools or a user-defined
@@ -444,6 +457,7 @@ impl Selection {
 pub struct LogicEditor {
     grid: LogicGrid,
     tool: Tool,
+    placement_rotation: Rotation,
     camera: Camera,
     gesture: Option<Gesture>,
     selection: Selection,
@@ -479,6 +493,7 @@ impl Default for LogicEditor {
                 merger_out_scale: Scale::new(4).expect("default scale is valid"),
                 challenge_port: None,
             },
+            placement_rotation: Rotation::Right,
             camera: Camera::default(),
             gesture: None,
             selection: Selection::default(),
@@ -2066,6 +2081,23 @@ impl LogicEditor {
             self.delete_selection();
         }
 
+        if self.tool.kind.places_component() && !response.ctx.egui_wants_keyboard_input() {
+            response.ctx.input(|input| {
+                if input.key_pressed(egui::Key::Q) {
+                    self.placement_rotation = rotate_left(self.placement_rotation);
+                }
+                if input.key_pressed(egui::Key::E) {
+                    self.placement_rotation = rotate_right(self.placement_rotation);
+                }
+                if input.key_pressed(egui::Key::OpenBracket) {
+                    self.tool.scale = previous_scale(self.tool.scale);
+                }
+                if input.key_pressed(egui::Key::CloseBracket) {
+                    self.tool.scale = next_scale(self.tool.scale);
+                }
+            });
+        }
+
         if response.hovered() {
             if let Some(pointer) = response.ctx.pointer_hover_pos() {
                 let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
@@ -2195,123 +2227,137 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Not { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world) {
-                        let scale = self.tool.scale;
-                        self.grid.add_component(
-                            component_placement_position(anchor, rotation, scale, ToolKind::Not),
-                            rotation,
-                            ComponentKind::Not { scale },
-                        );
-                    }
+                    let rotation = placement_rotation(
+                        drag_start,
+                        world,
+                        self.placement_rotation,
+                        ToolKind::Not,
+                    );
+                    let scale = self.tool.scale;
+                    self.grid.add_component(
+                        component_placement_position(anchor, rotation, scale, ToolKind::Not),
+                        rotation,
+                        ComponentKind::Not { scale },
+                    );
                 }
                 Some(Gesture::MergerSplitter { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world) {
-                        let (input_scale, output_scale) = self.tool.conversion_scales();
-                        self.grid.add_component(
-                            component_placement_position(
-                                anchor,
-                                rotation,
-                                output_scale,
-                                ToolKind::MergerSplitter,
-                            ),
+                    let rotation = placement_rotation(
+                        drag_start,
+                        world,
+                        self.placement_rotation,
+                        ToolKind::MergerSplitter,
+                    );
+                    let (input_scale, output_scale) = self.tool.conversion_scales();
+                    self.grid.add_component(
+                        component_placement_position(
+                            anchor,
                             rotation,
-                            ComponentKind::MergerSplitter {
-                                input_scale,
-                                output_scale,
-                            },
-                        );
-                    }
+                            output_scale,
+                            ToolKind::MergerSplitter,
+                        ),
+                        rotation,
+                        ComponentKind::MergerSplitter {
+                            input_scale,
+                            output_scale,
+                        },
+                    );
                 }
                 Some(Gesture::Led { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world) {
-                        self.grid.add_component(
-                            component_placement_position(
-                                anchor,
-                                rotation,
-                                Scale::ONE,
-                                ToolKind::Led,
-                            ),
-                            rotation,
-                            ComponentKind::Led,
-                        );
-                    }
+                    let rotation = placement_rotation(
+                        drag_start,
+                        world,
+                        self.placement_rotation,
+                        ToolKind::Led,
+                    );
+                    self.grid.add_component(
+                        component_placement_position(anchor, rotation, Scale::ONE, ToolKind::Led),
+                        rotation,
+                        ComponentKind::Led,
+                    );
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world) {
-                        let scale = self.tool.scale;
-                        self.grid.add_component(
-                            component_placement_position(
-                                anchor,
-                                rotation,
-                                scale,
-                                ToolKind::Storage,
-                            ),
-                            rotation,
-                            ComponentKind::Storage { scale, value: 0 },
-                        );
-                    }
+                    let rotation = placement_rotation(
+                        drag_start,
+                        world,
+                        self.placement_rotation,
+                        ToolKind::Storage,
+                    );
+                    let scale = self.tool.scale;
+                    self.grid.add_component(
+                        component_placement_position(anchor, rotation, scale, ToolKind::Storage),
+                        rotation,
+                        ComponentKind::Storage { scale, value: 0 },
+                    );
                 }
                 Some(Gesture::Input { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world).map(|r| r.flip()) {
-                        let scale = self.tool.scale;
-                        let position =
-                            component_placement_position(anchor, rotation, scale, ToolKind::Input);
-                        match self.tool.challenge_port {
-                            Some(port) => {
-                                let label = self.challenge_port_label(ToolKind::Input, port);
-                                self.grid.add_component_with_explicit_io(
-                                    position,
-                                    rotation,
-                                    ComponentKind::Input {
-                                        scale,
-                                        id: InputId::from_u128(port as u128),
-                                        label,
-                                    },
-                                );
-                            }
-                            None => {
-                                self.grid.add_component(
-                                    position,
-                                    rotation,
-                                    ComponentKind::Input {
-                                        scale,
-                                        id: InputId::from_u128(u128::MAX),
-                                        label: self.io_label.clone(),
-                                    },
-                                );
-                            }
+                    let rotation = placement_rotation(
+                        drag_start,
+                        world,
+                        self.placement_rotation,
+                        ToolKind::Input,
+                    );
+                    let scale = self.tool.scale;
+                    let position =
+                        component_placement_position(anchor, rotation, scale, ToolKind::Input);
+                    match self.tool.challenge_port {
+                        Some(port) => {
+                            let label = self.challenge_port_label(ToolKind::Input, port);
+                            self.grid.add_component_with_explicit_io(
+                                position,
+                                rotation,
+                                ComponentKind::Input {
+                                    scale,
+                                    id: InputId::from_u128(port as u128),
+                                    label,
+                                },
+                            );
+                        }
+                        None => {
+                            self.grid.add_component(
+                                position,
+                                rotation,
+                                ComponentKind::Input {
+                                    scale,
+                                    id: InputId::from_u128(u128::MAX),
+                                    label: self.io_label.clone(),
+                                },
+                            );
                         }
                     }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world) {
-                        let scale = self.tool.scale;
-                        let position =
-                            component_placement_position(anchor, rotation, scale, ToolKind::Output);
-                        match self.tool.challenge_port {
-                            Some(port) => {
-                                let label = self.challenge_port_label(ToolKind::Output, port);
-                                self.grid.add_component_with_explicit_io(
-                                    position,
-                                    rotation,
-                                    ComponentKind::Output {
-                                        scale,
-                                        id: OutputId::from_u128(port as u128),
-                                        label,
-                                    },
-                                );
-                            }
-                            None => {
-                                self.grid.add_component(
-                                    position,
-                                    rotation,
-                                    ComponentKind::Output {
-                                        scale,
-                                        id: OutputId::from_u128(u128::MAX),
-                                        label: self.io_label.clone(),
-                                    },
-                                );
-                            }
+                    let rotation = placement_rotation(
+                        drag_start,
+                        world,
+                        self.placement_rotation,
+                        ToolKind::Output,
+                    );
+                    let scale = self.tool.scale;
+                    let position =
+                        component_placement_position(anchor, rotation, scale, ToolKind::Output);
+                    match self.tool.challenge_port {
+                        Some(port) => {
+                            let label = self.challenge_port_label(ToolKind::Output, port);
+                            self.grid.add_component_with_explicit_io(
+                                position,
+                                rotation,
+                                ComponentKind::Output {
+                                    scale,
+                                    id: OutputId::from_u128(port as u128),
+                                    label,
+                                },
+                            );
+                        }
+                        None => {
+                            self.grid.add_component(
+                                position,
+                                rotation,
+                                ComponentKind::Output {
+                                    scale,
+                                    id: OutputId::from_u128(u128::MAX),
+                                    label: self.io_label.clone(),
+                                },
+                            );
                         }
                     }
                 }
@@ -2320,10 +2366,14 @@ impl LogicEditor {
                     drag_start,
                     kind,
                 }) => {
-                    if let Some(rotation) = drag_rotation(drag_start, world) {
-                        let position = subcomponent_placement_position(anchor, rotation, &kind);
-                        self.grid.add_component(position, rotation, kind);
-                    }
+                    let rotation = placement_rotation(
+                        drag_start,
+                        world,
+                        self.placement_rotation,
+                        ToolKind::Custom,
+                    );
+                    let position = subcomponent_placement_position(anchor, rotation, &kind);
+                    self.grid.add_component(position, rotation, kind);
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
                     if !additive {
@@ -2482,6 +2532,34 @@ impl LogicEditor {
             self.grid.remove_wire(wire);
         }
         self.gesture = None;
+    }
+
+    fn selected_custom_kind(&self) -> Option<ComponentKind> {
+        (self.tool.kind == ToolKind::Custom)
+            .then_some(self.active_custom)
+            .flatten()
+            .and_then(|index| self.hotbar.get(index))
+            .and_then(|slot| match slot {
+                HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
+                HotbarSlot::Builtin(_) => None,
+            })
+    }
+
+    fn placement_preview_component(&self, pointer: [f32; 2]) -> Option<Component> {
+        if let Some(kind) = self.selected_custom_kind() {
+            return component_preview(
+                self.tool,
+                snap_point(pointer, kind.snap()),
+                self.placement_rotation,
+                Some(&kind),
+            );
+        }
+        component_preview(
+            self.tool,
+            snap_point(pointer, self.tool.snap()),
+            self.placement_rotation,
+            None,
+        )
     }
 
     fn render_frame(
@@ -2676,20 +2754,13 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Not { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
-                        let component = Component {
-                            id: ComponentId(u64::MAX),
-                            position: component_placement_position(
-                                *anchor,
-                                rotation,
-                                self.tool.scale,
-                                ToolKind::Not,
-                            ),
-                            rotation,
-                            kind: ComponentKind::Not {
-                                scale: self.tool.scale,
-                            },
-                        };
+                    let rotation = placement_rotation(
+                        *drag_start,
+                        pointer,
+                        self.placement_rotation,
+                        ToolKind::Not,
+                    );
+                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -2698,22 +2769,13 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::MergerSplitter { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
-                        let (input_scale, output_scale) = self.tool.conversion_scales();
-                        let component = Component {
-                            id: ComponentId(u64::MAX),
-                            position: component_placement_position(
-                                *anchor,
-                                rotation,
-                                output_scale,
-                                ToolKind::MergerSplitter,
-                            ),
-                            rotation,
-                            kind: ComponentKind::MergerSplitter {
-                                input_scale,
-                                output_scale,
-                            },
-                        };
+                    let rotation = placement_rotation(
+                        *drag_start,
+                        pointer,
+                        self.placement_rotation,
+                        ToolKind::MergerSplitter,
+                    );
+                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -2722,18 +2784,13 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Led { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
-                        let component = Component {
-                            id: ComponentId(u64::MAX),
-                            position: component_placement_position(
-                                *anchor,
-                                rotation,
-                                Scale::ONE,
-                                ToolKind::Led,
-                            ),
-                            rotation,
-                            kind: ComponentKind::Led,
-                        };
+                    let rotation = placement_rotation(
+                        *drag_start,
+                        pointer,
+                        self.placement_rotation,
+                        ToolKind::Led,
+                    );
+                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -2742,21 +2799,13 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
-                        let component = Component {
-                            id: ComponentId(u64::MAX),
-                            position: component_placement_position(
-                                *anchor,
-                                rotation,
-                                self.tool.scale,
-                                ToolKind::Storage,
-                            ),
-                            rotation,
-                            kind: ComponentKind::Storage {
-                                scale: self.tool.scale,
-                                value: 0,
-                            },
-                        };
+                    let rotation = placement_rotation(
+                        *drag_start,
+                        pointer,
+                        self.placement_rotation,
+                        ToolKind::Storage,
+                    );
+                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -2765,22 +2814,13 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Input { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer).map(|r| r.flip()) {
-                        let component = Component {
-                            id: ComponentId(u64::MAX),
-                            position: component_placement_position(
-                                *anchor,
-                                rotation,
-                                self.tool.scale,
-                                ToolKind::Input,
-                            ),
-                            rotation,
-                            kind: ComponentKind::Input {
-                                scale: self.tool.scale,
-                                id: InputId::from_u128(u128::MAX),
-                                label: String::new(),
-                            },
-                        };
+                    let rotation = placement_rotation(
+                        *drag_start,
+                        pointer,
+                        self.placement_rotation,
+                        ToolKind::Input,
+                    );
+                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -2794,22 +2834,13 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
-                        let component = Component {
-                            id: ComponentId(u64::MAX),
-                            position: component_placement_position(
-                                *anchor,
-                                rotation,
-                                self.tool.scale,
-                                ToolKind::Output,
-                            ),
-                            rotation,
-                            kind: ComponentKind::Output {
-                                scale: self.tool.scale,
-                                id: OutputId::from_u128(u128::MAX),
-                                label: String::new(),
-                            },
-                        };
+                    let rotation = placement_rotation(
+                        *drag_start,
+                        pointer,
+                        self.placement_rotation,
+                        ToolKind::Output,
+                    );
+                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -2827,13 +2858,15 @@ impl LogicEditor {
                     drag_start,
                     kind,
                 }) => {
-                    if let Some(rotation) = drag_rotation(*drag_start, pointer) {
-                        let component = Component {
-                            id: ComponentId(u64::MAX),
-                            position: subcomponent_placement_position(*anchor, rotation, kind),
-                            rotation,
-                            kind: kind.clone(),
-                        };
+                    let rotation = placement_rotation(
+                        *drag_start,
+                        pointer,
+                        self.placement_rotation,
+                        ToolKind::Custom,
+                    );
+                    if let Some(component) =
+                        component_preview(self.tool, *anchor, rotation, Some(kind))
+                    {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -2876,7 +2909,20 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::SelectBox { .. }) => {}
-                None => {}
+                None => {
+                    if let Some(component) = self.placement_preview_component(pointer) {
+                        draw_rays.extend(DrawRay::from_component(
+                            &component,
+                            DrawTriangle::PREVIEW_COLOR,
+                            0,
+                        ));
+                        component_triangles.extend(
+                            DrawTriangle::component(&component, false)
+                                .into_iter()
+                                .map(|triangle| triangle.with_color(DrawTriangle::PREVIEW_COLOR)),
+                        );
+                    }
+                }
             }
         }
         wire_triangles.extend(component_triangles);
@@ -3481,6 +3527,108 @@ fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot: &HotbarSl
             }
         }
     }
+}
+
+fn rotate_left(rotation: Rotation) -> Rotation {
+    match rotation {
+        Rotation::Up => Rotation::Left,
+        Rotation::Right => Rotation::Up,
+        Rotation::Down => Rotation::Right,
+        Rotation::Left => Rotation::Down,
+    }
+}
+
+fn rotate_right(rotation: Rotation) -> Rotation {
+    match rotation {
+        Rotation::Up => Rotation::Right,
+        Rotation::Right => Rotation::Down,
+        Rotation::Down => Rotation::Left,
+        Rotation::Left => Rotation::Up,
+    }
+}
+
+fn previous_scale(scale: Scale) -> Scale {
+    let current = scale.get() as u8;
+    let value = SCALES
+        .iter()
+        .copied()
+        .rev()
+        .find(|value| *value < current)
+        .unwrap_or(current);
+    Scale::new(value).expect("scale shortcut uses valid scale")
+}
+
+fn next_scale(scale: Scale) -> Scale {
+    let current = scale.get() as u8;
+    let value = SCALES
+        .iter()
+        .copied()
+        .find(|value| *value > current)
+        .unwrap_or(current);
+    Scale::new(value).expect("scale shortcut uses valid scale")
+}
+
+fn placement_rotation(
+    drag_start: [f32; 2],
+    pointer: [f32; 2],
+    selected: Rotation,
+    kind: ToolKind,
+) -> Rotation {
+    match drag_rotation(drag_start, pointer) {
+        Some(rotation) if kind == ToolKind::Input => rotation.flip(),
+        Some(rotation) => rotation,
+        None => selected,
+    }
+}
+
+fn component_preview(
+    tool: Tool,
+    anchor: Point,
+    rotation: Rotation,
+    custom_kind: Option<&ComponentKind>,
+) -> Option<Component> {
+    let kind = match tool.kind {
+        ToolKind::Select | ToolKind::Wire | ToolKind::ConfigureStorage => return None,
+        ToolKind::Not => ComponentKind::Not { scale: tool.scale },
+        ToolKind::MergerSplitter => {
+            let (input_scale, output_scale) = tool.conversion_scales();
+            ComponentKind::MergerSplitter {
+                input_scale,
+                output_scale,
+            }
+        }
+        ToolKind::Led => ComponentKind::Led,
+        ToolKind::Storage => ComponentKind::Storage {
+            scale: tool.scale,
+            value: 0,
+        },
+        ToolKind::Input => ComponentKind::Input {
+            scale: tool.scale,
+            id: InputId::from_u128(u128::MAX),
+            label: String::new(),
+        },
+        ToolKind::Output => ComponentKind::Output {
+            scale: tool.scale,
+            id: OutputId::from_u128(u128::MAX),
+            label: String::new(),
+        },
+        ToolKind::Custom => custom_kind.cloned()?,
+    };
+    let position = match tool.kind {
+        ToolKind::Custom => subcomponent_placement_position(anchor, rotation, &kind),
+        ToolKind::MergerSplitter => {
+            let (_, output_scale) = tool.conversion_scales();
+            component_placement_position(anchor, rotation, output_scale, tool.kind)
+        }
+        ToolKind::Led => component_placement_position(anchor, rotation, Scale::ONE, tool.kind),
+        _ => component_placement_position(anchor, rotation, tool.scale, tool.kind),
+    };
+    Some(Component {
+        id: ComponentId(u64::MAX),
+        position,
+        rotation,
+        kind,
+    })
 }
 
 fn drag_rotation(start: [f32; 2], pointer: [f32; 2]) -> Option<Rotation> {
