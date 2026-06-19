@@ -8,3 +8,5 @@ After making changes, always run at least:
 - `cargo nextest run`
 
 Keep test files seperate from code files. Give every test its own seperate file.
+
+Do not run git commands unless asked, unless they are read-only commands. Don't stage changes, commit changes, or push unless asked.
