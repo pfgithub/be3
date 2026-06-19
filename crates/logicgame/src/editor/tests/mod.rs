@@ -64,8 +64,9 @@ fn nor_challenge_editor() -> LogicEditor {
 }
 
 mod box_selection_finds_components_and_individual_wire_endpoints;
-mod challenge_hotbar_folder_contains_challenge_ports;
-mod challenge_hotbar_port_selection_uses_bound_port;
+mod challenge_hotbar_folder_contains_regular_io;
+mod challenge_input_placement_uses_first_missing_port;
+mod challenge_output_placement_uses_first_missing_port;
 mod challenge_port_slots_map_each_port_to_its_dense_slot;
 mod challenge_test_flags_wrong_outputs;
 mod challenge_test_passes_for_a_correct_nor_solution;

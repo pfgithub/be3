@@ -109,12 +109,6 @@ enum HotbarSlot {
     Locked {
         name: String,
     },
-    ChallengePort {
-        kind: ToolKind,
-        index: usize,
-        scale: Scale,
-        label: String,
-    },
     Folder {
         name: String,
         slots: Vec<HotbarSlot>,
@@ -130,10 +124,7 @@ impl HotbarSlot {
     fn label(&self) -> &str {
         match self {
             Self::Builtin(kind) => kind.label(),
-            Self::Locked { name }
-            | Self::ChallengePort { label: name, .. }
-            | Self::Folder { name, .. }
-            | Self::Custom { name, .. } => name,
+            Self::Locked { name } | Self::Folder { name, .. } | Self::Custom { name, .. } => name,
         }
     }
 }
@@ -143,10 +134,6 @@ struct Tool {
     kind: ToolKind,
     scale: Scale,
     merger_out_scale: Scale,
-    // When placing an Input/Output inside a challenge, the port index it binds
-    // to (its identity becomes `InputId`/`OutputId::from_u128(port)`). `None`
-    // for ordinary placement, which generates a fresh id.
-    challenge_port: Option<usize>,
 }
 
 impl Tool {
@@ -570,28 +557,6 @@ fn default_component_slots() -> Vec<HotbarSlot> {
     ]
 }
 
-fn challenge_hotbar_slots(challenge: &Challenge) -> Vec<HotbarSlot> {
-    challenge
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(index, port)| HotbarSlot::ChallengePort {
-            kind: ToolKind::Input,
-            index,
-            scale: port.scale,
-            label: format!("In {}", port.label),
-        })
-        .chain(challenge.outputs.iter().enumerate().map(|(index, port)| {
-            HotbarSlot::ChallengePort {
-                kind: ToolKind::Output,
-                index,
-                scale: port.scale,
-                label: format!("Out {}", port.label),
-            }
-        }))
-        .collect()
-}
-
 impl Default for LogicEditor {
     fn default() -> Self {
         Self {
@@ -600,7 +565,6 @@ impl Default for LogicEditor {
                 kind: ToolKind::Select,
                 scale: Scale::ONE,
                 merger_out_scale: Scale::new(4).expect("default scale is valid"),
-                challenge_port: None,
             },
             placement_rotation: Rotation::Right,
             camera: Camera::default(),
@@ -626,7 +590,6 @@ impl LogicEditor {
 
     fn select_tool(&mut self) {
         self.tool.kind = ToolKind::Select;
-        self.tool.challenge_port = None;
         self.active_hotbar_slot = None;
         self.gesture = None;
         self.configured_storage = None;
@@ -639,7 +602,6 @@ impl LogicEditor {
         match slot {
             HotbarSlot::Builtin(kind) => {
                 self.tool.kind = *kind;
-                self.tool.challenge_port = None;
                 self.active_hotbar_slot = Some(path);
                 self.gesture = None;
                 self.configured_storage = None;
@@ -647,18 +609,6 @@ impl LogicEditor {
             }
             HotbarSlot::Custom { .. } => {
                 self.tool.kind = ToolKind::Custom;
-                self.tool.challenge_port = None;
-                self.active_hotbar_slot = Some(path);
-                self.gesture = None;
-                self.configured_storage = None;
-                self.selection.clear();
-            }
-            HotbarSlot::ChallengePort {
-                kind, index, scale, ..
-            } => {
-                self.tool.kind = *kind;
-                self.tool.challenge_port = Some(*index);
-                self.tool.scale = *scale;
                 self.active_hotbar_slot = Some(path);
                 self.gesture = None;
                 self.configured_storage = None;
@@ -681,13 +631,10 @@ impl LogicEditor {
                 .into_iter()
                 .map(|(name, source, kind)| HotbarSlot::Custom { name, source, kind }),
         );
-        let challenge_slots = self
-            .challenge
-            .as_ref()
-            .map(|challenge| challenge_hotbar_slots(&challenge.data));
         self.set_context_hotbar_folder(
-            challenge_slots
-                .map(|slots| ("Challenge", slots))
+            self.challenge
+                .as_ref()
+                .map(|_| ("Challenge", default_component_slots()))
                 .unwrap_or_else(|| ("Component", default_component_slots())),
         );
         if self.tool.kind == ToolKind::Custom {
@@ -758,17 +705,14 @@ impl LogicEditor {
             kind: ToolKind::Select,
             scale: Scale::ONE,
             merger_out_scale: Scale::ONE,
-            challenge_port: None,
         };
-        let challenge_data = generate_challenge(id);
-        let challenge_slots = challenge_hotbar_slots(&challenge_data);
         self.challenge = Some(ChallengeState {
             id,
-            data: challenge_data,
+            data: generate_challenge(id),
             test: ChallengeTest::default(),
             passed_event: false,
         });
-        self.set_context_hotbar_folder(("Challenge", challenge_slots));
+        self.set_context_hotbar_folder(("Challenge", default_component_slots()));
     }
 
     pub fn active_challenge_id(&self) -> Option<ChallengeId> {
@@ -791,20 +735,104 @@ impl LogicEditor {
         *folder_slots = slots;
     }
 
-    /// The label the active challenge assigns to the input/output port at
-    /// `index`, or an empty string when there is no challenge or no such port.
-    fn challenge_port_label(&self, kind: ToolKind, index: usize) -> String {
-        let Some(challenge) = self.challenge.as_ref() else {
-            return String::new();
-        };
-        let ports = match kind {
-            ToolKind::Output => &challenge.data.outputs,
-            _ => &challenge.data.inputs,
-        };
-        ports
-            .get(index)
-            .map(|port| port.label.to_owned())
-            .unwrap_or_default()
+    fn next_missing_challenge_input(&self) -> Option<(usize, Scale, String)> {
+        let challenge = self.challenge.as_ref()?;
+        challenge
+            .data
+            .inputs
+            .iter()
+            .enumerate()
+            .find(|(index, _)| {
+                let id = InputId::from_u128(*index as u128);
+                self.grid.components().all(|component| {
+                    !matches!(component.kind, ComponentKind::Input { id: placed, .. } if placed == id)
+                })
+            })
+            .map(|(index, port)| (index, port.scale, port.label.to_owned()))
+    }
+
+    fn next_missing_challenge_output(&self) -> Option<(usize, Scale, String)> {
+        let challenge = self.challenge.as_ref()?;
+        challenge
+            .data
+            .outputs
+            .iter()
+            .enumerate()
+            .find(|(index, _)| {
+                let id = OutputId::from_u128(*index as u128);
+                self.grid.components().all(|component| {
+                    !matches!(component.kind, ComponentKind::Output { id: placed, .. } if placed == id)
+                })
+            })
+            .map(|(index, port)| (index, port.scale, port.label.to_owned()))
+    }
+
+    fn active_input_scale(&self) -> Scale {
+        self.next_missing_challenge_input()
+            .map(|(_, scale, _)| scale)
+            .unwrap_or(self.tool.scale)
+    }
+
+    fn active_output_scale(&self) -> Scale {
+        self.next_missing_challenge_output()
+            .map(|(_, scale, _)| scale)
+            .unwrap_or(self.tool.scale)
+    }
+
+    fn active_tool_snap(&self) -> Scale {
+        match self.tool.kind {
+            ToolKind::Input => self.active_input_scale(),
+            ToolKind::Output => self.active_output_scale(),
+            _ => self.tool.snap(),
+        }
+    }
+
+    fn add_input_at(&mut self, position: Point, rotation: Rotation) {
+        if let Some((port, scale, label)) = self.next_missing_challenge_input() {
+            self.grid.add_component_with_explicit_io(
+                position,
+                rotation,
+                ComponentKind::Input {
+                    scale,
+                    id: InputId::from_u128(port as u128),
+                    label,
+                },
+            );
+        } else if self.challenge.is_none() {
+            self.grid.add_component(
+                position,
+                rotation,
+                ComponentKind::Input {
+                    scale: self.tool.scale,
+                    id: InputId::from_u128(u128::MAX),
+                    label: self.io_label.clone(),
+                },
+            );
+        }
+    }
+
+    fn add_output_at(&mut self, position: Point, rotation: Rotation) {
+        if let Some((port, scale, label)) = self.next_missing_challenge_output() {
+            self.grid.add_component_with_explicit_io(
+                position,
+                rotation,
+                ComponentKind::Output {
+                    scale,
+                    id: OutputId::from_u128(port as u128),
+                    label,
+                },
+            );
+        } else if self.challenge.is_none() {
+            self.grid.add_component(
+                position,
+                rotation,
+                ComponentKind::Output {
+                    scale: self.tool.scale,
+                    id: OutputId::from_u128(u128::MAX),
+                    label: self.io_label.clone(),
+                },
+            );
+        }
     }
 
     /// Draws text labels over the grid: the label on each input/output, the
@@ -1094,9 +1122,8 @@ impl LogicEditor {
         }
 
         // A label for freely placed inputs/outputs. Inside a challenge the label
-        // is fixed by the chosen port, so the field is not offered.
-        if matches!(self.tool.kind, ToolKind::Input | ToolKind::Output)
-            && self.tool.challenge_port.is_none()
+        // is fixed by the assigned port, so the field is not offered.
+        if matches!(self.tool.kind, ToolKind::Input | ToolKind::Output) && self.challenge.is_none()
         {
             ui.separator();
             ui.small("Label");
@@ -2306,7 +2333,7 @@ impl LogicEditor {
         }
 
         let world = self.camera.screen_to_world(pointer, response.rect);
-        let snapped = snap_point(world, self.tool.snap());
+        let snapped = snap_point(world, self.active_tool_snap());
 
         if response.clicked_by(PointerButton::Secondary) && self.tool.kind == ToolKind::Wire {
             if let Some(wire) =
@@ -2372,10 +2399,16 @@ impl LogicEditor {
                 ToolKind::Input => Some(Gesture::Input {
                     anchor: snapped,
                     drag_start: world,
+                })
+                .filter(|_| {
+                    self.challenge.is_none() || self.next_missing_challenge_input().is_some()
                 }),
                 ToolKind::Output => Some(Gesture::Output {
                     anchor: snapped,
                     drag_start: world,
+                })
+                .filter(|_| {
+                    self.challenge.is_none() || self.next_missing_challenge_output().is_some()
                 }),
                 ToolKind::ConfigureStorage => {
                     if let Some(DebugEntity::Component(id)) = self.entity_at(world) {
@@ -2479,34 +2512,10 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Input,
                     );
-                    let scale = self.tool.scale;
+                    let scale = self.active_input_scale();
                     let position =
                         component_placement_position(anchor, rotation, scale, ToolKind::Input);
-                    match self.tool.challenge_port {
-                        Some(port) => {
-                            let label = self.challenge_port_label(ToolKind::Input, port);
-                            self.grid.add_component_with_explicit_io(
-                                position,
-                                rotation,
-                                ComponentKind::Input {
-                                    scale,
-                                    id: InputId::from_u128(port as u128),
-                                    label,
-                                },
-                            );
-                        }
-                        None => {
-                            self.grid.add_component(
-                                position,
-                                rotation,
-                                ComponentKind::Input {
-                                    scale,
-                                    id: InputId::from_u128(u128::MAX),
-                                    label: self.io_label.clone(),
-                                },
-                            );
-                        }
-                    }
+                    self.add_input_at(position, rotation);
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
                     let rotation = placement_rotation(
@@ -2515,34 +2524,10 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Output,
                     );
-                    let scale = self.tool.scale;
+                    let scale = self.active_output_scale();
                     let position =
                         component_placement_position(anchor, rotation, scale, ToolKind::Output);
-                    match self.tool.challenge_port {
-                        Some(port) => {
-                            let label = self.challenge_port_label(ToolKind::Output, port);
-                            self.grid.add_component_with_explicit_io(
-                                position,
-                                rotation,
-                                ComponentKind::Output {
-                                    scale,
-                                    id: OutputId::from_u128(port as u128),
-                                    label,
-                                },
-                            );
-                        }
-                        None => {
-                            self.grid.add_component(
-                                position,
-                                rotation,
-                                ComponentKind::Output {
-                                    scale,
-                                    id: OutputId::from_u128(u128::MAX),
-                                    label: self.io_label.clone(),
-                                },
-                            );
-                        }
-                    }
+                    self.add_output_at(position, rotation);
                 }
                 Some(Gesture::Subcomponent {
                     anchor,
@@ -2737,9 +2722,25 @@ impl LogicEditor {
                 Some(&kind),
             );
         }
+        let mut tool = self.tool;
+        tool.scale = match self.tool.kind {
+            ToolKind::Input => {
+                if self.challenge.is_some() && self.next_missing_challenge_input().is_none() {
+                    return None;
+                }
+                self.active_input_scale()
+            }
+            ToolKind::Output => {
+                if self.challenge.is_some() && self.next_missing_challenge_output().is_none() {
+                    return None;
+                }
+                self.active_output_scale()
+            }
+            _ => self.tool.scale,
+        };
         component_preview(
-            self.tool,
-            snap_point(pointer, self.tool.snap()),
+            tool,
+            snap_point(pointer, self.active_tool_snap()),
             self.placement_rotation,
             None,
         )
@@ -2928,7 +2929,7 @@ impl LogicEditor {
         }
 
         if let Some(pointer) = pointer_world {
-            let snapped = snap_point(pointer, self.tool.snap());
+            let snapped = snap_point(pointer, self.active_tool_snap());
             match self.gesture.as_ref() {
                 Some(Gesture::Wire { start }) => {
                     if let Some(wire) = projected_wire(*start, snapped, self.tool.scale) {
@@ -3003,7 +3004,9 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Input,
                     );
-                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
+                    let mut tool = self.tool;
+                    tool.scale = self.active_input_scale();
+                    if let Some(component) = component_preview(tool, *anchor, rotation, None) {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -3023,7 +3026,9 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Output,
                     );
-                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
+                    let mut tool = self.tool;
+                    tool.scale = self.active_output_scale();
+                    if let Some(component) = component_preview(tool, *anchor, rotation, None) {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -3859,7 +3864,6 @@ fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot: &HotbarSl
         HotbarSlot::Builtin(ToolKind::Input) => paint_port_glyph(painter, rect, ToolKind::Input),
         HotbarSlot::Builtin(ToolKind::Output) => paint_port_glyph(painter, rect, ToolKind::Output),
         HotbarSlot::Builtin(ToolKind::Custom) => paint_glyph_box(painter, rect, gate),
-        HotbarSlot::ChallengePort { kind, .. } => paint_port_glyph(painter, rect, *kind),
         HotbarSlot::Locked { .. } => {
             paint_glyph_box(painter, rect, egui::Color32::DARK_GRAY);
             let lock_rect = glyph_inset(rect, 0.32, 0.42, 0.68, 0.78);
