@@ -31,7 +31,11 @@ const MAX_ZOOM: f32 = 96.0;
 const DEFAULT_ZOOM: f32 = 24.0;
 const WIRE_HIT_RADIUS: f32 = 7.0;
 const SCALES: [u8; 7] = [1, 2, 4, 8, 16, 32, 64];
-const HOTBAR_WIDTH: f32 = 92.0;
+const HOTBAR_COLUMN_WIDTH: f32 = 92.0;
+const HOTBAR_COLUMN_GAP: f32 = 8.0;
+const SIDE_PANEL_HORIZONTAL_MARGIN: f32 = 16.0;
+const HOTBAR_WIDTH: f32 =
+    HOTBAR_COLUMN_WIDTH * 2.0 + HOTBAR_COLUMN_GAP + SIDE_PANEL_HORIZONTAL_MARGIN;
 /// Label drawn on an input/output component.
 const LABEL_COLOR: egui::Color32 = egui::Color32::from_rgb(232, 236, 245);
 /// Name drawn in the centre of a subcomponent.
@@ -989,15 +993,21 @@ impl LogicEditor {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
 
-        egui::Panel::top("logic-hotbar")
+        let hotbar_width = if self.active_hotbar_folder.is_empty() {
+            HOTBAR_COLUMN_WIDTH + SIDE_PANEL_HORIZONTAL_MARGIN
+        } else {
+            HOTBAR_WIDTH
+        };
+        egui::Panel::left("logic-hotbar")
             .resizable(false)
+            .exact_size(hotbar_width)
             .show_inside(ui, |ui| {
                 self.show_hotbar(ui);
             });
 
         egui::Panel::left("logic-tool-settings")
             .resizable(false)
-            .exact_size(HOTBAR_WIDTH)
+            .exact_size(HOTBAR_COLUMN_WIDTH + SIDE_PANEL_HORIZONTAL_MARGIN)
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.show_tool_settings(ui);
@@ -1155,8 +1165,15 @@ impl LogicEditor {
             }
         });
 
-        ui.vertical(|ui| {
-            for (row_index, row) in rows.iter().enumerate() {
+        let visible_row_count = if self.active_hotbar_folder.is_empty() {
+            1
+        } else {
+            rows.len()
+        };
+        let column_height = ui.available_height();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = HOTBAR_COLUMN_GAP;
+            for (row_index, row) in rows.iter().enumerate().take(visible_row_count) {
                 let mut hovered_hotbar_slot = false;
                 let row_response = egui::Frame::group(ui.style())
                     .fill(if row.active {
@@ -1165,10 +1182,12 @@ impl LogicEditor {
                         ui.visuals().widgets.inactive.bg_fill
                     })
                     .show(ui, |ui| {
-                        ui.set_min_height(HOTBAR_SLOT_SIZE + 12.0);
-                        ui.horizontal(|ui| {
+                        let column_width = HOTBAR_COLUMN_WIDTH - 16.0;
+                        ui.set_width(column_width);
+                        ui.set_min_height(column_height);
+                        ui.vertical_centered(|ui| {
                             let (label_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(92.0, HOTBAR_SLOT_SIZE),
+                                egui::vec2(column_width, 18.0),
                                 egui::Sense::hover(),
                             );
                             ui.painter().text(
@@ -1178,11 +1197,13 @@ impl LogicEditor {
                                 egui::FontId::proportional(11.0),
                                 ui.visuals().weak_text_color(),
                             );
-                            egui::ScrollArea::horizontal()
+                            egui::ScrollArea::vertical()
                                 .id_salt(("hotbar-row", row_index, row.folder_path.as_slice()))
-                                .max_height(HOTBAR_SLOT_SIZE + 8.0)
+                                .auto_shrink([false, false])
+                                .max_height((column_height - 24.0).max(HOTBAR_SLOT_SIZE))
                                 .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
+                                    ui.set_width(column_width);
+                                    ui.vertical_centered(|ui| {
                                         if row.entries.is_empty() {
                                             ui.allocate_exact_size(
                                                 egui::vec2(HOTBAR_SLOT_SIZE, HOTBAR_SLOT_SIZE),
