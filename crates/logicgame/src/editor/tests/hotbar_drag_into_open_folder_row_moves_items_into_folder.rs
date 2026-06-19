@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn hotbar_drag_moves_items_into_folders() {
+fn hotbar_drag_into_open_folder_row_moves_items_into_folder() {
     let mut hotbar = vec![
         HotbarSlot::Builtin(ToolKind::Wire),
         HotbarSlot::Folder {
@@ -10,7 +10,7 @@ fn hotbar_drag_moves_items_into_folders() {
         },
     ];
 
-    move_hotbar_slot(&mut hotbar, &[0], &[1]);
+    move_hotbar_slot_to_folder(&mut hotbar, &[0], &[1]);
 
     assert!(matches!(
         hotbar.as_slice(),

@@ -989,12 +989,18 @@ impl LogicEditor {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
 
-        egui::Panel::left("logic-hotbar")
+        egui::Panel::top("logic-hotbar")
+            .resizable(false)
+            .show_inside(ui, |ui| {
+                self.show_hotbar(ui);
+            });
+
+        egui::Panel::left("logic-tool-settings")
             .resizable(false)
             .exact_size(HOTBAR_WIDTH)
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_hotbar(ui);
+                    self.show_tool_settings(ui);
                 });
             });
 
@@ -1057,7 +1063,14 @@ impl LogicEditor {
         }
 
         if context.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.select_tool();
+            if self.gesture.is_some()
+                || self.active_hotbar_slot.is_some()
+                || self.tool.kind != ToolKind::Select
+            {
+                self.select_tool();
+            } else {
+                self.active_hotbar_folder.pop();
+            }
         }
 
         context.request_repaint();
@@ -1068,7 +1081,7 @@ impl LogicEditor {
         let mut remove: Option<Vec<usize>> = None;
         let mut remove_folder: Option<Vec<usize>> = None;
         let mut new_folder = false;
-        let mut drop_target: Option<Vec<usize>> = None;
+        let mut drop_target: Option<HotbarDropTarget> = None;
         let pointer_released = ui.ctx().input(|input| input.pointer.any_released());
         let dragging_hotbar = self.hotbar_drag.is_some();
         let dragged_slot = self
@@ -1076,13 +1089,19 @@ impl LogicEditor {
             .as_ref()
             .and_then(|path| get_hotbar_slot(&self.hotbar, path))
             .cloned();
-        let visible = visible_hotbar_entries(&self.hotbar, &self.active_hotbar_folder);
+        let rows = visible_hotbar_rows(&self.hotbar, &self.active_hotbar_folder);
+        let key_entries = rows
+            .iter()
+            .rev()
+            .find(|row| !row.entries.is_empty())
+            .map(|row| row.entries.as_slice())
+            .unwrap_or(&[]);
 
         if !ui.ctx().egui_wants_keyboard_input() {
             ui.ctx().input(|input| {
                 for (index, key) in HOTBAR_KEYS.iter().enumerate() {
                     if input.key_pressed(*key) {
-                        if let Some((path, _)) = visible.get(index) {
+                        if let Some((path, _)) = key_entries.get(index) {
                             action = Some(HotbarAction::SelectPath(path.clone()));
                         }
                     }
@@ -1105,7 +1124,7 @@ impl LogicEditor {
             if up_response.hovered() && pointer_released {
                 let mut parent = current_folder.clone();
                 parent.pop();
-                drop_target = Some(parent);
+                drop_target = Some(HotbarDropTarget::Folder(parent));
             }
             if !self.active_hotbar_folder.is_empty() {
                 ui.small(hotbar_folder_name(&self.hotbar, &self.active_hotbar_folder));
@@ -1114,7 +1133,7 @@ impl LogicEditor {
             }
         });
         if hotbar_header.response.hovered() && pointer_released {
-            drop_target = Some(current_folder);
+            drop_target = Some(HotbarDropTarget::Folder(current_folder));
         }
         if dragging_hotbar && hotbar_header.response.hovered() {
             ui.painter().rect_stroke(
@@ -1136,61 +1155,124 @@ impl LogicEditor {
             }
         });
 
-        for (visible_index, (path, slot)) in visible.iter().enumerate() {
-            let hotkey = hotbar_key_label(visible_index);
-            let label = match hotkey {
-                Some(hotkey) => format!("{hotkey} {}", slot.label()),
-                None => slot.label().to_string(),
-            };
-            let selected = self.active_hotbar_slot.as_ref() == Some(path);
-            let dragging = self.hotbar_drag.as_ref() == Some(path);
-            let drop_highlight = self
-                .hotbar_drag
-                .as_ref()
-                .is_some_and(|source| source != path && !path.starts_with(source));
-            let response = hotbar_button(
-                ui,
-                selected,
-                dragging,
-                drop_highlight,
-                &label,
-                |painter, rect| {
-                    paint_slot_preview(painter, rect, slot);
-                },
-            );
-            if response.clicked() {
-                action = Some(HotbarAction::SelectPath(path.clone()));
+        ui.vertical(|ui| {
+            for (row_index, row) in rows.iter().enumerate() {
+                let mut hovered_hotbar_slot = false;
+                let row_response = egui::Frame::group(ui.style())
+                    .fill(if row.active {
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.28)
+                    } else {
+                        ui.visuals().widgets.inactive.bg_fill
+                    })
+                    .show(ui, |ui| {
+                        ui.set_min_height(HOTBAR_SLOT_SIZE + 12.0);
+                        ui.horizontal(|ui| {
+                            let (label_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(92.0, HOTBAR_SLOT_SIZE),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().text(
+                                label_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                &row.title,
+                                egui::FontId::proportional(11.0),
+                                ui.visuals().weak_text_color(),
+                            );
+                            egui::ScrollArea::horizontal()
+                                .id_salt(("hotbar-row", row_index, row.folder_path.as_slice()))
+                                .max_height(HOTBAR_SLOT_SIZE + 8.0)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        if row.entries.is_empty() {
+                                            ui.allocate_exact_size(
+                                                egui::vec2(HOTBAR_SLOT_SIZE, HOTBAR_SLOT_SIZE),
+                                                egui::Sense::hover(),
+                                            );
+                                        }
+                                        for (path, slot) in &row.entries {
+                                            let hotkey = key_entries
+                                                .iter()
+                                                .position(|(key_path, _)| key_path == path)
+                                                .and_then(hotbar_key_label);
+                                            let selected =
+                                                self.active_hotbar_slot.as_ref() == Some(path);
+                                            let open_folder = self.active_hotbar_folder == *path;
+                                            let dragging = self.hotbar_drag.as_ref() == Some(path);
+                                            let drop_highlight =
+                                                self.hotbar_drag.as_ref().is_some_and(|source| {
+                                                    source != path
+                                                        && !path.starts_with(source)
+                                                        && hotbar_slot_drop_target(
+                                                            &self.hotbar,
+                                                            path,
+                                                        )
+                                                        .is_some()
+                                                });
+                                            let response = hotbar_button(
+                                                ui,
+                                                selected,
+                                                open_folder,
+                                                dragging,
+                                                drop_highlight,
+                                                slot.label(),
+                                                hotkey,
+                                                |painter, rect| {
+                                                    paint_slot_preview(painter, rect, slot);
+                                                },
+                                            );
+                                            if response.clicked() {
+                                                action =
+                                                    Some(HotbarAction::SelectPath(path.clone()));
+                                            }
+                                            if response.drag_started() {
+                                                self.hotbar_drag = Some(path.clone());
+                                            }
+                                            if response.hovered() {
+                                                hovered_hotbar_slot = true;
+                                                if pointer_released {
+                                                    drop_target =
+                                                        hotbar_slot_drop_target(&self.hotbar, path);
+                                                }
+                                            }
+                                            if matches!(
+                                                slot,
+                                                HotbarSlot::Custom { .. }
+                                                    | HotbarSlot::Folder { .. }
+                                            ) {
+                                                response.context_menu(|ui| {
+                                                    if matches!(slot, HotbarSlot::Custom { .. })
+                                                        && ui.button("Remove from hotbar").clicked()
+                                                    {
+                                                        remove = Some(path.clone());
+                                                        ui.close();
+                                                    }
+                                                    if matches!(slot, HotbarSlot::Folder { .. })
+                                                        && ui.button("Open folder").clicked()
+                                                    {
+                                                        action = Some(HotbarAction::OpenFolder(
+                                                            path.clone(),
+                                                        ));
+                                                        ui.close();
+                                                    }
+                                                    if matches!(slot, HotbarSlot::Folder { .. })
+                                                        && !hotbar_slot_contains_unremovable(slot)
+                                                        && ui.button("Remove folder").clicked()
+                                                    {
+                                                        remove_folder = Some(path.clone());
+                                                        ui.close();
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    });
+                                });
+                        });
+                    });
+                if row_response.response.hovered() && pointer_released && !hovered_hotbar_slot {
+                    drop_target = Some(HotbarDropTarget::Folder(row.folder_path.clone()));
+                }
             }
-            if response.drag_started() {
-                self.hotbar_drag = Some(path.clone());
-            }
-            if response.hovered() && pointer_released {
-                drop_target = Some(path.clone());
-            }
-            if matches!(slot, HotbarSlot::Custom { .. } | HotbarSlot::Folder { .. }) {
-                response.context_menu(|ui| {
-                    if matches!(slot, HotbarSlot::Custom { .. })
-                        && ui.button("Remove from hotbar").clicked()
-                    {
-                        remove = Some(path.clone());
-                        ui.close();
-                    }
-                    if matches!(slot, HotbarSlot::Folder { .. })
-                        && ui.button("Open folder").clicked()
-                    {
-                        action = Some(HotbarAction::OpenFolder(path.clone()));
-                        ui.close();
-                    }
-                    if matches!(slot, HotbarSlot::Folder { .. })
-                        && !hotbar_slot_contains_unremovable(slot)
-                        && ui.button("Remove folder").clicked()
-                    {
-                        remove_folder = Some(path.clone());
-                        ui.close();
-                    }
-                });
-            }
-        }
+        });
 
         if let Some(path) = remove {
             self.remove_hotbar_slot(&path);
@@ -1208,7 +1290,14 @@ impl LogicEditor {
         }
         if pointer_released {
             if let (Some(source), Some(target)) = (self.hotbar_drag.take(), drop_target) {
-                move_hotbar_slot(&mut self.hotbar, &source, &target);
+                match target {
+                    HotbarDropTarget::Slot(target) => {
+                        move_hotbar_slot(&mut self.hotbar, &source, &target);
+                    }
+                    HotbarDropTarget::Folder(target) => {
+                        move_hotbar_slot_to_folder(&mut self.hotbar, &source, &target);
+                    }
+                }
                 self.persist_hotbar();
                 if self
                     .active_hotbar_slot
@@ -1236,15 +1325,20 @@ impl LogicEditor {
                 }
             }
             Some(HotbarAction::OpenFolder(path)) => {
-                self.active_hotbar_folder = path;
+                if self.active_hotbar_folder == path {
+                    self.active_hotbar_folder.pop();
+                } else {
+                    self.active_hotbar_folder = path;
+                }
             }
             None => {}
         }
 
         self.show_hotbar_reset_confirmation(ui.ctx());
+    }
 
+    fn show_tool_settings(&mut self, ui: &mut egui::Ui) {
         // Scale controls. They have no effect on custom components for now.
-        ui.separator();
         if matches!(self.tool.kind, ToolKind::MergerSplitter) {
             ui.small("Input scale");
             scale_buttons(ui, &mut self.tool.scale);
@@ -3645,6 +3739,12 @@ enum HotbarAction {
     OpenFolder(Vec<usize>),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum HotbarDropTarget {
+    Slot(Vec<usize>),
+    Folder(Vec<usize>),
+}
+
 fn hotbar_key_label(index: usize) -> Option<&'static str> {
     match index {
         0 => Some("1"),
@@ -3709,6 +3809,51 @@ fn hotbar_slot_contains_unremovable(slot: &HotbarSlot) -> bool {
         HotbarSlot::Builtin(_) | HotbarSlot::Locked { .. } => true,
         HotbarSlot::Folder { slots, .. } => slots.iter().any(hotbar_slot_contains_unremovable),
         HotbarSlot::Custom { .. } => false,
+    }
+}
+
+struct HotbarRow {
+    folder_path: Vec<usize>,
+    title: String,
+    active: bool,
+    entries: Vec<(Vec<usize>, HotbarSlot)>,
+}
+
+fn visible_hotbar_rows(slots: &[HotbarSlot], active_folder: &[usize]) -> [HotbarRow; 2] {
+    let (first_path, second_path) = if active_folder.len() <= 1 {
+        (
+            Vec::new(),
+            (!active_folder.is_empty()).then(|| active_folder.to_vec()),
+        )
+    } else {
+        (
+            active_folder[..active_folder.len() - 1].to_vec(),
+            Some(active_folder.to_vec()),
+        )
+    };
+    let first_active = second_path.is_none();
+    [
+        hotbar_row(slots, first_path, first_active),
+        match second_path {
+            Some(path) => hotbar_row(slots, path, true),
+            None => HotbarRow {
+                folder_path: Vec::new(),
+                title: "Open folder".to_string(),
+                active: false,
+                entries: Vec::new(),
+            },
+        },
+    ]
+}
+
+fn hotbar_row(slots: &[HotbarSlot], folder_path: Vec<usize>, active: bool) -> HotbarRow {
+    let title = hotbar_folder_name(slots, &folder_path).to_string();
+    let entries = visible_hotbar_entries(slots, &folder_path);
+    HotbarRow {
+        folder_path,
+        title,
+        active,
+        entries,
     }
 }
 
@@ -3803,14 +3948,47 @@ fn remove_hotbar_slot_at(slots: &mut Vec<HotbarSlot>, path: &[usize]) -> Option<
     (*index < parent.len()).then(|| parent.remove(*index))
 }
 
+fn hotbar_slot_drop_target(slots: &[HotbarSlot], path: &[usize]) -> Option<HotbarDropTarget> {
+    if matches!(
+        get_hotbar_slot(slots, path),
+        Some(HotbarSlot::Folder { .. })
+    ) {
+        None
+    } else {
+        Some(HotbarDropTarget::Slot(path.to_vec()))
+    }
+}
+
+fn move_hotbar_slot_to_folder(
+    slots: &mut Vec<HotbarSlot>,
+    source: &[usize],
+    folder_path: &[usize],
+) {
+    if source == folder_path || folder_path.starts_with(source) {
+        return;
+    }
+    let Some(slot) = remove_hotbar_slot_at(slots, source) else {
+        return;
+    };
+
+    let mut adjusted_folder = folder_path.to_vec();
+    if !folder_path.is_empty()
+        && source.len() == folder_path.len()
+        && source[..source.len() - 1] == folder_path[..folder_path.len() - 1]
+        && source[source.len() - 1] < folder_path[folder_path.len() - 1]
+    {
+        *adjusted_folder
+            .last_mut()
+            .expect("folder path is non-empty") -= 1;
+    }
+
+    get_hotbar_slots_mut(slots, &adjusted_folder).push(slot);
+}
+
 fn move_hotbar_slot(slots: &mut Vec<HotbarSlot>, source: &[usize], target: &[usize]) {
     if source == target || target.starts_with(source) {
         return;
     }
-    let target_is_folder = matches!(
-        get_hotbar_slot(slots, target),
-        Some(HotbarSlot::Folder { .. })
-    );
     let Some(slot) = remove_hotbar_slot_at(slots, source) else {
         return;
     };
@@ -3830,36 +4008,11 @@ fn move_hotbar_slot(slots: &mut Vec<HotbarSlot>, source: &[usize], target: &[usi
             .expect("target path is non-empty") -= 1;
     }
 
-    if target_is_folder {
-        if let Some(HotbarSlot::Folder {
-            slots: children, ..
-        }) = get_hotbar_slot_mut(slots, &adjusted_target)
-        {
-            children.push(slot);
-        }
-        return;
-    }
-
     let Some((index, parent_path)) = adjusted_target.split_last() else {
         return;
     };
     let parent = get_hotbar_slots_mut(slots, parent_path);
     parent.insert((*index).min(parent.len()), slot);
-}
-
-fn get_hotbar_slot_mut<'a>(
-    slots: &'a mut [HotbarSlot],
-    path: &[usize],
-) -> Option<&'a mut HotbarSlot> {
-    let (index, rest) = path.split_first()?;
-    let slot = slots.get_mut(*index)?;
-    if rest.is_empty() {
-        return Some(slot);
-    }
-    match slot {
-        HotbarSlot::Folder { slots, .. } => get_hotbar_slot_mut(slots, rest),
-        _ => None,
-    }
 }
 
 fn color32(color: [f32; 4]) -> egui::Color32 {
@@ -3891,9 +4044,11 @@ fn scale_buttons(ui: &mut egui::Ui, scale: &mut Scale) {
 fn hotbar_button(
     ui: &mut egui::Ui,
     selected: bool,
+    open_folder: bool,
     dragging: bool,
     drop_target: bool,
     label: &str,
+    hotkey: Option<&str>,
     paint_preview: impl FnOnce(&egui::Painter, egui::Rect),
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
@@ -3914,6 +4069,11 @@ fn hotbar_button(
     } else if selected {
         (
             visuals.selection.bg_fill,
+            egui::Stroke::new(1.5, visuals.selection.stroke.color),
+        )
+    } else if open_folder {
+        (
+            visuals.widgets.active.bg_fill,
             egui::Stroke::new(1.5, visuals.selection.stroke.color),
         )
     } else if response.hovered() {
@@ -3942,6 +4102,18 @@ fn hotbar_button(
         egui::pos2(inner.max.x, inner.max.y),
     );
     paint_preview(painter, preview_rect);
+    if let Some(hotkey) = hotkey {
+        let badge_rect =
+            egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(15.0, 15.0));
+        painter.rect_filled(badge_rect, 3.0, visuals.extreme_bg_color);
+        painter.text(
+            badge_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            hotkey,
+            egui::FontId::proportional(9.0),
+            text_color,
+        );
+    }
     painter.text(
         label_rect.center(),
         egui::Align2::CENTER_CENTER,
