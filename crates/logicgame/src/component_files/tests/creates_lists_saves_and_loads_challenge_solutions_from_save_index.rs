@@ -8,8 +8,8 @@ fn creates_lists_saves_and_loads_challenge_solutions_from_save_index() {
     let (first_id, first_name, mut first_grid) =
         files.create_challenge_solution(ChallengeId::Nor).unwrap();
     let (second_id, second_name, _) = files.create_challenge_solution(ChallengeId::Nor).unwrap();
-    assert_eq!(first_name, "Solution 1");
-    assert_eq!(second_name, "Solution 2");
+    assert_eq!(first_name, "NOR 1");
+    assert_eq!(second_name, "NOR 2");
 
     first_grid.add_component(Point::new(0, 0), Rotation::Up, ComponentKind::Led);
     files
@@ -23,12 +23,12 @@ fn creates_lists_saves_and_loads_challenge_solutions_from_save_index() {
         vec![
             ChallengeSolutionFile {
                 id: first_id,
-                name: "Solution 1".to_owned(),
+                name: "NOR 1".to_owned(),
                 completed: true,
             },
             ChallengeSolutionFile {
                 id: second_id,
-                name: "Solution 2".to_owned(),
+                name: "NOR 2".to_owned(),
                 completed: false,
             },
         ]

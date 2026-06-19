@@ -252,8 +252,9 @@ impl ComponentFiles {
         let mut index = self.load_index()?;
         let challenge_index = index.challenges.entry(challenge).or_default();
         let mut candidate = 1;
+        let challenge_name = challenge.name();
         let name = loop {
-            let name = format!("Solution {candidate}");
+            let name = format!("{challenge_name} {candidate}");
             if !challenge_index.files.iter().any(|file| file.name == name) {
                 break name;
             }
