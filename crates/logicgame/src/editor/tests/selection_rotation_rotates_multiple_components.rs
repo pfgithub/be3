@@ -21,8 +21,8 @@ fn selection_rotation_rotates_multiple_components() {
     let left = editor.grid.component(left).unwrap();
     let right = editor.grid.component(right).unwrap();
     assert_eq!(left.position, Point::new(0, 0));
-    assert_eq!(left.rotation, Rotation::Right);
+    assert_eq!(left.orientation, ComponentOrientation::Right);
     assert_eq!(right.position, Point::new(0, 2));
-    assert_eq!(right.rotation, Rotation::Right);
+    assert_eq!(right.orientation, ComponentOrientation::Right);
     assert!(editor.grid.validate().is_empty());
 }

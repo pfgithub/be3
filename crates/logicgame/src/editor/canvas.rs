@@ -225,10 +225,13 @@ fn rotation_offset(
     ))
 }
 
-fn flipped_component_flip(flip: ComponentFlip, direction: FlipDirection) -> ComponentFlip {
+fn flipped_component_orientation(
+    orientation: ComponentOrientation,
+    direction: FlipDirection,
+) -> ComponentOrientation {
     match direction {
-        FlipDirection::Horizontal => flip.horizontal(),
-        FlipDirection::Vertical => flip.vertical(),
+        FlipDirection::Horizontal => orientation.flip_horizontal(),
+        FlipDirection::Vertical => orientation.flip_vertical(),
     }
 }
 
@@ -331,10 +334,10 @@ impl LogicEditor {
         if self.tool.kind.places_component() && !response.ctx.egui_wants_keyboard_input() {
             response.ctx.input(|input| {
                 if input.key_pressed(egui::Key::Q) {
-                    self.placement_rotation = rotate_left(self.placement_rotation);
+                    self.placement_orientation = self.placement_orientation.rotate_left();
                 }
                 if input.key_pressed(egui::Key::E) {
-                    self.placement_rotation = rotate_right(self.placement_rotation);
+                    self.placement_orientation = self.placement_orientation.rotate_right();
                 }
                 if input.key_pressed(egui::Key::OpenBracket) {
                     self.tool.scale = previous_scale(self.tool.scale);
@@ -343,10 +346,10 @@ impl LogicEditor {
                     self.tool.scale = next_scale(self.tool.scale);
                 }
                 if input.key_pressed(egui::Key::H) {
-                    self.placement_flip = self.placement_flip.horizontal();
+                    self.placement_orientation = self.placement_orientation.flip_horizontal();
                 }
                 if input.key_pressed(egui::Key::V) {
-                    self.placement_flip = self.placement_flip.vertical();
+                    self.placement_orientation = self.placement_orientation.flip_vertical();
                 }
             });
         }
@@ -479,98 +482,117 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Not { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         drag_start,
                         world,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Not,
                     );
                     let scale = self.tool.scale;
-                    let id = self.grid.add_component(
-                        component_placement_position(anchor, rotation, scale, ToolKind::Not),
-                        rotation,
+                    self.grid.add_component_with_orientation(
+                        component_placement_position(
+                            anchor,
+                            orientation.rotation(),
+                            scale,
+                            ToolKind::Not,
+                        ),
+                        orientation,
                         ComponentKind::Not { scale },
                     );
-                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::MergerSplitter { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         drag_start,
                         world,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::MergerSplitter,
                     );
                     let (input_scale, output_scale) = self.tool.conversion_scales();
-                    let id = self.grid.add_component(
+                    self.grid.add_component_with_orientation(
                         component_placement_position(
                             anchor,
-                            rotation,
+                            orientation.rotation(),
                             output_scale,
                             ToolKind::MergerSplitter,
                         ),
-                        rotation,
+                        orientation,
                         ComponentKind::MergerSplitter {
                             input_scale,
                             output_scale,
                         },
                     );
-                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::Led { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         drag_start,
                         world,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Led,
                     );
-                    let id = self.grid.add_component(
-                        component_placement_position(anchor, rotation, Scale::ONE, ToolKind::Led),
-                        rotation,
+                    self.grid.add_component_with_orientation(
+                        component_placement_position(
+                            anchor,
+                            orientation.rotation(),
+                            Scale::ONE,
+                            ToolKind::Led,
+                        ),
+                        orientation,
                         ComponentKind::Led,
                     );
-                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         drag_start,
                         world,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Storage,
                     );
                     let scale = self.tool.scale;
-                    let id = self.grid.add_component(
-                        component_placement_position(anchor, rotation, scale, ToolKind::Storage),
-                        rotation,
+                    self.grid.add_component_with_orientation(
+                        component_placement_position(
+                            anchor,
+                            orientation.rotation(),
+                            scale,
+                            ToolKind::Storage,
+                        ),
+                        orientation,
                         ComponentKind::Storage { scale, value: 0 },
                     );
-                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::Input { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         drag_start,
                         world,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Input,
                     );
                     let scale = self.active_input_scale();
-                    let position =
-                        component_placement_position(anchor, rotation, scale, ToolKind::Input);
-                    if let Some(id) = self.add_input_at(position, rotation) {
-                        self.grid.set_component_flip(id, self.placement_flip);
+                    let position = component_placement_position(
+                        anchor,
+                        orientation.rotation(),
+                        scale,
+                        ToolKind::Input,
+                    );
+                    if let Some(id) = self.add_input_at(position, orientation.rotation()) {
+                        self.grid.set_component_orientation(id, orientation);
                     }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         drag_start,
                         world,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Output,
                     );
                     let scale = self.active_output_scale();
-                    let position =
-                        component_placement_position(anchor, rotation, scale, ToolKind::Output);
-                    if let Some(id) = self.add_output_at(position, rotation) {
-                        self.grid.set_component_flip(id, self.placement_flip);
+                    let position = component_placement_position(
+                        anchor,
+                        orientation.rotation(),
+                        scale,
+                        ToolKind::Output,
+                    );
+                    if let Some(id) = self.add_output_at(position, orientation.rotation()) {
+                        self.grid.set_component_orientation(id, orientation);
                     }
                 }
                 Some(Gesture::Subcomponent {
@@ -578,15 +600,16 @@ impl LogicEditor {
                     drag_start,
                     kind,
                 }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         drag_start,
                         world,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Custom,
                     );
-                    let position = subcomponent_placement_position(anchor, rotation, &kind);
-                    let id = self.grid.add_component(position, rotation, kind);
-                    self.grid.set_component_flip(id, self.placement_flip);
+                    let position =
+                        subcomponent_placement_position(anchor, orientation.rotation(), &kind);
+                    self.grid
+                        .add_component_with_orientation(position, orientation, kind);
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
                     if !additive {
@@ -751,14 +774,13 @@ impl LogicEditor {
             .map(|id| {
                 let component = self.grid.component(*id)?;
                 let size = component.size()?;
-                let rotation = match direction {
-                    RotationDirection::Left => rotate_left(component.rotation),
-                    RotationDirection::Right => rotate_right(component.rotation),
+                let orientation = match direction {
+                    RotationDirection::Left => component.orientation.rotate_left(),
+                    RotationDirection::Right => component.orientation.rotate_right(),
                 };
-                let flip = component.flip.rotate_quarter_turn();
                 let position =
                     rotate_rect_position(component.position, size, origin, offset, direction)?;
-                Some((*id, position, rotation, flip))
+                Some((*id, position, orientation))
             })
             .collect();
         let Some(components) = components else {
@@ -777,10 +799,9 @@ impl LogicEditor {
         for wire in &wires {
             self.grid.remove_wire(wire.wire);
         }
-        for (id, position, rotation, flip) in components {
+        for (id, position, orientation) in components {
             self.grid.set_component_position(id, position);
-            self.grid.set_component_rotation(id, rotation);
-            self.grid.set_component_flip(id, flip);
+            self.grid.set_component_orientation(id, orientation);
         }
         for wire in &rotated_wires {
             self.grid.add_wire(*wire);
@@ -822,7 +843,7 @@ impl LogicEditor {
                 Some((
                     *id,
                     position,
-                    flipped_component_flip(component.flip, direction),
+                    flipped_component_orientation(component.orientation, direction),
                 ))
             })
             .collect();
@@ -842,9 +863,9 @@ impl LogicEditor {
         for wire in &wires {
             self.grid.remove_wire(wire.wire);
         }
-        for (id, position, flip) in components {
+        for (id, position, orientation) in components {
             self.grid.set_component_position(id, position);
-            self.grid.set_component_flip(id, flip);
+            self.grid.set_component_orientation(id, orientation);
         }
         for wire in &flipped_wires {
             self.grid.add_wire(*wire);
@@ -1011,8 +1032,7 @@ impl LogicEditor {
             return component_preview(
                 self.tool,
                 snap_point(pointer, kind.snap()),
-                self.placement_rotation,
-                self.placement_flip,
+                self.placement_orientation,
                 Some(&kind),
             );
         }
@@ -1035,8 +1055,7 @@ impl LogicEditor {
         component_preview(
             tool,
             snap_point(pointer, self.active_tool_snap()),
-            self.placement_rotation,
-            self.placement_flip,
+            self.placement_orientation,
             None,
         )
     }

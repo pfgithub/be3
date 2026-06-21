@@ -5,8 +5,7 @@ fn connection_stub_extends_outward_from_the_wired_port() {
     let component = Component {
         id: ComponentId(0),
         position: Point::new(10, 20),
-        rotation: Rotation::Up,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Up,
         kind: ComponentKind::Storage {
             scale: Scale::ONE,
             value: 0,

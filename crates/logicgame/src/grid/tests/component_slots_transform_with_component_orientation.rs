@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn component_slots_mirror_with_component_flip() {
+fn component_slots_transform_with_component_orientation() {
     let size = Size::new(10, 6);
     let ports = vec![
         ComponentPort::input(0, scale(1), ComponentSide::Left, 1, 3),
@@ -11,13 +11,7 @@ fn component_slots_mirror_with_component_flip() {
     let mut grid = LogicGrid::new();
     let id = grid.add_component(Point::new(4, 7), Rotation::Up, kind);
 
-    assert!(grid.set_component_flip(
-        id,
-        ComponentFlip {
-            horizontal: true,
-            vertical: true,
-        },
-    ));
+    assert!(grid.set_component_orientation(id, ComponentOrientation::Down));
 
     assert_eq!(
         grid.component(id).unwrap().connection_slots(),

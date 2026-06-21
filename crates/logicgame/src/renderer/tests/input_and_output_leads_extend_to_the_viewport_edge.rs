@@ -5,8 +5,7 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
     let input = Component {
         id: ComponentId(0),
         position: Point::new(0, 0),
-        rotation: Rotation::Up,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Up,
         kind: ComponentKind::Input {
             scale: Scale::ONE,
             id: InputId::from_u128(0),
@@ -17,8 +16,7 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
     let output = Component {
         id: ComponentId(1),
         position: Point::new(-10, 0),
-        rotation: Rotation::Right,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Right,
         kind: ComponentKind::Output {
             scale: Scale::ONE,
             id: OutputId::from_u128(0),

@@ -5,8 +5,7 @@ fn not_gate_defines_rotated_input_and_output_slots() {
     let component = Component {
         id: ComponentId(0),
         position: Point::new(10, 20),
-        rotation: Rotation::Right,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Right,
         kind: ComponentKind::Not { scale: scale(2) },
     };
 

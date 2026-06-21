@@ -5,8 +5,7 @@ fn splitter_partitions_a_wide_input_into_smaller_outputs() {
     let component = Component {
         id: ComponentId(0),
         position: Point::new(0, 0),
-        rotation: Rotation::Right,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Right,
         kind: ComponentKind::MergerSplitter {
             input_scale: scale(16),
             output_scale: scale(4),

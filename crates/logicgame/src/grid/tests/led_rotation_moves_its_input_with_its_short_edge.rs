@@ -5,8 +5,7 @@ fn led_rotation_moves_its_input_with_its_short_edge() {
     let component = Component {
         id: ComponentId(0),
         position: Point::new(10, 20),
-        rotation: Rotation::Right,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Right,
         kind: ComponentKind::Led,
     };
 

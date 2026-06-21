@@ -126,24 +126,6 @@ pub(super) fn projected_wire(start: Point, end: Point, scale: Scale) -> Option<W
     Wire::new(start, end, scale).ok()
 }
 
-pub(super) fn rotate_left(rotation: Rotation) -> Rotation {
-    match rotation {
-        Rotation::Up => Rotation::Left,
-        Rotation::Right => Rotation::Up,
-        Rotation::Down => Rotation::Right,
-        Rotation::Left => Rotation::Down,
-    }
-}
-
-pub(super) fn rotate_right(rotation: Rotation) -> Rotation {
-    match rotation {
-        Rotation::Up => Rotation::Right,
-        Rotation::Right => Rotation::Down,
-        Rotation::Down => Rotation::Left,
-        Rotation::Left => Rotation::Up,
-    }
-}
-
 pub(super) fn previous_scale(scale: Scale) -> Scale {
     let current = scale.get() as u8;
     let value = SCALES
@@ -168,12 +150,14 @@ pub(super) fn next_scale(scale: Scale) -> Scale {
 pub(super) fn placement_rotation(
     drag_start: [f32; 2],
     pointer: [f32; 2],
-    selected: Rotation,
+    selected: ComponentOrientation,
     kind: ToolKind,
-) -> Rotation {
+) -> ComponentOrientation {
     match drag_rotation(drag_start, pointer) {
-        Some(rotation) if kind == ToolKind::Input => rotation.flip(),
-        Some(rotation) => rotation,
+        Some(rotation) if kind == ToolKind::Input => {
+            ComponentOrientation::from_rotation(rotation.flip())
+        }
+        Some(rotation) => ComponentOrientation::from_rotation(rotation),
         None => selected,
     }
 }
@@ -181,8 +165,7 @@ pub(super) fn placement_rotation(
 pub(super) fn component_preview(
     tool: Tool,
     anchor: Point,
-    rotation: Rotation,
-    flip: ComponentFlip,
+    orientation: ComponentOrientation,
     custom_kind: Option<&ComponentKind>,
 ) -> Option<Component> {
     let kind = match tool.kind {
@@ -213,19 +196,20 @@ pub(super) fn component_preview(
         ToolKind::Custom => custom_kind.cloned()?,
     };
     let position = match tool.kind {
-        ToolKind::Custom => subcomponent_placement_position(anchor, rotation, &kind),
+        ToolKind::Custom => subcomponent_placement_position(anchor, orientation.rotation(), &kind),
         ToolKind::MergerSplitter => {
             let (_, output_scale) = tool.conversion_scales();
-            component_placement_position(anchor, rotation, output_scale, tool.kind)
+            component_placement_position(anchor, orientation.rotation(), output_scale, tool.kind)
         }
-        ToolKind::Led => component_placement_position(anchor, rotation, Scale::ONE, tool.kind),
-        _ => component_placement_position(anchor, rotation, tool.scale, tool.kind),
+        ToolKind::Led => {
+            component_placement_position(anchor, orientation.rotation(), Scale::ONE, tool.kind)
+        }
+        _ => component_placement_position(anchor, orientation.rotation(), tool.scale, tool.kind),
     };
     Some(Component {
         id: ComponentId(u64::MAX),
         position,
-        rotation,
-        flip,
+        orientation,
         kind,
     })
 }
@@ -280,8 +264,7 @@ pub(super) fn subcomponent_placement_position(
     let probe = Component {
         id: ComponentId(u64::MAX),
         position: anchor,
-        rotation,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::from_rotation(rotation),
         kind: kind.clone(),
     };
     let Some(size) = probe.size() else {

@@ -5,8 +5,7 @@ fn storage_has_bottom_input_and_top_output() {
     let component = Component {
         id: ComponentId(0),
         position: Point::new(10, 20),
-        rotation: Rotation::Up,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Up,
         kind: ComponentKind::Storage {
             scale: scale(2),
             value: 0,

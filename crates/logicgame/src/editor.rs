@@ -11,7 +11,7 @@ use logicgame::{
 use logicgame::{
     challenges::Challenge,
     grid::{
-        value_mask, CircuitGraph, Component, ComponentFlip, ComponentId, ComponentKind,
+        value_mask, CircuitGraph, Component, ComponentId, ComponentKind, ComponentOrientation,
         ComponentSide, ConnectionSlot, GraphNode, GraphNodeId, InputId, LogicGrid, OutputId, Point,
         Rotation, Scale, ValidationError, Wire,
     },
@@ -505,8 +505,7 @@ impl Selection {
 pub struct LogicEditor {
     grid: LogicGrid,
     tool: Tool,
-    placement_rotation: Rotation,
-    placement_flip: ComponentFlip,
+    placement_orientation: ComponentOrientation,
     camera: Camera,
     gesture: Option<Gesture>,
     selection: Selection,
@@ -537,8 +536,7 @@ impl Default for LogicEditor {
                 scale: Scale::ONE,
                 merger_out_scale: Scale::new(4).expect("default scale is valid"),
             },
-            placement_rotation: Rotation::Right,
-            placement_flip: ComponentFlip::default(),
+            placement_orientation: ComponentOrientation::Right,
             camera: Camera::default(),
             gesture: None,
             selection: Selection::default(),

@@ -7,22 +7,19 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
             Component {
                 id: ComponentId(2),
                 position: Point::new(-8, 0),
-                rotation: Rotation::Up,
-                flip: ComponentFlip::default(),
+                orientation: ComponentOrientation::Up,
                 kind: ComponentKind::Not { scale: scale(2) },
             },
             Component {
                 id: ComponentId(4),
                 position: Point::new(0, 0),
-                rotation: Rotation::Right,
-                flip: ComponentFlip::default(),
+                orientation: ComponentOrientation::Right,
                 kind: ComponentKind::Led,
             },
             Component {
                 id: ComponentId(6),
                 position: Point::new(4, 0),
-                rotation: Rotation::Down,
-                flip: ComponentFlip::default(),
+                orientation: ComponentOrientation::Down,
                 kind: ComponentKind::Storage {
                     scale: scale(4),
                     value: 0b1010,
@@ -31,8 +28,7 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
             Component {
                 id: ComponentId(8),
                 position: Point::new(8, 0),
-                rotation: Rotation::Left,
-                flip: ComponentFlip::default(),
+                orientation: ComponentOrientation::Left,
                 kind: ComponentKind::Input {
                     scale: scale(2),
                     id: InputId::from_u128(5),
@@ -43,8 +39,7 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
             Component {
                 id: ComponentId(10),
                 position: Point::new(12, 0),
-                rotation: Rotation::Up,
-                flip: ComponentFlip::default(),
+                orientation: ComponentOrientation::Up,
                 kind: ComponentKind::Output {
                     scale: scale(2),
                     id: OutputId::from_u128(7),
@@ -55,8 +50,7 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
             Component {
                 id: ComponentId(12),
                 position: Point::new(16, 0),
-                rotation: Rotation::Right,
-                flip: ComponentFlip::default(),
+                orientation: ComponentOrientation::Right,
                 kind: ComponentKind::subcomponent(
                     file_id(),
                     component_hash(),
@@ -72,6 +66,11 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
         wires: vec![wire((-4, 8), (4, 8), 2)],
     };
     let json = serde_json::to_vec_pretty(&snapshot).unwrap();
+    let json_value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    let first_component = &json_value["components"][0];
+    assert_eq!(first_component["orientation"], "Up");
+    assert!(first_component.get("rotation").is_none());
+    assert!(first_component.get("flip").is_none());
     let decoded: LogicGridSnapshot = serde_json::from_slice(&json).unwrap();
     let mut grid = LogicGrid::from_snapshot(decoded);
     assert_eq!(grid.snapshot(), snapshot);

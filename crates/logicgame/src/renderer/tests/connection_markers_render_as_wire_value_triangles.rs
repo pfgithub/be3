@@ -5,8 +5,7 @@ fn connection_markers_render_as_wire_value_triangles() {
     let component = Component {
         id: ComponentId(0),
         position: Point::new(10, 20),
-        rotation: Rotation::Up,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Up,
         kind: ComponentKind::Storage {
             scale: Scale::new(4).unwrap(),
             value: 0,

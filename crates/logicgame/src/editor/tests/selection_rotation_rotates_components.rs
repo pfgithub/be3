@@ -18,5 +18,5 @@ fn selection_rotation_rotates_components() {
     assert!(editor.rotate_selection(RotationDirection::Right));
     let component = editor.grid.component(component).unwrap();
     assert_eq!(component.position, Point::new(0, 0));
-    assert_eq!(component.rotation, Rotation::Right);
+    assert_eq!(component.orientation, ComponentOrientation::Right);
 }

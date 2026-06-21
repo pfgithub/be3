@@ -5,8 +5,7 @@ fn storage_state_renders_as_wire_value_rectangle() {
     let component = Component {
         id: ComponentId(0),
         position: Point::new(10, 20),
-        rotation: Rotation::Up,
-        flip: ComponentFlip::default(),
+        orientation: ComponentOrientation::Up,
         kind: ComponentKind::Storage {
             scale: Scale::new(4).unwrap(),
             value: 0b1010,

@@ -321,11 +321,8 @@ impl LogicEditor {
                                                 component.position.x, component.position.y
                                             ));
                                             ui.end_row();
-                                            ui.label("Rotation");
-                                            ui.monospace(format!("{:?}", component.rotation));
-                                            ui.end_row();
-                                            ui.label("Flip");
-                                            ui.monospace(format!("{:?}", component.flip));
+                                            ui.label("Orientation");
+                                            ui.monospace(format!("{:?}", component.orientation));
                                             ui.end_row();
                                             ui.label("Kind");
                                             ui.monospace(format!("{:?}", component.kind));
@@ -680,14 +677,14 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Not { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         *drag_start,
                         pointer,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Not,
                     );
                     if let Some(component) =
-                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                        component_preview(self.tool, *anchor, orientation, None)
                     {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
@@ -697,14 +694,14 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::MergerSplitter { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         *drag_start,
                         pointer,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::MergerSplitter,
                     );
                     if let Some(component) =
-                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                        component_preview(self.tool, *anchor, orientation, None)
                     {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
@@ -714,14 +711,14 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Led { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         *drag_start,
                         pointer,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Led,
                     );
                     if let Some(component) =
-                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                        component_preview(self.tool, *anchor, orientation, None)
                     {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
@@ -731,14 +728,14 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         *drag_start,
                         pointer,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Storage,
                     );
                     if let Some(component) =
-                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                        component_preview(self.tool, *anchor, orientation, None)
                     {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
@@ -748,17 +745,15 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Input { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         *drag_start,
                         pointer,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Input,
                     );
                     let mut tool = self.tool;
                     tool.scale = self.active_input_scale();
-                    if let Some(component) =
-                        component_preview(tool, *anchor, rotation, self.placement_flip, None)
-                    {
+                    if let Some(component) = component_preview(tool, *anchor, orientation, None) {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -772,17 +767,15 @@ impl LogicEditor {
                     }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         *drag_start,
                         pointer,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Output,
                     );
                     let mut tool = self.tool;
                     tool.scale = self.active_output_scale();
-                    if let Some(component) =
-                        component_preview(tool, *anchor, rotation, self.placement_flip, None)
-                    {
+                    if let Some(component) = component_preview(tool, *anchor, orientation, None) {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -800,19 +793,15 @@ impl LogicEditor {
                     drag_start,
                     kind,
                 }) => {
-                    let rotation = placement_rotation(
+                    let orientation = placement_rotation(
                         *drag_start,
                         pointer,
-                        self.placement_rotation,
+                        self.placement_orientation,
                         ToolKind::Custom,
                     );
-                    if let Some(component) = component_preview(
-                        self.tool,
-                        *anchor,
-                        rotation,
-                        self.placement_flip,
-                        Some(kind),
-                    ) {
+                    if let Some(component) =
+                        component_preview(self.tool, *anchor, orientation, Some(kind))
+                    {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
