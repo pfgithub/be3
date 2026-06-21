@@ -10,15 +10,7 @@ pub(super) fn default_hotbar() -> Vec<HotbarSlot> {
         },
         HotbarSlot::Folder {
             name: "Logic".to_string(),
-            slots: vec![
-                HotbarSlot::Builtin(ToolKind::Not),
-                HotbarSlot::ChallengeCompletion {
-                    challenge: ChallengeId::And,
-                },
-                HotbarSlot::ChallengeCompletion {
-                    challenge: ChallengeId::Or,
-                },
-            ],
+            slots: vec![HotbarSlot::Builtin(ToolKind::Not)],
         },
         HotbarSlot::Folder {
             name: "Storage".to_string(),
@@ -92,11 +84,6 @@ impl LogicEditor {
             }
             HotbarSlot::Custom { .. } => {
                 self.select_custom_hotbar_path(path);
-            }
-            HotbarSlot::ChallengeCompletion { .. } => {
-                if self.selected_hotbar_kind(&path).is_some() {
-                    self.select_custom_hotbar_path(path);
-                }
             }
             HotbarSlot::Folder { .. } => {
                 self.active_hotbar_folder = path;
@@ -577,9 +564,6 @@ pub(super) fn hotbar_slot_from_save(slot: SaveHotbarSlot) -> Option<HotbarSlot> 
     Some(match slot {
         SaveHotbarSlot::Builtin { tool } => HotbarSlot::Builtin(ToolKind::from_id(&tool)?),
         SaveHotbarSlot::Locked { name } => HotbarSlot::Locked { name },
-        SaveHotbarSlot::ChallengeCompletion { challenge } => {
-            HotbarSlot::ChallengeCompletion { challenge }
-        }
         SaveHotbarSlot::Folder { name, slots } => HotbarSlot::Folder {
             name,
             slots: slots
@@ -601,9 +585,6 @@ pub(super) fn hotbar_slot_to_save(slot: &HotbarSlot) -> SaveHotbarSlot {
             tool: kind.id().to_string(),
         },
         HotbarSlot::Locked { name } => SaveHotbarSlot::Locked { name: name.clone() },
-        HotbarSlot::ChallengeCompletion { challenge } => SaveHotbarSlot::ChallengeCompletion {
-            challenge: *challenge,
-        },
         HotbarSlot::Folder { name, slots } => SaveHotbarSlot::Folder {
             name: name.clone(),
             slots: slots.iter().map(hotbar_slot_to_save).collect(),
@@ -624,9 +605,7 @@ pub(super) fn hotbar_kind_source(kind: &ComponentKind) -> Option<ComponentFileRe
 
 pub(super) fn hotbar_slot_contains_unremovable(slot: &HotbarSlot) -> bool {
     match slot {
-        HotbarSlot::Builtin(_)
-        | HotbarSlot::Locked { .. }
-        | HotbarSlot::ChallengeCompletion { .. } => true,
+        HotbarSlot::Builtin(_) | HotbarSlot::Locked { .. } => true,
         HotbarSlot::Folder { slots, .. } => slots.iter().any(hotbar_slot_contains_unremovable),
         HotbarSlot::Custom { .. } => false,
     }
@@ -1130,7 +1109,7 @@ pub(super) fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot
         HotbarSlot::Builtin(ToolKind::Input) => paint_port_glyph(painter, rect, ToolKind::Input),
         HotbarSlot::Builtin(ToolKind::Output) => paint_port_glyph(painter, rect, ToolKind::Output),
         HotbarSlot::Builtin(ToolKind::Custom) => paint_glyph_box(painter, rect, gate),
-        HotbarSlot::Locked { .. } | HotbarSlot::ChallengeCompletion { .. } => {
+        HotbarSlot::Locked { .. } => {
             paint_glyph_box(painter, rect, egui::Color32::DARK_GRAY);
             let lock_rect = glyph_inset(rect, 0.32, 0.42, 0.68, 0.78);
             painter.rect_filled(lock_rect, 1.5, egui::Color32::DARK_GRAY);
@@ -1160,82 +1139,21 @@ pub(super) fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot
 
 impl LogicEditor {
     pub(super) fn hotbar_display_slot(&self, slot: &HotbarSlot) -> HotbarSlot {
-        match slot {
-            HotbarSlot::ChallengeCompletion { challenge }
-                if self.challenge_completion_solution(*challenge).is_some() =>
-            {
-                HotbarSlot::Builtin(ToolKind::Custom)
-            }
-            _ => slot.clone(),
-        }
+        slot.clone()
     }
 
     pub(super) fn hotbar_slot_label(&self, slot: &HotbarSlot) -> String {
-        match slot {
-            HotbarSlot::ChallengeCompletion { challenge } => self
-                .challenge_completion_solution(*challenge)
-                .map(|(_, name)| name)
-                .unwrap_or_else(|| challenge.name().to_owned()),
-            _ => slot.label().to_owned(),
-        }
+        slot.label().to_owned()
     }
 
-    pub(super) fn hotbar_slot_tooltip(&self, slot: &HotbarSlot, label: &str) -> String {
-        match slot {
-            HotbarSlot::ChallengeCompletion { challenge }
-                if self.challenge_completion_solution(*challenge).is_none() =>
-            {
-                challenge_completion_locked_tooltip(*challenge)
-            }
-            _ => label.to_owned(),
-        }
+    pub(super) fn hotbar_slot_tooltip(&self, _slot: &HotbarSlot, label: &str) -> String {
+        label.to_owned()
     }
 
     pub(super) fn selected_hotbar_kind(&self, path: &[usize]) -> Option<ComponentKind> {
         get_hotbar_slot(&self.hotbar, path).and_then(|slot| match slot {
             HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
-            HotbarSlot::ChallengeCompletion { challenge } => self
-                .challenge_completion_solution(*challenge)
-                .and_then(|(source, name)| self.compile_hotbar_component(source, &name)),
             _ => None,
         })
     }
-
-    fn challenge_completion_solution(
-        &self,
-        challenge: ChallengeId,
-    ) -> Option<(ComponentFileRef, String)> {
-        let files = self.component_files.as_ref()?;
-        let solution = match files.list_challenge_solutions(challenge) {
-            Ok(solutions) => solutions.into_iter().find(|solution| solution.completed)?,
-            Err(error) => {
-                eprintln!("failed to list challenge solutions: {error}");
-                return None;
-            }
-        };
-        let file = ComponentFileRef { id: solution.id };
-        Some((file, solution.name))
-    }
-
-    fn compile_hotbar_component(
-        &self,
-        file: ComponentFileRef,
-        name: &str,
-    ) -> Option<ComponentKind> {
-        match self
-            .component_files
-            .as_ref()?
-            .compile_subcomponent(&file, name)
-        {
-            Ok(kind) => Some(kind),
-            Err(error) => {
-                eprintln!("failed to compile challenge hotbar component: {error}");
-                None
-            }
-        }
-    }
-}
-
-pub(super) fn challenge_completion_locked_tooltip(challenge: ChallengeId) -> String {
-    format!("Complete the challenge {} to unlock", challenge.name())
 }

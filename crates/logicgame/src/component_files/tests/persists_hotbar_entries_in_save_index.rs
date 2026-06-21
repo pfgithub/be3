@@ -100,17 +100,5 @@ fn persists_hotbar_entries_in_save_index() {
         }]
     );
 
-    files
-        .save_hotbar(vec![SaveHotbarSlot::ChallengeCompletion {
-            challenge: ChallengeId::And,
-        }])
-        .unwrap();
-    assert_eq!(
-        files.load_hotbar().unwrap(),
-        vec![SaveHotbarSlot::ChallengeCompletion {
-            challenge: ChallengeId::And,
-        }]
-    );
-
     remove_test_root(&root);
 }

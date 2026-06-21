@@ -26,18 +26,9 @@ fn default_hotbar_uses_requested_folder_layout() {
         panic!("fourth default slot should be the Logic folder");
     };
     assert_eq!(name, "Logic");
-    assert!(matches!(slots[0], HotbarSlot::Builtin(ToolKind::Not)));
     assert!(matches!(
-        &slots[1],
-        HotbarSlot::ChallengeCompletion {
-            challenge: ChallengeId::And
-        }
-    ));
-    assert!(matches!(
-        &slots[2],
-        HotbarSlot::ChallengeCompletion {
-            challenge: ChallengeId::Or
-        }
+        slots.as_slice(),
+        [HotbarSlot::Builtin(ToolKind::Not)]
     ));
 
     assert!(hotbar
