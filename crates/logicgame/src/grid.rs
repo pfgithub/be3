@@ -553,6 +553,10 @@ impl Component {
         })
     }
 
+    fn bounds_rect(&self) -> Option<Rect> {
+        self.rect()?.snap_to_grid(self.kind.snap())
+    }
+
     pub fn connection_slots(&self) -> Vec<ConnectionSlot> {
         let Some(unrotated_size) = self.kind.unrotated_size() else {
             return Vec::new();
@@ -749,7 +753,7 @@ impl LogicGrid {
             .components
             .values()
             .filter(|c| c.include_in_bounds())
-            .map(Component::rect)
+            .map(Component::bounds_rect)
             .chain(self.wires.iter().copied().map(Wire::rect));
         let first = rects.next()??;
         let mut bounds = GridBounds {
@@ -1304,6 +1308,33 @@ impl Rect {
     fn overlaps_area(self, other: Self) -> bool {
         overlaps(self.min.x, self.max.x, other.min.x, other.max.x)
             && overlaps(self.min.y, self.max.y, other.min.y, other.max.y)
+    }
+
+    fn snap_to_grid(self, scale: Scale) -> Option<Self> {
+        let scale = scale.get();
+        Some(Self {
+            min: Point::new(
+                snap_min_to_grid(self.min.x, scale)?,
+                snap_min_to_grid(self.min.y, scale)?,
+            ),
+            max: Point::new(
+                snap_max_to_grid(self.max.x, scale)?,
+                snap_max_to_grid(self.max.y, scale)?,
+            ),
+        })
+    }
+}
+
+fn snap_min_to_grid(value: i64, scale: i64) -> Option<i64> {
+    value.checked_sub(value.rem_euclid(scale))
+}
+
+fn snap_max_to_grid(value: i64, scale: i64) -> Option<i64> {
+    let remainder = value.rem_euclid(scale);
+    if remainder == 0 {
+        Some(value)
+    } else {
+        value.checked_add(scale - remainder)
     }
 }
 
