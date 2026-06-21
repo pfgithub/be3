@@ -852,6 +852,33 @@ impl LogicGrid {
         true
     }
 
+    pub fn set_component_rotation(&mut self, id: ComponentId, rotation: Rotation) -> bool {
+        let Some(component) = self.components.get_mut(&id) else {
+            return false;
+        };
+        if component.rotation == rotation {
+            return false;
+        }
+        component.rotation = rotation;
+        self.mark_changed();
+        true
+    }
+
+    pub fn set_component_kind(&mut self, id: ComponentId, mut kind: ComponentKind) -> bool {
+        let Some(component) = self.components.get_mut(&id) else {
+            return false;
+        };
+        if let ComponentKind::Storage { scale, value } = &mut kind {
+            *value &= value_mask(*scale);
+        }
+        if component.kind == kind {
+            return false;
+        }
+        component.kind = kind;
+        self.mark_changed();
+        true
+    }
+
     pub fn set_storage_value(&mut self, id: ComponentId, value: u64) -> bool {
         let Some(Component {
             kind:

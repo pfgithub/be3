@@ -1,5 +1,213 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RotationDirection {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScaleDirection {
+    Down,
+    Up,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SelectionBounds {
+    min: Option<Point>,
+    max: Option<Point>,
+}
+
+impl SelectionBounds {
+    fn include_rect(&mut self, position: Point, size: logicgame::grid::Size) -> Option<()> {
+        self.include(position);
+        self.include(Point::new(
+            position.x.checked_add(size.width)?,
+            position.y.checked_add(size.height)?,
+        ));
+        Some(())
+    }
+
+    fn include_point_cell(&mut self, point: Point, scale: Scale) -> Option<()> {
+        self.include_rect(point, logicgame::grid::Size::new(scale.get(), scale.get()))
+    }
+
+    fn include(&mut self, point: Point) {
+        self.min = Some(match self.min {
+            Some(min) => Point::new(min.x.min(point.x), min.y.min(point.y)),
+            None => point,
+        });
+        self.max = Some(match self.max {
+            Some(max) => Point::new(max.x.max(point.x), max.y.max(point.y)),
+            None => point,
+        });
+    }
+
+    fn non_empty(self) -> Option<Self> {
+        match (self.min, self.max) {
+            (Some(min), Some(max)) if min != max => Some(Self {
+                min: Some(min),
+                max: Some(max),
+            }),
+            _ => None,
+        }
+    }
+
+    fn center_twice(self) -> Option<Point> {
+        let min = self.min.expect("selection bounds has min");
+        let max = self.max.expect("selection bounds has max");
+        Some(Point::new(
+            min.x.checked_add(max.x)?,
+            min.y.checked_add(max.y)?,
+        ))
+    }
+
+    fn min(self) -> Point {
+        self.min.expect("selection bounds has min")
+    }
+}
+
+fn scaled_scale(scale: Scale, direction: ScaleDirection) -> Option<Scale> {
+    let scaled = match direction {
+        ScaleDirection::Down => previous_scale(scale),
+        ScaleDirection::Up => next_scale(scale),
+    };
+    (scaled != scale).then_some(scaled)
+}
+
+fn scaled_component_kind(kind: &ComponentKind, direction: ScaleDirection) -> Option<ComponentKind> {
+    Some(match kind {
+        ComponentKind::Not { scale } => ComponentKind::Not {
+            scale: scaled_scale(*scale, direction)?,
+        },
+        ComponentKind::MergerSplitter {
+            input_scale,
+            output_scale,
+        } => ComponentKind::MergerSplitter {
+            input_scale: scaled_scale(*input_scale, direction)?,
+            output_scale: scaled_scale(*output_scale, direction)?,
+        },
+        ComponentKind::Storage { scale, value } => ComponentKind::Storage {
+            scale: scaled_scale(*scale, direction)?,
+            value: *value,
+        },
+        ComponentKind::Input { scale, id, label } => ComponentKind::Input {
+            scale: scaled_scale(*scale, direction)?,
+            id: *id,
+            label: label.clone(),
+        },
+        ComponentKind::Output { scale, id, label } => ComponentKind::Output {
+            scale: scaled_scale(*scale, direction)?,
+            id: *id,
+            label: label.clone(),
+        },
+        ComponentKind::Led | ComponentKind::Subcomponent { .. } => return None,
+    })
+}
+
+fn scaled_point(point: Point, origin: Point, direction: ScaleDirection) -> Option<Point> {
+    let dx = point.x.checked_sub(origin.x)?;
+    let dy = point.y.checked_sub(origin.y)?;
+    let (dx, dy) = match direction {
+        ScaleDirection::Down => {
+            if dx.rem_euclid(2) != 0 || dy.rem_euclid(2) != 0 {
+                return None;
+            }
+            (dx / 2, dy / 2)
+        }
+        ScaleDirection::Up => (dx.checked_mul(2)?, dy.checked_mul(2)?),
+    };
+    Some(Point::new(
+        origin.x.checked_add(dx)?,
+        origin.y.checked_add(dy)?,
+    ))
+}
+
+fn scale_transform_origin(
+    bounds: SelectionBounds,
+    direction: ScaleDirection,
+    snap: Scale,
+) -> Point {
+    let min = bounds.min();
+    match direction {
+        ScaleDirection::Down => min,
+        ScaleDirection::Up => Point::new(
+            snap_coordinate(min.x as f32, snap),
+            snap_coordinate(min.y as f32, snap),
+        ),
+    }
+}
+
+fn point_snapped_to_scale(point: Point, scale: Scale) -> bool {
+    let scale = scale.get();
+    point.x.rem_euclid(scale) == 0 && point.y.rem_euclid(scale) == 0
+}
+
+fn rotate_selected_wire(
+    selected: SelectedWire,
+    bounds: SelectionBounds,
+    direction: RotationDirection,
+) -> Option<Wire> {
+    let start = if selected.start {
+        rotate_point(selected.wire.start, bounds, direction)?
+    } else {
+        selected.wire.start
+    };
+    let end = if selected.end {
+        rotate_point(selected.wire.end, bounds, direction)?
+    } else {
+        selected.wire.end
+    };
+    Wire::new(start, end, selected.wire.scale).ok()
+}
+
+fn rotate_rect_position(
+    position: Point,
+    size: logicgame::grid::Size,
+    bounds: SelectionBounds,
+    direction: RotationDirection,
+) -> Option<Point> {
+    let corners = [
+        position,
+        Point::new(position.x.checked_add(size.width)?, position.y),
+        Point::new(
+            position.x.checked_add(size.width)?,
+            position.y.checked_add(size.height)?,
+        ),
+        Point::new(position.x, position.y.checked_add(size.height)?),
+    ];
+    corners
+        .into_iter()
+        .map(|point| rotate_point(point, bounds, direction))
+        .collect::<Option<Vec<_>>>()
+        .map(|points| {
+            points
+                .into_iter()
+                .reduce(|min, point| Point::new(min.x.min(point.x), min.y.min(point.y)))
+                .expect("rect has corners")
+        })
+}
+
+fn rotate_point(
+    point: Point,
+    bounds: SelectionBounds,
+    direction: RotationDirection,
+) -> Option<Point> {
+    let center = bounds.center_twice()?;
+    let x = point.x.checked_mul(2)?;
+    let y = point.y.checked_mul(2)?;
+    let dx = x.checked_sub(center.x)?;
+    let dy = y.checked_sub(center.y)?;
+    let (rotated_x, rotated_y) = match direction {
+        RotationDirection::Left => (center.x.checked_add(dy)?, center.y.checked_sub(dx)?),
+        RotationDirection::Right => (center.x.checked_sub(dy)?, center.y.checked_add(dx)?),
+    };
+    if rotated_x.rem_euclid(2) != 0 || rotated_y.rem_euclid(2) != 0 {
+        return None;
+    }
+    Some(Point::new(rotated_x / 2, rotated_y / 2))
+}
+
 impl LogicEditor {
     pub(super) fn handle_canvas_input(&mut self, response: &egui::Response) {
         if self.tool.kind == ToolKind::Select
@@ -8,6 +216,23 @@ impl LogicEditor {
             })
         {
             self.delete_selection();
+        }
+
+        if self.tool.kind == ToolKind::Select && !response.ctx.egui_wants_keyboard_input() {
+            response.ctx.input(|input| {
+                if input.key_pressed(egui::Key::Q) {
+                    self.rotate_selection(RotationDirection::Left);
+                }
+                if input.key_pressed(egui::Key::E) {
+                    self.rotate_selection(RotationDirection::Right);
+                }
+                if input.key_pressed(egui::Key::OpenBracket) {
+                    self.scale_selection(ScaleDirection::Down);
+                }
+                if input.key_pressed(egui::Key::CloseBracket) {
+                    self.scale_selection(ScaleDirection::Up);
+                }
+            });
         }
 
         if self.tool.kind.places_component() && !response.ctx.egui_wants_keyboard_input() {
@@ -388,6 +613,187 @@ impl LogicEditor {
             })
             .flatten()
             .collect();
+        self.selection.wire_endpoints = self
+            .grid
+            .wires()
+            .iter()
+            .copied()
+            .flat_map(|wire| {
+                [WireEnd::Start, WireEnd::End].map(move |end| WireEndpoint { wire, end })
+            })
+            .filter(|endpoint| selected_points.contains(&(endpoint.point(), endpoint.wire.scale)))
+            .collect();
+    }
+
+    pub(super) fn rotate_selection(&mut self, direction: RotationDirection) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        let Some(bounds) = self.selection_bounds() else {
+            return false;
+        };
+        let components: Option<Vec<_>> = self
+            .selection
+            .components
+            .iter()
+            .map(|id| {
+                let component = self.grid.component(*id)?;
+                let size = component.size()?;
+                let rotation = match direction {
+                    RotationDirection::Left => rotate_left(component.rotation),
+                    RotationDirection::Right => rotate_right(component.rotation),
+                };
+                let position = rotate_rect_position(component.position, size, bounds, direction)?;
+                Some((*id, position, rotation))
+            })
+            .collect();
+        let Some(components) = components else {
+            return false;
+        };
+
+        let wires = self.selection.selected_wires();
+        let rotated_wires: Option<Vec<_>> = wires
+            .iter()
+            .map(|wire| rotate_selected_wire(*wire, bounds, direction))
+            .collect();
+        let Some(rotated_wires) = rotated_wires else {
+            return false;
+        };
+
+        for wire in &wires {
+            self.grid.remove_wire(wire.wire);
+        }
+        for (id, position, rotation) in components {
+            self.grid.set_component_position(id, position);
+            self.grid.set_component_rotation(id, rotation);
+        }
+        for wire in &rotated_wires {
+            self.grid.add_wire(*wire);
+        }
+        self.reselect_wire_points(
+            wires
+                .iter()
+                .zip(rotated_wires.iter())
+                .flat_map(|(selected, rotated)| {
+                    let mut points = Vec::new();
+                    if selected.start {
+                        points.push((rotated.start, rotated.scale));
+                    }
+                    if selected.end {
+                        points.push((rotated.end, rotated.scale));
+                    }
+                    points
+                })
+                .collect(),
+        );
+        true
+    }
+
+    pub(super) fn scale_selection(&mut self, direction: ScaleDirection) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        let Some(bounds) = self.selection_bounds() else {
+            return false;
+        };
+        let components: Option<Vec<_>> = self
+            .selection
+            .components
+            .iter()
+            .map(|id| {
+                let component = self.grid.component(*id)?;
+                let kind = scaled_component_kind(&component.kind, direction)?;
+                Some((*id, component.position, kind))
+            })
+            .collect();
+        let Some(components) = components else {
+            return false;
+        };
+
+        let wires = self.selection.selected_wires();
+        let snap = components
+            .iter()
+            .map(|(_, _, kind)| kind.snap())
+            .chain(
+                wires
+                    .iter()
+                    .filter_map(|wire| scaled_scale(wire.wire.scale, direction)),
+            )
+            .max()
+            .unwrap_or(Scale::ONE);
+        let origin = scale_transform_origin(bounds, direction, snap);
+        let scaled_components: Option<Vec<_>> = components
+            .iter()
+            .map(|(id, position, kind)| {
+                let position = scaled_point(*position, origin, direction)?;
+                point_snapped_to_scale(position, kind.snap()).then_some((
+                    *id,
+                    position,
+                    kind.clone(),
+                ))
+            })
+            .collect();
+        let Some(scaled_components) = scaled_components else {
+            return false;
+        };
+        let scaled_wires: Option<Vec<_>> = wires
+            .iter()
+            .map(|wire| {
+                let scale = scaled_scale(wire.wire.scale, direction)?;
+                let start = scaled_point(wire.wire.start, origin, direction)?;
+                let end = scaled_point(wire.wire.end, origin, direction)?;
+                if !point_snapped_to_scale(start, scale) || !point_snapped_to_scale(end, scale) {
+                    return None;
+                }
+                Wire::new(start, end, scale).ok()
+            })
+            .collect();
+        let Some(scaled_wires) = scaled_wires else {
+            return false;
+        };
+
+        for wire in &wires {
+            self.grid.remove_wire(wire.wire);
+        }
+        for (id, position, kind) in scaled_components {
+            self.grid.set_component_position(id, position);
+            self.grid.set_component_kind(id, kind);
+        }
+        for wire in &scaled_wires {
+            self.grid.add_wire(*wire);
+        }
+        self.reselect_wire_points(
+            wires
+                .iter()
+                .zip(scaled_wires.iter())
+                .flat_map(|(selected, scaled)| {
+                    let mut points = Vec::new();
+                    if selected.start {
+                        points.push((scaled.start, scaled.scale));
+                    }
+                    if selected.end {
+                        points.push((scaled.end, scaled.scale));
+                    }
+                    points
+                })
+                .collect(),
+        );
+        true
+    }
+
+    fn selection_bounds(&self) -> Option<SelectionBounds> {
+        let mut bounds = SelectionBounds::default();
+        for id in &self.selection.components {
+            let component = self.grid.component(*id)?;
+            bounds.include_rect(component.position, component.size()?)?;
+        }
+        for endpoint in &self.selection.wire_endpoints {
+            bounds.include_point_cell(endpoint.point(), endpoint.wire.scale)?;
+        }
+        bounds.non_empty()
+    }
+
+    fn reselect_wire_points(&mut self, selected_points: BTreeSet<(Point, Scale)>) {
         self.selection.wire_endpoints = self
             .grid
             .wires()
