@@ -586,25 +586,22 @@ impl LogicEditor {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
 
-        let hotbar_width = if self.active_hotbar_folder.is_empty() {
-            HOTBAR_COLUMN_WIDTH + SIDE_PANEL_HORIZONTAL_MARGIN
-        } else {
-            HOTBAR_WIDTH
-        };
         egui::Panel::left("logic-hotbar")
             .resizable(false)
-            .exact_size(hotbar_width)
+            .exact_size(HOTBAR_WIDTH)
             .show_inside(ui, |ui| {
-                self.show_hotbar(ui);
-            });
-
-        egui::Panel::left("logic-tool-settings")
-            .resizable(false)
-            .exact_size(HOTBAR_COLUMN_WIDTH + SIDE_PANEL_HORIZONTAL_MARGIN)
-            .show_inside(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.show_tool_settings(ui);
+                let settings_height = 190.0;
+                let hotbar_height = (ui.available_height() - settings_height).max(160.0);
+                ui.allocate_ui(egui::vec2(ui.available_width(), hotbar_height), |ui| {
+                    self.show_hotbar(ui);
                 });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .id_salt("tool-settings")
+                    .max_height(settings_height)
+                    .show(ui, |ui| {
+                        self.show_tool_settings(ui);
+                    });
             });
 
         let canvas = egui::Frame::central_panel(ui.style()).show(ui, |ui| {

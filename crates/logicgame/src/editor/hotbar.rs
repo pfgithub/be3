@@ -1,3 +1,4 @@
+use super::canvas::ScaleDirection;
 use super::*;
 
 pub(super) fn default_hotbar() -> Vec<HotbarSlot> {
@@ -241,6 +242,12 @@ impl LogicEditor {
                 }
                 if input.key_pressed(egui::Key::Backtick) {
                     self.active_hotbar_folder.pop();
+                }
+                if input.key_pressed(egui::Key::OpenBracket) {
+                    step_scale(&mut self.tool.scale, ScaleDirection::Down);
+                }
+                if input.key_pressed(egui::Key::CloseBracket) {
+                    step_scale(&mut self.tool.scale, ScaleDirection::Up);
                 }
             });
         }
@@ -769,14 +776,7 @@ pub(super) fn hotbar_slot_drop_target(
     slots: &[HotbarSlot],
     path: &[usize],
 ) -> Option<HotbarDropTarget> {
-    if matches!(
-        get_hotbar_slot(slots, path),
-        Some(HotbarSlot::Folder { .. })
-    ) {
-        None
-    } else {
-        Some(HotbarDropTarget::Slot(path.to_vec()))
-    }
+    get_hotbar_slot(slots, path).map(|_| HotbarDropTarget::Slot(path.to_vec()))
 }
 
 pub(super) fn move_hotbar_slot_to_folder(
@@ -818,16 +818,7 @@ pub(super) fn move_hotbar_slot(slots: &mut Vec<HotbarSlot>, source: &[usize], ta
         return;
     }
 
-    let mut adjusted_target = target.to_vec();
-    if source.len() == target.len()
-        && source[..source.len() - 1] == target[..target.len() - 1]
-        && source[source.len() - 1] < target[target.len() - 1]
-    {
-        *adjusted_target
-            .last_mut()
-            .expect("target path is non-empty") -= 1;
-    }
-
+    let adjusted_target = target.to_vec();
     let Some((index, parent_path)) = adjusted_target.split_last() else {
         return;
     };
@@ -857,6 +848,18 @@ pub(super) fn scale_buttons(ui: &mut egui::Ui, scale: &mut Scale) {
             }
         }
     });
+}
+
+pub(super) fn step_scale(scale: &mut Scale, direction: ScaleDirection) {
+    let index = SCALES
+        .iter()
+        .position(|value| i64::from(*value) == scale.get())
+        .expect("selected tool scale is one of the hotbar scales");
+    let next = match direction {
+        ScaleDirection::Down => index.saturating_sub(1),
+        ScaleDirection::Up => (index + 1).min(SCALES.len() - 1),
+    };
+    *scale = Scale::new(SCALES[next]).expect("hotbar scale is valid");
 }
 
 /// A square hotbar slot: a framed button with a glyph preview painted in its top
