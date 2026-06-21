@@ -261,19 +261,11 @@ pub(super) fn subcomponent_placement_position(
     rotation: Rotation,
     kind: &ComponentKind,
 ) -> Point {
-    let probe = Component {
-        id: ComponentId(u64::MAX),
-        position: anchor,
-        orientation: ComponentOrientation::from_rotation(rotation),
-        kind: kind.clone(),
-    };
-    let Some(size) = probe.size() else {
-        return anchor;
-    };
+    let snap = kind.snap().get();
     match rotation {
-        Rotation::Up => Point::new(anchor.x, anchor.y - size.height),
+        Rotation::Up => Point::new(anchor.x, anchor.y - snap),
         Rotation::Right | Rotation::Down => anchor,
-        Rotation::Left => Point::new(anchor.x - size.width, anchor.y),
+        Rotation::Left => Point::new(anchor.x - snap, anchor.y),
     }
 }
 

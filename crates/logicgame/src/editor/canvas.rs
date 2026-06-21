@@ -147,12 +147,24 @@ fn rotate_selected_wire(
     direction: RotationDirection,
 ) -> Option<Wire> {
     let start = if selected.start {
-        rotate_point(selected.wire.start, origin, offset, direction)?
+        rotate_point_cell(
+            selected.wire.start,
+            selected.wire.scale,
+            origin,
+            offset,
+            direction,
+        )?
     } else {
         selected.wire.start
     };
     let end = if selected.end {
-        rotate_point(selected.wire.end, origin, offset, direction)?
+        rotate_point_cell(
+            selected.wire.end,
+            selected.wire.scale,
+            origin,
+            offset,
+            direction,
+        )?
     } else {
         selected.wire.end
     };
@@ -185,6 +197,22 @@ fn rotate_rect_position(
                 .reduce(|min, point| Point::new(min.x.min(point.x), min.y.min(point.y)))
                 .expect("rect has corners")
         })
+}
+
+fn rotate_point_cell(
+    point: Point,
+    scale: Scale,
+    origin: Point,
+    offset: Point,
+    direction: RotationDirection,
+) -> Option<Point> {
+    rotate_rect_position(
+        point,
+        logicgame::grid::Size::new(scale.get(), scale.get()),
+        origin,
+        offset,
+        direction,
+    )
 }
 
 fn rotate_point(
@@ -222,6 +250,20 @@ fn rotation_offset(
     Some(Point::new(
         min.x.checked_sub(rotated_min.x)?,
         min.y.checked_sub(rotated_min.y)?,
+    ))
+}
+
+fn aligned_rotation_offset(
+    origin: Point,
+    offset: Point,
+    direction: RotationDirection,
+    snap: Scale,
+) -> Option<Point> {
+    let rotated_zero = rotate_point(Point::new(0, 0), origin, offset, direction)?;
+    let snap = snap.get();
+    Some(Point::new(
+        offset.x.checked_sub(rotated_zero.x.rem_euclid(snap))?,
+        offset.y.checked_sub(rotated_zero.y.rem_euclid(snap))?,
     ))
 }
 
@@ -767,6 +809,19 @@ impl LogicEditor {
         let Some(offset) = rotation_offset(bounds, origin, direction) else {
             return false;
         };
+        let wires = self.selection.selected_wires();
+        let snap = self
+            .selection
+            .components
+            .iter()
+            .filter_map(|id| self.grid.component(*id))
+            .map(|component| component.kind.snap())
+            .chain(wires.iter().map(|wire| wire.wire.scale))
+            .max()
+            .unwrap_or(Scale::ONE);
+        let Some(offset) = aligned_rotation_offset(origin, offset, direction, snap) else {
+            return false;
+        };
         let components: Option<Vec<_>> = self
             .selection
             .components
@@ -779,7 +834,8 @@ impl LogicEditor {
                     RotationDirection::Right => component.orientation.rotate_right(),
                 };
                 let position =
-                    rotate_rect_position(component.position, size, origin, offset, direction)?;
+                    rotate_rect_position(component.position, size, origin, offset, direction)
+                        .filter(|point| point_snapped_to_scale(*point, component.kind.snap()))?;
                 Some((*id, position, orientation))
             })
             .collect();
@@ -787,7 +843,6 @@ impl LogicEditor {
             return false;
         };
 
-        let wires = self.selection.selected_wires();
         let rotated_wires: Option<Vec<_>> = wires
             .iter()
             .map(|wire| rotate_selected_wire(*wire, origin, offset, direction))
