@@ -324,6 +324,9 @@ impl LogicEditor {
                                             ui.label("Rotation");
                                             ui.monospace(format!("{:?}", component.rotation));
                                             ui.end_row();
+                                            ui.label("Flip");
+                                            ui.monospace(format!("{:?}", component.flip));
+                                            ui.end_row();
                                             ui.label("Kind");
                                             ui.monospace(format!("{:?}", component.kind));
                                             ui.end_row();
@@ -683,7 +686,9 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Not,
                     );
-                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
+                    if let Some(component) =
+                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                    {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -698,7 +703,9 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::MergerSplitter,
                     );
-                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
+                    if let Some(component) =
+                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                    {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -713,7 +720,9 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Led,
                     );
-                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
+                    if let Some(component) =
+                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                    {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -728,7 +737,9 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Storage,
                     );
-                    if let Some(component) = component_preview(self.tool, *anchor, rotation, None) {
+                    if let Some(component) =
+                        component_preview(self.tool, *anchor, rotation, self.placement_flip, None)
+                    {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()
@@ -745,7 +756,9 @@ impl LogicEditor {
                     );
                     let mut tool = self.tool;
                     tool.scale = self.active_input_scale();
-                    if let Some(component) = component_preview(tool, *anchor, rotation, None) {
+                    if let Some(component) =
+                        component_preview(tool, *anchor, rotation, self.placement_flip, None)
+                    {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -767,7 +780,9 @@ impl LogicEditor {
                     );
                     let mut tool = self.tool;
                     tool.scale = self.active_output_scale();
-                    if let Some(component) = component_preview(tool, *anchor, rotation, None) {
+                    if let Some(component) =
+                        component_preview(tool, *anchor, rotation, self.placement_flip, None)
+                    {
                         draw_rays.extend(DrawRay::from_component(
                             &component,
                             DrawTriangle::PREVIEW_COLOR,
@@ -791,9 +806,13 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Custom,
                     );
-                    if let Some(component) =
-                        component_preview(self.tool, *anchor, rotation, Some(kind))
-                    {
+                    if let Some(component) = component_preview(
+                        self.tool,
+                        *anchor,
+                        rotation,
+                        self.placement_flip,
+                        Some(kind),
+                    ) {
                         component_triangles.extend(
                             DrawTriangle::component(&component, false)
                                 .into_iter()

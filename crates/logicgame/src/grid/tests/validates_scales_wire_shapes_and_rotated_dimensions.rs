@@ -12,6 +12,7 @@ fn validates_scales_wire_shapes_and_rotated_dimensions() {
         id: ComponentId(0),
         position: Point::new(0, 0),
         rotation: Rotation::Right,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::Not { scale: scale(4) },
     };
     assert_eq!(component.size(), Some(Size::new(8, 4)));

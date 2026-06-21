@@ -12,6 +12,12 @@ pub(super) enum ScaleDirection {
     Up,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FlipDirection {
+    Horizontal,
+    Vertical,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct SelectionBounds {
     min: Option<Point>,
@@ -219,6 +225,76 @@ fn rotation_offset(
     ))
 }
 
+fn flipped_component_flip(flip: ComponentFlip, direction: FlipDirection) -> ComponentFlip {
+    match direction {
+        FlipDirection::Horizontal => flip.horizontal(),
+        FlipDirection::Vertical => flip.vertical(),
+    }
+}
+
+fn flip_point_cell(
+    point: Point,
+    scale: Scale,
+    bounds: SelectionBounds,
+    direction: FlipDirection,
+) -> Option<Point> {
+    let min = bounds.min.expect("selection bounds has min");
+    let max = bounds.max.expect("selection bounds has max");
+    let scale = scale.get();
+    Some(match direction {
+        FlipDirection::Horizontal => Point::new(
+            min.x
+                .checked_add(max.x.checked_sub(point.x.checked_add(scale)?)?)?,
+            point.y,
+        ),
+        FlipDirection::Vertical => Point::new(
+            point.x,
+            min.y
+                .checked_add(max.y.checked_sub(point.y.checked_add(scale)?)?)?,
+        ),
+    })
+}
+
+fn flip_rect_position(
+    position: Point,
+    size: logicgame::grid::Size,
+    bounds: SelectionBounds,
+    direction: FlipDirection,
+) -> Option<Point> {
+    let min = bounds.min.expect("selection bounds has min");
+    let max = bounds.max.expect("selection bounds has max");
+    Some(match direction {
+        FlipDirection::Horizontal => Point::new(
+            min.x
+                .checked_add(max.x.checked_sub(position.x.checked_add(size.width)?)?)?,
+            position.y,
+        ),
+        FlipDirection::Vertical => Point::new(
+            position.x,
+            min.y
+                .checked_add(max.y.checked_sub(position.y.checked_add(size.height)?)?)?,
+        ),
+    })
+}
+
+fn flip_selected_wire(
+    selected: SelectedWire,
+    bounds: SelectionBounds,
+    direction: FlipDirection,
+) -> Option<Wire> {
+    let start = if selected.start {
+        flip_point_cell(selected.wire.start, selected.wire.scale, bounds, direction)?
+    } else {
+        selected.wire.start
+    };
+    let end = if selected.end {
+        flip_point_cell(selected.wire.end, selected.wire.scale, bounds, direction)?
+    } else {
+        selected.wire.end
+    };
+    Wire::new(start, end, selected.wire.scale).ok()
+}
+
 impl LogicEditor {
     pub(super) fn handle_canvas_input(&mut self, response: &egui::Response) {
         if self.tool.kind == ToolKind::Select
@@ -243,6 +319,12 @@ impl LogicEditor {
                 if input.key_pressed(egui::Key::CloseBracket) {
                     self.scale_selection(ScaleDirection::Up);
                 }
+                if input.key_pressed(egui::Key::H) {
+                    self.flip_selection(FlipDirection::Horizontal);
+                }
+                if input.key_pressed(egui::Key::V) {
+                    self.flip_selection(FlipDirection::Vertical);
+                }
             });
         }
 
@@ -259,6 +341,12 @@ impl LogicEditor {
                 }
                 if input.key_pressed(egui::Key::CloseBracket) {
                     self.tool.scale = next_scale(self.tool.scale);
+                }
+                if input.key_pressed(egui::Key::H) {
+                    self.placement_flip = self.placement_flip.horizontal();
+                }
+                if input.key_pressed(egui::Key::V) {
+                    self.placement_flip = self.placement_flip.vertical();
                 }
             });
         }
@@ -398,11 +486,12 @@ impl LogicEditor {
                         ToolKind::Not,
                     );
                     let scale = self.tool.scale;
-                    self.grid.add_component(
+                    let id = self.grid.add_component(
                         component_placement_position(anchor, rotation, scale, ToolKind::Not),
                         rotation,
                         ComponentKind::Not { scale },
                     );
+                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::MergerSplitter { anchor, drag_start }) => {
                     let rotation = placement_rotation(
@@ -412,7 +501,7 @@ impl LogicEditor {
                         ToolKind::MergerSplitter,
                     );
                     let (input_scale, output_scale) = self.tool.conversion_scales();
-                    self.grid.add_component(
+                    let id = self.grid.add_component(
                         component_placement_position(
                             anchor,
                             rotation,
@@ -425,6 +514,7 @@ impl LogicEditor {
                             output_scale,
                         },
                     );
+                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::Led { anchor, drag_start }) => {
                     let rotation = placement_rotation(
@@ -433,11 +523,12 @@ impl LogicEditor {
                         self.placement_rotation,
                         ToolKind::Led,
                     );
-                    self.grid.add_component(
+                    let id = self.grid.add_component(
                         component_placement_position(anchor, rotation, Scale::ONE, ToolKind::Led),
                         rotation,
                         ComponentKind::Led,
                     );
+                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::Storage { anchor, drag_start }) => {
                     let rotation = placement_rotation(
@@ -447,11 +538,12 @@ impl LogicEditor {
                         ToolKind::Storage,
                     );
                     let scale = self.tool.scale;
-                    self.grid.add_component(
+                    let id = self.grid.add_component(
                         component_placement_position(anchor, rotation, scale, ToolKind::Storage),
                         rotation,
                         ComponentKind::Storage { scale, value: 0 },
                     );
+                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::Input { anchor, drag_start }) => {
                     let rotation = placement_rotation(
@@ -463,7 +555,9 @@ impl LogicEditor {
                     let scale = self.active_input_scale();
                     let position =
                         component_placement_position(anchor, rotation, scale, ToolKind::Input);
-                    self.add_input_at(position, rotation);
+                    if let Some(id) = self.add_input_at(position, rotation) {
+                        self.grid.set_component_flip(id, self.placement_flip);
+                    }
                 }
                 Some(Gesture::Output { anchor, drag_start }) => {
                     let rotation = placement_rotation(
@@ -475,7 +569,9 @@ impl LogicEditor {
                     let scale = self.active_output_scale();
                     let position =
                         component_placement_position(anchor, rotation, scale, ToolKind::Output);
-                    self.add_output_at(position, rotation);
+                    if let Some(id) = self.add_output_at(position, rotation) {
+                        self.grid.set_component_flip(id, self.placement_flip);
+                    }
                 }
                 Some(Gesture::Subcomponent {
                     anchor,
@@ -489,7 +585,8 @@ impl LogicEditor {
                         ToolKind::Custom,
                     );
                     let position = subcomponent_placement_position(anchor, rotation, &kind);
-                    self.grid.add_component(position, rotation, kind);
+                    let id = self.grid.add_component(position, rotation, kind);
+                    self.grid.set_component_flip(id, self.placement_flip);
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
                     if !additive {
@@ -658,9 +755,10 @@ impl LogicEditor {
                     RotationDirection::Left => rotate_left(component.rotation),
                     RotationDirection::Right => rotate_right(component.rotation),
                 };
+                let flip = component.flip.rotate_quarter_turn();
                 let position =
                     rotate_rect_position(component.position, size, origin, offset, direction)?;
-                Some((*id, position, rotation))
+                Some((*id, position, rotation, flip))
             })
             .collect();
         let Some(components) = components else {
@@ -679,9 +777,10 @@ impl LogicEditor {
         for wire in &wires {
             self.grid.remove_wire(wire.wire);
         }
-        for (id, position, rotation) in components {
+        for (id, position, rotation, flip) in components {
             self.grid.set_component_position(id, position);
             self.grid.set_component_rotation(id, rotation);
+            self.grid.set_component_flip(id, flip);
         }
         for wire in &rotated_wires {
             self.grid.add_wire(*wire);
@@ -697,6 +796,70 @@ impl LogicEditor {
                     }
                     if selected.end {
                         points.push((rotated.end, rotated.scale));
+                    }
+                    points
+                })
+                .collect(),
+        );
+        true
+    }
+
+    pub(super) fn flip_selection(&mut self, direction: FlipDirection) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        let Some(bounds) = self.selection_bounds() else {
+            return false;
+        };
+        let components: Option<Vec<_>> = self
+            .selection
+            .components
+            .iter()
+            .map(|id| {
+                let component = self.grid.component(*id)?;
+                let size = component.size()?;
+                let position = flip_rect_position(component.position, size, bounds, direction)?;
+                Some((
+                    *id,
+                    position,
+                    flipped_component_flip(component.flip, direction),
+                ))
+            })
+            .collect();
+        let Some(components) = components else {
+            return false;
+        };
+
+        let wires = self.selection.selected_wires();
+        let flipped_wires: Option<Vec<_>> = wires
+            .iter()
+            .map(|wire| flip_selected_wire(*wire, bounds, direction))
+            .collect();
+        let Some(flipped_wires) = flipped_wires else {
+            return false;
+        };
+
+        for wire in &wires {
+            self.grid.remove_wire(wire.wire);
+        }
+        for (id, position, flip) in components {
+            self.grid.set_component_position(id, position);
+            self.grid.set_component_flip(id, flip);
+        }
+        for wire in &flipped_wires {
+            self.grid.add_wire(*wire);
+        }
+        self.reselect_wire_points(
+            wires
+                .iter()
+                .zip(flipped_wires.iter())
+                .flat_map(|(selected, flipped)| {
+                    let mut points = Vec::new();
+                    if selected.start {
+                        points.push((flipped.start, flipped.scale));
+                    }
+                    if selected.end {
+                        points.push((flipped.end, flipped.scale));
                     }
                     points
                 })
@@ -849,6 +1012,7 @@ impl LogicEditor {
                 self.tool,
                 snap_point(pointer, kind.snap()),
                 self.placement_rotation,
+                self.placement_flip,
                 Some(&kind),
             );
         }
@@ -872,6 +1036,7 @@ impl LogicEditor {
             tool,
             snap_point(pointer, self.active_tool_snap()),
             self.placement_rotation,
+            self.placement_flip,
             None,
         )
     }

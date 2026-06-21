@@ -6,6 +6,7 @@ fn led_rotation_moves_its_input_with_its_short_edge() {
         id: ComponentId(0),
         position: Point::new(10, 20),
         rotation: Rotation::Right,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::Led,
     };
 

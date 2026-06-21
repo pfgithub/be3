@@ -27,6 +27,7 @@ fn wires_and_components_are_emitted_as_filled_triangles() {
         id: ComponentId(0),
         position: Point::new(10, 20),
         rotation: Rotation::Right,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::Not { scale: Scale::ONE },
     };
     let gate_triangles = DrawTriangle::component(&gate, false);
@@ -50,6 +51,7 @@ fn wires_and_components_are_emitted_as_filled_triangles() {
         id: ComponentId(1),
         position: Point::new(0, 0),
         rotation: Rotation::Up,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::Led,
     };
     let led_triangles = DrawTriangle::component(&led, false);
@@ -62,6 +64,7 @@ fn wires_and_components_are_emitted_as_filled_triangles() {
         id: ComponentId(2),
         position: Point::new(0, 0),
         rotation: Rotation::Right,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::Storage {
             scale: Scale::ONE,
             value: 0,

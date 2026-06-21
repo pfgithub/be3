@@ -6,6 +6,7 @@ fn merger_combines_smaller_inputs_into_a_wide_output() {
         id: ComponentId(0),
         position: Point::new(0, 0),
         rotation: Rotation::Right,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::MergerSplitter {
             input_scale: scale(4),
             output_scale: scale(16),

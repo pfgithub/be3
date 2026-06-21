@@ -182,6 +182,7 @@ pub(super) fn component_preview(
     tool: Tool,
     anchor: Point,
     rotation: Rotation,
+    flip: ComponentFlip,
     custom_kind: Option<&ComponentKind>,
 ) -> Option<Component> {
     let kind = match tool.kind {
@@ -224,6 +225,7 @@ pub(super) fn component_preview(
         id: ComponentId(u64::MAX),
         position,
         rotation,
+        flip,
         kind,
     })
 }
@@ -279,6 +281,7 @@ pub(super) fn subcomponent_placement_position(
         id: ComponentId(u64::MAX),
         position: anchor,
         rotation,
+        flip: ComponentFlip::default(),
         kind: kind.clone(),
     };
     let Some(size) = probe.size() else {

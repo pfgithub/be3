@@ -25,6 +25,7 @@ fn wire(start: (i64, i64), end: (i64, i64), scale: u8) -> Wire {
 mod bounds_exclude_input_and_output_components;
 mod bounds_expand_to_largest_io_scale;
 mod calculates_bounds_from_components_and_scaled_wires;
+mod component_slots_mirror_with_component_flip;
 mod component_slots_only_connect_to_wires_at_the_same_scale;
 mod does_not_merge_collinear_wires_whose_endpoints_only_touch;
 mod empty_grid_has_no_bounds;

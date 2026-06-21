@@ -72,9 +72,13 @@ impl LogicEditor {
         }
     }
 
-    pub(super) fn add_input_at(&mut self, position: Point, rotation: Rotation) {
+    pub(super) fn add_input_at(
+        &mut self,
+        position: Point,
+        rotation: Rotation,
+    ) -> Option<ComponentId> {
         if let Some((port, scale, label)) = self.next_missing_challenge_input() {
-            self.grid.add_component_with_explicit_io(
+            let id = self.grid.add_component_with_explicit_io(
                 position,
                 rotation,
                 ComponentKind::Input {
@@ -86,8 +90,9 @@ impl LogicEditor {
             if self.next_missing_challenge_input().is_none() && self.tool.kind == ToolKind::Input {
                 self.select_tool();
             }
+            Some(id)
         } else if self.challenge.is_none() {
-            self.grid.add_component(
+            Some(self.grid.add_component(
                 position,
                 rotation,
                 ComponentKind::Input {
@@ -95,13 +100,19 @@ impl LogicEditor {
                     id: InputId::from_u128(u128::MAX),
                     label: self.io_label.clone(),
                 },
-            );
+            ))
+        } else {
+            None
         }
     }
 
-    pub(super) fn add_output_at(&mut self, position: Point, rotation: Rotation) {
+    pub(super) fn add_output_at(
+        &mut self,
+        position: Point,
+        rotation: Rotation,
+    ) -> Option<ComponentId> {
         if let Some((port, scale, label)) = self.next_missing_challenge_output() {
-            self.grid.add_component_with_explicit_io(
+            let id = self.grid.add_component_with_explicit_io(
                 position,
                 rotation,
                 ComponentKind::Output {
@@ -114,8 +125,9 @@ impl LogicEditor {
             {
                 self.select_tool();
             }
+            Some(id)
         } else if self.challenge.is_none() {
-            self.grid.add_component(
+            Some(self.grid.add_component(
                 position,
                 rotation,
                 ComponentKind::Output {
@@ -123,7 +135,9 @@ impl LogicEditor {
                     id: OutputId::from_u128(u128::MAX),
                     label: self.io_label.clone(),
                 },
-            );
+            ))
+        } else {
+            None
         }
     }
 

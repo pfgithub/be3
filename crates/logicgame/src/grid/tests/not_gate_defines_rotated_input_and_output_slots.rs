@@ -6,6 +6,7 @@ fn not_gate_defines_rotated_input_and_output_slots() {
         id: ComponentId(0),
         position: Point::new(10, 20),
         rotation: Rotation::Right,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::Not { scale: scale(2) },
     };
 

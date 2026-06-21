@@ -129,6 +129,37 @@ impl Rotation {
     }
 }
 
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct ComponentFlip {
+    pub horizontal: bool,
+    pub vertical: bool,
+}
+
+impl ComponentFlip {
+    pub const fn horizontal(self) -> Self {
+        Self {
+            horizontal: !self.horizontal,
+            vertical: self.vertical,
+        }
+    }
+
+    pub const fn vertical(self) -> Self {
+        Self {
+            horizontal: self.horizontal,
+            vertical: !self.vertical,
+        }
+    }
+
+    pub const fn rotate_quarter_turn(self) -> Self {
+        Self {
+            horizontal: self.vertical,
+            vertical: self.horizontal,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Orientation {
     Horizontal,
@@ -522,6 +553,8 @@ pub struct Component {
     pub id: ComponentId,
     pub position: Point,
     pub rotation: Rotation,
+    #[serde(default)]
+    pub flip: ComponentFlip,
     pub kind: ComponentKind,
 }
 
@@ -562,7 +595,12 @@ impl Component {
             .connection_slot_definitions()
             .into_iter()
             .filter_map(|slot| {
-                slot.rotate_and_translate(unrotated_size, self.rotation, self.position)
+                slot.transform_and_translate(
+                    unrotated_size,
+                    self.rotation,
+                    self.flip,
+                    self.position,
+                )
             })
             .collect()
     }
@@ -574,18 +612,28 @@ impl Component {
         ) {
             return None;
         }
+        let size = self.kind.unrotated_size()?;
+        let slot = ConnectionSlotDefinition::new(
+            0,
+            ConnectionDirection::Output,
+            ComponentSide::Top,
+            0,
+            size.width,
+            self.kind.snap(),
+        )
+        .transform_and_translate(size, self.rotation, self.flip, self.position)?;
         let rect = self.rect()?;
-        let (side, axis, start, end) = match self.rotation {
-            Rotation::Up => (ComponentSide::Top, rect.min.y, rect.min.x, rect.max.x),
-            Rotation::Right => (ComponentSide::Right, rect.max.x, rect.min.y, rect.max.y),
-            Rotation::Down => (ComponentSide::Bottom, rect.max.y, rect.min.x, rect.max.x),
-            Rotation::Left => (ComponentSide::Left, rect.min.x, rect.min.y, rect.max.y),
+        let axis = match slot.side {
+            ComponentSide::Top => rect.min.y,
+            ComponentSide::Right => rect.max.x,
+            ComponentSide::Bottom => rect.max.y,
+            ComponentSide::Left => rect.min.x,
         };
         Some(ComponentLead {
-            side,
+            side: slot.side,
             axis,
-            start,
-            end,
+            start: slot.start,
+            end: slot.end,
         })
     }
 }
@@ -824,6 +872,7 @@ impl LogicGrid {
                 id,
                 position,
                 rotation,
+                flip: ComponentFlip::default(),
                 kind,
             },
         );
@@ -854,6 +903,7 @@ impl LogicGrid {
                 id,
                 position,
                 rotation,
+                flip: ComponentFlip::default(),
                 kind,
             },
         );
@@ -889,6 +939,18 @@ impl LogicGrid {
             return false;
         }
         component.rotation = rotation;
+        self.mark_changed();
+        true
+    }
+
+    pub fn set_component_flip(&mut self, id: ComponentId, flip: ComponentFlip) -> bool {
+        let Some(component) = self.components.get_mut(&id) else {
+            return false;
+        };
+        if component.flip == flip {
+            return false;
+        }
+        component.flip = flip;
         self.mark_changed();
         true
     }
@@ -1577,10 +1639,11 @@ impl ConnectionSlotDefinition {
         }
     }
 
-    fn rotate_and_translate(
+    fn transform_and_translate(
         self,
         size: Size,
         rotation: Rotation,
+        flip: ComponentFlip,
         position: Point,
     ) -> Option<ConnectionSlot> {
         let (first, second) = match self.side {
@@ -1595,8 +1658,8 @@ impl ConnectionSlotDefinition {
             ),
             ComponentSide::Left => (Point::new(0, self.start), Point::new(0, self.end)),
         };
-        let first = rotate_local_point(first, size, rotation)?;
-        let second = rotate_local_point(second, size, rotation)?;
+        let first = transform_local_point(first, size, rotation, flip)?;
+        let second = transform_local_point(second, size, rotation, flip)?;
         let first = Point::new(
             position.x.checked_add(first.x)?,
             position.y.checked_add(first.y)?,
@@ -1638,6 +1701,31 @@ impl ConnectionSlotDefinition {
             None
         }
     }
+}
+
+fn rotated_size(size: Size, rotation: Rotation) -> Size {
+    if rotation.swaps_axes() {
+        Size::new(size.height, size.width)
+    } else {
+        size
+    }
+}
+
+fn transform_local_point(
+    point: Point,
+    size: Size,
+    rotation: Rotation,
+    flip: ComponentFlip,
+) -> Option<Point> {
+    let rotated_size = rotated_size(size, rotation);
+    let mut point = rotate_local_point(point, size, rotation)?;
+    if flip.horizontal {
+        point.x = rotated_size.width.checked_sub(point.x)?;
+    }
+    if flip.vertical {
+        point.y = rotated_size.height.checked_sub(point.y)?;
+    }
+    Some(point)
 }
 
 fn rotate_local_point(point: Point, size: Size, rotation: Rotation) -> Option<Point> {

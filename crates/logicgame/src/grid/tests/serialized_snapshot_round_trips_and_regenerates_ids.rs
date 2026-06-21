@@ -8,18 +8,21 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
                 id: ComponentId(2),
                 position: Point::new(-8, 0),
                 rotation: Rotation::Up,
+                flip: ComponentFlip::default(),
                 kind: ComponentKind::Not { scale: scale(2) },
             },
             Component {
                 id: ComponentId(4),
                 position: Point::new(0, 0),
                 rotation: Rotation::Right,
+                flip: ComponentFlip::default(),
                 kind: ComponentKind::Led,
             },
             Component {
                 id: ComponentId(6),
                 position: Point::new(4, 0),
                 rotation: Rotation::Down,
+                flip: ComponentFlip::default(),
                 kind: ComponentKind::Storage {
                     scale: scale(4),
                     value: 0b1010,
@@ -29,6 +32,7 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
                 id: ComponentId(8),
                 position: Point::new(8, 0),
                 rotation: Rotation::Left,
+                flip: ComponentFlip::default(),
                 kind: ComponentKind::Input {
                     scale: scale(2),
                     id: InputId::from_u128(5),
@@ -40,6 +44,7 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
                 id: ComponentId(10),
                 position: Point::new(12, 0),
                 rotation: Rotation::Up,
+                flip: ComponentFlip::default(),
                 kind: ComponentKind::Output {
                     scale: scale(2),
                     id: OutputId::from_u128(7),
@@ -51,6 +56,7 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
                 id: ComponentId(12),
                 position: Point::new(16, 0),
                 rotation: Rotation::Right,
+                flip: ComponentFlip::default(),
                 kind: ComponentKind::subcomponent(
                     file_id(),
                     component_hash(),

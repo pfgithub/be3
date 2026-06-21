@@ -3,8 +3,8 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 use eframe::egui_wgpu::{self, wgpu};
 use logicgame::grid::{
-    Component, ComponentKind, ComponentLead, ComponentSide, ConnectionDirection, ConnectionSlot,
-    GridBounds, Orientation, Rotation, Wire,
+    Component, ComponentFlip, ComponentKind, ComponentLead, ComponentSide, ConnectionDirection,
+    ConnectionSlot, GridBounds, Orientation, Rotation, Wire,
 };
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
@@ -316,7 +316,7 @@ impl DrawTriangle {
             ComponentKind::Not { .. } => {
                 let canonical = [[0.12, 0.82], [0.88, 0.82], [0.5, 0.12]];
                 let positions = canonical.map(|point| {
-                    let point = rotate_point(point, component.rotation);
+                    let point = transform_point(point, component.rotation, component.flip);
                     [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
                 });
                 triangles.push(Self::new(positions, outline_color));
@@ -330,7 +330,7 @@ impl DrawTriangle {
                     [[0.12, 0.18], [0.62, 0.5], [0.88, 0.18]],
                 ] {
                     let positions = canonical.map(|point| {
-                        let point = rotate_point(point, component.rotation);
+                        let point = transform_point(point, component.rotation, component.flip);
                         [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
                     });
                     triangles.push(Self::new(positions, outline_color));
@@ -342,7 +342,7 @@ impl DrawTriangle {
                     [[0.12, 0.18], [0.88, 0.18], [0.38, 0.5]],
                 ] {
                     let positions = canonical.map(|point| {
-                        let point = rotate_point(point, component.rotation);
+                        let point = transform_point(point, component.rotation, component.flip);
                         [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
                     });
                     triangles.push(Self::new(positions, outline_color));
@@ -455,6 +455,17 @@ fn rotate_point(point: [f32; 2], rotation: Rotation) -> [f32; 2] {
         Rotation::Down => [1.0 - point[0], 1.0 - point[1]],
         Rotation::Left => [point[1], 1.0 - point[0]],
     }
+}
+
+fn transform_point(point: [f32; 2], rotation: Rotation, flip: ComponentFlip) -> [f32; 2] {
+    let mut point = rotate_point(point, rotation);
+    if flip.horizontal {
+        point[0] = 1.0 - point[0];
+    }
+    if flip.vertical {
+        point[1] = 1.0 - point[1];
+    }
+    point
 }
 
 fn rectangle(rect: [f32; 4], color: [f32; 4]) -> [DrawTriangle; 2] {

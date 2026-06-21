@@ -6,6 +6,7 @@ fn input_components_rotate_their_connection_slots() {
         id: ComponentId(0),
         position: Point::new(10, 20),
         rotation: Rotation::Right,
+        flip: ComponentFlip::default(),
         kind: ComponentKind::Input {
             scale: scale(2),
             id: InputId::from_u128(0),
