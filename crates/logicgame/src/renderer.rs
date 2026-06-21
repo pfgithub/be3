@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use eframe::egui_wgpu::{self, wgpu};
 use logicgame::grid::{
     Component, ComponentKind, ComponentLead, ComponentOrientation, ComponentSide,
-    ConnectionDirection, ConnectionSlot, GridBounds, Orientation, Rotation, Wire,
+    ConnectionDirection, ConnectionSlot, GridBounds, Orientation, Rotation, Scale, Wire,
 };
 
 const BACKGROUND_COLOR: [f32; 4] = [0.035, 0.043, 0.055, 1.0];
@@ -324,29 +324,13 @@ impl DrawTriangle {
             ComponentKind::MergerSplitter {
                 input_scale,
                 output_scale,
-            } if input_scale <= output_scale => {
-                for canonical in [
-                    [[0.12, 0.82], [0.88, 0.82], [0.62, 0.5]],
-                    [[0.12, 0.18], [0.62, 0.5], [0.88, 0.18]],
-                ] {
-                    let positions = canonical.map(|point| {
-                        let point = transform_point(point, component.orientation);
-                        [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
-                    });
-                    triangles.push(Self::new(positions, outline_color));
-                }
-            }
-            ComponentKind::MergerSplitter { .. } => {
-                for canonical in [
-                    [[0.12, 0.82], [0.38, 0.5], [0.88, 0.82]],
-                    [[0.12, 0.18], [0.88, 0.18], [0.38, 0.5]],
-                ] {
-                    let positions = canonical.map(|point| {
-                        let point = transform_point(point, component.orientation);
-                        [min[0] + point[0] * extent[0], min[1] + point[1] * extent[1]]
-                    });
-                    triangles.push(Self::new(positions, outline_color));
-                }
+            } => {
+                triangles.extend(merger_splitter_order_lines(
+                    component,
+                    input_scale,
+                    output_scale,
+                    outline_color,
+                ));
             }
             ComponentKind::Led => {
                 let center = [min[0] + extent[0] * 0.5, min[1] + extent[1] * 0.5];
@@ -470,6 +454,25 @@ fn rectangle(rect: [f32; 4], color: [f32; 4]) -> [DrawTriangle; 2] {
     [
         DrawTriangle::new([[left, top], [right, top], [left, bottom]], color),
         DrawTriangle::new([[left, bottom], [right, top], [right, bottom]], color),
+    ]
+}
+
+fn line_segment(start: [f32; 2], end: [f32; 2], radius: f32, color: [f32; 4]) -> [DrawTriangle; 2] {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let length = dx.hypot(dy);
+    if length <= f32::EPSILON {
+        return square(start, radius, color);
+    }
+
+    let normal = [-(dy / length) * radius, (dx / length) * radius];
+    let a = [start[0] + normal[0], start[1] + normal[1]];
+    let b = [start[0] - normal[0], start[1] - normal[1]];
+    let c = [end[0] + normal[0], end[1] + normal[1]];
+    let d = [end[0] - normal[0], end[1] - normal[1]];
+    [
+        DrawTriangle::new([a, c, b], color),
+        DrawTriangle::new([b, c, d], color),
     ]
 }
 
@@ -598,6 +601,71 @@ fn connection_marker_bit_coords(
         .map(|position| position[axis])
         .fold(f32::INFINITY, f32::min);
     positions.map(|position| ((position[axis] - min) / (radius * 2.0)) * scale)
+}
+
+fn merger_splitter_order_lines(
+    component: &Component,
+    input_scale: Scale,
+    output_scale: Scale,
+    color: [f32; 4],
+) -> Vec<DrawTriangle> {
+    let large_scale = input_scale.max(output_scale);
+    let small_scale = input_scale.min(output_scale);
+    let slots = component.connection_slots();
+    let Some(large_slot) = slots.iter().copied().find(|slot| slot.scale == large_scale) else {
+        return Vec::new();
+    };
+    let mut small_slots = slots
+        .into_iter()
+        .filter(|slot| slot.scale == small_scale && slot.id != large_slot.id)
+        .collect::<Vec<_>>();
+    if small_slots.is_empty() {
+        small_slots.push(large_slot);
+    }
+    small_slots.sort_by_key(|slot| slot.id);
+
+    let Some(size) = component.size() else {
+        return Vec::new();
+    };
+    let inset = size.width.min(size.height) as f32 * 0.3;
+    let radius = (small_scale.get() as f32 * 0.045).clamp(0.035, 0.14);
+    let chunk_width = small_scale.get() as f32;
+    let mut triangles = Vec::with_capacity(small_slots.len() * 2);
+
+    for (index, small_slot) in small_slots.into_iter().enumerate() {
+        let chunk_center = large_slot.start as f32 + (index as f32 + 0.5) * chunk_width;
+        let large_point = slot_interior_point(component, large_slot, chunk_center, inset);
+        let small_point = slot_interior_point(
+            component,
+            small_slot,
+            (small_slot.start + small_slot.end) as f32 * 0.5,
+            inset,
+        );
+        triangles.extend(line_segment(large_point, small_point, radius, color));
+    }
+
+    triangles
+}
+
+fn slot_interior_point(
+    component: &Component,
+    slot: ConnectionSlot,
+    coordinate: f32,
+    inset: f32,
+) -> [f32; 2] {
+    let Some(size) = component.size() else {
+        return connection_boundary_center(component, slot);
+    };
+    let left = component.position.x as f32;
+    let top = component.position.y as f32;
+    let right = left + size.width as f32;
+    let bottom = top + size.height as f32;
+    match slot.side {
+        ComponentSide::Top => [coordinate, top + inset],
+        ComponentSide::Right => [right - inset, coordinate],
+        ComponentSide::Bottom => [coordinate, bottom - inset],
+        ComponentSide::Left => [left + inset, coordinate],
+    }
 }
 
 fn diamond(center: [f32; 2], radius: f32, color: [f32; 4]) -> [DrawTriangle; 4] {
