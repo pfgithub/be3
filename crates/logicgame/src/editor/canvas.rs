@@ -53,15 +53,6 @@ impl SelectionBounds {
         }
     }
 
-    fn center_twice(self) -> Option<Point> {
-        let min = self.min.expect("selection bounds has min");
-        let max = self.max.expect("selection bounds has max");
-        Some(Point::new(
-            min.x.checked_add(max.x)?,
-            min.y.checked_add(max.y)?,
-        ))
-    }
-
     fn min(self) -> Point {
         self.min.expect("selection bounds has min")
     }
@@ -145,16 +136,17 @@ fn point_snapped_to_scale(point: Point, scale: Scale) -> bool {
 
 fn rotate_selected_wire(
     selected: SelectedWire,
-    bounds: SelectionBounds,
+    origin: Point,
+    offset: Point,
     direction: RotationDirection,
 ) -> Option<Wire> {
     let start = if selected.start {
-        rotate_point(selected.wire.start, bounds, direction)?
+        rotate_point(selected.wire.start, origin, offset, direction)?
     } else {
         selected.wire.start
     };
     let end = if selected.end {
-        rotate_point(selected.wire.end, bounds, direction)?
+        rotate_point(selected.wire.end, origin, offset, direction)?
     } else {
         selected.wire.end
     };
@@ -164,7 +156,8 @@ fn rotate_selected_wire(
 fn rotate_rect_position(
     position: Point,
     size: logicgame::grid::Size,
-    bounds: SelectionBounds,
+    origin: Point,
+    offset: Point,
     direction: RotationDirection,
 ) -> Option<Point> {
     let corners = [
@@ -178,7 +171,7 @@ fn rotate_rect_position(
     ];
     corners
         .into_iter()
-        .map(|point| rotate_point(point, bounds, direction))
+        .map(|point| rotate_point(point, origin, offset, direction))
         .collect::<Option<Vec<_>>>()
         .map(|points| {
             points
@@ -190,22 +183,40 @@ fn rotate_rect_position(
 
 fn rotate_point(
     point: Point,
-    bounds: SelectionBounds,
+    origin: Point,
+    offset: Point,
     direction: RotationDirection,
 ) -> Option<Point> {
-    let center = bounds.center_twice()?;
-    let x = point.x.checked_mul(2)?;
-    let y = point.y.checked_mul(2)?;
-    let dx = x.checked_sub(center.x)?;
-    let dy = y.checked_sub(center.y)?;
+    let dx = point.x.checked_sub(origin.x)?;
+    let dy = point.y.checked_sub(origin.y)?;
     let (rotated_x, rotated_y) = match direction {
-        RotationDirection::Left => (center.x.checked_add(dy)?, center.y.checked_sub(dx)?),
-        RotationDirection::Right => (center.x.checked_sub(dy)?, center.y.checked_add(dx)?),
+        RotationDirection::Left => (origin.x.checked_add(dy)?, origin.y.checked_sub(dx)?),
+        RotationDirection::Right => (origin.x.checked_sub(dy)?, origin.y.checked_add(dx)?),
     };
-    if rotated_x.rem_euclid(2) != 0 || rotated_y.rem_euclid(2) != 0 {
-        return None;
-    }
-    Some(Point::new(rotated_x / 2, rotated_y / 2))
+    Some(Point::new(
+        rotated_x.checked_add(offset.x)?,
+        rotated_y.checked_add(offset.y)?,
+    ))
+}
+
+fn rotation_offset(
+    bounds: SelectionBounds,
+    origin: Point,
+    direction: RotationDirection,
+) -> Option<Point> {
+    let min = bounds.min.expect("selection bounds has min");
+    let max = bounds.max.expect("selection bounds has max");
+    let rotated_min = [min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)]
+        .into_iter()
+        .map(|point| rotate_point(point, origin, Point::new(0, 0), direction))
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .reduce(|min, point| Point::new(min.x.min(point.x), min.y.min(point.y)))
+        .expect("bounds has corners");
+    Some(Point::new(
+        min.x.checked_sub(rotated_min.x)?,
+        min.y.checked_sub(rotated_min.y)?,
+    ))
 }
 
 impl LogicEditor {
@@ -632,6 +643,10 @@ impl LogicEditor {
         let Some(bounds) = self.selection_bounds() else {
             return false;
         };
+        let origin = bounds.min();
+        let Some(offset) = rotation_offset(bounds, origin, direction) else {
+            return false;
+        };
         let components: Option<Vec<_>> = self
             .selection
             .components
@@ -643,7 +658,8 @@ impl LogicEditor {
                     RotationDirection::Left => rotate_left(component.rotation),
                     RotationDirection::Right => rotate_right(component.rotation),
                 };
-                let position = rotate_rect_position(component.position, size, bounds, direction)?;
+                let position =
+                    rotate_rect_position(component.position, size, origin, offset, direction)?;
                 Some((*id, position, rotation))
             })
             .collect();
@@ -654,7 +670,7 @@ impl LogicEditor {
         let wires = self.selection.selected_wires();
         let rotated_wires: Option<Vec<_>> = wires
             .iter()
-            .map(|wire| rotate_selected_wire(*wire, bounds, direction))
+            .map(|wire| rotate_selected_wire(*wire, origin, offset, direction))
             .collect();
         let Some(rotated_wires) = rotated_wires else {
             return false;
