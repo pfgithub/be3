@@ -324,6 +324,74 @@ pub(super) fn nearest_wire(wires: &[Wire], point: [f32; 2], radius: f32) -> Opti
         .map(|(_, wire)| wire)
 }
 
+pub(super) fn deletion_wire(wires: &[Wire], point: [f32; 2], radius: f32) -> Option<Wire> {
+    directional_endpoint_wire(wires, point).or_else(|| nearest_wire(wires, point, radius))
+}
+
+fn directional_endpoint_wire(wires: &[Wire], point: [f32; 2]) -> Option<Wire> {
+    wires
+        .iter()
+        .copied()
+        .flat_map(|wire| [WireEnd::Start, WireEnd::End].map(move |end| WireEndpoint { wire, end }))
+        .filter_map(|endpoint| {
+            let direction = pointer_direction_in_endpoint_cell(endpoint, point)?;
+            (endpoint_direction(endpoint) == direction).then_some(endpoint.wire)
+        })
+        .min()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PointerDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+fn pointer_direction_in_endpoint_cell(
+    endpoint: WireEndpoint,
+    point: [f32; 2],
+) -> Option<PointerDirection> {
+    if !endpoint_cell_contains(endpoint, point) {
+        return None;
+    }
+    let scale = endpoint.wire.scale.get() as f32;
+    let endpoint_point = endpoint.point();
+    let dx = point[0] - (endpoint_point.x as f32 + scale * 0.5);
+    let dy = point[1] - (endpoint_point.y as f32 + scale * 0.5);
+    if dx == 0.0 && dy == 0.0 {
+        return None;
+    }
+    Some(if dx.abs() >= dy.abs() {
+        if dx >= 0.0 {
+            PointerDirection::Right
+        } else {
+            PointerDirection::Left
+        }
+    } else if dy >= 0.0 {
+        PointerDirection::Down
+    } else {
+        PointerDirection::Up
+    })
+}
+
+fn endpoint_cell_contains(endpoint: WireEndpoint, point: [f32; 2]) -> bool {
+    let scale = endpoint.wire.scale.get() as f32;
+    let endpoint_point = endpoint.point();
+    let min_x = endpoint_point.x as f32;
+    let min_y = endpoint_point.y as f32;
+    point[0] >= min_x && point[0] <= min_x + scale && point[1] >= min_y && point[1] <= min_y + scale
+}
+
+fn endpoint_direction(endpoint: WireEndpoint) -> PointerDirection {
+    match (endpoint.wire.orientation(), endpoint.end) {
+        (logicgame::grid::Orientation::Horizontal, WireEnd::Start) => PointerDirection::Right,
+        (logicgame::grid::Orientation::Horizontal, WireEnd::End) => PointerDirection::Left,
+        (logicgame::grid::Orientation::Vertical, WireEnd::Start) => PointerDirection::Down,
+        (logicgame::grid::Orientation::Vertical, WireEnd::End) => PointerDirection::Up,
+    }
+}
+
 pub(super) fn nearest_wire_endpoint(
     wires: &[Wire],
     point: [f32; 2],

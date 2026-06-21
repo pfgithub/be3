@@ -292,9 +292,9 @@ impl LogicEditor {
 
         if response.clicked_by(PointerButton::Secondary) && self.tool.kind == ToolKind::Wire {
             if let Some(wire) =
-                nearest_wire(self.grid.wires(), world, WIRE_HIT_RADIUS / self.camera.zoom)
+                deletion_wire(self.grid.wires(), world, WIRE_HIT_RADIUS / self.camera.zoom)
             {
-                self.grid.remove_wire(wire);
+                self.grid.remove_wire_segment(wire);
             }
         }
 

@@ -1009,6 +1009,18 @@ impl LogicGrid {
         &self.wires
     }
 
+    pub fn remove_wire_segment(&mut self, removal: Wire) -> &[Wire] {
+        let original = self.wires.clone();
+        if let Some(index) = self.wires.iter().position(|wire| *wire == removal) {
+            self.wires.remove(index);
+            self.normalize_wires();
+            if self.wires != original {
+                self.mark_changed();
+            }
+        }
+        &self.wires
+    }
+
     pub fn validate(&self) -> Vec<ValidationError> {
         let mut errors = BTreeSet::new();
         for wire in &self.wires {
