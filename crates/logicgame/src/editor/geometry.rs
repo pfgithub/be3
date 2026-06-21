@@ -196,7 +196,7 @@ pub(super) fn component_preview(
         ToolKind::Custom => custom_kind.cloned()?,
     };
     let position = match tool.kind {
-        ToolKind::Custom => subcomponent_placement_position(anchor, orientation.rotation(), &kind),
+        ToolKind::Custom => subcomponent_placement_position(anchor, orientation, &kind)?,
         ToolKind::MergerSplitter => {
             let (_, output_scale) = tool.conversion_scales();
             component_placement_position(anchor, orientation.rotation(), output_scale, tool.kind)
@@ -254,18 +254,79 @@ pub(super) fn component_placement_position(
     }
 }
 
-/// Places a custom component so the snapped click anchor sits on its leading
-/// edge for the dragged facing, mirroring how the built-in tools anchor.
+/// Places a custom component so the snapped local cell being held stays under
+/// the cursor as the component rotates.
 pub(super) fn subcomponent_placement_position(
     anchor: Point,
-    rotation: Rotation,
+    orientation: ComponentOrientation,
     kind: &ComponentKind,
-) -> Point {
+) -> Option<Point> {
+    let ComponentKind::Subcomponent { size, .. } = kind else {
+        return None;
+    };
     let snap = kind.snap().get();
+    let footprint = snapped_size(*size, snap)?;
+    let offset = transform_local_snap_cell(Point::new(0, 0), footprint, snap, orientation)?;
+    Some(Point::new(
+        anchor.x.checked_sub(offset.x)?,
+        anchor.y.checked_sub(offset.y)?,
+    ))
+}
+
+fn snapped_size(size: logicgame::grid::Size, snap: i64) -> Option<logicgame::grid::Size> {
+    Some(logicgame::grid::Size::new(
+        snapped_extent(size.width, snap)?,
+        snapped_extent(size.height, snap)?,
+    ))
+}
+
+fn snapped_extent(extent: i64, snap: i64) -> Option<i64> {
+    let remainder = extent.rem_euclid(snap);
+    if remainder == 0 {
+        Some(extent)
+    } else {
+        extent.checked_add(snap.checked_sub(remainder)?)
+    }
+}
+
+fn transform_local_snap_cell(
+    cell: Point,
+    footprint: logicgame::grid::Size,
+    snap: i64,
+    orientation: ComponentOrientation,
+) -> Option<Point> {
+    let mut cell = rotate_local_snap_cell(cell, footprint, snap, orientation.rotation())?;
+    if orientation.is_mirrored() {
+        let width = if orientation.swaps_axes() {
+            footprint.height
+        } else {
+            footprint.width
+        };
+        cell.x = width.checked_sub(cell.x.checked_add(snap)?)?;
+    }
+    Some(cell)
+}
+
+fn rotate_local_snap_cell(
+    cell: Point,
+    footprint: logicgame::grid::Size,
+    snap: i64,
+    rotation: Rotation,
+) -> Option<Point> {
     match rotation {
-        Rotation::Up => Point::new(anchor.x, anchor.y - snap),
-        Rotation::Right | Rotation::Down => anchor,
-        Rotation::Left => Point::new(anchor.x - snap, anchor.y),
+        Rotation::Up => Some(cell),
+        Rotation::Right => Some(Point::new(
+            footprint.height.checked_sub(cell.y.checked_add(snap)?)?,
+            cell.x,
+        )),
+        Rotation::Down => Some(Point::new(
+            footprint.width.checked_sub(cell.x.checked_add(snap)?)?,
+            footprint.height.checked_sub(cell.y.checked_add(snap)?)?,
+        )),
+        Rotation::Left => Some(Point::new(
+            cell.y,
+            footprint.width.checked_sub(cell.x.checked_add(snap)?)?,
+        )),
     }
 }
 

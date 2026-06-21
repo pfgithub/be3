@@ -16,19 +16,19 @@ fn subcomponent_placement_keeps_the_anchor_under_the_cursor() {
     .unwrap();
 
     assert_eq!(
-        subcomponent_placement_position(anchor, Rotation::Up, &kind),
-        Point::new(8, 4)
+        subcomponent_placement_position(anchor, ComponentOrientation::Up, &kind),
+        Some(anchor)
     );
     assert_eq!(
-        subcomponent_placement_position(anchor, Rotation::Right, &kind),
-        anchor
+        subcomponent_placement_position(anchor, ComponentOrientation::Right, &kind),
+        Some(Point::new(0, 8))
     );
     assert_eq!(
-        subcomponent_placement_position(anchor, Rotation::Down, &kind),
-        anchor
+        subcomponent_placement_position(anchor, ComponentOrientation::Down, &kind),
+        Some(Point::new(4, 0))
     );
     assert_eq!(
-        subcomponent_placement_position(anchor, Rotation::Left, &kind),
-        Point::new(4, 8)
+        subcomponent_placement_position(anchor, ComponentOrientation::Left, &kind),
+        Some(Point::new(8, 4))
     );
 }

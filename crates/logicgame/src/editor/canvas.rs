@@ -648,10 +648,12 @@ impl LogicEditor {
                         self.placement_orientation,
                         ToolKind::Custom,
                     );
-                    let position =
-                        subcomponent_placement_position(anchor, orientation.rotation(), &kind);
-                    self.grid
-                        .add_component_with_orientation(position, orientation, kind);
+                    if let Some(position) =
+                        subcomponent_placement_position(anchor, orientation, &kind)
+                    {
+                        self.grid
+                            .add_component_with_orientation(position, orientation, kind);
+                    }
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
                     if !additive {
