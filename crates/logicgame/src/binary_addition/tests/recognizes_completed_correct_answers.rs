@@ -8,12 +8,14 @@ fn recognizes_completed_correct_answers() {
         quiz.carry_answers[problem_index] = quiz.problems[problem_index]
             .carry_bits
             .iter()
-            .map(char::to_string)
+            .copied()
+            .map(Some)
             .collect();
         quiz.sum_answers[problem_index] = quiz.problems[problem_index]
             .sum_bits
             .iter()
-            .map(char::to_string)
+            .copied()
+            .map(Some)
             .collect();
     }
 

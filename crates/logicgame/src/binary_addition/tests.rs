@@ -1,2 +1,3 @@
 mod builds_expected_carry_and_sum_bits;
+mod cycles_bit_answers_through_blank_zero_and_one;
 mod recognizes_completed_correct_answers;

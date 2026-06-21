@@ -53,8 +53,8 @@ impl BinaryAdditionProblem {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BinaryAdditionQuiz {
     problems: Vec<BinaryAdditionProblem>,
-    carry_answers: Vec<Vec<String>>,
-    sum_answers: Vec<Vec<String>>,
+    carry_answers: Vec<Vec<Option<char>>>,
+    sum_answers: Vec<Vec<Option<char>>>,
     current_problem: usize,
     checked: bool,
     passed_event: bool,
@@ -192,7 +192,7 @@ impl BinaryAdditionQuiz {
                 .spacing([4.0, 6.0])
                 .show(ui, |ui| {
                     ui.label("carry");
-                    bit_inputs(
+                    bit_buttons(
                         ui,
                         &mut self.carry_answers[problem_index],
                         &problem.carry_bits,
@@ -221,7 +221,7 @@ impl BinaryAdditionQuiz {
                     ui.end_row();
 
                     ui.label("sum");
-                    bit_inputs(
+                    bit_buttons(
                         ui,
                         &mut self.sum_answers[problem_index],
                         &problem.sum_bits,
@@ -244,33 +244,30 @@ impl BinaryAdditionQuiz {
 
     fn reset_current_page(&mut self) {
         self.carry_answers[self.current_problem] =
-            vec![String::new(); self.problems[self.current_problem].carry_bits.len()];
+            vec![None; self.problems[self.current_problem].carry_bits.len()];
         self.sum_answers[self.current_problem] =
-            vec![String::new(); self.problems[self.current_problem].sum_bits.len()];
+            vec![None; self.problems[self.current_problem].sum_bits.len()];
         self.checked = false;
         self.passed_event = false;
     }
 }
 
-fn bit_inputs(
+fn bit_buttons(
     ui: &mut egui::Ui,
-    answers: &mut [String],
+    answers: &mut [Option<char>],
     expected: &[char],
     checked: bool,
     cell_width: f32,
 ) {
     for (answer, expected) in answers.iter_mut().zip(expected) {
-        sanitize_bit(answer);
-        let correct = answer.len() == 1 && answer.starts_with(*expected);
+        let correct = *answer == Some(*expected);
+        let label = answer.map_or(" ".to_owned(), |bit| bit.to_string());
         let response = ui.add_sized(
             [cell_width, 24.0],
-            egui::TextEdit::singleline(answer)
-                .char_limit(1)
-                .font(egui::TextStyle::Monospace)
-                .horizontal_align(egui::Align::Center),
+            egui::Button::new(egui::RichText::new(label).monospace()),
         );
-        if response.changed() {
-            sanitize_bit(answer);
+        if response.clicked() {
+            *answer = next_bit_answer(*answer);
         }
         if checked && !correct {
             let rect = response.rect.expand(1.0);
@@ -284,30 +281,34 @@ fn bit_inputs(
     }
 }
 
-fn sanitize_bit(answer: &mut String) {
-    answer.retain(|character| matches!(character, '0' | '1'));
-    answer.truncate(1);
+fn next_bit_answer(answer: Option<char>) -> Option<char> {
+    match answer {
+        None => Some('0'),
+        Some('0') => Some('1'),
+        Some('1') => None,
+        _ => None,
+    }
 }
 
-fn bit_row_matches(answers: &[String], expected: &[char]) -> bool {
+fn bit_row_matches(answers: &[Option<char>], expected: &[char]) -> bool {
     answers.len() == expected.len()
         && answers
             .iter()
             .zip(expected)
-            .all(|(answer, expected)| answer.len() == 1 && answer.starts_with(*expected))
+            .all(|(answer, expected)| *answer == Some(*expected))
 }
 
-fn blank_carry_answers(problems: &[BinaryAdditionProblem]) -> Vec<Vec<String>> {
+fn blank_carry_answers(problems: &[BinaryAdditionProblem]) -> Vec<Vec<Option<char>>> {
     problems
         .iter()
-        .map(|problem| vec![String::new(); problem.carry_bits.len()])
+        .map(|problem| vec![None; problem.carry_bits.len()])
         .collect()
 }
 
-fn blank_sum_answers(problems: &[BinaryAdditionProblem]) -> Vec<Vec<String>> {
+fn blank_sum_answers(problems: &[BinaryAdditionProblem]) -> Vec<Vec<Option<char>>> {
     problems
         .iter()
-        .map(|problem| vec![String::new(); problem.width()])
+        .map(|problem| vec![None; problem.width()])
         .collect()
 }
 
