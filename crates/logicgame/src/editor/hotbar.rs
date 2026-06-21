@@ -71,12 +71,13 @@ impl LogicEditor {
     }
 
     pub(super) fn select_hotbar_path(&mut self, path: Vec<usize>) {
-        let Some(slot) = get_hotbar_slot(&self.hotbar, &path) else {
+        let Some(slot) = get_hotbar_slot(&self.hotbar, &path).cloned() else {
             return;
         };
         match slot {
             HotbarSlot::Builtin(kind) => {
-                self.tool.kind = *kind;
+                self.close_hotbar_folder_if_selecting_outside(&path);
+                self.tool.kind = kind;
                 self.active_hotbar_slot = Some(path);
                 self.gesture = None;
                 self.configured_storage = None;
@@ -93,11 +94,18 @@ impl LogicEditor {
     }
 
     fn select_custom_hotbar_path(&mut self, path: Vec<usize>) {
+        self.close_hotbar_folder_if_selecting_outside(&path);
         self.tool.kind = ToolKind::Custom;
         self.active_hotbar_slot = Some(path);
         self.gesture = None;
         self.configured_storage = None;
         self.selection.clear();
+    }
+
+    fn close_hotbar_folder_if_selecting_outside(&mut self, path: &[usize]) {
+        if !self.active_hotbar_folder.is_empty() && !path.starts_with(&self.active_hotbar_folder) {
+            self.active_hotbar_folder.clear();
+        }
     }
 
     /// Rebuilds the hotbar from persisted entries. An empty save keeps the
