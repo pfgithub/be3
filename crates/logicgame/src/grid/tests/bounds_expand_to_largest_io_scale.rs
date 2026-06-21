@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn component_bounds_snap_to_largest_port_scale() {
+fn bounds_expand_to_largest_io_scale() {
     let mut grid = LogicGrid::new();
     grid.add_component(
         Point::new(2, 3),
@@ -11,9 +11,18 @@ fn component_bounds_snap_to_largest_port_scale() {
             output_scale: scale(8),
         },
     );
+    grid.add_component(
+        Point::new(0, -8),
+        Rotation::Up,
+        ComponentKind::Input {
+            scale: scale(4),
+            id: InputId::from_u128(1),
+            label: String::new(),
+        },
+    );
 
     let bounds = grid.bounds().unwrap();
 
     assert_eq!(bounds.min, Point::new(0, 0));
-    assert_eq!(bounds.max, Point::new(16, 16));
+    assert_eq!(bounds.max, Point::new(12, 12));
 }

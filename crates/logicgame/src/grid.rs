@@ -553,10 +553,6 @@ impl Component {
         })
     }
 
-    fn bounds_rect(&self) -> Option<Rect> {
-        self.rect()?.snap_to_grid(self.kind.snap())
-    }
-
     pub fn connection_slots(&self) -> Vec<ConnectionSlot> {
         let Some(unrotated_size) = self.kind.unrotated_size() else {
             return Vec::new();
@@ -675,6 +671,20 @@ impl GridBounds {
         self.max.x = self.max.x.max(rect.max.x);
         self.max.y = self.max.y.max(rect.max.y);
     }
+
+    fn expand_to_grid(self, scale: Scale) -> Option<Self> {
+        let scale = scale.get();
+        Some(Self {
+            min: Point::new(
+                snap_min_to_grid(self.min.x, scale)?,
+                snap_min_to_grid(self.min.y, scale)?,
+            ),
+            max: Point::new(
+                snap_max_to_grid(self.max.x, scale)?,
+                snap_max_to_grid(self.max.y, scale)?,
+            ),
+        })
+    }
 }
 
 pub struct LogicGrid {
@@ -753,7 +763,7 @@ impl LogicGrid {
             .components
             .values()
             .filter(|c| c.include_in_bounds())
-            .map(Component::bounds_rect)
+            .map(Component::rect)
             .chain(self.wires.iter().copied().map(Wire::rect));
         let first = rects.next()??;
         let mut bounds = GridBounds {
@@ -763,7 +773,22 @@ impl LogicGrid {
         for rect in rects {
             bounds.include(rect?);
         }
-        Some(bounds)
+        match self.largest_io_scale() {
+            Some(scale) => bounds.expand_to_grid(scale),
+            None => Some(bounds),
+        }
+    }
+
+    fn largest_io_scale(&self) -> Option<Scale> {
+        self.components
+            .values()
+            .filter_map(|component| match component.kind {
+                ComponentKind::Input { scale, .. } | ComponentKind::Output { scale, .. } => {
+                    Some(scale)
+                }
+                _ => None,
+            })
+            .max()
     }
 
     pub fn component(&self, id: ComponentId) -> Option<&Component> {
@@ -1308,20 +1333,6 @@ impl Rect {
     fn overlaps_area(self, other: Self) -> bool {
         overlaps(self.min.x, self.max.x, other.min.x, other.max.x)
             && overlaps(self.min.y, self.max.y, other.min.y, other.max.y)
-    }
-
-    fn snap_to_grid(self, scale: Scale) -> Option<Self> {
-        let scale = scale.get();
-        Some(Self {
-            min: Point::new(
-                snap_min_to_grid(self.min.x, scale)?,
-                snap_min_to_grid(self.min.y, scale)?,
-            ),
-            max: Point::new(
-                snap_max_to_grid(self.max.x, scale)?,
-                snap_max_to_grid(self.max.y, scale)?,
-            ),
-        })
     }
 }
 
