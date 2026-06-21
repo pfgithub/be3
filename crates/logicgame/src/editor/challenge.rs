@@ -83,6 +83,9 @@ impl LogicEditor {
                     label,
                 },
             );
+            if self.next_missing_challenge_input().is_none() && self.tool.kind == ToolKind::Input {
+                self.select_tool();
+            }
         } else if self.challenge.is_none() {
             self.grid.add_component(
                 position,
@@ -107,6 +110,10 @@ impl LogicEditor {
                     label,
                 },
             );
+            if self.next_missing_challenge_output().is_none() && self.tool.kind == ToolKind::Output
+            {
+                self.select_tool();
+            }
         } else if self.challenge.is_none() {
             self.grid.add_component(
                 position,

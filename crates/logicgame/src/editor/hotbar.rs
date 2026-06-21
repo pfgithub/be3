@@ -232,8 +232,10 @@ impl LogicEditor {
             ui.ctx().input(|input| {
                 for (index, key) in HOTBAR_KEYS.iter().enumerate() {
                     if input.key_pressed(*key) {
-                        if let Some((path, _)) = key_entries.get(index) {
-                            action = Some(HotbarAction::SelectPath(path.clone()));
+                        if let Some((path, slot)) = key_entries.get(index) {
+                            if !self.hotbar_slot_disabled(slot) {
+                                action = Some(HotbarAction::SelectPath(path.clone()));
+                            }
                         }
                     }
                 }
@@ -353,12 +355,14 @@ impl LogicEditor {
                                             let label = self.hotbar_slot_label(slot);
                                             let tooltip = self.hotbar_slot_tooltip(slot, &label);
                                             let preview_slot = self.hotbar_display_slot(slot);
+                                            let disabled = self.hotbar_slot_disabled(slot);
                                             let response = hotbar_button(
                                                 ui,
                                                 selected,
                                                 open_folder,
                                                 dragging,
                                                 drop_highlight,
+                                                disabled,
                                                 &label,
                                                 &tooltip,
                                                 hotkey,
@@ -370,11 +374,11 @@ impl LogicEditor {
                                                     );
                                                 },
                                             );
-                                            if response.clicked() {
+                                            if response.clicked() && !disabled {
                                                 action =
                                                     Some(HotbarAction::SelectPath(path.clone()));
                                             }
-                                            if response.drag_started() {
+                                            if response.drag_started() && !disabled {
                                                 self.hotbar_drag = Some(path.clone());
                                             }
                                             if response.hovered() {
@@ -863,6 +867,7 @@ pub(super) fn hotbar_button(
     open_folder: bool,
     dragging: bool,
     drop_target: bool,
+    disabled: bool,
     label: &str,
     tooltip: &str,
     hotkey: Option<&str>,
@@ -873,7 +878,20 @@ pub(super) fn hotbar_button(
         egui::Sense::click_and_drag(),
     );
     let visuals = ui.visuals();
-    let (bg, stroke) = if dragging {
+    let (bg, stroke) = if disabled {
+        (
+            visuals.widgets.inactive.bg_fill.gamma_multiply(0.55),
+            egui::Stroke::new(
+                1.0,
+                visuals
+                    .widgets
+                    .inactive
+                    .bg_stroke
+                    .color
+                    .gamma_multiply(0.55),
+            ),
+        )
+    } else if dragging {
         (
             visuals.widgets.inactive.bg_fill.gamma_multiply(0.65),
             egui::Stroke::new(1.5, visuals.selection.stroke.color),
@@ -904,7 +922,7 @@ pub(super) fn hotbar_button(
             egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color),
         )
     };
-    let text_color = if dragging {
+    let text_color = if disabled || dragging {
         visuals.weak_text_color()
     } else {
         visuals.text_color()
@@ -1163,5 +1181,18 @@ impl LogicEditor {
             HotbarSlot::Custom { kind, .. } => Some(kind.clone()),
             _ => None,
         })
+    }
+
+    pub(super) fn hotbar_slot_disabled(&self, slot: &HotbarSlot) -> bool {
+        matches!(slot, HotbarSlot::Builtin(kind) if self.challenge_tool_exhausted(*kind))
+    }
+
+    fn challenge_tool_exhausted(&self, kind: ToolKind) -> bool {
+        self.challenge.is_some()
+            && match kind {
+                ToolKind::Input => self.next_missing_challenge_input().is_none(),
+                ToolKind::Output => self.next_missing_challenge_output().is_none(),
+                _ => false,
+            }
     }
 }
