@@ -173,7 +173,7 @@ impl LogicGame {
         }
     }
 
-    fn show_components(&mut self, context: &egui::Context) {
+    fn show_components(&mut self, ui: &mut egui::Ui) {
         let mut requested_component = None;
         let mut requested_solution = None;
         let mut requested_new_solution = None;
@@ -181,142 +181,131 @@ impl LogicGame {
         let mut requested_delete_component = None;
         let mut requested_delete_solution = None;
         let mut requested_add_hotbar: Option<(ComponentFileRef, String)> = None;
-        egui::Window::new("Components")
-            .default_pos([700.0, 16.0])
-            .default_width(220.0)
-            .hscroll(true)
-            .vscroll(true)
-            .show(context, |ui| {
-                ui.strong("Challenges");
-                for challenge_id in challenges::CHALLENGES {
-                    let active = self.editor.active_challenge_id() == Some(challenge_id)
-                        || self.active_special_challenge() == Some(challenge_id);
-                    let passed = self.challenge_progress.is_passed(challenge_id);
-                    ui.horizontal(|ui| {
-                        let label = if passed {
-                            format!("{} pass", challenge_id.name())
-                        } else {
-                            challenge_id.name().to_owned()
-                        };
-                        if ui.selectable_label(active, label).clicked() {
-                            if challenge_id.is_special() {
-                                requested_solution = None;
-                                requested_new_solution = Some(challenge_id);
-                            } else if self
-                                .challenge_solutions
-                                .get(&challenge_id)
-                                .is_none_or(Vec::is_empty)
-                            {
-                                requested_new_solution = Some(challenge_id);
-                            }
-                        }
-                        if !challenge_id.is_special() && ui.button("New Solution").clicked() {
-                            requested_new_solution = Some(challenge_id);
-                        }
-                        if challenge_id.is_special() {
-                            ui.weak("quiz");
-                        }
-                    });
+        ui.strong("Challenges");
+        for challenge_id in challenges::CHALLENGES {
+            let active = self.editor.active_challenge_id() == Some(challenge_id)
+                || self.active_special_challenge() == Some(challenge_id);
+            let passed = self.challenge_progress.is_passed(challenge_id);
+            ui.horizontal(|ui| {
+                let label = if passed {
+                    format!("{} pass", challenge_id.name())
+                } else {
+                    challenge_id.name().to_owned()
+                };
+                if ui.selectable_label(active, label).clicked() {
                     if challenge_id.is_special() {
-                        continue;
-                    }
-                    for solution in self
+                        requested_solution = None;
+                        requested_new_solution = Some(challenge_id);
+                    } else if self
                         .challenge_solutions
                         .get(&challenge_id)
-                        .into_iter()
-                        .flatten()
+                        .is_none_or(Vec::is_empty)
                     {
-                        let file = ComponentFileRef { id: solution.id };
-                        let active = self
-                            .active_file
-                            .as_ref()
-                            .is_some_and(|active| active.file_ref() == Some(file));
-                        ui.horizontal(|ui| {
-                            ui.add_space(12.0);
-                            let text = if solution.completed {
-                                format!("{} pass", solution.name)
-                            } else {
-                                solution.name.clone()
-                            };
-                            let response = ui.selectable_label(active, text);
-                            if response.clicked() {
-                                requested_solution = Some((challenge_id, solution.id));
-                            }
-                            response.context_menu(|ui| {
-                                if ui.button("Add to hotbar").clicked() {
-                                    requested_add_hotbar =
-                                        Some((file.clone(), solution.name.clone()));
-                                    ui.close();
-                                }
-                                if ui.button("Rename").clicked() {
-                                    requested_rename = Some((
-                                        ComponentFileSource::ChallengeSolution {
-                                            challenge: challenge_id,
-                                        },
-                                        file,
-                                        solution.name.clone(),
-                                    ));
-                                    ui.close();
-                                }
-                                if ui.button("Delete").clicked() {
-                                    requested_delete_solution = Some((challenge_id, solution.id));
-                                    ui.close();
-                                }
-                            });
-                        });
+                        requested_new_solution = Some(challenge_id);
                     }
                 }
-                ui.separator();
-                ui.strong("Components");
-                if ui
-                    .add_enabled(self.component_files.is_some(), egui::Button::new("New"))
-                    .clicked()
-                {
-                    self.new_component_open = true;
-                    self.new_component_name.clear();
-                    self.new_component_error = None;
+                if !challenge_id.is_special() && ui.button("New Solution").clicked() {
+                    requested_new_solution = Some(challenge_id);
                 }
-
-                ui.separator();
-                if self.component_files_list.is_empty() {
-                    ui.weak("No component files");
-                } else {
-                    for component in &self.component_files_list {
-                        let file = ComponentFileRef { id: component.id };
-                        let active = self
-                            .active_file
-                            .as_ref()
-                            .is_some_and(|active| active.file_ref() == Some(file));
-                        let response = ui.selectable_label(active, &component.name);
-                        if response.clicked() {
-                            requested_component = Some(component.id);
-                        }
-                        response.context_menu(|ui| {
-                            if ui.button("Add to hotbar").clicked() {
-                                requested_add_hotbar = Some((file, component.name.clone()));
-                                ui.close();
-                            }
-                            if ui.button("Rename").clicked() {
-                                requested_rename = Some((
-                                    ComponentFileSource::Component,
-                                    file,
-                                    component.name.clone(),
-                                ));
-                                ui.close();
-                            }
-                            if ui.button("Delete").clicked() {
-                                requested_delete_component = Some(component.id);
-                                ui.close();
-                            }
-                        });
-                    }
-                }
-
-                if let Some(error) = &self.persistence_error {
-                    ui.separator();
-                    ui.colored_label(ui.visuals().error_fg_color, error);
+                if challenge_id.is_special() {
+                    ui.weak("quiz");
                 }
             });
+            if challenge_id.is_special() {
+                continue;
+            }
+            for solution in self
+                .challenge_solutions
+                .get(&challenge_id)
+                .into_iter()
+                .flatten()
+            {
+                let file = ComponentFileRef { id: solution.id };
+                let active = self
+                    .active_file
+                    .as_ref()
+                    .is_some_and(|active| active.file_ref() == Some(file));
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    let text = if solution.completed {
+                        format!("{} pass", solution.name)
+                    } else {
+                        solution.name.clone()
+                    };
+                    let response = ui.selectable_label(active, text);
+                    if response.clicked() {
+                        requested_solution = Some((challenge_id, solution.id));
+                    }
+                    response.context_menu(|ui| {
+                        if ui.button("Add to hotbar").clicked() {
+                            requested_add_hotbar = Some((file.clone(), solution.name.clone()));
+                            ui.close();
+                        }
+                        if ui.button("Rename").clicked() {
+                            requested_rename = Some((
+                                ComponentFileSource::ChallengeSolution {
+                                    challenge: challenge_id,
+                                },
+                                file,
+                                solution.name.clone(),
+                            ));
+                            ui.close();
+                        }
+                        if ui.button("Delete").clicked() {
+                            requested_delete_solution = Some((challenge_id, solution.id));
+                            ui.close();
+                        }
+                    });
+                });
+            }
+        }
+        ui.separator();
+        ui.strong("Components");
+        if ui
+            .add_enabled(self.component_files.is_some(), egui::Button::new("New"))
+            .clicked()
+        {
+            self.new_component_open = true;
+            self.new_component_name.clear();
+            self.new_component_error = None;
+        }
+
+        ui.separator();
+        if self.component_files_list.is_empty() {
+            ui.weak("No component files");
+        } else {
+            for component in &self.component_files_list {
+                let file = ComponentFileRef { id: component.id };
+                let active = self
+                    .active_file
+                    .as_ref()
+                    .is_some_and(|active| active.file_ref() == Some(file));
+                let response = ui.selectable_label(active, &component.name);
+                if response.clicked() {
+                    requested_component = Some(component.id);
+                }
+                response.context_menu(|ui| {
+                    if ui.button("Add to hotbar").clicked() {
+                        requested_add_hotbar = Some((file, component.name.clone()));
+                        ui.close();
+                    }
+                    if ui.button("Rename").clicked() {
+                        requested_rename =
+                            Some((ComponentFileSource::Component, file, component.name.clone()));
+                        ui.close();
+                    }
+                    if ui.button("Delete").clicked() {
+                        requested_delete_component = Some(component.id);
+                        ui.close();
+                    }
+                });
+            }
+        }
+
+        if let Some(error) = &self.persistence_error {
+            ui.separator();
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
 
         if let Some((path, file, name)) = requested_rename {
             self.rename = Some(RenameState {
@@ -795,6 +784,12 @@ impl LogicGame {
 
 impl eframe::App for LogicGame {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::left("challenges")
+            .default_size(220.0)
+            .show_inside(ui, |ui| {
+                self.show_components(ui);
+            });
+
         match self.active_file.clone() {
             Some(ActiveFile::SpecialChallenge { challenge }) => {
                 match challenge {
@@ -823,7 +818,6 @@ impl eframe::App for LogicGame {
         }
 
         let context = ui.ctx().clone();
-        self.show_components(&context);
         self.show_new_component_modal(&context);
         self.show_rename_modal(&context);
         context.request_repaint_after(AUTOSAVE_DELAY);
