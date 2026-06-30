@@ -27,7 +27,7 @@ use crate::{
 };
 
 const MIN_ZOOM: f32 = 0.1;
-const MAX_ZOOM: f32 = 96.0;
+const MAX_ZOOM: f32 = 768.0;
 const DEFAULT_ZOOM: f32 = 24.0;
 const WIRE_HIT_RADIUS: f32 = 7.0;
 const SCALES: [u8; 7] = [1, 2, 4, 8, 16, 32, 64];
