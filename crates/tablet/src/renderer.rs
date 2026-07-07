@@ -1,7 +1,8 @@
 use crate::apps::calendar::CalendarApp;
+use crate::apps::notes::NotesApp;
 use crate::text::TextEngine;
 use bytemuck::{Pod, Zeroable};
-use std::ops::{Add, Index};
+use std::ops::{Add, Index, Sub};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
@@ -109,7 +110,35 @@ impl ApplicationHandler for Application {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.ui.cursor_position = Some(Vector::new(position.x as f32, position.y as f32));
+                let position = Vector::new(position.x as f32, position.y as f32);
+                self.ui.cursor_position = Some(position);
+                let Some(renderer) = &self.renderer else {
+                    return;
+                };
+                let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
+                if self.ui.pointer_moved(size, position) {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let Some(position) = self.ui.cursor_position else {
+                    return;
+                };
+                let Some(renderer) = &self.renderer else {
+                    return;
+                };
+                let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
+                if self.ui.pointer_pressed(size, position) {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
             }
             WindowEvent::MouseInput {
                 state: ElementState::Released,
@@ -123,7 +152,7 @@ impl ApplicationHandler for Application {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
-                if self.ui.click(size, position) {
+                if self.ui.pointer_released(size, position) {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -139,6 +168,7 @@ impl ApplicationHandler for Application {
 enum Page {
     Home,
     Calendar,
+    Notes,
     Todo(Feature),
 }
 
@@ -166,6 +196,7 @@ impl Feature {
 struct TabletUi {
     page: Page,
     calendar: CalendarApp,
+    notes: NotesApp,
     cursor_position: Option<Vector<2, f32>>,
 }
 
@@ -174,17 +205,36 @@ impl TabletUi {
         Self {
             page: Page::Home,
             calendar: CalendarApp::new(),
+            notes: NotesApp::new(),
             cursor_position: None,
         }
     }
 
-    fn click(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+    fn pointer_pressed(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+        match self.page {
+            Page::Notes => self.notes.pointer_pressed(size, position),
+            Page::Home | Page::Calendar | Page::Todo(_) => false,
+        }
+    }
+
+    fn pointer_moved(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+        match self.page {
+            Page::Notes => self.notes.pointer_moved(size, position),
+            Page::Home | Page::Calendar | Page::Todo(_) => false,
+        }
+    }
+
+    fn pointer_released(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+        if matches!(self.page, Page::Notes) && self.notes.pointer_released(size, position) {
+            return true;
+        }
         if home_button_rect().contains(position) {
             return self.set_page(Page::Home);
         }
 
         match self.page {
             Page::Calendar => return self.calendar.click(size, position),
+            Page::Notes => return false,
             Page::Todo(_) => return false,
             Page::Home => {}
         }
@@ -195,6 +245,7 @@ impl TabletUi {
             .is_some_and(|feature| {
                 self.set_page(match feature {
                     Feature::Calendar => Page::Calendar,
+                    Feature::Notes => Page::Notes,
                     _ => Page::Todo(feature),
                 })
             })
@@ -215,6 +266,7 @@ impl TabletUi {
         match self.page {
             Page::Home => self.draw_home(scene, text, size),
             Page::Calendar => self.calendar.draw(scene, text, size),
+            Page::Notes => self.notes.draw(scene, text, size),
             Page::Todo(feature) => self.draw_todo(scene, text, size, feature),
         }
     }
@@ -313,6 +365,16 @@ impl<const N: usize, T: Add<Output = T> + Copy> Add for Vector<N, T> {
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             values: std::array::from_fn(|index| self[index] + rhs[index]),
+        }
+    }
+}
+
+impl<const N: usize, T: Sub<Output = T> + Copy> Sub for Vector<N, T> {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            values: std::array::from_fn(|index| self[index] - rhs[index]),
         }
     }
 }
@@ -486,6 +548,38 @@ impl Scene {
         self.push_quad(rect, [-1.0, -1.0], [-1.0, -1.0], color);
     }
 
+    pub(crate) fn push_line(
+        &mut self,
+        start: Vector<2, f32>,
+        end: Vector<2, f32>,
+        thickness: f32,
+        color: Color,
+    ) {
+        let delta = end - start;
+        let length = (delta[0] * delta[0] + delta[1] * delta[1]).sqrt();
+        if length <= f32::EPSILON {
+            let radius = thickness * 0.5;
+            self.push_rect(
+                Rect::new(
+                    Vector::new(start[0] - radius, start[1] - radius),
+                    Vector::new(thickness, thickness),
+                ),
+                color,
+            );
+            return;
+        }
+
+        let half_width = thickness * 0.5;
+        let normal = Vector::new(
+            -delta[1] / length * half_width,
+            delta[0] / length * half_width,
+        );
+        self.push_polygon(
+            [start + normal, end + normal, end - normal, start - normal],
+            color,
+        );
+    }
+
     pub(crate) fn stroke_rect(&mut self, rect: Rect, thickness: f32, color: Color) {
         let thickness = thickness
             .min(rect.size[0].max(0.0) * 0.5)
@@ -518,6 +612,21 @@ impl Scene {
             ),
             color,
         );
+    }
+
+    fn push_polygon(&mut self, points: [Vector<2, f32>; 4], color: Color) {
+        let base = self.vertices.len() as u32;
+        let color = color.as_f32();
+        self.vertices.extend(points.into_iter().map(|point| Vertex {
+            position: [
+                point[0] / self.size[0] * 2.0 - 1.0,
+                1.0 - point[1] / self.size[1] * 2.0,
+            ],
+            tex_coord: [-1.0, -1.0],
+            color,
+        }));
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 }
 
