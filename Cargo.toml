@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/ui",
+    "crates/tablet",
     "crates/reactive",
     "crates/block",
     "crates/block-server",

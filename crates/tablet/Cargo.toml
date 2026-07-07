@@ -1,5 +1,5 @@
 [package]
-name = "ui"
+name = "tablet"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
