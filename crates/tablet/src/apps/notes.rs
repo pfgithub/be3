@@ -102,6 +102,18 @@ impl NotesApp {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn stroke_count(&self) -> usize {
+        self.strokes.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stroke_points(&self, index: usize) -> Option<&[Vector<2, f32>]> {
+        self.strokes
+            .get(index)
+            .map(|stroke| stroke.points.as_slice())
+    }
+
     fn draw_toolbar(&self, scene: &mut Scene, text: &mut TextEngine, size: Vector<2, f32>) {
         scene.push_rect(
             Rect::new(

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
@@ -111,12 +111,11 @@ impl ApplicationHandler for Application {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let position = Vector::new(position.x as f32, position.y as f32);
-                self.ui.cursor_position = Some(position);
                 let Some(renderer) = &self.renderer else {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
-                if self.ui.pointer_moved(size, position) {
+                if self.ui.cursor_moved(size, position) {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -127,14 +126,11 @@ impl ApplicationHandler for Application {
                 button: MouseButton::Left,
                 ..
             } => {
-                let Some(position) = self.ui.cursor_position else {
-                    return;
-                };
                 let Some(renderer) = &self.renderer else {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
-                if self.ui.pointer_pressed(size, position) {
+                if self.ui.mouse_pressed(size) {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -145,14 +141,23 @@ impl ApplicationHandler for Application {
                 button: MouseButton::Left,
                 ..
             } => {
-                let Some(position) = self.ui.cursor_position else {
-                    return;
-                };
                 let Some(renderer) = &self.renderer else {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
-                if self.ui.pointer_released(size, position) {
+                if self.ui.mouse_released(size) {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::Touch(touch) => {
+                let Some(renderer) = &self.renderer else {
+                    return;
+                };
+                let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
+                let position = Vector::new(touch.location.x as f32, touch.location.y as f32);
+                if self.ui.touch_input(size, touch.id, touch.phase, position) {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -198,6 +203,8 @@ struct TabletUi {
     calendar: CalendarApp,
     notes: NotesApp,
     cursor_position: Option<Vector<2, f32>>,
+    active_touch_id: Option<u64>,
+    accepts_mouse_input: bool,
 }
 
 impl TabletUi {
@@ -207,6 +214,65 @@ impl TabletUi {
             calendar: CalendarApp::new(),
             notes: NotesApp::new(),
             cursor_position: None,
+            active_touch_id: None,
+            accepts_mouse_input: true,
+        }
+    }
+
+    fn cursor_moved(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+        self.cursor_position = Some(position);
+        self.accepts_mouse_input = true;
+        if self.active_touch_id.is_some() {
+            return false;
+        }
+        self.pointer_moved(size, position)
+    }
+
+    fn mouse_pressed(&mut self, size: Vector<2, f32>) -> bool {
+        if self.active_touch_id.is_some() || !self.accepts_mouse_input {
+            return false;
+        }
+        self.cursor_position
+            .is_some_and(|position| self.pointer_pressed(size, position))
+    }
+
+    fn mouse_released(&mut self, size: Vector<2, f32>) -> bool {
+        if self.active_touch_id.is_some() || !self.accepts_mouse_input {
+            return false;
+        }
+        self.cursor_position
+            .is_some_and(|position| self.pointer_released(size, position))
+    }
+
+    fn touch_input(
+        &mut self,
+        size: Vector<2, f32>,
+        id: u64,
+        phase: TouchPhase,
+        position: Vector<2, f32>,
+    ) -> bool {
+        match phase {
+            TouchPhase::Started => {
+                if self.active_touch_id.is_some() {
+                    return false;
+                }
+                self.active_touch_id = Some(id);
+                self.accepts_mouse_input = false;
+                self.pointer_pressed(size, position)
+            }
+            TouchPhase::Moved => {
+                if self.active_touch_id != Some(id) {
+                    return false;
+                }
+                self.pointer_moved(size, position)
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if self.active_touch_id != Some(id) {
+                    return false;
+                }
+                self.active_touch_id = None;
+                self.pointer_released(size, position)
+            }
         }
     }
 
@@ -340,7 +406,7 @@ impl TabletUi {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Vector<const N: usize, T> {
     values: [T; N],
 }
@@ -906,3 +972,7 @@ impl Renderer {
         Ok(status)
     }
 }
+
+#[cfg(test)]
+#[path = "renderer/tests.rs"]
+mod tests;
