@@ -5,7 +5,7 @@ When making changes to serialization formats or network requests, do not conside
 After making changes, always run at least:
 - `cargo fmt`
 - `cargo check`
-- `cargo nextest run`
+- `cargo nextest run` (Takes around 10 seconds)
 
 Keep test files seperate from code files. Give every test its own seperate file.
 
