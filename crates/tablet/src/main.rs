@@ -1,3 +1,4 @@
+mod apps;
 mod renderer;
 mod text;
 

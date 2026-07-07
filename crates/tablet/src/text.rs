@@ -7,8 +7,7 @@ use std::path::Path;
 use std::ptr;
 use unicode_script::{Script, UnicodeScript};
 
-const TEXT_PIXEL_SIZE: u32 = 18;
-const TEXT_SCALE: i32 = (TEXT_PIXEL_SIZE as i32) * 64;
+const DEFAULT_TEXT_PIXEL_SIZE: u32 = 18;
 
 pub(crate) struct TextEngine {
     library: ft::FT_Library,
@@ -60,7 +59,7 @@ impl TextEngine {
                     if ft::FT_New_Face(library, font_path_c.as_ptr(), 0, &mut face) != 0 {
                         return None;
                     }
-                    if ft::FT_Set_Pixel_Sizes(face, 0, TEXT_PIXEL_SIZE) != 0 {
+                    if ft::FT_Set_Pixel_Sizes(face, 0, DEFAULT_TEXT_PIXEL_SIZE) != 0 {
                         ft::FT_Done_Face(face);
                         return None;
                     }
@@ -86,12 +85,27 @@ impl TextEngine {
         value: &str,
         color: Color,
     ) {
-        let baseline = position[1] + self.ascender();
+        self.draw_with_size(scene, position, value, color, DEFAULT_TEXT_PIXEL_SIZE);
+    }
+
+    pub(crate) fn draw_with_size(
+        &mut self,
+        scene: &mut Scene,
+        position: Vector<2, f32>,
+        value: &str,
+        color: Color,
+        pixel_size: u32,
+    ) {
+        let pixel_size = pixel_size.max(1);
+        let baseline = position[1] + self.ascender(pixel_size);
         let mut pen_x = position[0];
 
-        for glyph in self.shape(value) {
+        for glyph in self.shape(value, pixel_size) {
             let face = self.fonts[glyph.font_index].face;
             unsafe {
+                if ft::FT_Set_Pixel_Sizes(face, 0, pixel_size) != 0 {
+                    continue;
+                }
                 if ft::FT_Load_Glyph(face, glyph.id, ft::FT_LOAD_DEFAULT as i32) == 0 {
                     let slot = (*face).glyph;
                     if ft::FT_Render_Glyph(slot, ft::FT_Render_Mode::FT_RENDER_MODE_NORMAL) == 0 {
@@ -111,7 +125,7 @@ impl TextEngine {
         }
     }
 
-    fn shape(&self, value: &str) -> Vec<ShapedGlyph> {
+    fn shape(&self, value: &str, pixel_size: u32) -> Vec<ShapedGlyph> {
         self.font_runs(value)
             .into_iter()
             .flat_map(|run| {
@@ -120,8 +134,9 @@ impl TextEngine {
                     Err(_) => return Vec::new(),
                 };
                 let mut hb_font = HbFont::new(hb_face);
-                hb_font.set_scale(TEXT_SCALE, TEXT_SCALE);
-                hb_font.set_ppem(TEXT_PIXEL_SIZE, TEXT_PIXEL_SIZE);
+                let scale = (pixel_size as i32) * 64;
+                hb_font.set_scale(scale, scale);
+                hb_font.set_ppem(pixel_size, pixel_size);
                 let mut buffer = UnicodeBuffer::new().add_str(run.value);
                 if let Some(script) = run.script {
                     let tag = script.as_iso15924_tag().to_be_bytes();
@@ -162,11 +177,11 @@ impl TextEngine {
         })
     }
 
-    fn ascender(&self) -> f32 {
+    fn ascender(&self, pixel_size: u32) -> f32 {
         self.fonts
             .iter()
-            .map(|font| face_ascender(font.face))
-            .fold(TEXT_PIXEL_SIZE as f32, f32::max)
+            .map(|font| face_ascender(font.face, pixel_size))
+            .fold(pixel_size as f32, f32::max)
     }
 }
 
@@ -206,11 +221,14 @@ fn split_font_runs(
     runs
 }
 
-fn face_ascender(face: ft::FT_Face) -> f32 {
+fn face_ascender(face: ft::FT_Face, pixel_size: u32) -> f32 {
     unsafe {
+        if ft::FT_Set_Pixel_Sizes(face, 0, pixel_size) != 0 {
+            return pixel_size as f32;
+        }
         let size = (*face).size;
         if size.is_null() {
-            TEXT_PIXEL_SIZE as f32
+            pixel_size as f32
         } else {
             (*size).metrics.ascender as f32 / 64.0
         }

@@ -1,3 +1,4 @@
+use crate::apps::calendar::CalendarApp;
 use crate::text::TextEngine;
 use bytemuck::{Pod, Zeroable};
 use std::ops::{Add, Index};
@@ -137,6 +138,7 @@ impl ApplicationHandler for Application {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Page {
     Home,
+    Calendar,
     Todo(Feature),
 }
 
@@ -163,6 +165,7 @@ impl Feature {
 
 struct TabletUi {
     page: Page,
+    calendar: CalendarApp,
     cursor_position: Option<Vector<2, f32>>,
 }
 
@@ -170,6 +173,7 @@ impl TabletUi {
     fn new() -> Self {
         Self {
             page: Page::Home,
+            calendar: CalendarApp::new(),
             cursor_position: None,
         }
     }
@@ -179,14 +183,21 @@ impl TabletUi {
             return self.set_page(Page::Home);
         }
 
-        if self.page != Page::Home {
-            return false;
+        match self.page {
+            Page::Calendar => return self.calendar.click(size, position),
+            Page::Todo(_) => return false,
+            Page::Home => {}
         }
 
         Feature::ALL
             .into_iter()
             .find(|feature| quadrant_rect(size, *feature).contains(position))
-            .is_some_and(|feature| self.set_page(Page::Todo(feature)))
+            .is_some_and(|feature| {
+                self.set_page(match feature {
+                    Feature::Calendar => Page::Calendar,
+                    _ => Page::Todo(feature),
+                })
+            })
     }
 
     fn set_page(&mut self, page: Page) -> bool {
@@ -203,6 +214,7 @@ impl TabletUi {
         self.draw_status_bar(scene, text);
         match self.page {
             Page::Home => self.draw_home(scene, text, size),
+            Page::Calendar => self.calendar.draw(scene, text, size),
             Page::Todo(feature) => self.draw_todo(scene, text, size, feature),
         }
     }
@@ -307,8 +319,8 @@ impl<const N: usize, T: Add<Output = T> + Copy> Add for Vector<N, T> {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Rect {
-    position: Vector<2, f32>,
-    size: Vector<2, f32>,
+    pub(crate) position: Vector<2, f32>,
+    pub(crate) size: Vector<2, f32>,
 }
 
 impl Rect {
@@ -316,7 +328,7 @@ impl Rect {
         Self { position, size }
     }
 
-    fn contains(self, position: Vector<2, f32>) -> bool {
+    pub(crate) fn contains(self, position: Vector<2, f32>) -> bool {
         position[0] >= self.position[0]
             && position[1] >= self.position[1]
             && position[0] < self.position[0] + self.size[0]
@@ -328,8 +340,9 @@ impl Rect {
 pub(crate) struct Color(u32);
 
 impl Color {
-    const BLACK: Self = Self::rgb(0, 0, 0);
-    const WHITE: Self = Self::rgb(255, 255, 255);
+    pub(crate) const BLACK: Self = Self::rgb(0, 0, 0);
+    pub(crate) const GRAY: Self = Self::rgb(128, 128, 128);
+    pub(crate) const WHITE: Self = Self::rgb(255, 255, 255);
 
     pub(crate) const fn rgb(red: u8, green: u8, blue: u8) -> Self {
         Self(((red as u32) << 16) | ((green as u32) << 8) | blue as u32)
@@ -469,11 +482,11 @@ impl Scene {
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
-    fn push_rect(&mut self, rect: Rect, color: Color) {
+    pub(crate) fn push_rect(&mut self, rect: Rect, color: Color) {
         self.push_quad(rect, [-1.0, -1.0], [-1.0, -1.0], color);
     }
 
-    fn stroke_rect(&mut self, rect: Rect, thickness: f32, color: Color) {
+    pub(crate) fn stroke_rect(&mut self, rect: Rect, thickness: f32, color: Color) {
         let thickness = thickness
             .min(rect.size[0].max(0.0) * 0.5)
             .min(rect.size[1].max(0.0) * 0.5);
