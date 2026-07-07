@@ -14,6 +14,17 @@ pub(crate) struct TextEngine {
     fonts: Vec<FontFace>,
 }
 
+pub(crate) struct ShapedText {
+    pixel_size: u32,
+    glyphs: Vec<ShapedGlyph>,
+}
+
+impl ShapedText {
+    pub(crate) fn width(&self) -> f32 {
+        self.glyphs.iter().map(|glyph| glyph.x_advance).sum()
+    }
+}
+
 struct FontFace {
     face: ft::FT_Face,
     font_path: &'static str,
@@ -96,14 +107,32 @@ impl TextEngine {
         color: Color,
         pixel_size: u32,
     ) {
+        let shaped_text = self.shape_text(value, pixel_size);
+        self.draw_shaped_text(scene, position, &shaped_text, color);
+    }
+
+    pub(crate) fn shape_text(&self, value: &str, pixel_size: u32) -> ShapedText {
         let pixel_size = pixel_size.max(1);
-        let baseline = position[1] + self.ascender(pixel_size);
+        ShapedText {
+            pixel_size,
+            glyphs: self.shape(value, pixel_size),
+        }
+    }
+
+    pub(crate) fn draw_shaped_text(
+        &mut self,
+        scene: &mut Scene,
+        position: Vector<2, f32>,
+        shaped_text: &ShapedText,
+        color: Color,
+    ) {
+        let baseline = position[1] + self.ascender(shaped_text.pixel_size);
         let mut pen_x = position[0];
 
-        for glyph in self.shape(value, pixel_size) {
+        for glyph in &shaped_text.glyphs {
             let face = self.fonts[glyph.font_index].face;
             unsafe {
-                if ft::FT_Set_Pixel_Sizes(face, 0, pixel_size) != 0 {
+                if ft::FT_Set_Pixel_Sizes(face, 0, shaped_text.pixel_size) != 0 {
                     continue;
                 }
                 if ft::FT_Load_Glyph(face, glyph.id, ft::FT_LOAD_DEFAULT as i32) == 0 {

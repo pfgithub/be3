@@ -38,20 +38,17 @@ impl CalendarApp {
         let month = self.visible_month;
         let header_y = HEADER_TOP;
         let month_name = month.name();
+        let shaped_month_name = text.shape_text(month_name, HEADER_TEXT_SIZE);
 
-        text.draw_with_size(
+        text.draw_shaped_text(
             scene,
             Vector::new(OUTER_MARGIN, header_y),
-            month_name,
+            &shaped_month_name,
             Color::BLACK,
-            HEADER_TEXT_SIZE,
         );
         text.draw_with_size(
             scene,
-            Vector::new(
-                OUTER_MARGIN + estimated_text_width(month_name, HEADER_TEXT_SIZE) + 16.0,
-                header_y,
-            ),
+            Vector::new(OUTER_MARGIN + shaped_month_name.width() + 16.0, header_y),
             &month.year.to_string(),
             Color::GRAY,
             HEADER_TEXT_SIZE,
@@ -296,10 +293,6 @@ fn calendar_grid_rect(size: Vector<2, f32>) -> Rect {
             (size[1] - top - OUTER_MARGIN).max(6.0),
         ),
     )
-}
-
-fn estimated_text_width(value: &str, pixel_size: u32) -> f32 {
-    value.chars().count() as f32 * pixel_size as f32 * 0.58
 }
 
 fn is_leap_year(year: i32) -> bool {
