@@ -27,6 +27,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let coverage = textureSample(glyph_atlas, glyph_sampler, input.tex_coord).r;
+    var coverage = 1.0;
+    if input.tex_coord.x >= 0.0 {
+        coverage = textureSample(glyph_atlas, glyph_sampler, input.tex_coord).r;
+    }
     return vec4<f32>(input.color.rgb, input.color.a * coverage);
 }

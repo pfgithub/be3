@@ -5,19 +5,24 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 const INITIAL_WIDTH: u32 = 900;
 const INITIAL_HEIGHT: u32 = 520;
 const ATLAS_SIZE: u32 = 1024;
+const STATUS_BAR_HEIGHT: f32 = 54.0;
+const HOME_BUTTON_WIDTH: f32 = 128.0;
+const OUTER_MARGIN: f32 = 22.0;
+const BUTTON_GAP: f32 = 18.0;
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let text_engine = TextEngine::new().ok_or("no supported system font was found")?;
     let event_loop = EventLoop::new()?;
     let mut app = Application {
         text_engine,
+        ui: TabletUi::new(),
         window: None,
         renderer: None,
         error: None,
@@ -31,6 +36,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 struct Application {
     text_engine: TextEngine,
+    ui: TabletUi,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     error: Option<String>,
@@ -47,21 +53,7 @@ impl Application {
             return;
         };
         let mut scene = Scene::new(Vector::new(renderer.size.width, renderer.size.height));
-        let lines = [
-            "Text rendering with FreeType + HarfBuzz",
-            "Latin: The quick brown fox jumps over the lazy dog. ffi office",
-            "Arabic: \u{645}\u{631}\u{62d}\u{628}\u{627} \u{628}\u{627}\u{644}\u{639}\u{627}\u{644}\u{645}",
-            "CJK: \u{4f60}\u{597d}\u{ff0c}\u{4e16}\u{754c}  \u{3053}\u{3093}\u{306b}\u{3061}\u{306f}\u{4e16}\u{754c}",
-            "Adlam: \u{1e900}\u{1e922}\u{1e924}\u{1e91f}",
-        ];
-        for (index, line) in lines.iter().enumerate() {
-            self.text_engine.draw(
-                &mut scene,
-                Vector::new(36.0, 40.0 + index as f32 * 54.0),
-                line,
-                Color::rgb(24, 28, 36),
-            );
-        }
+        self.ui.draw(&mut scene, &mut self.text_engine);
 
         match renderer.render(&scene) {
             Ok(RenderStatus::Presented | RenderStatus::Skipped) => {}
@@ -77,7 +69,7 @@ impl ApplicationHandler for Application {
             return;
         }
         let attributes = Window::default_attributes()
-            .with_title("Text rendering demo")
+            .with_title("BE3 Tablet")
             .with_inner_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT));
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
@@ -115,9 +107,172 @@ impl ApplicationHandler for Application {
                     window.request_redraw();
                 }
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.ui.cursor_position = Some(Vector::new(position.x as f32, position.y as f32));
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let Some(position) = self.ui.cursor_position else {
+                    return;
+                };
+                let Some(renderer) = &self.renderer else {
+                    return;
+                };
+                let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
+                if self.ui.click(size, position) {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+            }
             WindowEvent::RedrawRequested => self.draw(event_loop),
             _ => {}
         }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Page {
+    Home,
+    Todo(Feature),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Feature {
+    Calendar,
+    Notes,
+    Reading,
+    Settings,
+}
+
+impl Feature {
+    const ALL: [Self; 4] = [Self::Calendar, Self::Notes, Self::Reading, Self::Settings];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Calendar => "Calendar",
+            Self::Notes => "Notes",
+            Self::Reading => "Reading",
+            Self::Settings => "Settings",
+        }
+    }
+}
+
+struct TabletUi {
+    page: Page,
+    cursor_position: Option<Vector<2, f32>>,
+}
+
+impl TabletUi {
+    fn new() -> Self {
+        Self {
+            page: Page::Home,
+            cursor_position: None,
+        }
+    }
+
+    fn click(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+        if home_button_rect().contains(position) {
+            return self.set_page(Page::Home);
+        }
+
+        if self.page != Page::Home {
+            return false;
+        }
+
+        Feature::ALL
+            .into_iter()
+            .find(|feature| quadrant_rect(size, *feature).contains(position))
+            .is_some_and(|feature| self.set_page(Page::Todo(feature)))
+    }
+
+    fn set_page(&mut self, page: Page) -> bool {
+        if self.page == page {
+            return false;
+        }
+        self.page = page;
+        true
+    }
+
+    fn draw(&self, scene: &mut Scene, text: &mut TextEngine) {
+        let size = scene.size();
+        scene.push_rect(Rect::new(Vector::new(0.0, 0.0), size), Color::WHITE);
+        self.draw_status_bar(scene, text);
+        match self.page {
+            Page::Home => self.draw_home(scene, text, size),
+            Page::Todo(feature) => self.draw_todo(scene, text, size, feature),
+        }
+    }
+
+    fn draw_status_bar(&self, scene: &mut Scene, text: &mut TextEngine) {
+        scene.push_rect(
+            Rect::new(Vector::new(0.0, 0.0), Vector::new(scene.size()[0], 1.0)),
+            Color::BLACK,
+        );
+        scene.push_rect(
+            Rect::new(
+                Vector::new(0.0, STATUS_BAR_HEIGHT - 1.0),
+                Vector::new(scene.size()[0], 1.0),
+            ),
+            Color::BLACK,
+        );
+        let home = home_button_rect();
+        scene.stroke_rect(home, 2.0, Color::BLACK);
+        text.draw(
+            scene,
+            Vector::new(home.position[0] + 22.0, 16.0),
+            "Home",
+            Color::BLACK,
+        );
+        text.draw(
+            scene,
+            Vector::new(scene.size()[0] - 156.0, 16.0),
+            "BE3 Tablet",
+            Color::BLACK,
+        );
+    }
+
+    fn draw_home(&self, scene: &mut Scene, text: &mut TextEngine, size: Vector<2, f32>) {
+        for feature in Feature::ALL {
+            let rect = quadrant_rect(size, feature);
+            scene.stroke_rect(rect, 3.0, Color::BLACK);
+            let label = feature.label();
+            let label_x = rect.position[0] + 28.0;
+            let label_y = rect.position[1] + rect.size[1] * 0.5 - 9.0;
+            text.draw(scene, Vector::new(label_x, label_y), label, Color::BLACK);
+        }
+    }
+
+    fn draw_todo(
+        &self,
+        scene: &mut Scene,
+        text: &mut TextEngine,
+        size: Vector<2, f32>,
+        feature: Feature,
+    ) {
+        let body = Rect::new(
+            Vector::new(OUTER_MARGIN, STATUS_BAR_HEIGHT + OUTER_MARGIN),
+            Vector::new(
+                (size[0] - OUTER_MARGIN * 2.0).max(1.0),
+                (size[1] - STATUS_BAR_HEIGHT - OUTER_MARGIN * 2.0).max(1.0),
+            ),
+        );
+        scene.stroke_rect(body, 3.0, Color::BLACK);
+        text.draw(
+            scene,
+            Vector::new(body.position[0] + 28.0, body.position[1] + 34.0),
+            feature.label(),
+            Color::BLACK,
+        );
+        text.draw(
+            scene,
+            Vector::new(body.position[0] + 28.0, body.position[1] + 88.0),
+            "TODO",
+            Color::BLACK,
+        );
     }
 }
 
@@ -160,12 +315,22 @@ impl Rect {
     pub(crate) const fn new(position: Vector<2, f32>, size: Vector<2, f32>) -> Self {
         Self { position, size }
     }
+
+    fn contains(self, position: Vector<2, f32>) -> bool {
+        position[0] >= self.position[0]
+            && position[1] >= self.position[1]
+            && position[0] < self.position[0] + self.size[0]
+            && position[1] < self.position[1] + self.size[1]
+    }
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct Color(u32);
 
 impl Color {
+    const BLACK: Self = Self::rgb(0, 0, 0);
+    const WHITE: Self = Self::rgb(255, 255, 255);
+
     pub(crate) const fn rgb(red: u8, green: u8, blue: u8) -> Self {
         Self(((red as u32) << 16) | ((green as u32) << 8) | blue as u32)
     }
@@ -222,6 +387,10 @@ impl Scene {
             atlas_y: 0,
             atlas_row_height: 0,
         }
+    }
+
+    fn size(&self) -> Vector<2, f32> {
+        self.size
     }
 
     pub(crate) fn add_glyph(
@@ -299,6 +468,73 @@ impl Scene {
         self.indices
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
+
+    fn push_rect(&mut self, rect: Rect, color: Color) {
+        self.push_quad(rect, [-1.0, -1.0], [-1.0, -1.0], color);
+    }
+
+    fn stroke_rect(&mut self, rect: Rect, thickness: f32, color: Color) {
+        let thickness = thickness
+            .min(rect.size[0].max(0.0) * 0.5)
+            .min(rect.size[1].max(0.0) * 0.5);
+        self.push_rect(
+            Rect::new(rect.position, Vector::new(rect.size[0], thickness)),
+            color,
+        );
+        self.push_rect(
+            Rect::new(
+                Vector::new(
+                    rect.position[0],
+                    rect.position[1] + rect.size[1] - thickness,
+                ),
+                Vector::new(rect.size[0], thickness),
+            ),
+            color,
+        );
+        self.push_rect(
+            Rect::new(rect.position, Vector::new(thickness, rect.size[1])),
+            color,
+        );
+        self.push_rect(
+            Rect::new(
+                Vector::new(
+                    rect.position[0] + rect.size[0] - thickness,
+                    rect.position[1],
+                ),
+                Vector::new(thickness, rect.size[1]),
+            ),
+            color,
+        );
+    }
+}
+
+fn home_button_rect() -> Rect {
+    Rect::new(
+        Vector::new(OUTER_MARGIN, 10.0),
+        Vector::new(HOME_BUTTON_WIDTH, STATUS_BAR_HEIGHT - 20.0),
+    )
+}
+
+fn quadrant_rect(size: Vector<2, f32>, feature: Feature) -> Rect {
+    let content_x = OUTER_MARGIN;
+    let content_y = STATUS_BAR_HEIGHT + OUTER_MARGIN;
+    let content_width = (size[0] - OUTER_MARGIN * 2.0).max(1.0);
+    let content_height = (size[1] - STATUS_BAR_HEIGHT - OUTER_MARGIN * 2.0).max(1.0);
+    let button_width = ((content_width - BUTTON_GAP) * 0.5).max(1.0);
+    let button_height = ((content_height - BUTTON_GAP) * 0.5).max(1.0);
+    let (column, row) = match feature {
+        Feature::Calendar => (0.0, 0.0),
+        Feature::Notes => (1.0, 0.0),
+        Feature::Reading => (0.0, 1.0),
+        Feature::Settings => (1.0, 1.0),
+    };
+    Rect::new(
+        Vector::new(
+            content_x + column * (button_width + BUTTON_GAP),
+            content_y + row * (button_height + BUTTON_GAP),
+        ),
+        Vector::new(button_width, button_height),
+    )
 }
 
 struct Renderer {
@@ -522,9 +758,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.96,
-                            g: 0.97,
-                            b: 0.99,
+                            r: 1.0,
+                            g: 1.0,
+                            b: 1.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
