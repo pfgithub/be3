@@ -4,9 +4,8 @@ use crate::text::TextEngine;
 use bytemuck::{Pod, Zeroable};
 use std::ops::{Add, Index, Sub};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
@@ -80,7 +79,7 @@ impl ApplicationHandler for Application {
                 return;
             }
         };
-        match pollster::block_on(Renderer::new(window.clone())) {
+        match Renderer::new(window.clone()) {
             Ok(renderer) => {
                 self.window = Some(window);
                 self.renderer = Some(renderer);
@@ -494,19 +493,6 @@ struct Vertex {
     color: [f32; 4],
 }
 
-impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
-
-    fn layout() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBUTES,
-        }
-    }
-}
-
 pub(crate) struct Scene {
     size: Vector<2, f32>,
     vertices: Vec<Vertex>,
@@ -725,253 +711,15 @@ fn quadrant_rect(size: Vector<2, f32>, feature: Feature) -> Rect {
     )
 }
 
-struct Renderer {
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    size: PhysicalSize<u32>,
-    pipeline: wgpu::RenderPipeline,
-    atlas_texture: wgpu::Texture,
-    atlas_bind_group: wgpu::BindGroup,
-}
-
 enum RenderStatus {
     Presented,
     Reconfigure,
     Skipped,
 }
 
-impl Renderer {
-    async fn new(window: Arc<Window>) -> Result<Self, Box<dyn std::error::Error>> {
-        let size = window.inner_size();
-        let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window)?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::None,
-                force_fallback_adapter: false,
-                compatible_surface: Some(&surface),
-            })
-            .await?;
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("text rendering device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            })
-            .await?;
-        let config = surface
-            .get_default_config(&adapter, size.width.max(1), size.height.max(1))
-            .ok_or("surface is not supported by the selected adapter")?;
-        surface.configure(&device, &config);
-
-        let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("glyph atlas"),
-            size: wgpu::Extent3d {
-                width: ATLAS_SIZE,
-                height: ATLAS_SIZE,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("glyph sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-        let atlas_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("glyph atlas layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let atlas_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("glyph atlas bind group"),
-            layout: &atlas_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&atlas_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
-                },
-            ],
-        });
-        let shader = device.create_shader_module(wgpu::include_wgsl!("ui.wgsl"));
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("text pipeline layout"),
-            bind_group_layouts: &[Some(&atlas_layout)],
-            immediate_size: 0,
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("text pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[Vertex::layout()],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        Ok(Self {
-            surface,
-            device,
-            queue,
-            config,
-            size,
-            pipeline,
-            atlas_texture,
-            atlas_bind_group,
-        })
-    }
-
-    fn resize(&mut self, size: PhysicalSize<u32>) {
-        self.size = size;
-        if size.width == 0 || size.height == 0 {
-            return;
-        }
-        self.config.width = size.width;
-        self.config.height = size.height;
-        self.surface.configure(&self.device, &self.config);
-    }
-
-    fn render(&mut self, scene: &Scene) -> Result<RenderStatus, String> {
-        if self.size.width == 0 || self.size.height == 0 {
-            return Ok(RenderStatus::Skipped);
-        }
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.atlas_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &scene.atlas,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(ATLAS_SIZE),
-                rows_per_image: Some(ATLAS_SIZE),
-            },
-            wgpu::Extent3d {
-                width: ATLAS_SIZE,
-                height: ATLAS_SIZE,
-                depth_or_array_layers: 1,
-            },
-        );
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("text vertices"),
-                contents: bytemuck::cast_slice(&scene.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("text indices"),
-                contents: bytemuck::cast_slice(&scene.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-        let (frame, status) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, RenderStatus::Presented),
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, RenderStatus::Reconfigure),
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(RenderStatus::Skipped);
-            }
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                return Ok(RenderStatus::Reconfigure);
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                return Err("wgpu surface texture validation failed".to_owned());
-            }
-        };
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("text command encoder"),
-            });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("text render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            if !scene.indices.is_empty() {
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.atlas_bind_group, &[]);
-                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..scene.indices.len() as u32, 0, 0..1);
-            }
-        }
-        self.queue.submit(Some(encoder.finish()));
-        frame.present();
-        Ok(status)
-    }
-}
+#[path = "renderer/vulkan.rs"]
+mod vulkan;
+use vulkan::Renderer;
 
 #[cfg(test)]
 #[path = "renderer/tests.rs"]
