@@ -1,4 +1,4 @@
-use super::{RenderStatus, Scene, Vertex, ATLAS_SIZE};
+use super::{AtlasPixels, RenderStatus, SceneData, Vertex, ATLAS_SIZE};
 use ash::{khr, vk};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::ffi::CString;
@@ -35,6 +35,9 @@ pub(super) struct Renderer {
     descriptor_set: vk::DescriptorSet,
     atlas_image: vk::Image,
     atlas_memory: vk::DeviceMemory,
+    atlas_mapped: *mut u8,
+    atlas_mapped_len: usize,
+    atlas_row_pitch: usize,
     atlas_view: vk::ImageView,
     atlas_sampler: vk::Sampler,
     atlas_initialized: bool,
@@ -151,7 +154,9 @@ impl Renderer {
             )?
         };
 
-        let (atlas_image, atlas_memory) = create_image(
+        let atlas = create_mapped_image(
+            &instance,
+            physical_device,
             &device,
             &memory_properties,
             vk::Extent2D {
@@ -159,8 +164,10 @@ impl Renderer {
                 height: ATLAS_SIZE,
             },
             vk::Format::R8_UNORM,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::ImageUsageFlags::SAMPLED,
         )?;
+        let atlas_image = atlas.image;
+        let atlas_memory = atlas.memory;
         let atlas_view = unsafe {
             device.create_image_view(
                 &vk::ImageViewCreateInfo::default()
@@ -209,7 +216,7 @@ impl Renderer {
         };
         let image_info = [vk::DescriptorImageInfo::default()
             .image_view(atlas_view)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+            .image_layout(vk::ImageLayout::GENERAL)];
         let sampler_info = [vk::DescriptorImageInfo::default().sampler(atlas_sampler)];
         let descriptor_writes = [
             vk::WriteDescriptorSet::default()
@@ -253,6 +260,9 @@ impl Renderer {
             descriptor_set,
             atlas_image,
             atlas_memory,
+            atlas_mapped: atlas.mapped,
+            atlas_mapped_len: atlas.mapped_len,
+            atlas_row_pitch: atlas.row_pitch,
             atlas_view,
             atlas_sampler,
             atlas_initialized: false,
@@ -276,7 +286,13 @@ impl Renderer {
         self.swapchain_dirty = size.width != 0 && size.height != 0;
     }
 
-    pub(super) fn render(&mut self, scene: &Scene) -> Result<RenderStatus, String> {
+    pub(super) fn atlas_pixels(&mut self) -> AtlasPixels<'_> {
+        let pixels =
+            unsafe { std::slice::from_raw_parts_mut(self.atlas_mapped, self.atlas_mapped_len) };
+        AtlasPixels::new(pixels, self.atlas_row_pitch)
+    }
+
+    pub(super) fn render(&mut self, scene: &SceneData) -> Result<RenderStatus, String> {
         if self.size.width == 0 || self.size.height == 0 {
             return Ok(RenderStatus::Skipped);
         }
@@ -301,9 +317,6 @@ impl Renderer {
             Err(error) => return Err(format!("failed to acquire Vulkan swapchain image: {error}")),
         };
 
-        let atlas_staging = self
-            .create_buffer_with_data(&scene.atlas, vk::BufferUsageFlags::TRANSFER_SRC)
-            .map_err(|error| error.to_string())?;
         let vertices = self
             .create_buffer_with_data(
                 bytemuck::cast_slice(&scene.vertices),
@@ -319,14 +332,11 @@ impl Renderer {
 
         let result = self.record_and_submit(
             image_index,
-            atlas_staging.buffer,
             vertices.buffer,
             indices.buffer,
             scene.indices.len() as u32,
         );
         unsafe {
-            self.device.destroy_buffer(atlas_staging.buffer, None);
-            self.device.free_memory(atlas_staging.memory, None);
             self.device.destroy_buffer(vertices.buffer, None);
             self.device.free_memory(vertices.memory, None);
             self.device.destroy_buffer(indices.buffer, None);
@@ -486,7 +496,6 @@ impl Renderer {
     fn record_and_submit(
         &mut self,
         image_index: u32,
-        staging_buffer: vk::Buffer,
         vertex_buffer: vk::Buffer,
         index_buffer: vk::Buffer,
         index_count: u32,
@@ -504,66 +513,25 @@ impl Renderer {
                 .map_err(|error| error.to_string())?;
 
             let old_layout = if self.atlas_initialized {
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+                vk::ImageLayout::GENERAL
             } else {
-                vk::ImageLayout::UNDEFINED
+                vk::ImageLayout::PREINITIALIZED
             };
             let source_stage = if self.atlas_initialized {
-                vk::PipelineStageFlags::FRAGMENT_SHADER
+                vk::PipelineStageFlags::HOST
             } else {
-                vk::PipelineStageFlags::TOP_OF_PIPE
+                vk::PipelineStageFlags::HOST
             };
-            let source_access = if self.atlas_initialized {
-                vk::AccessFlags::SHADER_READ
-            } else {
-                vk::AccessFlags::empty()
-            };
-            let to_transfer = [vk::ImageMemoryBarrier::default()
-                .src_access_mask(source_access)
-                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            let to_shader = [vk::ImageMemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::HOST_WRITE)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ)
                 .old_layout(old_layout)
-                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .new_layout(vk::ImageLayout::GENERAL)
                 .image(self.atlas_image)
                 .subresource_range(color_subresource_range())];
             self.device.cmd_pipeline_barrier(
                 self.command_buffer,
                 source_stage,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &to_transfer,
-            );
-            let copy = [vk::BufferImageCopy::default()
-                .image_subresource(
-                    vk::ImageSubresourceLayers::default()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .mip_level(0)
-                        .base_array_layer(0)
-                        .layer_count(1),
-                )
-                .image_extent(vk::Extent3D {
-                    width: ATLAS_SIZE,
-                    height: ATLAS_SIZE,
-                    depth: 1,
-                })];
-            self.device.cmd_copy_buffer_to_image(
-                self.command_buffer,
-                staging_buffer,
-                self.atlas_image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &copy,
-            );
-            let to_shader = [vk::ImageMemoryBarrier::default()
-                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(vk::AccessFlags::SHADER_READ)
-                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image(self.atlas_image)
-                .subresource_range(color_subresource_range())];
-            self.device.cmd_pipeline_barrier(
-                self.command_buffer,
-                vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
                 vk::DependencyFlags::empty(),
                 &[],
@@ -719,6 +687,7 @@ impl Drop for Renderer {
             self.device.destroy_sampler(self.atlas_sampler, None);
             self.device.destroy_image_view(self.atlas_view, None);
             self.device.destroy_image(self.atlas_image, None);
+            self.device.unmap_memory(self.atlas_memory);
             self.device.free_memory(self.atlas_memory, None);
             self.device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
@@ -736,13 +705,31 @@ struct AllocatedBuffer {
     memory: vk::DeviceMemory,
 }
 
-fn create_image(
+struct MappedImage {
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    mapped: *mut u8,
+    mapped_len: usize,
+    row_pitch: usize,
+}
+
+fn create_mapped_image(
+    instance: &ash::Instance,
+    physical_device: vk::PhysicalDevice,
     device: &ash::Device,
     memory_properties: &vk::PhysicalDeviceMemoryProperties,
     extent: vk::Extent2D,
     format: vk::Format,
     usage: vk::ImageUsageFlags,
-) -> Result<(vk::Image, vk::DeviceMemory), Box<dyn std::error::Error>> {
+) -> Result<MappedImage, Box<dyn std::error::Error>> {
+    let format_properties =
+        unsafe { instance.get_physical_device_format_properties(physical_device, format) };
+    if !format_properties
+        .linear_tiling_features
+        .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE)
+    {
+        return Err("the Vulkan device cannot sample a linear R8 image".into());
+    }
     let image = unsafe {
         device.create_image(
             &vk::ImageCreateInfo::default()
@@ -756,10 +743,10 @@ fn create_image(
                 .mip_levels(1)
                 .array_layers(1)
                 .samples(vk::SampleCountFlags::TYPE_1)
-                .tiling(vk::ImageTiling::OPTIMAL)
+                .tiling(vk::ImageTiling::LINEAR)
                 .usage(usage)
                 .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                .initial_layout(vk::ImageLayout::UNDEFINED),
+                .initial_layout(vk::ImageLayout::PREINITIALIZED),
             None,
         )?
     };
@@ -767,9 +754,9 @@ fn create_image(
     let memory_type = find_memory_type(
         memory_properties,
         requirements.memory_type_bits,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
     )
-    .ok_or("no device-local Vulkan memory type is available")?;
+    .ok_or("no host-visible coherent memory supports the Vulkan atlas image")?;
     let memory = unsafe {
         device.allocate_memory(
             &vk::MemoryAllocateInfo::default()
@@ -779,7 +766,34 @@ fn create_image(
         )?
     };
     unsafe { device.bind_image_memory(image, memory, 0)? };
-    Ok((image, memory))
+    let layout = unsafe {
+        device.get_image_subresource_layout(
+            image,
+            vk::ImageSubresource {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                array_layer: 0,
+            },
+        )
+    };
+    let mapped = unsafe {
+        device
+            .map_memory(
+                memory,
+                layout.offset,
+                layout.size,
+                vk::MemoryMapFlags::empty(),
+            )?
+            .cast::<u8>()
+    };
+    unsafe { ptr::write_bytes(mapped, 0, layout.size as usize) };
+    Ok(MappedImage {
+        image,
+        memory,
+        mapped,
+        mapped_len: layout.size as usize,
+        row_pitch: layout.row_pitch as usize,
+    })
 }
 
 fn find_memory_type(

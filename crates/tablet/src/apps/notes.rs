@@ -1,4 +1,4 @@
-use crate::renderer::{Color, Rect, Scene, Vector};
+use crate::renderer::{AtlasPixels, Color, Rect, Scene, Vector, ATLAS_SIZE, NOTES_ATLAS_Y};
 use crate::text::TextEngine;
 
 const STATUS_BAR_HEIGHT: f32 = 54.0;
@@ -31,6 +31,7 @@ impl NotesApp {
         &mut self,
         size: Vector<2, f32>,
         position: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
     ) -> bool {
         if let Some(tool) = tool_at_position(position) {
             self.selected_tool = tool;
@@ -47,18 +48,23 @@ impl NotesApp {
         self.ensure_bitmap(canvas);
         let bitmap_position = self.bitmap_position(canvas, position);
         self.active_position = Some(bitmap_position);
-        self.draw_segment(bitmap_position, bitmap_position);
+        self.draw_segment(bitmap_position, bitmap_position, atlas);
         true
     }
 
-    pub(crate) fn pointer_moved(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+    pub(crate) fn pointer_moved(
+        &mut self,
+        size: Vector<2, f32>,
+        position: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
+    ) -> bool {
         let canvas = canvas_rect(size);
         let Some(previous_position) = self.active_position else {
             return false;
         };
 
         let bitmap_position = self.bitmap_position(canvas, position);
-        self.draw_segment(previous_position, bitmap_position);
+        self.draw_segment(previous_position, bitmap_position, atlas);
         self.active_position = Some(bitmap_position);
         true
     }
@@ -67,11 +73,12 @@ impl NotesApp {
         &mut self,
         _size: Vector<2, f32>,
         _position: Vector<2, f32>,
+        _atlas: &mut AtlasPixels<'_>,
     ) -> bool {
         self.active_position.take().is_some()
     }
 
-    pub(crate) fn draw(&self, scene: &mut Scene, text: &mut TextEngine, size: Vector<2, f32>) {
+    pub(crate) fn draw(&self, scene: &mut Scene<'_>, text: &mut TextEngine, size: Vector<2, f32>) {
         self.draw_toolbar(scene, text, size);
 
         let canvas = canvas_rect(size);
@@ -79,7 +86,7 @@ impl NotesApp {
         let Some(bitmap) = &self.bitmap else {
             return;
         };
-        if let Some((uv_min, uv_max)) = scene.add_bitmap(bitmap.size(), &bitmap.pixels) {
+        if let Some((uv_min, uv_max)) = scene.notes_bitmap(bitmap.size()) {
             scene.push_quad(canvas, uv_min, uv_max, Color::BLACK);
         }
     }
@@ -119,8 +126,8 @@ impl NotesApp {
             return;
         }
         self.bitmap = Some(Bitmap::new(
-            canvas.size[0].ceil() as u32,
-            canvas.size[1].ceil() as u32,
+            (canvas.size[0].ceil() as u32).min(ATLAS_SIZE),
+            (canvas.size[1].ceil() as u32).min(ATLAS_SIZE - NOTES_ATLAS_Y),
         ));
     }
 
@@ -132,7 +139,12 @@ impl NotesApp {
         )
     }
 
-    fn draw_segment(&mut self, start: Vector<2, f32>, end: Vector<2, f32>) {
+    fn draw_segment(
+        &mut self,
+        start: Vector<2, f32>,
+        end: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
+    ) {
         let (width, coverage) = match self.selected_tool {
             Tool::Pen => (PEN_WIDTH, Some(PEN_COVERAGE)),
             Tool::Highlighter => (HIGHLIGHTER_WIDTH, Some(HIGHLIGHTER_COVERAGE)),
@@ -141,17 +153,26 @@ impl NotesApp {
         self.bitmap
             .as_mut()
             .expect("bitmap should be initialized")
-            .draw_line(start, end, width, coverage);
+            .draw_line(start, end, width, coverage, atlas);
     }
 
     #[cfg(test)]
-    pub(crate) fn coverage_at(&self, size: Vector<2, f32>, position: Vector<2, f32>) -> u8 {
+    pub(crate) fn coverage_at(
+        &self,
+        size: Vector<2, f32>,
+        position: Vector<2, f32>,
+        atlas: &AtlasPixels<'_>,
+    ) -> u8 {
         let canvas = canvas_rect(size);
         let Some(bitmap) = &self.bitmap else {
             return 0;
         };
         let position = self.bitmap_position(canvas, position);
-        bitmap.coverage_at(position[0].floor() as i32, position[1].floor() as i32)
+        bitmap.coverage_at(
+            position[0].floor() as i32,
+            position[1].floor() as i32,
+            atlas,
+        )
     }
 }
 
@@ -177,18 +198,13 @@ impl Tool {
 struct Bitmap {
     width: u32,
     height: u32,
-    pixels: Vec<u8>,
 }
 
 impl Bitmap {
     fn new(width: u32, height: u32) -> Self {
         let width = width.max(1);
         let height = height.max(1);
-        Self {
-            width,
-            height,
-            pixels: vec![0; (width * height) as usize],
-        }
+        Self { width, height }
     }
 
     fn size(&self) -> Vector<2, u32> {
@@ -201,6 +217,7 @@ impl Bitmap {
         end: Vector<2, f32>,
         width: f32,
         coverage: Option<u8>,
+        atlas: &mut AtlasPixels<'_>,
     ) {
         let delta = end - start;
         let distance = (delta[0] * delta[0] + delta[1] * delta[1]).sqrt();
@@ -211,11 +228,17 @@ impl Bitmap {
                 start[0] + delta[0] * progress,
                 start[1] + delta[1] * progress,
             );
-            self.draw_circle(center, width * 0.5, coverage);
+            self.draw_circle(center, width * 0.5, coverage, atlas);
         }
     }
 
-    fn draw_circle(&mut self, center: Vector<2, f32>, radius: f32, coverage: Option<u8>) {
+    fn draw_circle(
+        &mut self,
+        center: Vector<2, f32>,
+        radius: f32,
+        coverage: Option<u8>,
+        atlas: &mut AtlasPixels<'_>,
+    ) {
         let min_x = (center[0] - radius).floor() as i32;
         let max_x = (center[0] + radius).ceil() as i32;
         let min_y = (center[1] - radius).floor() as i32;
@@ -232,9 +255,15 @@ impl Bitmap {
                 let Some(index) = self.pixel_index(x, y) else {
                     continue;
                 };
+                let atlas_x = index as u32 % self.width;
+                let atlas_y = NOTES_ATLAS_Y + index as u32 / self.width;
                 match coverage {
-                    Some(coverage) => self.pixels[index] = self.pixels[index].max(coverage),
-                    None => self.pixels[index] = 0,
+                    Some(coverage) => atlas.set_pixel(
+                        atlas_x,
+                        atlas_y,
+                        atlas.pixel(atlas_x, atlas_y).max(coverage),
+                    ),
+                    None => atlas.set_pixel(atlas_x, atlas_y, 0),
                 }
             }
         }
@@ -248,8 +277,13 @@ impl Bitmap {
     }
 
     #[cfg(test)]
-    fn coverage_at(&self, x: i32, y: i32) -> u8 {
-        self.pixel_index(x, y).map_or(0, |index| self.pixels[index])
+    fn coverage_at(&self, x: i32, y: i32, atlas: &AtlasPixels<'_>) -> u8 {
+        self.pixel_index(x, y).map_or(0, |index| {
+            atlas.pixel(
+                index as u32 % self.width,
+                NOTES_ATLAS_Y + index as u32 / self.width,
+            )
+        })
     }
 }
 

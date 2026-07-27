@@ -12,7 +12,8 @@ use winit::window::{Window, WindowId};
 
 const INITIAL_WIDTH: u32 = 900;
 const INITIAL_HEIGHT: u32 = 520;
-const ATLAS_SIZE: u32 = 2048;
+pub(crate) const ATLAS_SIZE: u32 = 2048;
+pub(crate) const NOTES_ATLAS_Y: u32 = ATLAS_SIZE / 2;
 const STATUS_BAR_HEIGHT: f32 = 54.0;
 const HOME_BUTTON_WIDTH: f32 = 128.0;
 const OUTER_MARGIN: f32 = 22.0;
@@ -53,8 +54,12 @@ impl Application {
         let Some(renderer) = &mut self.renderer else {
             return;
         };
-        let mut scene = Scene::new(Vector::new(renderer.size.width, renderer.size.height));
-        self.ui.draw(&mut scene, &mut self.text_engine);
+        let size = Vector::new(renderer.size.width, renderer.size.height);
+        let scene = {
+            let mut scene = Scene::new(size, renderer.atlas_pixels());
+            self.ui.draw(&mut scene, &mut self.text_engine);
+            scene.finish()
+        };
 
         match renderer.render(&scene) {
             Ok(RenderStatus::Presented | RenderStatus::Skipped) => {}
@@ -110,11 +115,14 @@ impl ApplicationHandler for Application {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let position = Vector::new(position.x as f32, position.y as f32);
-                let Some(renderer) = &self.renderer else {
+                let Some(renderer) = &mut self.renderer else {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
-                if self.ui.cursor_moved(size, position) {
+                if self
+                    .ui
+                    .cursor_moved(size, position, &mut renderer.atlas_pixels())
+                {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -125,11 +133,11 @@ impl ApplicationHandler for Application {
                 button: MouseButton::Left,
                 ..
             } => {
-                let Some(renderer) = &self.renderer else {
+                let Some(renderer) = &mut self.renderer else {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
-                if self.ui.mouse_pressed(size) {
+                if self.ui.mouse_pressed(size, &mut renderer.atlas_pixels()) {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -140,23 +148,29 @@ impl ApplicationHandler for Application {
                 button: MouseButton::Left,
                 ..
             } => {
-                let Some(renderer) = &self.renderer else {
+                let Some(renderer) = &mut self.renderer else {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
-                if self.ui.mouse_released(size) {
+                if self.ui.mouse_released(size, &mut renderer.atlas_pixels()) {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
                 }
             }
             WindowEvent::Touch(touch) => {
-                let Some(renderer) = &self.renderer else {
+                let Some(renderer) = &mut self.renderer else {
                     return;
                 };
                 let size = Vector::new(renderer.size.width as f32, renderer.size.height as f32);
                 let position = Vector::new(touch.location.x as f32, touch.location.y as f32);
-                if self.ui.touch_input(size, touch.id, touch.phase, position) {
+                if self.ui.touch_input(
+                    size,
+                    touch.id,
+                    touch.phase,
+                    position,
+                    &mut renderer.atlas_pixels(),
+                ) {
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -218,29 +232,34 @@ impl TabletUi {
         }
     }
 
-    fn cursor_moved(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+    fn cursor_moved(
+        &mut self,
+        size: Vector<2, f32>,
+        position: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
+    ) -> bool {
         self.cursor_position = Some(position);
         self.accepts_mouse_input = true;
         if self.active_touch_id.is_some() {
             return false;
         }
-        self.pointer_moved(size, position)
+        self.pointer_moved(size, position, atlas)
     }
 
-    fn mouse_pressed(&mut self, size: Vector<2, f32>) -> bool {
+    fn mouse_pressed(&mut self, size: Vector<2, f32>, atlas: &mut AtlasPixels<'_>) -> bool {
         if self.active_touch_id.is_some() || !self.accepts_mouse_input {
             return false;
         }
         self.cursor_position
-            .is_some_and(|position| self.pointer_pressed(size, position))
+            .is_some_and(|position| self.pointer_pressed(size, position, atlas))
     }
 
-    fn mouse_released(&mut self, size: Vector<2, f32>) -> bool {
+    fn mouse_released(&mut self, size: Vector<2, f32>, atlas: &mut AtlasPixels<'_>) -> bool {
         if self.active_touch_id.is_some() || !self.accepts_mouse_input {
             return false;
         }
         self.cursor_position
-            .is_some_and(|position| self.pointer_released(size, position))
+            .is_some_and(|position| self.pointer_released(size, position, atlas))
     }
 
     fn touch_input(
@@ -249,6 +268,7 @@ impl TabletUi {
         id: u64,
         phase: TouchPhase,
         position: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
     ) -> bool {
         match phase {
             TouchPhase::Started => {
@@ -257,40 +277,55 @@ impl TabletUi {
                 }
                 self.active_touch_id = Some(id);
                 self.accepts_mouse_input = false;
-                self.pointer_pressed(size, position)
+                self.pointer_pressed(size, position, atlas)
             }
             TouchPhase::Moved => {
                 if self.active_touch_id != Some(id) {
                     return false;
                 }
-                self.pointer_moved(size, position)
+                self.pointer_moved(size, position, atlas)
             }
             TouchPhase::Ended | TouchPhase::Cancelled => {
                 if self.active_touch_id != Some(id) {
                     return false;
                 }
                 self.active_touch_id = None;
-                self.pointer_released(size, position)
+                self.pointer_released(size, position, atlas)
             }
         }
     }
 
-    fn pointer_pressed(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+    fn pointer_pressed(
+        &mut self,
+        size: Vector<2, f32>,
+        position: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
+    ) -> bool {
         match self.page {
-            Page::Notes => self.notes.pointer_pressed(size, position),
+            Page::Notes => self.notes.pointer_pressed(size, position, atlas),
             Page::Home | Page::Calendar | Page::Todo(_) => false,
         }
     }
 
-    fn pointer_moved(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
+    fn pointer_moved(
+        &mut self,
+        size: Vector<2, f32>,
+        position: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
+    ) -> bool {
         match self.page {
-            Page::Notes => self.notes.pointer_moved(size, position),
+            Page::Notes => self.notes.pointer_moved(size, position, atlas),
             Page::Home | Page::Calendar | Page::Todo(_) => false,
         }
     }
 
-    fn pointer_released(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
-        if matches!(self.page, Page::Notes) && self.notes.pointer_released(size, position) {
+    fn pointer_released(
+        &mut self,
+        size: Vector<2, f32>,
+        position: Vector<2, f32>,
+        atlas: &mut AtlasPixels<'_>,
+    ) -> bool {
+        if matches!(self.page, Page::Notes) && self.notes.pointer_released(size, position, atlas) {
             return true;
         }
         if home_button_rect().contains(position) {
@@ -493,26 +528,57 @@ struct Vertex {
     color: [f32; 4],
 }
 
-pub(crate) struct Scene {
+pub(crate) struct AtlasPixels<'a> {
+    pixels: &'a mut [u8],
+    row_pitch: usize,
+}
+
+impl AtlasPixels<'_> {
+    pub(crate) fn new(pixels: &mut [u8], row_pitch: usize) -> AtlasPixels<'_> {
+        AtlasPixels { pixels, row_pitch }
+    }
+
+    pub(crate) fn pixel(&self, x: u32, y: u32) -> u8 {
+        self.pixels[y as usize * self.row_pitch + x as usize]
+    }
+
+    pub(crate) fn set_pixel(&mut self, x: u32, y: u32, value: u8) {
+        self.pixels[y as usize * self.row_pitch + x as usize] = value;
+    }
+}
+
+struct SceneData {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+}
+
+pub(crate) struct Scene<'a> {
     size: Vector<2, f32>,
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
-    atlas: Vec<u8>,
+    atlas: AtlasPixels<'a>,
     atlas_x: u32,
     atlas_y: u32,
     atlas_row_height: u32,
 }
 
-impl Scene {
-    fn new(size: Vector<2, u32>) -> Self {
+impl<'a> Scene<'a> {
+    fn new(size: Vector<2, u32>, atlas: AtlasPixels<'a>) -> Self {
         Self {
             size: Vector::new(size[0].max(1) as f32, size[1].max(1) as f32),
             vertices: Vec::new(),
             indices: Vec::new(),
-            atlas: vec![0; (ATLAS_SIZE * ATLAS_SIZE) as usize],
+            atlas,
             atlas_x: 0,
             atlas_y: 0,
             atlas_row_height: 0,
+        }
+    }
+
+    fn finish(self) -> SceneData {
+        SceneData {
+            vertices: self.vertices,
+            indices: self.indices,
         }
     }
 
@@ -543,16 +609,17 @@ impl Scene {
             self.atlas_y += self.atlas_row_height + 1;
             self.atlas_row_height = 0;
         }
-        if self.atlas_y + height > ATLAS_SIZE {
+        if self.atlas_y + height > NOTES_ATLAS_Y {
             return None;
         }
         let x = self.atlas_x;
         let y = self.atlas_y;
         for row in 0..height {
-            let destination = ((y + row) * ATLAS_SIZE + x) as usize;
             let source = (row * width) as usize;
-            self.atlas[destination..destination + width as usize]
-                .copy_from_slice(&pixels[source..source + width as usize]);
+            for column in 0..width {
+                self.atlas
+                    .set_pixel(x + column, y + row, pixels[source + column as usize]);
+            }
         }
         self.atlas_x += width + 1;
         self.atlas_row_height = self.atlas_row_height.max(height);
@@ -561,6 +628,21 @@ impl Scene {
             [
                 (x + width) as f32 / ATLAS_SIZE as f32,
                 (y + height) as f32 / ATLAS_SIZE as f32,
+            ],
+        ))
+    }
+
+    pub(crate) fn notes_bitmap(&self, size: Vector<2, u32>) -> Option<([f32; 2], [f32; 2])> {
+        let width = size[0];
+        let height = size[1];
+        if width == 0 || height == 0 || width > ATLAS_SIZE || height > ATLAS_SIZE - NOTES_ATLAS_Y {
+            return None;
+        }
+        Some((
+            [0.0, NOTES_ATLAS_Y as f32 / ATLAS_SIZE as f32],
+            [
+                width as f32 / ATLAS_SIZE as f32,
+                (NOTES_ATLAS_Y + height) as f32 / ATLAS_SIZE as f32,
             ],
         ))
     }
