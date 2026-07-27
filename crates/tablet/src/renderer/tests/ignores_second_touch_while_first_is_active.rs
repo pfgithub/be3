@@ -14,8 +14,6 @@ fn ignores_second_touch_while_first_is_active() {
     assert!(ui.touch_input(size, 1, TouchPhase::Ended, Vector::new(140.0, 180.0),));
 
     assert_eq!(ui.active_touch_id, None);
-    let points = ui.notes.stroke_points(0).expect("stroke should exist");
-    assert_eq!(ui.notes.stroke_count(), 1);
-    assert_eq!(points.len(), 2);
-    assert_eq!(points[1], Vector::new(140.0, 180.0));
+    assert_eq!(ui.notes.coverage_at(size, Vector::new(140.0, 180.0)), 255);
+    assert_eq!(ui.notes.coverage_at(size, Vector::new(300.0, 260.0)), 0);
 }

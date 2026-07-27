@@ -12,7 +12,7 @@ use winit::window::{Window, WindowId};
 
 const INITIAL_WIDTH: u32 = 900;
 const INITIAL_HEIGHT: u32 = 520;
-const ATLAS_SIZE: u32 = 1024;
+const ATLAS_SIZE: u32 = 2048;
 const STATUS_BAR_HEIGHT: f32 = 54.0;
 const HOME_BUTTON_WIDTH: f32 = 128.0;
 const OUTER_MARGIN: f32 = 22.0;
@@ -525,6 +525,14 @@ impl Scene {
         size: Vector<2, u32>,
         pixels: &[u8],
     ) -> Option<([f32; 2], [f32; 2])> {
+        self.add_bitmap(size, pixels)
+    }
+
+    pub(crate) fn add_bitmap(
+        &mut self,
+        size: Vector<2, u32>,
+        pixels: &[u8],
+    ) -> Option<([f32; 2], [f32; 2])> {
         let width = size[0];
         let height = size[1];
         if width == 0 || height == 0 || width >= ATLAS_SIZE || height >= ATLAS_SIZE {
@@ -600,38 +608,6 @@ impl Scene {
         self.push_quad(rect, [-1.0, -1.0], [-1.0, -1.0], color);
     }
 
-    pub(crate) fn push_line(
-        &mut self,
-        start: Vector<2, f32>,
-        end: Vector<2, f32>,
-        thickness: f32,
-        color: Color,
-    ) {
-        let delta = end - start;
-        let length = (delta[0] * delta[0] + delta[1] * delta[1]).sqrt();
-        if length <= f32::EPSILON {
-            let radius = thickness * 0.5;
-            self.push_rect(
-                Rect::new(
-                    Vector::new(start[0] - radius, start[1] - radius),
-                    Vector::new(thickness, thickness),
-                ),
-                color,
-            );
-            return;
-        }
-
-        let half_width = thickness * 0.5;
-        let normal = Vector::new(
-            -delta[1] / length * half_width,
-            delta[0] / length * half_width,
-        );
-        self.push_polygon(
-            [start + normal, end + normal, end - normal, start - normal],
-            color,
-        );
-    }
-
     pub(crate) fn stroke_rect(&mut self, rect: Rect, thickness: f32, color: Color) {
         let thickness = thickness
             .min(rect.size[0].max(0.0) * 0.5)
@@ -664,21 +640,6 @@ impl Scene {
             ),
             color,
         );
-    }
-
-    fn push_polygon(&mut self, points: [Vector<2, f32>; 4], color: Color) {
-        let base = self.vertices.len() as u32;
-        let color = color.as_f32();
-        self.vertices.extend(points.into_iter().map(|point| Vertex {
-            position: [
-                point[0] / self.size[0] * 2.0 - 1.0,
-                1.0 - point[1] / self.size[1] * 2.0,
-            ],
-            tex_coord: [-1.0, -1.0],
-            color,
-        }));
-        self.indices
-            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 }
 

@@ -2,16 +2,15 @@ use super::super::*;
 
 #[test]
 fn eraser_waits_for_press() {
+    let size = Vector::new(900.0, 520.0);
+    let position = Vector::new(180.0, 160.0);
     let mut app = NotesApp::new();
-    app.selected_tool = Tool::Eraser;
-    app.strokes.push(Stroke {
-        tool: Tool::Pen,
-        points: vec![Vector::new(160.0, 160.0), Vector::new(220.0, 160.0)],
-    });
+    app.pointer_pressed(size, position);
+    app.pointer_released(size, position);
 
-    let changed = app.pointer_moved(Vector::new(900.0, 520.0), Vector::new(180.0, 160.0));
+    app.selected_tool = Tool::Eraser;
+    let changed = app.pointer_moved(size, position);
 
     assert!(!changed);
-    assert_eq!(app.strokes.len(), 1);
-    assert_eq!(app.strokes[0].points.len(), 2);
+    assert_eq!(app.coverage_at(size, position), PEN_COVERAGE);
 }
