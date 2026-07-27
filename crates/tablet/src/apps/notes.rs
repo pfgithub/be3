@@ -53,9 +53,6 @@ impl NotesApp {
 
     pub(crate) fn pointer_moved(&mut self, size: Vector<2, f32>, position: Vector<2, f32>) -> bool {
         let canvas = canvas_rect(size);
-        if !canvas.contains(position) {
-            return false;
-        }
         let Some(previous_position) = self.active_position else {
             return false;
         };

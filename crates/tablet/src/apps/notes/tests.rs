@@ -8,5 +8,7 @@ mod eraser_clears_bitmap_pixels;
 mod eraser_waits_for_press;
 #[path = "tests/pen_rasterizes_line_into_bitmap.rs"]
 mod pen_rasterizes_line_into_bitmap;
+#[path = "tests/stroke_tracks_pointer_outside_canvas.rs"]
+mod stroke_tracks_pointer_outside_canvas;
 #[path = "tests/tool_buttons_map_to_tools.rs"]
 mod tool_buttons_map_to_tools;
