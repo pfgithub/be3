@@ -48,4 +48,8 @@ impl Block for WorkspaceIndex {
             }
         }
     }
+
+    fn references(&self) -> Vec<Uuid> {
+        self.entries.iter().map(|entry| entry.id).collect()
+    }
 }

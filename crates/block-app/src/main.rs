@@ -88,13 +88,14 @@ impl BlockApp {
             return;
         };
         let id = editor.id();
-        self.editors.insert(id, editor);
         self.workspace
             .operate(WorkspaceIndexOperation::Add(BlockEntry {
                 id,
                 block_type,
                 title: title.into(),
             }));
+        editor.set_parent(Some(self.workspace.id()));
+        self.editors.insert(id, editor);
         self.open_tab(id, block_type);
         self.rename = Some(RenameState {
             id,

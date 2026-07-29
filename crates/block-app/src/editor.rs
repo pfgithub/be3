@@ -9,6 +9,7 @@ use crate::index::WorkspaceIndex;
 
 pub trait BlockEditor {
     fn id(&self) -> Uuid;
+    fn set_parent(&self, parent: Option<Uuid>);
     fn ui(&mut self, ui: &mut egui::Ui);
 }
 
@@ -105,6 +106,10 @@ impl BlockEditor for WorkspaceIndexEditor {
         self.block.id()
     }
 
+    fn set_parent(&self, parent: Option<Uuid>) {
+        self.block.set_parent(parent);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui) {
         let Some(index) = self.block.read() else {
             ui.centered_and_justified(|ui| {
@@ -141,6 +146,10 @@ impl TextEditor {
 impl BlockEditor for TextEditor {
     fn id(&self) -> Uuid {
         self.block.id()
+    }
+
+    fn set_parent(&self, parent: Option<Uuid>) {
+        self.block.set_parent(parent);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
@@ -220,6 +229,8 @@ impl BlockEditor for UnsupportedEditor {
     fn id(&self) -> Uuid {
         self.id
     }
+
+    fn set_parent(&self, _parent: Option<Uuid>) {}
 
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.centered_and_justified(|ui| {

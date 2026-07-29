@@ -8,7 +8,7 @@ use std::{
 
 use block::{
     Block, BlockOperation, BlockUpdate, ClientMessage, CommandKind, ErrorCode, OperationRecord,
-    ServerMessage,
+    ReferenceDelta, ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -125,6 +125,14 @@ impl BlockClient {
             .unwrap_or_else(|_| fatal("block client worker stopped before synchronizing"));
     }
 
+    pub async fn orphaned_blocks(&self) -> Vec<Uuid> {
+        let (completed, completion) = oneshot::channel();
+        self.send(WorkerCommand::ListOrphanedBlocks(completed));
+        completion
+            .await
+            .unwrap_or_else(|_| fatal("block client worker stopped before listing orphaned blocks"))
+    }
+
     fn send(&self, command: WorkerCommand) {
         self.commands
             .send(command)
@@ -179,6 +187,15 @@ impl<B: Block> BlockHandle<B> {
         self.block.local_operation(operation);
         self.commands
             .send(WorkerCommand::Operate { id: self.id })
+            .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn set_parent(&self, parent: Option<Uuid>) {
+        self.commands
+            .send(WorkerCommand::SetBlockParent {
+                id: self.id,
+                parent,
+            })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
     }
 
@@ -261,6 +278,8 @@ enum WorkerCommand {
     AddBlock(Arc<dyn ErasedBlock>),
     Operate { id: Uuid },
     OperateBatch { ids: Vec<Uuid> },
+    SetBlockParent { id: Uuid, parent: Option<Uuid> },
+    ListOrphanedBlocks(oneshot::Sender<Vec<Uuid>>),
     Synchronize(oneshot::Sender<()>),
 }
 
@@ -361,6 +380,7 @@ struct WorkerState {
     blocks: HashMap<Uuid, Arc<dyn ErasedBlock>>,
     requests: HashMap<Uuid, PendingRequest>,
     outbound: VecDeque<ClientMessage>,
+    deferred: VecDeque<DeferredRequest>,
     synchronization_waiters: Vec<oneshot::Sender<()>>,
 }
 
@@ -372,6 +392,7 @@ impl WorkerState {
             blocks: HashMap::new(),
             requests: HashMap::new(),
             outbound: VecDeque::new(),
+            deferred: VecDeque::new(),
             synchronization_waiters: Vec::new(),
         }
     }
@@ -400,6 +421,17 @@ impl WorkerState {
                 }
                 self.maybe_send_batch(ids);
             }
+            WorkerCommand::SetBlockParent { id, parent } => {
+                if !self.blocks.contains_key(&id) {
+                    fatal(format!("unknown block {id}"));
+                }
+                self.deferred
+                    .push_back(DeferredRequest::SetBlockParent { id, parent });
+            }
+            WorkerCommand::ListOrphanedBlocks(completed) => {
+                self.deferred
+                    .push_back(DeferredRequest::ListOrphanedBlocks(completed));
+            }
             WorkerCommand::Synchronize(completed) => {
                 self.synchronization_waiters.push(completed);
             }
@@ -425,6 +457,7 @@ impl WorkerState {
                     id,
                     block_type: block.block_type_id(),
                     data,
+                    references: block.initial_references(),
                     watch: true,
                 }
             } else {
@@ -435,6 +468,7 @@ impl WorkerState {
                     id,
                     block_type: block.block_type_id(),
                     data,
+                    references: block.initial_references(),
                     watch: true,
                 }
             }
@@ -473,6 +507,7 @@ impl WorkerState {
                 seq: update.seq,
                 operation_id: update.operation_id,
                 operation: update.operation,
+                references: update.references,
             });
         }
     }
@@ -489,6 +524,7 @@ impl WorkerState {
                     seq: update.seq,
                     operation_id: update.operation_id,
                     operation: update.operation,
+                    references: update.references,
                 });
             }
         }
@@ -543,6 +579,10 @@ impl WorkerState {
                         self.blocks[&id].acknowledge(expected_operation, seq);
                         self.maybe_send_update(id);
                     }
+                    (
+                        PendingRequest::SetBlockParent { id: expected },
+                        CommandKind::SetBlockParent,
+                    ) if expected == id => {}
                     _ => fatal("server response did not match its request"),
                 }
             }
@@ -672,13 +712,25 @@ impl WorkerState {
                 }
             }
             ServerMessage::Presence { .. } => {}
+            ServerMessage::OrphanedBlocks { request_id, blocks } => {
+                let pending = self
+                    .requests
+                    .remove(&request_id)
+                    .unwrap_or_else(|| fatal("orphan response referenced an unknown request"));
+                let PendingRequest::ListOrphanedBlocks(completed) = pending else {
+                    fatal("orphan response did not match its request");
+                };
+                let _ = completed.send(blocks);
+            }
         }
     }
 
     fn finish_synchronization(&mut self) {
+        self.maybe_send_deferred();
         if !self.connected
             || !self.requests.is_empty()
             || !self.outbound.is_empty()
+            || !self.deferred.is_empty()
             || self.blocks.values().any(|block| !block.is_synchronized())
         {
             return;
@@ -686,6 +738,37 @@ impl WorkerState {
 
         for completed in self.synchronization_waiters.drain(..) {
             let _ = completed.send(());
+        }
+    }
+
+    fn maybe_send_deferred(&mut self) {
+        if !self.connected
+            || !self.requests.is_empty()
+            || !self.outbound.is_empty()
+            || self.blocks.values().any(|block| !block.is_synchronized())
+        {
+            return;
+        }
+        let Some(request) = self.deferred.pop_front() else {
+            return;
+        };
+        let request_id = Uuid::new_v4();
+        match request {
+            DeferredRequest::SetBlockParent { id, parent } => {
+                self.requests
+                    .insert(request_id, PendingRequest::SetBlockParent { id });
+                self.outbound.push_back(ClientMessage::SetBlockParent {
+                    request_id,
+                    id,
+                    parent,
+                });
+            }
+            DeferredRequest::ListOrphanedBlocks(completed) => {
+                self.requests
+                    .insert(request_id, PendingRequest::ListOrphanedBlocks(completed));
+                self.outbound
+                    .push_back(ClientMessage::ListOrphanedBlocks { request_id });
+            }
         }
     }
 }
@@ -696,18 +779,27 @@ enum PendingRequest {
     Read { id: Uuid },
     Update { id: Uuid, operation_id: Uuid },
     Batch { operations: Vec<(Uuid, Uuid)> },
+    SetBlockParent { id: Uuid },
+    ListOrphanedBlocks(oneshot::Sender<Vec<Uuid>>),
+}
+
+enum DeferredRequest {
+    SetBlockParent { id: Uuid, parent: Option<Uuid> },
+    ListOrphanedBlocks(oneshot::Sender<Vec<Uuid>>),
 }
 
 struct OutboundUpdate {
     seq: Option<u64>,
     operation_id: Uuid,
     operation: Vec<u8>,
+    references: ReferenceDelta,
 }
 
 trait ErasedBlock: Send + Sync {
     fn id(&self) -> Uuid;
     fn block_type_id(&self) -> Uuid;
     fn initial_data(&self) -> Option<Vec<u8>>;
+    fn initial_references(&self) -> Vec<Uuid>;
     fn get_or_create(&self) -> bool;
     fn created(&self);
     fn resolve(&self, snapshot: Vec<u8>, snapshot_seq: u64, operations: Vec<OperationRecord>);
@@ -741,6 +833,7 @@ struct TypedState<B: Block> {
 struct PendingOperation<O> {
     id: Uuid,
     operation: O,
+    references: ReferenceDelta,
 }
 
 impl<B: Block> TypedBlock<B> {
@@ -797,14 +890,22 @@ impl<B: Block> TypedBlock<B> {
 
     fn local_operation(&self, operation: B::Operation) {
         let mut state = self.state.write();
+        let references = {
+            let mut visible = self.shared.value.write();
+            let value = visible
+                .as_mut()
+                .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
+            let before = normalized_references(value.references());
+            B::apply_operation(value, &operation);
+            let after = normalized_references(value.references());
+            self.changed.send_replace(());
+            reference_delta(&before, &after)
+        };
         state.pending.push_back(PendingOperation {
             id: Uuid::new_v4(),
-            operation: operation.clone(),
+            operation,
+            references,
         });
-        if let Some(value) = self.shared.value.write().as_mut() {
-            B::apply_operation(value, &operation);
-            self.changed.send_replace(());
-        }
     }
 }
 
@@ -822,6 +923,16 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             serde_json::to_vec(initial)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
         })
+    }
+
+    fn initial_references(&self) -> Vec<Uuid> {
+        self.state
+            .read()
+            .initial
+            .as_ref()
+            .map_or_else(Vec::new, |initial| {
+                normalized_references(initial.references())
+            })
     }
 
     fn get_or_create(&self) -> bool {
@@ -862,6 +973,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             state.confirmed = None;
         } else {
             state.confirmed = Some(value);
+            Self::recompute_pending_references(&mut state);
             self.rebuild_visible(&state);
         }
         state.confirmed_seq = seq;
@@ -884,6 +996,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             operation_id: pending_id,
             operation: serde_json::to_vec(&pending.operation)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize operation: {error}"))),
+            references: pending.references.clone(),
         };
         state.in_flight.insert(pending_id);
         Some(update)
@@ -962,6 +1075,18 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 }
 
 impl<B: Block> TypedBlock<B> {
+    fn recompute_pending_references(state: &mut TypedState<B>) {
+        let Some(mut value) = state.confirmed.clone() else {
+            return;
+        };
+        for pending in &mut state.pending {
+            let before = normalized_references(value.references());
+            B::apply_operation(&mut value, &pending.operation);
+            let after = normalized_references(value.references());
+            pending.references = reference_delta(&before, &after);
+        }
+    }
+
     fn apply_remote_operation(&self, state: &mut TypedState<B>, record: OperationRecord) {
         if B::CRDT {
             let remote: B::Operation =
@@ -1006,7 +1131,29 @@ impl<B: Block> TypedBlock<B> {
         for pending in &mut state.pending {
             B::transform_operation(&mut pending.operation, &remote);
         }
+        Self::recompute_pending_references(state);
         self.rebuild_visible(&state);
+    }
+}
+
+fn normalized_references(mut references: Vec<Uuid>) -> Vec<Uuid> {
+    references.sort_unstable();
+    references.dedup();
+    references
+}
+
+fn reference_delta(before: &[Uuid], after: &[Uuid]) -> ReferenceDelta {
+    ReferenceDelta {
+        added: after
+            .iter()
+            .filter(|id| before.binary_search(id).is_err())
+            .copied()
+            .collect(),
+        removed: before
+            .iter()
+            .filter(|id| after.binary_search(id).is_err())
+            .copied()
+            .collect(),
     }
 }
 
@@ -1068,6 +1215,7 @@ mod tests {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
                 operation: serde_json::to_vec(&CounterOperation::Add(3)).unwrap(),
+                references: ReferenceDelta::default(),
             }],
         );
         assert_eq!(shared.value.read().as_ref().unwrap().count, 5);
@@ -1093,6 +1241,7 @@ mod tests {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
                 operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
+                references: ReferenceDelta::default(),
             });
             finished_tx.send(()).unwrap();
         });
@@ -1124,6 +1273,7 @@ mod tests {
             seq: 1,
             operation_id: Uuid::new_v4(),
             operation: serde_json::to_vec(&CounterOperation::Add(10)).unwrap(),
+            references: ReferenceDelta::default(),
         });
 
         assert_eq!(shared.value.read().as_ref().unwrap().count, 15);
@@ -1150,6 +1300,7 @@ mod tests {
             seq: 1,
             operation_id: update.operation_id,
             operation: update.operation,
+            references: ReferenceDelta::default(),
         });
         block.acknowledge(update.operation_id, 1);
 
@@ -1173,6 +1324,7 @@ mod tests {
             seq: 2,
             operation_id: Uuid::new_v4(),
             operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
+            references: ReferenceDelta::default(),
         });
         assert_eq!(shared.value.read().as_ref().unwrap().count, 0);
 
@@ -1180,6 +1332,7 @@ mod tests {
             seq: 1,
             operation_id: Uuid::new_v4(),
             operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
+            references: ReferenceDelta::default(),
         });
         assert_eq!(shared.value.read().as_ref().unwrap().count, 3);
     }
@@ -1197,6 +1350,7 @@ mod tests {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
                 operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
+                references: ReferenceDelta::default(),
             });
         });
 
@@ -1242,7 +1396,11 @@ mod tests {
                                     operation_id: Uuid::new_v4(),
                                     operation: serde_json::to_vec(&CounterOperation::Add(3))
                                         .unwrap(),
+                                    references: ReferenceDelta::default(),
                                 }],
+                                parent: None,
+                                references: Vec::new(),
+                                backrefs: Vec::new(),
                             })
                             .unwrap(),
                         ))

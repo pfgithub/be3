@@ -10,6 +10,10 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
     fn apply_operation(block: &mut Self, operation: &Self::Operation);
 
     fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
+
+    fn references(&self) -> Vec<Uuid> {
+        Vec::new()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -17,6 +21,13 @@ pub struct OperationRecord {
     pub seq: u64,
     pub operation_id: Uuid,
     pub operation: Vec<u8>,
+    pub references: ReferenceDelta,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub struct ReferenceDelta {
+    pub added: Vec<Uuid>,
+    pub removed: Vec<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -32,6 +43,7 @@ pub struct BlockUpdate {
     pub seq: Option<u64>,
     pub operation_id: Uuid,
     pub operation: Vec<u8>,
+    pub references: ReferenceDelta,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -44,6 +56,8 @@ pub enum CommandKind {
     ReadBlock,
     UnwatchBlock,
     PostPresence,
+    SetBlockParent,
+    ListOrphanedBlocks,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -54,6 +68,9 @@ pub enum ErrorCode {
     ConflictingOperationId,
     InvalidMessage,
     InvalidSeq,
+    ParentCycle,
+    ParentMissingReference,
+    ReferencedBlockNotFound,
     StorageError,
     UnsupportedMessage,
 }
@@ -67,6 +84,7 @@ pub enum ClientMessage {
         #[serde(rename = "type")]
         block_type: Uuid,
         data: Vec<u8>,
+        references: Vec<Uuid>,
         watch: bool,
     },
     GetOrCreateBlock {
@@ -75,6 +93,7 @@ pub enum ClientMessage {
         #[serde(rename = "type")]
         block_type: Uuid,
         data: Vec<u8>,
+        references: Vec<Uuid>,
         watch: bool,
     },
     UpdateBlock {
@@ -84,6 +103,7 @@ pub enum ClientMessage {
         seq: Option<u64>,
         operation_id: Uuid,
         operation: Vec<u8>,
+        references: ReferenceDelta,
     },
     UpdateBatch {
         request_id: Uuid,
@@ -103,6 +123,14 @@ pub enum ClientMessage {
         id: Uuid,
         data: Vec<u8>,
     },
+    SetBlockParent {
+        request_id: Uuid,
+        id: Uuid,
+        parent: Option<Uuid>,
+    },
+    ListOrphanedBlocks {
+        request_id: Uuid,
+    },
 }
 
 impl ClientMessage {
@@ -114,7 +142,9 @@ impl ClientMessage {
             | Self::UpdateBatch { request_id, .. }
             | Self::ReadBlock { request_id, .. }
             | Self::UnwatchBlock { request_id, .. }
-            | Self::PostPresence { request_id, .. } => *request_id,
+            | Self::PostPresence { request_id, .. }
+            | Self::SetBlockParent { request_id, .. }
+            | Self::ListOrphanedBlocks { request_id } => *request_id,
         }
     }
 }
@@ -141,6 +171,9 @@ pub enum ServerMessage {
         snapshot: Vec<u8>,
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
+        parent: Option<Uuid>,
+        references: Vec<Uuid>,
+        backrefs: Vec<Uuid>,
     },
     BatchOk {
         request_id: Uuid,
@@ -170,6 +203,10 @@ pub enum ServerMessage {
         id: Uuid,
         data: Vec<u8>,
     },
+    OrphanedBlocks {
+        request_id: Uuid,
+        blocks: Vec<Uuid>,
+    },
 }
 
 impl ServerMessage {
@@ -179,7 +216,7 @@ impl ServerMessage {
             | Self::ReadBlock { id, .. }
             | Self::BlockUpdated { id, .. }
             | Self::Presence { id, .. } => Some(*id),
-            Self::BatchOk { .. } | Self::BatchUpdated { .. } => None,
+            Self::BatchOk { .. } | Self::BatchUpdated { .. } | Self::OrphanedBlocks { .. } => None,
             Self::Error { id, .. } => *id,
         }
     }

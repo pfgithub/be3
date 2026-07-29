@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -10,7 +10,8 @@ use std::{
 };
 
 use block::{
-    BlockOperation, ClientMessage, CommandKind, ErrorCode, OperationRecord, ServerMessage,
+    BlockOperation, ClientMessage, CommandKind, ErrorCode, OperationRecord, ReferenceDelta,
+    ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -23,9 +24,10 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 use uuid::Uuid;
 
 pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
-    let store = Arc::new(BlockStore::new(data_dir.into()));
+    let root = data_dir.into();
+    fs::create_dir_all(&root).await?;
+    let store = Arc::new(BlockStore::open(root).await?);
     let watch_hub = Arc::new(WatchHub::new());
-    fs::create_dir_all(store.root()).await?;
 
     loop {
         let (stream, peer_addr) = listener.accept().await?;
@@ -122,11 +124,15 @@ async fn handle_text_message(
             id,
             block_type,
             data,
+            references,
             watch,
         } => {
             let lock = store.lock_for(id).await;
             let _guard = lock.lock().await;
-            let response = match store.create_block_unlocked(id, block_type, data).await {
+            let response = match store
+                .create_block_unlocked(id, block_type, data, references)
+                .await
+            {
                 Ok(()) => {
                     if watch {
                         watch_hub.watch(id, client_id, outbound).await;
@@ -148,12 +154,13 @@ async fn handle_text_message(
             id,
             block_type,
             data,
+            references,
             watch,
         } => {
             let lock = store.lock_for(id).await;
             let _guard = lock.lock().await;
             let response = match store
-                .get_or_create_block_unlocked(id, block_type, data)
+                .get_or_create_block_unlocked(id, block_type, data, references)
                 .await
             {
                 Ok(read) => {
@@ -168,6 +175,9 @@ async fn handle_text_message(
                         snapshot: read.snapshot,
                         snapshot_seq: read.snapshot_seq,
                         operations: read.operations,
+                        parent: read.parent,
+                        references: read.references,
+                        backrefs: read.backrefs,
                     }
                 }
                 Err(error) => error.to_response(request_id, CommandKind::GetOrCreateBlock, id),
@@ -180,11 +190,12 @@ async fn handle_text_message(
             seq,
             operation_id,
             operation,
+            references,
         } => {
             let lock = store.lock_for(id).await;
             let _guard = lock.lock().await;
             match store
-                .update_block_unlocked(id, seq, operation_id, operation)
+                .update_block_unlocked(id, seq, operation_id, operation, references)
                 .await
             {
                 Ok(UpdateOutcome::Inserted(record)) => (
@@ -267,6 +278,7 @@ async fn handle_text_message(
                         update.seq,
                         update.operation_id,
                         update.operation,
+                        update.references,
                     )
                     .await
                 {
@@ -323,6 +335,9 @@ async fn handle_text_message(
                         snapshot: read.snapshot,
                         snapshot_seq: read.snapshot_seq,
                         operations: read.operations,
+                        parent: read.parent,
+                        references: read.references,
+                        backrefs: read.backrefs,
                     }
                 }
                 Err(error) => error.to_response(request_id, CommandKind::ReadBlock, id),
@@ -355,6 +370,32 @@ async fn handle_text_message(
                 operation_id: None,
             },
             Some(ServerMessage::Presence { id, data }),
+        ),
+        ClientMessage::SetBlockParent {
+            request_id,
+            id,
+            parent,
+        } => {
+            let lock = store.lock_for(id).await;
+            let _guard = lock.lock().await;
+            let response = match store.set_parent_unlocked(id, parent).await {
+                Ok(()) => ServerMessage::Ok {
+                    request_id,
+                    command: CommandKind::SetBlockParent,
+                    id,
+                    seq: None,
+                    operation_id: None,
+                },
+                Err(error) => error.to_response(request_id, CommandKind::SetBlockParent, id),
+            };
+            (response, None)
+        }
+        ClientMessage::ListOrphanedBlocks { request_id } => (
+            ServerMessage::OrphanedBlocks {
+                request_id,
+                blocks: store.orphaned_blocks().await,
+            },
+            None,
         ),
     }
 }
@@ -441,16 +482,34 @@ impl WatchHub {
 struct BlockStore {
     root: PathBuf,
     locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+    dependencies: Mutex<DependencyState>,
 }
 
 impl BlockStore {
+    #[cfg(test)]
     fn new(root: PathBuf) -> Self {
         Self {
             root,
             locks: Mutex::new(HashMap::new()),
+            dependencies: Mutex::new(DependencyState::default()),
         }
     }
 
+    async fn open(root: PathBuf) -> Result<Self, ServerError> {
+        let path = root.join("dependencies.json");
+        let dependencies = match fs::read(path).await {
+            Ok(data) => serde_json::from_slice(&data)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => DependencyState::default(),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Self {
+            root,
+            locks: Mutex::new(HashMap::new()),
+            dependencies: Mutex::new(dependencies),
+        })
+    }
+
+    #[cfg(test)]
     fn root(&self) -> &Path {
         &self.root
     }
@@ -465,7 +524,19 @@ impl BlockStore {
         id: Uuid,
         block_type: Uuid,
         data: Vec<u8>,
+        references: Vec<Uuid>,
     ) -> Result<(), StoreError> {
+        let references = normalize_ids(references);
+        let mut dependencies = self.dependencies.lock().await;
+        if dependencies.blocks.contains_key(&id) {
+            return Err(StoreError::BlockAlreadyExists);
+        }
+        if references
+            .iter()
+            .any(|reference| *reference != id && !dependencies.blocks.contains_key(reference))
+        {
+            return Err(StoreError::ReferencedBlockNotFound);
+        }
         let block_path = self.block_path(id);
         match fs::create_dir(&block_path).await {
             Ok(()) => {}
@@ -482,6 +553,19 @@ impl BlockStore {
         )
         .await?;
         fs::write(block_path.join("snapshots").join("0"), data).await?;
+        let mut updated = dependencies.clone();
+        updated.blocks.insert(
+            id,
+            DependencyBlock {
+                parent: None,
+                references,
+            },
+        );
+        if let Err(error) = self.persist_dependencies(&updated).await {
+            let _ = fs::remove_dir_all(&block_path).await;
+            return Err(error);
+        }
+        *dependencies = updated;
         Ok(())
     }
 
@@ -490,11 +574,13 @@ impl BlockStore {
         id: Uuid,
         block_type: Uuid,
         data: Vec<u8>,
+        references: Vec<Uuid>,
     ) -> Result<BlockRead, StoreError> {
         match self.read_block_unlocked(id).await {
             Ok(read) => Ok(read),
             Err(StoreError::BlockNotFound) => {
-                self.create_block_unlocked(id, block_type, data).await?;
+                self.create_block_unlocked(id, block_type, data, references)
+                    .await?;
                 self.read_block_unlocked(id).await
             }
             Err(error) => Err(error),
@@ -507,6 +593,7 @@ impl BlockStore {
         seq: Option<u64>,
         operation_id: Uuid,
         operation: Vec<u8>,
+        references: ReferenceDelta,
     ) -> Result<UpdateOutcome, StoreError> {
         let operations_path = self.block_path(id).join("operations");
         if !operations_path.is_dir() {
@@ -518,7 +605,7 @@ impl BlockStore {
             .iter()
             .find(|record| record.operation_id == operation_id)
         {
-            if existing.operation == operation {
+            if existing.operation == operation && existing.references == references {
                 return Ok(UpdateOutcome::Duplicate(existing.clone()));
             }
             return Err(StoreError::ConflictingOperationId);
@@ -536,9 +623,21 @@ impl BlockStore {
             seq: expected,
             operation_id,
             operation,
+            references,
         };
         let path = operations_path.join(expected.to_string());
         write_new_file(path, serde_json::to_vec(&record)?).await?;
+        let mut dependencies = self.dependencies.lock().await;
+        let mut updated = dependencies.clone();
+        if let Err(error) = updated.apply_references(id, &record.references) {
+            let _ = fs::remove_file(operations_path.join(expected.to_string())).await;
+            return Err(error);
+        }
+        if let Err(error) = self.persist_dependencies(&updated).await {
+            let _ = fs::remove_file(operations_path.join(expected.to_string())).await;
+            return Err(error);
+        }
+        *dependencies = updated;
         Ok(UpdateOutcome::Inserted(record))
     }
 
@@ -554,12 +653,49 @@ impl BlockStore {
             .into_iter()
             .filter(|record| record.seq > snapshot_seq)
             .collect();
+        let dependencies = self.dependencies.lock().await;
+        let dependency = dependencies
+            .blocks
+            .get(&id)
+            .ok_or(StoreError::BlockNotFound)?;
         Ok(BlockRead {
             block_type: info.block_type,
             snapshot,
             snapshot_seq,
             operations,
+            parent: dependency.parent,
+            references: dependency.references.clone(),
+            backrefs: dependencies.backrefs(id),
         })
+    }
+
+    async fn set_parent_unlocked(&self, id: Uuid, parent: Option<Uuid>) -> Result<(), StoreError> {
+        let mut dependencies = self.dependencies.lock().await;
+        let mut updated = dependencies.clone();
+        updated.set_parent(id, parent)?;
+        self.persist_dependencies(&updated).await?;
+        *dependencies = updated;
+        Ok(())
+    }
+
+    async fn orphaned_blocks(&self) -> Vec<Uuid> {
+        let dependencies = self.dependencies.lock().await;
+        let mut blocks: Vec<_> = dependencies
+            .blocks
+            .iter()
+            .filter_map(|(&id, block)| block.parent.is_none().then_some(id))
+            .collect();
+        blocks.sort_unstable();
+        blocks
+    }
+
+    async fn persist_dependencies(&self, dependencies: &DependencyState) -> Result<(), StoreError> {
+        fs::write(
+            self.root.join("dependencies.json"),
+            serde_json::to_vec_pretty(dependencies)?,
+        )
+        .await?;
+        Ok(())
     }
 
     fn block_path(&self, id: Uuid) -> PathBuf {
@@ -577,6 +713,90 @@ struct BlockRead {
     snapshot: Vec<u8>,
     snapshot_seq: u64,
     operations: Vec<OperationRecord>,
+    parent: Option<Uuid>,
+    references: Vec<Uuid>,
+    backrefs: Vec<Uuid>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+struct DependencyState {
+    blocks: HashMap<Uuid, DependencyBlock>,
+}
+
+impl DependencyState {
+    fn apply_references(&mut self, id: Uuid, delta: &ReferenceDelta) -> Result<(), StoreError> {
+        if delta
+            .added
+            .iter()
+            .any(|reference| !self.blocks.contains_key(reference))
+        {
+            return Err(StoreError::ReferencedBlockNotFound);
+        }
+        let block = self.blocks.get_mut(&id).ok_or(StoreError::BlockNotFound)?;
+        let mut references: HashSet<_> = block.references.iter().copied().collect();
+        for reference in &delta.removed {
+            references.remove(reference);
+        }
+        references.extend(delta.added.iter().copied());
+        block.references = references.into_iter().collect();
+        block.references.sort_unstable();
+
+        let still_referenced: HashSet<_> = self.blocks[&id].references.iter().copied().collect();
+        for (&child_id, child) in &mut self.blocks {
+            if child.parent == Some(id) && !still_referenced.contains(&child_id) {
+                child.parent = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn set_parent(&mut self, id: Uuid, parent: Option<Uuid>) -> Result<(), StoreError> {
+        if !self.blocks.contains_key(&id) {
+            return Err(StoreError::BlockNotFound);
+        }
+        let Some(parent) = parent else {
+            self.blocks.get_mut(&id).unwrap().parent = None;
+            return Ok(());
+        };
+        let parent_block = self
+            .blocks
+            .get(&parent)
+            .ok_or(StoreError::ReferencedBlockNotFound)?;
+        if !parent_block.references.contains(&id) {
+            return Err(StoreError::ParentMissingReference);
+        }
+        let mut ancestor = Some(parent);
+        while let Some(current) = ancestor {
+            if current == id {
+                return Err(StoreError::ParentCycle);
+            }
+            ancestor = self.blocks.get(&current).and_then(|block| block.parent);
+        }
+        self.blocks.get_mut(&id).unwrap().parent = Some(parent);
+        Ok(())
+    }
+
+    fn backrefs(&self, id: Uuid) -> Vec<Uuid> {
+        let mut backrefs: Vec<_> = self
+            .blocks
+            .iter()
+            .filter_map(|(&source, block)| block.references.contains(&id).then_some(source))
+            .collect();
+        backrefs.sort_unstable();
+        backrefs
+    }
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+struct DependencyBlock {
+    parent: Option<Uuid>,
+    references: Vec<Uuid>,
+}
+
+fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }
 
 #[derive(Deserialize, Serialize)]
@@ -666,6 +886,9 @@ enum StoreError {
     BlockNotFound,
     ConflictingOperationId,
     InvalidSeq { expected: u64, actual: u64 },
+    ParentCycle,
+    ParentMissingReference,
+    ReferencedBlockNotFound,
     CorruptOperationLog,
     Io(std::io::Error),
     Json(serde_json::Error),
@@ -692,6 +915,9 @@ impl StoreError {
             Self::BlockNotFound => ErrorCode::BlockNotFound,
             Self::ConflictingOperationId => ErrorCode::ConflictingOperationId,
             Self::InvalidSeq { .. } => ErrorCode::InvalidSeq,
+            Self::ParentCycle => ErrorCode::ParentCycle,
+            Self::ParentMissingReference => ErrorCode::ParentMissingReference,
+            Self::ReferencedBlockNotFound => ErrorCode::ReferencedBlockNotFound,
             Self::CorruptOperationLog | Self::Io(_) | Self::Json(_) => ErrorCode::StorageError,
         }
     }
@@ -708,6 +934,11 @@ impl fmt::Display for StoreError {
             Self::InvalidSeq { expected, actual } => {
                 write!(formatter, "invalid seq {actual}; expected {expected}")
             }
+            Self::ParentCycle => write!(formatter, "parent assignment would create a cycle"),
+            Self::ParentMissingReference => {
+                write!(formatter, "parent does not reference the child block")
+            }
+            Self::ReferencedBlockNotFound => write!(formatter, "referenced block does not exist"),
             Self::CorruptOperationLog => write!(formatter, "operation log is not contiguous"),
             Self::Io(error) => write!(formatter, "storage I/O error: {error}"),
             Self::Json(error) => write!(formatter, "storage JSON error: {error}"),
@@ -774,28 +1005,46 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![1])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![1], vec![])
             .await
             .unwrap();
         let operation_id = Uuid::new_v4();
 
         assert!(matches!(
             store
-                .update_block_unlocked(id, Some(1), operation_id, vec![2])
+                .update_block_unlocked(
+                    id,
+                    Some(1),
+                    operation_id,
+                    vec![2],
+                    ReferenceDelta::default(),
+                )
                 .await
                 .unwrap(),
             UpdateOutcome::Inserted(_)
         ));
         assert!(matches!(
             store
-                .update_block_unlocked(id, Some(99), operation_id, vec![2])
+                .update_block_unlocked(
+                    id,
+                    Some(99),
+                    operation_id,
+                    vec![2],
+                    ReferenceDelta::default(),
+                )
                 .await
                 .unwrap(),
             UpdateOutcome::Duplicate(_)
         ));
         assert!(matches!(
             store
-                .update_block_unlocked(id, Some(2), operation_id, vec![3])
+                .update_block_unlocked(
+                    id,
+                    Some(2),
+                    operation_id,
+                    vec![3],
+                    ReferenceDelta::default(),
+                )
                 .await,
             Err(StoreError::ConflictingOperationId)
         ));
@@ -810,15 +1059,27 @@ mod tests {
         let id = Uuid::new_v4();
         let block_type = Uuid::new_v4();
         store
-            .create_block_unlocked(id, block_type, vec![1])
+            .create_block_unlocked(id, block_type, vec![1], vec![])
             .await
             .unwrap();
         store
-            .update_block_unlocked(id, Some(1), Uuid::new_v4(), vec![2])
+            .update_block_unlocked(
+                id,
+                Some(1),
+                Uuid::new_v4(),
+                vec![2],
+                ReferenceDelta::default(),
+            )
             .await
             .unwrap();
         store
-            .update_block_unlocked(id, Some(2), Uuid::new_v4(), vec![3])
+            .update_block_unlocked(
+                id,
+                Some(2),
+                Uuid::new_v4(),
+                vec![3],
+                ReferenceDelta::default(),
+            )
             .await
             .unwrap();
 
@@ -839,12 +1100,18 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![], vec![])
             .await
             .unwrap();
         assert!(matches!(
             store
-                .update_block_unlocked(id, Some(4), Uuid::new_v4(), vec![])
+                .update_block_unlocked(
+                    id,
+                    Some(4),
+                    Uuid::new_v4(),
+                    vec![],
+                    ReferenceDelta::default(),
+                )
                 .await,
             Err(StoreError::InvalidSeq {
                 expected: 1,
@@ -861,16 +1128,16 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![], vec![])
             .await
             .unwrap();
 
         let first = store
-            .update_block_unlocked(id, None, Uuid::new_v4(), vec![1])
+            .update_block_unlocked(id, None, Uuid::new_v4(), vec![1], ReferenceDelta::default())
             .await
             .unwrap();
         let second = store
-            .update_block_unlocked(id, None, Uuid::new_v4(), vec![2])
+            .update_block_unlocked(id, None, Uuid::new_v4(), vec![2], ReferenceDelta::default())
             .await
             .unwrap();
 
@@ -886,13 +1153,19 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![], vec![])
             .await
             .unwrap();
 
         assert!(matches!(
             store
-                .update_block_unlocked(id, Some(2), Uuid::new_v4(), vec![2])
+                .update_block_unlocked(
+                    id,
+                    Some(2),
+                    Uuid::new_v4(),
+                    vec![2],
+                    ReferenceDelta::default(),
+                )
                 .await,
             Err(StoreError::InvalidSeq {
                 expected: 1,
@@ -900,11 +1173,23 @@ mod tests {
             })
         ));
         store
-            .update_block_unlocked(id, Some(1), Uuid::new_v4(), vec![1])
+            .update_block_unlocked(
+                id,
+                Some(1),
+                Uuid::new_v4(),
+                vec![1],
+                ReferenceDelta::default(),
+            )
             .await
             .unwrap();
         store
-            .update_block_unlocked(id, Some(2), Uuid::new_v4(), vec![2])
+            .update_block_unlocked(
+                id,
+                Some(2),
+                Uuid::new_v4(),
+                vec![2],
+                ReferenceDelta::default(),
+            )
             .await
             .unwrap();
 
@@ -947,6 +1232,7 @@ mod tests {
                 id,
                 block_type,
                 data: vec![1, 2],
+                references: vec![],
                 watch: true,
             },
         )
@@ -969,6 +1255,7 @@ mod tests {
                 seq: Some(1),
                 operation_id,
                 operation: vec![3],
+                references: ReferenceDelta::default(),
             },
         )
         .await;
@@ -1050,6 +1337,7 @@ mod tests {
                     id,
                     block_type: Uuid::new_v4(),
                     data: vec![],
+                    references: vec![],
                     watch: true,
                 },
             )
@@ -1074,12 +1362,14 @@ mod tests {
                         seq: Some(1),
                         operation_id: Uuid::new_v4(),
                         operation: vec![1],
+                        references: ReferenceDelta::default(),
                     },
                     block::BlockUpdate {
                         id: second,
                         seq: Some(1),
                         operation_id: Uuid::new_v4(),
                         operation: vec![2],
+                        references: ReferenceDelta::default(),
                     },
                 ],
             },
