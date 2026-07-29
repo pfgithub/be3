@@ -825,7 +825,7 @@ impl BlockApp {
             self.open_tab(reference.id, reference.block_type);
         }
 
-        let is_expanded = self.expanded.contains_key(&reference.id);
+        let is_expanded = can_expand && self.expanded.contains_key(&reference.id);
         if !is_expanded || !path.insert(reference.id) {
             return;
         }
