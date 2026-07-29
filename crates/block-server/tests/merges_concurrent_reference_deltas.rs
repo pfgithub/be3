@@ -26,15 +26,13 @@ async fn merges_reference_deltas_from_concurrent_clients() {
     assert!(matches!(first, ServerMessage::Ok { .. }));
     assert!(matches!(second, ServerMessage::Ok { .. }));
 
-    let mut expected = vec![first_target, second_target];
-    expected.sort_unstable();
-    assert_eq!(
-        references(&mut first_socket, BlockReferenceList::References(source),)
-            .await
-            .into_iter()
-            .map(|block| block.id)
-            .collect::<Vec<_>>(),
-        expected
-    );
+    let references = references(&mut first_socket, BlockReferenceList::References(source))
+        .await
+        .into_iter()
+        .map(|block| block.id)
+        .collect::<Vec<_>>();
+    assert_eq!(references.len(), 2);
+    assert!(references.contains(&first_target));
+    assert!(references.contains(&second_target));
     server.cleanup().await;
 }

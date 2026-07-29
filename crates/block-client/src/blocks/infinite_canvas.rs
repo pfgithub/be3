@@ -182,8 +182,8 @@ impl Block for InfiniteCanvas {
                 _ => None,
             })
             .collect();
-        references.sort_unstable();
-        references.dedup();
+        let mut seen = HashSet::new();
+        references.retain(|reference| seen.insert(*reference));
         references
     }
 }

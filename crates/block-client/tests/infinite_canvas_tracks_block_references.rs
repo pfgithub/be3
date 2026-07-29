@@ -30,9 +30,7 @@ fn infinite_canvas_tracks_block_references() {
             entities: vec![block_entity(a, second)],
         },
     );
-    let mut expected = vec![first, second];
-    expected.sort_unstable();
-    assert_eq!(canvas.references(), expected);
+    assert_eq!(canvas.references(), vec![second, first]);
 
     InfiniteCanvas::apply_operation(
         &mut canvas,

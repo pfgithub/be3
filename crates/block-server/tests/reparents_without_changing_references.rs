@@ -31,8 +31,6 @@ async fn reparents_without_changing_either_parents_references() {
         ServerMessage::Ok { .. }
     ));
 
-    let mut expected_backrefs = vec![first_parent, second_parent];
-    expected_backrefs.sort_unstable();
     assert_eq!(
         read_parent(read(&mut socket, child).await),
         BlockParent::Uuid(second_parent)
@@ -59,7 +57,7 @@ async fn reparents_without_changing_either_parents_references() {
             .into_iter()
             .map(|block| block.id)
             .collect::<Vec<_>>(),
-        expected_backrefs
+        vec![first_parent, second_parent]
     );
     server.cleanup().await;
 }

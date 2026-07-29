@@ -91,8 +91,8 @@ pub async fn create(socket: &mut Socket, id: Uuid, references: Vec<Uuid>) -> Ser
 pub async fn update(
     socket: &mut Socket,
     id: Uuid,
-    added: Vec<Uuid>,
-    removed: Vec<Uuid>,
+    after: Vec<Uuid>,
+    before: Vec<Uuid>,
 ) -> ServerMessage {
     request(
         socket,
@@ -103,7 +103,7 @@ pub async fn update(
             operation_id: Uuid::new_v4(),
             operation: vec![],
             implicit_name: "Block".into(),
-            references: ReferenceDelta { added, removed },
+            references: ReferenceDelta { before, after },
         },
     )
     .await

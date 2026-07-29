@@ -30,8 +30,8 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
                     operation: vec![],
                     implicit_name: "First".into(),
                     references: ReferenceDelta {
-                        added: vec![target],
-                        removed: vec![],
+                        before: vec![],
+                        after: vec![target],
                     },
                 },
                 BlockUpdate {
@@ -41,8 +41,8 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
                     operation: vec![],
                     implicit_name: "Second".into(),
                     references: ReferenceDelta {
-                        added: vec![target],
-                        removed: vec![],
+                        before: vec![],
+                        after: vec![target],
                     },
                 },
             ],
@@ -51,15 +51,13 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
     .await;
     assert!(matches!(response, ServerMessage::BatchOk { .. }));
 
-    let mut expected_backrefs = vec![first, second];
-    expected_backrefs.sort_unstable();
     assert_eq!(
         references(&mut socket, BlockReferenceList::Backrefs(target))
             .await
             .into_iter()
             .map(|block| block.id)
             .collect::<Vec<_>>(),
-        expected_backrefs
+        vec![first, second]
     );
     server.cleanup().await;
 }

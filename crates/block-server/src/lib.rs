@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -14,6 +14,7 @@ use block::{
     ErrorCode, OperationRecord, ReferenceDelta, ServerMessage, MAX_NAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -264,9 +265,7 @@ async fn handle_text_message(
                     None,
                 );
             }
-            let mut ids: Vec<_> = updates.iter().map(|update| update.id).collect();
-            ids.sort_unstable();
-            ids.dedup();
+            let ids: BTreeSet<_> = updates.iter().map(|update| update.id).collect();
             if ids.len() != updates.len() {
                 return (
                     ServerMessage::Error {
@@ -703,8 +702,16 @@ impl BlockStore {
                 explicit_name: None,
                 parent: BlockParent::Orphaned,
                 references,
+                backrefs: Vec::new(),
             },
         );
+        let references = updated.blocks[&id].references.clone();
+        for reference in references {
+            let backrefs = &mut updated.blocks.get_mut(&reference).unwrap().backrefs;
+            if !backrefs.contains(&id) {
+                backrefs.push(id);
+            }
+        }
         if let Err(error) = self.persist_dependencies(&updated).await {
             let _ = fs::remove_dir_all(&block_path).await;
             return Err(error);
@@ -872,8 +879,7 @@ impl BlockStore {
                 parents
             }
         };
-        let mut blocks: Vec<_> = ids
-            .into_iter()
+        ids.into_iter()
             .filter_map(|id| {
                 dependencies.blocks.get(&id).map(|block| BlockReference {
                     id,
@@ -884,11 +890,7 @@ impl BlockStore {
                     references: block.references.len(),
                 })
             })
-            .collect();
-        if !matches!(list, BlockReferenceList::Parents(_)) {
-            blocks.sort_unstable_by_key(|block| block.id);
-        }
-        blocks
+            .collect()
     }
 
     async fn persist_dependencies(&self, dependencies: &DependencyState) -> Result<(), StoreError> {
@@ -922,26 +924,48 @@ struct BlockRead {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct DependencyState {
-    blocks: HashMap<Uuid, DependencyBlock>,
+    blocks: IndexMap<Uuid, DependencyBlock>,
 }
 
 impl DependencyState {
     fn apply_references(&mut self, id: Uuid, delta: &ReferenceDelta) -> Result<(), StoreError> {
         if delta
-            .added
+            .after
             .iter()
             .any(|reference| !self.blocks.contains_key(reference))
         {
             return Err(StoreError::ReferencedBlockNotFound);
         }
-        let block = self.blocks.get_mut(&id).ok_or(StoreError::BlockNotFound)?;
-        let mut references: HashSet<_> = block.references.iter().copied().collect();
-        for reference in &delta.removed {
-            references.remove(reference);
+        if !self.blocks.contains_key(&id) {
+            return Err(StoreError::BlockNotFound);
         }
-        references.extend(delta.added.iter().copied());
-        block.references = references.into_iter().collect();
-        block.references.sort_unstable();
+        let before: HashSet<_> = delta.before.iter().copied().collect();
+        let after: HashSet<_> = delta.after.iter().copied().collect();
+        let previous = self.blocks[&id].references.clone();
+        let mut references: Vec<_> = previous
+            .iter()
+            .copied()
+            .filter(|reference| !before.contains(reference) || after.contains(reference))
+            .filter(|reference| !after.contains(reference))
+            .collect();
+        references.extend(normalize_ids(delta.after.clone()));
+
+        let previous: HashSet<_> = previous.into_iter().collect();
+        let current: HashSet<_> = references.iter().copied().collect();
+        for removed in previous.difference(&current) {
+            self.blocks
+                .get_mut(removed)
+                .unwrap()
+                .backrefs
+                .retain(|backref| *backref != id);
+        }
+        for added in current.difference(&previous) {
+            let backrefs = &mut self.blocks.get_mut(added).unwrap().backrefs;
+            if !backrefs.contains(&id) {
+                backrefs.push(id);
+            }
+        }
+        self.blocks.get_mut(&id).unwrap().references = references;
 
         let still_referenced: HashSet<_> = self.blocks[&id].references.iter().copied().collect();
         for (&child_id, child) in &mut self.blocks {
@@ -985,13 +1009,9 @@ impl DependencyState {
     }
 
     fn backrefs(&self, id: Uuid) -> Vec<Uuid> {
-        let mut backrefs: Vec<_> = self
-            .blocks
-            .iter()
-            .filter_map(|(&source, block)| block.references.contains(&id).then_some(source))
-            .collect();
-        backrefs.sort_unstable();
-        backrefs
+        self.blocks
+            .get(&id)
+            .map_or_else(Vec::new, |block| block.backrefs.clone())
     }
 }
 
@@ -1003,6 +1023,7 @@ struct DependencyBlock {
     explicit_name: Option<String>,
     parent: BlockParent,
     references: Vec<Uuid>,
+    backrefs: Vec<Uuid>,
 }
 
 fn validate_name(name: &str) -> Result<(), StoreError> {
@@ -1015,8 +1036,8 @@ fn validate_name(name: &str) -> Result<(), StoreError> {
 }
 
 fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
-    ids.sort_unstable();
-    ids.dedup();
+    let mut seen = HashSet::new();
+    ids.retain(|id| seen.insert(*id));
     ids
 }
 
@@ -1058,7 +1079,7 @@ async fn highest_snapshot_seq(path: &Path) -> Result<u64, StoreError> {
 }
 
 async fn read_operations(path: &Path) -> Result<Vec<OperationRecord>, StoreError> {
-    let mut records = Vec::new();
+    let mut records = BTreeMap::new();
     let mut entries = fs::read_dir(path).await.map_err(|error| {
         if error.kind() == ErrorKind::NotFound {
             StoreError::BlockNotFound
@@ -1078,9 +1099,11 @@ async fn read_operations(path: &Path) -> Result<Vec<OperationRecord>, StoreError
         if record.seq != seq {
             return Err(StoreError::CorruptOperationLog);
         }
-        records.push(record);
+        if records.insert(seq, record).is_some() {
+            return Err(StoreError::CorruptOperationLog);
+        }
     }
-    records.sort_by_key(|record| record.seq);
+    let records: Vec<_> = records.into_values().collect();
     for (index, record) in records.iter().enumerate() {
         if record.seq != index as u64 + 1 {
             return Err(StoreError::CorruptOperationLog);
@@ -1221,10 +1244,7 @@ impl From<tokio_tungstenite::tungstenite::Error> for ServerError {
 mod tests {
     use super::*;
     use tokio_tungstenite::connect_async;
-    use tokio_tungstenite::tungstenite::{
-        client::IntoClientRequest,
-        http::HeaderValue,
-    };
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue};
 
     #[tokio::test]
     async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
@@ -1709,9 +1729,8 @@ mod tests {
 
     async fn test_connect(
         url: String,
-    ) -> tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    > {
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             ACCOUNT_HEADER,

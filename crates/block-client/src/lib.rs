@@ -318,14 +318,7 @@ impl BlockClient {
     }
 
     pub fn cached_blocks(&self) -> Vec<CachedBlock> {
-        let mut blocks: Vec<_> = self.cached_blocks.read().values().cloned().collect();
-        blocks.sort_by(|left, right| {
-            left.name
-                .to_lowercase()
-                .cmp(&right.name.to_lowercase())
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        blocks
+        self.cached_blocks.read().values().cloned().collect()
     }
 
     pub fn cached_block(&self, id: Uuid) -> Option<CachedBlock> {
@@ -440,7 +433,6 @@ impl<B: Block> BlockHandle<B> {
         let mut relationships = self.block.relationships.write();
         if !relationships.backrefs.contains(&id) {
             relationships.backrefs.push(id);
-            relationships.backrefs.sort_unstable();
         }
     }
 
@@ -888,14 +880,12 @@ impl WorkerState {
         debug.changes_saved = changes_saved;
         drop(debug);
 
-        let mut blocks: Vec<_> = self
+        let blocks: Vec<_> = self
             .blocks
             .values()
             .map(|block| block.debug_snapshot())
             .collect();
-        blocks.sort_by_key(|block| block.id);
-
-        let mut reference_lists: Vec<_> = self
+        let reference_lists: Vec<_> = self
             .reference_lists
             .iter()
             .map(|(list, shared)| ReferenceListDebugSnapshot {
@@ -904,18 +894,13 @@ impl WorkerState {
                 blocks: shared.blocks.read().len(),
             })
             .collect();
-        reference_lists.sort_by_key(|reference| format!("{:?}", reference.list));
+        let cached_blocks: Vec<_> = self.cached_blocks.read().values().cloned().collect();
 
-        let mut cached_blocks: Vec<_> = self.cached_blocks.read().values().cloned().collect();
-        cached_blocks.sort_by_key(|block| block.id);
-
-        let mut pending_requests: Vec<_> = self
+        let pending_requests: Vec<_> = self
             .requests
             .iter()
             .map(|(request_id, request)| request.debug_snapshot(*request_id))
             .collect();
-        pending_requests.sort_by_key(|request| request.request_id);
-
         let outbound_messages = self
             .outbound
             .iter()
@@ -2110,23 +2095,15 @@ impl<B: Block> TypedBlock<B> {
 }
 
 fn normalized_references(mut references: Vec<Uuid>) -> Vec<Uuid> {
-    references.sort_unstable();
-    references.dedup();
+    let mut seen = HashSet::new();
+    references.retain(|reference| seen.insert(*reference));
     references
 }
 
 fn reference_delta(before: &[Uuid], after: &[Uuid]) -> ReferenceDelta {
     ReferenceDelta {
-        added: after
-            .iter()
-            .filter(|id| before.binary_search(id).is_err())
-            .copied()
-            .collect(),
-        removed: before
-            .iter()
-            .filter(|id| after.binary_search(id).is_err())
-            .copied()
-            .collect(),
+        before: before.to_vec(),
+        after: after.to_vec(),
     }
 }
 

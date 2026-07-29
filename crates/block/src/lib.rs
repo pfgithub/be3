@@ -29,8 +29,8 @@ pub struct OperationRecord {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ReferenceDelta {
-    pub added: Vec<Uuid>,
-    pub removed: Vec<Uuid>,
+    pub before: Vec<Uuid>,
+    pub after: Vec<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
