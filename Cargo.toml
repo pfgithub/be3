@@ -6,6 +6,7 @@ members = [
     "crates/block-server",
     "crates/block-client",
     "crates/block-e2e",
+    "crates/block-app",
     "crates/citygame",
     "crates/citygenerator",
     "crates/logicgame",

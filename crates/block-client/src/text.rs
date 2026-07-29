@@ -115,8 +115,12 @@ mod tests {
         let shared = Arc::new(BlockShared {
             value: RwLock::new(Some(document.clone())),
         });
-        let block =
-            TypedBlock::<TextDocument>::created(Uuid::new_v4(), Arc::clone(&shared), document);
+        let block = TypedBlock::<TextDocument>::created(
+            Uuid::new_v4(),
+            Arc::clone(&shared),
+            document,
+            false,
+        );
         block.created();
 
         let first_operation = {

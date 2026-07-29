@@ -56,7 +56,32 @@ impl BlockClient {
         let shared = Arc::new(BlockShared {
             value: RwLock::new(Some(initial.clone())),
         });
-        let block = Arc::new(TypedBlock::<B>::created(id, Arc::clone(&shared), initial));
+        let block = Arc::new(TypedBlock::<B>::created(
+            id,
+            Arc::clone(&shared),
+            initial,
+            false,
+        ));
+        self.send(WorkerCommand::AddBlock(block.clone()));
+        BlockHandle {
+            client_id: self.id,
+            id,
+            block,
+            commands: self.commands.clone(),
+            access: Arc::clone(&self.access),
+        }
+    }
+
+    pub fn get_or_create_block<B: Block>(&self, id: Uuid, initial: B) -> BlockHandle<B> {
+        let shared = Arc::new(BlockShared {
+            value: RwLock::new(Some(initial.clone())),
+        });
+        let block = Arc::new(TypedBlock::<B>::created(
+            id,
+            Arc::clone(&shared),
+            initial,
+            true,
+        ));
         self.send(WorkerCommand::AddBlock(block.clone()));
         BlockHandle {
             client_id: self.id,
@@ -392,14 +417,26 @@ impl WorkerState {
         let request_id = Uuid::new_v4();
         let id = block.id();
         let message = if let Some(data) = block.initial_data() {
-            self.requests
-                .insert(request_id, PendingRequest::Create { id });
-            ClientMessage::CreateBlock {
-                request_id,
-                id,
-                block_type: block.block_type_id(),
-                data,
-                watch: true,
+            if block.get_or_create() {
+                self.requests
+                    .insert(request_id, PendingRequest::GetOrCreate { id });
+                ClientMessage::GetOrCreateBlock {
+                    request_id,
+                    id,
+                    block_type: block.block_type_id(),
+                    data,
+                    watch: true,
+                }
+            } else {
+                self.requests
+                    .insert(request_id, PendingRequest::Create { id });
+                ClientMessage::CreateBlock {
+                    request_id,
+                    id,
+                    block_type: block.block_type_id(),
+                    data,
+                    watch: true,
+                }
             }
         } else {
             self.requests
@@ -511,6 +548,7 @@ impl WorkerState {
             }
             ServerMessage::ReadBlock {
                 request_id,
+                command,
                 id,
                 block_type,
                 snapshot,
@@ -518,8 +556,13 @@ impl WorkerState {
                 operations,
                 ..
             } => {
-                match self.requests.remove(&request_id) {
-                    Some(PendingRequest::Read { id: expected }) if expected == id => {}
+                match (self.requests.remove(&request_id), command) {
+                    (Some(PendingRequest::Read { id: expected }), CommandKind::ReadBlock)
+                        if expected == id => {}
+                    (
+                        Some(PendingRequest::GetOrCreate { id: expected }),
+                        CommandKind::GetOrCreateBlock,
+                    ) if expected == id => {}
                     _ => fatal("read response did not match its request"),
                 }
                 let block = &self.blocks[&id];
@@ -649,6 +692,7 @@ impl WorkerState {
 
 enum PendingRequest {
     Create { id: Uuid },
+    GetOrCreate { id: Uuid },
     Read { id: Uuid },
     Update { id: Uuid, operation_id: Uuid },
     Batch { operations: Vec<(Uuid, Uuid)> },
@@ -664,6 +708,7 @@ trait ErasedBlock: Send + Sync {
     fn id(&self) -> Uuid;
     fn block_type_id(&self) -> Uuid;
     fn initial_data(&self) -> Option<Vec<u8>>;
+    fn get_or_create(&self) -> bool;
     fn created(&self);
     fn resolve(&self, snapshot: Vec<u8>, snapshot_seq: u64, operations: Vec<OperationRecord>);
     fn next_update(&self) -> Option<OutboundUpdate>;
@@ -683,6 +728,7 @@ struct TypedBlock<B: Block> {
 
 struct TypedState<B: Block> {
     initial: Option<B>,
+    get_or_create: bool,
     confirmed: Option<B>,
     confirmed_seq: u64,
     acknowledged_seq: u64,
@@ -698,12 +744,13 @@ struct PendingOperation<O> {
 }
 
 impl<B: Block> TypedBlock<B> {
-    fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
+    fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B, get_or_create: bool) -> Self {
         Self {
             id,
             shared,
             state: RwLock::new(TypedState {
                 initial: Some(initial.clone()),
+                get_or_create,
                 confirmed: Some(initial),
                 confirmed_seq: 0,
                 acknowledged_seq: 0,
@@ -723,6 +770,7 @@ impl<B: Block> TypedBlock<B> {
             shared,
             state: RwLock::new(TypedState {
                 initial: None,
+                get_or_create: false,
                 confirmed: None,
                 confirmed_seq: 0,
                 acknowledged_seq: 0,
@@ -774,6 +822,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             serde_json::to_vec(initial)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
         })
+    }
+
+    fn get_or_create(&self) -> bool {
+        self.state.read().get_or_create
     }
 
     fn created(&self) {
@@ -1030,6 +1082,7 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
+            false,
         ));
         block.created();
         let read = shared.value.read();
@@ -1060,6 +1113,7 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
+            false,
         );
         block.created();
         block.local_operation(CounterOperation::Add(2));
@@ -1087,6 +1141,7 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
+            false,
         );
         block.created();
         block.local_operation(CounterOperation::Add(4));
@@ -1110,6 +1165,7 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
+            false,
         );
         block.created();
 

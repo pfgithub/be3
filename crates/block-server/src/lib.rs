@@ -143,6 +143,37 @@ async fn handle_text_message(
             };
             (response, None)
         }
+        ClientMessage::GetOrCreateBlock {
+            request_id,
+            id,
+            block_type,
+            data,
+            watch,
+        } => {
+            let lock = store.lock_for(id).await;
+            let _guard = lock.lock().await;
+            let response = match store
+                .get_or_create_block_unlocked(id, block_type, data)
+                .await
+            {
+                Ok(read) => {
+                    if watch {
+                        watch_hub.watch(id, client_id, outbound).await;
+                    }
+                    ServerMessage::ReadBlock {
+                        request_id,
+                        command: CommandKind::GetOrCreateBlock,
+                        id,
+                        block_type: read.block_type,
+                        snapshot: read.snapshot,
+                        snapshot_seq: read.snapshot_seq,
+                        operations: read.operations,
+                    }
+                }
+                Err(error) => error.to_response(request_id, CommandKind::GetOrCreateBlock, id),
+            };
+            (response, None)
+        }
         ClientMessage::UpdateBlock {
             request_id,
             id,
@@ -452,6 +483,22 @@ impl BlockStore {
         .await?;
         fs::write(block_path.join("snapshots").join("0"), data).await?;
         Ok(())
+    }
+
+    async fn get_or_create_block_unlocked(
+        &self,
+        id: Uuid,
+        block_type: Uuid,
+        data: Vec<u8>,
+    ) -> Result<BlockRead, StoreError> {
+        match self.read_block_unlocked(id).await {
+            Ok(read) => Ok(read),
+            Err(StoreError::BlockNotFound) => {
+                self.create_block_unlocked(id, block_type, data).await?;
+                self.read_block_unlocked(id).await
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn update_block_unlocked(

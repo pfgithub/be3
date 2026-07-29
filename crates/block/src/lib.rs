@@ -38,6 +38,7 @@ pub struct BlockUpdate {
 #[serde(rename_all = "snake_case")]
 pub enum CommandKind {
     CreateBlock,
+    GetOrCreateBlock,
     UpdateBlock,
     UpdateBatch,
     ReadBlock,
@@ -61,6 +62,14 @@ pub enum ErrorCode {
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientMessage {
     CreateBlock {
+        request_id: Uuid,
+        id: Uuid,
+        #[serde(rename = "type")]
+        block_type: Uuid,
+        data: Vec<u8>,
+        watch: bool,
+    },
+    GetOrCreateBlock {
         request_id: Uuid,
         id: Uuid,
         #[serde(rename = "type")]
@@ -100,6 +109,7 @@ impl ClientMessage {
     pub fn request_id(&self) -> Uuid {
         match self {
             Self::CreateBlock { request_id, .. }
+            | Self::GetOrCreateBlock { request_id, .. }
             | Self::UpdateBlock { request_id, .. }
             | Self::UpdateBatch { request_id, .. }
             | Self::ReadBlock { request_id, .. }
