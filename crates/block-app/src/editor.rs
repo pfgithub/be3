@@ -1,14 +1,21 @@
 use std::collections::HashMap;
 
-use block::Block;
-use block_client::{text::TextDocument, BlockClient, BlockHandle};
+use block::{Block, BlockParent};
+use block_client::{text::TextDocument, BlockClient, BlockHandle, BlockRelationships};
 use eframe::egui;
 use uuid::Uuid;
 
-use crate::index::WorkspaceIndex;
+use crate::index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation};
 
 pub trait BlockEditor {
     fn id(&self) -> Uuid;
+    fn block_type(&self) -> Uuid;
+    fn relationships(&self) -> Option<BlockRelationships>;
+    fn set_parent(&self, parent: BlockParent);
+    fn note_backref(&self, id: Uuid);
+    fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
+        None
+    }
     fn ui(&mut self, ui: &mut egui::Ui);
 }
 
@@ -105,6 +112,35 @@ impl BlockEditor for WorkspaceIndexEditor {
         self.block.id()
     }
 
+    fn block_type(&self) -> Uuid {
+        WorkspaceIndex::TYPE_ID
+    }
+
+    fn relationships(&self) -> Option<BlockRelationships> {
+        self.block.read().map(|_| self.block.relationships())
+    }
+
+    fn set_parent(&self, parent: BlockParent) {
+        self.block.set_parent(parent);
+    }
+
+    fn note_backref(&self, id: Uuid) {
+        self.block.note_backref(id);
+    }
+
+    fn add_child(&self, entry: BlockEntry) -> Option<bool> {
+        let index = self.block.read()?;
+        let already_present = index
+            .entries()
+            .iter()
+            .any(|existing| existing.id == entry.id);
+        drop(index);
+        if !already_present {
+            self.block.operate(WorkspaceIndexOperation::Add(entry));
+        }
+        Some(true)
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui) {
         let Some(index) = self.block.read() else {
             ui.centered_and_justified(|ui| {
@@ -141,6 +177,22 @@ impl TextEditor {
 impl BlockEditor for TextEditor {
     fn id(&self) -> Uuid {
         self.block.id()
+    }
+
+    fn block_type(&self) -> Uuid {
+        TextDocument::TYPE_ID
+    }
+
+    fn relationships(&self) -> Option<BlockRelationships> {
+        self.block.read().map(|_| self.block.relationships())
+    }
+
+    fn set_parent(&self, parent: BlockParent) {
+        self.block.set_parent(parent);
+    }
+
+    fn note_backref(&self, id: Uuid) {
+        self.block.note_backref(id);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
@@ -220,6 +272,18 @@ impl BlockEditor for UnsupportedEditor {
     fn id(&self) -> Uuid {
         self.id
     }
+
+    fn block_type(&self) -> Uuid {
+        self.block_type
+    }
+
+    fn relationships(&self) -> Option<BlockRelationships> {
+        None
+    }
+
+    fn set_parent(&self, _parent: BlockParent) {}
+
+    fn note_backref(&self, _id: Uuid) {}
 
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.centered_and_justified(|ui| {

@@ -49,6 +49,13 @@ struct BlockApp {
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     tabs: Vec<Uuid>,
     active_tab: Option<Uuid>,
+    pending_placements: Vec<PendingPlacement>,
+}
+
+#[derive(Clone, Copy)]
+struct PendingPlacement {
+    child: BlockReference,
+    parent: Uuid,
 }
 
 impl BlockApp {
@@ -69,16 +76,73 @@ impl BlockApp {
             editors: HashMap::new(),
             tabs: Vec::new(),
             active_tab: None,
+            pending_placements: Vec::new(),
         })
     }
 
-    fn create_block(&mut self, block_type: Uuid) {
+    fn create_block(&mut self, block_type: Uuid, parent: Option<Uuid>) {
         let Some(editor) = self.registry.create(&self.client, block_type) else {
             return;
         };
         let id = editor.id();
         self.editors.insert(id, editor);
+        if let Some(parent) = parent {
+            self.queue_placement(BlockReference { id, block_type }, parent);
+        }
         self.open_tab(id, block_type);
+    }
+
+    fn queue_placement(&mut self, child: BlockReference, parent: Uuid) {
+        if child.id == parent
+            || self
+                .pending_placements
+                .iter()
+                .any(|pending| pending.child.id == child.id && pending.parent == parent)
+        {
+            return;
+        }
+        if !self.editors.contains_key(&child.id) {
+            self.editors.insert(
+                child.id,
+                self.registry.open(&self.client, child.id, child.block_type),
+            );
+        }
+        if !self.editors.contains_key(&parent) {
+            self.editors.insert(
+                parent,
+                self.registry
+                    .open(&self.client, parent, WorkspaceIndex::TYPE_ID),
+            );
+        }
+        self.pending_placements
+            .push(PendingPlacement { child, parent });
+    }
+
+    fn process_pending_placements(&mut self) {
+        let pending = std::mem::take(&mut self.pending_placements);
+        for placement in pending {
+            let kind = self
+                .registry
+                .display_name(placement.child.block_type)
+                .unwrap_or("Block");
+            let entry = index::BlockEntry {
+                id: placement.child.id,
+                block_type: placement.child.block_type,
+                title: format!("{kind} {}", &placement.child.id.to_string()[..8]),
+            };
+            let ready = self
+                .editors
+                .get(&placement.parent)
+                .and_then(|editor| editor.add_child(entry));
+            if ready == Some(true) {
+                if let Some(child) = self.editors.get(&placement.child.id) {
+                    child.note_backref(placement.parent);
+                    child.set_parent(BlockParent::Uuid(placement.parent));
+                }
+            } else {
+                self.pending_placements.push(placement);
+            }
+        }
     }
 
     fn open_tab(&mut self, id: Uuid, block_type: Uuid) {
@@ -142,6 +206,8 @@ impl BlockApp {
         let was_expanded = self.expanded.contains_key(&reference.id);
         let mut toggle = false;
         let mut open = false;
+        let mut create_inside = None;
+        let mut row_response = None;
         ui.horizontal(|ui| {
             ui.add_space(depth as f32 * 14.0);
             if ui
@@ -150,17 +216,62 @@ impl BlockApp {
             {
                 toggle = true;
             }
-            if ui
-                .selectable_label(
-                    self.active_tab == Some(reference.id),
-                    self.reference_label(reference),
+            let response = ui
+                .add(
+                    egui::Button::selectable(
+                        self.active_tab == Some(reference.id),
+                        self.reference_label(reference),
+                    )
+                    .sense(egui::Sense::click_and_drag()),
                 )
-                .on_hover_text(reference.id.to_string())
-                .clicked()
-            {
+                .on_hover_text(reference.id.to_string());
+            response.dnd_set_drag_payload(reference);
+            if response.clicked() {
                 open = true;
             }
+            row_response = Some(response);
+            if reference.block_type == WorkspaceIndex::TYPE_ID {
+                ui.menu_button("+", |ui| {
+                    if ui.button("Text block").clicked() {
+                        create_inside = Some(TextDocument::TYPE_ID);
+                        ui.close();
+                    }
+                    if ui.button("Folder").clicked() {
+                        create_inside = Some(WorkspaceIndex::TYPE_ID);
+                        ui.close();
+                    }
+                })
+                .response
+                .on_hover_text("Create inside this folder");
+            }
         });
+
+        if let Some(block_type) = create_inside {
+            self.create_block(block_type, Some(reference.id));
+        }
+        if reference.block_type == WorkspaceIndex::TYPE_ID {
+            if let Some(response) = row_response {
+                if let Some(dragged) = response.dnd_hover_payload::<BlockReference>() {
+                    let valid = dragged.id != reference.id && !path.contains(&dragged.id);
+                    let color = if valid {
+                        ui.visuals().selection.stroke.color
+                    } else {
+                        ui.visuals().error_fg_color
+                    };
+                    ui.painter().rect_stroke(
+                        response.rect,
+                        3.0,
+                        egui::Stroke::new(1.0, color),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                if let Some(dragged) = response.dnd_release_payload::<BlockReference>() {
+                    if dragged.id != reference.id && !path.contains(&dragged.id) {
+                        self.queue_placement(*dragged, reference.id);
+                    }
+                }
+            }
+        }
 
         if toggle {
             if was_expanded {
@@ -213,7 +324,7 @@ impl BlockApp {
             .on_hover_text("Create block");
         });
         if let Some(block_type) = create {
-            self.create_block(block_type);
+            self.create_block(block_type, None);
         }
         ui.separator();
 
@@ -281,10 +392,90 @@ impl BlockApp {
         };
         editor.ui(ui);
     }
+
+    fn show_statusbar(&mut self, ui: &mut egui::Ui) {
+        let Some(active) = self.active_tab else {
+            return;
+        };
+        let Some(editor) = self.editors.get(&active) else {
+            return;
+        };
+        let block_type = editor.block_type();
+        let type_name = self
+            .registry
+            .display_name(block_type)
+            .map_or_else(|| block_type.to_string(), str::to_owned);
+        let relationships = editor.relationships();
+        let mut new_parent = None;
+
+        ui.horizontal_wrapped(|ui| {
+            ui.small(format!("Type: {type_name}"));
+            ui.separator();
+            let Some(relationships) = &relationships else {
+                ui.small("Relationships loading…");
+                return;
+            };
+
+            ui.menu_button(
+                format!("Parent: {}", parent_label(relationships.parent)),
+                |ui| {
+                    if relationships.backrefs.is_empty() {
+                        ui.weak("No backrefs available");
+                    }
+                    for backref in &relationships.backrefs {
+                        if ui
+                            .selectable_label(
+                                relationships.parent == BlockParent::Uuid(*backref),
+                                backref.to_string(),
+                            )
+                            .clicked()
+                        {
+                            new_parent = Some(BlockParent::Uuid(*backref));
+                            ui.close();
+                        }
+                    }
+                },
+            );
+            ui.separator();
+            ui.menu_button(
+                format!("Backrefs: {}", relationships.backrefs.len()),
+                |ui| immutable_id_list(ui, &relationships.backrefs, "No backrefs"),
+            );
+            ui.separator();
+            ui.menu_button(
+                format!("References: {}", relationships.references.len()),
+                |ui| immutable_id_list(ui, &relationships.references, "No references"),
+            );
+        });
+
+        if let Some(parent) = new_parent {
+            if let Some(editor) = self.editors.get(&active) {
+                editor.set_parent(parent);
+            }
+        }
+    }
+}
+
+fn parent_label(parent: BlockParent) -> String {
+    match parent {
+        BlockParent::Root => "Root".into(),
+        BlockParent::Orphaned => "Orphaned".into(),
+        BlockParent::Uuid(id) => id.to_string(),
+    }
+}
+
+fn immutable_id_list(ui: &mut egui::Ui, ids: &[Uuid], empty: &str) {
+    if ids.is_empty() {
+        ui.weak(empty);
+    }
+    for id in ids {
+        ui.label(id.to_string());
+    }
 }
 
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.process_pending_placements();
         egui::Panel::left("blocks-sidebar")
             .default_size(240.0)
             .min_size(160.0)
@@ -295,6 +486,9 @@ impl eframe::App for BlockApp {
         ui.vertical(|ui| {
             self.show_tabs(ui);
             ui.separator();
+            egui::Panel::bottom("block-statusbar")
+                .resizable(false)
+                .show_inside(ui, |ui| self.show_statusbar(ui));
             self.show_content(ui);
         });
         ui.ctx().request_repaint_after(Duration::from_millis(100));

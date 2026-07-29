@@ -145,6 +145,13 @@ pub struct BlockHandle<B: Block> {
     access: Arc<RwLock<()>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockRelationships {
+    pub parent: BlockParent,
+    pub references: Vec<Uuid>,
+    pub backrefs: Vec<Uuid>,
+}
+
 impl<B: Block> Clone for BlockHandle<B> {
     fn clone(&self) -> Self {
         Self {
@@ -188,6 +195,18 @@ impl<B: Block> BlockHandle<B> {
                 parent,
             })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn relationships(&self) -> BlockRelationships {
+        self.block.relationships.read().clone()
+    }
+
+    pub fn note_backref(&self, id: Uuid) {
+        let mut relationships = self.block.relationships.write();
+        if !relationships.backrefs.contains(&id) {
+            relationships.backrefs.push(id);
+            relationships.backrefs.sort_unstable();
+        }
     }
 
     pub async fn loaded(&self) {
@@ -616,9 +635,14 @@ impl WorkerState {
                         self.maybe_send_update(id);
                     }
                     (
-                        PendingRequest::SetBlockParent { id: expected },
+                        PendingRequest::SetBlockParent {
+                            id: expected,
+                            parent,
+                        },
                         CommandKind::SetBlockParent,
-                    ) if expected == id => {}
+                    ) if expected == id => {
+                        self.blocks[&id].set_parent(parent);
+                    }
                     (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
                         if id.is_nil() => {}
                     _ => fatal("server response did not match its request"),
@@ -632,7 +656,9 @@ impl WorkerState {
                 snapshot,
                 snapshot_seq,
                 operations,
-                ..
+                parent,
+                references,
+                backrefs,
             } => {
                 match (self.requests.remove(&request_id), command) {
                     (Some(PendingRequest::Read { id: expected }), CommandKind::ReadBlock)
@@ -646,7 +672,16 @@ impl WorkerState {
                         block.block_type_id()
                     ));
                 }
-                block.resolve(snapshot, snapshot_seq, operations);
+                block.resolve(
+                    snapshot,
+                    snapshot_seq,
+                    operations,
+                    BlockRelationships {
+                        parent,
+                        references,
+                        backrefs,
+                    },
+                );
                 self.maybe_send_update(id);
             }
             ServerMessage::BatchOk {
@@ -810,7 +845,7 @@ impl WorkerState {
         match request {
             DeferredRequest::SetBlockParent { id, parent } => {
                 self.requests
-                    .insert(request_id, PendingRequest::SetBlockParent { id });
+                    .insert(request_id, PendingRequest::SetBlockParent { id, parent });
                 self.outbound.push_back(ClientMessage::SetBlockParent {
                     request_id,
                     id,
@@ -863,6 +898,7 @@ enum PendingRequest {
     },
     SetBlockParent {
         id: Uuid,
+        parent: BlockParent,
     },
     ListReferences {
         parent: BlockParent,
@@ -904,7 +940,14 @@ trait ErasedBlock: Send + Sync {
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_references(&self) -> Vec<Uuid>;
     fn created(&self);
-    fn resolve(&self, snapshot: Vec<u8>, snapshot_seq: u64, operations: Vec<OperationRecord>);
+    fn resolve(
+        &self,
+        snapshot: Vec<u8>,
+        snapshot_seq: u64,
+        operations: Vec<OperationRecord>,
+        relationships: BlockRelationships,
+    );
+    fn set_parent(&self, parent: BlockParent);
     fn next_update(&self) -> Option<OutboundUpdate>;
     fn acknowledge(&self, operation_id: Uuid, seq: u64);
     fn sequence_conflict(&self, operation_id: Uuid, expected_seq: u64) -> bool;
@@ -918,6 +961,7 @@ struct TypedBlock<B: Block> {
     state: RwLock<TypedState<B>>,
     loaded: watch::Sender<bool>,
     changed: watch::Sender<()>,
+    relationships: RwLock<BlockRelationships>,
 }
 
 struct TypedState<B: Block> {
@@ -939,6 +983,7 @@ struct PendingOperation<O> {
 
 impl<B: Block> TypedBlock<B> {
     fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
+        let references = normalized_references(initial.references());
         Self {
             id,
             shared,
@@ -954,6 +999,11 @@ impl<B: Block> TypedBlock<B> {
             }),
             loaded: watch::channel(false).0,
             changed: watch::channel(()).0,
+            relationships: RwLock::new(BlockRelationships {
+                parent: BlockParent::Root,
+                references,
+                backrefs: Vec::new(),
+            }),
         }
     }
 
@@ -973,6 +1023,11 @@ impl<B: Block> TypedBlock<B> {
             }),
             loaded: watch::channel(false).0,
             changed: watch::channel(()).0,
+            relationships: RwLock::new(BlockRelationships {
+                parent: BlockParent::Orphaned,
+                references: Vec::new(),
+                backrefs: Vec::new(),
+            }),
         }
     }
 
@@ -997,6 +1052,7 @@ impl<B: Block> TypedBlock<B> {
             let before = normalized_references(value.references());
             B::apply_operation(value, &operation);
             let after = normalized_references(value.references());
+            self.relationships.write().references.clone_from(&after);
             self.changed.send_replace(());
             reference_delta(&before, &after)
         };
@@ -1044,7 +1100,13 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         self.loaded.send_replace(true);
     }
 
-    fn resolve(&self, snapshot: Vec<u8>, snapshot_seq: u64, operations: Vec<OperationRecord>) {
+    fn resolve(
+        &self,
+        snapshot: Vec<u8>,
+        snapshot_seq: u64,
+        operations: Vec<OperationRecord>,
+        relationships: BlockRelationships,
+    ) {
         let mut value: B = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
             fatal(format!("failed to deserialize block snapshot: {error}"))
         });
@@ -1059,6 +1121,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             seq = record.seq;
         }
         let mut state = self.state.write();
+        *self.relationships.write() = relationships;
         if B::CRDT {
             for pending in &state.pending {
                 B::apply_operation(&mut value, &pending.operation);
@@ -1074,6 +1137,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         state.confirmed_seq = seq;
         state.ready = true;
         self.loaded.send_replace(true);
+    }
+
+    fn set_parent(&self, parent: BlockParent) {
+        self.relationships.write().parent = parent;
     }
 
     fn next_update(&self) -> Option<OutboundUpdate> {
@@ -1312,6 +1379,11 @@ mod tests {
                 operation: serde_json::to_vec(&CounterOperation::Add(3)).unwrap(),
                 references: ReferenceDelta::default(),
             }],
+            BlockRelationships {
+                parent: BlockParent::Root,
+                references: Vec::new(),
+                backrefs: Vec::new(),
+            },
         );
         assert_eq!(shared.value.read().as_ref().unwrap().count, 5);
     }
