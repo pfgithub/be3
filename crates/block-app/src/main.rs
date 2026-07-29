@@ -692,6 +692,7 @@ impl eframe::App for BlockApp {
                         .max_rect(content_rect),
                 );
                 content_ui.set_clip_rect(content_rect.intersect(ui.clip_rect()));
+                content_ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 self.show_sidebar(&mut content_ui);
                 ui.advance_cursor_after_rect(content_rect);
             });
