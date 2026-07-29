@@ -234,12 +234,21 @@ impl BlockApp {
             {
                 toggle = true;
             }
+            let trailing_width = if reference.block_type == WorkspaceIndex::TYPE_ID {
+                ui.spacing().interact_size.x + ui.spacing().item_spacing.x
+            } else {
+                0.0
+            };
+            let label_width = (ui.available_width() - trailing_width).max(0.0);
             let response = ui
-                .add(
+                .add_sized(
+                    [label_width, ui.spacing().interact_size.y],
                     egui::Button::selectable(
                         self.active_tab == Some(reference.id),
                         self.reference_label(&reference),
                     )
+                    .right_text(())
+                    .truncate()
                     .sense(egui::Sense::click_and_drag()),
                 )
                 .on_hover_text(reference.id.to_string());
@@ -675,7 +684,10 @@ impl eframe::App for BlockApp {
             .min_size(160.0)
             .max_size(420.0)
             .resizable(true)
-            .show_inside(ui, |ui| self.show_sidebar(ui));
+            .show_inside(ui, |ui| {
+                ui.set_width(ui.available_width());
+                self.show_sidebar(ui);
+            });
 
         ui.vertical(|ui| {
             self.show_tabs(ui);
