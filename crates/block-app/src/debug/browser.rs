@@ -21,6 +21,7 @@ impl BrowserDebug {
         let webview = WebViewBuilder::new()
             .with_url(&url)
             .with_visible(false)
+            .with_focused(false)
             .with_bounds(WebViewRect {
                 position: PhysicalPosition::new(0, 0).into(),
                 size: PhysicalSize::new(1, 1).into(),
@@ -48,6 +49,7 @@ impl BrowserDebug {
         let mut back = false;
         let mut forward = false;
         let mut reload = false;
+        let mut focus_parent = false;
 
         let shown = egui::Window::new("Web Browser")
             .open(&mut open)
@@ -66,6 +68,7 @@ impl BrowserDebug {
                         [address_width, ui.spacing().interact_size.y],
                         egui::TextEdit::singleline(&mut self.url),
                     );
+                    focus_parent = address.clicked();
                     navigate = ui
                         .add_sized([go_width, 0.0], egui::Button::new("Go"))
                         .clicked()
@@ -81,6 +84,9 @@ impl BrowserDebug {
             });
 
         self.open = open;
+        if focus_parent {
+            self.focus_parent();
+        }
 
         let operation = if navigate {
             let url = browser_url(&self.url);
@@ -144,6 +150,15 @@ impl BrowserDebug {
             self.error = Some(error.to_string());
         } else {
             self.visible = visible;
+            if !visible {
+                self.focus_parent();
+            }
+        }
+    }
+
+    fn focus_parent(&mut self) {
+        if let Err(error) = self.webview.focus_parent() {
+            self.error = Some(error.to_string());
         }
     }
 }
