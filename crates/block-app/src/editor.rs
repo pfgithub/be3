@@ -10,6 +10,7 @@ use crate::index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation};
 pub trait BlockEditor {
     fn id(&self) -> Uuid;
     fn block_type(&self) -> Uuid;
+    fn name(&self) -> String;
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
     fn note_backref(&self, id: Uuid);
@@ -116,6 +117,10 @@ impl BlockEditor for WorkspaceIndexEditor {
         WorkspaceIndex::TYPE_ID
     }
 
+    fn name(&self) -> String {
+        self.block.name()
+    }
+
     fn relationships(&self) -> Option<BlockRelationships> {
         self.block.read().map(|_| self.block.relationships())
     }
@@ -158,7 +163,7 @@ impl BlockEditor for WorkspaceIndexEditor {
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             for entry in index.entries() {
-                ui.label(&entry.title).on_hover_text(entry.id.to_string());
+                ui.label(entry.id.to_string());
             }
         });
     }
@@ -181,6 +186,10 @@ impl BlockEditor for TextEditor {
 
     fn block_type(&self) -> Uuid {
         TextDocument::TYPE_ID
+    }
+
+    fn name(&self) -> String {
+        self.block.name()
     }
 
     fn relationships(&self) -> Option<BlockRelationships> {
@@ -275,6 +284,10 @@ impl BlockEditor for UnsupportedEditor {
 
     fn block_type(&self) -> Uuid {
         self.block_type
+    }
+
+    fn name(&self) -> String {
+        self.id.to_string()
     }
 
     fn relationships(&self) -> Option<BlockRelationships> {

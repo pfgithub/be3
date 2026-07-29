@@ -124,6 +124,13 @@ impl BlockClient {
         }
     }
 
+    pub fn set_block_name(&self, id: Uuid, name: impl Into<String>) {
+        self.send(WorkerCommand::SetBlockName {
+            id,
+            name: name.into(),
+        });
+    }
+
     fn send(&self, command: WorkerCommand) {
         self.commands
             .send(command)
@@ -193,6 +200,19 @@ impl<B: Block> BlockHandle<B> {
             .send(WorkerCommand::SetBlockParent {
                 id: self.id,
                 parent,
+            })
+            .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn name(&self) -> String {
+        self.block.name.read().clone()
+    }
+
+    pub fn set_name(&self, name: impl Into<String>) {
+        self.commands
+            .send(WorkerCommand::SetBlockName {
+                id: self.id,
+                name: name.into(),
             })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
     }
@@ -324,6 +344,10 @@ enum WorkerCommand {
     SetBlockParent {
         id: Uuid,
         parent: BlockParent,
+    },
+    SetBlockName {
+        id: Uuid,
+        name: String,
     },
     ListReferences {
         parent: BlockParent,
@@ -484,6 +508,10 @@ impl WorkerState {
                 self.deferred
                     .push_back(DeferredRequest::SetBlockParent { id, parent });
             }
+            WorkerCommand::SetBlockName { id, name } => {
+                self.deferred
+                    .push_back(DeferredRequest::SetBlockName { id, name });
+            }
             WorkerCommand::ListReferences { parent, completed } => {
                 self.deferred
                     .push_back(DeferredRequest::ListReferences { parent, completed });
@@ -524,6 +552,7 @@ impl WorkerState {
                 id,
                 block_type: block.block_type_id(),
                 data,
+                implicit_name: block.initial_name(),
                 references: block.initial_references(),
                 watch: true,
             }
@@ -562,6 +591,7 @@ impl WorkerState {
                 seq: update.seq,
                 operation_id: update.operation_id,
                 operation: update.operation,
+                implicit_name: update.implicit_name,
                 references: update.references,
             });
         }
@@ -579,6 +609,7 @@ impl WorkerState {
                     seq: update.seq,
                     operation_id: update.operation_id,
                     operation: update.operation,
+                    implicit_name: update.implicit_name,
                     references: update.references,
                 });
             }
@@ -643,6 +674,8 @@ impl WorkerState {
                     ) if expected == id => {
                         self.blocks[&id].set_parent(parent);
                     }
+                    (PendingRequest::SetBlockName { id: expected }, CommandKind::SetBlockName)
+                        if expected == id => {}
                     (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
                         if id.is_nil() => {}
                     _ => fatal("server response did not match its request"),
@@ -659,6 +692,7 @@ impl WorkerState {
                 parent,
                 references,
                 backrefs,
+                name,
             } => {
                 match (self.requests.remove(&request_id), command) {
                     (Some(PendingRequest::Read { id: expected }), CommandKind::ReadBlock)
@@ -681,6 +715,7 @@ impl WorkerState {
                         references,
                         backrefs,
                     },
+                    name,
                 );
                 self.maybe_send_update(id);
             }
@@ -752,7 +787,11 @@ impl WorkerState {
                     request_id, response_id, code, message
                 ));
             }
-            ServerMessage::BlockUpdated { id, operation } => {
+            ServerMessage::BlockUpdated {
+                id,
+                name,
+                operation,
+            } => {
                 let access = Arc::clone(&self.access);
                 let _access = access.write();
                 let block = self
@@ -760,6 +799,7 @@ impl WorkerState {
                     .get(&id)
                     .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
                 block.remote_operation(operation);
+                block.set_name(name);
                 drop(_access);
                 self.maybe_send_update(id);
             }
@@ -767,12 +807,18 @@ impl WorkerState {
                 let access = Arc::clone(&self.access);
                 let _access = access.write();
                 let mut ids = Vec::with_capacity(operations.len());
-                for BlockOperation { id, operation } in operations {
+                for BlockOperation {
+                    id,
+                    name,
+                    operation,
+                } in operations
+                {
                     let block = self
                         .blocks
                         .get(&id)
                         .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
                     block.remote_operation(operation);
+                    block.set_name(name);
                     ids.push(id);
                 }
                 drop(_access);
@@ -781,6 +827,11 @@ impl WorkerState {
                 }
             }
             ServerMessage::Presence { .. } => {}
+            ServerMessage::BlockNameUpdated { id, name } => {
+                if let Some(block) = self.blocks.get(&id) {
+                    block.set_name(name);
+                }
+            }
             ServerMessage::References {
                 request_id,
                 parent,
@@ -852,6 +903,15 @@ impl WorkerState {
                     parent,
                 });
             }
+            DeferredRequest::SetBlockName { id, name } => {
+                self.requests
+                    .insert(request_id, PendingRequest::SetBlockName { id });
+                self.outbound.push_back(ClientMessage::SetBlockName {
+                    request_id,
+                    id,
+                    name,
+                });
+            }
             DeferredRequest::ListReferences { parent, completed } => {
                 self.requests.insert(
                     request_id,
@@ -900,6 +960,9 @@ enum PendingRequest {
         id: Uuid,
         parent: BlockParent,
     },
+    SetBlockName {
+        id: Uuid,
+    },
     ListReferences {
         parent: BlockParent,
         completed: oneshot::Sender<Vec<BlockReference>>,
@@ -914,6 +977,10 @@ enum DeferredRequest {
     SetBlockParent {
         id: Uuid,
         parent: BlockParent,
+    },
+    SetBlockName {
+        id: Uuid,
+        name: String,
     },
     ListReferences {
         parent: BlockParent,
@@ -931,6 +998,7 @@ struct OutboundUpdate {
     seq: Option<u64>,
     operation_id: Uuid,
     operation: Vec<u8>,
+    implicit_name: String,
     references: ReferenceDelta,
 }
 
@@ -938,6 +1006,7 @@ trait ErasedBlock: Send + Sync {
     fn id(&self) -> Uuid;
     fn block_type_id(&self) -> Uuid;
     fn initial_data(&self) -> Option<Vec<u8>>;
+    fn initial_name(&self) -> String;
     fn initial_references(&self) -> Vec<Uuid>;
     fn created(&self);
     fn resolve(
@@ -946,7 +1015,9 @@ trait ErasedBlock: Send + Sync {
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         relationships: BlockRelationships,
+        name: String,
     );
+    fn set_name(&self, name: String);
     fn set_parent(&self, parent: BlockParent);
     fn next_update(&self) -> Option<OutboundUpdate>;
     fn acknowledge(&self, operation_id: Uuid, seq: u64);
@@ -962,6 +1033,7 @@ struct TypedBlock<B: Block> {
     loaded: watch::Sender<bool>,
     changed: watch::Sender<()>,
     relationships: RwLock<BlockRelationships>,
+    name: RwLock<String>,
 }
 
 struct TypedState<B: Block> {
@@ -978,12 +1050,14 @@ struct TypedState<B: Block> {
 struct PendingOperation<O> {
     id: Uuid,
     operation: O,
+    implicit_name: String,
     references: ReferenceDelta,
 }
 
 impl<B: Block> TypedBlock<B> {
     fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
         let references = normalized_references(initial.references());
+        let name = initial.implicit_name();
         Self {
             id,
             shared,
@@ -1004,6 +1078,7 @@ impl<B: Block> TypedBlock<B> {
                 references,
                 backrefs: Vec::new(),
             }),
+            name: RwLock::new(name),
         }
     }
 
@@ -1028,6 +1103,7 @@ impl<B: Block> TypedBlock<B> {
                 references: Vec::new(),
                 backrefs: Vec::new(),
             }),
+            name: RwLock::new(String::new()),
         }
     }
 
@@ -1051,15 +1127,17 @@ impl<B: Block> TypedBlock<B> {
                 .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
             let before = normalized_references(value.references());
             B::apply_operation(value, &operation);
+            let implicit_name = value.implicit_name();
             let after = normalized_references(value.references());
             self.relationships.write().references.clone_from(&after);
             self.changed.send_replace(());
-            reference_delta(&before, &after)
+            (reference_delta(&before, &after), implicit_name)
         };
         state.pending.push_back(PendingOperation {
             id: Uuid::new_v4(),
             operation,
-            references,
+            references: references.0,
+            implicit_name: references.1,
         });
     }
 }
@@ -1078,6 +1156,14 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             serde_json::to_vec(initial)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
         })
+    }
+
+    fn initial_name(&self) -> String {
+        self.state
+            .read()
+            .initial
+            .as_ref()
+            .map_or_else(String::new, Block::implicit_name)
     }
 
     fn initial_references(&self) -> Vec<Uuid> {
@@ -1106,6 +1192,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         relationships: BlockRelationships,
+        name: String,
     ) {
         let mut value: B = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
             fatal(format!("failed to deserialize block snapshot: {error}"))
@@ -1122,6 +1209,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         }
         let mut state = self.state.write();
         *self.relationships.write() = relationships;
+        *self.name.write() = name;
         if B::CRDT {
             for pending in &state.pending {
                 B::apply_operation(&mut value, &pending.operation);
@@ -1143,6 +1231,11 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         self.relationships.write().parent = parent;
     }
 
+    fn set_name(&self, name: String) {
+        *self.name.write() = name;
+        self.changed.send_replace(());
+    }
+
     fn next_update(&self) -> Option<OutboundUpdate> {
         let mut state = self.state.write();
         if !state.ready || (!B::CRDT && !state.in_flight.is_empty()) {
@@ -1158,6 +1251,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             operation_id: pending_id,
             operation: serde_json::to_vec(&pending.operation)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize operation: {error}"))),
+            implicit_name: pending.implicit_name.clone(),
             references: pending.references.clone(),
         };
         state.in_flight.insert(pending_id);
@@ -1351,6 +1445,10 @@ mod tests {
             block.count += amount;
         }
 
+        fn implicit_name(&self) -> String {
+            format!("Counter {}", self.count)
+        }
+
         fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
     }
 
@@ -1384,6 +1482,7 @@ mod tests {
                 references: Vec::new(),
                 backrefs: Vec::new(),
             },
+            "Counter 5".into(),
         );
         assert_eq!(shared.value.read().as_ref().unwrap().count, 5);
     }
@@ -1564,6 +1663,7 @@ mod tests {
                                 parent: BlockParent::Root,
                                 references: Vec::new(),
                                 backrefs: Vec::new(),
+                                name: "Counter 5".into(),
                             })
                             .unwrap(),
                         ))

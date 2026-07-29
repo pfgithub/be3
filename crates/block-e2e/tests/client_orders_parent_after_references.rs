@@ -27,6 +27,10 @@ impl Block for ReferencingBlock {
         }
     }
 
+    fn implicit_name(&self) -> String {
+        "References".into()
+    }
+
     fn references(&self) -> Vec<Uuid> {
         self.references.clone()
     }

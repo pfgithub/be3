@@ -5,8 +5,6 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BlockEntry {
     pub id: Uuid,
-    pub block_type: Uuid,
-    pub title: String,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -17,7 +15,6 @@ pub struct WorkspaceIndex {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum WorkspaceIndexOperation {
     Add(BlockEntry),
-    Rename { id: Uuid, title: String },
 }
 
 impl WorkspaceIndex {
@@ -39,12 +36,11 @@ impl Block for WorkspaceIndex {
                     index.entries.push(entry.clone());
                 }
             }
-            WorkspaceIndexOperation::Rename { id, title } => {
-                if let Some(entry) = index.entries.iter_mut().find(|entry| entry.id == *id) {
-                    entry.title.clone_from(title);
-                }
-            }
         }
+    }
+
+    fn implicit_name(&self) -> String {
+        "Folder".into()
     }
 
     fn references(&self) -> Vec<Uuid> {

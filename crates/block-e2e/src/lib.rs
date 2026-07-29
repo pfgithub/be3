@@ -28,6 +28,10 @@ mod tests {
             block.count += amount;
         }
 
+        fn implicit_name(&self) -> String {
+            format!("Counter {}", self.count)
+        }
+
         fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
     }
 

@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use block::{Block, BlockParent, BlockReference};
+use block::{Block, BlockParent, BlockReference, MAX_NAME_BYTES};
 use block_client::{text::TextDocument, BlockClient, ReferenceList};
 use editor::{BlockEditor, EditorRegistry};
 use eframe::egui;
@@ -50,12 +50,18 @@ struct BlockApp {
     tabs: Vec<Uuid>,
     active_tab: Option<Uuid>,
     pending_placements: Vec<PendingPlacement>,
+    rename: Option<RenameState>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct PendingPlacement {
     child: BlockReference,
     parent: Uuid,
+}
+
+struct RenameState {
+    id: Uuid,
+    name: String,
 }
 
 impl BlockApp {
@@ -77,6 +83,7 @@ impl BlockApp {
             tabs: Vec::new(),
             active_tab: None,
             pending_placements: Vec::new(),
+            rename: None,
         })
     }
 
@@ -87,7 +94,18 @@ impl BlockApp {
         let id = editor.id();
         self.editors.insert(id, editor);
         if let Some(parent) = parent {
-            self.queue_placement(BlockReference { id, block_type }, parent);
+            self.queue_placement(
+                BlockReference {
+                    id,
+                    block_type,
+                    name: if block_type == WorkspaceIndex::TYPE_ID {
+                        "Folder".into()
+                    } else {
+                        String::new()
+                    },
+                },
+                parent,
+            );
         }
         self.open_tab(id, block_type);
     }
@@ -121,14 +139,8 @@ impl BlockApp {
     fn process_pending_placements(&mut self) {
         let pending = std::mem::take(&mut self.pending_placements);
         for placement in pending {
-            let kind = self
-                .registry
-                .display_name(placement.child.block_type)
-                .unwrap_or("Block");
             let entry = index::BlockEntry {
                 id: placement.child.id,
-                block_type: placement.child.block_type,
-                title: format!("{kind} {}", &placement.child.id.to_string()[..8]),
             };
             let ready = self
                 .editors
@@ -170,12 +182,8 @@ impl BlockApp {
         }
     }
 
-    fn reference_label(&self, reference: BlockReference) -> String {
-        let kind = self
-            .registry
-            .display_name(reference.block_type)
-            .unwrap_or("Unsupported");
-        format!("{kind} · {}", &reference.id.to_string()[..8])
+    fn reference_label(&self, reference: &BlockReference) -> String {
+        reference.name.clone()
     }
 
     fn collapse_reference(&mut self, id: Uuid) {
@@ -220,15 +228,24 @@ impl BlockApp {
                 .add(
                     egui::Button::selectable(
                         self.active_tab == Some(reference.id),
-                        self.reference_label(reference),
+                        self.reference_label(&reference),
                     )
                     .sense(egui::Sense::click_and_drag()),
                 )
                 .on_hover_text(reference.id.to_string());
-            response.dnd_set_drag_payload(reference);
+            response.dnd_set_drag_payload(reference.clone());
             if response.clicked() {
                 open = true;
             }
+            response.context_menu(|ui| {
+                if ui.button("Rename").clicked() {
+                    self.rename = Some(RenameState {
+                        id: reference.id,
+                        name: reference.name.clone(),
+                    });
+                    ui.close();
+                }
+            });
             row_response = Some(response);
             if reference.block_type == WorkspaceIndex::TYPE_ID {
                 ui.menu_button("+", |ui| {
@@ -267,7 +284,7 @@ impl BlockApp {
                 }
                 if let Some(dragged) = response.dnd_release_payload::<BlockReference>() {
                     if dragged.id != reference.id && !path.contains(&dragged.id) {
-                        self.queue_placement(*dragged, reference.id);
+                        self.queue_placement(dragged.as_ref().clone(), reference.id);
                     }
                 }
             }
@@ -357,7 +374,11 @@ impl BlockApp {
                             .inner_margin(egui::Margin::symmetric(8, 4))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    if ui.selectable_label(active, &id.to_string()[..8]).clicked() {
+                                    let label = self
+                                        .editors
+                                        .get(id)
+                                        .map_or_else(|| id.to_string(), |editor| editor.name());
+                                    if ui.selectable_label(active, label).clicked() {
                                         activate = Some(*id);
                                     }
                                     if ui.small_button("×").clicked() {
@@ -454,6 +475,40 @@ impl BlockApp {
             }
         }
     }
+
+    fn show_rename(&mut self, ui: &mut egui::Ui) {
+        let Some(rename) = &mut self.rename else {
+            return;
+        };
+        let mut submit = false;
+        let mut cancel = false;
+        egui::Window::new("Rename block")
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                let response = ui.text_edit_singleline(&mut rename.name);
+                let valid = rename.name.len() <= MAX_NAME_BYTES;
+                if !valid {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        format!("Name must be at most {MAX_NAME_BYTES} UTF-8 bytes."),
+                    );
+                }
+                ui.horizontal(|ui| {
+                    submit = ui.add_enabled(valid, egui::Button::new("Rename")).clicked()
+                        || (valid
+                            && response.lost_focus()
+                            && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if submit {
+            let rename = self.rename.take().unwrap();
+            self.client.set_block_name(rename.id, rename.name);
+        } else if cancel {
+            self.rename = None;
+        }
+    }
 }
 
 fn parent_label(parent: BlockParent) -> String {
@@ -476,6 +531,7 @@ fn immutable_id_list(ui: &mut egui::Ui, ids: &[Uuid], empty: &str) {
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.process_pending_placements();
+        self.show_rename(ui);
         egui::Panel::left("blocks-sidebar")
             .default_size(240.0)
             .min_size(160.0)

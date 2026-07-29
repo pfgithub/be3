@@ -11,7 +11,7 @@ use std::{
 
 use block::{
     BlockOperation, BlockParent, BlockReference, ClientMessage, CommandKind, ErrorCode,
-    OperationRecord, ReferenceDelta, ServerMessage,
+    OperationRecord, ReferenceDelta, ServerMessage, MAX_NAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -125,13 +125,14 @@ async fn handle_text_message(
             id,
             block_type,
             data,
+            implicit_name,
             references,
             watch,
         } => {
             let lock = store.lock_for(id).await;
             let _guard = lock.lock().await;
             let response = match store
-                .create_block_unlocked(id, block_type, data, references)
+                .create_block_unlocked(id, block_type, data, implicit_name, references)
                 .await
             {
                 Ok(()) => {
@@ -156,15 +157,16 @@ async fn handle_text_message(
             seq,
             operation_id,
             operation,
+            implicit_name,
             references,
         } => {
             let lock = store.lock_for(id).await;
             let _guard = lock.lock().await;
             match store
-                .update_block_unlocked(id, seq, operation_id, operation, references)
+                .update_block_unlocked(id, seq, operation_id, operation, implicit_name, references)
                 .await
             {
-                Ok(UpdateOutcome::Inserted(record)) => (
+                Ok(UpdateOutcome::Inserted(record, name)) => (
                     ServerMessage::Ok {
                         request_id,
                         command: CommandKind::UpdateBlock,
@@ -174,10 +176,11 @@ async fn handle_text_message(
                     },
                     Some(ServerMessage::BlockUpdated {
                         id,
+                        name,
                         operation: record,
                     }),
                 ),
-                Ok(UpdateOutcome::Duplicate(record)) => (
+                Ok(UpdateOutcome::Duplicate(record, _)) => (
                     ServerMessage::Ok {
                         request_id,
                         command: CommandKind::UpdateBlock,
@@ -244,21 +247,24 @@ async fn handle_text_message(
                         update.seq,
                         update.operation_id,
                         update.operation,
+                        update.implicit_name,
                         update.references,
                     )
                     .await
                 {
-                    Ok(UpdateOutcome::Inserted(operation)) => {
+                    Ok(UpdateOutcome::Inserted(operation, name)) => {
                         let operation = BlockOperation {
                             id: update.id,
+                            name,
                             operation,
                         };
                         inserted.push(operation.clone());
                         operations.push(operation);
                     }
-                    Ok(UpdateOutcome::Duplicate(operation)) => {
+                    Ok(UpdateOutcome::Duplicate(operation, name)) => {
                         operations.push(BlockOperation {
                             id: update.id,
+                            name,
                             operation,
                         });
                     }
@@ -304,6 +310,7 @@ async fn handle_text_message(
                         parent: read.parent,
                         references: read.references,
                         backrefs: read.backrefs,
+                        name: read.name,
                     }
                 }
                 Err(error) => error.to_response(request_id, CommandKind::ReadBlock, id),
@@ -355,6 +362,30 @@ async fn handle_text_message(
                 Err(error) => error.to_response(request_id, CommandKind::SetBlockParent, id),
             };
             (response, None)
+        }
+        ClientMessage::SetBlockName {
+            request_id,
+            id,
+            name,
+        } => {
+            let lock = store.lock_for(id).await;
+            let _guard = lock.lock().await;
+            match store.set_name_unlocked(id, name).await {
+                Ok(name) => (
+                    ServerMessage::Ok {
+                        request_id,
+                        command: CommandKind::SetBlockName,
+                        id,
+                        seq: None,
+                        operation_id: None,
+                    },
+                    Some(ServerMessage::BlockNameUpdated { id, name }),
+                ),
+                Err(error) => (
+                    error.to_response(request_id, CommandKind::SetBlockName, id),
+                    None,
+                ),
+            }
         }
         ClientMessage::ListReferences {
             request_id,
@@ -579,8 +610,10 @@ impl BlockStore {
         id: Uuid,
         block_type: Uuid,
         data: Vec<u8>,
+        implicit_name: String,
         references: Vec<Uuid>,
     ) -> Result<(), StoreError> {
+        validate_name(&implicit_name)?;
         let references = normalize_ids(references);
         let mut dependencies = self.dependencies.lock().await;
         if dependencies.blocks.contains_key(&id) {
@@ -613,6 +646,8 @@ impl BlockStore {
             id,
             DependencyBlock {
                 block_type,
+                name: implicit_name,
+                explicit_name: None,
                 parent: BlockParent::Root,
                 references,
             },
@@ -631,8 +666,10 @@ impl BlockStore {
         seq: Option<u64>,
         operation_id: Uuid,
         operation: Vec<u8>,
+        implicit_name: String,
         references: ReferenceDelta,
     ) -> Result<UpdateOutcome, StoreError> {
+        validate_name(&implicit_name)?;
         let operations_path = self.block_path(id).join("operations");
         if !operations_path.is_dir() {
             return Err(StoreError::BlockNotFound);
@@ -644,7 +681,14 @@ impl BlockStore {
             .find(|record| record.operation_id == operation_id)
         {
             if existing.operation == operation && existing.references == references {
-                return Ok(UpdateOutcome::Duplicate(existing.clone()));
+                let dependencies = self.dependencies.lock().await;
+                let name = dependencies
+                    .blocks
+                    .get(&id)
+                    .ok_or(StoreError::BlockNotFound)?
+                    .name
+                    .clone();
+                return Ok(UpdateOutcome::Duplicate(existing.clone(), name));
             }
             return Err(StoreError::ConflictingOperationId);
         }
@@ -671,12 +715,20 @@ impl BlockStore {
             let _ = fs::remove_file(operations_path.join(expected.to_string())).await;
             return Err(error);
         }
+        let block = updated
+            .blocks
+            .get_mut(&id)
+            .ok_or(StoreError::BlockNotFound)?;
+        if block.explicit_name.is_none() {
+            block.name = implicit_name;
+        }
+        let name = block.name.clone();
         if let Err(error) = self.persist_dependencies(&updated).await {
             let _ = fs::remove_file(operations_path.join(expected.to_string())).await;
             return Err(error);
         }
         *dependencies = updated;
-        Ok(UpdateOutcome::Inserted(record))
+        Ok(UpdateOutcome::Inserted(record, name))
     }
 
     async fn read_block_unlocked(&self, id: Uuid) -> Result<BlockRead, StoreError> {
@@ -704,6 +756,7 @@ impl BlockStore {
             parent: dependency.parent,
             references: dependency.references.clone(),
             backrefs: dependencies.backrefs(id),
+            name: dependency.name.clone(),
         })
     }
 
@@ -714,6 +767,21 @@ impl BlockStore {
         self.persist_dependencies(&updated).await?;
         *dependencies = updated;
         Ok(())
+    }
+
+    async fn set_name_unlocked(&self, id: Uuid, name: String) -> Result<String, StoreError> {
+        validate_name(&name)?;
+        let mut dependencies = self.dependencies.lock().await;
+        let mut updated = dependencies.clone();
+        let block = updated
+            .blocks
+            .get_mut(&id)
+            .ok_or(StoreError::BlockNotFound)?;
+        block.name.clone_from(&name);
+        block.explicit_name = Some(name.clone());
+        self.persist_dependencies(&updated).await?;
+        *dependencies = updated;
+        Ok(name)
     }
 
     async fn references(&self, parent: BlockParent) -> Vec<BlockReference> {
@@ -735,6 +803,7 @@ impl BlockStore {
                 dependencies.blocks.get(&id).map(|block| BlockReference {
                     id,
                     block_type: block.block_type,
+                    name: block.name.clone(),
                 })
             })
             .collect();
@@ -757,8 +826,8 @@ impl BlockStore {
 }
 
 enum UpdateOutcome {
-    Inserted(OperationRecord),
-    Duplicate(OperationRecord),
+    Inserted(OperationRecord, String),
+    Duplicate(OperationRecord, String),
 }
 
 struct BlockRead {
@@ -769,6 +838,7 @@ struct BlockRead {
     parent: BlockParent,
     references: Vec<Uuid>,
     backrefs: Vec<Uuid>,
+    name: String,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -849,8 +919,19 @@ impl DependencyState {
 #[derive(Clone, Deserialize, Serialize)]
 struct DependencyBlock {
     block_type: Uuid,
+    name: String,
+    explicit_name: Option<String>,
     parent: BlockParent,
     references: Vec<Uuid>,
+}
+
+fn validate_name(name: &str) -> Result<(), StoreError> {
+    if name.len() > MAX_NAME_BYTES {
+        return Err(StoreError::InvalidMessage(format!(
+            "block name exceeds {MAX_NAME_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
@@ -945,6 +1026,7 @@ enum StoreError {
     BlockAlreadyExists,
     BlockNotFound,
     ConflictingOperationId,
+    InvalidMessage(String),
     InvalidSeq { expected: u64, actual: u64 },
     ParentCycle,
     ParentMissingReference,
@@ -974,6 +1056,7 @@ impl StoreError {
             Self::BlockAlreadyExists => ErrorCode::BlockAlreadyExists,
             Self::BlockNotFound => ErrorCode::BlockNotFound,
             Self::ConflictingOperationId => ErrorCode::ConflictingOperationId,
+            Self::InvalidMessage(_) => ErrorCode::InvalidMessage,
             Self::InvalidSeq { .. } => ErrorCode::InvalidSeq,
             Self::ParentCycle => ErrorCode::ParentCycle,
             Self::ParentMissingReference => ErrorCode::ParentMissingReference,
@@ -991,6 +1074,7 @@ impl fmt::Display for StoreError {
             Self::ConflictingOperationId => {
                 write!(formatter, "operation UUID reused with different data")
             }
+            Self::InvalidMessage(message) => formatter.write_str(message),
             Self::InvalidSeq { expected, actual } => {
                 write!(formatter, "invalid seq {actual}; expected {expected}")
             }
@@ -1065,7 +1149,7 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![1], vec![])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![1], "Block".into(), vec![])
             .await
             .unwrap();
         let operation_id = Uuid::new_v4();
@@ -1077,11 +1161,12 @@ mod tests {
                     Some(1),
                     operation_id,
                     vec![2],
+                    "Block".into(),
                     ReferenceDelta::default(),
                 )
                 .await
                 .unwrap(),
-            UpdateOutcome::Inserted(_)
+            UpdateOutcome::Inserted(..)
         ));
         assert!(matches!(
             store
@@ -1090,11 +1175,12 @@ mod tests {
                     Some(99),
                     operation_id,
                     vec![2],
+                    "Block".into(),
                     ReferenceDelta::default(),
                 )
                 .await
                 .unwrap(),
-            UpdateOutcome::Duplicate(_)
+            UpdateOutcome::Duplicate(..)
         ));
         assert!(matches!(
             store
@@ -1103,6 +1189,7 @@ mod tests {
                     Some(2),
                     operation_id,
                     vec![3],
+                    "Block".into(),
                     ReferenceDelta::default(),
                 )
                 .await,
@@ -1119,7 +1206,7 @@ mod tests {
         let id = Uuid::new_v4();
         let block_type = Uuid::new_v4();
         store
-            .create_block_unlocked(id, block_type, vec![1], vec![])
+            .create_block_unlocked(id, block_type, vec![1], "Block".into(), vec![])
             .await
             .unwrap();
         store
@@ -1128,6 +1215,7 @@ mod tests {
                 Some(1),
                 Uuid::new_v4(),
                 vec![2],
+                "Block".into(),
                 ReferenceDelta::default(),
             )
             .await
@@ -1138,6 +1226,7 @@ mod tests {
                 Some(2),
                 Uuid::new_v4(),
                 vec![3],
+                "Block".into(),
                 ReferenceDelta::default(),
             )
             .await
@@ -1160,7 +1249,7 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![], vec![])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![], "Block".into(), vec![])
             .await
             .unwrap();
         assert!(matches!(
@@ -1170,6 +1259,7 @@ mod tests {
                     Some(4),
                     Uuid::new_v4(),
                     vec![],
+                    "Block".into(),
                     ReferenceDelta::default(),
                 )
                 .await,
@@ -1188,21 +1278,35 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![], vec![])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![], "Block".into(), vec![])
             .await
             .unwrap();
 
         let first = store
-            .update_block_unlocked(id, None, Uuid::new_v4(), vec![1], ReferenceDelta::default())
+            .update_block_unlocked(
+                id,
+                None,
+                Uuid::new_v4(),
+                vec![1],
+                "Block".into(),
+                ReferenceDelta::default(),
+            )
             .await
             .unwrap();
         let second = store
-            .update_block_unlocked(id, None, Uuid::new_v4(), vec![2], ReferenceDelta::default())
+            .update_block_unlocked(
+                id,
+                None,
+                Uuid::new_v4(),
+                vec![2],
+                "Block".into(),
+                ReferenceDelta::default(),
+            )
             .await
             .unwrap();
 
-        assert!(matches!(first, UpdateOutcome::Inserted(record) if record.seq == 1));
-        assert!(matches!(second, UpdateOutcome::Inserted(record) if record.seq == 2));
+        assert!(matches!(first, UpdateOutcome::Inserted(record, _) if record.seq == 1));
+        assert!(matches!(second, UpdateOutcome::Inserted(record, _) if record.seq == 2));
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -1213,7 +1317,7 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![], vec![])
+            .create_block_unlocked(id, Uuid::new_v4(), vec![], "Block".into(), vec![])
             .await
             .unwrap();
 
@@ -1224,6 +1328,7 @@ mod tests {
                     Some(2),
                     Uuid::new_v4(),
                     vec![2],
+                    "Block".into(),
                     ReferenceDelta::default(),
                 )
                 .await,
@@ -1238,6 +1343,7 @@ mod tests {
                 Some(1),
                 Uuid::new_v4(),
                 vec![1],
+                "Block".into(),
                 ReferenceDelta::default(),
             )
             .await
@@ -1248,6 +1354,7 @@ mod tests {
                 Some(2),
                 Uuid::new_v4(),
                 vec![2],
+                "Block".into(),
                 ReferenceDelta::default(),
             )
             .await
@@ -1292,6 +1399,7 @@ mod tests {
                 id,
                 block_type,
                 data: vec![1, 2],
+                implicit_name: "Block".into(),
                 references: vec![],
                 watch: true,
             },
@@ -1315,6 +1423,7 @@ mod tests {
                 seq: Some(1),
                 operation_id,
                 operation: vec![3],
+                implicit_name: "Block".into(),
                 references: ReferenceDelta::default(),
             },
         )
@@ -1397,6 +1506,7 @@ mod tests {
                     id,
                     block_type: Uuid::new_v4(),
                     data: vec![],
+                    implicit_name: "Block".into(),
                     references: vec![],
                     watch: true,
                 },
@@ -1422,6 +1532,7 @@ mod tests {
                         seq: Some(1),
                         operation_id: Uuid::new_v4(),
                         operation: vec![1],
+                        implicit_name: "First".into(),
                         references: ReferenceDelta::default(),
                     },
                     block::BlockUpdate {
@@ -1429,6 +1540,7 @@ mod tests {
                         seq: Some(1),
                         operation_id: Uuid::new_v4(),
                         operation: vec![2],
+                        implicit_name: "Second".into(),
                         references: ReferenceDelta::default(),
                     },
                 ],

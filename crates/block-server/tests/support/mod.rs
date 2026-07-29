@@ -65,6 +65,7 @@ pub async fn create(socket: &mut Socket, id: Uuid, references: Vec<Uuid>) -> Ser
             id,
             block_type: Uuid::new_v4(),
             data: vec![],
+            implicit_name: "Block".into(),
             references,
             watch: false,
         },
@@ -86,6 +87,7 @@ pub async fn update(
             seq: None,
             operation_id: Uuid::new_v4(),
             operation: vec![],
+            implicit_name: "Block".into(),
             references: ReferenceDelta { added, removed },
         },
     )

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use block::Block;
+use block::{Block, MAX_NAME_BYTES};
 use eips::{LocalChange, RemoteChange};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -99,6 +99,25 @@ impl Block for TextDocument {
                 block.text.insert(new, character);
             }
         }
+    }
+
+    fn implicit_name(&self) -> String {
+        let line: String = self
+            .text
+            .iter()
+            .take_while(|character| **character != '\n')
+            .collect();
+        let mut end = line.len();
+        if end > MAX_NAME_BYTES {
+            end = MAX_NAME_BYTES;
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+        }
+        if end == 0 {
+            return "Untitled".to_owned();
+        }
+        line[..end].to_owned()
     }
 }
 

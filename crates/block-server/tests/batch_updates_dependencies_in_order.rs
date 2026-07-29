@@ -28,6 +28,7 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
                     seq: None,
                     operation_id: Uuid::new_v4(),
                     operation: vec![],
+                    implicit_name: "First".into(),
                     references: ReferenceDelta {
                         added: vec![target],
                         removed: vec![],
@@ -38,6 +39,7 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
                     seq: None,
                     operation_id: Uuid::new_v4(),
                     operation: vec![],
+                    implicit_name: "Second".into(),
                     references: ReferenceDelta {
                         added: vec![target],
                         removed: vec![],
