@@ -63,6 +63,7 @@ pub enum BlockParent {
 pub enum BlockReferenceList {
     Roots,
     Orphans,
+    Parents(Uuid),
     References(Uuid),
     Backrefs(Uuid),
 }

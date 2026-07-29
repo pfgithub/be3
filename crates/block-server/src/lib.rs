@@ -800,6 +800,19 @@ impl BlockStore {
                 .get(&id)
                 .map_or_else(Vec::new, |block| block.references.clone()),
             BlockReferenceList::Backrefs(id) => dependencies.backrefs(id),
+            BlockReferenceList::Parents(id) => {
+                let mut parents = Vec::new();
+                let mut parent = dependencies.blocks.get(&id).map(|block| block.parent);
+                while let Some(BlockParent::Uuid(parent_id)) = parent {
+                    parents.push(parent_id);
+                    parent = dependencies
+                        .blocks
+                        .get(&parent_id)
+                        .map(|block| block.parent);
+                }
+                parents.reverse();
+                parents
+            }
         };
         let mut blocks: Vec<_> = ids
             .into_iter()
@@ -813,7 +826,9 @@ impl BlockStore {
                 })
             })
             .collect();
-        blocks.sort_unstable_by_key(|block| block.id);
+        if !matches!(list, BlockReferenceList::Parents(_)) {
+            blocks.sort_unstable_by_key(|block| block.id);
+        }
         blocks
     }
 

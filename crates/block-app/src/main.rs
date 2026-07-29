@@ -52,6 +52,7 @@ struct BlockApp {
     orphaned: Option<ReferenceList>,
     orphaned_expanded: bool,
     expanded: HashMap<Uuid, ReferenceList>,
+    parents: HashMap<Uuid, ReferenceList>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     tabs: Vec<Uuid>,
@@ -100,6 +101,7 @@ impl BlockApp {
             orphaned: None,
             orphaned_expanded: false,
             expanded: HashMap::new(),
+            parents: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
             tabs: Vec::new(),
@@ -251,6 +253,9 @@ impl BlockApp {
             self.editors
                 .insert(id, self.registry.open(&self.client, id, block_type));
         }
+        self.parents
+            .entry(id)
+            .or_insert_with(|| self.client.watch_parents(id));
         if !self.tabs.contains(&id) {
             self.tabs.push(id);
         }
@@ -262,6 +267,7 @@ impl BlockApp {
             return;
         };
         self.tabs.remove(index);
+        self.parents.remove(&id);
         if self.active_tab == Some(id) {
             self.active_tab = if self.tabs.is_empty() {
                 None
@@ -623,7 +629,9 @@ impl BlockApp {
             .display_name(block_type)
             .map_or_else(|| block_type.to_string(), str::to_owned);
         let relationships = editor.relationships();
-        let mut new_parent = None;
+        let parents = self.parents.get(&active).map(ReferenceList::read);
+        let current_name = editor.name();
+        let mut navigate = None;
 
         ui.horizontal_wrapped(|ui| {
             ui.small(format!("Type: {type_name}"));
@@ -633,26 +641,30 @@ impl BlockApp {
                 return;
             };
 
-            ui.menu_button(
-                format!("Parent: {}", parent_label(relationships.parent)),
-                |ui| {
-                    if relationships.backrefs.is_empty() {
-                        ui.weak("No backrefs available");
-                    }
-                    for backref in &relationships.backrefs {
-                        if ui
-                            .selectable_label(
-                                relationships.parent == BlockParent::Uuid(*backref),
-                                backref.to_string(),
-                            )
-                            .clicked()
-                        {
-                            new_parent = Some(BlockParent::Uuid(*backref));
-                            ui.close();
-                        }
-                    }
-                },
-            );
+            let Some(parents) = &parents else {
+                ui.small("Parents loading…");
+                return;
+            };
+            let root = parents
+                .first()
+                .map_or(relationships.parent, |parent| parent.parent);
+            ui.small(match root {
+                BlockParent::Orphaned => "Recently Deleted",
+                BlockParent::Root => "Root",
+                BlockParent::Uuid(_) => "Unknown",
+            });
+            for parent in parents {
+                ui.small("›");
+                if ui
+                    .small_button(&parent.name)
+                    .on_hover_text(parent.id.to_string())
+                    .clicked()
+                {
+                    navigate = Some((parent.id, parent.block_type));
+                }
+            }
+            ui.small("›");
+            ui.small(current_name);
             ui.separator();
             ui.menu_button(
                 format!("Backrefs: {}", relationships.backrefs.len()),
@@ -665,10 +677,8 @@ impl BlockApp {
             );
         });
 
-        if let Some(parent) = new_parent {
-            if let Some(editor) = self.editors.get(&active) {
-                editor.set_parent(parent);
-            }
+        if let Some((id, block_type)) = navigate {
+            self.open_tab(id, block_type);
         }
     }
 
@@ -704,14 +714,6 @@ impl BlockApp {
         } else if cancel {
             self.rename = None;
         }
-    }
-}
-
-fn parent_label(parent: BlockParent) -> String {
-    match parent {
-        BlockParent::Root => "Root".into(),
-        BlockParent::Orphaned => "Orphaned".into(),
-        BlockParent::Uuid(id) => id.to_string(),
     }
 }
 

@@ -174,6 +174,10 @@ impl BlockClient {
         }
     }
 
+    pub fn watch_parents(&self, id: Uuid) -> ReferenceList {
+        self.watch_references(BlockReferenceList::Parents(id))
+    }
+
     pub fn set_block_name(&self, id: Uuid, name: impl Into<String>) {
         self.send(WorkerCommand::SetBlockName {
             id,
