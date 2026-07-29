@@ -1,3 +1,4 @@
+mod debug;
 mod editor;
 mod index;
 
@@ -12,9 +13,8 @@ use std::{
 };
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
-use block_client::{
-    text::TextDocument, BlockClient, NetworkDirection, NetworkTrafficEntry, ReferenceList,
-};
+use block_client::{text::TextDocument, BlockClient, ReferenceList};
+use debug::browser::BrowserDebug;
 use editor::{BlockEditor, EditorRegistry};
 use eframe::egui;
 use index::WorkspaceIndex;
@@ -35,8 +35,8 @@ fn main() -> eframe::Result {
     eframe::run_native(
         APP_ID,
         options,
-        Box::new(|_| {
-            BlockApp::new()
+        Box::new(|creation_context| {
+            BlockApp::new(creation_context)
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
                 .map_err(Into::into)
         }),
@@ -56,6 +56,7 @@ struct BlockApp {
     pending_placements: Vec<PendingPlacement>,
     rename: Option<RenameState>,
     network_debug_open: bool,
+    browser_debug: BrowserDebug,
 }
 
 #[derive(Clone)]
@@ -70,7 +71,9 @@ struct RenameState {
 }
 
 impl BlockApp {
-    fn new() -> Result<Self, Box<dyn Error + Send + Sync>> {
+    fn new(
+        creation_context: &eframe::CreationContext<'_>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let data_dir = eframe::storage_dir(APP_ID)
             .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?
             .join("blocks");
@@ -78,6 +81,7 @@ impl BlockApp {
         let client = BlockClient::new();
         client.connect(url);
         let roots = client.watch_references(BlockReferenceList::Roots);
+        let browser_debug = BrowserDebug::new(creation_context)?;
 
         Ok(Self {
             client,
@@ -92,6 +96,7 @@ impl BlockApp {
             pending_placements: Vec::new(),
             rename: None,
             network_debug_open: false,
+            browser_debug,
         })
     }
 
@@ -440,66 +445,18 @@ impl BlockApp {
                 ui.small("Submitting changes\u{2026}");
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Network").clicked() {
-                    self.network_debug_open = true;
-                }
+                ui.menu_button("Debug", |ui| {
+                    if ui.button("Browser").clicked() {
+                        self.browser_debug.open();
+                        ui.close();
+                    }
+                    if ui.button("Network").clicked() {
+                        self.network_debug_open = true;
+                        ui.close();
+                    }
+                });
             });
         });
-    }
-
-    fn show_network_debug(&mut self, ctx: &egui::Context) {
-        if !self.network_debug_open {
-            return;
-        }
-        let debug = self.client.network_debug_snapshot();
-        let mut open = self.network_debug_open;
-        egui::Window::new("Network Traffic")
-            .open(&mut open)
-            .default_size([720.0, 480.0])
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(!debug.sending_paused, egui::Button::new("Pause"))
-                        .clicked()
-                    {
-                        self.client.pause_sending();
-                    }
-                    if ui
-                        .add_enabled(
-                            debug.sending_paused && debug.queued_messages > 0,
-                            egui::Button::new("Step"),
-                        )
-                        .on_hover_text("Send the next queued message")
-                        .clicked()
-                    {
-                        self.client.step_sending();
-                    }
-                    if ui
-                        .add_enabled(debug.sending_paused, egui::Button::new("Resume"))
-                        .clicked()
-                    {
-                        self.client.resume_sending();
-                    }
-                    ui.separator();
-                    ui.small(if debug.sending_paused {
-                        format!("Paused \u{2022} {} queued", debug.queued_messages)
-                    } else {
-                        format!("Sending \u{2022} {} queued", debug.queued_messages)
-                    });
-                });
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        if debug.traffic.is_empty() {
-                            ui.weak("No network traffic yet");
-                        }
-                        for entry in &debug.traffic {
-                            show_traffic_entry(ui, entry);
-                        }
-                    });
-            });
-        self.network_debug_open = open;
     }
 
     fn show_tabs(&mut self, ui: &mut egui::Ui) {
@@ -679,6 +636,7 @@ impl eframe::App for BlockApp {
         self.process_pending_placements();
         self.show_rename(ui);
         self.show_network_debug(ui.ctx());
+        self.browser_debug.show(ui.ctx());
         egui::Panel::left("blocks-sidebar")
             .default_size(240.0)
             .min_size(160.0)
@@ -707,22 +665,6 @@ impl eframe::App for BlockApp {
         });
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
-}
-
-fn show_traffic_entry(ui: &mut egui::Ui, entry: &NetworkTrafficEntry) {
-    let (arrow, color) = match entry.direction {
-        NetworkDirection::Sent => ("\u{2192}", ui.visuals().hyperlink_color),
-        NetworkDirection::Received => ("\u{2190}", ui.visuals().warn_fg_color),
-    };
-    ui.horizontal_top(|ui| {
-        ui.colored_label(color, arrow);
-        ui.small(format!("{}", entry.timestamp_ms));
-        ui.add(
-            egui::Label::new(egui::RichText::new(&entry.payload).monospace())
-                .wrap()
-                .selectable(true),
-        );
-    });
 }
 
 fn start_embedded_server(data_dir: PathBuf) -> Result<String, Box<dyn Error + Send + Sync>> {
