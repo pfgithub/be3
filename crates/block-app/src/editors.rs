@@ -33,6 +33,20 @@ pub enum EditorAction {
     },
 }
 
+#[derive(Clone)]
+pub struct SidebarDragPayload {
+    pub reference: block::BlockReference,
+    pub source: SidebarDragSource,
+    pub is_reference: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SidebarDragSource {
+    Root,
+    Orphaned,
+    Block(Uuid),
+}
+
 pub trait BlockEditor {
     fn id(&self) -> Uuid;
     fn block_type(&self) -> Uuid;
@@ -40,7 +54,16 @@ pub trait BlockEditor {
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
     fn note_backref(&self, id: Uuid);
+    fn can_add_child(&self) -> bool {
+        false
+    }
     fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
+        None
+    }
+    fn can_delete_child(&self) -> bool {
+        false
+    }
+    fn delete_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }
     fn block_created(&mut self, _id: Uuid, _block_type: Uuid, _name: String) {}

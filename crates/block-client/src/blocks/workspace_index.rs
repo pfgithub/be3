@@ -15,6 +15,7 @@ pub struct WorkspaceIndex {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum WorkspaceIndexOperation {
     Add(BlockEntry),
+    Remove(BlockEntry),
 }
 
 impl WorkspaceIndex {
@@ -35,6 +36,9 @@ impl Block for WorkspaceIndex {
                 if !index.entries.iter().any(|existing| existing.id == entry.id) {
                     index.entries.push(entry.clone());
                 }
+            }
+            WorkspaceIndexOperation::Remove(entry) => {
+                index.entries.retain(|existing| existing.id != entry.id);
             }
         }
     }

@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{Block, BlockParent, BlockReference, BlockReferenceList};
+use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
     blocks::infinite_canvas::{
         CanvasEntity, CanvasEntityKind, CanvasLayerMove, CanvasPoint, CanvasTransform,
@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
-use super::{BlockEditor, EditorAction};
+use super::{BlockEditor, EditorAction, SidebarDragPayload};
 
 const MIN_SIZE: f32 = 4.0;
 const HIT_RADIUS: f32 = 7.0;
@@ -354,10 +354,16 @@ impl InfiniteCanvasEditor {
             .or_else(|| response.ctx.pointer_hover_pos());
         let world = pointer.map(|point| self.screen_to_world(point, response.rect));
 
-        if let Some(reference) = response.dnd_release_payload::<BlockReference>() {
-            if reference.id != self.block.id() {
+        if let Some(dragged) = response.dnd_hover_payload::<SidebarDragPayload>() {
+            if dragged.reference.id != self.block.id() {
+                response.ctx.set_cursor_icon(egui::CursorIcon::Alias);
+            }
+        }
+
+        if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
+            if dragged.reference.id != self.block.id() {
                 if let Some(world) = world {
-                    self.add_block_entity(reference.id, world);
+                    self.add_block_entity(dragged.reference.id, world);
                 }
             }
         }

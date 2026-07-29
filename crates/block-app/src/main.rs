@@ -12,14 +12,11 @@ use std::{
     time::Duration,
 };
 
-use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
-use block_client::{
-    blocks::workspace_index::{BlockEntry, WorkspaceIndex},
-    BlockClient, ReferenceList,
-};
+use block::{BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
+use block_client::{blocks::workspace_index::BlockEntry, BlockClient, ReferenceList};
 use block_picker::{BlockPicker, BlockPickerMenuAction};
 use debug::browser::BrowserDebug;
-use editors::{BlockEditor, EditorAction, EditorRegistry};
+use editors::{BlockEditor, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource};
 use eframe::egui;
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -57,7 +54,7 @@ struct BlockApp {
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     tabs: Vec<Uuid>,
     active_tab: Option<Uuid>,
-    pending_placements: Vec<PendingPlacement>,
+    pending_transfers: Vec<PendingTransfer>,
     rename: Option<RenameState>,
     network_debug_open: bool,
     browser_debug: BrowserDebug,
@@ -66,9 +63,18 @@ struct BlockApp {
 }
 
 #[derive(Clone)]
-struct PendingPlacement {
+struct PendingTransfer {
     child: BlockReference,
-    parent: Uuid,
+    source: Option<SidebarDragSource>,
+    destination: Option<Uuid>,
+    parent_after: Option<BlockParent>,
+    stage: TransferStage,
+}
+
+#[derive(Clone, Copy)]
+enum TransferStage {
+    DeleteSource,
+    AddDestination,
 }
 
 struct RenameState {
@@ -79,7 +85,7 @@ struct RenameState {
 #[derive(Clone, Copy)]
 enum BlockPickerTarget {
     Root,
-    Folder(Uuid),
+    Block(Uuid),
 }
 
 impl BlockApp {
@@ -106,7 +112,7 @@ impl BlockApp {
             editors: HashMap::new(),
             tabs: Vec::new(),
             active_tab: None,
-            pending_placements: Vec::new(),
+            pending_transfers: Vec::new(),
             rename: None,
             network_debug_open: false,
             browser_debug,
@@ -133,11 +139,11 @@ impl BlockApp {
                 BlockReference {
                     id,
                     block_type,
-                    name: if block_type == WorkspaceIndex::TYPE_ID {
-                        "Folder".into()
-                    } else {
-                        String::new()
-                    },
+                    name: self
+                        .registry
+                        .display_name(block_type)
+                        .unwrap_or_default()
+                        .into(),
                     parent: BlockParent::Root,
                     references: 0,
                 },
@@ -158,7 +164,7 @@ impl BlockApp {
                 }
                 self.editors[&block.id].set_parent(BlockParent::Root);
             }
-            BlockPickerTarget::Folder(parent) => self.queue_placement(
+            BlockPickerTarget::Block(parent) => self.queue_placement(
                 BlockReference {
                     id: block.id,
                     block_type: block.block_type,
@@ -181,7 +187,7 @@ impl BlockApp {
             BlockPickerMenuAction::New(block_type) => {
                 let parent = match target {
                     BlockPickerTarget::Root => None,
-                    BlockPickerTarget::Folder(parent) => Some(parent),
+                    BlockPickerTarget::Block(parent) => Some(parent),
                 };
                 self.create_block(block_type, parent);
             }
@@ -204,9 +210,9 @@ impl BlockApp {
     fn queue_placement(&mut self, child: BlockReference, parent: Uuid) {
         if child.id == parent
             || self
-                .pending_placements
+                .pending_transfers
                 .iter()
-                .any(|pending| pending.child.id == child.id && pending.parent == parent)
+                .any(|pending| pending.child.id == child.id && pending.destination == Some(parent))
         {
             return;
         }
@@ -216,34 +222,99 @@ impl BlockApp {
                 self.registry.open(&self.client, child.id, child.block_type),
             );
         }
-        if !self.editors.contains_key(&parent) {
-            self.editors.insert(
-                parent,
-                self.registry
-                    .open(&self.client, parent, WorkspaceIndex::TYPE_ID),
-            );
-        }
-        self.pending_placements
-            .push(PendingPlacement { child, parent });
+        self.pending_transfers.push(PendingTransfer {
+            child,
+            source: None,
+            destination: Some(parent),
+            parent_after: Some(BlockParent::Uuid(parent)),
+            stage: TransferStage::AddDestination,
+        });
     }
 
-    fn process_pending_placements(&mut self) {
-        let pending = std::mem::take(&mut self.pending_placements);
-        for placement in pending {
-            let entry = BlockEntry {
-                id: placement.child.id,
-            };
-            let ready = self
-                .editors
-                .get(&placement.parent)
-                .and_then(|editor| editor.add_child(entry));
-            if ready == Some(true) {
-                if let Some(child) = self.editors.get(&placement.child.id) {
-                    child.note_backref(placement.parent);
-                    child.set_parent(BlockParent::Uuid(placement.parent));
+    fn queue_move(&mut self, dragged: SidebarDragPayload, destination: Uuid) {
+        if self.pending_transfers.iter().any(|pending| {
+            pending.child.id == dragged.reference.id && pending.destination == Some(destination)
+        }) {
+            return;
+        }
+        self.pending_transfers.push(PendingTransfer {
+            child: dragged.reference,
+            source: Some(dragged.source),
+            destination: Some(destination),
+            parent_after: (!dragged.is_reference).then_some(BlockParent::Uuid(destination)),
+            stage: TransferStage::DeleteSource,
+        });
+    }
+
+    fn queue_delete(
+        &mut self,
+        reference: BlockReference,
+        source: SidebarDragSource,
+        is_reference: bool,
+    ) {
+        if self.pending_transfers.iter().any(|pending| {
+            pending.child.id == reference.id
+                && pending.source == Some(source)
+                && pending.destination.is_none()
+        }) {
+            return;
+        }
+        self.pending_transfers.push(PendingTransfer {
+            child: reference,
+            source: Some(source),
+            destination: None,
+            parent_after: (!is_reference && source != SidebarDragSource::Root)
+                .then_some(BlockParent::Orphaned),
+            stage: TransferStage::DeleteSource,
+        });
+    }
+
+    fn process_pending_transfers(&mut self) {
+        let pending = std::mem::take(&mut self.pending_transfers);
+        for mut transfer in pending {
+            if matches!(transfer.stage, TransferStage::DeleteSource) {
+                let ready = match transfer.source {
+                    None | Some(SidebarDragSource::Orphaned) => Some(true),
+                    Some(SidebarDragSource::Root) => {
+                        self.editors
+                            .get(&transfer.child.id)
+                            .map(|child| child.set_parent(BlockParent::Orphaned));
+                        Some(true)
+                    }
+                    Some(SidebarDragSource::Block(source)) => {
+                        self.editors.get(&source).and_then(|editor| {
+                            editor.delete_child(BlockEntry {
+                                id: transfer.child.id,
+                            })
+                        })
+                    }
+                };
+                if ready != Some(true) {
+                    self.pending_transfers.push(transfer);
+                    continue;
                 }
-            } else {
-                self.pending_placements.push(placement);
+                transfer.stage = TransferStage::AddDestination;
+            }
+
+            let ready = transfer.destination.map_or(Some(true), |destination| {
+                self.editors.get(&destination).and_then(|editor| {
+                    editor.add_child(BlockEntry {
+                        id: transfer.child.id,
+                    })
+                })
+            });
+            if ready != Some(true) {
+                self.pending_transfers.push(transfer);
+                continue;
+            }
+
+            if let Some(parent) = transfer.parent_after {
+                if let Some(child) = self.editors.get(&transfer.child.id) {
+                    if let BlockParent::Uuid(destination) = parent {
+                        child.note_backref(destination);
+                    }
+                    child.set_parent(parent);
+                }
             }
         }
     }
@@ -281,6 +352,16 @@ impl BlockApp {
         reference.name.clone()
     }
 
+    fn can_delete_from(&self, source: SidebarDragSource) -> bool {
+        match source {
+            SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
+            SidebarDragSource::Block(id) => self
+                .editors
+                .get(&id)
+                .is_some_and(|editor| editor.can_delete_child()),
+        }
+    }
+
     fn collapse_reference(&mut self, id: Uuid) {
         self.collapse_reference_inner(id, &mut HashSet::new());
     }
@@ -307,12 +388,30 @@ impl BlockApp {
         containing_id: Option<Uuid>,
         path: &mut HashSet<Uuid>,
     ) {
+        if !self.editors.contains_key(&reference.id) {
+            self.editors.insert(
+                reference.id,
+                self.registry
+                    .open(&self.client, reference.id, reference.block_type),
+            );
+        }
         let is_reference =
             containing_id.is_some_and(|id| reference.parent != BlockParent::Uuid(id));
+        let source = containing_id.map_or_else(
+            || match reference.parent {
+                BlockParent::Orphaned => SidebarDragSource::Orphaned,
+                BlockParent::Root | BlockParent::Uuid(_) => SidebarDragSource::Root,
+            },
+            SidebarDragSource::Block,
+        );
+        let can_add_child = self.editors[&reference.id].can_add_child();
+        let can_delete_child =
+            source != SidebarDragSource::Orphaned && self.can_delete_from(source);
         let can_expand = !is_reference && reference.references > 0;
         let was_expanded = self.expanded.contains_key(&reference.id);
         let mut toggle = false;
         let mut open = false;
+        let mut delete = false;
         let mut picker_action = None;
         let mut row_response = None;
         ui.horizontal(|ui| {
@@ -352,7 +451,7 @@ impl BlockApp {
             {
                 toggle = true;
             }
-            let trailing_width = if reference.block_type == WorkspaceIndex::TYPE_ID {
+            let trailing_width = if can_add_child {
                 ui.spacing().interact_size.x + ui.spacing().item_spacing.x
             } else {
                 0.0
@@ -368,12 +467,16 @@ impl BlockApp {
                 .truncate()
                 .sense(egui::Sense::click_and_drag()),
             );
-            response.dnd_set_drag_payload(reference.clone());
+            response.dnd_set_drag_payload(SidebarDragPayload {
+                reference: reference.clone(),
+                source,
+                is_reference,
+            });
             if response.clicked() {
                 open = true;
             }
             response.context_menu(|ui| {
-                ui.add_enabled_ui(reference.block_type == WorkspaceIndex::TYPE_ID, |ui| {
+                ui.add_enabled_ui(can_add_child, |ui| {
                     ui.menu_button("Add", |ui| {
                         picker_action = BlockPicker::show_menu(ui);
                     });
@@ -385,14 +488,27 @@ impl BlockApp {
                     });
                     ui.close();
                 }
+                let delete_text = egui::RichText::new("Delete");
+                let delete_text = if can_delete_child {
+                    delete_text.color(ui.visuals().error_fg_color)
+                } else {
+                    delete_text
+                };
+                if ui
+                    .add_enabled(can_delete_child, egui::Button::new(delete_text))
+                    .clicked()
+                {
+                    delete = true;
+                    ui.close();
+                }
             });
             row_response = Some(response);
-            if reference.block_type == WorkspaceIndex::TYPE_ID {
+            if can_add_child {
                 ui.menu_button("+", |ui| {
                     picker_action = BlockPicker::show_menu(ui);
                 })
                 .response
-                .on_hover_text("Create inside this folder");
+                .on_hover_text("Add a child");
             }
         });
 
@@ -401,14 +517,20 @@ impl BlockApp {
             excluded.insert(reference.id);
             self.handle_picker_menu_action(
                 action,
-                BlockPickerTarget::Folder(reference.id),
+                BlockPickerTarget::Block(reference.id),
                 excluded,
             );
         }
-        if reference.block_type == WorkspaceIndex::TYPE_ID {
+        if delete {
+            self.queue_delete(reference.clone(), source, is_reference);
+        }
+        if can_add_child {
             if let Some(response) = row_response {
-                if let Some(dragged) = response.dnd_hover_payload::<BlockReference>() {
-                    let valid = dragged.id != reference.id && !path.contains(&dragged.id);
+                if let Some(dragged) = response.dnd_hover_payload::<SidebarDragPayload>() {
+                    let valid = dragged.reference.id != reference.id
+                        && dragged.source != SidebarDragSource::Block(reference.id)
+                        && !path.contains(&dragged.reference.id)
+                        && self.can_delete_from(dragged.source);
                     let color = if valid {
                         ui.visuals().selection.stroke.color
                     } else {
@@ -421,9 +543,13 @@ impl BlockApp {
                         egui::StrokeKind::Outside,
                     );
                 }
-                if let Some(dragged) = response.dnd_release_payload::<BlockReference>() {
-                    if dragged.id != reference.id && !path.contains(&dragged.id) {
-                        self.queue_placement(dragged.as_ref().clone(), reference.id);
+                if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
+                    if dragged.reference.id != reference.id
+                        && dragged.source != SidebarDragSource::Block(reference.id)
+                        && !path.contains(&dragged.reference.id)
+                        && self.can_delete_from(dragged.source)
+                    {
+                        self.queue_move(dragged.as_ref().clone(), reference.id);
                     }
                 }
             }
@@ -759,7 +885,7 @@ fn immutable_id_list(ui: &mut egui::Ui, ids: &[Uuid], empty: &str) {
 
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.process_pending_placements();
+        self.process_pending_transfers();
         self.show_block_picker(ui.ctx());
         self.show_rename(ui);
         self.show_network_debug(ui.ctx());
