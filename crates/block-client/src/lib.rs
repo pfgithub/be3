@@ -22,6 +22,8 @@ pub mod blocks;
 
 #[cfg(test)]
 mod cached_blocks_are_populated_from_confirmed_metadata;
+#[cfg(test)]
+mod client_debug_snapshot_reports_active_worker_state;
 
 pub struct BlockClient {
     id: Uuid,
@@ -29,6 +31,7 @@ pub struct BlockClient {
     connected: Arc<OnceLock<()>>,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
+    client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
 }
 
@@ -60,18 +63,94 @@ pub struct NetworkDebugSnapshot {
     pub traffic: Vec<NetworkTrafficEntry>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientDebugSnapshot {
+    pub client_id: Uuid,
+    pub connected: bool,
+    pub sending_paused: bool,
+    pub queued_messages: usize,
+    pub steps_remaining: usize,
+    pub changes_saved: bool,
+    pub synchronization_waiters: usize,
+    pub blocks: Vec<BlockDebugSnapshot>,
+    pub reference_lists: Vec<ReferenceListDebugSnapshot>,
+    pub cached_blocks: Vec<CachedBlock>,
+    pub pending_requests: Vec<PendingRequestDebugSnapshot>,
+    pub outbound_messages: Vec<ClientDebugEntry>,
+    pub deferred_requests: Vec<ClientDebugEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockDebugSnapshot {
+    pub id: Uuid,
+    pub block_type: Uuid,
+    pub name: String,
+    pub crdt: bool,
+    pub ready: bool,
+    pub synchronized: bool,
+    pub has_local_changes: bool,
+    pub confirmed_seq: u64,
+    pub acknowledged_seq: u64,
+    pub pending_operations: usize,
+    pub in_flight_operations: usize,
+    pub buffered_operations: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReferenceListDebugSnapshot {
+    pub list: BlockReferenceList,
+    pub loaded: bool,
+    pub blocks: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingRequestDebugSnapshot {
+    pub request_id: Uuid,
+    pub kind: String,
+    pub details: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientDebugEntry {
+    pub kind: String,
+    pub details: String,
+}
+
+impl ClientDebugSnapshot {
+    fn empty(client_id: Uuid) -> Self {
+        Self {
+            client_id,
+            connected: false,
+            sending_paused: false,
+            queued_messages: 0,
+            steps_remaining: 0,
+            changes_saved: true,
+            synchronization_waiters: 0,
+            blocks: Vec::new(),
+            reference_lists: Vec::new(),
+            cached_blocks: Vec::new(),
+            pending_requests: Vec::new(),
+            outbound_messages: Vec::new(),
+            deferred_requests: Vec::new(),
+        }
+    }
+}
+
 impl BlockClient {
     pub fn new() -> Self {
         let (commands, command_rx) = mpsc::channel();
+        let id = Uuid::new_v4();
         let connected = Arc::new(OnceLock::new());
         let access = Arc::new(RwLock::new(()));
         let debug = Arc::new(RwLock::new(NetworkDebugSnapshot {
             changes_saved: true,
             ..Default::default()
         }));
+        let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(id)));
         let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
+        let worker_client_debug = Arc::clone(&client_debug);
         let worker_cached_blocks = Arc::clone(&cached_blocks);
         thread::Builder::new()
             .name("block-client".into())
@@ -80,16 +159,18 @@ impl BlockClient {
                     command_rx,
                     worker_access,
                     worker_debug,
+                    worker_client_debug,
                     worker_cached_blocks,
                 )
             })
             .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));
         Self {
-            id: Uuid::new_v4(),
+            id,
             commands,
             connected,
             access,
             debug,
+            client_debug,
             cached_blocks,
         }
     }
@@ -187,6 +268,10 @@ impl BlockClient {
 
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
         self.debug.read().clone()
+    }
+
+    pub fn client_debug_snapshot(&self) -> ClientDebugSnapshot {
+        self.client_debug.read().clone()
     }
 
     pub fn cached_blocks(&self) -> Vec<CachedBlock> {
@@ -458,6 +543,7 @@ fn worker_main(
     commands: mpsc::Receiver<WorkerCommand>,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
+    client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
 ) {
     let runtime = tokio::runtime::Runtime::new()
@@ -475,7 +561,7 @@ fn worker_main(
             })
             .unwrap_or_else(|error| fatal(format!("failed to spawn command forwarder: {error}")));
 
-        let mut state = WorkerState::new(access, debug, cached_blocks);
+        let mut state = WorkerState::new(access, debug, client_debug, cached_blocks);
         while let Some(command) = async_rx.recv().await {
             match command {
                 WorkerCommand::Connect(url) => {
@@ -573,6 +659,7 @@ struct WorkerState {
     sending_paused: bool,
     steps_remaining: usize,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
+    client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
 }
 
@@ -580,6 +667,7 @@ impl WorkerState {
     fn new(
         access: Arc<RwLock<()>>,
         debug: Arc<RwLock<NetworkDebugSnapshot>>,
+        client_debug: Arc<RwLock<ClientDebugSnapshot>>,
         cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
     ) -> Self {
         Self {
@@ -594,6 +682,7 @@ impl WorkerState {
             sending_paused: false,
             steps_remaining: 0,
             debug,
+            client_debug,
             cached_blocks,
         }
     }
@@ -723,10 +812,65 @@ impl WorkerState {
     }
 
     fn refresh_debug(&self) {
+        let changes_saved = !self.has_unsaved_changes();
         let mut debug = self.debug.write();
         debug.sending_paused = self.sending_paused;
         debug.queued_messages = self.outbound.len();
-        debug.changes_saved = !self.has_unsaved_changes();
+        debug.changes_saved = changes_saved;
+        drop(debug);
+
+        let mut blocks: Vec<_> = self
+            .blocks
+            .values()
+            .map(|block| block.debug_snapshot())
+            .collect();
+        blocks.sort_by_key(|block| block.id);
+
+        let mut reference_lists: Vec<_> = self
+            .reference_lists
+            .iter()
+            .map(|(list, shared)| ReferenceListDebugSnapshot {
+                list: *list,
+                loaded: *shared.loaded.borrow(),
+                blocks: shared.blocks.read().len(),
+            })
+            .collect();
+        reference_lists.sort_by_key(|reference| format!("{:?}", reference.list));
+
+        let mut cached_blocks: Vec<_> = self.cached_blocks.read().values().cloned().collect();
+        cached_blocks.sort_by_key(|block| block.id);
+
+        let mut pending_requests: Vec<_> = self
+            .requests
+            .iter()
+            .map(|(request_id, request)| request.debug_snapshot(*request_id))
+            .collect();
+        pending_requests.sort_by_key(|request| request.request_id);
+
+        let outbound_messages = self
+            .outbound
+            .iter()
+            .map(client_message_debug_entry)
+            .collect();
+        let deferred_requests = self
+            .deferred
+            .iter()
+            .map(DeferredRequest::debug_entry)
+            .collect();
+
+        let mut client_debug = self.client_debug.write();
+        client_debug.connected = self.connected;
+        client_debug.sending_paused = self.sending_paused;
+        client_debug.queued_messages = self.outbound.len();
+        client_debug.steps_remaining = self.steps_remaining;
+        client_debug.changes_saved = changes_saved;
+        client_debug.synchronization_waiters = self.synchronization_waiters.len();
+        client_debug.blocks = blocks;
+        client_debug.reference_lists = reference_lists;
+        client_debug.cached_blocks = cached_blocks;
+        client_debug.pending_requests = pending_requests;
+        client_debug.outbound_messages = outbound_messages;
+        client_debug.deferred_requests = deferred_requests;
     }
 
     fn has_unsaved_changes(&self) -> bool {
@@ -1206,6 +1350,36 @@ enum PendingRequest {
 }
 
 impl PendingRequest {
+    fn debug_snapshot(&self, request_id: Uuid) -> PendingRequestDebugSnapshot {
+        let (kind, details) = match self {
+            Self::Create { id } => ("Create block", format!("block {id}")),
+            Self::Read { id } => ("Read block", format!("block {id}")),
+            Self::Update { id, operation_id } => (
+                "Update block",
+                format!("block {id}, operation {operation_id}"),
+            ),
+            Self::Batch { operations } => (
+                "Update batch",
+                format_operation_ids(operations.iter().copied()),
+            ),
+            Self::SetBlockParent { id, parent } => {
+                ("Set block parent", format!("block {id}, parent {parent:?}"))
+            }
+            Self::SetBlockName { id, name } => {
+                ("Set block name", format!("block {id}, name {name:?}"))
+            }
+            Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
+            Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
+            Self::CacheReferences { list } => ("Cache references", format!("list {list:?}")),
+            Self::UnwatchReferences => ("Unwatch references", String::new()),
+        };
+        PendingRequestDebugSnapshot {
+            request_id,
+            kind: kind.into(),
+            details,
+        }
+    }
+
     fn changes_data(&self) -> bool {
         matches!(
             self,
@@ -1243,6 +1417,25 @@ enum DeferredRequest {
 }
 
 impl DeferredRequest {
+    fn debug_entry(&self) -> ClientDebugEntry {
+        let (kind, details) = match self {
+            Self::SetBlockParent { id, parent } => {
+                ("Set block parent", format!("block {id}, parent {parent:?}"))
+            }
+            Self::SetBlockName { id, name } => {
+                ("Set block name", format!("block {id}, name {name:?}"))
+            }
+            Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
+            Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
+            Self::CacheReferences { list } => ("Cache references", format!("list {list:?}")),
+            Self::UnwatchReferences { list } => ("Unwatch references", format!("list {list:?}")),
+        };
+        ClientDebugEntry {
+            kind: kind.into(),
+            details,
+        }
+    }
+
     fn changes_data(&self) -> bool {
         matches!(
             self,
@@ -1262,6 +1455,103 @@ fn client_message_changes_data(message: &ClientMessage) -> bool {
     )
 }
 
+fn client_message_debug_entry(message: &ClientMessage) -> ClientDebugEntry {
+    let (kind, details) = match message {
+        ClientMessage::CreateBlock {
+            request_id,
+            id,
+            block_type,
+            watch,
+            ..
+        } => (
+            "Create block",
+            format!("request {request_id}, block {id}, type {block_type}, watch {watch}"),
+        ),
+        ClientMessage::UpdateBlock {
+            request_id,
+            id,
+            seq,
+            operation_id,
+            ..
+        } => (
+            "Update block",
+            format!("request {request_id}, block {id}, seq {seq:?}, operation {operation_id}"),
+        ),
+        ClientMessage::UpdateBatch {
+            request_id,
+            updates,
+        } => (
+            "Update batch",
+            format!(
+                "request {request_id}, {}",
+                format_operation_ids(
+                    updates
+                        .iter()
+                        .map(|update| (update.id, update.operation_id))
+                )
+            ),
+        ),
+        ClientMessage::ReadBlock {
+            request_id,
+            id,
+            watch,
+        } => (
+            "Read block",
+            format!("request {request_id}, block {id}, watch {watch}"),
+        ),
+        ClientMessage::UnwatchBlock { request_id, id } => {
+            ("Unwatch block", format!("request {request_id}, block {id}"))
+        }
+        ClientMessage::PostPresence { request_id, id, .. } => {
+            ("Post presence", format!("request {request_id}, block {id}"))
+        }
+        ClientMessage::SetBlockParent {
+            request_id,
+            id,
+            parent,
+        } => (
+            "Set block parent",
+            format!("request {request_id}, block {id}, parent {parent:?}"),
+        ),
+        ClientMessage::SetBlockName {
+            request_id,
+            id,
+            name,
+        } => (
+            "Set block name",
+            format!("request {request_id}, block {id}, name {name:?}"),
+        ),
+        ClientMessage::ListReferences {
+            request_id,
+            list,
+            watch,
+        } => (
+            "List references",
+            format!("request {request_id}, list {list:?}, watch {watch}"),
+        ),
+        ClientMessage::UnwatchReferences { request_id, list } => (
+            "Unwatch references",
+            format!("request {request_id}, list {list:?}"),
+        ),
+    };
+    ClientDebugEntry {
+        kind: kind.into(),
+        details,
+    }
+}
+
+fn format_operation_ids(operations: impl Iterator<Item = (Uuid, Uuid)>) -> String {
+    let operations: Vec<_> = operations
+        .map(|(id, operation_id)| format!("{id}/{operation_id}"))
+        .collect();
+    format!(
+        "{} operation{} [{}]",
+        operations.len(),
+        if operations.len() == 1 { "" } else { "s" },
+        operations.join(", ")
+    )
+}
+
 struct OutboundUpdate {
     seq: Option<u64>,
     operation_id: Uuid,
@@ -1273,6 +1563,7 @@ struct OutboundUpdate {
 trait ErasedBlock: Send + Sync {
     fn id(&self) -> Uuid;
     fn block_type_id(&self) -> Uuid;
+    fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
     fn name(&self) -> String;
@@ -1419,6 +1710,32 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 
     fn block_type_id(&self) -> Uuid {
         B::TYPE_ID
+    }
+
+    fn debug_snapshot(&self) -> BlockDebugSnapshot {
+        let state = self.state.read();
+        let synchronized = state.ready
+            && state.pending.is_empty()
+            && state.in_flight.is_empty()
+            && state.buffered.is_empty()
+            && (!B::CRDT || state.confirmed_seq >= state.acknowledged_seq);
+        let has_local_changes = (state.initial.is_some() && !state.ready)
+            || !state.pending.is_empty()
+            || !state.in_flight.is_empty();
+        BlockDebugSnapshot {
+            id: self.id,
+            block_type: B::TYPE_ID,
+            name: self.name.read().clone(),
+            crdt: B::CRDT,
+            ready: state.ready,
+            synchronized,
+            has_local_changes,
+            confirmed_seq: state.confirmed_seq,
+            acknowledged_seq: state.acknowledged_seq,
+            pending_operations: state.pending.len(),
+            in_flight_operations: state.in_flight.len(),
+            buffered_operations: state.buffered.len(),
+        }
     }
 
     fn initial_data(&self) -> Option<Vec<u8>> {

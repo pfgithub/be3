@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    BlockShared, CachedBlock, ErasedBlock, NetworkDebugSnapshot, PendingRequest, TypedBlock,
-    WorkerState,
+    BlockShared, CachedBlock, ClientDebugSnapshot, ErasedBlock, NetworkDebugSnapshot,
+    PendingRequest, TypedBlock, WorkerState,
 };
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -29,6 +29,7 @@ fn state(cache: Arc<RwLock<HashMap<Uuid, CachedBlock>>>) -> WorkerState {
     WorkerState::new(
         Arc::new(RwLock::new(())),
         Arc::new(RwLock::new(NetworkDebugSnapshot::default())),
+        Arc::new(RwLock::new(ClientDebugSnapshot::empty(Uuid::nil()))),
         cache,
     )
 }

@@ -56,6 +56,7 @@ struct BlockApp {
     active_tab: Option<Uuid>,
     pending_transfers: Vec<PendingTransfer>,
     rename: Option<RenameState>,
+    client_debug_open: bool,
     network_debug_open: bool,
     browser_debug: BrowserDebug,
     block_picker: BlockPicker,
@@ -114,6 +115,7 @@ impl BlockApp {
             active_tab: None,
             pending_transfers: Vec::new(),
             rename: None,
+            client_debug_open: false,
             network_debug_open: false,
             browser_debug,
             block_picker: BlockPicker::default(),
@@ -684,6 +686,10 @@ impl BlockApp {
                         self.browser_debug.open();
                         ui.close();
                     }
+                    if ui.button("Client").clicked() {
+                        self.client_debug_open = true;
+                        ui.close();
+                    }
                     if ui.button("Network").clicked() {
                         self.network_debug_open = true;
                         ui.close();
@@ -888,6 +894,7 @@ impl eframe::App for BlockApp {
         self.process_pending_transfers();
         self.show_block_picker(ui.ctx());
         self.show_rename(ui);
+        self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
         self.browser_debug.show(ui.ctx());
         egui::Panel::left("blocks-sidebar")
