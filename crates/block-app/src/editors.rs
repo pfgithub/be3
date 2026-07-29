@@ -72,7 +72,13 @@ pub trait BlockEditor {
     fn delete_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }
-    fn block_created(&mut self, _id: Uuid, _block_type: Uuid, _name: String) -> bool {
+    fn block_created(
+        &mut self,
+        _id: Uuid,
+        _block_type: Uuid,
+        _author: Uuid,
+        _name: String,
+    ) -> bool {
         false
     }
     fn update_open_tab(&mut self, _frame: &eframe::Frame) {}

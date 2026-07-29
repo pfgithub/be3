@@ -819,7 +819,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         self.block.note_backref(id);
     }
 
-    fn block_created(&mut self, id: Uuid, block_type: Uuid, name: String) -> bool {
+    fn block_created(&mut self, id: Uuid, block_type: Uuid, author: Uuid, name: String) -> bool {
         if let Some(center) = self.pending_block_center.take() {
             self.add_block_entity(id, center);
             self.tool = Tool::Select;
@@ -828,6 +828,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             self.armed_block = Some(CachedBlock {
                 id,
                 block_type,
+                author,
                 name,
             });
             self.armed_block_needs_parent = true;

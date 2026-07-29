@@ -48,7 +48,7 @@ mod tests {
         });
         let url = format!("ws://{address}");
 
-        let client_a = BlockClient::new();
+        let client_a = BlockClient::new(Uuid::new_v4());
         client_a.connect(url.clone());
         let block_a = client_a.create_block(Counter { count: 0 });
         let block_id = block_a.id();
@@ -57,7 +57,7 @@ mod tests {
         timeout(client_a.synchronized()).await;
         assert_eq!(block_a.read().unwrap().count, 1);
 
-        let client_b = BlockClient::new();
+        let client_b = BlockClient::new(Uuid::new_v4());
         client_b.connect(url.clone());
         let block_b = client_b.get_block::<Counter>(block_id);
         assert!(block_b.read().is_none());
@@ -74,7 +74,7 @@ mod tests {
         timeout(client_b.synchronized()).await;
         assert_eq!(block_b.read().unwrap().count, 1_111);
 
-        let client_c = BlockClient::new();
+        let client_c = BlockClient::new(Uuid::new_v4());
         client_c.connect(url);
         let block_c = client_c.get_block::<Counter>(block_id);
         timeout(block_c.loaded()).await;
@@ -105,14 +105,14 @@ mod tests {
         });
         let url = format!("ws://{address}");
 
-        let client_a = BlockClient::new();
+        let client_a = BlockClient::new(Uuid::new_v4());
         client_a.connect(url.clone());
         let first_a = client_a.create_block(Counter { count: 0 });
         let second_a = client_a.create_block(Counter { count: 0 });
         timeout(first_a.loaded()).await;
         timeout(second_a.loaded()).await;
 
-        let client_b = BlockClient::new();
+        let client_b = BlockClient::new(Uuid::new_v4());
         client_b.connect(url);
         let first_b = client_b.get_block::<Counter>(first_a.id());
         let second_b = client_b.get_block::<Counter>(second_a.id());
@@ -162,12 +162,12 @@ mod tests {
         });
         let url = format!("ws://{address}");
 
-        let client_a = BlockClient::new();
+        let client_a = BlockClient::new(Uuid::new_v4());
         client_a.connect(url.clone());
         let block_a = client_a.create_block(TextDocument::new());
         timeout(block_a.loaded()).await;
 
-        let client_b = BlockClient::new();
+        let client_b = BlockClient::new(Uuid::new_v4());
         client_b.connect(url);
         let block_b = client_b.get_block::<TextDocument>(block_a.id());
         timeout(block_b.loaded()).await;

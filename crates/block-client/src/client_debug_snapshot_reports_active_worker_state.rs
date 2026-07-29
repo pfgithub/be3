@@ -46,7 +46,10 @@ fn block(id: Uuid, ready: bool) -> Arc<dyn ErasedBlock> {
 #[test]
 fn client_debug_snapshot_reports_active_worker_state() {
     let client_id = Uuid::from_u128(1);
-    let debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(client_id)));
+    let debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(
+        client_id,
+        Uuid::from_u128(2),
+    )));
     let cache = Arc::new(RwLock::new(HashMap::new()));
     let mut state = WorkerState::new(
         Arc::new(RwLock::new(())),
@@ -76,6 +79,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
             blocks: RwLock::new(vec![BlockReference {
                 id: reference_id,
                 block_type: DebugBlock::TYPE_ID,
+                author: Uuid::new_v4(),
                 name: "Referenced".into(),
                 parent: BlockParent::Root,
                 references: 0,
@@ -90,6 +94,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
         CachedBlock {
             id: reference_id,
             block_type: DebugBlock::TYPE_ID,
+            author: Uuid::new_v4(),
             name: "Referenced".into(),
         },
     );

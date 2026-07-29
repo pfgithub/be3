@@ -7,7 +7,11 @@ use block::{
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::{fs, net::TcpListener, task::JoinHandle};
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
+    MaybeTlsStream, WebSocketStream,
+};
 use uuid::Uuid;
 
 pub type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -35,7 +39,16 @@ impl TestServer {
     }
 
     pub async fn connect(&self) -> Socket {
-        connect_async(&self.url).await.unwrap().0
+        self.connect_as(Uuid::new_v4()).await
+    }
+
+    pub async fn connect_as(&self, account_id: Uuid) -> Socket {
+        let mut request = self.url.as_str().into_client_request().unwrap();
+        request.headers_mut().insert(
+            "x-block-account-id",
+            HeaderValue::from_str(&account_id.to_string()).unwrap(),
+        );
+        connect_async(request).await.unwrap().0
     }
 
     pub async fn stop(self) -> PathBuf {

@@ -46,7 +46,7 @@ async fn client_orders_parent_assignment_after_creation_and_reference_updates() 
         block_server::serve(listener, server_root).await.unwrap();
     });
 
-    let client = BlockClient::new();
+    let client = BlockClient::new(Uuid::new_v4());
     let parent = client.create_block(ReferencingBlock::default());
     let child = client.create_block(ReferencingBlock::default());
     client.connect(url);

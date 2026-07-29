@@ -29,7 +29,10 @@ fn state(cache: Arc<RwLock<HashMap<Uuid, CachedBlock>>>) -> WorkerState {
     WorkerState::new(
         Arc::new(RwLock::new(())),
         Arc::new(RwLock::new(NetworkDebugSnapshot::default())),
-        Arc::new(RwLock::new(ClientDebugSnapshot::empty(Uuid::nil()))),
+        Arc::new(RwLock::new(ClientDebugSnapshot::empty(
+            Uuid::nil(),
+            Uuid::nil(),
+        ))),
         cache,
     )
 }
@@ -78,6 +81,7 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
         command: CommandKind::ReadBlock,
         id: read_id,
         block_type: MetadataBlock::TYPE_ID,
+        author: Uuid::new_v4(),
         snapshot: serde_json::to_vec(&MetadataBlock).unwrap(),
         snapshot_seq: 0,
         operations: Vec::new(),
@@ -98,6 +102,7 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
         blocks: vec![BlockReference {
             id: listed_id,
             block_type: Uuid::from_u128(0xbeef),
+            author: Uuid::new_v4(),
             name: "Listed".into(),
             parent: BlockParent::Root,
             references: 0,

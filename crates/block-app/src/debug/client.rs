@@ -30,6 +30,7 @@ fn show_snapshot(ui: &mut egui::Ui, snapshot: &ClientDebugSnapshot) {
         .striped(true)
         .show(ui, |ui| {
             field(ui, "Client", snapshot.client_id);
+            field(ui, "Account", snapshot.account_id);
             field(
                 ui,
                 "Connection",
@@ -113,6 +114,8 @@ fn show_snapshot(ui: &mut egui::Ui, snapshot: &ClientDebugSnapshot) {
                     monospace(ui, block.id);
                     ui.weak("·");
                     monospace(ui, block.block_type);
+                    ui.weak("Â·");
+                    monospace(ui, block.author);
                 });
             }
         },

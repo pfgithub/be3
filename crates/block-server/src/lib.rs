@@ -20,8 +20,17 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, Mutex},
 };
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{
+    accept_hdr_async,
+    tungstenite::{
+        handshake::server::{ErrorResponse, Request, Response},
+        http::StatusCode,
+        Message,
+    },
+};
 use uuid::Uuid;
+
+const ACCOUNT_HEADER: &str = "x-block-account-id";
 
 pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
     let root = data_dir.into();
@@ -46,7 +55,27 @@ async fn handle_connection(
     store: Arc<BlockStore>,
     watch_hub: Arc<WatchHub>,
 ) -> Result<(), ServerError> {
-    let socket = accept_async(stream).await?;
+    let mut account_id = None;
+    let socket = accept_hdr_async(
+        stream,
+        |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+            let parsed = request
+                .headers()
+                .get(ACCOUNT_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| Uuid::parse_str(value).ok());
+            let Some(parsed) = parsed else {
+                return Err(http_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("missing or invalid {ACCOUNT_HEADER} header"),
+                ));
+            };
+            account_id = Some(parsed);
+            Ok(response)
+        },
+    )
+    .await?;
+    let account_id = account_id.expect("accepted handshake omitted account identity");
     let (mut sink, mut source) = socket.split();
     let (outbound, mut outbound_rx) = mpsc::unbounded_channel();
     let client_id = watch_hub.next_client_id();
@@ -60,7 +89,14 @@ async fn handle_connection(
                 match message? {
                     Message::Text(text) => {
                         let (response, notification) =
-                            handle_text_message(&store, &watch_hub, client_id, outbound.clone(), &text).await;
+                            handle_text_message(
+                                &store,
+                                &watch_hub,
+                                client_id,
+                                account_id,
+                                outbound.clone(),
+                                &text,
+                            ).await;
                         sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
                         if let Some(notification) = notification {
                             match notification {
@@ -95,10 +131,17 @@ async fn handle_connection(
     Ok(())
 }
 
+fn http_error(status: StatusCode, message: String) -> ErrorResponse {
+    let mut response = ErrorResponse::new(Some(message));
+    *response.status_mut() = status;
+    response
+}
+
 async fn handle_text_message(
     store: &BlockStore,
     watch_hub: &WatchHub,
     client_id: ClientId,
+    account_id: Uuid,
     outbound: OutboundMessages,
     text: &str,
 ) -> (ServerMessage, Option<ServerMessage>) {
@@ -132,7 +175,7 @@ async fn handle_text_message(
             let lock = store.lock_for(id).await;
             let _guard = lock.lock().await;
             let response = match store
-                .create_block_unlocked(id, block_type, data, implicit_name, references)
+                .create_block_unlocked(id, block_type, account_id, data, implicit_name, references)
                 .await
             {
                 Ok(()) => {
@@ -163,7 +206,15 @@ async fn handle_text_message(
             let lock = store.lock_for(id).await;
             let _guard = lock.lock().await;
             match store
-                .update_block_unlocked(id, seq, operation_id, operation, implicit_name, references)
+                .update_block_unlocked(
+                    id,
+                    seq,
+                    operation_id,
+                    account_id,
+                    operation,
+                    implicit_name,
+                    references,
+                )
                 .await
             {
                 Ok(UpdateOutcome::Inserted(record, name)) => (
@@ -246,6 +297,7 @@ async fn handle_text_message(
                         update.id,
                         update.seq,
                         update.operation_id,
+                        account_id,
                         update.operation,
                         update.implicit_name,
                         update.references,
@@ -304,6 +356,7 @@ async fn handle_text_message(
                         command: CommandKind::ReadBlock,
                         id,
                         block_type: read.block_type,
+                        author: read.author,
                         snapshot: read.snapshot,
                         snapshot_seq: read.snapshot_seq,
                         operations: read.operations,
@@ -607,6 +660,7 @@ impl BlockStore {
         &self,
         id: Uuid,
         block_type: Uuid,
+        author: Uuid,
         data: Vec<u8>,
         implicit_name: String,
         references: Vec<Uuid>,
@@ -644,6 +698,7 @@ impl BlockStore {
             id,
             DependencyBlock {
                 block_type,
+                author,
                 name: implicit_name,
                 explicit_name: None,
                 parent: BlockParent::Orphaned,
@@ -663,6 +718,7 @@ impl BlockStore {
         id: Uuid,
         seq: Option<u64>,
         operation_id: Uuid,
+        author: Uuid,
         operation: Vec<u8>,
         implicit_name: String,
         references: ReferenceDelta,
@@ -702,6 +758,7 @@ impl BlockStore {
         let record = OperationRecord {
             seq: expected,
             operation_id,
+            author,
             operation,
             references,
         };
@@ -748,6 +805,7 @@ impl BlockStore {
             .ok_or(StoreError::BlockNotFound)?;
         Ok(BlockRead {
             block_type: info.block_type,
+            author: dependency.author,
             snapshot,
             snapshot_seq,
             operations,
@@ -820,6 +878,7 @@ impl BlockStore {
                 dependencies.blocks.get(&id).map(|block| BlockReference {
                     id,
                     block_type: block.block_type,
+                    author: block.author,
                     name: block.name.clone(),
                     parent: block.parent,
                     references: block.references.len(),
@@ -853,6 +912,7 @@ enum UpdateOutcome {
 
 struct BlockRead {
     block_type: Uuid,
+    author: Uuid,
     snapshot: Vec<u8>,
     snapshot_seq: u64,
     operations: Vec<OperationRecord>,
@@ -938,6 +998,7 @@ impl DependencyState {
 #[derive(Clone, Deserialize, Serialize)]
 struct DependencyBlock {
     block_type: Uuid,
+    author: Uuid,
     name: String,
     explicit_name: Option<String>,
     parent: BlockParent,
@@ -1160,6 +1221,10 @@ impl From<tokio_tungstenite::tungstenite::Error> for ServerError {
 mod tests {
     use super::*;
     use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::{
+        client::IntoClientRequest,
+        http::HeaderValue,
+    };
 
     #[tokio::test]
     async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
@@ -1168,7 +1233,14 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![1], "Block".into(), vec![])
+            .create_block_unlocked(
+                id,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                vec![1],
+                "Block".into(),
+                vec![],
+            )
             .await
             .unwrap();
         let operation_id = Uuid::new_v4();
@@ -1179,6 +1251,7 @@ mod tests {
                     id,
                     Some(1),
                     operation_id,
+                    Uuid::new_v4(),
                     vec![2],
                     "Block".into(),
                     ReferenceDelta::default(),
@@ -1193,6 +1266,7 @@ mod tests {
                     id,
                     Some(99),
                     operation_id,
+                    Uuid::new_v4(),
                     vec![2],
                     "Block".into(),
                     ReferenceDelta::default(),
@@ -1207,6 +1281,7 @@ mod tests {
                     id,
                     Some(2),
                     operation_id,
+                    Uuid::new_v4(),
                     vec![3],
                     "Block".into(),
                     ReferenceDelta::default(),
@@ -1225,13 +1300,21 @@ mod tests {
         let id = Uuid::new_v4();
         let block_type = Uuid::new_v4();
         store
-            .create_block_unlocked(id, block_type, vec![1], "Block".into(), vec![])
+            .create_block_unlocked(
+                id,
+                block_type,
+                Uuid::new_v4(),
+                vec![1],
+                "Block".into(),
+                vec![],
+            )
             .await
             .unwrap();
         store
             .update_block_unlocked(
                 id,
                 Some(1),
+                Uuid::new_v4(),
                 Uuid::new_v4(),
                 vec![2],
                 "Block".into(),
@@ -1243,6 +1326,7 @@ mod tests {
             .update_block_unlocked(
                 id,
                 Some(2),
+                Uuid::new_v4(),
                 Uuid::new_v4(),
                 vec![3],
                 "Block".into(),
@@ -1268,7 +1352,14 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![], "Block".into(), vec![])
+            .create_block_unlocked(
+                id,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                vec![],
+                "Block".into(),
+                vec![],
+            )
             .await
             .unwrap();
         assert!(matches!(
@@ -1276,6 +1367,7 @@ mod tests {
                 .update_block_unlocked(
                     id,
                     Some(4),
+                    Uuid::new_v4(),
                     Uuid::new_v4(),
                     vec![],
                     "Block".into(),
@@ -1297,7 +1389,14 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![], "Block".into(), vec![])
+            .create_block_unlocked(
+                id,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                vec![],
+                "Block".into(),
+                vec![],
+            )
             .await
             .unwrap();
 
@@ -1305,6 +1404,7 @@ mod tests {
             .update_block_unlocked(
                 id,
                 None,
+                Uuid::new_v4(),
                 Uuid::new_v4(),
                 vec![1],
                 "Block".into(),
@@ -1316,6 +1416,7 @@ mod tests {
             .update_block_unlocked(
                 id,
                 None,
+                Uuid::new_v4(),
                 Uuid::new_v4(),
                 vec![2],
                 "Block".into(),
@@ -1336,7 +1437,14 @@ mod tests {
         fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
-            .create_block_unlocked(id, Uuid::new_v4(), vec![], "Block".into(), vec![])
+            .create_block_unlocked(
+                id,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                vec![],
+                "Block".into(),
+                vec![],
+            )
             .await
             .unwrap();
 
@@ -1345,6 +1453,7 @@ mod tests {
                 .update_block_unlocked(
                     id,
                     Some(2),
+                    Uuid::new_v4(),
                     Uuid::new_v4(),
                     vec![2],
                     "Block".into(),
@@ -1361,6 +1470,7 @@ mod tests {
                 id,
                 Some(1),
                 Uuid::new_v4(),
+                Uuid::new_v4(),
                 vec![1],
                 "Block".into(),
                 ReferenceDelta::default(),
@@ -1371,6 +1481,7 @@ mod tests {
             .update_block_unlocked(
                 id,
                 Some(2),
+                Uuid::new_v4(),
                 Uuid::new_v4(),
                 vec![2],
                 "Block".into(),
@@ -1406,7 +1517,7 @@ mod tests {
                 handle_connection(stream, store, watch_hub).await.unwrap();
             }
         });
-        let (mut client, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        let mut client = test_connect(format!("ws://{addr}")).await;
         let id = Uuid::new_v4();
         let block_type = Uuid::new_v4();
 
@@ -1513,7 +1624,7 @@ mod tests {
                 handle_connection(stream, store, watch_hub).await.unwrap();
             }
         });
-        let (mut client, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        let mut client = test_connect(format!("ws://{addr}")).await;
         let first = Uuid::new_v4();
         let second = Uuid::new_v4();
 
@@ -1594,6 +1705,19 @@ mod tests {
             .send(Message::Text(serde_json::to_string(&message).unwrap()))
             .await
             .unwrap();
+    }
+
+    async fn test_connect(
+        url: String,
+    ) -> tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    > {
+        let mut request = url.into_client_request().unwrap();
+        request.headers_mut().insert(
+            ACCOUNT_HEADER,
+            HeaderValue::from_str(&Uuid::new_v4().to_string()).unwrap(),
+        );
+        connect_async(request).await.unwrap().0
     }
 
     async fn next_message<S>(socket: &mut S) -> ServerMessage

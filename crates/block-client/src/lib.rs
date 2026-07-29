@@ -18,10 +18,15 @@ use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::{oneshot, watch};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
+};
 use uuid::Uuid;
 
 pub mod blocks;
+
+const ACCOUNT_HEADER: &str = "x-block-account-id";
 
 #[cfg(test)]
 mod cached_blocks_are_populated_from_confirmed_metadata;
@@ -32,6 +37,7 @@ mod duplicate_reference_watches_share_subscription;
 
 pub struct BlockClient {
     id: Uuid,
+    account_id: Uuid,
     commands: mpsc::Sender<WorkerCommand>,
     connected: Arc<OnceLock<()>>,
     access: Arc<RwLock<()>>,
@@ -45,6 +51,7 @@ pub struct BlockClient {
 pub struct CachedBlock {
     pub id: Uuid,
     pub block_type: Uuid,
+    pub author: Uuid,
     pub name: String,
 }
 
@@ -72,6 +79,7 @@ pub struct NetworkDebugSnapshot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientDebugSnapshot {
     pub client_id: Uuid,
+    pub account_id: Uuid,
     pub connected: bool,
     pub sending_paused: bool,
     pub queued_messages: usize,
@@ -123,9 +131,10 @@ pub struct ClientDebugEntry {
 }
 
 impl ClientDebugSnapshot {
-    fn empty(client_id: Uuid) -> Self {
+    fn empty(client_id: Uuid, account_id: Uuid) -> Self {
         Self {
             client_id,
+            account_id,
             connected: false,
             sending_paused: false,
             queued_messages: 0,
@@ -143,7 +152,7 @@ impl ClientDebugSnapshot {
 }
 
 impl BlockClient {
-    pub fn new() -> Self {
+    pub fn new(account_id: Uuid) -> Self {
         let (commands, command_rx) = mpsc::channel();
         let id = Uuid::new_v4();
         let connected = Arc::new(OnceLock::new());
@@ -152,7 +161,7 @@ impl BlockClient {
             changes_saved: true,
             ..Default::default()
         }));
-        let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(id)));
+        let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(id, account_id)));
         let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
         let worker_access = Arc::clone(&access);
@@ -173,6 +182,7 @@ impl BlockClient {
             .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));
         Self {
             id,
+            account_id,
             commands,
             connected,
             access,
@@ -187,7 +197,14 @@ impl BlockClient {
         if self.connected.set(()).is_err() {
             fatal("BlockClient::connect may only be called once");
         }
-        self.send(WorkerCommand::Connect(url.into()));
+        self.send(WorkerCommand::Connect {
+            url: url.into(),
+            account_id: self.account_id,
+        });
+    }
+
+    pub fn account_id(&self) -> Uuid {
+        self.account_id
     }
 
     pub fn create_block<B: Block>(&self, initial: B) -> BlockHandle<B> {
@@ -195,7 +212,12 @@ impl BlockClient {
         let shared = Arc::new(BlockShared {
             value: RwLock::new(Some(initial.clone())),
         });
-        let block = Arc::new(TypedBlock::<B>::created(id, Arc::clone(&shared), initial));
+        let block = Arc::new(TypedBlock::<B>::created_by(
+            id,
+            self.account_id,
+            Arc::clone(&shared),
+            initial,
+        ));
         self.send(WorkerCommand::AddBlock(block.clone()));
         BlockHandle {
             client_id: self.id,
@@ -333,12 +355,6 @@ impl BlockClient {
     }
 }
 
-impl Default for BlockClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 pub struct BlockHandle<B: Block> {
     client_id: Uuid,
     id: Uuid,
@@ -369,6 +385,10 @@ impl<B: Block> Clone for BlockHandle<B> {
 impl<B: Block> BlockHandle<B> {
     pub fn id(&self) -> Uuid {
         self.id
+    }
+
+    pub fn author(&self) -> Option<Uuid> {
+        *self.block.author.read()
     }
 
     pub fn read(&self) -> Option<BlockReadGuard<'_, B>> {
@@ -541,7 +561,10 @@ struct BlockShared<B: Block> {
 }
 
 enum WorkerCommand {
-    Connect(String),
+    Connect {
+        url: String,
+        account_id: Uuid,
+    },
     AddBlock(Arc<dyn ErasedBlock>),
     Operate {
         id: Uuid,
@@ -598,8 +621,8 @@ fn worker_main(
         let mut state = WorkerState::new(access, debug, client_debug, cached_blocks);
         while let Some(command) = async_rx.recv().await {
             match command {
-                WorkerCommand::Connect(url) => {
-                    if run_connected(url, &mut state, &mut async_rx).await {
+                WorkerCommand::Connect { url, account_id } => {
+                    if run_connected(url, account_id, &mut state, &mut async_rx).await {
                         return;
                     }
                     fatal("block server connection closed");
@@ -612,10 +635,20 @@ fn worker_main(
 
 async fn run_connected(
     url: String,
+    account_id: Uuid,
     state: &mut WorkerState,
     commands: &mut tokio_mpsc::UnboundedReceiver<WorkerCommand>,
 ) -> bool {
-    let (socket, _) = connect_async(&url)
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .unwrap_or_else(|error| fatal(format!("invalid block server URL {url}: {error}")));
+    request.headers_mut().insert(
+        ACCOUNT_HEADER,
+        HeaderValue::from_str(&account_id.to_string())
+            .expect("UUID is always a valid HTTP header value"),
+    );
+    let (socket, _) = connect_async(request)
         .await
         .unwrap_or_else(|error| fatal(format!("failed to connect to {url}: {error}")));
     let (mut sink, mut source) = socket.split();
@@ -642,7 +675,7 @@ async fn run_connected(
                 let Some(command) = command else {
                     return true;
                 };
-                if matches!(command, WorkerCommand::Connect(_)) {
+                if matches!(command, WorkerCommand::Connect { .. }) {
                     fatal("BlockClient::connect may only be called once");
                 }
                 state.handle_command(command);
@@ -733,6 +766,7 @@ impl WorkerState {
                 CachedBlock {
                     id: block.id,
                     block_type: block.block_type,
+                    author: block.author,
                     name: block.name.clone(),
                 },
             );
@@ -744,13 +778,14 @@ impl WorkerState {
         self.cache_block(CachedBlock {
             id,
             block_type: block.block_type_id(),
+            author: block.author().expect("registered block omitted author"),
             name: block.name(),
         });
     }
 
     fn handle_command(&mut self, command: WorkerCommand) {
         match command {
-            WorkerCommand::Connect(_) => fatal("unexpected connect command"),
+            WorkerCommand::Connect { .. } => fatal("unexpected connect command"),
             WorkerCommand::AddBlock(block) => {
                 let id = block.id();
                 if self.blocks.insert(id, Arc::clone(&block)).is_some() {
@@ -1073,6 +1108,7 @@ impl WorkerState {
                 command,
                 id,
                 block_type,
+                author,
                 snapshot,
                 snapshot_seq,
                 operations,
@@ -1091,10 +1127,18 @@ impl WorkerState {
                         block.block_type_id()
                     ));
                 }
-                block.resolve(snapshot, snapshot_seq, operations, parent, name.clone());
+                block.resolve_authored(
+                    author,
+                    snapshot,
+                    snapshot_seq,
+                    operations,
+                    parent,
+                    name.clone(),
+                );
                 self.cache_block(CachedBlock {
                     id,
                     block_type,
+                    author,
                     name,
                 });
                 self.maybe_send_update(id);
@@ -1597,14 +1641,16 @@ struct OutboundUpdate {
 trait ErasedBlock: Send + Sync {
     fn id(&self) -> Uuid;
     fn block_type_id(&self) -> Uuid;
+    fn author(&self) -> Option<Uuid>;
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
     fn name(&self) -> String;
     fn initial_references(&self) -> Vec<Uuid>;
     fn created(&self);
-    fn resolve(
+    fn resolve_authored(
         &self,
+        author: Uuid,
         snapshot: Vec<u8>,
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
@@ -1623,6 +1669,7 @@ trait ErasedBlock: Send + Sync {
 
 struct TypedBlock<B: Block> {
     id: Uuid,
+    author: RwLock<Option<Uuid>>,
     shared: Arc<BlockShared<B>>,
     state: RwLock<TypedState<B>>,
     loaded: watch::Sender<bool>,
@@ -1650,11 +1697,17 @@ struct PendingOperation<O> {
 }
 
 impl<B: Block> TypedBlock<B> {
+    #[cfg(test)]
     fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
+        Self::created_by(id, Uuid::nil(), shared, initial)
+    }
+
+    fn created_by(id: Uuid, author: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
         let references = normalized_references(initial.references());
         let name = initial.implicit_name();
         Self {
             id,
+            author: RwLock::new(Some(author)),
             shared,
             state: RwLock::new(TypedState {
                 initial: Some(initial.clone()),
@@ -1680,6 +1733,7 @@ impl<B: Block> TypedBlock<B> {
     fn unresolved(id: Uuid, shared: Arc<BlockShared<B>>) -> Self {
         Self {
             id,
+            author: RwLock::new(None),
             shared,
             state: RwLock::new(TypedState {
                 initial: None,
@@ -1735,6 +1789,26 @@ impl<B: Block> TypedBlock<B> {
             implicit_name: references.1,
         });
     }
+
+    #[cfg(test)]
+    fn resolve(
+        &self,
+        snapshot: Vec<u8>,
+        snapshot_seq: u64,
+        operations: Vec<OperationRecord>,
+        parent: BlockParent,
+        name: String,
+    ) {
+        <Self as ErasedBlock>::resolve_authored(
+            self,
+            Uuid::nil(),
+            snapshot,
+            snapshot_seq,
+            operations,
+            parent,
+            name,
+        );
+    }
 }
 
 impl<B: Block> ErasedBlock for TypedBlock<B> {
@@ -1744,6 +1818,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 
     fn block_type_id(&self) -> Uuid {
         B::TYPE_ID
+    }
+
+    fn author(&self) -> Option<Uuid> {
+        *self.author.read()
     }
 
     fn debug_snapshot(&self) -> BlockDebugSnapshot {
@@ -1811,14 +1889,16 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         self.loaded.send_replace(true);
     }
 
-    fn resolve(
+    fn resolve_authored(
         &self,
+        author: Uuid,
         snapshot: Vec<u8>,
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         parent: BlockParent,
         name: String,
     ) {
+        *self.author.write() = Some(author);
         let mut value: B = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
             fatal(format!("failed to deserialize block snapshot: {error}"))
         });
@@ -2091,7 +2171,7 @@ mod tests {
 
     #[test]
     fn created_blocks_are_immediately_readable_and_operate_optimistically() {
-        let client = BlockClient::new();
+        let client = BlockClient::new(Uuid::new_v4());
         let block = client.create_block(Counter { count: 1 });
         assert_eq!(block.read().unwrap().count, 1);
         block.operate(CounterOperation::Add(2));
@@ -2111,6 +2191,7 @@ mod tests {
             vec![OperationRecord {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
+                author: Uuid::new_v4(),
                 operation: serde_json::to_vec(&CounterOperation::Add(3)).unwrap(),
                 references: ReferenceDelta::default(),
             }],
@@ -2138,6 +2219,7 @@ mod tests {
             block_for_thread.remote_operation(OperationRecord {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
+                author: Uuid::new_v4(),
                 operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
                 references: ReferenceDelta::default(),
             });
@@ -2169,6 +2251,7 @@ mod tests {
         block.remote_operation(OperationRecord {
             seq: 1,
             operation_id: Uuid::new_v4(),
+            author: Uuid::new_v4(),
             operation: serde_json::to_vec(&CounterOperation::Add(10)).unwrap(),
             references: ReferenceDelta::default(),
         });
@@ -2195,6 +2278,7 @@ mod tests {
         block.remote_operation(OperationRecord {
             seq: 1,
             operation_id: update.operation_id,
+            author: Uuid::new_v4(),
             operation: update.operation,
             references: ReferenceDelta::default(),
         });
@@ -2218,6 +2302,7 @@ mod tests {
         block.remote_operation(OperationRecord {
             seq: 2,
             operation_id: Uuid::new_v4(),
+            author: Uuid::new_v4(),
             operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
             references: ReferenceDelta::default(),
         });
@@ -2226,6 +2311,7 @@ mod tests {
         block.remote_operation(OperationRecord {
             seq: 1,
             operation_id: Uuid::new_v4(),
+            author: Uuid::new_v4(),
             operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
             references: ReferenceDelta::default(),
         });
@@ -2234,7 +2320,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_until_observes_current_and_future_values() {
-        let client = BlockClient::new();
+        let client = BlockClient::new(Uuid::new_v4());
         let block = client.create_block(Counter { count: 1 });
         block.wait_until(|counter| counter.count == 1).await;
 
@@ -2244,6 +2330,7 @@ mod tests {
             block_for_update.block.remote_operation(OperationRecord {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
+                author: Uuid::new_v4(),
                 operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
                 references: ReferenceDelta::default(),
             });
@@ -2284,11 +2371,13 @@ mod tests {
                                 command: CommandKind::ReadBlock,
                                 id,
                                 block_type: Counter::TYPE_ID,
+                                author: Uuid::new_v4(),
                                 snapshot: serde_json::to_vec(&Counter { count: 2 }).unwrap(),
                                 snapshot_seq: 0,
                                 operations: vec![OperationRecord {
                                     seq: 1,
                                     operation_id: Uuid::new_v4(),
+                                    author: Uuid::new_v4(),
                                     operation: serde_json::to_vec(&CounterOperation::Add(3))
                                         .unwrap(),
                                     references: ReferenceDelta::default(),
@@ -2305,7 +2394,7 @@ mod tests {
         });
 
         let address = address_rx.recv().unwrap();
-        let client = BlockClient::new();
+        let client = BlockClient::new(Uuid::new_v4());
         let block = client.get_block::<Counter>(id);
         assert!(block.read().is_none());
         client.connect(format!("ws://{address}"));

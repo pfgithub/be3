@@ -21,6 +21,28 @@ use tokio::net::TcpListener;
 use uuid::Uuid;
 
 const APP_ID: &str = "Block";
+const ACCOUNTS: [Account; 5] = [
+    Account {
+        name: "Account A",
+        id: Uuid::from_u128(0x88ee0604_544d_4b45_bfed_75b295301153),
+    },
+    Account {
+        name: "Account B",
+        id: Uuid::from_u128(0x380531b6_3b86_452d_bbcd_ae94ce002f8e),
+    },
+    Account {
+        name: "Account C",
+        id: Uuid::from_u128(0x81a47f30_6c99_4154_8075_5d53998d6cd4),
+    },
+    Account {
+        name: "Account D",
+        id: Uuid::from_u128(0xc4b6705d_f2be_403e_a1b7_bc336314d741),
+    },
+    Account {
+        name: "Account E",
+        id: Uuid::from_u128(0x51db8e56_fe52_42c7_9d92_1c298502fa32),
+    },
+];
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -43,6 +65,8 @@ fn main() -> eframe::Result {
 }
 
 struct BlockApp {
+    server_url: String,
+    account: Account,
     client: BlockClient,
     roots: ReferenceList,
     orphaned: Option<ReferenceList>,
@@ -59,6 +83,21 @@ struct BlockApp {
     network_debug_open: bool,
     block_picker: BlockPicker,
     block_picker_target: Option<BlockPickerTarget>,
+    pending_destructive_action: Option<PendingDestructiveAction>,
+    scheduled_account_switch: Option<Account>,
+    allow_close: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Account {
+    name: &'static str,
+    id: Uuid,
+}
+
+#[derive(Clone, Copy)]
+enum PendingDestructiveAction {
+    Switch(Account),
+    Close,
 }
 
 #[derive(Clone)]
@@ -93,10 +132,13 @@ impl BlockApp {
             .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?
             .join("blocks");
         let url = start_embedded_server(data_dir)?;
-        let client = BlockClient::new();
-        client.connect(url);
+        let account = ACCOUNTS[0];
+        let client = BlockClient::new(account.id);
+        client.connect(url.clone());
         let roots = client.watch_references(BlockReferenceList::Roots);
         Ok(Self {
+            server_url: url,
+            account,
             client,
             roots,
             orphaned: None,
@@ -113,7 +155,109 @@ impl BlockApp {
             network_debug_open: false,
             block_picker: BlockPicker::default(),
             block_picker_target: None,
+            pending_destructive_action: None,
+            scheduled_account_switch: None,
+            allow_close: false,
         })
+    }
+
+    fn request_account_switch(&mut self, account: Account) {
+        if account == self.account {
+            return;
+        }
+        if self.client.network_debug_snapshot().changes_saved {
+            self.scheduled_account_switch = Some(account);
+        } else {
+            self.pending_destructive_action = Some(PendingDestructiveAction::Switch(account));
+        }
+    }
+
+    fn switch_account(&mut self, ctx: &egui::Context, account: Account) {
+        let client = BlockClient::new(account.id);
+        client.connect(self.server_url.clone());
+        let roots = client.watch_references(BlockReferenceList::Roots);
+
+        self.orphaned = None;
+        self.orphaned_expanded = false;
+        self.expanded.clear();
+        self.parents.clear();
+        self.registry = EditorRegistry::new();
+        self.editors.clear();
+        self.tabs.clear();
+        self.active_tab = None;
+        self.pending_transfers.clear();
+        self.rename = None;
+        self.client_debug_open = false;
+        self.network_debug_open = false;
+        self.block_picker = BlockPicker::default();
+        self.block_picker_target = None;
+        self.pending_destructive_action = None;
+        self.scheduled_account_switch = None;
+        self.allow_close = false;
+        self.roots = roots;
+        self.client = client;
+        self.account = account;
+        ctx.memory_mut(|memory| *memory = Default::default());
+    }
+
+    fn intercept_close(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|input| input.viewport().close_requested()) || self.allow_close {
+            return;
+        }
+        if self.client.network_debug_snapshot().changes_saved {
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        self.pending_destructive_action = Some(PendingDestructiveAction::Close);
+    }
+
+    fn show_discard_confirmation(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.pending_destructive_action else {
+            return;
+        };
+        let mut discard = false;
+        let mut cancel = false;
+        let (title, message, button) = match action {
+            PendingDestructiveAction::Switch(account) => (
+                "Discard unsaved changes?",
+                format!(
+                    "Switching to {} will discard changes that have not reached the server.",
+                    account.name
+                ),
+                "Discard and switch",
+            ),
+            PendingDestructiveAction::Close => (
+                "Discard unsaved changes?",
+                "Closing Block Editor will discard changes that have not reached the server."
+                    .into(),
+                "Discard and close",
+            ),
+        };
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(message);
+                ui.horizontal(|ui| {
+                    discard = ui.button(button).clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if discard {
+            self.pending_destructive_action = None;
+            match action {
+                PendingDestructiveAction::Switch(account) => {
+                    self.scheduled_account_switch = Some(account);
+                }
+                PendingDestructiveAction::Close => {
+                    self.allow_close = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        } else if cancel {
+            self.pending_destructive_action = None;
+        }
     }
 
     fn create_block_editor(&mut self, block_type: Uuid) -> Option<Uuid> {
@@ -134,6 +278,7 @@ impl BlockApp {
                 BlockReference {
                     id,
                     block_type,
+                    author: self.account.id,
                     name: self
                         .registry
                         .display_name(block_type)
@@ -165,6 +310,7 @@ impl BlockApp {
                 BlockReference {
                     id: block.id,
                     block_type: block.block_type,
+                    author: block.author,
                     name: block.name,
                     parent: BlockParent::Root,
                     references: 0,
@@ -688,6 +834,20 @@ impl BlockApp {
                         self.network_debug_open = true;
                         ui.close();
                     }
+                    ui.separator();
+                    ui.strong("Accounts");
+                    ui.small(format!("Signed in as {}", self.account.name));
+                    ui.small(self.account.id.to_string());
+                    for account in ACCOUNTS {
+                        if ui
+                            .selectable_label(account == self.account, account.name)
+                            .on_hover_text(account.id.to_string())
+                            .clicked()
+                        {
+                            self.request_account_switch(account);
+                            ui.close();
+                        }
+                    }
                 });
             });
         });
@@ -758,10 +918,9 @@ impl BlockApp {
                         .display_name(block_type)
                         .unwrap_or_default()
                         .to_owned();
-                    let referenced = self
-                        .editors
-                        .get_mut(&active)
-                        .is_some_and(|editor| editor.block_created(id, block_type, name));
+                    let referenced = self.editors.get_mut(&active).is_some_and(|editor| {
+                        editor.block_created(id, block_type, self.account.id, name)
+                    });
                     match (parent, referenced) {
                         (Some(parent), true) => {
                             if let Some(created) = self.editors.get(&id) {
@@ -900,6 +1059,10 @@ fn immutable_id_list(ui: &mut egui::Ui, ids: &[Uuid], empty: &str) {
 
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Some(account) = self.scheduled_account_switch.take() {
+            self.switch_account(ui.ctx(), account);
+        }
+        self.intercept_close(ui.ctx());
         self.process_pending_transfers();
         self.show_block_picker(ui.ctx());
         self.show_rename(ui);
@@ -937,6 +1100,7 @@ impl eframe::App for BlockApp {
                 .show_inside(ui, |ui| self.show_statusbar(ui));
             self.show_content(ui, frame);
         });
+        self.show_discard_confirmation(ui.ctx());
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
 }

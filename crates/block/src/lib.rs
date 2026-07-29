@@ -22,6 +22,7 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
 pub struct OperationRecord {
     pub seq: u64,
     pub operation_id: Uuid,
+    pub author: Uuid,
     pub operation: Vec<u8>,
     pub references: ReferenceDelta,
 }
@@ -73,6 +74,7 @@ pub struct BlockReference {
     pub id: Uuid,
     #[serde(rename = "type")]
     pub block_type: Uuid,
+    pub author: Uuid,
     pub name: String,
     pub parent: BlockParent,
     pub references: usize,
@@ -208,6 +210,7 @@ pub enum ServerMessage {
         id: Uuid,
         #[serde(rename = "type")]
         block_type: Uuid,
+        author: Uuid,
         snapshot: Vec<u8>,
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,

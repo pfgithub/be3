@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn duplicate_reference_watches_share_subscription() {
-    let client = BlockClient::new();
+    let client = BlockClient::new(Uuid::new_v4());
     let first = client.watch_references(BlockReferenceList::Roots);
     let second = client.watch_references(BlockReferenceList::Roots);
 
