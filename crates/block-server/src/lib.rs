@@ -1,8 +1,7 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt,
-    io::ErrorKind,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -15,11 +14,12 @@ use block::{
 };
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use tokio::{
     fs,
     net::{TcpListener, TcpStream},
     sync::{mpsc, Mutex},
+    task::JoinSet,
 };
 use tokio_tungstenite::{
     accept_hdr_async,
@@ -32,22 +32,33 @@ use tokio_tungstenite::{
 use uuid::Uuid;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
+const DATABASE_FILE: &str = "blocks.sqlite3";
 
 pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
     let root = data_dir.into();
     fs::create_dir_all(&root).await?;
     let store = Arc::new(BlockStore::open(root).await?);
     let watch_hub = Arc::new(WatchHub::new());
+    let mut connections = JoinSet::new();
 
     loop {
-        let (stream, peer_addr) = listener.accept().await?;
-        let store = Arc::clone(&store);
-        let watch_hub = Arc::clone(&watch_hub);
-        tokio::spawn(async move {
-            if let Err(error) = handle_connection(stream, store, watch_hub).await {
-                eprintln!("connection {peer_addr} closed with error: {error}");
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (stream, peer_addr) = accepted?;
+                let store = Arc::clone(&store);
+                let watch_hub = Arc::clone(&watch_hub);
+                connections.spawn(async move {
+                    if let Err(error) = handle_connection(stream, store, watch_hub).await {
+                        eprintln!("connection {peer_addr} closed with error: {error}");
+                    }
+                });
             }
-        });
+            Some(result) = connections.join_next(), if !connections.is_empty() => {
+                if let Err(error) = result {
+                    eprintln!("connection task failed: {error}");
+                }
+            }
+        }
     }
 }
 
@@ -616,7 +627,7 @@ impl WatchHub {
 }
 
 struct BlockStore {
-    root: PathBuf,
+    database: Mutex<Connection>,
     locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
     dependencies: Mutex<DependencyState>,
 }
@@ -624,30 +635,25 @@ struct BlockStore {
 impl BlockStore {
     #[cfg(test)]
     fn new(root: PathBuf) -> Self {
-        Self {
-            root,
-            locks: Mutex::new(HashMap::new()),
-            dependencies: Mutex::new(DependencyState::default()),
-        }
+        std::fs::create_dir_all(&root).unwrap();
+        let mut connection = Connection::open(root.join(DATABASE_FILE)).unwrap();
+        initialize_database(&mut connection).unwrap();
+        Self::from_connection(connection).unwrap()
     }
 
     async fn open(root: PathBuf) -> Result<Self, ServerError> {
-        let path = root.join("dependencies.json");
-        let dependencies = match fs::read(path).await {
-            Ok(data) => serde_json::from_slice(&data)?,
-            Err(error) if error.kind() == ErrorKind::NotFound => DependencyState::default(),
-            Err(error) => return Err(error.into()),
-        };
+        let mut connection = Connection::open(root.join(DATABASE_FILE))?;
+        initialize_database(&mut connection)?;
+        Self::from_connection(connection).map_err(ServerError::from)
+    }
+
+    fn from_connection(connection: Connection) -> Result<Self, StoreError> {
+        let dependencies = load_dependencies(&connection)?;
         Ok(Self {
-            root,
+            database: Mutex::new(connection),
             locks: Mutex::new(HashMap::new()),
             dependencies: Mutex::new(dependencies),
         })
-    }
-
-    #[cfg(test)]
-    fn root(&self) -> &Path {
-        &self.root
     }
 
     async fn lock_for(&self, id: Uuid) -> Arc<Mutex<()>> {
@@ -676,29 +682,13 @@ impl BlockStore {
         {
             return Err(StoreError::ReferencedBlockNotFound);
         }
-        let block_path = self.block_path(id);
-        match fs::create_dir(&block_path).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                return Err(StoreError::BlockAlreadyExists);
-            }
-            Err(error) => return Err(error.into()),
-        }
-        fs::create_dir(block_path.join("snapshots")).await?;
-        fs::create_dir(block_path.join("operations")).await?;
-        fs::write(
-            block_path.join("info.json"),
-            serde_json::to_vec_pretty(&BlockInfo { block_type })?,
-        )
-        .await?;
-        fs::write(block_path.join("snapshots").join("0"), data).await?;
         let mut updated = dependencies.clone();
         updated.blocks.insert(
             id,
             DependencyBlock {
                 block_type,
                 author,
-                name: implicit_name,
+                name: implicit_name.clone(),
                 explicit_name: None,
                 parent: BlockParent::Orphaned,
                 references,
@@ -712,10 +702,23 @@ impl BlockStore {
                 backrefs.push(id);
             }
         }
-        if let Err(error) = self.persist_dependencies(&updated).await {
-            let _ = fs::remove_dir_all(&block_path).await;
-            return Err(error);
-        }
+        let mut database = self.database.lock().await;
+        let transaction = database.transaction()?;
+        transaction.execute(
+            "INSERT INTO blocks (
+                id, block_type, author, snapshot, snapshot_seq, name, explicit_name,
+                parent_kind, parent_id
+            ) VALUES (?1, ?2, ?3, ?4, 0, ?5, NULL, 0, NULL)",
+            params![
+                id.to_string(),
+                block_type.to_string(),
+                author.to_string(),
+                data,
+                implicit_name,
+            ],
+        )?;
+        persist_dependencies(&transaction, &updated)?;
+        transaction.commit()?;
         *dependencies = updated;
         Ok(())
     }
@@ -731,12 +734,26 @@ impl BlockStore {
         references: ReferenceDelta,
     ) -> Result<UpdateOutcome, StoreError> {
         validate_name(&implicit_name)?;
-        let operations_path = self.block_path(id).join("operations");
-        if !operations_path.is_dir() {
+        let (exists, records) = {
+            let database = self.database.lock().await;
+            let exists = database
+                .query_row(
+                    "SELECT 1 FROM blocks WHERE id = ?1",
+                    [id.to_string()],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            let records = exists
+                .then(|| read_operations(&database, id))
+                .transpose()?
+                .unwrap_or_default();
+            (exists, records)
+        };
+        if !exists {
             return Err(StoreError::BlockNotFound);
         }
 
-        let records = read_operations(&operations_path).await?;
         if let Some(existing) = records
             .iter()
             .find(|record| record.operation_id == operation_id)
@@ -769,14 +786,9 @@ impl BlockStore {
             operation,
             references,
         };
-        let path = operations_path.join(expected.to_string());
-        write_new_file(path, serde_json::to_vec(&record)?).await?;
         let mut dependencies = self.dependencies.lock().await;
         let mut updated = dependencies.clone();
-        if let Err(error) = updated.apply_references(id, &record.references) {
-            let _ = fs::remove_file(operations_path.join(expected.to_string())).await;
-            return Err(error);
-        }
+        updated.apply_references(id, &record.references)?;
         let block = updated
             .blocks
             .get_mut(&id)
@@ -785,33 +797,58 @@ impl BlockStore {
             block.name = implicit_name;
         }
         let name = block.name.clone();
-        if let Err(error) = self.persist_dependencies(&updated).await {
-            let _ = fs::remove_file(operations_path.join(expected.to_string())).await;
-            return Err(error);
-        }
+        let mut database = self.database.lock().await;
+        let transaction = database.transaction()?;
+        transaction.execute(
+            "INSERT INTO operations (
+                block_id, seq, operation_id, author, operation, reference_delta
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id.to_string(),
+                u64_to_i64(record.seq)?,
+                record.operation_id.to_string(),
+                record.author.to_string(),
+                &record.operation,
+                serde_json::to_string(&record.references)?,
+            ],
+        )?;
+        persist_dependencies(&transaction, &updated)?;
+        transaction.commit()?;
         *dependencies = updated;
         Ok(UpdateOutcome::Inserted(record, name))
     }
 
     async fn read_block_unlocked(&self, id: Uuid) -> Result<BlockRead, StoreError> {
-        let block_path = self.block_path(id);
-        let info: BlockInfo =
-            serde_json::from_slice(&read_required(block_path.join("info.json")).await?)?;
-        let snapshot_seq = highest_snapshot_seq(&block_path.join("snapshots")).await?;
-        let snapshot =
-            read_required(block_path.join("snapshots").join(snapshot_seq.to_string())).await?;
-        let operations = read_operations(&block_path.join("operations"))
-            .await?
+        let database = self.database.lock().await;
+        let block = database
+            .query_row(
+                "SELECT block_type, snapshot, snapshot_seq FROM blocks WHERE id = ?1",
+                [id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(StoreError::BlockNotFound)?;
+        let block_type = parse_uuid(&block.0)?;
+        let snapshot = block.1;
+        let snapshot_seq = i64_to_u64(block.2)?;
+        let operations = read_operations(&database, id)?
             .into_iter()
             .filter(|record| record.seq > snapshot_seq)
             .collect();
+        drop(database);
         let dependencies = self.dependencies.lock().await;
         let dependency = dependencies
             .blocks
             .get(&id)
             .ok_or(StoreError::BlockNotFound)?;
         Ok(BlockRead {
-            block_type: info.block_type,
+            block_type,
             author: dependency.author,
             snapshot,
             snapshot_seq,
@@ -825,7 +862,10 @@ impl BlockStore {
         let mut dependencies = self.dependencies.lock().await;
         let mut updated = dependencies.clone();
         updated.set_parent(id, parent)?;
-        self.persist_dependencies(&updated).await?;
+        let mut database = self.database.lock().await;
+        let transaction = database.transaction()?;
+        persist_dependencies(&transaction, &updated)?;
+        transaction.commit()?;
         *dependencies = updated;
         Ok(())
     }
@@ -840,7 +880,10 @@ impl BlockStore {
             .ok_or(StoreError::BlockNotFound)?;
         block.name.clone_from(&name);
         block.explicit_name = Some(name.clone());
-        self.persist_dependencies(&updated).await?;
+        let mut database = self.database.lock().await;
+        let transaction = database.transaction()?;
+        persist_dependencies(&transaction, &updated)?;
+        transaction.commit()?;
         *dependencies = updated;
         Ok(name)
     }
@@ -892,19 +935,6 @@ impl BlockStore {
             })
             .collect()
     }
-
-    async fn persist_dependencies(&self, dependencies: &DependencyState) -> Result<(), StoreError> {
-        fs::write(
-            self.root.join("dependencies.json"),
-            serde_json::to_vec_pretty(dependencies)?,
-        )
-        .await?;
-        Ok(())
-    }
-
-    fn block_path(&self, id: Uuid) -> PathBuf {
-        self.root.join(id.to_string())
-    }
 }
 
 enum UpdateOutcome {
@@ -922,7 +952,7 @@ struct BlockRead {
     name: String,
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Default)]
 struct DependencyState {
     blocks: IndexMap<Uuid, DependencyBlock>,
 }
@@ -1015,7 +1045,7 @@ impl DependencyState {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 struct DependencyBlock {
     block_type: Uuid,
     author: Uuid,
@@ -1041,69 +1071,192 @@ fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
     ids
 }
 
-#[derive(Deserialize, Serialize)]
-struct BlockInfo {
-    #[serde(rename = "type")]
-    block_type: Uuid,
+fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Error> {
+    connection.pragma_update(None, "foreign_keys", true)?;
+    connection.pragma_update(None, "journal_mode", "WAL")?;
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS blocks (
+            id              TEXT PRIMARY KEY,
+            block_type      TEXT NOT NULL,
+            author          TEXT NOT NULL,
+            snapshot        BLOB NOT NULL,
+            snapshot_seq    INTEGER NOT NULL CHECK (snapshot_seq >= 0),
+            name            TEXT NOT NULL,
+            explicit_name   TEXT,
+            parent_kind     INTEGER NOT NULL CHECK (parent_kind IN (0, 1, 2)),
+            parent_id       TEXT,
+            CHECK (
+                (parent_kind = 2 AND parent_id IS NOT NULL)
+                OR (parent_kind != 2 AND parent_id IS NULL)
+            )
+        );
+
+        CREATE TABLE IF NOT EXISTS block_references (
+            block_id        TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            position        INTEGER NOT NULL CHECK (position >= 0),
+            reference_id    TEXT NOT NULL REFERENCES blocks(id),
+            PRIMARY KEY (block_id, position),
+            UNIQUE (block_id, reference_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS operations (
+            block_id        TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            seq             INTEGER NOT NULL CHECK (seq > 0),
+            operation_id    TEXT NOT NULL,
+            author          TEXT NOT NULL,
+            operation       BLOB NOT NULL,
+            reference_delta TEXT NOT NULL,
+            PRIMARY KEY (block_id, seq),
+            UNIQUE (block_id, operation_id)
+        );
+        ",
+    )
 }
 
-async fn read_required(path: PathBuf) -> Result<Vec<u8>, StoreError> {
-    fs::read(path).await.map_err(|error| {
-        if error.kind() == ErrorKind::NotFound {
-            StoreError::BlockNotFound
-        } else {
-            StoreError::Io(error)
-        }
-    })
-}
-
-async fn highest_snapshot_seq(path: &Path) -> Result<u64, StoreError> {
-    let mut highest = None;
-    let mut entries = fs::read_dir(path).await.map_err(|error| {
-        if error.kind() == ErrorKind::NotFound {
-            StoreError::BlockNotFound
-        } else {
-            StoreError::Io(error)
-        }
-    })?;
-    while let Some(entry) = entries.next_entry().await? {
-        if let Some(seq) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u64>().ok())
-        {
-            highest = Some(highest.map_or(seq, |current: u64| current.max(seq)));
+fn load_dependencies(connection: &Connection) -> Result<DependencyState, StoreError> {
+    let mut state = DependencyState::default();
+    {
+        let mut statement = connection.prepare(
+            "SELECT id, block_type, author, name, explicit_name, parent_kind, parent_id
+             FROM blocks ORDER BY rowid",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, block_type, author, name, explicit_name, parent_kind, parent_id) = row?;
+            let parent = decode_parent(parent_kind, parent_id)?;
+            state.blocks.insert(
+                parse_uuid(&id)?,
+                DependencyBlock {
+                    block_type: parse_uuid(&block_type)?,
+                    author: parse_uuid(&author)?,
+                    name,
+                    explicit_name,
+                    parent,
+                    references: Vec::new(),
+                    backrefs: Vec::new(),
+                },
+            );
         }
     }
-    highest.ok_or(StoreError::BlockNotFound)
+
+    let mut statement = connection.prepare(
+        "SELECT block_id, reference_id
+         FROM block_references ORDER BY block_id, position",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (block_id, reference_id) = row?;
+        let block_id = parse_uuid(&block_id)?;
+        let reference_id = parse_uuid(&reference_id)?;
+        state
+            .blocks
+            .get_mut(&block_id)
+            .ok_or_else(|| StoreError::InvalidStorage("reference source is missing".into()))?
+            .references
+            .push(reference_id);
+    }
+
+    let references: Vec<_> = state
+        .blocks
+        .iter()
+        .flat_map(|(&id, block)| {
+            block
+                .references
+                .iter()
+                .copied()
+                .map(move |reference| (id, reference))
+        })
+        .collect();
+    for (id, reference) in references {
+        state
+            .blocks
+            .get_mut(&reference)
+            .ok_or_else(|| StoreError::InvalidStorage("referenced block is missing".into()))?
+            .backrefs
+            .push(id);
+    }
+    Ok(state)
 }
 
-async fn read_operations(path: &Path) -> Result<Vec<OperationRecord>, StoreError> {
-    let mut records = BTreeMap::new();
-    let mut entries = fs::read_dir(path).await.map_err(|error| {
-        if error.kind() == ErrorKind::NotFound {
-            StoreError::BlockNotFound
-        } else {
-            StoreError::Io(error)
+fn persist_dependencies(
+    transaction: &Transaction<'_>,
+    dependencies: &DependencyState,
+) -> Result<(), StoreError> {
+    transaction.execute("DELETE FROM block_references", [])?;
+    for (&id, block) in &dependencies.blocks {
+        let (parent_kind, parent_id) = encode_parent(block.parent);
+        let updated = transaction.execute(
+            "UPDATE blocks
+             SET name = ?2, explicit_name = ?3, parent_kind = ?4, parent_id = ?5
+             WHERE id = ?1",
+            params![
+                id.to_string(),
+                block.name,
+                block.explicit_name,
+                parent_kind,
+                parent_id,
+            ],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidStorage(
+                "dependency metadata references a missing block".into(),
+            ));
         }
-    })?;
-    while let Some(entry) = entries.next_entry().await? {
-        let Some(seq) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u64>().ok())
-        else {
-            continue;
-        };
-        let record: OperationRecord = serde_json::from_slice(&fs::read(entry.path()).await?)?;
-        if record.seq != seq {
-            return Err(StoreError::CorruptOperationLog);
-        }
-        if records.insert(seq, record).is_some() {
-            return Err(StoreError::CorruptOperationLog);
+        for (position, reference) in block.references.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO block_references (block_id, position, reference_id)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    id.to_string(),
+                    i64::try_from(position).map_err(|_| {
+                        StoreError::InvalidStorage("reference position exceeds SQLite range".into())
+                    })?,
+                    reference.to_string(),
+                ],
+            )?;
         }
     }
-    let records: Vec<_> = records.into_values().collect();
+    Ok(())
+}
+
+fn read_operations(connection: &Connection, id: Uuid) -> Result<Vec<OperationRecord>, StoreError> {
+    let mut statement = connection.prepare(
+        "SELECT seq, operation_id, author, operation, reference_delta
+         FROM operations WHERE block_id = ?1 ORDER BY seq",
+    )?;
+    let rows = statement.query_map([id.to_string()], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Vec<u8>>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut records = Vec::new();
+    for row in rows {
+        let (seq, operation_id, author, operation, references) = row?;
+        records.push(OperationRecord {
+            seq: i64_to_u64(seq)?,
+            operation_id: parse_uuid(&operation_id)?,
+            author: parse_uuid(&author)?,
+            operation,
+            references: serde_json::from_str(&references)?,
+        });
+    }
     for (index, record) in records.iter().enumerate() {
         if record.seq != index as u64 + 1 {
             return Err(StoreError::CorruptOperationLog);
@@ -1112,16 +1265,38 @@ async fn read_operations(path: &Path) -> Result<Vec<OperationRecord>, StoreError
     Ok(records)
 }
 
-async fn write_new_file(path: PathBuf, data: Vec<u8>) -> Result<(), StoreError> {
-    use tokio::io::AsyncWriteExt;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .await?;
-    file.write_all(&data).await?;
-    file.flush().await?;
-    Ok(())
+fn encode_parent(parent: BlockParent) -> (i64, Option<String>) {
+    match parent {
+        BlockParent::Orphaned => (0, None),
+        BlockParent::Root => (1, None),
+        BlockParent::Uuid(id) => (2, Some(id.to_string())),
+    }
+}
+
+fn decode_parent(kind: i64, id: Option<String>) -> Result<BlockParent, StoreError> {
+    match (kind, id) {
+        (0, None) => Ok(BlockParent::Orphaned),
+        (1, None) => Ok(BlockParent::Root),
+        (2, Some(id)) => Ok(BlockParent::Uuid(parse_uuid(&id)?)),
+        _ => Err(StoreError::InvalidStorage(
+            "block has an invalid parent representation".into(),
+        )),
+    }
+}
+
+fn parse_uuid(value: &str) -> Result<Uuid, StoreError> {
+    Uuid::parse_str(value)
+        .map_err(|error| StoreError::InvalidStorage(format!("invalid UUID in database: {error}")))
+}
+
+fn u64_to_i64(value: u64) -> Result<i64, StoreError> {
+    i64::try_from(value)
+        .map_err(|_| StoreError::InvalidStorage("sequence exceeds SQLite integer range".into()))
+}
+
+fn i64_to_u64(value: i64) -> Result<u64, StoreError> {
+    u64::try_from(value)
+        .map_err(|_| StoreError::InvalidStorage("negative sequence in database".into()))
 }
 
 #[derive(Debug)]
@@ -1135,7 +1310,8 @@ enum StoreError {
     ParentMissingReference,
     ReferencedBlockNotFound,
     CorruptOperationLog,
-    Io(std::io::Error),
+    InvalidStorage(String),
+    Sqlite(rusqlite::Error),
     Json(serde_json::Error),
 }
 
@@ -1164,7 +1340,10 @@ impl StoreError {
             Self::ParentCycle => ErrorCode::ParentCycle,
             Self::ParentMissingReference => ErrorCode::ParentMissingReference,
             Self::ReferencedBlockNotFound => ErrorCode::ReferencedBlockNotFound,
-            Self::CorruptOperationLog | Self::Io(_) | Self::Json(_) => ErrorCode::StorageError,
+            Self::CorruptOperationLog
+            | Self::InvalidStorage(_)
+            | Self::Sqlite(_)
+            | Self::Json(_) => ErrorCode::StorageError,
         }
     }
 }
@@ -1187,15 +1366,16 @@ impl fmt::Display for StoreError {
             }
             Self::ReferencedBlockNotFound => write!(formatter, "referenced block does not exist"),
             Self::CorruptOperationLog => write!(formatter, "operation log is not contiguous"),
-            Self::Io(error) => write!(formatter, "storage I/O error: {error}"),
+            Self::InvalidStorage(message) => write!(formatter, "invalid storage data: {message}"),
+            Self::Sqlite(error) => write!(formatter, "SQLite storage error: {error}"),
             Self::Json(error) => write!(formatter, "storage JSON error: {error}"),
         }
     }
 }
 
-impl From<std::io::Error> for StoreError {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error)
+impl From<rusqlite::Error> for StoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
     }
 }
 
@@ -1209,6 +1389,8 @@ impl From<serde_json::Error> for StoreError {
 pub enum ServerError {
     Io(std::io::Error),
     Json(serde_json::Error),
+    Sqlite(rusqlite::Error),
+    Storage(String),
     WebSocket(Box<tokio_tungstenite::tungstenite::Error>),
 }
 
@@ -1217,6 +1399,8 @@ impl fmt::Display for ServerError {
         match self {
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::Json(error) => write!(formatter, "JSON error: {error}"),
+            Self::Sqlite(error) => write!(formatter, "SQLite error: {error}"),
+            Self::Storage(message) => write!(formatter, "storage error: {message}"),
             Self::WebSocket(error) => write!(formatter, "websocket error: {error}"),
         }
     }
@@ -1231,6 +1415,22 @@ impl From<std::io::Error> for ServerError {
 impl From<serde_json::Error> for ServerError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+impl From<rusqlite::Error> for ServerError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
+    }
+}
+
+impl From<StoreError> for ServerError {
+    fn from(error: StoreError) -> Self {
+        match error {
+            StoreError::Sqlite(error) => Self::Sqlite(error),
+            StoreError::Json(error) => Self::Json(error),
+            error => Self::Storage(error.to_string()),
+        }
     }
 }
 
@@ -1250,7 +1450,6 @@ mod tests {
     async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
         let root = test_root();
         let store = BlockStore::new(root.clone());
-        fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
             .create_block_unlocked(
@@ -1309,6 +1508,7 @@ mod tests {
                 .await,
             Err(StoreError::ConflictingOperationId)
         ));
+        drop(store);
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -1316,7 +1516,6 @@ mod tests {
     async fn reads_replay_contiguous_operation_records() {
         let root = test_root();
         let store = BlockStore::new(root.clone());
-        fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         let block_type = Uuid::new_v4();
         store
@@ -1362,6 +1561,7 @@ mod tests {
         assert_eq!(read.operations.len(), 2);
         assert_eq!(read.operations[0].seq, 1);
         assert_eq!(read.operations[1].seq, 2);
+        drop(store);
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -1369,7 +1569,6 @@ mod tests {
     async fn sequence_errors_include_the_expected_sequence() {
         let root = test_root();
         let store = BlockStore::new(root.clone());
-        fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
             .create_block_unlocked(
@@ -1399,6 +1598,7 @@ mod tests {
                 actual: 4
             })
         ));
+        drop(store);
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -1406,7 +1606,6 @@ mod tests {
     async fn omitted_sequences_are_assigned_by_the_server() {
         let root = test_root();
         let store = BlockStore::new(root.clone());
-        fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
             .create_block_unlocked(
@@ -1447,6 +1646,7 @@ mod tests {
 
         assert!(matches!(first, UpdateOutcome::Inserted(record, _) if record.seq == 1));
         assert!(matches!(second, UpdateOutcome::Inserted(record, _) if record.seq == 2));
+        drop(store);
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -1454,7 +1654,6 @@ mod tests {
     async fn explicit_sequences_cannot_be_applied_out_of_order() {
         let root = test_root();
         let store = BlockStore::new(root.clone());
-        fs::create_dir_all(store.root()).await.unwrap();
         let id = Uuid::new_v4();
         store
             .create_block_unlocked(
@@ -1518,6 +1717,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1, 2]
         );
+        drop(store);
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -1526,7 +1726,6 @@ mod tests {
         let root = test_root();
         let store = Arc::new(BlockStore::new(root.clone()));
         let watch_hub = Arc::new(WatchHub::new());
-        fs::create_dir_all(store.root()).await.unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn({
@@ -1625,6 +1824,7 @@ mod tests {
 
         client.close(None).await.unwrap();
         server.await.unwrap();
+        drop(store);
         fs::remove_dir_all(root).await.unwrap();
     }
 
@@ -1633,7 +1833,6 @@ mod tests {
         let root = test_root();
         let store = Arc::new(BlockStore::new(root.clone()));
         let watch_hub = Arc::new(WatchHub::new());
-        fs::create_dir_all(store.root()).await.unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn({
@@ -1713,6 +1912,7 @@ mod tests {
 
         client.close(None).await.unwrap();
         server.await.unwrap();
+        drop(store);
         fs::remove_dir_all(root).await.unwrap();
     }
 

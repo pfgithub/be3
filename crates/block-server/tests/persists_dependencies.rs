@@ -25,6 +25,10 @@ async fn dependency_state_survives_a_server_restart() {
     ));
     drop(socket);
     let root = server.stop().await;
+    assert!(root.join("blocks.sqlite3").is_file());
+    assert!(!root.join("dependencies.json").exists());
+    assert!(!root.join(parent.to_string()).exists());
+    assert!(!root.join(child.to_string()).exists());
 
     let restarted = TestServer::start_at(root).await;
     let mut socket = restarted.connect().await;

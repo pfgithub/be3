@@ -14,11 +14,12 @@ async fn main() -> Result<(), block_server::ServerError> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_DIR));
     let listener = TcpListener::bind(&address).await?;
+    let database_path = data_dir.join("blocks.sqlite3");
 
     println!(
         "block server listening on ws://{} storing blocks in {}",
         address,
-        data_dir.display()
+        database_path.display()
     );
     block_server::serve(listener, data_dir).await
 }
