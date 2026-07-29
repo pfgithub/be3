@@ -4,6 +4,7 @@ use std::{
     process,
     sync::{mpsc, Arc, OnceLock},
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use block::{
@@ -24,6 +25,28 @@ pub struct BlockClient {
     commands: mpsc::Sender<WorkerCommand>,
     connected: Arc<OnceLock<()>>,
     access: Arc<RwLock<()>>,
+    debug: Arc<RwLock<NetworkDebugSnapshot>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetworkDirection {
+    Sent,
+    Received,
+}
+
+#[derive(Clone, Debug)]
+pub struct NetworkTrafficEntry {
+    pub timestamp_ms: u128,
+    pub direction: NetworkDirection,
+    pub payload: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NetworkDebugSnapshot {
+    pub sending_paused: bool,
+    pub queued_messages: usize,
+    pub changes_saved: bool,
+    pub traffic: Vec<NetworkTrafficEntry>,
 }
 
 impl BlockClient {
@@ -31,16 +54,22 @@ impl BlockClient {
         let (commands, command_rx) = mpsc::channel();
         let connected = Arc::new(OnceLock::new());
         let access = Arc::new(RwLock::new(()));
+        let debug = Arc::new(RwLock::new(NetworkDebugSnapshot {
+            changes_saved: true,
+            ..Default::default()
+        }));
         let worker_access = Arc::clone(&access);
+        let worker_debug = Arc::clone(&debug);
         thread::Builder::new()
             .name("block-client".into())
-            .spawn(move || worker_main(command_rx, worker_access))
+            .spawn(move || worker_main(command_rx, worker_access, worker_debug))
             .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));
         Self {
             id: Uuid::new_v4(),
             commands,
             connected,
             access,
+            debug,
         }
     }
 
@@ -129,6 +158,22 @@ impl BlockClient {
             id,
             name: name.into(),
         });
+    }
+
+    pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
+        self.debug.read().clone()
+    }
+
+    pub fn pause_sending(&self) {
+        self.send(WorkerCommand::PauseSending);
+    }
+
+    pub fn step_sending(&self) {
+        self.send(WorkerCommand::StepSending);
+    }
+
+    pub fn resume_sending(&self) {
+        self.send(WorkerCommand::ResumeSending);
     }
 
     fn send(&self, command: WorkerCommand) {
@@ -359,9 +404,16 @@ enum WorkerCommand {
     },
     UnwatchReferences(BlockReferenceList),
     Synchronize(oneshot::Sender<()>),
+    PauseSending,
+    StepSending,
+    ResumeSending,
 }
 
-fn worker_main(commands: mpsc::Receiver<WorkerCommand>, access: Arc<RwLock<()>>) {
+fn worker_main(
+    commands: mpsc::Receiver<WorkerCommand>,
+    access: Arc<RwLock<()>>,
+    debug: Arc<RwLock<NetworkDebugSnapshot>>,
+) {
     let runtime = tokio::runtime::Runtime::new()
         .unwrap_or_else(|error| fatal(format!("failed to create block client runtime: {error}")));
     runtime.block_on(async move {
@@ -377,7 +429,7 @@ fn worker_main(commands: mpsc::Receiver<WorkerCommand>, access: Arc<RwLock<()>>)
             })
             .unwrap_or_else(|error| fatal(format!("failed to spawn command forwarder: {error}")));
 
-        let mut state = WorkerState::new(access);
+        let mut state = WorkerState::new(access, debug);
         while let Some(command) = async_rx.recv().await {
             match command {
                 WorkerCommand::Connect(url) => {
@@ -405,14 +457,19 @@ async fn run_connected(
     state.queue_initial_requests();
 
     loop {
-        while let Some(message) = state.outbound.pop_front() {
+        while state.can_send() {
+            let Some(message) = state.outbound.pop_front() else {
+                break;
+            };
             let text = serde_json::to_string(&message).unwrap_or_else(|error| {
                 fatal(format!("failed to serialize client message: {error}"))
             });
-            sink.send(Message::Text(text))
+            sink.send(Message::Text(text.clone()))
                 .await
                 .unwrap_or_else(|error| fatal(format!("failed to send block message: {error}")));
+            state.message_sent(text);
         }
+        state.refresh_debug();
 
         tokio::select! {
             command = commands.recv() => {
@@ -433,14 +490,20 @@ async fn run_connected(
                 };
                 match message {
                     Message::Text(text) => {
+                        state.record_traffic(NetworkDirection::Received, text.to_string());
                         let message: ServerMessage = serde_json::from_str(&text)
                             .unwrap_or_else(|error| fatal(format!("invalid server message: {error}: {text}")));
                         state.handle_server_message(message);
                         state.finish_synchronization();
                     }
                     Message::Ping(payload) => {
+                        state.record_traffic(
+                            NetworkDirection::Received,
+                            format!("<websocket ping: {} bytes>", payload.len()),
+                        );
                         sink.send(Message::Pong(payload)).await
                             .unwrap_or_else(|error| fatal(format!("failed to send pong: {error}")));
+                        state.record_traffic(NetworkDirection::Sent, "<websocket pong>".into());
                     }
                     Message::Close(_) => return false,
                     Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
@@ -461,10 +524,13 @@ struct WorkerState {
     outbound: VecDeque<ClientMessage>,
     deferred: VecDeque<DeferredRequest>,
     synchronization_waiters: Vec<oneshot::Sender<()>>,
+    sending_paused: bool,
+    steps_remaining: usize,
+    debug: Arc<RwLock<NetworkDebugSnapshot>>,
 }
 
 impl WorkerState {
-    fn new(access: Arc<RwLock<()>>) -> Self {
+    fn new(access: Arc<RwLock<()>>, debug: Arc<RwLock<NetworkDebugSnapshot>>) -> Self {
         Self {
             connected: false,
             access,
@@ -474,6 +540,9 @@ impl WorkerState {
             outbound: VecDeque::new(),
             deferred: VecDeque::new(),
             synchronization_waiters: Vec::new(),
+            sending_paused: false,
+            steps_remaining: 0,
+            debug,
         }
     }
 
@@ -531,7 +600,57 @@ impl WorkerState {
             WorkerCommand::Synchronize(completed) => {
                 self.synchronization_waiters.push(completed);
             }
+            WorkerCommand::PauseSending => {
+                self.sending_paused = true;
+                self.steps_remaining = 0;
+            }
+            WorkerCommand::StepSending => {
+                if self.sending_paused {
+                    self.steps_remaining = self.steps_remaining.saturating_add(1);
+                }
+            }
+            WorkerCommand::ResumeSending => {
+                self.sending_paused = false;
+                self.steps_remaining = 0;
+            }
         }
+        self.refresh_debug();
+    }
+
+    fn can_send(&self) -> bool {
+        !self.sending_paused || self.steps_remaining > 0
+    }
+
+    fn message_sent(&mut self, payload: String) {
+        if self.sending_paused {
+            self.steps_remaining = self.steps_remaining.saturating_sub(1);
+        }
+        self.record_traffic(NetworkDirection::Sent, payload);
+    }
+
+    fn record_traffic(&self, direction: NetworkDirection, payload: String) {
+        self.debug.write().traffic.push(NetworkTrafficEntry {
+            timestamp_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+            direction,
+            payload,
+        });
+    }
+
+    fn refresh_debug(&self) {
+        let mut debug = self.debug.write();
+        debug.sending_paused = self.sending_paused;
+        debug.queued_messages = self.outbound.len();
+        debug.changes_saved = !self.has_unsaved_changes();
+    }
+
+    fn has_unsaved_changes(&self) -> bool {
+        self.blocks.values().any(|block| block.has_local_changes())
+            || self.requests.values().any(PendingRequest::changes_data)
+            || self.outbound.iter().any(client_message_changes_data)
+            || self.deferred.iter().any(DeferredRequest::changes_data)
     }
 
     fn queue_initial_requests(&mut self) {
@@ -961,6 +1080,19 @@ enum PendingRequest {
     UnwatchReferences,
 }
 
+impl PendingRequest {
+    fn changes_data(&self) -> bool {
+        matches!(
+            self,
+            Self::Create { .. }
+                | Self::Update { .. }
+                | Self::Batch { .. }
+                | Self::SetBlockParent { .. }
+                | Self::SetBlockName { .. }
+        )
+    }
+}
+
 enum DeferredRequest {
     SetBlockParent {
         id: Uuid,
@@ -980,6 +1112,26 @@ enum DeferredRequest {
     UnwatchReferences {
         list: BlockReferenceList,
     },
+}
+
+impl DeferredRequest {
+    fn changes_data(&self) -> bool {
+        matches!(
+            self,
+            Self::SetBlockParent { .. } | Self::SetBlockName { .. }
+        )
+    }
+}
+
+fn client_message_changes_data(message: &ClientMessage) -> bool {
+    matches!(
+        message,
+        ClientMessage::CreateBlock { .. }
+            | ClientMessage::UpdateBlock { .. }
+            | ClientMessage::UpdateBatch { .. }
+            | ClientMessage::SetBlockParent { .. }
+            | ClientMessage::SetBlockName { .. }
+    )
 }
 
 struct OutboundUpdate {
@@ -1012,6 +1164,7 @@ trait ErasedBlock: Send + Sync {
     fn sequence_conflict(&self, operation_id: Uuid, expected_seq: u64) -> bool;
     fn remote_operation(&self, operation: OperationRecord);
     fn is_synchronized(&self) -> bool;
+    fn has_local_changes(&self) -> bool;
 }
 
 struct TypedBlock<B: Block> {
@@ -1320,6 +1473,13 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             && state.in_flight.is_empty()
             && state.buffered.is_empty()
             && (!B::CRDT || state.confirmed_seq >= state.acknowledged_seq)
+    }
+
+    fn has_local_changes(&self) -> bool {
+        let state = self.state.read();
+        (state.initial.is_some() && !state.ready)
+            || !state.pending.is_empty()
+            || !state.in_flight.is_empty()
     }
 }
 

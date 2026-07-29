@@ -12,7 +12,9 @@ use std::{
 };
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
-use block_client::{text::TextDocument, BlockClient, ReferenceList};
+use block_client::{
+    text::TextDocument, BlockClient, NetworkDirection, NetworkTrafficEntry, ReferenceList,
+};
 use editor::{BlockEditor, EditorRegistry};
 use eframe::egui;
 use index::WorkspaceIndex;
@@ -44,6 +46,8 @@ fn main() -> eframe::Result {
 struct BlockApp {
     client: BlockClient,
     roots: ReferenceList,
+    orphaned: Option<ReferenceList>,
+    orphaned_expanded: bool,
     expanded: HashMap<Uuid, ReferenceList>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
@@ -51,6 +55,7 @@ struct BlockApp {
     active_tab: Option<Uuid>,
     pending_placements: Vec<PendingPlacement>,
     rename: Option<RenameState>,
+    network_debug_open: bool,
 }
 
 #[derive(Clone)]
@@ -77,6 +82,8 @@ impl BlockApp {
         Ok(Self {
             client,
             roots,
+            orphaned: None,
+            orphaned_expanded: false,
             expanded: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
@@ -84,6 +91,7 @@ impl BlockApp {
             active_tab: None,
             pending_placements: Vec::new(),
             rename: None,
+            network_debug_open: false,
         })
     }
 
@@ -347,6 +355,10 @@ impl BlockApp {
         }
         ui.separator();
 
+        egui::Panel::bottom("file-list-status")
+            .resizable(false)
+            .show_inside(ui, |ui| self.show_file_list_status(ui));
+
         egui::ScrollArea::vertical().show(ui, |ui| {
             let roots = self.roots.read();
             if roots.is_empty() && self.roots.is_loaded() {
@@ -355,7 +367,130 @@ impl BlockApp {
             for root in roots {
                 self.show_reference(ui, root, 0, &mut HashSet::new());
             }
+            ui.separator();
+            self.show_recently_deleted(ui);
         });
+    }
+
+    fn show_recently_deleted(&mut self, ui: &mut egui::Ui) {
+        let mut toggle = false;
+        ui.horizontal(|ui| {
+            if ui
+                .small_button(if self.orphaned_expanded {
+                    "\u{25bc}"
+                } else {
+                    "\u{25b6}"
+                })
+                .clicked()
+            {
+                toggle = true;
+            }
+            if ui
+                .selectable_label(false, "Recently Deleted")
+                .on_hover_text("Blocks that no longer have a parent")
+                .clicked()
+            {
+                toggle = true;
+            }
+        });
+
+        if toggle {
+            self.orphaned_expanded = !self.orphaned_expanded;
+            self.orphaned = self
+                .orphaned_expanded
+                .then(|| self.client.watch_references(BlockReferenceList::Orphans));
+        }
+
+        if !self.orphaned_expanded {
+            return;
+        }
+        let Some(orphaned) = &self.orphaned else {
+            return;
+        };
+        let blocks = orphaned.read();
+        let loaded = orphaned.is_loaded();
+        if blocks.is_empty() && loaded {
+            ui.horizontal(|ui| {
+                ui.add_space(36.0);
+                ui.weak("No recently deleted blocks");
+            });
+        }
+        for block in blocks {
+            self.show_reference(ui, block, 1, &mut HashSet::new());
+        }
+    }
+
+    fn show_file_list_status(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        let debug = self.client.network_debug_snapshot();
+        ui.horizontal(|ui| {
+            if debug.changes_saved {
+                ui.small("\u{2713} All changes saved");
+            } else {
+                ui.spinner();
+                ui.small("Submitting changes\u{2026}");
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Network").clicked() {
+                    self.network_debug_open = true;
+                }
+            });
+        });
+    }
+
+    fn show_network_debug(&mut self, ctx: &egui::Context) {
+        if !self.network_debug_open {
+            return;
+        }
+        let debug = self.client.network_debug_snapshot();
+        let mut open = self.network_debug_open;
+        egui::Window::new("Network Traffic")
+            .open(&mut open)
+            .default_size([720.0, 480.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!debug.sending_paused, egui::Button::new("Pause"))
+                        .clicked()
+                    {
+                        self.client.pause_sending();
+                    }
+                    if ui
+                        .add_enabled(
+                            debug.sending_paused && debug.queued_messages > 0,
+                            egui::Button::new("Step"),
+                        )
+                        .on_hover_text("Send the next queued message")
+                        .clicked()
+                    {
+                        self.client.step_sending();
+                    }
+                    if ui
+                        .add_enabled(debug.sending_paused, egui::Button::new("Resume"))
+                        .clicked()
+                    {
+                        self.client.resume_sending();
+                    }
+                    ui.separator();
+                    ui.small(if debug.sending_paused {
+                        format!("Paused \u{2022} {} queued", debug.queued_messages)
+                    } else {
+                        format!("Sending \u{2022} {} queued", debug.queued_messages)
+                    });
+                });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        if debug.traffic.is_empty() {
+                            ui.weak("No network traffic yet");
+                        }
+                        for entry in &debug.traffic {
+                            show_traffic_entry(ui, entry);
+                        }
+                    });
+            });
+        self.network_debug_open = open;
     }
 
     fn show_tabs(&mut self, ui: &mut egui::Ui) {
@@ -534,6 +669,7 @@ impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.process_pending_placements();
         self.show_rename(ui);
+        self.show_network_debug(ui.ctx());
         egui::Panel::left("blocks-sidebar")
             .default_size(240.0)
             .min_size(160.0)
@@ -551,6 +687,22 @@ impl eframe::App for BlockApp {
         });
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
+}
+
+fn show_traffic_entry(ui: &mut egui::Ui, entry: &NetworkTrafficEntry) {
+    let (arrow, color) = match entry.direction {
+        NetworkDirection::Sent => ("\u{2192}", ui.visuals().hyperlink_color),
+        NetworkDirection::Received => ("\u{2190}", ui.visuals().warn_fg_color),
+    };
+    ui.horizontal_top(|ui| {
+        ui.colored_label(color, arrow);
+        ui.small(format!("{}", entry.timestamp_ms));
+        ui.add(
+            egui::Label::new(egui::RichText::new(&entry.payload).monospace())
+                .wrap()
+                .selectable(true),
+        );
+    });
 }
 
 fn start_embedded_server(data_dir: PathBuf) -> Result<String, Box<dyn Error + Send + Sync>> {
