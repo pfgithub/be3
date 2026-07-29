@@ -304,8 +304,12 @@ impl BlockApp {
         ui: &mut egui::Ui,
         reference: BlockReference,
         depth: usize,
+        containing_id: Option<Uuid>,
         path: &mut HashSet<Uuid>,
     ) {
+        let is_reference =
+            containing_id.is_some_and(|id| reference.parent != BlockParent::Uuid(id));
+        let can_expand = !is_reference && reference.references > 0;
         let was_expanded = self.expanded.contains_key(&reference.id);
         let mut toggle = false;
         let mut open = false;
@@ -314,7 +318,36 @@ impl BlockApp {
         ui.horizontal(|ui| {
             ui.add_space(depth as f32 * 14.0);
             if ui
-                .small_button(if was_expanded { "▼" } else { "▶" })
+                .add_enabled(
+                    can_expand,
+                    egui::Button::new(if can_expand {
+                        if was_expanded {
+                            "▾"
+                        } else {
+                            "▸"
+                        }
+                    } else {
+                        if is_reference {
+                            "→"
+                        } else {
+                            "•"
+                        }
+                    })
+                    .small(),
+                )
+                .on_hover_text(match (can_expand, is_reference) {
+                    (false, true) => format!(
+                        "{}\nThis block is referenced here, but is not a direct child. It cannot be expanded here.",
+                        reference.id
+                    ),
+                    (false, false) => {
+                        format!(
+                            "{}\nThis block cannot be expanded because it has no children.",
+                            reference.id
+                        )
+                    }
+                    (true, _) => reference.id.to_string(),
+                })
                 .clicked()
             {
                 toggle = true;
@@ -325,18 +358,16 @@ impl BlockApp {
                 0.0
             };
             let label_width = (ui.available_width() - trailing_width).max(0.0);
-            let response = ui
-                .add_sized(
-                    [label_width, ui.spacing().interact_size.y],
-                    egui::Button::selectable(
-                        self.active_tab == Some(reference.id),
-                        self.reference_label(&reference),
-                    )
-                    .right_text(())
-                    .truncate()
-                    .sense(egui::Sense::click_and_drag()),
+            let response = ui.add_sized(
+                [label_width, ui.spacing().interact_size.y],
+                egui::Button::selectable(
+                    self.active_tab == Some(reference.id),
+                    self.reference_label(&reference),
                 )
-                .on_hover_text(reference.id.to_string());
+                .right_text(())
+                .truncate()
+                .sense(egui::Sense::click_and_drag()),
+            );
             response.dnd_set_drag_payload(reference.clone());
             if response.clicked() {
                 open = true;
@@ -425,7 +456,7 @@ impl BlockApp {
             });
         }
         for child in children {
-            self.show_reference(ui, child, depth + 1, path);
+            self.show_reference(ui, child, depth + 1, Some(reference.id), path);
         }
         path.remove(&reference.id);
     }
@@ -456,7 +487,7 @@ impl BlockApp {
                 ui.weak("No root blocks");
             }
             for root in roots {
-                self.show_reference(ui, root, 0, &mut HashSet::new());
+                self.show_reference(ui, root, 0, None, &mut HashSet::new());
             }
             ui.separator();
             self.show_recently_deleted(ui);
@@ -507,7 +538,7 @@ impl BlockApp {
             });
         }
         for block in blocks {
-            self.show_reference(ui, block, 1, &mut HashSet::new());
+            self.show_reference(ui, block, 1, None, &mut HashSet::new());
         }
     }
 
