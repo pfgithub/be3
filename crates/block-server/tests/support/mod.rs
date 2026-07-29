@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use block::{ClientMessage, ReferenceDelta, ServerMessage};
+use block::{BlockParent, BlockReference, ClientMessage, ReferenceDelta, ServerMessage};
 use futures_util::{SinkExt, StreamExt};
 use tokio::{fs, net::TcpListener, task::JoinHandle};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
@@ -92,7 +92,7 @@ pub async fn update(
     .await
 }
 
-pub async fn set_parent(socket: &mut Socket, id: Uuid, parent: Option<Uuid>) -> ServerMessage {
+pub async fn set_parent(socket: &mut Socket, id: Uuid, parent: BlockParent) -> ServerMessage {
     request(
         socket,
         ClientMessage::SetBlockParent {
@@ -116,21 +116,23 @@ pub async fn read(socket: &mut Socket, id: Uuid) -> ServerMessage {
     .await
 }
 
-pub async fn orphaned(socket: &mut Socket) -> Vec<Uuid> {
+pub async fn references(socket: &mut Socket, parent: BlockParent) -> Vec<BlockReference> {
     match request(
         socket,
-        ClientMessage::ListOrphanedBlocks {
+        ClientMessage::ListReferences {
             request_id: Uuid::new_v4(),
+            parent,
+            watch: false,
         },
     )
     .await
     {
-        ServerMessage::OrphanedBlocks { blocks, .. } => blocks,
-        message => panic!("expected orphaned blocks, got {message:?}"),
+        ServerMessage::References { blocks, .. } => blocks,
+        message => panic!("expected references, got {message:?}"),
     }
 }
 
-pub fn relationships(message: ServerMessage) -> (Option<Uuid>, Vec<Uuid>, Vec<Uuid>) {
+pub fn relationships(message: ServerMessage) -> (BlockParent, Vec<Uuid>, Vec<Uuid>) {
     match message {
         ServerMessage::ReadBlock {
             parent,

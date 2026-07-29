@@ -2,21 +2,24 @@ mod editor;
 mod index;
 
 use std::{
-    collections::HashMap, error::Error, io, net::TcpListener as StdTcpListener, path::PathBuf,
-    thread, time::Duration,
+    collections::{HashMap, HashSet},
+    error::Error,
+    io,
+    net::TcpListener as StdTcpListener,
+    path::PathBuf,
+    thread,
+    time::Duration,
 };
 
-use block::Block;
-use block_client::{text::TextDocument, BlockClient, BlockHandle};
+use block::{Block, BlockParent, BlockReference};
+use block_client::{text::TextDocument, BlockClient, ReferenceList};
 use editor::{BlockEditor, EditorRegistry};
 use eframe::egui;
-use index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation, WORKSPACE_INDEX_ID};
+use index::WorkspaceIndex;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
 const APP_ID: &str = "Block";
-const DEFAULT_TITLE: &str = "Untitled";
-const DEFAULT_FOLDER_TITLE: &str = "New folder";
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -40,19 +43,12 @@ fn main() -> eframe::Result {
 
 struct BlockApp {
     client: BlockClient,
-    workspace: BlockHandle<WorkspaceIndex>,
+    roots: ReferenceList,
+    expanded: HashMap<Uuid, ReferenceList>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     tabs: Vec<Uuid>,
     active_tab: Option<Uuid>,
-    rename: Option<RenameState>,
-}
-
-struct RenameState {
-    id: Uuid,
-    title: String,
-    request_focus: bool,
-    error: Option<&'static str>,
 }
 
 impl BlockApp {
@@ -62,53 +58,33 @@ impl BlockApp {
             .join("blocks");
         let url = start_embedded_server(data_dir)?;
         let client = BlockClient::new();
-        let workspace = client.get_or_create_block(WORKSPACE_INDEX_ID, WorkspaceIndex::default());
         client.connect(url);
+        let roots = client.watch_references(BlockParent::Root);
 
         Ok(Self {
             client,
-            workspace,
+            roots,
+            expanded: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
             tabs: Vec::new(),
             active_tab: None,
-            rename: None,
         })
     }
 
-    fn entries(&self) -> Vec<BlockEntry> {
-        self.workspace
-            .read()
-            .map(|index| index.entries().to_vec())
-            .unwrap_or_default()
-    }
-
-    fn create_block(&mut self, block_type: Uuid, title: &str) {
+    fn create_block(&mut self, block_type: Uuid) {
         let Some(editor) = self.registry.create(&self.client, block_type) else {
             return;
         };
         let id = editor.id();
-        self.workspace
-            .operate(WorkspaceIndexOperation::Add(BlockEntry {
-                id,
-                block_type,
-                title: title.into(),
-            }));
-        editor.set_parent(Some(self.workspace.id()));
         self.editors.insert(id, editor);
         self.open_tab(id, block_type);
-        self.rename = Some(RenameState {
-            id,
-            title: title.into(),
-            request_focus: true,
-            error: None,
-        });
     }
 
     fn open_tab(&mut self, id: Uuid, block_type: Uuid) {
         if !self.editors.contains_key(&id) {
-            let editor = self.registry.open(&self.client, id, block_type);
-            self.editors.insert(id, editor);
+            self.editors
+                .insert(id, self.registry.open(&self.client, id, block_type));
         }
         if !self.tabs.contains(&id) {
             self.tabs.push(id);
@@ -130,145 +106,136 @@ impl BlockApp {
         }
     }
 
-    fn begin_rename(&mut self, entry: &BlockEntry) {
-        self.rename = Some(RenameState {
-            id: entry.id,
-            title: entry.title.clone(),
-            request_focus: true,
-            error: None,
-        });
+    fn reference_label(&self, reference: BlockReference) -> String {
+        let kind = self
+            .registry
+            .display_name(reference.block_type)
+            .unwrap_or("Unsupported");
+        format!("{kind} · {}", &reference.id.to_string()[..8])
     }
 
-    fn commit_rename(&mut self) -> bool {
-        let Some(rename) = &mut self.rename else {
-            return true;
-        };
-        let title = rename.title.trim();
-        if title.is_empty() {
-            rename.error = Some("Title cannot be empty");
-            return false;
+    fn collapse_reference(&mut self, id: Uuid) {
+        self.collapse_reference_inner(id, &mut HashSet::new());
+    }
+
+    fn collapse_reference_inner(&mut self, id: Uuid, visited: &mut HashSet<Uuid>) {
+        if !visited.insert(id) {
+            return;
         }
-        self.workspace.operate(WorkspaceIndexOperation::Rename {
-            id: rename.id,
-            title: title.to_owned(),
-        });
-        self.rename = None;
-        true
+        let children = self
+            .expanded
+            .remove(&id)
+            .map(|list| list.read())
+            .unwrap_or_default();
+        for child in children {
+            self.collapse_reference_inner(child.id, visited);
+        }
     }
 
-    fn show_sidebar(&mut self, ui: &mut egui::Ui, entries: &[BlockEntry]) {
+    fn show_reference(
+        &mut self,
+        ui: &mut egui::Ui,
+        reference: BlockReference,
+        depth: usize,
+        path: &mut HashSet<Uuid>,
+    ) {
+        let was_expanded = self.expanded.contains_key(&reference.id);
+        let mut toggle = false;
+        let mut open = false;
+        ui.horizontal(|ui| {
+            ui.add_space(depth as f32 * 14.0);
+            if ui
+                .small_button(if was_expanded { "▼" } else { "▶" })
+                .clicked()
+            {
+                toggle = true;
+            }
+            if ui
+                .selectable_label(
+                    self.active_tab == Some(reference.id),
+                    self.reference_label(reference),
+                )
+                .on_hover_text(reference.id.to_string())
+                .clicked()
+            {
+                open = true;
+            }
+        });
+
+        if toggle {
+            if was_expanded {
+                self.collapse_reference(reference.id);
+            } else {
+                self.expanded.insert(
+                    reference.id,
+                    self.client
+                        .watch_references(BlockParent::Uuid(reference.id)),
+                );
+            }
+        }
+        if open {
+            self.open_tab(reference.id, reference.block_type);
+        }
+
+        let is_expanded = self.expanded.contains_key(&reference.id);
+        if !is_expanded || !path.insert(reference.id) {
+            return;
+        }
+        let children = self.expanded[&reference.id].read();
+        if children.is_empty() && self.expanded[&reference.id].is_loaded() {
+            ui.horizontal(|ui| {
+                ui.add_space((depth + 1) as f32 * 14.0 + 22.0);
+                ui.weak("No references");
+            });
+        }
+        for child in children {
+            self.show_reference(ui, child, depth + 1, path);
+        }
+        path.remove(&reference.id);
+    }
+
+    fn show_sidebar(&mut self, ui: &mut egui::Ui) {
         let mut create = None;
         ui.horizontal(|ui| {
             ui.heading("Blocks");
             ui.add_space(ui.available_width() - 28.0);
             ui.menu_button("+", |ui| {
                 if ui.button("Text block").clicked() {
-                    create = Some((TextDocument::TYPE_ID, DEFAULT_TITLE));
+                    create = Some(TextDocument::TYPE_ID);
                     ui.close();
                 }
                 if ui.button("Folder").clicked() {
-                    create = Some((WorkspaceIndex::TYPE_ID, DEFAULT_FOLDER_TITLE));
+                    create = Some(WorkspaceIndex::TYPE_ID);
                     ui.close();
                 }
             })
             .response
             .on_hover_text("Create block");
         });
-        if let Some((block_type, title)) = create {
-            self.create_block(block_type, title);
+        if let Some(block_type) = create {
+            self.create_block(block_type);
         }
         ui.separator();
 
-        let mut open = None;
-        let mut begin_rename = None;
-        let mut commit_rename = false;
-        let mut cancel_rename = false;
-
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for entry in entries {
-                if self
-                    .rename
-                    .as_ref()
-                    .is_some_and(|rename| rename.id == entry.id)
-                {
-                    let rename = self.rename.as_mut().unwrap();
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut rename.title).desired_width(f32::INFINITY),
-                    );
-                    if rename.request_focus {
-                        response.request_focus();
-                        rename.request_focus = false;
-                    }
-                    if response.changed() {
-                        rename.error = None;
-                    }
-                    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                        cancel_rename = true;
-                    } else if ui.input(|input| input.key_pressed(egui::Key::Enter))
-                        || response.lost_focus()
-                    {
-                        commit_rename = true;
-                    }
-                    if let Some(error) = rename.error {
-                        ui.colored_label(ui.visuals().error_fg_color, error);
-                    }
-                    continue;
-                }
-
-                ui.horizontal(|ui| {
-                    let selected = self.active_tab == Some(entry.id);
-                    let response =
-                        ui.selectable_label(selected, &entry.title)
-                            .on_hover_text(format!(
-                                "{}\n{}",
-                                self.registry
-                                    .display_name(entry.block_type)
-                                    .unwrap_or("Unsupported"),
-                                entry.id
-                            ));
-                    if response.clicked() {
-                        open = Some((entry.id, entry.block_type));
-                    }
-                    response.context_menu(|ui| {
-                        if ui.button("Rename").clicked() {
-                            begin_rename = Some(entry.clone());
-                            ui.close();
-                        }
-                    });
-                    if ui.small_button("…").clicked() {
-                        begin_rename = Some(entry.clone());
-                    }
-                });
+            let roots = self.roots.read();
+            if roots.is_empty() && self.roots.is_loaded() {
+                ui.weak("No root blocks");
+            }
+            for root in roots {
+                self.show_reference(ui, root, 0, &mut HashSet::new());
             }
         });
-
-        if cancel_rename {
-            self.rename = None;
-        } else if commit_rename {
-            self.commit_rename();
-        }
-        if let Some(entry) = begin_rename {
-            self.begin_rename(&entry);
-        }
-        if let Some((id, block_type)) = open {
-            self.open_tab(id, block_type);
-        }
     }
 
-    fn show_tabs(&mut self, ui: &mut egui::Ui, entries: &[BlockEntry]) {
-        let titles: HashMap<_, _> = entries
-            .iter()
-            .map(|entry| (entry.id, entry.title.as_str()))
-            .collect();
+    fn show_tabs(&mut self, ui: &mut egui::Ui) {
         let mut activate = None;
         let mut close = None;
-
         egui::ScrollArea::horizontal()
             .id_salt("block-tabs")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for id in &self.tabs {
-                        let title = titles.get(id).copied().unwrap_or("Unknown block");
                         let active = self.active_tab == Some(*id);
                         egui::Frame::new()
                             .fill(if active {
@@ -279,7 +246,7 @@ impl BlockApp {
                             .inner_margin(egui::Margin::symmetric(8, 4))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    if ui.selectable_label(active, title).clicked() {
+                                    if ui.selectable_label(active, &id.to_string()[..8]).clicked() {
                                         activate = Some(*id);
                                     }
                                     if ui.small_button("×").clicked() {
@@ -290,7 +257,6 @@ impl BlockApp {
                     }
                 });
             });
-
         if let Some(id) = activate {
             self.active_tab = Some(id);
         }
@@ -319,16 +285,15 @@ impl BlockApp {
 
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let entries = self.entries();
         egui::Panel::left("blocks-sidebar")
             .default_size(240.0)
             .min_size(160.0)
             .max_size(420.0)
             .resizable(true)
-            .show_inside(ui, |ui| self.show_sidebar(ui, &entries));
+            .show_inside(ui, |ui| self.show_sidebar(ui));
 
         ui.vertical(|ui| {
-            self.show_tabs(ui, &entries);
+            self.show_tabs(ui);
             ui.separator();
             self.show_content(ui);
         });

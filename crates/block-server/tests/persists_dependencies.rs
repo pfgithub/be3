@@ -1,6 +1,6 @@
 mod support;
 
-use block::ServerMessage;
+use block::{BlockParent, ServerMessage};
 use support::{create, read, relationships, set_parent, TestServer};
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ async fn dependency_state_survives_a_server_restart() {
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(
-        set_parent(&mut socket, child, Some(parent)).await,
+        set_parent(&mut socket, child, BlockParent::Uuid(parent)).await,
         ServerMessage::Ok { .. }
     ));
     drop(socket);
@@ -30,7 +30,7 @@ async fn dependency_state_survives_a_server_restart() {
     let mut socket = restarted.connect().await;
     assert_eq!(
         relationships(read(&mut socket, child).await),
-        (Some(parent), vec![], vec![parent])
+        (BlockParent::Uuid(parent), vec![], vec![parent])
     );
     restarted.cleanup().await;
 }

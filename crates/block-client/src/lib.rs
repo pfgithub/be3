@@ -7,8 +7,8 @@ use std::{
 };
 
 use block::{
-    Block, BlockOperation, BlockUpdate, ClientMessage, CommandKind, ErrorCode, OperationRecord,
-    ReferenceDelta, ServerMessage,
+    Block, BlockOperation, BlockParent, BlockReference, BlockUpdate, ClientMessage, CommandKind,
+    ErrorCode, OperationRecord, ReferenceDelta, ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -56,32 +56,7 @@ impl BlockClient {
         let shared = Arc::new(BlockShared {
             value: RwLock::new(Some(initial.clone())),
         });
-        let block = Arc::new(TypedBlock::<B>::created(
-            id,
-            Arc::clone(&shared),
-            initial,
-            false,
-        ));
-        self.send(WorkerCommand::AddBlock(block.clone()));
-        BlockHandle {
-            client_id: self.id,
-            id,
-            block,
-            commands: self.commands.clone(),
-            access: Arc::clone(&self.access),
-        }
-    }
-
-    pub fn get_or_create_block<B: Block>(&self, id: Uuid, initial: B) -> BlockHandle<B> {
-        let shared = Arc::new(BlockShared {
-            value: RwLock::new(Some(initial.clone())),
-        });
-        let block = Arc::new(TypedBlock::<B>::created(
-            id,
-            Arc::clone(&shared),
-            initial,
-            true,
-        ));
+        let block = Arc::new(TypedBlock::<B>::created(id, Arc::clone(&shared), initial));
         self.send(WorkerCommand::AddBlock(block.clone()));
         BlockHandle {
             client_id: self.id,
@@ -125,12 +100,28 @@ impl BlockClient {
             .unwrap_or_else(|_| fatal("block client worker stopped before synchronizing"));
     }
 
-    pub async fn orphaned_blocks(&self) -> Vec<Uuid> {
+    pub async fn list_references(&self, parent: BlockParent) -> Vec<BlockReference> {
         let (completed, completion) = oneshot::channel();
-        self.send(WorkerCommand::ListOrphanedBlocks(completed));
+        self.send(WorkerCommand::ListReferences { parent, completed });
         completion
             .await
-            .unwrap_or_else(|_| fatal("block client worker stopped before listing orphaned blocks"))
+            .unwrap_or_else(|_| fatal("block client worker stopped before listing references"))
+    }
+
+    pub fn watch_references(&self, parent: BlockParent) -> ReferenceList {
+        let shared = Arc::new(ReferenceListShared {
+            blocks: RwLock::new(Vec::new()),
+            loaded: watch::channel(false).0,
+        });
+        self.send(WorkerCommand::WatchReferences {
+            parent,
+            shared: Arc::clone(&shared),
+        });
+        ReferenceList {
+            parent,
+            shared,
+            commands: self.commands.clone(),
+        }
     }
 
     fn send(&self, command: WorkerCommand) {
@@ -190,7 +181,7 @@ impl<B: Block> BlockHandle<B> {
             .unwrap_or_else(|_| fatal("block client worker stopped"));
     }
 
-    pub fn set_parent(&self, parent: Option<Uuid>) {
+    pub fn set_parent(&self, parent: BlockParent) {
         self.commands
             .send(WorkerCommand::SetBlockParent {
                 id: self.id,
@@ -221,6 +212,35 @@ impl<B: Block> BlockHandle<B> {
                 .unwrap_or_else(|_| fatal("block client worker stopped while waiting for a block"));
         }
     }
+}
+
+pub struct ReferenceList {
+    parent: BlockParent,
+    shared: Arc<ReferenceListShared>,
+    commands: mpsc::Sender<WorkerCommand>,
+}
+
+impl ReferenceList {
+    pub fn read(&self) -> Vec<BlockReference> {
+        self.shared.blocks.read().clone()
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        *self.shared.loaded.borrow()
+    }
+}
+
+impl Drop for ReferenceList {
+    fn drop(&mut self) {
+        let _ = self
+            .commands
+            .send(WorkerCommand::UnwatchReferences(self.parent));
+    }
+}
+
+struct ReferenceListShared {
+    blocks: RwLock<Vec<BlockReference>>,
+    loaded: watch::Sender<bool>,
 }
 
 pub struct BlockReadGuard<'a, B: Block> {
@@ -276,10 +296,25 @@ struct BlockShared<B: Block> {
 enum WorkerCommand {
     Connect(String),
     AddBlock(Arc<dyn ErasedBlock>),
-    Operate { id: Uuid },
-    OperateBatch { ids: Vec<Uuid> },
-    SetBlockParent { id: Uuid, parent: Option<Uuid> },
-    ListOrphanedBlocks(oneshot::Sender<Vec<Uuid>>),
+    Operate {
+        id: Uuid,
+    },
+    OperateBatch {
+        ids: Vec<Uuid>,
+    },
+    SetBlockParent {
+        id: Uuid,
+        parent: BlockParent,
+    },
+    ListReferences {
+        parent: BlockParent,
+        completed: oneshot::Sender<Vec<BlockReference>>,
+    },
+    WatchReferences {
+        parent: BlockParent,
+        shared: Arc<ReferenceListShared>,
+    },
+    UnwatchReferences(BlockParent),
     Synchronize(oneshot::Sender<()>),
 }
 
@@ -378,6 +413,7 @@ struct WorkerState {
     connected: bool,
     access: Arc<RwLock<()>>,
     blocks: HashMap<Uuid, Arc<dyn ErasedBlock>>,
+    reference_lists: HashMap<BlockParent, Arc<ReferenceListShared>>,
     requests: HashMap<Uuid, PendingRequest>,
     outbound: VecDeque<ClientMessage>,
     deferred: VecDeque<DeferredRequest>,
@@ -390,6 +426,7 @@ impl WorkerState {
             connected: false,
             access,
             blocks: HashMap::new(),
+            reference_lists: HashMap::new(),
             requests: HashMap::new(),
             outbound: VecDeque::new(),
             deferred: VecDeque::new(),
@@ -428,9 +465,21 @@ impl WorkerState {
                 self.deferred
                     .push_back(DeferredRequest::SetBlockParent { id, parent });
             }
-            WorkerCommand::ListOrphanedBlocks(completed) => {
+            WorkerCommand::ListReferences { parent, completed } => {
                 self.deferred
-                    .push_back(DeferredRequest::ListOrphanedBlocks(completed));
+                    .push_back(DeferredRequest::ListReferences { parent, completed });
+            }
+            WorkerCommand::WatchReferences { parent, shared } => {
+                if self.reference_lists.insert(parent, shared).is_some() {
+                    fatal("references for this parent are already being watched");
+                }
+                self.deferred
+                    .push_back(DeferredRequest::WatchReferences { parent });
+            }
+            WorkerCommand::UnwatchReferences(parent) => {
+                self.reference_lists.remove(&parent);
+                self.deferred
+                    .push_back(DeferredRequest::UnwatchReferences { parent });
             }
             WorkerCommand::Synchronize(completed) => {
                 self.synchronization_waiters.push(completed);
@@ -449,28 +498,15 @@ impl WorkerState {
         let request_id = Uuid::new_v4();
         let id = block.id();
         let message = if let Some(data) = block.initial_data() {
-            if block.get_or_create() {
-                self.requests
-                    .insert(request_id, PendingRequest::GetOrCreate { id });
-                ClientMessage::GetOrCreateBlock {
-                    request_id,
-                    id,
-                    block_type: block.block_type_id(),
-                    data,
-                    references: block.initial_references(),
-                    watch: true,
-                }
-            } else {
-                self.requests
-                    .insert(request_id, PendingRequest::Create { id });
-                ClientMessage::CreateBlock {
-                    request_id,
-                    id,
-                    block_type: block.block_type_id(),
-                    data,
-                    references: block.initial_references(),
-                    watch: true,
-                }
+            self.requests
+                .insert(request_id, PendingRequest::Create { id });
+            ClientMessage::CreateBlock {
+                request_id,
+                id,
+                block_type: block.block_type_id(),
+                data,
+                references: block.initial_references(),
+                watch: true,
             }
         } else {
             self.requests
@@ -583,6 +619,8 @@ impl WorkerState {
                         PendingRequest::SetBlockParent { id: expected },
                         CommandKind::SetBlockParent,
                     ) if expected == id => {}
+                    (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
+                        if id.is_nil() => {}
                     _ => fatal("server response did not match its request"),
                 }
             }
@@ -599,10 +637,6 @@ impl WorkerState {
                 match (self.requests.remove(&request_id), command) {
                     (Some(PendingRequest::Read { id: expected }), CommandKind::ReadBlock)
                         if expected == id => {}
-                    (
-                        Some(PendingRequest::GetOrCreate { id: expected }),
-                        CommandKind::GetOrCreateBlock,
-                    ) if expected == id => {}
                     _ => fatal("read response did not match its request"),
                 }
                 let block = &self.blocks[&id];
@@ -712,15 +746,35 @@ impl WorkerState {
                 }
             }
             ServerMessage::Presence { .. } => {}
-            ServerMessage::OrphanedBlocks { request_id, blocks } => {
+            ServerMessage::References {
+                request_id,
+                parent,
+                blocks,
+            } => {
                 let pending = self
                     .requests
                     .remove(&request_id)
-                    .unwrap_or_else(|| fatal("orphan response referenced an unknown request"));
-                let PendingRequest::ListOrphanedBlocks(completed) = pending else {
-                    fatal("orphan response did not match its request");
-                };
-                let _ = completed.send(blocks);
+                    .unwrap_or_else(|| fatal("reference response referenced an unknown request"));
+                match pending {
+                    PendingRequest::ListReferences {
+                        parent: expected,
+                        completed,
+                    } if expected == parent => {
+                        let _ = completed.send(blocks);
+                    }
+                    PendingRequest::WatchReferences { parent: expected } if expected == parent => {
+                        if let Some(shared) = self.reference_lists.get(&parent) {
+                            *shared.blocks.write() = blocks;
+                            shared.loaded.send_replace(true);
+                        }
+                    }
+                    _ => fatal("reference response did not match its request"),
+                }
+            }
+            ServerMessage::ReferencesUpdated { parent, blocks } => {
+                if let Some(shared) = self.reference_lists.get(&parent) {
+                    *shared.blocks.write() = blocks;
+                }
             }
         }
     }
@@ -763,29 +817,78 @@ impl WorkerState {
                     parent,
                 });
             }
-            DeferredRequest::ListOrphanedBlocks(completed) => {
+            DeferredRequest::ListReferences { parent, completed } => {
+                self.requests.insert(
+                    request_id,
+                    PendingRequest::ListReferences { parent, completed },
+                );
+                self.outbound.push_back(ClientMessage::ListReferences {
+                    request_id,
+                    parent,
+                    watch: false,
+                });
+            }
+            DeferredRequest::WatchReferences { parent } => {
                 self.requests
-                    .insert(request_id, PendingRequest::ListOrphanedBlocks(completed));
+                    .insert(request_id, PendingRequest::WatchReferences { parent });
+                self.outbound.push_back(ClientMessage::ListReferences {
+                    request_id,
+                    parent,
+                    watch: true,
+                });
+            }
+            DeferredRequest::UnwatchReferences { parent } => {
+                self.requests
+                    .insert(request_id, PendingRequest::UnwatchReferences);
                 self.outbound
-                    .push_back(ClientMessage::ListOrphanedBlocks { request_id });
+                    .push_back(ClientMessage::UnwatchReferences { request_id, parent });
             }
         }
     }
 }
 
 enum PendingRequest {
-    Create { id: Uuid },
-    GetOrCreate { id: Uuid },
-    Read { id: Uuid },
-    Update { id: Uuid, operation_id: Uuid },
-    Batch { operations: Vec<(Uuid, Uuid)> },
-    SetBlockParent { id: Uuid },
-    ListOrphanedBlocks(oneshot::Sender<Vec<Uuid>>),
+    Create {
+        id: Uuid,
+    },
+    Read {
+        id: Uuid,
+    },
+    Update {
+        id: Uuid,
+        operation_id: Uuid,
+    },
+    Batch {
+        operations: Vec<(Uuid, Uuid)>,
+    },
+    SetBlockParent {
+        id: Uuid,
+    },
+    ListReferences {
+        parent: BlockParent,
+        completed: oneshot::Sender<Vec<BlockReference>>,
+    },
+    WatchReferences {
+        parent: BlockParent,
+    },
+    UnwatchReferences,
 }
 
 enum DeferredRequest {
-    SetBlockParent { id: Uuid, parent: Option<Uuid> },
-    ListOrphanedBlocks(oneshot::Sender<Vec<Uuid>>),
+    SetBlockParent {
+        id: Uuid,
+        parent: BlockParent,
+    },
+    ListReferences {
+        parent: BlockParent,
+        completed: oneshot::Sender<Vec<BlockReference>>,
+    },
+    WatchReferences {
+        parent: BlockParent,
+    },
+    UnwatchReferences {
+        parent: BlockParent,
+    },
 }
 
 struct OutboundUpdate {
@@ -800,7 +903,6 @@ trait ErasedBlock: Send + Sync {
     fn block_type_id(&self) -> Uuid;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_references(&self) -> Vec<Uuid>;
-    fn get_or_create(&self) -> bool;
     fn created(&self);
     fn resolve(&self, snapshot: Vec<u8>, snapshot_seq: u64, operations: Vec<OperationRecord>);
     fn next_update(&self) -> Option<OutboundUpdate>;
@@ -820,7 +922,6 @@ struct TypedBlock<B: Block> {
 
 struct TypedState<B: Block> {
     initial: Option<B>,
-    get_or_create: bool,
     confirmed: Option<B>,
     confirmed_seq: u64,
     acknowledged_seq: u64,
@@ -837,13 +938,12 @@ struct PendingOperation<O> {
 }
 
 impl<B: Block> TypedBlock<B> {
-    fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B, get_or_create: bool) -> Self {
+    fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
         Self {
             id,
             shared,
             state: RwLock::new(TypedState {
                 initial: Some(initial.clone()),
-                get_or_create,
                 confirmed: Some(initial),
                 confirmed_seq: 0,
                 acknowledged_seq: 0,
@@ -863,7 +963,6 @@ impl<B: Block> TypedBlock<B> {
             shared,
             state: RwLock::new(TypedState {
                 initial: None,
-                get_or_create: false,
                 confirmed: None,
                 confirmed_seq: 0,
                 acknowledged_seq: 0,
@@ -933,10 +1032,6 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             .map_or_else(Vec::new, |initial| {
                 normalized_references(initial.references())
             })
-    }
-
-    fn get_or_create(&self) -> bool {
-        self.state.read().get_or_create
     }
 
     fn created(&self) {
@@ -1230,7 +1325,6 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
-            false,
         ));
         block.created();
         let read = shared.value.read();
@@ -1262,7 +1356,6 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
-            false,
         );
         block.created();
         block.local_operation(CounterOperation::Add(2));
@@ -1291,7 +1384,6 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
-            false,
         );
         block.created();
         block.local_operation(CounterOperation::Add(4));
@@ -1316,7 +1408,6 @@ mod tests {
             Uuid::new_v4(),
             Arc::clone(&shared),
             Counter { count: 0 },
-            false,
         );
         block.created();
 
@@ -1398,7 +1489,7 @@ mod tests {
                                         .unwrap(),
                                     references: ReferenceDelta::default(),
                                 }],
-                                parent: None,
+                                parent: BlockParent::Root,
                                 references: Vec::new(),
                                 backrefs: Vec::new(),
                             })

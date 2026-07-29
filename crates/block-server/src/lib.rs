@@ -10,8 +10,8 @@ use std::{
 };
 
 use block::{
-    BlockOperation, ClientMessage, CommandKind, ErrorCode, OperationRecord, ReferenceDelta,
-    ServerMessage,
+    BlockOperation, BlockParent, BlockReference, ClientMessage, CommandKind, ErrorCode,
+    OperationRecord, ReferenceDelta, ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,7 @@ async fn handle_connection(
                                 notification => watch_hub.broadcast(notification).await,
                             }
                         }
+                        watch_hub.broadcast_reference_lists(&store).await;
                     }
                     Message::Close(_) => break,
                     Message::Ping(payload) => sink.send(Message::Pong(payload)).await?,
@@ -146,41 +147,6 @@ async fn handle_text_message(
                     }
                 }
                 Err(error) => error.to_response(request_id, CommandKind::CreateBlock, id),
-            };
-            (response, None)
-        }
-        ClientMessage::GetOrCreateBlock {
-            request_id,
-            id,
-            block_type,
-            data,
-            references,
-            watch,
-        } => {
-            let lock = store.lock_for(id).await;
-            let _guard = lock.lock().await;
-            let response = match store
-                .get_or_create_block_unlocked(id, block_type, data, references)
-                .await
-            {
-                Ok(read) => {
-                    if watch {
-                        watch_hub.watch(id, client_id, outbound).await;
-                    }
-                    ServerMessage::ReadBlock {
-                        request_id,
-                        command: CommandKind::GetOrCreateBlock,
-                        id,
-                        block_type: read.block_type,
-                        snapshot: read.snapshot,
-                        snapshot_seq: read.snapshot_seq,
-                        operations: read.operations,
-                        parent: read.parent,
-                        references: read.references,
-                        backrefs: read.backrefs,
-                    }
-                }
-                Err(error) => error.to_response(request_id, CommandKind::GetOrCreateBlock, id),
             };
             (response, None)
         }
@@ -390,13 +356,39 @@ async fn handle_text_message(
             };
             (response, None)
         }
-        ClientMessage::ListOrphanedBlocks { request_id } => (
-            ServerMessage::OrphanedBlocks {
-                request_id,
-                blocks: store.orphaned_blocks().await,
-            },
-            None,
-        ),
+        ClientMessage::ListReferences {
+            request_id,
+            parent,
+            watch,
+        } => {
+            let blocks = store.references(parent).await;
+            if watch {
+                watch_hub
+                    .watch_references(parent, client_id, outbound, blocks.clone())
+                    .await;
+            }
+            (
+                ServerMessage::References {
+                    request_id,
+                    parent,
+                    blocks,
+                },
+                None,
+            )
+        }
+        ClientMessage::UnwatchReferences { request_id, parent } => {
+            watch_hub.unwatch_references(parent, client_id).await;
+            (
+                ServerMessage::Ok {
+                    request_id,
+                    command: CommandKind::UnwatchReferences,
+                    id: Uuid::nil(),
+                    seq: None,
+                    operation_id: None,
+                },
+                None,
+            )
+        }
     }
 }
 
@@ -406,6 +398,12 @@ type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
 struct WatchHub {
     next_client_id: AtomicU64,
     watchers: Mutex<HashMap<Uuid, HashMap<ClientId, OutboundMessages>>>,
+    reference_watchers: Mutex<HashMap<BlockParent, HashMap<ClientId, ReferenceWatch>>>,
+}
+
+struct ReferenceWatch {
+    outbound: OutboundMessages,
+    last: Vec<BlockReference>,
 }
 
 impl WatchHub {
@@ -413,6 +411,7 @@ impl WatchHub {
         Self {
             next_client_id: AtomicU64::new(1),
             watchers: Mutex::new(HashMap::new()),
+            reference_watchers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -445,6 +444,62 @@ impl WatchHub {
             entries.remove(&client_id);
             !entries.is_empty()
         });
+        let mut watchers = self.reference_watchers.lock().await;
+        watchers.retain(|_, entries| {
+            entries.remove(&client_id);
+            !entries.is_empty()
+        });
+    }
+
+    async fn watch_references(
+        &self,
+        parent: BlockParent,
+        client_id: ClientId,
+        outbound: OutboundMessages,
+        last: Vec<BlockReference>,
+    ) {
+        self.reference_watchers
+            .lock()
+            .await
+            .entry(parent)
+            .or_default()
+            .insert(client_id, ReferenceWatch { outbound, last });
+    }
+
+    async fn unwatch_references(&self, parent: BlockParent, client_id: ClientId) {
+        let mut watchers = self.reference_watchers.lock().await;
+        if let Some(entries) = watchers.get_mut(&parent) {
+            entries.remove(&client_id);
+            if entries.is_empty() {
+                watchers.remove(&parent);
+            }
+        }
+    }
+
+    async fn broadcast_reference_lists(&self, store: &BlockStore) {
+        let parents: Vec<_> = self
+            .reference_watchers
+            .lock()
+            .await
+            .keys()
+            .copied()
+            .collect();
+        for parent in parents {
+            let blocks = store.references(parent).await;
+            let mut watchers = self.reference_watchers.lock().await;
+            let Some(entries) = watchers.get_mut(&parent) else {
+                continue;
+            };
+            for watch in entries.values_mut() {
+                if watch.last != blocks {
+                    watch.last.clone_from(&blocks);
+                    let _ = watch.outbound.send(ServerMessage::ReferencesUpdated {
+                        parent,
+                        blocks: blocks.clone(),
+                    });
+                }
+            }
+        }
     }
 
     async fn broadcast(&self, message: ServerMessage) {
@@ -557,7 +612,8 @@ impl BlockStore {
         updated.blocks.insert(
             id,
             DependencyBlock {
-                parent: None,
+                block_type,
+                parent: BlockParent::Root,
                 references,
             },
         );
@@ -567,24 +623,6 @@ impl BlockStore {
         }
         *dependencies = updated;
         Ok(())
-    }
-
-    async fn get_or_create_block_unlocked(
-        &self,
-        id: Uuid,
-        block_type: Uuid,
-        data: Vec<u8>,
-        references: Vec<Uuid>,
-    ) -> Result<BlockRead, StoreError> {
-        match self.read_block_unlocked(id).await {
-            Ok(read) => Ok(read),
-            Err(StoreError::BlockNotFound) => {
-                self.create_block_unlocked(id, block_type, data, references)
-                    .await?;
-                self.read_block_unlocked(id).await
-            }
-            Err(error) => Err(error),
-        }
     }
 
     async fn update_block_unlocked(
@@ -669,7 +707,7 @@ impl BlockStore {
         })
     }
 
-    async fn set_parent_unlocked(&self, id: Uuid, parent: Option<Uuid>) -> Result<(), StoreError> {
+    async fn set_parent_unlocked(&self, id: Uuid, parent: BlockParent) -> Result<(), StoreError> {
         let mut dependencies = self.dependencies.lock().await;
         let mut updated = dependencies.clone();
         updated.set_parent(id, parent)?;
@@ -678,14 +716,29 @@ impl BlockStore {
         Ok(())
     }
 
-    async fn orphaned_blocks(&self) -> Vec<Uuid> {
+    async fn references(&self, parent: BlockParent) -> Vec<BlockReference> {
         let dependencies = self.dependencies.lock().await;
-        let mut blocks: Vec<_> = dependencies
-            .blocks
-            .iter()
-            .filter_map(|(&id, block)| block.parent.is_none().then_some(id))
+        let ids: Vec<_> = match parent {
+            BlockParent::Orphaned | BlockParent::Root => dependencies
+                .blocks
+                .iter()
+                .filter_map(|(&id, block)| (block.parent == parent).then_some(id))
+                .collect(),
+            BlockParent::Uuid(id) => dependencies
+                .blocks
+                .get(&id)
+                .map_or_else(Vec::new, |block| block.references.clone()),
+        };
+        let mut blocks: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| {
+                dependencies.blocks.get(&id).map(|block| BlockReference {
+                    id,
+                    block_type: block.block_type,
+                })
+            })
             .collect();
-        blocks.sort_unstable();
+        blocks.sort_unstable_by_key(|block| block.id);
         blocks
     }
 
@@ -713,7 +766,7 @@ struct BlockRead {
     snapshot: Vec<u8>,
     snapshot_seq: u64,
     operations: Vec<OperationRecord>,
-    parent: Option<Uuid>,
+    parent: BlockParent,
     references: Vec<Uuid>,
     backrefs: Vec<Uuid>,
 }
@@ -743,36 +796,42 @@ impl DependencyState {
 
         let still_referenced: HashSet<_> = self.blocks[&id].references.iter().copied().collect();
         for (&child_id, child) in &mut self.blocks {
-            if child.parent == Some(id) && !still_referenced.contains(&child_id) {
-                child.parent = None;
+            if child.parent == BlockParent::Uuid(id) && !still_referenced.contains(&child_id) {
+                child.parent = BlockParent::Orphaned;
             }
         }
         Ok(())
     }
 
-    fn set_parent(&mut self, id: Uuid, parent: Option<Uuid>) -> Result<(), StoreError> {
+    fn set_parent(&mut self, id: Uuid, parent: BlockParent) -> Result<(), StoreError> {
         if !self.blocks.contains_key(&id) {
             return Err(StoreError::BlockNotFound);
         }
-        let Some(parent) = parent else {
-            self.blocks.get_mut(&id).unwrap().parent = None;
+        let BlockParent::Uuid(parent_id) = parent else {
+            self.blocks.get_mut(&id).unwrap().parent = parent;
             return Ok(());
         };
         let parent_block = self
             .blocks
-            .get(&parent)
+            .get(&parent_id)
             .ok_or(StoreError::ReferencedBlockNotFound)?;
         if !parent_block.references.contains(&id) {
             return Err(StoreError::ParentMissingReference);
         }
-        let mut ancestor = Some(parent);
+        let mut ancestor = Some(parent_id);
         while let Some(current) = ancestor {
             if current == id {
                 return Err(StoreError::ParentCycle);
             }
-            ancestor = self.blocks.get(&current).and_then(|block| block.parent);
+            ancestor = self
+                .blocks
+                .get(&current)
+                .and_then(|block| match block.parent {
+                    BlockParent::Uuid(parent) => Some(parent),
+                    BlockParent::Orphaned | BlockParent::Root => None,
+                });
         }
-        self.blocks.get_mut(&id).unwrap().parent = Some(parent);
+        self.blocks.get_mut(&id).unwrap().parent = parent;
         Ok(())
     }
 
@@ -787,9 +846,10 @@ impl DependencyState {
     }
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct DependencyBlock {
-    parent: Option<Uuid>,
+    block_type: Uuid,
+    parent: BlockParent,
     references: Vec<Uuid>,
 }
 

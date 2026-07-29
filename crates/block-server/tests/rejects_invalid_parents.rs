@@ -1,6 +1,6 @@
 mod support;
 
-use block::{ErrorCode, ServerMessage};
+use block::{BlockParent, ErrorCode, ServerMessage};
 use support::{create, set_parent, TestServer};
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ async fn rejects_missing_parent_references_and_parent_cycles() {
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(
-        set_parent(&mut socket, second, Some(first)).await,
+        set_parent(&mut socket, second, BlockParent::Uuid(first)).await,
         ServerMessage::Error {
             code: ErrorCode::ParentMissingReference,
             ..
@@ -32,11 +32,11 @@ async fn rejects_missing_parent_references_and_parent_cycles() {
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(
-        set_parent(&mut socket, second, Some(first)).await,
+        set_parent(&mut socket, second, BlockParent::Uuid(first)).await,
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(
-        set_parent(&mut socket, first, Some(second)).await,
+        set_parent(&mut socket, first, BlockParent::Uuid(second)).await,
         ServerMessage::Error {
             code: ErrorCode::ParentCycle,
             ..

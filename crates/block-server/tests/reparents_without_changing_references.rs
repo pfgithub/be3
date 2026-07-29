@@ -1,6 +1,6 @@
 mod support;
 
-use block::ServerMessage;
+use block::{BlockParent, ServerMessage};
 use support::{create, read, relationships, set_parent, TestServer};
 use uuid::Uuid;
 
@@ -23,11 +23,11 @@ async fn reparents_without_changing_either_parents_references() {
         ));
     }
     assert!(matches!(
-        set_parent(&mut socket, child, Some(first_parent)).await,
+        set_parent(&mut socket, child, BlockParent::Uuid(first_parent)).await,
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(
-        set_parent(&mut socket, child, Some(second_parent)).await,
+        set_parent(&mut socket, child, BlockParent::Uuid(second_parent)).await,
         ServerMessage::Ok { .. }
     ));
 
@@ -35,7 +35,7 @@ async fn reparents_without_changing_either_parents_references() {
     expected_backrefs.sort_unstable();
     assert_eq!(
         relationships(read(&mut socket, child).await),
-        (Some(second_parent), vec![], expected_backrefs)
+        (BlockParent::Uuid(second_parent), vec![], expected_backrefs)
     );
     assert_eq!(
         relationships(read(&mut socket, first_parent).await).1,

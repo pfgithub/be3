@@ -2,8 +2,6 @@ use block::Block;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const WORKSPACE_INDEX_ID: Uuid = Uuid::from_u128(0x626c_6f63_6b2d_6170_702d_696e_6465_7801);
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BlockEntry {
     pub id: Uuid,

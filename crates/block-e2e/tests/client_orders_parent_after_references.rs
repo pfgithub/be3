@@ -1,4 +1,4 @@
-use block::Block;
+use block::{Block, BlockParent};
 use block_client::BlockClient;
 use serde::{Deserialize, Serialize};
 use tokio::{fs, net::TcpListener};
@@ -50,10 +50,18 @@ async fn client_orders_parent_assignment_after_creation_and_reference_updates() 
     child.loaded().await;
 
     parent.operate(ReferenceOperation::Add(child.id()));
-    child.set_parent(Some(parent.id()));
+    child.set_parent(BlockParent::Uuid(parent.id()));
     client.synchronized().await;
 
-    assert_eq!(client.orphaned_blocks().await, vec![parent.id()]);
+    assert_eq!(
+        client
+            .list_references(BlockParent::Root)
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
+        vec![parent.id()]
+    );
 
     drop(parent);
     drop(child);
