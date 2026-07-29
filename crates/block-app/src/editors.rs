@@ -23,7 +23,14 @@ use self::{
 };
 
 pub enum EditorAction {
-    OpenBlock { id: Uuid, block_type: Uuid },
+    OpenBlock {
+        id: Uuid,
+        block_type: Uuid,
+    },
+    CreateBlock {
+        block_type: Uuid,
+        parent: Option<Uuid>,
+    },
 }
 
 pub trait BlockEditor {
@@ -36,6 +43,7 @@ pub trait BlockEditor {
     fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }
+    fn block_created(&mut self, _id: Uuid, _block_type: Uuid, _name: String) {}
     fn ui(&mut self, ui: &mut egui::Ui, client: &BlockClient) -> Option<EditorAction>;
 }
 

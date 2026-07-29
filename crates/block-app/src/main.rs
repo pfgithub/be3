@@ -14,13 +14,10 @@ use std::{
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
 use block_client::{
-    blocks::{
-        infinite_canvas::InfiniteCanvas,
-        text::TextDocument,
-        workspace_index::{BlockEntry, WorkspaceIndex},
-    },
+    blocks::workspace_index::{BlockEntry, WorkspaceIndex},
     BlockClient, ReferenceList,
 };
+use block_picker::{BlockPicker, BlockPickerMenuAction};
 use debug::browser::BrowserDebug;
 use editors::{BlockEditor, EditorAction, EditorRegistry};
 use eframe::egui;
@@ -63,6 +60,8 @@ struct BlockApp {
     rename: Option<RenameState>,
     network_debug_open: bool,
     browser_debug: BrowserDebug,
+    block_picker: BlockPicker,
+    block_picker_target: Option<BlockPickerTarget>,
 }
 
 #[derive(Clone)]
@@ -74,6 +73,12 @@ struct PendingPlacement {
 struct RenameState {
     id: Uuid,
     name: String,
+}
+
+#[derive(Clone, Copy)]
+enum BlockPickerTarget {
+    Root,
+    Folder(Uuid),
 }
 
 impl BlockApp {
@@ -103,15 +108,24 @@ impl BlockApp {
             rename: None,
             network_debug_open: false,
             browser_debug,
+            block_picker: BlockPicker::default(),
+            block_picker_target: None,
         })
     }
 
-    fn create_block(&mut self, block_type: Uuid, parent: Option<Uuid>) {
+    fn create_block_editor(&mut self, block_type: Uuid) -> Option<Uuid> {
         let Some(editor) = self.registry.create(&self.client, block_type) else {
-            return;
+            return None;
         };
         let id = editor.id();
         self.editors.insert(id, editor);
+        Some(id)
+    }
+
+    fn create_block(&mut self, block_type: Uuid, parent: Option<Uuid>) {
+        let Some(id) = self.create_block_editor(block_type) else {
+            return;
+        };
         if let Some(parent) = parent {
             self.queue_placement(
                 BlockReference {
@@ -129,6 +143,60 @@ impl BlockApp {
             );
         }
         self.open_tab(id, block_type);
+    }
+
+    fn link_cached_block(&mut self, block: block_client::CachedBlock, target: BlockPickerTarget) {
+        match target {
+            BlockPickerTarget::Root => {
+                if !self.editors.contains_key(&block.id) {
+                    self.editors.insert(
+                        block.id,
+                        self.registry.open(&self.client, block.id, block.block_type),
+                    );
+                }
+                self.editors[&block.id].set_parent(BlockParent::Root);
+            }
+            BlockPickerTarget::Folder(parent) => self.queue_placement(
+                BlockReference {
+                    id: block.id,
+                    block_type: block.block_type,
+                    name: block.name,
+                    parent: BlockParent::Root,
+                    references: 0,
+                },
+                parent,
+            ),
+        }
+    }
+
+    fn handle_picker_menu_action(
+        &mut self,
+        action: BlockPickerMenuAction,
+        target: BlockPickerTarget,
+        excluded: impl IntoIterator<Item = Uuid>,
+    ) {
+        match action {
+            BlockPickerMenuAction::New(block_type) => {
+                let parent = match target {
+                    BlockPickerTarget::Root => None,
+                    BlockPickerTarget::Folder(parent) => Some(parent),
+                };
+                self.create_block(block_type, parent);
+            }
+            BlockPickerMenuAction::LinkExisting => {
+                self.block_picker.open(excluded);
+                self.block_picker_target = Some(target);
+            }
+        }
+    }
+
+    fn show_block_picker(&mut self, context: &egui::Context) {
+        let Some(block) = self.block_picker.show(context, &self.client) else {
+            return;
+        };
+        if let Some(target) = self.block_picker_target.take() {
+            self.link_cached_block(block, target);
+        }
     }
 
     fn queue_placement(&mut self, child: BlockReference, parent: Uuid) {
@@ -235,7 +303,7 @@ impl BlockApp {
         let was_expanded = self.expanded.contains_key(&reference.id);
         let mut toggle = false;
         let mut open = false;
-        let mut create_inside = None;
+        let mut picker_action = None;
         let mut row_response = None;
         ui.horizontal(|ui| {
             ui.add_space(depth as f32 * 14.0);
@@ -268,6 +336,11 @@ impl BlockApp {
                 open = true;
             }
             response.context_menu(|ui| {
+                ui.add_enabled_ui(reference.block_type == WorkspaceIndex::TYPE_ID, |ui| {
+                    ui.menu_button("Add", |ui| {
+                        picker_action = BlockPicker::show_menu(ui);
+                    });
+                });
                 if ui.button("Rename").clicked() {
                     self.rename = Some(RenameState {
                         id: reference.id,
@@ -279,26 +352,21 @@ impl BlockApp {
             row_response = Some(response);
             if reference.block_type == WorkspaceIndex::TYPE_ID {
                 ui.menu_button("+", |ui| {
-                    if ui.button("Text block").clicked() {
-                        create_inside = Some(TextDocument::TYPE_ID);
-                        ui.close();
-                    }
-                    if ui.button("Canvas").clicked() {
-                        create_inside = Some(InfiniteCanvas::TYPE_ID);
-                        ui.close();
-                    }
-                    if ui.button("Folder").clicked() {
-                        create_inside = Some(WorkspaceIndex::TYPE_ID);
-                        ui.close();
-                    }
+                    picker_action = BlockPicker::show_menu(ui);
                 })
                 .response
                 .on_hover_text("Create inside this folder");
             }
         });
 
-        if let Some(block_type) = create_inside {
-            self.create_block(block_type, Some(reference.id));
+        if let Some(action) = picker_action {
+            let mut excluded = path.clone();
+            excluded.insert(reference.id);
+            self.handle_picker_menu_action(
+                action,
+                BlockPickerTarget::Folder(reference.id),
+                excluded,
+            );
         }
         if reference.block_type == WorkspaceIndex::TYPE_ID {
             if let Some(response) = row_response {
@@ -357,29 +425,18 @@ impl BlockApp {
     }
 
     fn show_sidebar(&mut self, ui: &mut egui::Ui) {
-        let mut create = None;
+        let mut picker_action = None;
         ui.horizontal(|ui| {
             ui.heading("Blocks");
             ui.add_space(ui.available_width() - 28.0);
             ui.menu_button("+", |ui| {
-                if ui.button("Text block").clicked() {
-                    create = Some(TextDocument::TYPE_ID);
-                    ui.close();
-                }
-                if ui.button("Canvas").clicked() {
-                    create = Some(InfiniteCanvas::TYPE_ID);
-                    ui.close();
-                }
-                if ui.button("Folder").clicked() {
-                    create = Some(WorkspaceIndex::TYPE_ID);
-                    ui.close();
-                }
+                picker_action = BlockPicker::show_menu(ui);
             })
             .response
             .on_hover_text("Create block");
         });
-        if let Some(block_type) = create {
-            self.create_block(block_type, None);
+        if let Some(action) = picker_action {
+            self.handle_picker_menu_action(action, BlockPickerTarget::Root, []);
         }
         ui.separator();
 
@@ -529,8 +586,27 @@ impl BlockApp {
             return;
         };
         let action = editor.ui(ui, &self.client);
-        if let Some(EditorAction::OpenBlock { id, block_type }) = action {
-            self.open_tab(id, block_type);
+        match action {
+            Some(EditorAction::OpenBlock { id, block_type }) => self.open_tab(id, block_type),
+            Some(EditorAction::CreateBlock { block_type, parent }) => {
+                if let Some(id) = self.create_block_editor(block_type) {
+                    if let Some(parent) = parent {
+                        if let Some(created) = self.editors.get(&id) {
+                            created.set_parent(BlockParent::Uuid(parent));
+                            created.note_backref(parent);
+                        }
+                    }
+                    let name = self
+                        .registry
+                        .display_name(block_type)
+                        .unwrap_or_default()
+                        .to_owned();
+                    if let Some(editor) = self.editors.get_mut(&active) {
+                        editor.block_created(id, block_type, name);
+                    }
+                }
+            }
+            None => {}
         }
     }
 
@@ -651,6 +727,7 @@ fn immutable_id_list(ui: &mut egui::Ui, ids: &[Uuid], empty: &str) {
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.process_pending_placements();
+        self.show_block_picker(ui.ctx());
         self.show_rename(ui);
         self.show_network_debug(ui.ctx());
         self.browser_debug.show(ui.ctx());

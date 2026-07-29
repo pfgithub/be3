@@ -14,7 +14,7 @@ use block_client::{
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use uuid::Uuid;
 
-use crate::block_picker::BlockPicker;
+use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use super::{BlockEditor, EditorAction};
 
@@ -124,6 +124,8 @@ pub(super) struct InfiniteCanvasEditor {
     gesture: Option<Gesture>,
     picker: BlockPicker,
     armed_block: Option<CachedBlock>,
+    pending_block_center: Option<CanvasPoint>,
+    context_menu_position: Option<CanvasPoint>,
     last_reference_refresh: Instant,
     focus_text: Option<Uuid>,
 }
@@ -140,6 +142,8 @@ impl InfiniteCanvasEditor {
             gesture: None,
             picker: BlockPicker::default(),
             armed_block: None,
+            pending_block_center: None,
+            context_menu_position: None,
             last_reference_refresh: Instant::now(),
             focus_text: None,
         }
@@ -203,7 +207,8 @@ impl InfiniteCanvasEditor {
         });
     }
 
-    fn show_toolbar(&mut self, ui: &mut egui::Ui, entities: &[CanvasEntity]) {
+    fn show_toolbar(&mut self, ui: &mut egui::Ui, entities: &[CanvasEntity]) -> Option<Uuid> {
+        let mut create_block = None;
         ui.horizontal(|ui| {
             for (tool, label) in [
                 (Tool::Select, "Select"),
@@ -217,14 +222,21 @@ impl InfiniteCanvasEditor {
                     self.armed_block = None;
                 }
             }
-            if ui
-                .selectable_label(self.tool == Tool::Block, "Block")
-                .clicked()
-            {
-                self.tool = Tool::Block;
-                self.armed_block = None;
-                self.picker.open([self.block.id()]);
-            }
+            ui.menu_button("Block", |ui| {
+                if let Some(action) = BlockPicker::show_menu(ui) {
+                    self.tool = Tool::Block;
+                    self.armed_block = None;
+                    self.pending_block_center = None;
+                    match action {
+                        BlockPickerMenuAction::New(block_type) => {
+                            create_block = Some(block_type);
+                        }
+                        BlockPickerMenuAction::LinkExisting => {
+                            self.picker.open([self.block.id()]);
+                        }
+                    }
+                }
+            });
 
             if let Some(block) = &self.armed_block {
                 ui.weak(format!(
@@ -264,12 +276,18 @@ impl InfiniteCanvasEditor {
             }
         });
         ui.separator();
+        create_block
     }
 
     fn show_picker(&mut self, context: &egui::Context, client: &BlockClient) {
         if let Some(block) = self.picker.show(context, client) {
-            self.armed_block = Some(block);
-            self.tool = Tool::Block;
+            if let Some(center) = self.pending_block_center.take() {
+                self.add_block_entity(block.id, center);
+                self.tool = Tool::Select;
+            } else {
+                self.armed_block = Some(block);
+                self.tool = Tool::Block;
+            }
         }
     }
 
@@ -306,7 +324,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         response: &egui::Response,
         entities: &[CanvasEntity],
-    ) -> Option<CanvasLayerMove> {
+    ) -> (Option<CanvasLayerMove>, Option<Uuid>) {
         if response
             .ctx
             .input(|input| input.key_pressed(egui::Key::Escape))
@@ -328,7 +346,7 @@ impl InfiniteCanvasEditor {
         }
 
         if self.handle_zoom_and_pan(response) {
-            return None;
+            return (None, None);
         }
 
         let pointer = response
@@ -346,6 +364,7 @@ impl InfiniteCanvasEditor {
 
         if response.secondary_clicked() {
             if let Some(world) = world {
+                self.context_menu_position = Some(world);
                 if let Some(id) = self.entity_at(entities, world) {
                     if !self.selection.contains(&id) {
                         self.selection.clear();
@@ -355,7 +374,56 @@ impl InfiniteCanvasEditor {
             }
         }
         let mut layer_move = None;
+        let mut create_block = None;
         response.context_menu(|ui| {
+            ui.menu_button("Add", |ui| {
+                if ui.button("Rectangle").clicked() {
+                    if let Some(center) = self.context_menu_position {
+                        self.add_entity(CanvasEntity {
+                            id: Uuid::new_v4(),
+                            transform: CanvasTransform::new(
+                                center,
+                                CanvasPoint::new(180.0, 100.0),
+                                0.0,
+                            ),
+                            kind: CanvasEntityKind::Rectangle,
+                        });
+                    }
+                    self.tool = Tool::Select;
+                    ui.close();
+                }
+                if ui.button("Line").clicked() {
+                    if let Some(center) = self.context_menu_position {
+                        self.add_entity(CanvasEntity {
+                            id: Uuid::new_v4(),
+                            transform: CanvasTransform::new(
+                                center,
+                                CanvasPoint::new(180.0, MIN_SIZE),
+                                0.0,
+                            ),
+                            kind: CanvasEntityKind::Line,
+                        });
+                    }
+                    self.tool = Tool::Select;
+                    ui.close();
+                }
+                ui.menu_button("Block", |ui| {
+                    if let Some(action) = BlockPicker::show_menu(ui) {
+                        self.tool = Tool::Block;
+                        self.armed_block = None;
+                        self.pending_block_center = self.context_menu_position;
+                        match action {
+                            BlockPickerMenuAction::New(block_type) => {
+                                create_block = Some(block_type);
+                            }
+                            BlockPickerMenuAction::LinkExisting => {
+                                self.picker.open([self.block.id()]);
+                            }
+                        }
+                    }
+                });
+            });
+            ui.separator();
             for (label, movement) in [
                 ("Bring to front", CanvasLayerMove::BringToFront),
                 ("Forwards one", CanvasLayerMove::ForwardOne),
@@ -373,7 +441,7 @@ impl InfiniteCanvasEditor {
         });
 
         let Some(world) = world else {
-            return layer_move;
+            return (layer_move, create_block);
         };
         let primary_pressed = response
             .ctx
@@ -495,7 +563,7 @@ impl InfiniteCanvasEditor {
                 self.finish_gesture(gesture, entities);
             }
         }
-        layer_move
+        (layer_move, create_block)
     }
 
     fn finish_gesture(&mut self, gesture: Gesture, entities: &[CanvasEntity]) {
@@ -734,6 +802,20 @@ impl BlockEditor for InfiniteCanvasEditor {
         self.block.note_backref(id);
     }
 
+    fn block_created(&mut self, id: Uuid, block_type: Uuid, name: String) {
+        if let Some(center) = self.pending_block_center.take() {
+            self.add_block_entity(id, center);
+            self.tool = Tool::Select;
+        } else {
+            self.armed_block = Some(CachedBlock {
+                id,
+                block_type,
+                name,
+            });
+            self.tool = Tool::Block;
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, client: &BlockClient) -> Option<EditorAction> {
         let Some(canvas) = self.block.read() else {
             ui.centered_and_justified(|ui| {
@@ -744,10 +826,11 @@ impl BlockEditor for InfiniteCanvasEditor {
         let entities = canvas.entities().to_vec();
         drop(canvas);
 
-        self.show_toolbar(ui, &entities);
+        let mut create_block = self.show_toolbar(ui, &entities);
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        let layer_move = self.handle_canvas_input(&response, &entities);
+        let (layer_move, context_create_block) = self.handle_canvas_input(&response, &entities);
+        create_block = create_block.or(context_create_block);
         if let Some(movement) = layer_move {
             self.block.operate(InfiniteCanvasOperation::Reorder {
                 ids: self.selection.iter().copied().collect(),
@@ -763,7 +846,12 @@ impl BlockEditor for InfiniteCanvasEditor {
         self.show_picker(ui.ctx(), client);
         let action = self.selected_block_action(ui.ctx(), response.rect, &painted_entities, client);
         ui.ctx().request_repaint();
-        action
+        action.or_else(|| {
+            create_block.map(|block_type| EditorAction::CreateBlock {
+                block_type,
+                parent: Some(self.block.id()),
+            })
+        })
     }
 }
 

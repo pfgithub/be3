@@ -1,20 +1,52 @@
 use std::collections::HashSet;
 
-use block_client::{BlockClient, CachedBlock};
+use block::Block;
+use block_client::{
+    blocks::{
+        infinite_canvas::InfiniteCanvas, text::TextDocument, workspace_index::WorkspaceIndex,
+    },
+    BlockClient, CachedBlock,
+};
 use eframe::egui;
 use uuid::Uuid;
+
+pub enum BlockPickerMenuAction {
+    New(Uuid),
+    LinkExisting,
+}
 
 #[derive(Default)]
 pub struct BlockPicker {
     open: bool,
-    input: String,
+    search: String,
     excluded: HashSet<Uuid>,
 }
 
 impl BlockPicker {
+    pub fn show_menu(ui: &mut egui::Ui) -> Option<BlockPickerMenuAction> {
+        let mut action = None;
+        ui.menu_button("New block", |ui| {
+            for (label, block_type) in [
+                ("Text block", TextDocument::TYPE_ID),
+                ("Canvas", InfiniteCanvas::TYPE_ID),
+                ("Folder", WorkspaceIndex::TYPE_ID),
+            ] {
+                if ui.button(label).clicked() {
+                    action = Some(BlockPickerMenuAction::New(block_type));
+                    ui.close();
+                }
+            }
+        });
+        if ui.button("Link existing block").clicked() {
+            action = Some(BlockPickerMenuAction::LinkExisting);
+            ui.close();
+        }
+        action
+    }
+
     pub fn open(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
         self.open = true;
-        self.input.clear();
+        self.search.clear();
         self.excluded = excluded.into_iter().collect();
     }
 
@@ -27,63 +59,61 @@ impl BlockPicker {
             return None;
         }
 
-        let parsed = self.input.trim().parse::<Uuid>().ok();
-        let cached = parsed
-            .filter(|id| !self.excluded.contains(id))
-            .and_then(|id| client.cached_block(id));
+        let search = self.search.trim().to_lowercase();
+        let blocks: Vec<_> = client
+            .cached_blocks()
+            .into_iter()
+            .filter(|block| !self.excluded.contains(&block.id))
+            .filter(|block| {
+                search.is_empty()
+                    || block.name.to_lowercase().contains(&search)
+                    || block.id.to_string().contains(&search)
+            })
+            .collect();
         let mut selected = None;
         let mut cancel = false;
         let mut open = self.open;
-        egui::Window::new("Choose cached block")
+        egui::Window::new("Link existing block")
             .collapsible(false)
-            .resizable(false)
+            .resizable(true)
+            .default_width(420.0)
             .open(&mut open)
             .show(context, |ui| {
-                ui.label("Block UUID");
-                ui.text_edit_singleline(&mut self.input).request_focus();
-
-                match (parsed, cached.as_ref()) {
-                    (None, _) if !self.input.trim().is_empty() => {
-                        ui.colored_label(ui.visuals().error_fg_color, "Enter a valid UUID.");
-                    }
-                    (Some(id), _) if self.excluded.contains(&id) => {
-                        ui.colored_label(
-                            ui.visuals().error_fg_color,
-                            "This block cannot be referenced here.",
-                        );
-                    }
-                    (Some(_), None) => {
-                        ui.colored_label(
-                            ui.visuals().error_fg_color,
-                            "That UUID is not in the client cache.",
-                        );
-                    }
-                    (_, Some(block)) => {
-                        ui.label(if block.name.is_empty() {
-                            block.id.to_string()
-                        } else {
-                            format!("{} ({})", block.name, block.id)
-                        });
-                    }
-                    _ => {
-                        ui.weak(format!(
-                            "{} cached blocks available",
-                            client.cached_blocks().len()
-                        ));
-                    }
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.search)
+                        .hint_text("Search by name or UUID"),
+                )
+                .request_focus();
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        if blocks.is_empty() {
+                            ui.weak(if search.is_empty() {
+                                "No blocks are available to link."
+                            } else {
+                                "No matching blocks."
+                            });
+                        }
+                        for block in &blocks {
+                            let label = if block.name.is_empty() {
+                                block.id.to_string()
+                            } else {
+                                block.name.clone()
+                            };
+                            if ui
+                                .button(label)
+                                .on_hover_text(block.id.to_string())
+                                .clicked()
+                            {
+                                selected = Some(block.clone());
+                            }
+                        }
+                    });
+                ui.separator();
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
                 }
-
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(cached.is_some(), egui::Button::new("Place block"))
-                        .clicked()
-                    {
-                        selected = cached.clone();
-                    }
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
-                });
             });
         if selected.is_some() || cancel {
             open = false;
