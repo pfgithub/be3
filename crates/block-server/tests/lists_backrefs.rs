@@ -20,6 +20,10 @@ async fn lists_backrefs_with_relationship_metadata() {
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(
+        set_parent(&mut socket, source, BlockParent::Root).await,
+        ServerMessage::Ok { .. }
+    ));
+    assert!(matches!(
         set_parent(&mut socket, target, BlockParent::Uuid(source)).await,
         ServerMessage::Ok { .. }
     ));

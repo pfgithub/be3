@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicUsize, Arc},
+};
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList, ClientMessage};
 use parking_lot::RwLock;
@@ -78,6 +81,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
                 references: 0,
             }]),
             loaded,
+            subscribers: AtomicUsize::new(1),
         }),
     );
 

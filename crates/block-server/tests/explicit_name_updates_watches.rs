@@ -1,8 +1,10 @@
 mod support;
 
-use block::{BlockReferenceList, ClientMessage, CommandKind, ReferenceDelta, ServerMessage};
+use block::{
+    BlockParent, BlockReferenceList, ClientMessage, CommandKind, ReferenceDelta, ServerMessage,
+};
 use futures_util::StreamExt;
-use support::{create, request, TestServer};
+use support::{create, request, set_parent, TestServer};
 use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
@@ -14,6 +16,10 @@ async fn explicit_name_overrides_implicit_names_and_updates_both_kinds_of_watch(
     let id = Uuid::new_v4();
     assert!(matches!(
         create(&mut mutator, id, vec![]).await,
+        ServerMessage::Ok { .. }
+    ));
+    assert!(matches!(
+        set_parent(&mut mutator, id, BlockParent::Root).await,
         ServerMessage::Ok { .. }
     ));
 

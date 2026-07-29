@@ -2,7 +2,10 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     ops::Deref,
     process,
-    sync::{mpsc, Arc, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, OnceLock, Weak,
+    },
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -24,6 +27,8 @@ pub mod blocks;
 mod cached_blocks_are_populated_from_confirmed_metadata;
 #[cfg(test)]
 mod client_debug_snapshot_reports_active_worker_state;
+#[cfg(test)]
+mod duplicate_reference_watches_share_subscription;
 
 pub struct BlockClient {
     id: Uuid,
@@ -33,6 +38,7 @@ pub struct BlockClient {
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+    watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +154,7 @@ impl BlockClient {
         }));
         let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(id)));
         let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
+        let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
         let worker_client_debug = Arc::clone(&client_debug);
@@ -172,6 +179,7 @@ impl BlockClient {
             debug,
             client_debug,
             cached_blocks,
+            watched_reference_lists,
         }
     }
 
@@ -240,10 +248,22 @@ impl BlockClient {
     }
 
     pub fn watch_references(&self, list: BlockReferenceList) -> ReferenceList {
+        let mut watched = self.watched_reference_lists.write();
+        if let Some(shared) = watched.get(&list).and_then(Weak::upgrade) {
+            shared.subscribers.fetch_add(1, Ordering::Relaxed);
+            return ReferenceList {
+                list,
+                shared,
+                commands: self.commands.clone(),
+                watched_reference_lists: Arc::clone(&self.watched_reference_lists),
+            };
+        }
         let shared = Arc::new(ReferenceListShared {
             blocks: RwLock::new(Vec::new()),
             loaded: watch::channel(false).0,
+            subscribers: AtomicUsize::new(1),
         });
+        watched.insert(list, Arc::downgrade(&shared));
         self.send(WorkerCommand::WatchReferences {
             list,
             shared: Arc::clone(&shared),
@@ -252,6 +272,7 @@ impl BlockClient {
             list,
             shared,
             commands: self.commands.clone(),
+            watched_reference_lists: Arc::clone(&self.watched_reference_lists),
         }
     }
 
@@ -431,6 +452,7 @@ pub struct ReferenceList {
     list: BlockReferenceList,
     shared: Arc<ReferenceListShared>,
     commands: mpsc::Sender<WorkerCommand>,
+    watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
 }
 
 impl ReferenceList {
@@ -445,15 +467,27 @@ impl ReferenceList {
 
 impl Drop for ReferenceList {
     fn drop(&mut self) {
-        let _ = self
-            .commands
-            .send(WorkerCommand::UnwatchReferences(self.list));
+        if self.shared.subscribers.fetch_sub(1, Ordering::AcqRel) != 1 {
+            return;
+        }
+        let mut watched = self.watched_reference_lists.write();
+        let is_current = watched
+            .get(&self.list)
+            .and_then(Weak::upgrade)
+            .is_some_and(|shared| Arc::ptr_eq(&shared, &self.shared));
+        if is_current {
+            watched.remove(&self.list);
+            let _ = self
+                .commands
+                .send(WorkerCommand::UnwatchReferences(self.list));
+        }
     }
 }
 
 struct ReferenceListShared {
     blocks: RwLock<Vec<BlockReference>>,
     loaded: watch::Sender<bool>,
+    subscribers: AtomicUsize,
 }
 
 pub struct BlockReadGuard<'a, B: Block> {
@@ -1635,7 +1669,7 @@ impl<B: Block> TypedBlock<B> {
             loaded: watch::channel(false).0,
             changed: watch::channel(()).0,
             relationships: RwLock::new(BlockRelationships {
-                parent: BlockParent::Root,
+                parent: BlockParent::Orphaned,
                 references,
                 backrefs: Vec::new(),
             }),

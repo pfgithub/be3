@@ -20,6 +20,10 @@ async fn lists_every_root_block_in_uuid_order() {
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(
+        set_parent(&mut socket, parent, BlockParent::Root).await,
+        ServerMessage::Ok { .. }
+    ));
+    assert!(matches!(
         set_parent(&mut socket, child, BlockParent::Uuid(parent)).await,
         ServerMessage::Ok { .. }
     ));

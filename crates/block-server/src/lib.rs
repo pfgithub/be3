@@ -646,7 +646,7 @@ impl BlockStore {
                 block_type,
                 name: implicit_name,
                 explicit_name: None,
-                parent: BlockParent::Root,
+                parent: BlockParent::Orphaned,
                 references,
             },
         );

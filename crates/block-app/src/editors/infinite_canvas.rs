@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, Instant},
-};
+use std::collections::{HashMap, HashSet};
 
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
@@ -9,7 +6,7 @@ use block_client::{
         CanvasEntity, CanvasEntityKind, CanvasLayerMove, CanvasPoint, CanvasTransform,
         InfiniteCanvas, InfiniteCanvasOperation,
     },
-    BlockClient, BlockHandle, BlockRelationships, CachedBlock,
+    BlockClient, BlockHandle, BlockRelationships, CachedBlock, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use uuid::Uuid;
@@ -124,15 +121,16 @@ pub(super) struct InfiniteCanvasEditor {
     gesture: Option<Gesture>,
     picker: BlockPicker,
     armed_block: Option<CachedBlock>,
+    armed_block_needs_parent: bool,
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
-    last_reference_refresh: Instant,
+    dependencies: ReferenceList,
     focus_text: Option<Uuid>,
 }
 
 impl InfiniteCanvasEditor {
     pub(super) fn new(block: BlockHandle<InfiniteCanvas>, client: &BlockClient) -> Self {
-        client.cache_references(BlockReferenceList::References(block.id()));
+        let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
         Self {
             block,
             tool: Tool::Select,
@@ -142,9 +140,10 @@ impl InfiniteCanvasEditor {
             gesture: None,
             picker: BlockPicker::default(),
             armed_block: None,
+            armed_block_needs_parent: false,
             pending_block_center: None,
             context_menu_position: None,
-            last_reference_refresh: Instant::now(),
+            dependencies,
             focus_text: None,
         }
     }
@@ -220,12 +219,14 @@ impl InfiniteCanvasEditor {
                 if ui.selectable_label(self.tool == tool, label).clicked() {
                     self.tool = tool;
                     self.armed_block = None;
+                    self.armed_block_needs_parent = false;
                 }
             }
             ui.menu_button("Block", |ui| {
                 if let Some(action) = BlockPicker::show_menu(ui) {
                     self.tool = Tool::Block;
                     self.armed_block = None;
+                    self.armed_block_needs_parent = false;
                     self.pending_block_center = None;
                     match action {
                         BlockPickerMenuAction::New(block_type) => {
@@ -286,6 +287,7 @@ impl InfiniteCanvasEditor {
                 self.tool = Tool::Select;
             } else {
                 self.armed_block = Some(block);
+                self.armed_block_needs_parent = false;
                 self.tool = Tool::Block;
             }
         }
@@ -324,13 +326,14 @@ impl InfiniteCanvasEditor {
         &mut self,
         response: &egui::Response,
         entities: &[CanvasEntity],
-    ) -> (Option<CanvasLayerMove>, Option<Uuid>) {
+    ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<Uuid>) {
         if response
             .ctx
             .input(|input| input.key_pressed(egui::Key::Escape))
         {
             self.gesture = None;
             self.armed_block = None;
+            self.armed_block_needs_parent = false;
             self.picker.close();
             self.tool = Tool::Select;
         }
@@ -346,7 +349,7 @@ impl InfiniteCanvasEditor {
         }
 
         if self.handle_zoom_and_pan(response) {
-            return (None, None);
+            return (None, None, None);
         }
 
         let pointer = response
@@ -381,6 +384,7 @@ impl InfiniteCanvasEditor {
         }
         let mut layer_move = None;
         let mut create_block = None;
+        let mut set_parent = None;
         response.context_menu(|ui| {
             ui.menu_button("Add", |ui| {
                 if ui.button("Rectangle").clicked() {
@@ -417,6 +421,7 @@ impl InfiniteCanvasEditor {
                     if let Some(action) = BlockPicker::show_menu(ui) {
                         self.tool = Tool::Block;
                         self.armed_block = None;
+                        self.armed_block_needs_parent = false;
                         self.pending_block_center = self.context_menu_position;
                         match action {
                             BlockPickerMenuAction::New(block_type) => {
@@ -447,7 +452,7 @@ impl InfiniteCanvasEditor {
         });
 
         let Some(world) = world else {
-            return (layer_move, create_block);
+            return (layer_move, create_block, set_parent);
         };
         let primary_pressed = response
             .ctx
@@ -531,6 +536,9 @@ impl InfiniteCanvasEditor {
                 Tool::Block => {
                     if let Some(block) = self.armed_block.take() {
                         self.add_block_entity(block.id, world);
+                        if std::mem::take(&mut self.armed_block_needs_parent) {
+                            set_parent = Some(block.id);
+                        }
                         self.tool = Tool::Select;
                     } else {
                         self.picker.open([self.block.id()]);
@@ -569,7 +577,7 @@ impl InfiniteCanvasEditor {
                 self.finish_gesture(gesture, entities);
             }
         }
-        (layer_move, create_block)
+        (layer_move, create_block, set_parent)
     }
 
     fn finish_gesture(&mut self, gesture: Gesture, entities: &[CanvasEntity]) {
@@ -644,7 +652,13 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    fn paint(&self, painter: &egui::Painter, rect: Rect, entities: &[CanvasEntity]) {
+    fn paint(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        entities: &[CanvasEntity],
+        dependency_titles: &HashMap<Uuid, String>,
+    ) {
         let preview = self
             .gesture
             .as_ref()
@@ -662,6 +676,7 @@ impl InfiniteCanvasEditor {
                 rect,
                 entity,
                 self.selection.contains(&entity.id),
+                dependency_titles,
             );
         }
 
@@ -757,10 +772,6 @@ impl InfiniteCanvasEditor {
         let position =
             self.world_to_screen(CanvasPoint::new(bounds.center().x, bounds.max.y), rect);
         let cached = client.cached_block(block_id);
-        if cached.is_none() && self.last_reference_refresh.elapsed() >= Duration::from_secs(1) {
-            client.cache_references(BlockReferenceList::References(self.block.id()));
-            self.last_reference_refresh = Instant::now();
-        }
         let mut action = None;
         egui::Area::new(egui::Id::new(("open-canvas-block", entity.id)))
             .order(egui::Order::Foreground)
@@ -808,17 +819,20 @@ impl BlockEditor for InfiniteCanvasEditor {
         self.block.note_backref(id);
     }
 
-    fn block_created(&mut self, id: Uuid, block_type: Uuid, name: String) {
+    fn block_created(&mut self, id: Uuid, block_type: Uuid, name: String) -> bool {
         if let Some(center) = self.pending_block_center.take() {
             self.add_block_entity(id, center);
             self.tool = Tool::Select;
+            true
         } else {
             self.armed_block = Some(CachedBlock {
                 id,
                 block_type,
                 name,
             });
+            self.armed_block_needs_parent = true;
             self.tool = Tool::Block;
+            false
         }
     }
 
@@ -836,11 +850,18 @@ impl BlockEditor for InfiniteCanvasEditor {
         };
         let entities = canvas.entities().to_vec();
         drop(canvas);
+        let dependency_titles = self
+            .dependencies
+            .read()
+            .into_iter()
+            .map(|dependency| (dependency.id, dependency.name))
+            .collect();
 
         let mut create_block = self.show_toolbar(ui, &entities);
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        let (layer_move, context_create_block) = self.handle_canvas_input(&response, &entities);
+        let (layer_move, context_create_block, set_parent) =
+            self.handle_canvas_input(&response, &entities);
         create_block = create_block.or(context_create_block);
         if let Some(movement) = layer_move {
             self.block.operate(InfiniteCanvasOperation::Reorder {
@@ -853,16 +874,28 @@ impl BlockEditor for InfiniteCanvasEditor {
             .read()
             .map(|canvas| canvas.entities().to_vec())
             .unwrap_or(entities);
-        self.paint(&painter, response.rect, &painted_entities);
+        self.paint(
+            &painter,
+            response.rect,
+            &painted_entities,
+            &dependency_titles,
+        );
         self.show_picker(ui.ctx(), client);
         let action = self.selected_block_action(ui.ctx(), response.rect, &painted_entities, client);
         ui.ctx().request_repaint();
-        action.or_else(|| {
-            create_block.map(|block_type| EditorAction::CreateBlock {
-                block_type,
-                parent: Some(self.block.id()),
+        action
+            .or_else(|| {
+                set_parent.map(|id| EditorAction::SetParent {
+                    id,
+                    parent: self.block.id(),
+                })
             })
-        })
+            .or_else(|| {
+                create_block.map(|block_type| EditorAction::CreateBlock {
+                    block_type,
+                    parent: Some(self.block.id()),
+                })
+            })
     }
 }
 
@@ -1194,6 +1227,7 @@ fn paint_entity(
     rect: Rect,
     entity: &CanvasEntity,
     selected: bool,
+    dependency_titles: &HashMap<Uuid, String>,
 ) {
     let color = if selected {
         Color32::LIGHT_BLUE
@@ -1246,7 +1280,7 @@ fn paint_entity(
                 stroke,
             ));
         }
-        CanvasEntityKind::Block { .. } => {
+        CanvasEntityKind::Block { block_id } => {
             let corners: Vec<_> = entity_corners(entity)
                 .into_iter()
                 .map(|point| editor.world_to_screen(point, rect))
@@ -1257,15 +1291,43 @@ fn paint_entity(
                 stroke,
             ));
             let center = editor.world_to_screen(entity.transform.center, rect);
-            let galley = painter.layout_no_wrap(
-                "TODO".into(),
+            let title = dependency_titles
+                .get(block_id)
+                .cloned()
+                .unwrap_or_else(|| "Loading…".into());
+            let title_galley = painter.layout_no_wrap(
+                title,
                 egui::FontId::proportional((18.0 * editor.zoom).clamp(8.0, 42.0)),
                 color,
             );
-            let position = center - galley.size() * 0.5;
+            let preview_galley = painter.layout_no_wrap(
+                "(TODO: preview)".into(),
+                egui::FontId::proportional((12.0 * editor.zoom).clamp(7.0, 30.0)),
+                color,
+            );
+            let gap = (4.0 * editor.zoom).clamp(2.0, 10.0);
+            let total_height = title_galley.size().y + gap + preview_galley.size().y;
+            let title_center_offset = -total_height * 0.5 + title_galley.size().y * 0.5;
+            let preview_center_offset = total_height * 0.5 - preview_galley.size().y * 0.5;
+            let (sin, cos) = entity.transform.rotation.sin_cos();
+            let rotated_offset = |offset: f32| Vec2::new(-offset * sin, offset * cos);
+            let title_center = center + rotated_offset(title_center_offset);
+            let preview_center = center + rotated_offset(preview_center_offset);
             painter.add(
-                egui::epaint::TextShape::new(position, galley, color)
-                    .with_angle_and_anchor(entity.transform.rotation, egui::Align2::CENTER_CENTER),
+                egui::epaint::TextShape::new(
+                    title_center - title_galley.size() * 0.5,
+                    title_galley,
+                    color,
+                )
+                .with_angle_and_anchor(entity.transform.rotation, egui::Align2::CENTER_CENTER),
+            );
+            painter.add(
+                egui::epaint::TextShape::new(
+                    preview_center - preview_galley.size() * 0.5,
+                    preview_galley,
+                    color,
+                )
+                .with_angle_and_anchor(entity.transform.rotation, egui::Align2::CENTER_CENTER),
             );
         }
     }

@@ -1,8 +1,8 @@
 mod support;
 
-use block::{BlockReferenceList, ClientMessage, ServerMessage};
+use block::{BlockParent, BlockReferenceList, ClientMessage, ServerMessage};
 use futures_util::StreamExt;
-use support::{create, request, update, TestServer};
+use support::{create, request, set_parent, update, TestServer};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -15,6 +15,8 @@ async fn reference_watch_updates_when_a_listed_blocks_reference_count_changes() 
 
     create(&mut writer, target, vec![]).await;
     create(&mut writer, source, vec![]).await;
+    set_parent(&mut writer, target, BlockParent::Root).await;
+    set_parent(&mut writer, source, BlockParent::Root).await;
 
     assert!(matches!(
         request(

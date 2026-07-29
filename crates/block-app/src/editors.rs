@@ -33,6 +33,10 @@ pub enum EditorAction {
         block_type: Uuid,
         parent: Option<Uuid>,
     },
+    SetParent {
+        id: Uuid,
+        parent: Uuid,
+    },
 }
 
 #[derive(Clone)]
@@ -68,7 +72,9 @@ pub trait BlockEditor {
     fn delete_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }
-    fn block_created(&mut self, _id: Uuid, _block_type: Uuid, _name: String) {}
+    fn block_created(&mut self, _id: Uuid, _block_type: Uuid, _name: String) -> bool {
+        false
+    }
     fn update_open_tab(&mut self, _frame: &eframe::Frame) {}
     fn set_tab_active(&mut self, _active: bool) {}
     fn tab_closed(&mut self) {}

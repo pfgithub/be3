@@ -144,6 +144,8 @@ impl BlockApp {
                 },
                 parent,
             );
+        } else if let Some(editor) = self.editors.get(&id) {
+            editor.set_parent(BlockParent::Root);
         }
         self.open_tab(id, block_type);
     }
@@ -751,20 +753,35 @@ impl BlockApp {
             Some(EditorAction::OpenBlock { id, block_type }) => self.open_tab(id, block_type),
             Some(EditorAction::CreateBlock { block_type, parent }) => {
                 if let Some(id) = self.create_block_editor(block_type) {
-                    if let Some(parent) = parent {
-                        if let Some(created) = self.editors.get(&id) {
-                            created.set_parent(BlockParent::Uuid(parent));
-                            created.note_backref(parent);
-                        }
-                    }
                     let name = self
                         .registry
                         .display_name(block_type)
                         .unwrap_or_default()
                         .to_owned();
-                    if let Some(editor) = self.editors.get_mut(&active) {
-                        editor.block_created(id, block_type, name);
+                    let referenced = self
+                        .editors
+                        .get_mut(&active)
+                        .is_some_and(|editor| editor.block_created(id, block_type, name));
+                    match (parent, referenced) {
+                        (Some(parent), true) => {
+                            if let Some(created) = self.editors.get(&id) {
+                                created.note_backref(parent);
+                                created.set_parent(BlockParent::Uuid(parent));
+                            }
+                        }
+                        (None, _) => {
+                            if let Some(created) = self.editors.get(&id) {
+                                created.set_parent(BlockParent::Root);
+                            }
+                        }
+                        (Some(_), false) => {}
                     }
+                }
+            }
+            Some(EditorAction::SetParent { id, parent }) => {
+                if let Some(child) = self.editors.get(&id) {
+                    child.note_backref(parent);
+                    child.set_parent(BlockParent::Uuid(parent));
                 }
             }
             None => {}

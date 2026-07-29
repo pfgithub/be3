@@ -52,6 +52,18 @@ async fn client_orders_parent_assignment_after_creation_and_reference_updates() 
     client.connect(url);
     parent.loaded().await;
     child.loaded().await;
+    parent.set_parent(BlockParent::Root);
+    client.synchronized().await;
+
+    assert_eq!(
+        client
+            .list_references(BlockReferenceList::Orphans)
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
+        vec![child.id()]
+    );
 
     parent.operate(ReferenceOperation::Add(child.id()));
     child.set_parent(BlockParent::Uuid(parent.id()));
