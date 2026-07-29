@@ -44,6 +44,7 @@ impl BlockEditor for TextEditor {
         &mut self,
         ui: &mut egui::Ui,
         _client: &block_client::BlockClient,
+        _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         let Some(document) = self.block.read() else {
             ui.centered_and_justified(|ui| {

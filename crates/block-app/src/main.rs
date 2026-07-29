@@ -15,7 +15,6 @@ use std::{
 use block::{BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
 use block_client::{blocks::workspace_index::BlockEntry, BlockClient, ReferenceList};
 use block_picker::{BlockPicker, BlockPickerMenuAction};
-use debug::browser::BrowserDebug;
 use editors::{BlockEditor, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource};
 use eframe::egui;
 use tokio::net::TcpListener;
@@ -35,8 +34,8 @@ fn main() -> eframe::Result {
     eframe::run_native(
         APP_ID,
         options,
-        Box::new(|creation_context| {
-            BlockApp::new(creation_context)
+        Box::new(|_creation_context| {
+            BlockApp::new()
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
                 .map_err(Into::into)
         }),
@@ -58,7 +57,6 @@ struct BlockApp {
     rename: Option<RenameState>,
     client_debug_open: bool,
     network_debug_open: bool,
-    browser_debug: BrowserDebug,
     block_picker: BlockPicker,
     block_picker_target: Option<BlockPickerTarget>,
 }
@@ -90,9 +88,7 @@ enum BlockPickerTarget {
 }
 
 impl BlockApp {
-    fn new(
-        creation_context: &eframe::CreationContext<'_>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    fn new() -> Result<Self, Box<dyn Error + Send + Sync>> {
         let data_dir = eframe::storage_dir(APP_ID)
             .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?
             .join("blocks");
@@ -100,8 +96,6 @@ impl BlockApp {
         let client = BlockClient::new();
         client.connect(url);
         let roots = client.watch_references(BlockReferenceList::Roots);
-        let browser_debug = BrowserDebug::new(creation_context)?;
-
         Ok(Self {
             client,
             roots,
@@ -117,7 +111,6 @@ impl BlockApp {
             rename: None,
             client_debug_open: false,
             network_debug_open: false,
-            browser_debug,
             block_picker: BlockPicker::default(),
             block_picker_target: None,
         })
@@ -341,6 +334,9 @@ impl BlockApp {
         };
         self.tabs.remove(index);
         self.parents.remove(&id);
+        if let Some(editor) = self.editors.get_mut(&id) {
+            editor.tab_closed();
+        }
         if self.active_tab == Some(id) {
             self.active_tab = if self.tabs.is_empty() {
                 None
@@ -682,10 +678,6 @@ impl BlockApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button("Debug", |ui| {
-                    if ui.button("Browser").clicked() {
-                        self.browser_debug.open();
-                        ui.close();
-                    }
                     if ui.button("Client").clicked() {
                         self.client_debug_open = true;
                         ui.close();
@@ -740,7 +732,7 @@ impl BlockApp {
         }
     }
 
-    fn show_content(&mut self, ui: &mut egui::Ui) {
+    fn show_content(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
         let Some(active) = self.active_tab else {
             ui.centered_and_justified(|ui| {
                 ui.vertical_centered(|ui| {
@@ -754,7 +746,7 @@ impl BlockApp {
             self.active_tab = None;
             return;
         };
-        let action = editor.ui(ui, &self.client);
+        let action = editor.ui(ui, &self.client, frame);
         match action {
             Some(EditorAction::OpenBlock { id, block_type }) => self.open_tab(id, block_type),
             Some(EditorAction::CreateBlock { block_type, parent }) => {
@@ -890,13 +882,12 @@ fn immutable_id_list(ui: &mut egui::Ui, ids: &[Uuid], empty: &str) {
 }
 
 impl eframe::App for BlockApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.process_pending_transfers();
         self.show_block_picker(ui.ctx());
         self.show_rename(ui);
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
-        self.browser_debug.show(ui.ctx());
         egui::Panel::left("blocks-sidebar")
             .default_size(240.0)
             .min_size(160.0)
@@ -917,11 +908,17 @@ impl eframe::App for BlockApp {
 
         ui.vertical(|ui| {
             self.show_tabs(ui);
+            for id in &self.tabs {
+                if let Some(editor) = self.editors.get_mut(id) {
+                    editor.update_open_tab(frame);
+                    editor.set_tab_active(self.active_tab == Some(*id));
+                }
+            }
             ui.separator();
             egui::Panel::bottom("block-statusbar")
                 .resizable(false)
                 .show_inside(ui, |ui| self.show_statusbar(ui));
-            self.show_content(ui);
+            self.show_content(ui, frame);
         });
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }

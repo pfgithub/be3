@@ -1,3 +1,4 @@
+mod browser_tab;
 mod infinite_canvas;
 mod text;
 mod unsupported;
@@ -10,6 +11,7 @@ use block_client::{
     blocks::{
         infinite_canvas::InfiniteCanvas,
         text::TextDocument,
+        web_browser_tab::WebBrowserTab,
         workspace_index::{BlockEntry, WorkspaceIndex},
     },
     BlockClient, BlockRelationships,
@@ -18,8 +20,8 @@ use eframe::egui;
 use uuid::Uuid;
 
 use self::{
-    infinite_canvas::InfiniteCanvasEditor, text::TextEditor, unsupported::UnsupportedEditor,
-    workspace_index::WorkspaceIndexEditor,
+    browser_tab::WebBrowserTabEditor, infinite_canvas::InfiniteCanvasEditor, text::TextEditor,
+    unsupported::UnsupportedEditor, workspace_index::WorkspaceIndexEditor,
 };
 
 pub enum EditorAction {
@@ -67,7 +69,15 @@ pub trait BlockEditor {
         None
     }
     fn block_created(&mut self, _id: Uuid, _block_type: Uuid, _name: String) {}
-    fn ui(&mut self, ui: &mut egui::Ui, client: &BlockClient) -> Option<EditorAction>;
+    fn update_open_tab(&mut self, _frame: &eframe::Frame) {}
+    fn set_tab_active(&mut self, _active: bool) {}
+    fn tab_closed(&mut self) {}
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        client: &BlockClient,
+        frame: &eframe::Frame,
+    ) -> Option<EditorAction>;
 }
 
 type CreateEditor = fn(&BlockClient) -> Box<dyn BlockEditor>;
@@ -109,6 +119,20 @@ impl EditorRegistry {
             "Text",
             |client| Box::new(TextEditor::new(client.create_block(TextDocument::new()))),
             |client, id| Box::new(TextEditor::new(client.get_block::<TextDocument>(id))),
+        );
+        registry.register(
+            WebBrowserTab::TYPE_ID,
+            "Web Browser Tab",
+            |client| {
+                Box::new(WebBrowserTabEditor::new(
+                    client.create_block(WebBrowserTab::new()),
+                ))
+            },
+            |client, id| {
+                Box::new(WebBrowserTabEditor::new(
+                    client.get_block::<WebBrowserTab>(id),
+                ))
+            },
         );
         registry.register(
             WorkspaceIndex::TYPE_ID,

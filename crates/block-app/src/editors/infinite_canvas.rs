@@ -822,7 +822,12 @@ impl BlockEditor for InfiniteCanvasEditor {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, client: &BlockClient) -> Option<EditorAction> {
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        client: &BlockClient,
+        _frame: &eframe::Frame,
+    ) -> Option<EditorAction> {
         let Some(canvas) = self.block.read() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();

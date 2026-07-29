@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use block::Block;
 use block_client::{
     blocks::{
-        infinite_canvas::InfiniteCanvas, text::TextDocument, workspace_index::WorkspaceIndex,
+        infinite_canvas::InfiniteCanvas, text::TextDocument, web_browser_tab::WebBrowserTab,
+        workspace_index::WorkspaceIndex,
     },
     BlockClient, CachedBlock,
 };
@@ -30,6 +31,7 @@ impl BlockPicker {
                 ("Text block", TextDocument::TYPE_ID),
                 ("Canvas", InfiniteCanvas::TYPE_ID),
                 ("Folder", WorkspaceIndex::TYPE_ID),
+                ("Browser Tab", WebBrowserTab::TYPE_ID),
             ] {
                 if ui.button(label).clicked() {
                     action = Some(BlockPickerMenuAction::New(block_type));
