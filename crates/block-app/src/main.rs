@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 const APP_ID: &str = "Block";
 const DEFAULT_TITLE: &str = "Untitled";
+const DEFAULT_FOLDER_TITLE: &str = "New folder";
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -82,8 +83,8 @@ impl BlockApp {
             .unwrap_or_default()
     }
 
-    fn create_text_block(&mut self) {
-        let Some(editor) = self.registry.create(&self.client, TextDocument::TYPE_ID) else {
+    fn create_block(&mut self, block_type: Uuid, title: &str) {
+        let Some(editor) = self.registry.create(&self.client, block_type) else {
             return;
         };
         let id = editor.id();
@@ -91,13 +92,13 @@ impl BlockApp {
         self.workspace
             .operate(WorkspaceIndexOperation::Add(BlockEntry {
                 id,
-                block_type: TextDocument::TYPE_ID,
-                title: DEFAULT_TITLE.into(),
+                block_type,
+                title: title.into(),
             }));
-        self.open_tab(id, TextDocument::TYPE_ID);
+        self.open_tab(id, block_type);
         self.rename = Some(RenameState {
             id,
-            title: DEFAULT_TITLE.into(),
+            title: title.into(),
             request_focus: true,
             error: None,
         });
@@ -155,13 +156,26 @@ impl BlockApp {
     }
 
     fn show_sidebar(&mut self, ui: &mut egui::Ui, entries: &[BlockEntry]) {
+        let mut create = None;
         ui.horizontal(|ui| {
             ui.heading("Blocks");
             ui.add_space(ui.available_width() - 28.0);
-            if ui.button("+").on_hover_text("Create text block").clicked() {
-                self.create_text_block();
-            }
+            ui.menu_button("+", |ui| {
+                if ui.button("Text block").clicked() {
+                    create = Some((TextDocument::TYPE_ID, DEFAULT_TITLE));
+                    ui.close();
+                }
+                if ui.button("Folder").clicked() {
+                    create = Some((WorkspaceIndex::TYPE_ID, DEFAULT_FOLDER_TITLE));
+                    ui.close();
+                }
+            })
+            .response
+            .on_hover_text("Create block");
         });
+        if let Some((block_type, title)) = create {
+            self.create_block(block_type, title);
+        }
         ui.separator();
 
         let mut open = None;

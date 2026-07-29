@@ -5,6 +5,8 @@ use block_client::{text::TextDocument, BlockClient, BlockHandle};
 use eframe::egui;
 use uuid::Uuid;
 
+use crate::index::WorkspaceIndex;
+
 pub trait BlockEditor {
     fn id(&self) -> Uuid;
     fn ui(&mut self, ui: &mut egui::Ui);
@@ -33,6 +35,20 @@ impl EditorRegistry {
             "Text",
             |client| Box::new(TextEditor::new(client.create_block(TextDocument::new()))),
             |client, id| Box::new(TextEditor::new(client.get_block::<TextDocument>(id))),
+        );
+        registry.register(
+            WorkspaceIndex::TYPE_ID,
+            "Folder",
+            |client| {
+                Box::new(WorkspaceIndexEditor::new(
+                    client.create_block(WorkspaceIndex::default()),
+                ))
+            },
+            |client, id| {
+                Box::new(WorkspaceIndexEditor::new(
+                    client.get_block::<WorkspaceIndex>(id),
+                ))
+            },
         );
         registry
     }
@@ -71,6 +87,44 @@ impl EditorRegistry {
             || Box::new(UnsupportedEditor { id, block_type }) as Box<dyn BlockEditor>,
             |registration| (registration.open)(client, id),
         )
+    }
+}
+
+struct WorkspaceIndexEditor {
+    block: BlockHandle<WorkspaceIndex>,
+}
+
+impl WorkspaceIndexEditor {
+    fn new(block: BlockHandle<WorkspaceIndex>) -> Self {
+        Self { block }
+    }
+}
+
+impl BlockEditor for WorkspaceIndexEditor {
+    fn id(&self) -> Uuid {
+        self.block.id()
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let Some(index) = self.block.read() else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return;
+        };
+
+        if index.entries().is_empty() {
+            ui.centered_and_justified(|ui| {
+                ui.weak("This folder is empty.");
+            });
+            return;
+        }
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for entry in index.entries() {
+                ui.label(&entry.title).on_hover_text(entry.id.to_string());
+            }
+        });
     }
 }
 
