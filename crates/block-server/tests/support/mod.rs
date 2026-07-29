@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use block::{BlockParent, BlockReference, ClientMessage, ReferenceDelta, ServerMessage};
+use block::{
+    BlockParent, BlockReference, BlockReferenceList, ClientMessage, ReferenceDelta, ServerMessage,
+};
 use futures_util::{SinkExt, StreamExt};
 use tokio::{fs, net::TcpListener, task::JoinHandle};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
@@ -118,12 +120,12 @@ pub async fn read(socket: &mut Socket, id: Uuid) -> ServerMessage {
     .await
 }
 
-pub async fn references(socket: &mut Socket, parent: BlockParent) -> Vec<BlockReference> {
+pub async fn references(socket: &mut Socket, list: BlockReferenceList) -> Vec<BlockReference> {
     match request(
         socket,
         ClientMessage::ListReferences {
             request_id: Uuid::new_v4(),
-            parent,
+            list,
             watch: false,
         },
     )
@@ -134,14 +136,9 @@ pub async fn references(socket: &mut Socket, parent: BlockParent) -> Vec<BlockRe
     }
 }
 
-pub fn relationships(message: ServerMessage) -> (BlockParent, Vec<Uuid>, Vec<Uuid>) {
+pub fn parent(message: ServerMessage) -> BlockParent {
     match message {
-        ServerMessage::ReadBlock {
-            parent,
-            references,
-            backrefs,
-            ..
-        } => (parent, references, backrefs),
+        ServerMessage::ReadBlock { parent, .. } => parent,
         message => panic!("expected block read, got {message:?}"),
     }
 }

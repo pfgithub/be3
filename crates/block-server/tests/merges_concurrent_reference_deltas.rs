@@ -1,7 +1,7 @@
 mod support;
 
-use block::ServerMessage;
-use support::{create, read, relationships, update, TestServer};
+use block::{BlockReferenceList, ServerMessage};
+use support::{create, references, update, TestServer};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -29,7 +29,11 @@ async fn merges_reference_deltas_from_concurrent_clients() {
     let mut expected = vec![first_target, second_target];
     expected.sort_unstable();
     assert_eq!(
-        relationships(read(&mut first_socket, source).await).1,
+        references(&mut first_socket, BlockReferenceList::References(source),)
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
         expected
     );
     server.cleanup().await;

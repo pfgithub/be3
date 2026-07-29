@@ -1,7 +1,7 @@
 mod support;
 
-use block::{BlockParent, ServerMessage};
-use support::{create, read, references, relationships, set_parent, update, TestServer};
+use block::{BlockParent, BlockReferenceList, ServerMessage};
+use support::{create, parent as read_parent, read, references, set_parent, update, TestServer};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -27,7 +27,7 @@ async fn removing_a_parent_reference_orphans_the_child_without_restoring_it_on_r
         update(&mut socket, parent, vec![], vec![child]).await,
         ServerMessage::Ok { .. }
     ));
-    assert!(references(&mut socket, BlockParent::Orphaned)
+    assert!(references(&mut socket, BlockReferenceList::Orphans)
         .await
         .iter()
         .any(|block| block.id == child));
@@ -37,7 +37,7 @@ async fn removing_a_parent_reference_orphans_the_child_without_restoring_it_on_r
         ServerMessage::Ok { .. }
     ));
     assert_eq!(
-        relationships(read(&mut socket, child).await).0,
+        read_parent(read(&mut socket, child).await),
         BlockParent::Orphaned
     );
     server.cleanup().await;

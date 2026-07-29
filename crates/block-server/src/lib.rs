@@ -10,8 +10,8 @@ use std::{
 };
 
 use block::{
-    BlockOperation, BlockParent, BlockReference, ClientMessage, CommandKind, ErrorCode,
-    OperationRecord, ReferenceDelta, ServerMessage, MAX_NAME_BYTES,
+    BlockOperation, BlockParent, BlockReference, BlockReferenceList, ClientMessage, CommandKind,
+    ErrorCode, OperationRecord, ReferenceDelta, ServerMessage, MAX_NAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -308,8 +308,6 @@ async fn handle_text_message(
                         snapshot_seq: read.snapshot_seq,
                         operations: read.operations,
                         parent: read.parent,
-                        references: read.references,
-                        backrefs: read.backrefs,
                         name: read.name,
                     }
                 }
@@ -389,26 +387,26 @@ async fn handle_text_message(
         }
         ClientMessage::ListReferences {
             request_id,
-            parent,
+            list,
             watch,
         } => {
-            let blocks = store.references(parent).await;
+            let blocks = store.references(list).await;
             if watch {
                 watch_hub
-                    .watch_references(parent, client_id, outbound, blocks.clone())
+                    .watch_references(list, client_id, outbound, blocks.clone())
                     .await;
             }
             (
                 ServerMessage::References {
                     request_id,
-                    parent,
+                    list,
                     blocks,
                 },
                 None,
             )
         }
-        ClientMessage::UnwatchReferences { request_id, parent } => {
-            watch_hub.unwatch_references(parent, client_id).await;
+        ClientMessage::UnwatchReferences { request_id, list } => {
+            watch_hub.unwatch_references(list, client_id).await;
             (
                 ServerMessage::Ok {
                     request_id,
@@ -429,7 +427,7 @@ type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
 struct WatchHub {
     next_client_id: AtomicU64,
     watchers: Mutex<HashMap<Uuid, HashMap<ClientId, OutboundMessages>>>,
-    reference_watchers: Mutex<HashMap<BlockParent, HashMap<ClientId, ReferenceWatch>>>,
+    reference_watchers: Mutex<HashMap<BlockReferenceList, HashMap<ClientId, ReferenceWatch>>>,
 }
 
 struct ReferenceWatch {
@@ -484,7 +482,7 @@ impl WatchHub {
 
     async fn watch_references(
         &self,
-        parent: BlockParent,
+        list: BlockReferenceList,
         client_id: ClientId,
         outbound: OutboundMessages,
         last: Vec<BlockReference>,
@@ -492,40 +490,40 @@ impl WatchHub {
         self.reference_watchers
             .lock()
             .await
-            .entry(parent)
+            .entry(list)
             .or_default()
             .insert(client_id, ReferenceWatch { outbound, last });
     }
 
-    async fn unwatch_references(&self, parent: BlockParent, client_id: ClientId) {
+    async fn unwatch_references(&self, list: BlockReferenceList, client_id: ClientId) {
         let mut watchers = self.reference_watchers.lock().await;
-        if let Some(entries) = watchers.get_mut(&parent) {
+        if let Some(entries) = watchers.get_mut(&list) {
             entries.remove(&client_id);
             if entries.is_empty() {
-                watchers.remove(&parent);
+                watchers.remove(&list);
             }
         }
     }
 
     async fn broadcast_reference_lists(&self, store: &BlockStore) {
-        let parents: Vec<_> = self
+        let lists: Vec<_> = self
             .reference_watchers
             .lock()
             .await
             .keys()
             .copied()
             .collect();
-        for parent in parents {
-            let blocks = store.references(parent).await;
+        for list in lists {
+            let blocks = store.references(list).await;
             let mut watchers = self.reference_watchers.lock().await;
-            let Some(entries) = watchers.get_mut(&parent) else {
+            let Some(entries) = watchers.get_mut(&list) else {
                 continue;
             };
             for watch in entries.values_mut() {
                 if watch.last != blocks {
                     watch.last.clone_from(&blocks);
                     let _ = watch.outbound.send(ServerMessage::ReferencesUpdated {
-                        parent,
+                        list,
                         blocks: blocks.clone(),
                     });
                 }
@@ -754,8 +752,6 @@ impl BlockStore {
             snapshot_seq,
             operations,
             parent: dependency.parent,
-            references: dependency.references.clone(),
-            backrefs: dependencies.backrefs(id),
             name: dependency.name.clone(),
         })
     }
@@ -784,18 +780,26 @@ impl BlockStore {
         Ok(name)
     }
 
-    async fn references(&self, parent: BlockParent) -> Vec<BlockReference> {
+    async fn references(&self, list: BlockReferenceList) -> Vec<BlockReference> {
         let dependencies = self.dependencies.lock().await;
-        let ids: Vec<_> = match parent {
-            BlockParent::Orphaned | BlockParent::Root => dependencies
+        let ids: Vec<_> = match list {
+            BlockReferenceList::Orphans | BlockReferenceList::Roots => dependencies
                 .blocks
                 .iter()
-                .filter_map(|(&id, block)| (block.parent == parent).then_some(id))
+                .filter_map(|(&id, block)| {
+                    let parent = match list {
+                        BlockReferenceList::Orphans => BlockParent::Orphaned,
+                        BlockReferenceList::Roots => BlockParent::Root,
+                        _ => unreachable!(),
+                    };
+                    (block.parent == parent).then_some(id)
+                })
                 .collect(),
-            BlockParent::Uuid(id) => dependencies
+            BlockReferenceList::References(id) => dependencies
                 .blocks
                 .get(&id)
                 .map_or_else(Vec::new, |block| block.references.clone()),
+            BlockReferenceList::Backrefs(id) => dependencies.backrefs(id),
         };
         let mut blocks: Vec<_> = ids
             .into_iter()
@@ -804,6 +808,8 @@ impl BlockStore {
                     id,
                     block_type: block.block_type,
                     name: block.name.clone(),
+                    parent: block.parent,
+                    references: block.references.len(),
                 })
             })
             .collect();
@@ -836,8 +842,6 @@ struct BlockRead {
     snapshot_seq: u64,
     operations: Vec<OperationRecord>,
     parent: BlockParent,
-    references: Vec<Uuid>,
-    backrefs: Vec<Uuid>,
     name: String,
 }
 

@@ -1,6 +1,6 @@
 mod support;
 
-use block::{BlockParent, ClientMessage, CommandKind, ReferenceDelta, ServerMessage};
+use block::{BlockReferenceList, ClientMessage, CommandKind, ReferenceDelta, ServerMessage};
 use futures_util::StreamExt;
 use support::{create, request, TestServer};
 use tokio::time::{timeout, Duration};
@@ -22,7 +22,7 @@ async fn explicit_name_overrides_implicit_names_and_updates_both_kinds_of_watch(
             &mut watcher,
             ClientMessage::ListReferences {
                 request_id: Uuid::new_v4(),
-                parent: BlockParent::Root,
+                list: BlockReferenceList::Roots,
                 watch: true,
             },
         )

@@ -1,7 +1,7 @@
 mod support;
 
-use block::{BlockUpdate, ClientMessage, ReferenceDelta, ServerMessage};
-use support::{create, read, relationships, request, TestServer};
+use block::{BlockReferenceList, BlockUpdate, ClientMessage, ReferenceDelta, ServerMessage};
+use support::{create, references, request, TestServer};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -54,7 +54,11 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
     let mut expected_backrefs = vec![first, second];
     expected_backrefs.sort_unstable();
     assert_eq!(
-        relationships(read(&mut socket, target).await).2,
+        references(&mut socket, BlockReferenceList::Backrefs(target))
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
         expected_backrefs
     );
     server.cleanup().await;

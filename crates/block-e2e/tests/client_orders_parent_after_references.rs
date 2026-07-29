@@ -1,4 +1,4 @@
-use block::{Block, BlockParent};
+use block::{Block, BlockParent, BlockReferenceList};
 use block_client::BlockClient;
 use serde::{Deserialize, Serialize};
 use tokio::{fs, net::TcpListener};
@@ -59,7 +59,7 @@ async fn client_orders_parent_assignment_after_creation_and_reference_updates() 
 
     assert_eq!(
         client
-            .list_references(BlockParent::Root)
+            .list_references(BlockReferenceList::Roots)
             .await
             .into_iter()
             .map(|block| block.id)

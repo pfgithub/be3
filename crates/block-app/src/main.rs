@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use block::{Block, BlockParent, BlockReference, MAX_NAME_BYTES};
+use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
 use block_client::{text::TextDocument, BlockClient, ReferenceList};
 use editor::{BlockEditor, EditorRegistry};
 use eframe::egui;
@@ -72,7 +72,7 @@ impl BlockApp {
         let url = start_embedded_server(data_dir)?;
         let client = BlockClient::new();
         client.connect(url);
-        let roots = client.watch_references(BlockParent::Root);
+        let roots = client.watch_references(BlockReferenceList::Roots);
 
         Ok(Self {
             client,
@@ -103,6 +103,8 @@ impl BlockApp {
                     } else {
                         String::new()
                     },
+                    parent: BlockParent::Root,
+                    references: 0,
                 },
                 parent,
             );
@@ -297,7 +299,7 @@ impl BlockApp {
                 self.expanded.insert(
                     reference.id,
                     self.client
-                        .watch_references(BlockParent::Uuid(reference.id)),
+                        .watch_references(BlockReferenceList::References(reference.id)),
                 );
             }
         }

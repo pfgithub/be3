@@ -1,6 +1,6 @@
 mod support;
 
-use block::{BlockParent, ServerMessage};
+use block::{BlockParent, BlockReferenceList, ServerMessage};
 use support::{create, references, set_parent, TestServer};
 use uuid::Uuid;
 
@@ -25,7 +25,7 @@ async fn lists_every_root_block_in_uuid_order() {
     ));
 
     assert_eq!(
-        references(&mut socket, BlockParent::Root)
+        references(&mut socket, BlockReferenceList::Roots)
             .await
             .into_iter()
             .map(|block| block.id)

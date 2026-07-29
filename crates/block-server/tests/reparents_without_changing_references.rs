@@ -1,7 +1,7 @@
 mod support;
 
-use block::{BlockParent, ServerMessage};
-use support::{create, read, relationships, set_parent, TestServer};
+use block::{BlockParent, BlockReferenceList, ServerMessage};
+use support::{create, parent as read_parent, read, references, set_parent, TestServer};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -34,16 +34,32 @@ async fn reparents_without_changing_either_parents_references() {
     let mut expected_backrefs = vec![first_parent, second_parent];
     expected_backrefs.sort_unstable();
     assert_eq!(
-        relationships(read(&mut socket, child).await),
-        (BlockParent::Uuid(second_parent), vec![], expected_backrefs)
+        read_parent(read(&mut socket, child).await),
+        BlockParent::Uuid(second_parent)
     );
     assert_eq!(
-        relationships(read(&mut socket, first_parent).await).1,
+        references(&mut socket, BlockReferenceList::References(first_parent))
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
         vec![child]
     );
     assert_eq!(
-        relationships(read(&mut socket, second_parent).await).1,
+        references(&mut socket, BlockReferenceList::References(second_parent))
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
         vec![child]
+    );
+    assert_eq!(
+        references(&mut socket, BlockReferenceList::Backrefs(child))
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
+        expected_backrefs
     );
     server.cleanup().await;
 }

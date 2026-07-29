@@ -1,11 +1,11 @@
 mod support;
 
 use block::{BlockParent, ServerMessage};
-use support::{create, read, relationships, set_parent, TestServer};
+use support::{create, parent as read_parent, read, set_parent, TestServer};
 use uuid::Uuid;
 
 #[tokio::test]
-async fn read_returns_parent_references_and_all_backrefs() {
+async fn read_returns_parent() {
     let server = TestServer::start().await;
     let mut socket = server.connect().await;
     let parent = Uuid::new_v4();
@@ -29,11 +29,9 @@ async fn read_returns_parent_references_and_all_backrefs() {
         ServerMessage::Ok { .. }
     ));
 
-    let mut expected_backrefs = vec![parent, other];
-    expected_backrefs.sort_unstable();
     assert_eq!(
-        relationships(read(&mut socket, child).await),
-        (BlockParent::Uuid(parent), vec![], expected_backrefs)
+        read_parent(read(&mut socket, child).await),
+        BlockParent::Uuid(parent)
     );
     server.cleanup().await;
 }

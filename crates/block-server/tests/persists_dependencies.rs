@@ -1,7 +1,7 @@
 mod support;
 
-use block::{BlockParent, ServerMessage};
-use support::{create, read, relationships, set_parent, TestServer};
+use block::{BlockParent, BlockReferenceList, ServerMessage};
+use support::{create, parent as read_parent, read, references, set_parent, TestServer};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -29,8 +29,16 @@ async fn dependency_state_survives_a_server_restart() {
     let restarted = TestServer::start_at(root).await;
     let mut socket = restarted.connect().await;
     assert_eq!(
-        relationships(read(&mut socket, child).await),
-        (BlockParent::Uuid(parent), vec![], vec![parent])
+        read_parent(read(&mut socket, child).await),
+        BlockParent::Uuid(parent)
+    );
+    assert_eq!(
+        references(&mut socket, BlockReferenceList::Backrefs(child))
+            .await
+            .into_iter()
+            .map(|block| block.id)
+            .collect::<Vec<_>>(),
+        vec![parent]
     );
     restarted.cleanup().await;
 }

@@ -2,7 +2,7 @@ mod support;
 
 use std::time::Duration;
 
-use block::{BlockParent, ClientMessage, ServerMessage};
+use block::{BlockReferenceList, ClientMessage, ServerMessage};
 use futures_util::StreamExt;
 use support::{create, request, update, TestServer};
 use tokio::time::timeout;
@@ -24,7 +24,7 @@ async fn watches_reference_changes_until_unwatched() {
             &mut watcher,
             ClientMessage::ListReferences {
                 request_id: Uuid::new_v4(),
-                parent: BlockParent::Uuid(source),
+                list: BlockReferenceList::References(source),
                 watch: true,
             },
         )
@@ -39,7 +39,7 @@ async fn watches_reference_changes_until_unwatched() {
     assert!(matches!(
         message,
         ServerMessage::ReferencesUpdated {
-            parent: BlockParent::Uuid(id),
+            list: BlockReferenceList::References(id),
             blocks,
         } if id == source && blocks.is_empty()
     ));
@@ -49,7 +49,7 @@ async fn watches_reference_changes_until_unwatched() {
             &mut watcher,
             ClientMessage::UnwatchReferences {
                 request_id: Uuid::new_v4(),
-                parent: BlockParent::Uuid(source),
+                list: BlockReferenceList::References(source),
             },
         )
         .await,

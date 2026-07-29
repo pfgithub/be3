@@ -58,12 +58,23 @@ pub enum BlockParent {
     Uuid(Uuid),
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockReferenceList {
+    Roots,
+    Orphans,
+    References(Uuid),
+    Backrefs(Uuid),
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct BlockReference {
     pub id: Uuid,
     #[serde(rename = "type")]
     pub block_type: Uuid,
     pub name: String,
+    pub parent: BlockParent,
+    pub references: usize,
 }
 
 pub const MAX_NAME_BYTES: usize = 128;
@@ -151,12 +162,12 @@ pub enum ClientMessage {
     },
     ListReferences {
         request_id: Uuid,
-        parent: BlockParent,
+        list: BlockReferenceList,
         watch: bool,
     },
     UnwatchReferences {
         request_id: Uuid,
-        parent: BlockParent,
+        list: BlockReferenceList,
     },
 }
 
@@ -200,8 +211,6 @@ pub enum ServerMessage {
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         parent: BlockParent,
-        references: Vec<Uuid>,
-        backrefs: Vec<Uuid>,
         name: String,
     },
     BatchOk {
@@ -239,11 +248,11 @@ pub enum ServerMessage {
     },
     References {
         request_id: Uuid,
-        parent: BlockParent,
+        list: BlockReferenceList,
         blocks: Vec<BlockReference>,
     },
     ReferencesUpdated {
-        parent: BlockParent,
+        list: BlockReferenceList,
         blocks: Vec<BlockReference>,
     },
 }

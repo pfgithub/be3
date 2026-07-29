@@ -7,8 +7,8 @@ use std::{
 };
 
 use block::{
-    Block, BlockOperation, BlockParent, BlockReference, BlockUpdate, ClientMessage, CommandKind,
-    ErrorCode, OperationRecord, ReferenceDelta, ServerMessage,
+    Block, BlockOperation, BlockParent, BlockReference, BlockReferenceList, BlockUpdate,
+    ClientMessage, CommandKind, ErrorCode, OperationRecord, ReferenceDelta, ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -100,25 +100,25 @@ impl BlockClient {
             .unwrap_or_else(|_| fatal("block client worker stopped before synchronizing"));
     }
 
-    pub async fn list_references(&self, parent: BlockParent) -> Vec<BlockReference> {
+    pub async fn list_references(&self, list: BlockReferenceList) -> Vec<BlockReference> {
         let (completed, completion) = oneshot::channel();
-        self.send(WorkerCommand::ListReferences { parent, completed });
+        self.send(WorkerCommand::ListReferences { list, completed });
         completion
             .await
             .unwrap_or_else(|_| fatal("block client worker stopped before listing references"))
     }
 
-    pub fn watch_references(&self, parent: BlockParent) -> ReferenceList {
+    pub fn watch_references(&self, list: BlockReferenceList) -> ReferenceList {
         let shared = Arc::new(ReferenceListShared {
             blocks: RwLock::new(Vec::new()),
             loaded: watch::channel(false).0,
         });
         self.send(WorkerCommand::WatchReferences {
-            parent,
+            list,
             shared: Arc::clone(&shared),
         });
         ReferenceList {
-            parent,
+            list,
             shared,
             commands: self.commands.clone(),
         }
@@ -254,7 +254,7 @@ impl<B: Block> BlockHandle<B> {
 }
 
 pub struct ReferenceList {
-    parent: BlockParent,
+    list: BlockReferenceList,
     shared: Arc<ReferenceListShared>,
     commands: mpsc::Sender<WorkerCommand>,
 }
@@ -273,7 +273,7 @@ impl Drop for ReferenceList {
     fn drop(&mut self) {
         let _ = self
             .commands
-            .send(WorkerCommand::UnwatchReferences(self.parent));
+            .send(WorkerCommand::UnwatchReferences(self.list));
     }
 }
 
@@ -350,14 +350,14 @@ enum WorkerCommand {
         name: String,
     },
     ListReferences {
-        parent: BlockParent,
+        list: BlockReferenceList,
         completed: oneshot::Sender<Vec<BlockReference>>,
     },
     WatchReferences {
-        parent: BlockParent,
+        list: BlockReferenceList,
         shared: Arc<ReferenceListShared>,
     },
-    UnwatchReferences(BlockParent),
+    UnwatchReferences(BlockReferenceList),
     Synchronize(oneshot::Sender<()>),
 }
 
@@ -456,7 +456,7 @@ struct WorkerState {
     connected: bool,
     access: Arc<RwLock<()>>,
     blocks: HashMap<Uuid, Arc<dyn ErasedBlock>>,
-    reference_lists: HashMap<BlockParent, Arc<ReferenceListShared>>,
+    reference_lists: HashMap<BlockReferenceList, Arc<ReferenceListShared>>,
     requests: HashMap<Uuid, PendingRequest>,
     outbound: VecDeque<ClientMessage>,
     deferred: VecDeque<DeferredRequest>,
@@ -512,21 +512,21 @@ impl WorkerState {
                 self.deferred
                     .push_back(DeferredRequest::SetBlockName { id, name });
             }
-            WorkerCommand::ListReferences { parent, completed } => {
+            WorkerCommand::ListReferences { list, completed } => {
                 self.deferred
-                    .push_back(DeferredRequest::ListReferences { parent, completed });
+                    .push_back(DeferredRequest::ListReferences { list, completed });
             }
-            WorkerCommand::WatchReferences { parent, shared } => {
-                if self.reference_lists.insert(parent, shared).is_some() {
-                    fatal("references for this parent are already being watched");
+            WorkerCommand::WatchReferences { list, shared } => {
+                if self.reference_lists.insert(list, shared).is_some() {
+                    fatal("this reference list is already being watched");
                 }
                 self.deferred
-                    .push_back(DeferredRequest::WatchReferences { parent });
+                    .push_back(DeferredRequest::WatchReferences { list });
             }
-            WorkerCommand::UnwatchReferences(parent) => {
-                self.reference_lists.remove(&parent);
+            WorkerCommand::UnwatchReferences(list) => {
+                self.reference_lists.remove(&list);
                 self.deferred
-                    .push_back(DeferredRequest::UnwatchReferences { parent });
+                    .push_back(DeferredRequest::UnwatchReferences { list });
             }
             WorkerCommand::Synchronize(completed) => {
                 self.synchronization_waiters.push(completed);
@@ -690,8 +690,6 @@ impl WorkerState {
                 snapshot_seq,
                 operations,
                 parent,
-                references,
-                backrefs,
                 name,
             } => {
                 match (self.requests.remove(&request_id), command) {
@@ -706,17 +704,7 @@ impl WorkerState {
                         block.block_type_id()
                     ));
                 }
-                block.resolve(
-                    snapshot,
-                    snapshot_seq,
-                    operations,
-                    BlockRelationships {
-                        parent,
-                        references,
-                        backrefs,
-                    },
-                    name,
-                );
+                block.resolve(snapshot, snapshot_seq, operations, parent, name);
                 self.maybe_send_update(id);
             }
             ServerMessage::BatchOk {
@@ -834,7 +822,7 @@ impl WorkerState {
             }
             ServerMessage::References {
                 request_id,
-                parent,
+                list,
                 blocks,
             } => {
                 let pending = self
@@ -843,13 +831,13 @@ impl WorkerState {
                     .unwrap_or_else(|| fatal("reference response referenced an unknown request"));
                 match pending {
                     PendingRequest::ListReferences {
-                        parent: expected,
+                        list: expected,
                         completed,
-                    } if expected == parent => {
+                    } if expected == list => {
                         let _ = completed.send(blocks);
                     }
-                    PendingRequest::WatchReferences { parent: expected } if expected == parent => {
-                        if let Some(shared) = self.reference_lists.get(&parent) {
+                    PendingRequest::WatchReferences { list: expected } if expected == list => {
+                        if let Some(shared) = self.reference_lists.get(&list) {
                             *shared.blocks.write() = blocks;
                             shared.loaded.send_replace(true);
                         }
@@ -857,8 +845,8 @@ impl WorkerState {
                     _ => fatal("reference response did not match its request"),
                 }
             }
-            ServerMessage::ReferencesUpdated { parent, blocks } => {
-                if let Some(shared) = self.reference_lists.get(&parent) {
+            ServerMessage::ReferencesUpdated { list, blocks } => {
+                if let Some(shared) = self.reference_lists.get(&list) {
                     *shared.blocks.write() = blocks;
                 }
             }
@@ -912,31 +900,31 @@ impl WorkerState {
                     name,
                 });
             }
-            DeferredRequest::ListReferences { parent, completed } => {
+            DeferredRequest::ListReferences { list, completed } => {
                 self.requests.insert(
                     request_id,
-                    PendingRequest::ListReferences { parent, completed },
+                    PendingRequest::ListReferences { list, completed },
                 );
                 self.outbound.push_back(ClientMessage::ListReferences {
                     request_id,
-                    parent,
+                    list,
                     watch: false,
                 });
             }
-            DeferredRequest::WatchReferences { parent } => {
+            DeferredRequest::WatchReferences { list } => {
                 self.requests
-                    .insert(request_id, PendingRequest::WatchReferences { parent });
+                    .insert(request_id, PendingRequest::WatchReferences { list });
                 self.outbound.push_back(ClientMessage::ListReferences {
                     request_id,
-                    parent,
+                    list,
                     watch: true,
                 });
             }
-            DeferredRequest::UnwatchReferences { parent } => {
+            DeferredRequest::UnwatchReferences { list } => {
                 self.requests
                     .insert(request_id, PendingRequest::UnwatchReferences);
                 self.outbound
-                    .push_back(ClientMessage::UnwatchReferences { request_id, parent });
+                    .push_back(ClientMessage::UnwatchReferences { request_id, list });
             }
         }
     }
@@ -964,11 +952,11 @@ enum PendingRequest {
         id: Uuid,
     },
     ListReferences {
-        parent: BlockParent,
+        list: BlockReferenceList,
         completed: oneshot::Sender<Vec<BlockReference>>,
     },
     WatchReferences {
-        parent: BlockParent,
+        list: BlockReferenceList,
     },
     UnwatchReferences,
 }
@@ -983,14 +971,14 @@ enum DeferredRequest {
         name: String,
     },
     ListReferences {
-        parent: BlockParent,
+        list: BlockReferenceList,
         completed: oneshot::Sender<Vec<BlockReference>>,
     },
     WatchReferences {
-        parent: BlockParent,
+        list: BlockReferenceList,
     },
     UnwatchReferences {
-        parent: BlockParent,
+        list: BlockReferenceList,
     },
 }
 
@@ -1014,7 +1002,7 @@ trait ErasedBlock: Send + Sync {
         snapshot: Vec<u8>,
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
-        relationships: BlockRelationships,
+        parent: BlockParent,
         name: String,
     );
     fn set_name(&self, name: String);
@@ -1191,7 +1179,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         snapshot: Vec<u8>,
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
-        relationships: BlockRelationships,
+        parent: BlockParent,
         name: String,
     ) {
         let mut value: B = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
@@ -1207,8 +1195,13 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             B::apply_operation(&mut value, &operation);
             seq = record.seq;
         }
+        let references = normalized_references(value.references());
         let mut state = self.state.write();
-        *self.relationships.write() = relationships;
+        {
+            let mut relationships = self.relationships.write();
+            relationships.parent = parent;
+            relationships.references = references;
+        }
         *self.name.write() = name;
         if B::CRDT {
             for pending in &state.pending {
@@ -1477,11 +1470,7 @@ mod tests {
                 operation: serde_json::to_vec(&CounterOperation::Add(3)).unwrap(),
                 references: ReferenceDelta::default(),
             }],
-            BlockRelationships {
-                parent: BlockParent::Root,
-                references: Vec::new(),
-                backrefs: Vec::new(),
-            },
+            BlockParent::Root,
             "Counter 5".into(),
         );
         assert_eq!(shared.value.read().as_ref().unwrap().count, 5);
@@ -1661,8 +1650,6 @@ mod tests {
                                     references: ReferenceDelta::default(),
                                 }],
                                 parent: BlockParent::Root,
-                                references: Vec::new(),
-                                backrefs: Vec::new(),
                                 name: "Counter 5".into(),
                             })
                             .unwrap(),
