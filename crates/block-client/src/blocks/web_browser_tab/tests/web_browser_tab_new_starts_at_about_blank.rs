@@ -1,4 +1,4 @@
-use super::web_browser_tab::WebBrowserTab;
+use super::WebBrowserTab;
 
 #[test]
 fn web_browser_tab_new_starts_at_about_blank() {

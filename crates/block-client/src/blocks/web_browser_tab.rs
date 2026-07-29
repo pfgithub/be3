@@ -93,3 +93,22 @@ impl Block for WebBrowserTab {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "web_browser_tab/tests/web_browser_tab_history_changes_current_index.rs"]
+mod web_browser_tab_history_changes_current_index;
+#[cfg(test)]
+#[path = "web_browser_tab/tests/web_browser_tab_new_starts_at_about_blank.rs"]
+mod web_browser_tab_new_starts_at_about_blank;
+#[cfg(test)]
+#[path = "web_browser_tab/tests/web_browser_tab_push_appends_and_selects_url.rs"]
+mod web_browser_tab_push_appends_and_selects_url;
+#[cfg(test)]
+#[path = "web_browser_tab/tests/web_browser_tab_push_discards_forward_history.rs"]
+mod web_browser_tab_push_discards_forward_history;
+#[cfg(test)]
+#[path = "web_browser_tab/tests/web_browser_tab_replace_changes_current_url.rs"]
+mod web_browser_tab_replace_changes_current_url;
+#[cfg(test)]
+#[path = "web_browser_tab/tests/web_browser_tab_title_determines_implicit_name.rs"]
+mod web_browser_tab_title_determines_implicit_name;

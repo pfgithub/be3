@@ -1,6 +1,6 @@
 use block::Block;
 
-use super::web_browser_tab::{HistoryItem, WebBrowserTab, WebBrowserTabOperation};
+use super::{HistoryItem, WebBrowserTab, WebBrowserTabOperation};
 
 #[test]
 fn web_browser_tab_history_changes_current_index() {

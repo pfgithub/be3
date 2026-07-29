@@ -1,6 +1,6 @@
 use block::Block;
 
-use super::web_browser_tab::{HistoryItem, WebBrowserTab, WebBrowserTabOperation};
+use super::{HistoryItem, WebBrowserTab, WebBrowserTabOperation};
 
 #[test]
 fn web_browser_tab_push_appends_and_selects_url() {
