@@ -1,5 +1,5 @@
 use block::{Block, MAX_NAME_BYTES};
-use block_client::text::TextDocument;
+use block_client::blocks::text::TextDocument;
 
 #[test]
 fn text_implicit_name_stops_at_newline_and_a_utf8_boundary() {

@@ -1,13 +1,20 @@
 BE3 project
 
-When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
+Do not run git commands unless asked, except read-only commands. Don't stage changes, commit changes, or push unless asked.
 
-After making changes, always run: `cargo fmt` and `cargo nextest run`. This will take ~10 seconds excluding compilation time.
+Functionality:
+- When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
 
-Do not perform any manual verification besides for those commands.
+Code style:
+- Prefer a.rs over a/mod.rs.
 
-Keep test files seperate from code files. Give every test its own seperate file. Do not add tests for GUI features.
+Tests:
+- Keep test files seperate from code files.
+- Give every test its own seperate file named the same as the function inside it.
+- Do not add tests for GUI features.
+- Do not add irrelevant or useless tests. If a change needs manual testing, note what needs testing in your final output.
 
-Do not run git commands unless asked, unless they are read-only commands. Don't stage changes, commit changes, or push unless asked.
+Verification:
+- After making changes, always run: `cargo fmt` and `cargo nextest run`. This will take ~10 seconds excluding compilation time.
+- Do not perform any manual verification besides those commands.
 
-Do not add irrelevant or useless tests. If a change needs manual testing, note what needs testing in your final output.

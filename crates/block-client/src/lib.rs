@@ -18,7 +18,7 @@ use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use uuid::Uuid;
 
-pub mod text;
+pub mod blocks;
 
 pub struct BlockClient {
     id: Uuid,

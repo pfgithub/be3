@@ -3,7 +3,7 @@ mod tests {
     use std::{env, future::Future, time::Duration};
 
     use block::Block;
-    use block_client::text::TextDocument;
+    use block_client::blocks::text::TextDocument;
     use block_client::BlockClient;
     use serde::{Deserialize, Serialize};
     use tokio::{fs, net::TcpListener};

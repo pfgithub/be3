@@ -1,6 +1,5 @@
 mod debug;
-mod editor;
-mod index;
+mod editors;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -13,11 +12,16 @@ use std::{
 };
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
-use block_client::{text::TextDocument, BlockClient, ReferenceList};
+use block_client::{
+    blocks::{
+        text::TextDocument,
+        workspace_index::{BlockEntry, WorkspaceIndex},
+    },
+    BlockClient, ReferenceList,
+};
 use debug::browser::BrowserDebug;
-use editor::{BlockEditor, EditorRegistry};
+use editors::{BlockEditor, EditorRegistry};
 use eframe::egui;
-use index::WorkspaceIndex;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -154,7 +158,7 @@ impl BlockApp {
     fn process_pending_placements(&mut self) {
         let pending = std::mem::take(&mut self.pending_placements);
         for placement in pending {
-            let entry = index::BlockEntry {
+            let entry = BlockEntry {
                 id: placement.child.id,
             };
             let ready = self
