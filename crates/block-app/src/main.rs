@@ -685,8 +685,15 @@ impl eframe::App for BlockApp {
             .max_size(420.0)
             .resizable(true)
             .show_inside(ui, |ui| {
-                ui.set_width(ui.available_width());
-                self.show_sidebar(ui);
+                let content_rect = ui.available_rect_before_wrap();
+                let mut content_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("blocks-sidebar-content")
+                        .max_rect(content_rect),
+                );
+                content_ui.set_clip_rect(content_rect.intersect(ui.clip_rect()));
+                self.show_sidebar(&mut content_ui);
+                ui.advance_cursor_after_rect(content_rect);
             });
 
         ui.vertical(|ui| {
