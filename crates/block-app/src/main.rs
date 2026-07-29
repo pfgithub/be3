@@ -77,6 +77,7 @@ struct BlockApp {
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     tabs: Vec<Uuid>,
     active_tab: Option<Uuid>,
+    sidebar_reveal: Option<Uuid>,
     pending_transfers: Vec<PendingTransfer>,
     rename: Option<RenameState>,
     client_debug_open: bool,
@@ -120,6 +121,25 @@ struct RenameState {
     name: String,
 }
 
+#[derive(Clone)]
+struct SidebarActiveLocation {
+    id: Uuid,
+    name: String,
+    root: BlockParent,
+    path: Vec<Uuid>,
+}
+
+struct SidebarHighlight {
+    rect: egui::Rect,
+    collapsed: bool,
+}
+
+#[derive(Default)]
+struct SidebarRenderState {
+    highlight: Option<SidebarHighlight>,
+    scroll_requested: bool,
+}
+
 #[derive(Clone, Copy)]
 enum BlockPickerTarget {
     Root,
@@ -149,6 +169,7 @@ impl BlockApp {
             editors: HashMap::new(),
             tabs: Vec::new(),
             active_tab: None,
+            sidebar_reveal: None,
             pending_transfers: Vec::new(),
             rename: None,
             client_debug_open: false,
@@ -185,6 +206,7 @@ impl BlockApp {
         self.editors.clear();
         self.tabs.clear();
         self.active_tab = None;
+        self.sidebar_reveal = None;
         self.pending_transfers.clear();
         self.rename = None;
         self.client_debug_open = false;
@@ -473,6 +495,9 @@ impl BlockApp {
         if !self.tabs.contains(&id) {
             self.tabs.push(id);
         }
+        if self.active_tab != Some(id) {
+            self.sidebar_reveal = None;
+        }
         self.active_tab = Some(id);
     }
 
@@ -491,7 +516,64 @@ impl BlockApp {
             } else {
                 Some(self.tabs[index.min(self.tabs.len() - 1)])
             };
+            self.sidebar_reveal = None;
         }
+    }
+
+    fn sidebar_active_location(&self) -> Option<SidebarActiveLocation> {
+        let id = self.active_tab?;
+        let editor = self.editors.get(&id)?;
+        let parents = self.parents.get(&id)?;
+        if !parents.is_loaded() {
+            return None;
+        }
+        let parents = parents.read();
+        let root = if let Some(parent) = parents.first() {
+            parent.parent
+        } else if let Some(relationships) = editor.relationships() {
+            relationships.parent
+        } else {
+            if !self.roots.is_loaded() {
+                return None;
+            }
+            if self.roots.read().iter().any(|root| root.id == id) {
+                BlockParent::Root
+            } else {
+                BlockParent::Orphaned
+            }
+        };
+        if matches!(root, BlockParent::Uuid(_)) {
+            return None;
+        }
+        let mut path = parents.iter().map(|parent| parent.id).collect::<Vec<_>>();
+        path.push(id);
+        Some(SidebarActiveLocation {
+            id,
+            name: self
+                .client
+                .cached_block(id)
+                .map_or_else(|| editor.name(), |block| block.name),
+            root,
+            path,
+        })
+    }
+
+    fn reveal_sidebar_location(&mut self, location: &SidebarActiveLocation) {
+        if location.root == BlockParent::Orphaned && !self.orphaned_expanded {
+            self.orphaned_expanded = true;
+            self.orphaned = Some(self.client.watch_references(BlockReferenceList::Orphans));
+        }
+        for parent in location
+            .path
+            .iter()
+            .take(location.path.len().saturating_sub(1))
+        {
+            self.expanded.entry(*parent).or_insert_with(|| {
+                self.client
+                    .watch_references(BlockReferenceList::References(*parent))
+            });
+        }
+        self.sidebar_reveal = Some(location.id);
     }
 
     fn reference_label(&self, reference: &BlockReference) -> String {
@@ -533,6 +615,8 @@ impl BlockApp {
         depth: usize,
         containing_id: Option<Uuid>,
         path: &mut HashSet<Uuid>,
+        active: Option<&SidebarActiveLocation>,
+        sidebar: &mut SidebarRenderState,
     ) {
         if !self.editors.contains_key(&reference.id) {
             self.editors.insert(
@@ -555,6 +639,12 @@ impl BlockApp {
             source != SidebarDragSource::Orphaned && self.can_delete_from(source);
         let can_expand = !is_reference && reference.references > 0;
         let was_expanded = self.expanded.contains_key(&reference.id);
+        let is_active = !is_reference && active.is_some_and(|active| active.id == reference.id);
+        let is_closed_active_ancestor = !is_reference
+            && !was_expanded
+            && active.is_some_and(|active| {
+                active.id != reference.id && active.path.contains(&reference.id)
+            });
         let mut toggle = false;
         let mut open = false;
         let mut delete = false;
@@ -562,22 +652,25 @@ impl BlockApp {
         let mut row_response = None;
         ui.horizontal(|ui| {
             ui.add_space(depth as f32 * 14.0);
-            if ui
+            let expand_response = ui
                 .add_enabled(
                     can_expand,
-                    egui::Button::new(if can_expand {
-                        if was_expanded {
-                            "▾"
+                    egui::Button::selectable(
+                        is_closed_active_ancestor,
+                        if can_expand {
+                            if was_expanded {
+                                "▾"
+                            } else {
+                                "▸"
+                            }
                         } else {
-                            "▸"
-                        }
-                    } else {
-                        if is_reference {
-                            "→"
-                        } else {
-                            "•"
-                        }
-                    })
+                            if is_reference {
+                                "→"
+                            } else {
+                                "•"
+                            }
+                        },
+                    )
                     .small(),
                 )
                 .on_hover_text(match (can_expand, is_reference) {
@@ -592,10 +685,15 @@ impl BlockApp {
                         )
                     }
                     (true, _) => reference.id.to_string(),
-                })
-                .clicked()
-            {
+                });
+            if expand_response.clicked() {
                 toggle = true;
+            }
+            if is_closed_active_ancestor {
+                sidebar.highlight = Some(SidebarHighlight {
+                    rect: expand_response.rect,
+                    collapsed: true,
+                });
             }
             let trailing_width = if can_add_child {
                 ui.spacing().interact_size.x + ui.spacing().item_spacing.x
@@ -606,7 +704,7 @@ impl BlockApp {
             let response = ui.add_sized(
                 [label_width, ui.spacing().interact_size.y],
                 egui::Button::selectable(
-                    self.active_tab == Some(reference.id),
+                    is_active,
                     self.reference_label(&reference),
                 )
                 .right_text(())
@@ -620,6 +718,17 @@ impl BlockApp {
             });
             if response.clicked() {
                 open = true;
+            }
+            if is_active {
+                if self.sidebar_reveal == Some(reference.id) {
+                    response.scroll_to_me(Some(egui::Align::Center));
+                    self.sidebar_reveal = None;
+                    sidebar.scroll_requested = true;
+                }
+                sidebar.highlight = Some(SidebarHighlight {
+                    rect: response.rect,
+                    collapsed: false,
+                });
             }
             response.context_menu(|ui| {
                 ui.add_enabled_ui(can_add_child, |ui| {
@@ -728,12 +837,24 @@ impl BlockApp {
             });
         }
         for child in children {
-            self.show_reference(ui, child, depth + 1, Some(reference.id), path);
+            self.show_reference(
+                ui,
+                child,
+                depth + 1,
+                Some(reference.id),
+                path,
+                active,
+                sidebar,
+            );
         }
         path.remove(&reference.id);
     }
 
     fn show_sidebar(&mut self, ui: &mut egui::Ui) {
+        if self.sidebar_reveal.is_some() && self.sidebar_reveal != self.active_tab {
+            self.sidebar_reveal = None;
+        }
+        let active = self.sidebar_active_location();
         let mut picker_action = None;
         ui.horizontal(|ui| {
             ui.heading("Blocks");
@@ -753,31 +874,91 @@ impl BlockApp {
             .resizable(false)
             .show_inside(ui, |ui| self.show_file_list_status(ui));
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        let mut sidebar = SidebarRenderState::default();
+        let scroll = egui::ScrollArea::vertical().show(ui, |ui| {
             let roots = self.roots.read();
             if roots.is_empty() && self.roots.is_loaded() {
                 ui.weak("No root blocks");
             }
             for root in roots {
-                self.show_reference(ui, root, 0, None, &mut HashSet::new());
+                self.show_reference(
+                    ui,
+                    root,
+                    0,
+                    None,
+                    &mut HashSet::new(),
+                    active.as_ref(),
+                    &mut sidebar,
+                );
             }
             ui.separator();
-            self.show_recently_deleted(ui);
+            self.show_recently_deleted(ui, active.as_ref(), &mut sidebar);
         });
+        if sidebar.scroll_requested {
+            return;
+        }
+        let Some(active) = active else {
+            return;
+        };
+        let Some(highlight) = sidebar.highlight else {
+            return;
+        };
+        let viewport = scroll.inner_rect;
+        let at_top = highlight.rect.bottom() < viewport.top();
+        let at_bottom = highlight.rect.top() > viewport.bottom();
+        let (arrow, y) = if at_top {
+            ("↑", viewport.top())
+        } else if at_bottom {
+            ("↓", viewport.bottom() - ui.spacing().interact_size.y)
+        } else if highlight.collapsed {
+            ("↑", viewport.bottom() - ui.spacing().interact_size.y)
+        } else {
+            return;
+        };
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(viewport.left(), y),
+            egui::vec2(viewport.width(), ui.spacing().interact_size.y),
+        );
+        if ui
+            .put(
+                rect,
+                egui::Button::new(format!("{arrow} ({})", active.name)),
+            )
+            .clicked()
+        {
+            self.reveal_sidebar_location(&active);
+        }
     }
 
-    fn show_recently_deleted(&mut self, ui: &mut egui::Ui) {
+    fn show_recently_deleted(
+        &mut self,
+        ui: &mut egui::Ui,
+        active: Option<&SidebarActiveLocation>,
+        sidebar: &mut SidebarRenderState,
+    ) {
         let mut toggle = false;
         ui.horizontal(|ui| {
-            if ui
-                .small_button(if self.orphaned_expanded {
-                    "\u{25bc}"
-                } else {
-                    "\u{25b6}"
-                })
-                .clicked()
-            {
+            let is_closed_active_ancestor = !self.orphaned_expanded
+                && active.is_some_and(|active| active.root == BlockParent::Orphaned);
+            let expand_response = ui.add(
+                egui::Button::selectable(
+                    is_closed_active_ancestor,
+                    if self.orphaned_expanded {
+                        "\u{25bc}"
+                    } else {
+                        "\u{25b6}"
+                    },
+                )
+                .small(),
+            );
+            if expand_response.clicked() {
                 toggle = true;
+            }
+            if is_closed_active_ancestor {
+                sidebar.highlight = Some(SidebarHighlight {
+                    rect: expand_response.rect,
+                    collapsed: true,
+                });
             }
             if ui
                 .selectable_label(false, "Recently Deleted")
@@ -810,7 +991,7 @@ impl BlockApp {
             });
         }
         for block in blocks {
-            self.show_reference(ui, block, 1, None, &mut HashSet::new());
+            self.show_reference(ui, block, 1, None, &mut HashSet::new(), active, sidebar);
         }
     }
 
@@ -887,6 +1068,9 @@ impl BlockApp {
                 });
             });
         if let Some(id) = activate {
+            if self.active_tab != Some(id) {
+                self.sidebar_reveal = None;
+            }
             self.active_tab = Some(id);
         }
         if let Some(id) = close {
