@@ -4,7 +4,9 @@ When making changes to serialization formats or network requests, do not conside
 
 After making changes, always run: `cargo fmt` and `cargo nextest run`. This will take ~10 seconds excluding compilation time.
 
-Keep test files seperate from code files. Give every test its own seperate file.
+Do not perform any manual verification besides for those commands.
+
+Keep test files seperate from code files. Give every test its own seperate file. Do not add tests for GUI features.
 
 Do not run git commands unless asked, unless they are read-only commands. Don't stage changes, commit changes, or push unless asked.
 
