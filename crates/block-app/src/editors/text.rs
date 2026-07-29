@@ -3,7 +3,7 @@ use block_client::{blocks::text::TextDocument, BlockHandle, BlockRelationships};
 use eframe::egui;
 use uuid::Uuid;
 
-use super::BlockEditor;
+use super::{BlockEditor, EditorAction};
 
 pub(super) struct TextEditor {
     block: BlockHandle<TextDocument>,
@@ -40,12 +40,16 @@ impl BlockEditor for TextEditor {
         self.block.note_backref(id);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _client: &block_client::BlockClient,
+    ) -> Option<EditorAction> {
         let Some(document) = self.block.read() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
-            return;
+            return None;
         };
         let original = document.text();
         drop(document);
@@ -58,6 +62,7 @@ impl BlockEditor for TextEditor {
         if response.changed() {
             apply_text_edit(&self.block, &original, &edited);
         }
+        None
     }
 }
 

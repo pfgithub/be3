@@ -1,3 +1,4 @@
+mod infinite_canvas;
 mod text;
 mod unsupported;
 mod workspace_index;
@@ -7,6 +8,7 @@ use std::collections::HashMap;
 use block::{Block, BlockParent};
 use block_client::{
     blocks::{
+        infinite_canvas::InfiniteCanvas,
         text::TextDocument,
         workspace_index::{BlockEntry, WorkspaceIndex},
     },
@@ -16,8 +18,13 @@ use eframe::egui;
 use uuid::Uuid;
 
 use self::{
-    text::TextEditor, unsupported::UnsupportedEditor, workspace_index::WorkspaceIndexEditor,
+    infinite_canvas::InfiniteCanvasEditor, text::TextEditor, unsupported::UnsupportedEditor,
+    workspace_index::WorkspaceIndexEditor,
 };
+
+pub enum EditorAction {
+    OpenBlock { id: Uuid, block_type: Uuid },
+}
 
 pub trait BlockEditor {
     fn id(&self) -> Uuid;
@@ -29,7 +36,7 @@ pub trait BlockEditor {
     fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }
-    fn ui(&mut self, ui: &mut egui::Ui);
+    fn ui(&mut self, ui: &mut egui::Ui, client: &BlockClient) -> Option<EditorAction>;
 }
 
 type CreateEditor = fn(&BlockClient) -> Box<dyn BlockEditor>;
@@ -50,6 +57,22 @@ impl EditorRegistry {
         let mut registry = Self {
             registrations: HashMap::new(),
         };
+        registry.register(
+            InfiniteCanvas::TYPE_ID,
+            "Canvas",
+            |client| {
+                Box::new(InfiniteCanvasEditor::new(
+                    client.create_block(InfiniteCanvas::new()),
+                    client,
+                ))
+            },
+            |client, id| {
+                Box::new(InfiniteCanvasEditor::new(
+                    client.get_block::<InfiniteCanvas>(id),
+                    client,
+                ))
+            },
+        );
         registry.register(
             TextDocument::TYPE_ID,
             "Text",

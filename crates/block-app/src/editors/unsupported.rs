@@ -3,7 +3,7 @@ use block_client::BlockRelationships;
 use eframe::egui;
 use uuid::Uuid;
 
-use super::BlockEditor;
+use super::{BlockEditor, EditorAction};
 
 pub(super) struct UnsupportedEditor {
     id: Uuid,
@@ -37,7 +37,11 @@ impl BlockEditor for UnsupportedEditor {
 
     fn note_backref(&self, _id: Uuid) {}
 
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _client: &block_client::BlockClient,
+    ) -> Option<EditorAction> {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("Unsupported block type");
@@ -45,5 +49,6 @@ impl BlockEditor for UnsupportedEditor {
                 ui.label(format!("Type: {}", self.block_type));
             });
         });
+        None
     }
 }

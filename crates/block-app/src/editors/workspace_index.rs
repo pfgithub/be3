@@ -6,7 +6,7 @@ use block_client::{
 use eframe::egui;
 use uuid::Uuid;
 
-use super::BlockEditor;
+use super::{BlockEditor, EditorAction};
 
 pub(super) struct WorkspaceIndexEditor {
     block: BlockHandle<WorkspaceIndex>,
@@ -56,19 +56,23 @@ impl BlockEditor for WorkspaceIndexEditor {
         Some(true)
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _client: &block_client::BlockClient,
+    ) -> Option<EditorAction> {
         let Some(index) = self.block.read() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
-            return;
+            return None;
         };
 
         if index.entries().is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.weak("This folder is empty.");
             });
-            return;
+            return None;
         }
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -76,5 +80,6 @@ impl BlockEditor for WorkspaceIndexEditor {
                 ui.label(entry.id.to_string());
             }
         });
+        None
     }
 }

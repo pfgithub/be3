@@ -1,3 +1,4 @@
+pub mod infinite_canvas;
 pub mod text;
 pub mod workspace_index;
 

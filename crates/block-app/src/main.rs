@@ -1,3 +1,4 @@
+mod block_picker;
 mod debug;
 mod editors;
 
@@ -14,13 +15,14 @@ use std::{
 use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
 use block_client::{
     blocks::{
+        infinite_canvas::InfiniteCanvas,
         text::TextDocument,
         workspace_index::{BlockEntry, WorkspaceIndex},
     },
     BlockClient, ReferenceList,
 };
 use debug::browser::BrowserDebug;
-use editors::{BlockEditor, EditorRegistry};
+use editors::{BlockEditor, EditorAction, EditorRegistry};
 use eframe::egui;
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -281,6 +283,10 @@ impl BlockApp {
                         create_inside = Some(TextDocument::TYPE_ID);
                         ui.close();
                     }
+                    if ui.button("Canvas").clicked() {
+                        create_inside = Some(InfiniteCanvas::TYPE_ID);
+                        ui.close();
+                    }
                     if ui.button("Folder").clicked() {
                         create_inside = Some(WorkspaceIndex::TYPE_ID);
                         ui.close();
@@ -358,6 +364,10 @@ impl BlockApp {
             ui.menu_button("+", |ui| {
                 if ui.button("Text block").clicked() {
                     create = Some(TextDocument::TYPE_ID);
+                    ui.close();
+                }
+                if ui.button("Canvas").clicked() {
+                    create = Some(InfiniteCanvas::TYPE_ID);
                     ui.close();
                 }
                 if ui.button("Folder").clicked() {
@@ -518,7 +528,10 @@ impl BlockApp {
             self.active_tab = None;
             return;
         };
-        editor.ui(ui);
+        let action = editor.ui(ui, &self.client);
+        if let Some(EditorAction::OpenBlock { id, block_type }) = action {
+            self.open_tab(id, block_type);
+        }
     }
 
     fn show_statusbar(&mut self, ui: &mut egui::Ui) {

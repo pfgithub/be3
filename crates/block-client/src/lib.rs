@@ -20,12 +20,23 @@ use uuid::Uuid;
 
 pub mod blocks;
 
+#[cfg(test)]
+mod cached_blocks_are_populated_from_confirmed_metadata;
+
 pub struct BlockClient {
     id: Uuid,
     commands: mpsc::Sender<WorkerCommand>,
     connected: Arc<OnceLock<()>>,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
+    cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CachedBlock {
+    pub id: Uuid,
+    pub block_type: Uuid,
+    pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,11 +69,20 @@ impl BlockClient {
             changes_saved: true,
             ..Default::default()
         }));
+        let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
+        let worker_cached_blocks = Arc::clone(&cached_blocks);
         thread::Builder::new()
             .name("block-client".into())
-            .spawn(move || worker_main(command_rx, worker_access, worker_debug))
+            .spawn(move || {
+                worker_main(
+                    command_rx,
+                    worker_access,
+                    worker_debug,
+                    worker_cached_blocks,
+                )
+            })
             .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));
         Self {
             id: Uuid::new_v4(),
@@ -70,6 +90,7 @@ impl BlockClient {
             connected,
             access,
             debug,
+            cached_blocks,
         }
     }
 
@@ -162,6 +183,25 @@ impl BlockClient {
 
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
         self.debug.read().clone()
+    }
+
+    pub fn cached_blocks(&self) -> Vec<CachedBlock> {
+        let mut blocks: Vec<_> = self.cached_blocks.read().values().cloned().collect();
+        blocks.sort_by(|left, right| {
+            left.name
+                .to_lowercase()
+                .cmp(&right.name.to_lowercase())
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        blocks
+    }
+
+    pub fn cached_block(&self, id: Uuid) -> Option<CachedBlock> {
+        self.cached_blocks.read().get(&id).cloned()
+    }
+
+    pub fn cache_references(&self, list: BlockReferenceList) {
+        self.send(WorkerCommand::CacheReferences(list));
     }
 
     pub fn pause_sending(&self) {
@@ -402,6 +442,7 @@ enum WorkerCommand {
         list: BlockReferenceList,
         shared: Arc<ReferenceListShared>,
     },
+    CacheReferences(BlockReferenceList),
     UnwatchReferences(BlockReferenceList),
     Synchronize(oneshot::Sender<()>),
     PauseSending,
@@ -413,6 +454,7 @@ fn worker_main(
     commands: mpsc::Receiver<WorkerCommand>,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
+    cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
 ) {
     let runtime = tokio::runtime::Runtime::new()
         .unwrap_or_else(|error| fatal(format!("failed to create block client runtime: {error}")));
@@ -429,7 +471,7 @@ fn worker_main(
             })
             .unwrap_or_else(|error| fatal(format!("failed to spawn command forwarder: {error}")));
 
-        let mut state = WorkerState::new(access, debug);
+        let mut state = WorkerState::new(access, debug, cached_blocks);
         while let Some(command) = async_rx.recv().await {
             match command {
                 WorkerCommand::Connect(url) => {
@@ -527,10 +569,15 @@ struct WorkerState {
     sending_paused: bool,
     steps_remaining: usize,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
+    cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
 }
 
 impl WorkerState {
-    fn new(access: Arc<RwLock<()>>, debug: Arc<RwLock<NetworkDebugSnapshot>>) -> Self {
+    fn new(
+        access: Arc<RwLock<()>>,
+        debug: Arc<RwLock<NetworkDebugSnapshot>>,
+        cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+    ) -> Self {
         Self {
             connected: false,
             access,
@@ -543,7 +590,35 @@ impl WorkerState {
             sending_paused: false,
             steps_remaining: 0,
             debug,
+            cached_blocks,
         }
+    }
+
+    fn cache_block(&self, block: CachedBlock) {
+        self.cached_blocks.write().insert(block.id, block);
+    }
+
+    fn cache_reference_blocks(&self, blocks: &[BlockReference]) {
+        let mut cache = self.cached_blocks.write();
+        for block in blocks {
+            cache.insert(
+                block.id,
+                CachedBlock {
+                    id: block.id,
+                    block_type: block.block_type,
+                    name: block.name.clone(),
+                },
+            );
+        }
+    }
+
+    fn cache_registered_block(&self, id: Uuid) {
+        let block = &self.blocks[&id];
+        self.cache_block(CachedBlock {
+            id,
+            block_type: block.block_type_id(),
+            name: block.name(),
+        });
     }
 
     fn handle_command(&mut self, command: WorkerCommand) {
@@ -591,6 +666,10 @@ impl WorkerState {
                 }
                 self.deferred
                     .push_back(DeferredRequest::WatchReferences { list });
+            }
+            WorkerCommand::CacheReferences(list) => {
+                self.deferred
+                    .push_back(DeferredRequest::CacheReferences { list });
             }
             WorkerCommand::UnwatchReferences(list) => {
                 self.reference_lists.remove(&list);
@@ -770,6 +849,7 @@ impl WorkerState {
                         if expected == id =>
                     {
                         self.blocks[&id].created();
+                        self.cache_registered_block(id);
                         self.maybe_send_update(id);
                     }
                     (
@@ -793,8 +873,14 @@ impl WorkerState {
                     ) if expected == id => {
                         self.blocks[&id].set_parent(parent);
                     }
-                    (PendingRequest::SetBlockName { id: expected }, CommandKind::SetBlockName)
-                        if expected == id => {}
+                    (
+                        PendingRequest::SetBlockName { id: expected, name },
+                        CommandKind::SetBlockName,
+                    ) if expected == id => {
+                        if let Some(block) = self.cached_blocks.write().get_mut(&id) {
+                            block.name = name;
+                        }
+                    }
                     (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
                         if id.is_nil() => {}
                     _ => fatal("server response did not match its request"),
@@ -823,7 +909,12 @@ impl WorkerState {
                         block.block_type_id()
                     ));
                 }
-                block.resolve(snapshot, snapshot_seq, operations, parent, name);
+                block.resolve(snapshot, snapshot_seq, operations, parent, name.clone());
+                self.cache_block(CachedBlock {
+                    id,
+                    block_type,
+                    name,
+                });
                 self.maybe_send_update(id);
             }
             ServerMessage::BatchOk {
@@ -906,7 +997,10 @@ impl WorkerState {
                     .get(&id)
                     .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
                 block.remote_operation(operation);
-                block.set_name(name);
+                block.set_name(name.clone());
+                if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
+                    cached.name = name;
+                }
                 drop(_access);
                 self.maybe_send_update(id);
             }
@@ -925,7 +1019,10 @@ impl WorkerState {
                         .get(&id)
                         .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
                     block.remote_operation(operation);
-                    block.set_name(name);
+                    block.set_name(name.clone());
+                    if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
+                        cached.name = name;
+                    }
                     ids.push(id);
                 }
                 drop(_access);
@@ -936,7 +1033,10 @@ impl WorkerState {
             ServerMessage::Presence { .. } => {}
             ServerMessage::BlockNameUpdated { id, name } => {
                 if let Some(block) = self.blocks.get(&id) {
-                    block.set_name(name);
+                    block.set_name(name.clone());
+                }
+                if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
+                    cached.name = name;
                 }
             }
             ServerMessage::References {
@@ -944,6 +1044,7 @@ impl WorkerState {
                 list,
                 blocks,
             } => {
+                self.cache_reference_blocks(&blocks);
                 let pending = self
                     .requests
                     .remove(&request_id)
@@ -961,10 +1062,12 @@ impl WorkerState {
                             shared.loaded.send_replace(true);
                         }
                     }
+                    PendingRequest::CacheReferences { list: expected } if expected == list => {}
                     _ => fatal("reference response did not match its request"),
                 }
             }
             ServerMessage::ReferencesUpdated { list, blocks } => {
+                self.cache_reference_blocks(&blocks);
                 if let Some(shared) = self.reference_lists.get(&list) {
                     *shared.blocks.write() = blocks;
                 }
@@ -1011,8 +1114,13 @@ impl WorkerState {
                 });
             }
             DeferredRequest::SetBlockName { id, name } => {
-                self.requests
-                    .insert(request_id, PendingRequest::SetBlockName { id });
+                self.requests.insert(
+                    request_id,
+                    PendingRequest::SetBlockName {
+                        id,
+                        name: name.clone(),
+                    },
+                );
                 self.outbound.push_back(ClientMessage::SetBlockName {
                     request_id,
                     id,
@@ -1037,6 +1145,15 @@ impl WorkerState {
                     request_id,
                     list,
                     watch: true,
+                });
+            }
+            DeferredRequest::CacheReferences { list } => {
+                self.requests
+                    .insert(request_id, PendingRequest::CacheReferences { list });
+                self.outbound.push_back(ClientMessage::ListReferences {
+                    request_id,
+                    list,
+                    watch: false,
                 });
             }
             DeferredRequest::UnwatchReferences { list } => {
@@ -1069,12 +1186,16 @@ enum PendingRequest {
     },
     SetBlockName {
         id: Uuid,
+        name: String,
     },
     ListReferences {
         list: BlockReferenceList,
         completed: oneshot::Sender<Vec<BlockReference>>,
     },
     WatchReferences {
+        list: BlockReferenceList,
+    },
+    CacheReferences {
         list: BlockReferenceList,
     },
     UnwatchReferences,
@@ -1107,6 +1228,9 @@ enum DeferredRequest {
         completed: oneshot::Sender<Vec<BlockReference>>,
     },
     WatchReferences {
+        list: BlockReferenceList,
+    },
+    CacheReferences {
         list: BlockReferenceList,
     },
     UnwatchReferences {
@@ -1147,6 +1271,7 @@ trait ErasedBlock: Send + Sync {
     fn block_type_id(&self) -> Uuid;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
+    fn name(&self) -> String;
     fn initial_references(&self) -> Vec<Uuid>;
     fn created(&self);
     fn resolve(
@@ -1305,6 +1430,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             .initial
             .as_ref()
             .map_or_else(String::new, Block::implicit_name)
+    }
+
+    fn name(&self) -> String {
+        self.name.read().clone()
     }
 
     fn initial_references(&self) -> Vec<Uuid> {

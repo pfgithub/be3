@@ -1,0 +1,42 @@
+use block::Block;
+use block_client::blocks::infinite_canvas::{
+    CanvasEntity, CanvasEntityKind, CanvasPoint, CanvasTransform, InfiniteCanvas,
+    InfiniteCanvasOperation,
+};
+use uuid::Uuid;
+
+fn block_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
+    CanvasEntity {
+        id,
+        transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
+        kind: CanvasEntityKind::Block { block_id },
+    }
+}
+
+#[test]
+fn infinite_canvas_tracks_block_references() {
+    let [first, second] = std::array::from_fn(|_| Uuid::new_v4());
+    let [a, b] = std::array::from_fn(|_| Uuid::new_v4());
+    let mut canvas = InfiniteCanvas::new();
+
+    for entity in [block_entity(a, first), block_entity(b, first)] {
+        InfiniteCanvas::apply_operation(&mut canvas, &InfiniteCanvasOperation::Add { entity });
+    }
+    assert_eq!(canvas.references(), vec![first]);
+
+    InfiniteCanvas::apply_operation(
+        &mut canvas,
+        &InfiniteCanvasOperation::Update {
+            entities: vec![block_entity(a, second)],
+        },
+    );
+    let mut expected = vec![first, second];
+    expected.sort_unstable();
+    assert_eq!(canvas.references(), expected);
+
+    InfiniteCanvas::apply_operation(
+        &mut canvas,
+        &InfiniteCanvasOperation::Remove { ids: vec![b] },
+    );
+    assert_eq!(canvas.references(), vec![second]);
+}
