@@ -73,6 +73,8 @@ struct BlockApp {
     orphaned_expanded: bool,
     expanded: HashMap<Uuid, ReferenceList>,
     parents: HashMap<Uuid, ReferenceList>,
+    references: HashMap<Uuid, ReferenceList>,
+    backrefs: HashMap<Uuid, ReferenceList>,
     block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
@@ -166,6 +168,8 @@ impl BlockApp {
             orphaned_expanded: false,
             expanded: HashMap::new(),
             parents: HashMap::new(),
+            references: HashMap::new(),
+            backrefs: HashMap::new(),
             block_types: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
@@ -204,6 +208,8 @@ impl BlockApp {
         self.orphaned_expanded = false;
         self.expanded.clear();
         self.parents.clear();
+        self.references.clear();
+        self.backrefs.clear();
         self.block_types.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
@@ -524,6 +530,14 @@ impl BlockApp {
         self.parents
             .entry(id)
             .or_insert_with(|| self.client.watch_parents(id));
+        self.references.entry(id).or_insert_with(|| {
+            self.client
+                .watch_references(BlockReferenceList::References(id))
+        });
+        self.backrefs.entry(id).or_insert_with(|| {
+            self.client
+                .watch_references(BlockReferenceList::Backrefs(id))
+        });
         if !self.tabs.contains(&id) {
             self.tabs.push(id);
         }
@@ -539,6 +553,8 @@ impl BlockApp {
         };
         self.tabs.remove(index);
         self.parents.remove(&id);
+        self.references.remove(&id);
+        self.backrefs.remove(&id);
         if let Some(editor) = self.editors.get_mut(&id) {
             editor.tab_closed();
         }
@@ -757,30 +773,16 @@ impl BlockApp {
                 });
             }
             response.context_menu(|ui| {
-                ui.add_enabled_ui(can_add_child, |ui| {
-                    ui.menu_button("Add", |ui| {
-                        picker_action = BlockPicker::show_menu(ui);
-                    });
-                });
-                if ui.button("Rename").clicked() {
-                    self.rename = Some(RenameState {
-                        id: reference.id,
-                        name: reference.name.clone(),
-                    });
-                    ui.close();
-                }
-                let delete_text = egui::RichText::new("Delete");
-                let delete_text = if can_delete_child {
-                    delete_text.color(ui.visuals().error_fg_color)
-                } else {
-                    delete_text
-                };
-                if ui
-                    .add_enabled(can_delete_child, egui::Button::new(delete_text))
-                    .clicked()
-                {
-                    delete = true;
-                    ui.close();
+                match block_context_menu(ui, can_add_child, can_delete_child) {
+                    Some(BlockContextMenuAction::Picker(action)) => picker_action = Some(action),
+                    Some(BlockContextMenuAction::Rename) => {
+                        self.rename = Some(RenameState {
+                            id: reference.id,
+                            name: reference.name.clone(),
+                        });
+                    }
+                    Some(BlockContextMenuAction::Delete) => delete = true,
+                    None => {}
                 }
             });
             row_response = Some(response);
@@ -1210,8 +1212,17 @@ impl BlockApp {
             .map_or_else(|| block_type.to_string(), str::to_owned);
         let relationships = editor.relationships();
         let parents = self.parents.get(&active).map(ReferenceList::read);
+        let references = self
+            .references
+            .get(&active)
+            .map(|list| (list.is_loaded(), list.read()));
+        let backrefs = self
+            .backrefs
+            .get(&active)
+            .map(|list| (list.is_loaded(), list.read()));
         let current_name = editor.name();
         let mut navigate = None;
+        let mut context_action = None;
 
         ui.horizontal_wrapped(|ui| {
             ui.small(format!("Type: {type_name}"));
@@ -1234,31 +1245,164 @@ impl BlockApp {
                 BlockParent::Uuid(_) => "Unknown",
             });
             for parent in parents {
+                self.record_reference_types(parent);
+                let source = sidebar_source(parent.parent);
                 ui.small("›");
-                if ui
+                let response = ui
                     .small_button(&parent.name)
-                    .on_hover_text(parent.id.to_string())
-                    .clicked()
-                {
+                    .on_hover_text(parent.id.to_string());
+                if response.clicked() {
                     navigate = Some((parent.id, parent.block_type));
                 }
+                let can_add = self.registry.can_add_child(parent.block_type);
+                let can_delete =
+                    source != SidebarDragSource::Orphaned && self.can_delete_from(source);
+                response.context_menu(|ui| {
+                    if let Some(action) = block_context_menu(ui, can_add, can_delete) {
+                        context_action = Some((parent.clone(), source, false, action));
+                    }
+                });
             }
             ui.small("›");
             ui.small(current_name);
             ui.separator();
             ui.menu_button(
-                format!("Backrefs: {}", relationships.backrefs.len()),
-                |ui| immutable_id_list(ui, &relationships.backrefs, "No backrefs"),
+                format!(
+                    "Backrefs: {}",
+                    backrefs
+                        .as_ref()
+                        .map_or(relationships.backrefs.len(), |(loaded, backrefs)| {
+                            if *loaded {
+                                backrefs.len()
+                            } else {
+                                relationships.backrefs.len()
+                            }
+                        })
+                ),
+                |ui| {
+                    let Some((loaded, backrefs)) = &backrefs else {
+                        ui.weak("Loading…");
+                        return;
+                    };
+                    self.status_reference_list(
+                        ui,
+                        backrefs,
+                        *loaded,
+                        "No backrefs",
+                        None,
+                        &mut navigate,
+                        &mut context_action,
+                    );
+                },
             );
             ui.separator();
             ui.menu_button(
-                format!("References: {}", relationships.references.len()),
-                |ui| immutable_id_list(ui, &relationships.references, "No references"),
+                format!(
+                    "References: {}",
+                    references.as_ref().map_or(
+                        relationships.references.len(),
+                        |(loaded, references)| {
+                            if *loaded {
+                                references.len()
+                            } else {
+                                relationships.references.len()
+                            }
+                        }
+                    )
+                ),
+                |ui| {
+                    let Some((loaded, references)) = &references else {
+                        ui.weak("Loading…");
+                        return;
+                    };
+                    self.status_reference_list(
+                        ui,
+                        references,
+                        *loaded,
+                        "No references",
+                        Some(active),
+                        &mut navigate,
+                        &mut context_action,
+                    );
+                },
             );
         });
 
+        if let Some((reference, source, is_reference, action)) = context_action {
+            match action {
+                BlockContextMenuAction::Picker(action) => {
+                    self.handle_picker_menu_action(
+                        action,
+                        BlockPickerTarget::Block(reference.id),
+                        [reference.id],
+                    );
+                }
+                BlockContextMenuAction::Rename => {
+                    self.rename = Some(RenameState {
+                        id: reference.id,
+                        name: reference.name,
+                    });
+                }
+                BlockContextMenuAction::Delete => {
+                    self.queue_delete(reference, source, is_reference);
+                }
+            }
+        }
         if let Some((id, block_type)) = navigate {
             self.open_tab(id, block_type);
+        }
+    }
+
+    fn record_reference_types(&mut self, reference: &BlockReference) {
+        self.block_types.insert(reference.id, reference.block_type);
+        if let BlockParent::Uuid(parent) = reference.parent {
+            if let Some(parent) = self.client.cached_block(parent) {
+                self.block_types.insert(parent.id, parent.block_type);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn status_reference_list(
+        &mut self,
+        ui: &mut egui::Ui,
+        references: &[BlockReference],
+        loaded: bool,
+        empty: &str,
+        containing_id: Option<Uuid>,
+        navigate: &mut Option<(Uuid, Uuid)>,
+        context_action: &mut Option<(
+            BlockReference,
+            SidebarDragSource,
+            bool,
+            BlockContextMenuAction,
+        )>,
+    ) {
+        if references.is_empty() {
+            ui.weak(if loaded { empty } else { "Loading…" });
+        }
+        for reference in references {
+            self.record_reference_types(reference);
+            let source = containing_id.map_or_else(
+                || sidebar_source(reference.parent),
+                SidebarDragSource::Block,
+            );
+            let is_reference =
+                containing_id.is_some_and(|id| reference.parent != BlockParent::Uuid(id));
+            let response = ui
+                .button(&reference.name)
+                .on_hover_text(reference.id.to_string());
+            if response.clicked() {
+                *navigate = Some((reference.id, reference.block_type));
+                ui.close();
+            }
+            let can_add = self.registry.can_add_child(reference.block_type);
+            let can_delete = source != SidebarDragSource::Orphaned && self.can_delete_from(source);
+            response.context_menu(|ui| {
+                if let Some(action) = block_context_menu(ui, can_add, can_delete) {
+                    *context_action = Some((reference.clone(), source, is_reference, action));
+                }
+            });
         }
     }
 
@@ -1297,12 +1441,50 @@ impl BlockApp {
     }
 }
 
-fn immutable_id_list(ui: &mut egui::Ui, ids: &[Uuid], empty: &str) {
-    if ids.is_empty() {
-        ui.weak(empty);
+enum BlockContextMenuAction {
+    Picker(BlockPickerMenuAction),
+    Rename,
+    Delete,
+}
+
+fn block_context_menu(
+    ui: &mut egui::Ui,
+    can_add: bool,
+    can_delete: bool,
+) -> Option<BlockContextMenuAction> {
+    let mut action = None;
+    ui.add_enabled_ui(can_add, |ui| {
+        ui.menu_button("Add", |ui| {
+            if let Some(picker_action) = BlockPicker::show_menu(ui) {
+                action = Some(BlockContextMenuAction::Picker(picker_action));
+            }
+        });
+    });
+    if ui.button("Rename").clicked() {
+        action = Some(BlockContextMenuAction::Rename);
+        ui.close();
     }
-    for id in ids {
-        ui.label(id.to_string());
+    let delete_text = egui::RichText::new("Delete");
+    let delete_text = if can_delete {
+        delete_text.color(ui.visuals().error_fg_color)
+    } else {
+        delete_text
+    };
+    if ui
+        .add_enabled(can_delete, egui::Button::new(delete_text))
+        .clicked()
+    {
+        action = Some(BlockContextMenuAction::Delete);
+        ui.close();
+    }
+    action
+}
+
+fn sidebar_source(parent: BlockParent) -> SidebarDragSource {
+    match parent {
+        BlockParent::Root => SidebarDragSource::Root,
+        BlockParent::Orphaned => SidebarDragSource::Orphaned,
+        BlockParent::Uuid(parent) => SidebarDragSource::Block(parent),
     }
 }
 
