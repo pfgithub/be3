@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
     blocks::infinite_canvas::{
-        CanvasEntity, CanvasEntityKind, CanvasLayerMove, CanvasPoint, CanvasTransform,
-        InfiniteCanvas, InfiniteCanvasOperation,
+        CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasLayerMove,
+        CanvasPoint, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
     },
     BlockClient, BlockHandle, BlockRelationships, CachedBlock, ReferenceList,
 };
@@ -21,6 +21,13 @@ const HANDLE_RADIUS: f32 = 5.0;
 const ROTATE_OFFSET: f32 = 28.0;
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CommonValue<T> {
+    None,
+    Mixed,
+    Uniform(T),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tool {
@@ -203,7 +210,220 @@ impl InfiniteCanvasEditor {
             id: Uuid::new_v4(),
             transform: CanvasTransform::new(center, CanvasPoint::new(180.0, 100.0), 0.0),
             kind: CanvasEntityKind::Block { block_id },
+            style: CanvasEntityStyle::default(),
         });
+    }
+
+    fn update_selected(
+        &self,
+        entities: &[CanvasEntity],
+        compatible: impl Fn(&CanvasEntityKind) -> bool,
+        mut update: impl FnMut(&mut CanvasEntityStyle),
+    ) {
+        let entities = entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id) && compatible(&entity.kind))
+            .cloned()
+            .map(|mut entity| {
+                update(&mut entity.style);
+                entity
+            })
+            .collect::<Vec<_>>();
+        if !entities.is_empty() {
+            self.block
+                .operate(InfiniteCanvasOperation::Update { entities });
+        }
+    }
+
+    fn show_inspector(
+        &self,
+        ui: &mut egui::Ui,
+        entities: &[CanvasEntity],
+    ) -> Option<CanvasLayerMove> {
+        ui.heading("Inspector");
+        ui.separator();
+        let selected = entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id))
+            .collect::<Vec<_>>();
+        if selected.is_empty() {
+            ui.weak("Select an object to edit its appearance.");
+            return None;
+        }
+
+        ui.weak(match selected.len() {
+            1 => "1 object selected".into(),
+            count => format!("{count} objects selected"),
+        });
+
+        let foreground = common_value(selected.iter().map(|entity| entity.style.foreground));
+        if let Some(color) = color_menu(ui, "Color", foreground) {
+            self.update_selected(entities, |_| true, |style| style.foreground = color);
+        }
+
+        let stroked = selected.iter().copied().filter(|entity| {
+            matches!(
+                entity.kind,
+                CanvasEntityKind::Line
+                    | CanvasEntityKind::Rectangle
+                    | CanvasEntityKind::Pen { .. }
+                    | CanvasEntityKind::Block { .. }
+            )
+        });
+        let width = common_value(stroked.map(|entity| entity.style.line_width));
+        if !matches!(width, CommonValue::None) {
+            let mixed = matches!(width, CommonValue::Mixed);
+            let mut value = match width {
+                CommonValue::Uniform(value) => value,
+                CommonValue::Mixed | CommonValue::None => 2.0,
+            };
+            ui.horizontal(|ui| {
+                ui.label("Line width");
+                if mixed {
+                    ui.weak("Mixed");
+                }
+            });
+            if ui
+                .add(egui::Slider::new(&mut value, 0.5..=20.0).suffix(" px"))
+                .changed()
+            {
+                self.update_selected(
+                    entities,
+                    |kind| {
+                        matches!(
+                            kind,
+                            CanvasEntityKind::Line
+                                | CanvasEntityKind::Rectangle
+                                | CanvasEntityKind::Pen { .. }
+                                | CanvasEntityKind::Block { .. }
+                        )
+                    },
+                    |style| style.line_width = value,
+                );
+            }
+        }
+
+        let lines = selected
+            .iter()
+            .copied()
+            .filter(|entity| matches!(entity.kind, CanvasEntityKind::Line))
+            .collect::<Vec<_>>();
+        if !lines.is_empty() {
+            ui.separator();
+            ui.strong("Line");
+            for (label, value, set) in [
+                (
+                    "Dashed",
+                    common_value(lines.iter().map(|entity| entity.style.dashed)),
+                    0_u8,
+                ),
+                (
+                    "Start arrow",
+                    common_value(lines.iter().map(|entity| entity.style.arrow_start)),
+                    1,
+                ),
+                (
+                    "End arrow",
+                    common_value(lines.iter().map(|entity| entity.style.arrow_end)),
+                    2,
+                ),
+            ] {
+                if let Some(value) = mixed_checkbox(ui, label, value) {
+                    self.update_selected(
+                        entities,
+                        |kind| matches!(kind, CanvasEntityKind::Line),
+                        |style| match set {
+                            0 => style.dashed = value,
+                            1 => style.arrow_start = value,
+                            _ => style.arrow_end = value,
+                        },
+                    );
+                }
+            }
+        }
+
+        let rectangles = selected
+            .iter()
+            .copied()
+            .filter(|entity| matches!(entity.kind, CanvasEntityKind::Rectangle))
+            .collect::<Vec<_>>();
+        if !rectangles.is_empty() {
+            ui.separator();
+            ui.strong("Rectangle");
+            let fill = common_value(rectangles.iter().map(|entity| entity.style.fill));
+            if let Some(fill) = fill_color_menu(ui, fill) {
+                self.update_selected(
+                    entities,
+                    |kind| matches!(kind, CanvasEntityKind::Rectangle),
+                    |style| style.fill = fill,
+                );
+            }
+
+            let radius = common_value(rectangles.iter().map(|entity| entity.style.corner_radius));
+            let mixed = matches!(radius, CommonValue::Mixed);
+            let mut value = match radius {
+                CommonValue::Uniform(value) => value,
+                CommonValue::Mixed | CommonValue::None => 0.0,
+            };
+            ui.horizontal(|ui| {
+                ui.label("Corner radius");
+                if mixed {
+                    ui.weak("Mixed");
+                }
+            });
+            if ui
+                .add(egui::Slider::new(&mut value, 0.0..=100.0).suffix(" px"))
+                .changed()
+            {
+                self.update_selected(
+                    entities,
+                    |kind| matches!(kind, CanvasEntityKind::Rectangle),
+                    |style| style.corner_radius = value,
+                );
+            }
+        }
+
+        ui.separator();
+        let opacity = common_value(selected.iter().map(|entity| entity.style.opacity));
+        let mixed = matches!(opacity, CommonValue::Mixed);
+        let mut value = match opacity {
+            CommonValue::Uniform(value) => value,
+            CommonValue::Mixed | CommonValue::None => 1.0,
+        };
+        ui.horizontal(|ui| {
+            ui.label("Opacity");
+            if mixed {
+                ui.weak("Mixed");
+            }
+        });
+        if ui
+            .add(
+                egui::Slider::new(&mut value, 0.0..=1.0)
+                    .custom_formatter(|value, _| format!("{:.0}%", value * 100.0)),
+            )
+            .changed()
+        {
+            self.update_selected(entities, |_| true, |style| style.opacity = value);
+        }
+
+        ui.separator();
+        ui.strong("Arrange");
+        let mut movement = None;
+        ui.columns(2, |columns| {
+            if columns[0].button("To front").clicked() {
+                movement = Some(CanvasLayerMove::BringToFront);
+            }
+            if columns[1].button("Forward").clicked() {
+                movement = Some(CanvasLayerMove::ForwardOne);
+            }
+            if columns[0].button("Backward").clicked() {
+                movement = Some(CanvasLayerMove::BackOne);
+            }
+            if columns[1].button("To back").clicked() {
+                movement = Some(CanvasLayerMove::SendToBack);
+            }
+        });
+        movement
     }
 
     fn show_toolbar(&mut self, ui: &mut egui::Ui, entities: &[CanvasEntity]) -> Option<Uuid> {
@@ -397,6 +617,7 @@ impl InfiniteCanvasEditor {
                                 0.0,
                             ),
                             kind: CanvasEntityKind::Rectangle,
+                            style: CanvasEntityStyle::default(),
                         });
                     }
                     self.tool = Tool::Select;
@@ -412,6 +633,7 @@ impl InfiniteCanvasEditor {
                                 0.0,
                             ),
                             kind: CanvasEntityKind::Line,
+                            style: CanvasEntityStyle::default(),
                         });
                     }
                     self.tool = Tool::Select;
@@ -525,6 +747,7 @@ impl InfiniteCanvasEditor {
                         kind: CanvasEntityKind::Text {
                             text: "Text".into(),
                         },
+                        style: CanvasEntityStyle::default(),
                     });
                     self.tool = Tool::Select;
                 }
@@ -598,6 +821,7 @@ impl InfiniteCanvasEditor {
                                 delta.y.atan2(delta.x),
                             ),
                             kind: CanvasEntityKind::Line,
+                            style: CanvasEntityStyle::default(),
                         })
                     }
                     Tool::Rectangle => {
@@ -613,6 +837,7 @@ impl InfiniteCanvasEditor {
                                 0.0,
                             ),
                             kind: CanvasEntityKind::Rectangle,
+                            style: CanvasEntityStyle::default(),
                         })
                     }
                     _ => None,
@@ -670,14 +895,7 @@ impl InfiniteCanvasEditor {
             .collect();
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
-            paint_entity(
-                self,
-                painter,
-                rect,
-                entity,
-                self.selection.contains(&entity.id),
-                dependency_titles,
-            );
+            paint_entity(self, painter, rect, entity, dependency_titles);
         }
 
         if let Some(Gesture::Create {
@@ -859,12 +1077,21 @@ impl BlockEditor for InfiniteCanvasEditor {
             .collect();
 
         let mut create_block = self.show_toolbar(ui, &entities);
+        let mut inspector_layer_move = None;
+        egui::Panel::right(egui::Id::new(("canvas-inspector", self.block.id())))
+            .default_size(240.0)
+            .min_size(200.0)
+            .max_size(340.0)
+            .resizable(true)
+            .show_inside(ui, |ui| {
+                inspector_layer_move = self.show_inspector(ui, &entities);
+            });
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        let (layer_move, context_create_block, set_parent) =
+        let (context_layer_move, context_create_block, set_parent) =
             self.handle_canvas_input(&response, &entities);
         create_block = create_block.or(context_create_block);
-        if let Some(movement) = layer_move {
+        if let Some(movement) = context_layer_move.or(inspector_layer_move) {
             self.block.operate(InfiniteCanvasOperation::Reorder {
                 ids: self.selection.iter().copied().collect(),
                 movement,
@@ -897,6 +1124,164 @@ impl BlockEditor for InfiniteCanvasEditor {
                     parent: Some(self.block.id()),
                 })
             })
+    }
+}
+
+fn common_value<T: Copy + PartialEq>(values: impl IntoIterator<Item = T>) -> CommonValue<T> {
+    let mut values = values.into_iter();
+    let Some(first) = values.next() else {
+        return CommonValue::None;
+    };
+    if values.all(|value| value == first) {
+        CommonValue::Uniform(first)
+    } else {
+        CommonValue::Mixed
+    }
+}
+
+fn mixed_checkbox(ui: &mut egui::Ui, label: &str, value: CommonValue<bool>) -> Option<bool> {
+    let mixed = matches!(value, CommonValue::Mixed);
+    let mut checked = matches!(value, CommonValue::Uniform(true));
+    let label = if mixed {
+        format!("{label} (Mixed)")
+    } else {
+        label.into()
+    };
+    ui.checkbox(&mut checked, label)
+        .changed()
+        .then_some(checked)
+}
+
+const COLOR_PRESETS: [(&str, CanvasColor); 5] = [
+    ("Default", CanvasColor::Auto),
+    (
+        "Red",
+        CanvasColor::Rgb {
+            red: 224,
+            green: 49,
+            blue: 49,
+        },
+    ),
+    (
+        "Orange",
+        CanvasColor::Rgb {
+            red: 240,
+            green: 140,
+            blue: 0,
+        },
+    ),
+    (
+        "Green",
+        CanvasColor::Rgb {
+            red: 47,
+            green: 158,
+            blue: 68,
+        },
+    ),
+    (
+        "Blue",
+        CanvasColor::Rgb {
+            red: 25,
+            green: 113,
+            blue: 194,
+        },
+    ),
+];
+
+fn color_menu(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: CommonValue<CanvasColor>,
+) -> Option<CanvasColor> {
+    let mut changed = None;
+    let current = match value {
+        CommonValue::Uniform(color) => color,
+        CommonValue::Mixed | CommonValue::None => CanvasColor::Auto,
+    };
+    let value_label: String = match value {
+        CommonValue::Uniform(CanvasColor::Auto) => "Default".into(),
+        CommonValue::Uniform(CanvasColor::Rgb { .. }) => "Custom".into(),
+        CommonValue::Mixed => "Mixed".into(),
+        CommonValue::None => "None".into(),
+    };
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.menu_button(value_label, |ui| {
+            for (name, color) in COLOR_PRESETS {
+                if color_button(ui, name, color).clicked() {
+                    changed = Some(color);
+                    ui.close();
+                }
+            }
+            ui.menu_button("Custom color", |ui| {
+                let mut color = resolve_color(current, ui.visuals().text_color());
+                if ui.color_edit_button_srgba(&mut color).changed() {
+                    changed = Some(CanvasColor::Rgb {
+                        red: color.r(),
+                        green: color.g(),
+                        blue: color.b(),
+                    });
+                }
+            });
+        });
+    });
+    changed
+}
+
+fn fill_color_menu(
+    ui: &mut egui::Ui,
+    value: CommonValue<Option<CanvasColor>>,
+) -> Option<Option<CanvasColor>> {
+    let mut changed = None;
+    let current = match value {
+        CommonValue::Uniform(Some(color)) => color,
+        CommonValue::Uniform(None) | CommonValue::Mixed | CommonValue::None => CanvasColor::Auto,
+    };
+    let value_label: String = match value {
+        CommonValue::Uniform(None) => "No fill".into(),
+        CommonValue::Uniform(Some(CanvasColor::Auto)) => "Default".into(),
+        CommonValue::Uniform(Some(CanvasColor::Rgb { .. })) => "Custom".into(),
+        CommonValue::Mixed => "Mixed".into(),
+        CommonValue::None => "None".into(),
+    };
+    ui.horizontal(|ui| {
+        ui.label("Fill");
+        ui.menu_button(value_label, |ui| {
+            if ui.button("No fill").clicked() {
+                changed = Some(None);
+                ui.close();
+            }
+            ui.separator();
+            for (name, color) in COLOR_PRESETS {
+                if color_button(ui, name, color).clicked() {
+                    changed = Some(Some(color));
+                    ui.close();
+                }
+            }
+            ui.menu_button("Custom color", |ui| {
+                let mut color = resolve_color(current, ui.visuals().text_color());
+                if ui.color_edit_button_srgba(&mut color).changed() {
+                    changed = Some(Some(CanvasColor::Rgb {
+                        red: color.r(),
+                        green: color.g(),
+                        blue: color.b(),
+                    }));
+                }
+            });
+        });
+    });
+    changed
+}
+
+fn color_button(ui: &mut egui::Ui, name: &str, color: CanvasColor) -> egui::Response {
+    let color = resolve_color(color, ui.visuals().text_color());
+    ui.button(egui::RichText::new(format!("● {name}")).color(color))
+}
+
+fn resolve_color(color: CanvasColor, auto: Color32) -> Color32 {
+    match color {
+        CanvasColor::Auto => auto,
+        CanvasColor::Rgb { red, green, blue } => Color32::from_rgb(red, green, blue),
     }
 }
 
@@ -1219,6 +1604,7 @@ fn pen_entity(points: Vec<CanvasPoint>) -> CanvasEntity {
         id: Uuid::new_v4(),
         transform: CanvasTransform::new(center, size, 0.0),
         kind: CanvasEntityKind::Pen { points },
+        style: CanvasEntityStyle::default(),
     }
 }
 
@@ -1227,38 +1613,43 @@ fn paint_entity(
     painter: &egui::Painter,
     rect: Rect,
     entity: &CanvasEntity,
-    selected: bool,
     dependency_titles: &HashMap<Uuid, String>,
 ) {
-    let color = if selected {
-        Color32::LIGHT_BLUE
-    } else {
-        painter.ctx().global_style().visuals.text_color()
-    };
-    let stroke = Stroke::new(2.0, color);
+    let auto = painter.ctx().global_style().visuals.text_color();
+    let opacity = entity.style.opacity.clamp(0.0, 1.0);
+    let color = with_opacity(resolve_color(entity.style.foreground, auto), opacity);
+    let stroke = Stroke::new(
+        (entity.style.line_width.max(0.0) * editor.zoom).max(0.1),
+        color,
+    );
     match &entity.kind {
         CanvasEntityKind::Line => {
-            painter.line_segment(
-                [
-                    editor.world_to_screen(
-                        local_to_world(entity.transform, CanvasPoint::new(-0.5, 0.0)),
-                        rect,
-                    ),
-                    editor.world_to_screen(
-                        local_to_world(entity.transform, CanvasPoint::new(0.5, 0.0)),
-                        rect,
-                    ),
-                ],
+            paint_styled_line(
+                painter,
+                editor.world_to_screen(
+                    local_to_world(entity.transform, CanvasPoint::new(-0.5, 0.0)),
+                    rect,
+                ),
+                editor.world_to_screen(
+                    local_to_world(entity.transform, CanvasPoint::new(0.5, 0.0)),
+                    rect,
+                ),
                 stroke,
+                entity.style,
+                editor.zoom,
             );
         }
         CanvasEntityKind::Rectangle => {
-            let mut points: Vec<_> = entity_corners(entity)
+            let points: Vec<_> = rounded_rectangle_points(entity, entity.style.corner_radius)
                 .into_iter()
                 .map(|point| editor.world_to_screen(point, rect))
                 .collect();
-            points.push(points[0]);
-            painter.add(egui::Shape::line(points, stroke));
+            let fill = entity
+                .style
+                .fill
+                .map(|fill| with_opacity(resolve_color(fill, auto), opacity))
+                .unwrap_or(Color32::TRANSPARENT);
+            painter.add(egui::Shape::convex_polygon(points, fill, stroke));
         }
         CanvasEntityKind::Text { text } => {
             let center = editor.world_to_screen(entity.transform.center, rect);
@@ -1288,7 +1679,7 @@ fn paint_entity(
                 .collect();
             painter.add(egui::Shape::convex_polygon(
                 corners,
-                Color32::from_gray(35),
+                with_opacity(Color32::from_gray(35), opacity),
                 stroke,
             ));
             let center = editor.world_to_screen(entity.transform.center, rect);
@@ -1332,6 +1723,103 @@ fn paint_entity(
             );
         }
     }
+}
+
+fn paint_styled_line(
+    painter: &egui::Painter,
+    start: Pos2,
+    end: Pos2,
+    stroke: Stroke,
+    style: CanvasEntityStyle,
+    zoom: f32,
+) {
+    let delta = end - start;
+    let length = delta.length();
+    if length <= f32::EPSILON {
+        return;
+    }
+    let direction = delta / length;
+    let arrow_size = ((style.line_width * 4.0).max(8.0) * zoom).min(length * 0.4);
+    let inset = arrow_size * 0.75;
+    let shaft_start = if style.arrow_start {
+        start + direction * inset
+    } else {
+        start
+    };
+    let shaft_end = if style.arrow_end {
+        end - direction * inset
+    } else {
+        end
+    };
+
+    if style.dashed {
+        let dash = (stroke.width * 3.0).max(2.0);
+        let gap = (stroke.width * 2.0).max(2.0);
+        painter.extend(egui::Shape::dashed_line(
+            &[shaft_start, shaft_end],
+            stroke,
+            dash,
+            gap,
+        ));
+    } else {
+        painter.line_segment([shaft_start, shaft_end], stroke);
+    }
+
+    if style.arrow_start {
+        painter.add(arrowhead(start, direction, arrow_size, stroke.color));
+    }
+    if style.arrow_end {
+        painter.add(arrowhead(end, -direction, arrow_size, stroke.color));
+    }
+}
+
+fn arrowhead(tip: Pos2, inward: Vec2, size: f32, color: Color32) -> egui::Shape {
+    let base = tip + inward * size;
+    let perpendicular = Vec2::new(-inward.y, inward.x) * size * 0.45;
+    egui::Shape::convex_polygon(
+        vec![tip, base + perpendicular, base - perpendicular],
+        color,
+        Stroke::NONE,
+    )
+}
+
+fn rounded_rectangle_points(entity: &CanvasEntity, radius: f32) -> Vec<CanvasPoint> {
+    let width = entity.transform.size.x.abs().max(0.001);
+    let height = entity.transform.size.y.abs().max(0.001);
+    let radius = radius.max(0.0).min(width * 0.5).min(height * 0.5);
+    if radius <= f32::EPSILON {
+        return entity_corners(entity).into();
+    }
+
+    const STEPS: usize = 6;
+    let corners = [
+        (width * 0.5 - radius, -height * 0.5 + radius, -90.0_f32),
+        (width * 0.5 - radius, height * 0.5 - radius, 0.0),
+        (-width * 0.5 + radius, height * 0.5 - radius, 90.0),
+        (-width * 0.5 + radius, -height * 0.5 + radius, 180.0),
+    ];
+    let mut points = Vec::with_capacity(corners.len() * (STEPS + 1));
+    for (center_x, center_y, start_degrees) in corners {
+        for step in 0..=STEPS {
+            let angle = (start_degrees + 90.0 * step as f32 / STEPS as f32).to_radians();
+            let local_x = center_x + radius * angle.cos();
+            let local_y = center_y + radius * angle.sin();
+            points.push(local_to_world(
+                entity.transform,
+                CanvasPoint::new(local_x / width, local_y / height),
+            ));
+        }
+    }
+    points
+}
+
+fn with_opacity(color: Color32, opacity: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        color.r(),
+        color.g(),
+        color.b(),
+        (color.a() as f32 * opacity.clamp(0.0, 1.0)).round() as u8,
+    )
 }
 
 fn paint_selection(

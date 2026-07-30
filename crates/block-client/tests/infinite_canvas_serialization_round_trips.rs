@@ -1,6 +1,6 @@
 use block_client::blocks::infinite_canvas::{
-    CanvasEntity, CanvasEntityKind, CanvasPoint, CanvasTransform, InfiniteCanvas,
-    InfiniteCanvasOperation,
+    CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
+    InfiniteCanvas, InfiniteCanvasOperation,
 };
 use uuid::Uuid;
 
@@ -15,6 +15,24 @@ fn infinite_canvas_serialization_round_trips() {
         ),
         kind: CanvasEntityKind::Pen {
             points: vec![CanvasPoint::new(-0.5, 0.0), CanvasPoint::new(0.5, 1.0)],
+        },
+        style: CanvasEntityStyle {
+            foreground: CanvasColor::Rgb {
+                red: 10,
+                green: 20,
+                blue: 30,
+            },
+            line_width: 6.5,
+            dashed: true,
+            fill: Some(CanvasColor::Rgb {
+                red: 40,
+                green: 50,
+                blue: 60,
+            }),
+            arrow_start: true,
+            arrow_end: true,
+            corner_radius: 14.0,
+            opacity: 0.35,
         },
     };
     let canvas = InfiniteCanvas::new();

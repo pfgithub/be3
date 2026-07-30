@@ -43,11 +43,51 @@ pub enum CanvasEntityKind {
     Block { block_id: Uuid },
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanvasColor {
+    #[default]
+    Auto,
+    Rgb {
+        red: u8,
+        green: u8,
+        blue: u8,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CanvasEntityStyle {
+    pub foreground: CanvasColor,
+    pub line_width: f32,
+    pub dashed: bool,
+    pub fill: Option<CanvasColor>,
+    pub arrow_start: bool,
+    pub arrow_end: bool,
+    pub corner_radius: f32,
+    pub opacity: f32,
+}
+
+impl Default for CanvasEntityStyle {
+    fn default() -> Self {
+        Self {
+            foreground: CanvasColor::Auto,
+            line_width: 2.0,
+            dashed: false,
+            fill: None,
+            arrow_start: false,
+            arrow_end: false,
+            corner_radius: 0.0,
+            opacity: 1.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CanvasEntity {
     pub id: Uuid,
     pub transform: CanvasTransform,
     pub kind: CanvasEntityKind,
+    pub style: CanvasEntityStyle,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]

@@ -1,7 +1,7 @@
 use block::Block;
 use block_client::blocks::infinite_canvas::{
-    CanvasEntity, CanvasEntityKind, CanvasPoint, CanvasTransform, InfiniteCanvas,
-    InfiniteCanvasOperation,
+    CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
+    InfiniteCanvas, InfiniteCanvasOperation,
 };
 use uuid::Uuid;
 
@@ -14,6 +14,7 @@ fn entity(id: Uuid, x: f32) -> CanvasEntity {
             0.0,
         ),
         kind: CanvasEntityKind::Rectangle,
+        style: CanvasEntityStyle::default(),
     }
 }
 
@@ -38,7 +39,20 @@ fn infinite_canvas_applies_entity_changes() {
     );
     assert_eq!(canvas.entities(), &[initial]);
 
-    let updated = entity(id, 9.0);
+    let mut updated = entity(id, 9.0);
+    updated.style.foreground = CanvasColor::Rgb {
+        red: 12,
+        green: 34,
+        blue: 56,
+    };
+    updated.style.fill = Some(CanvasColor::Rgb {
+        red: 78,
+        green: 90,
+        blue: 123,
+    });
+    updated.style.line_width = 7.0;
+    updated.style.corner_radius = 11.0;
+    updated.style.opacity = 0.4;
     InfiniteCanvas::apply_operation(
         &mut canvas,
         &InfiniteCanvasOperation::Update {

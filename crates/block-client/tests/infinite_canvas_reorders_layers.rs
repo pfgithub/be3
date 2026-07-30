@@ -1,7 +1,7 @@
 use block::Block;
 use block_client::blocks::infinite_canvas::{
-    CanvasEntity, CanvasEntityKind, CanvasLayerMove, CanvasPoint, CanvasTransform, InfiniteCanvas,
-    InfiniteCanvasOperation,
+    CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasLayerMove, CanvasPoint,
+    CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
 };
 use uuid::Uuid;
 
@@ -10,6 +10,7 @@ fn entity(id: Uuid) -> CanvasEntity {
         id,
         transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
         kind: CanvasEntityKind::Rectangle,
+        style: CanvasEntityStyle::default(),
     }
 }
 
