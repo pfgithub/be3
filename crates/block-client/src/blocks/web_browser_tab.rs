@@ -61,6 +61,7 @@ impl Default for WebBrowserTab {
 
 impl Block for WebBrowserTab {
     type Operation = WebBrowserTabOperation;
+    type History = block::NoHistory;
 
     const TYPE_ID: Uuid = Uuid::from_u128(0x7765_622d_6272_6f77_7365_722d_7461_6201);
 

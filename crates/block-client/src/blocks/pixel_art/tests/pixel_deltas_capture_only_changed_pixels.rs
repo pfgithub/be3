@@ -1,7 +1,6 @@
 use block::Block;
-use block_client::blocks::pixel_art::{PixelArt, PixelArtOperation, PixelColor, PixelUpdate};
 
-use super::pixel_deltas;
+use super::{pixel_deltas, PixelArt, PixelArtOperation, PixelColor, PixelUpdate};
 
 #[test]
 fn pixel_deltas_capture_only_changed_pixels() {

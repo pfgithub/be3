@@ -1,5 +1,4 @@
 mod browser_tab;
-mod history;
 mod infinite_canvas;
 mod pixel_art;
 mod text;
@@ -82,17 +81,9 @@ pub trait BlockEditor {
     fn update_open_tab(&mut self, _frame: &eframe::Frame) {}
     fn set_tab_active(&mut self, _active: bool) {}
     fn tab_closed(&mut self) {}
-    fn supports_undo(&self) -> bool {
-        false
+    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
+        None
     }
-    fn can_undo(&self) -> bool {
-        false
-    }
-    fn can_redo(&self) -> bool {
-        false
-    }
-    fn undo(&mut self) {}
-    fn redo(&mut self) {}
     fn ui(
         &mut self,
         ui: &mut egui::Ui,

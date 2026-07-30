@@ -26,6 +26,7 @@ impl WorkspaceIndex {
 
 impl Block for WorkspaceIndex {
     type Operation = WorkspaceIndexOperation;
+    type History = block::NoHistory;
 
     const TYPE_ID: Uuid = Uuid::from_u128(0x626c_6f63_6b2d_6170_702d_696e_6465_7802);
     const CRDT: bool = true;

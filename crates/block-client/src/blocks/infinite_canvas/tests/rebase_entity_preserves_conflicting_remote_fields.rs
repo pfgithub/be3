@@ -1,9 +1,9 @@
-use block_client::blocks::infinite_canvas::{
-    CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
-};
 use uuid::Uuid;
 
-use super::rebase_entity;
+use super::{
+    rebase_entity, CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint,
+    CanvasTransform,
+};
 
 fn entity() -> CanvasEntity {
     CanvasEntity {

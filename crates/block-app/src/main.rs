@@ -1118,7 +1118,10 @@ impl BlockApp {
             self.active_tab = None;
             return;
         };
-        if editor.supports_undo() {
+        if let Some(history) = editor
+            .history()
+            .filter(|history| history.supports_history())
+        {
             let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
             let redo_shortcut = egui::KeyboardShortcut::new(
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -1136,20 +1139,20 @@ impl BlockApp {
                 .input_mut(|input| input.consume_shortcut(&undo_shortcut));
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(editor.can_undo(), egui::Button::new("Undo"))
+                    .add_enabled(history.can_undo(), egui::Button::new("Undo"))
                     .on_hover_text("Undo (Ctrl/Cmd+Z)")
                     .clicked()
                     || undo_requested
                 {
-                    editor.undo();
+                    history.undo();
                 }
                 if ui
-                    .add_enabled(editor.can_redo(), egui::Button::new("Redo"))
+                    .add_enabled(history.can_redo(), egui::Button::new("Redo"))
                     .on_hover_text("Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)")
                     .clicked()
                     || redo_requested
                 {
-                    editor.redo();
+                    history.redo();
                 }
             });
             ui.separator();

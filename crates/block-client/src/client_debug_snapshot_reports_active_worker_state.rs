@@ -19,6 +19,7 @@ struct DebugBlock;
 
 impl Block for DebugBlock {
     type Operation = ();
+    type History = block::NoHistory;
 
     const TYPE_ID: Uuid = Uuid::from_u128(0xfeed);
 

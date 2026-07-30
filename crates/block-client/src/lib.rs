@@ -11,8 +11,9 @@ use std::{
 };
 
 use block::{
-    Block, BlockOperation, BlockParent, BlockReference, BlockReferenceList, BlockUpdate,
-    ClientMessage, CommandKind, ErrorCode, OperationRecord, ReferenceDelta, ServerMessage,
+    Block, BlockHistory, BlockOperation, BlockParent, BlockReference, BlockReferenceList,
+    BlockUpdate, ClientMessage, CommandKind, ErrorCode, HistoryDirection, OperationRecord,
+    ReferenceDelta, ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -27,13 +28,29 @@ use uuid::Uuid;
 pub mod blocks;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
+const MAX_HISTORY_ACTIONS: usize = 100;
+const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
+#[cfg(test)]
+#[path = "history/tests/block_handle_history_is_shared_by_clones.rs"]
+mod block_handle_history_is_shared_by_clones;
 #[cfg(test)]
 mod cached_blocks_are_populated_from_confirmed_metadata;
 #[cfg(test)]
 mod client_debug_snapshot_reports_active_worker_state;
 #[cfg(test)]
 mod duplicate_reference_watches_share_subscription;
+#[cfg(test)]
+#[path = "history/tests/finish_history_group_starts_a_new_action.rs"]
+mod finish_history_group_starts_a_new_action;
+#[cfg(test)]
+mod history_test_support;
+#[cfg(test)]
+#[path = "history/tests/new_history_action_clears_redo.rs"]
+mod new_history_action_clears_redo;
+#[cfg(test)]
+#[path = "history/tests/no_history_policy_disables_undo.rs"]
+mod no_history_policy_disables_undo;
 
 pub struct BlockClient {
     id: Uuid,
@@ -401,10 +418,55 @@ impl<B: Block> BlockHandle<B> {
     }
 
     pub fn operate(&self, operation: B::Operation) {
-        self.block.local_operation(operation);
+        self.block
+            .local_operations(vec![operation], HistoryMode::Standalone);
         self.commands
             .send(WorkerCommand::Operate { id: self.id })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn operate_grouped(&self, operations: impl IntoIterator<Item = B::Operation>) {
+        let operations = operations.into_iter().collect::<Vec<_>>();
+        if operations.is_empty() {
+            return;
+        }
+        self.block
+            .local_operations(operations, HistoryMode::Grouped);
+        self.commands
+            .send(WorkerCommand::Operate { id: self.id })
+            .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn finish_history_group(&self) {
+        self.block.history.write().finish_group();
+    }
+
+    pub fn supports_history(&self) -> bool {
+        B::History::ENABLED
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.block.history.read().can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.block.history.read().can_redo()
+    }
+
+    pub fn undo(&self) {
+        if self.block.apply_history(HistoryDirection::Undo) {
+            self.commands
+                .send(WorkerCommand::Operate { id: self.id })
+                .unwrap_or_else(|_| fatal("block client worker stopped"));
+        }
+    }
+
+    pub fn redo(&self) {
+        if self.block.apply_history(HistoryDirection::Redo) {
+            self.commands
+                .send(WorkerCommand::Operate { id: self.id })
+                .unwrap_or_else(|_| fatal("block client worker stopped"));
+        }
     }
 
     pub fn set_parent(&self, parent: BlockParent) {
@@ -461,6 +523,36 @@ impl<B: Block> BlockHandle<B> {
                 .await
                 .unwrap_or_else(|_| fatal("block client worker stopped while waiting for a block"));
         }
+    }
+}
+
+pub trait BlockHistoryHandle {
+    fn supports_history(&self) -> bool;
+    fn can_undo(&self) -> bool;
+    fn can_redo(&self) -> bool;
+    fn undo(&self);
+    fn redo(&self);
+}
+
+impl<B: Block> BlockHistoryHandle for BlockHandle<B> {
+    fn supports_history(&self) -> bool {
+        BlockHandle::supports_history(self)
+    }
+
+    fn can_undo(&self) -> bool {
+        BlockHandle::can_undo(self)
+    }
+
+    fn can_redo(&self) -> bool {
+        BlockHandle::can_redo(self)
+    }
+
+    fn undo(&self) {
+        BlockHandle::undo(self);
+    }
+
+    fn redo(&self) {
+        BlockHandle::redo(self);
     }
 }
 
@@ -534,7 +626,9 @@ impl BlockBatch<'_> {
         if self.ids.contains(&block.id) {
             fatal("a batch may contain at most one operation per block");
         }
-        block.block.local_operation(operation);
+        block
+            .block
+            .local_operations(vec![operation], HistoryMode::Standalone);
         self.ids.push(block.id);
     }
 }
@@ -1666,6 +1760,118 @@ struct TypedBlock<B: Block> {
     changed: watch::Sender<()>,
     relationships: RwLock<BlockRelationships>,
     name: RwLock<String>,
+    history: RwLock<HistoryStack<HistoryAction<B>>>,
+}
+
+type HistoryAction<B> = <<B as Block>::History as BlockHistory<B>>::Action;
+
+#[derive(Clone, Copy)]
+enum HistoryMode {
+    None,
+    Standalone,
+    Grouped,
+}
+
+struct HistoryEntry<A> {
+    action: A,
+    bytes: usize,
+}
+
+struct HistoryStack<A> {
+    undo: VecDeque<HistoryEntry<A>>,
+    redo: Vec<HistoryEntry<A>>,
+    undo_bytes: usize,
+    group_open: bool,
+}
+
+impl<A> Default for HistoryStack<A> {
+    fn default() -> Self {
+        Self {
+            undo: VecDeque::new(),
+            redo: Vec::new(),
+            undo_bytes: 0,
+            group_open: false,
+        }
+    }
+}
+
+impl<A> HistoryStack<A> {
+    fn push<B: Block<History = H>, H: BlockHistory<B, Action = A>>(
+        &mut self,
+        mut action: A,
+        mode: HistoryMode,
+    ) {
+        self.redo.clear();
+        if matches!(mode, HistoryMode::Grouped) && self.group_open {
+            if let Some(previous) = self.undo.back_mut() {
+                let old_bytes = previous.bytes;
+                match H::merge(&mut previous.action, action) {
+                    Ok(()) => {
+                        previous.bytes = H::action_bytes(&previous.action);
+                        self.undo_bytes = self
+                            .undo_bytes
+                            .saturating_sub(old_bytes)
+                            .saturating_add(previous.bytes);
+                        self.evict();
+                        return;
+                    }
+                    Err(next) => action = next,
+                }
+            }
+        }
+        let bytes = H::action_bytes(&action);
+        self.undo_bytes = self.undo_bytes.saturating_add(bytes);
+        self.undo.push_back(HistoryEntry { action, bytes });
+        self.group_open = matches!(mode, HistoryMode::Grouped);
+        self.evict();
+    }
+
+    fn evict(&mut self) {
+        while self.undo.len() > MAX_HISTORY_ACTIONS || self.undo_bytes > MAX_HISTORY_BYTES {
+            if self.undo.len() == 1 {
+                break;
+            }
+            if let Some(entry) = self.undo.pop_front() {
+                self.undo_bytes = self.undo_bytes.saturating_sub(entry.bytes);
+            }
+        }
+    }
+
+    fn finish_group(&mut self) {
+        self.group_open = false;
+    }
+
+    fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    fn apply<R>(
+        &mut self,
+        direction: HistoryDirection,
+        apply: impl FnOnce(&mut A) -> R,
+    ) -> Option<R> {
+        self.group_open = false;
+        match direction {
+            HistoryDirection::Undo => {
+                let mut entry = self.undo.pop_back()?;
+                self.undo_bytes = self.undo_bytes.saturating_sub(entry.bytes);
+                let result = apply(&mut entry.action);
+                self.redo.push(entry);
+                Some(result)
+            }
+            HistoryDirection::Redo => {
+                let mut entry = self.redo.pop()?;
+                let result = apply(&mut entry.action);
+                self.undo_bytes = self.undo_bytes.saturating_add(entry.bytes);
+                self.undo.push_back(entry);
+                Some(result)
+            }
+        }
+    }
 }
 
 struct TypedState<B: Block> {
@@ -1717,6 +1923,7 @@ impl<B: Block> TypedBlock<B> {
                 backrefs: Vec::new(),
             }),
             name: RwLock::new(name),
+            history: RwLock::new(HistoryStack::default()),
         }
     }
 
@@ -1743,6 +1950,7 @@ impl<B: Block> TypedBlock<B> {
                 backrefs: Vec::new(),
             }),
             name: RwLock::new(String::new()),
+            history: RwLock::new(HistoryStack::default()),
         }
     }
 
@@ -1757,27 +1965,62 @@ impl<B: Block> TypedBlock<B> {
         self.changed.send_replace(());
     }
 
-    fn local_operation(&self, operation: B::Operation) {
+    fn local_operations(&self, operations: Vec<B::Operation>, history_mode: HistoryMode) {
         let mut state = self.state.write();
-        let references = {
+        let record_history = B::History::ENABLED && !matches!(history_mode, HistoryMode::None);
+        let history_action = {
             let mut visible = self.shared.value.write();
             let value = visible
                 .as_mut()
                 .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
-            let before = normalized_references(value.references());
-            B::apply_operation(value, &operation);
-            let implicit_name = value.implicit_name();
-            let after = normalized_references(value.references());
-            self.relationships.write().references.clone_from(&after);
+            let history_before = record_history.then(|| value.clone());
+            for operation in &operations {
+                let before = normalized_references(value.references());
+                B::apply_operation(value, operation);
+                let implicit_name = value.implicit_name();
+                let after = normalized_references(value.references());
+                self.relationships.write().references.clone_from(&after);
+                state.pending.push_back(PendingOperation {
+                    id: Uuid::new_v4(),
+                    operation: operation.clone(),
+                    references: reference_delta(&before, &after),
+                    implicit_name,
+                });
+            }
             self.changed.send_replace(());
-            (reference_delta(&before, &after), implicit_name)
+            history_before.and_then(|before| B::History::action(&before, value, &operations))
         };
-        state.pending.push_back(PendingOperation {
-            id: Uuid::new_v4(),
-            operation,
-            references: references.0,
-            implicit_name: references.1,
-        });
+        drop(state);
+        if !matches!(history_mode, HistoryMode::None) {
+            if let Some(action) = history_action {
+                self.history
+                    .write()
+                    .push::<B, B::History>(action, history_mode);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn local_operation(&self, operation: B::Operation) {
+        self.local_operations(vec![operation], HistoryMode::Standalone);
+    }
+
+    fn apply_history(&self, direction: HistoryDirection) -> bool {
+        let Some(current) = self.shared.value.read().clone() else {
+            return false;
+        };
+        let operations = self
+            .history
+            .write()
+            .apply(direction, |action| {
+                B::History::operations(&current, action, direction)
+            })
+            .unwrap_or_default();
+        if operations.is_empty() {
+            return false;
+        }
+        self.local_operations(operations, HistoryMode::None);
+        true
     }
 
     #[cfg(test)]
@@ -2137,6 +2380,7 @@ mod tests {
 
     impl Block for Counter {
         type Operation = CounterOperation;
+        type History = block::NoHistory;
         const TYPE_ID: Uuid = Uuid::from_u128(1);
 
         fn apply_operation(block: &mut Self, operation: &Self::Operation) {

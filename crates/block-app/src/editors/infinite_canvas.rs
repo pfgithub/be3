@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, Instant},
-};
+use std::collections::{HashMap, HashSet};
 
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
@@ -16,7 +13,7 @@ use uuid::Uuid;
 
 use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
-use super::{history::History, BlockEditor, EditorAction, SidebarDragPayload};
+use super::{BlockEditor, EditorAction, SidebarDragPayload};
 
 const MIN_SIZE: f32 = 4.0;
 const HIT_RADIUS: f32 = 7.0;
@@ -24,7 +21,6 @@ const HANDLE_RADIUS: f32 = 5.0;
 const ROTATE_OFFSET: f32 = 28.0;
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
-const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum CommonValue<T> {
@@ -137,24 +133,6 @@ pub(super) struct InfiniteCanvasEditor {
     context_menu_position: Option<CanvasPoint>,
     dependencies: ReferenceList,
     focus_text: Option<Uuid>,
-    history: History<CanvasAction>,
-    update_group: Option<(Instant, Vec<Uuid>)>,
-}
-
-enum CanvasAction {
-    Add(CanvasEntity),
-    Remove {
-        entities: Vec<CanvasEntity>,
-        order: Vec<Uuid>,
-    },
-    Update {
-        before: Vec<CanvasEntity>,
-        after: Vec<CanvasEntity>,
-    },
-    Order {
-        before: Vec<Uuid>,
-        after: Vec<Uuid>,
-    },
 }
 
 impl InfiniteCanvasEditor {
@@ -174,8 +152,6 @@ impl InfiniteCanvasEditor {
             context_menu_position: None,
             dependencies,
             focus_text: None,
-            history: History::default(),
-            update_group: None,
         }
     }
 
@@ -183,109 +159,18 @@ impl InfiniteCanvasEditor {
         if before == after || after.is_empty() {
             return;
         }
-        self.block.operate(InfiniteCanvasOperation::Update {
-            entities: after.clone(),
-        });
-        let ids = after.iter().map(|entity| entity.id).collect::<Vec<_>>();
-        let now = Instant::now();
-        let joins = group
-            && self.update_group.as_ref().is_some_and(|(last, grouped)| {
-                now.duration_since(*last) <= EDIT_BURST_DELAY && *grouped == ids
-            });
-        if joins {
-            if let Some(CanvasAction::Update {
-                after: grouped_after,
-                ..
-            }) = self.history.last_undo_mut()
-            {
-                *grouped_after = after;
-            } else {
-                self.history
-                    .push(CanvasAction::Update { before, after }, ids.len() * 512);
-            }
+        let operation = InfiniteCanvasOperation::Update { entities: after };
+        if group {
+            self.block.operate_grouped([operation]);
         } else {
-            self.history
-                .push(CanvasAction::Update { before, after }, ids.len() * 512);
+            self.block.finish_history_group();
+            self.block.operate(operation);
         }
-        self.update_group = group.then_some((now, ids));
     }
 
-    fn record_action(&mut self, action: CanvasAction, operation: InfiniteCanvasOperation) {
-        self.update_group = None;
-        let bytes = match &action {
-            CanvasAction::Add(_) => 512,
-            CanvasAction::Remove { entities, .. }
-            | CanvasAction::Update {
-                before: entities, ..
-            } => entities.len() * 1024,
-            CanvasAction::Order { before, .. } => before.len() * size_of::<Uuid>() * 2,
-        };
+    fn record_action(&mut self, operation: InfiniteCanvasOperation) {
+        self.block.finish_history_group();
         self.block.operate(operation);
-        self.history.push(action, bytes);
-    }
-
-    fn apply_action(block: &BlockHandle<InfiniteCanvas>, action: &CanvasAction, to_after: bool) {
-        match action {
-            CanvasAction::Add(entity) => {
-                if to_after {
-                    block.operate(InfiniteCanvasOperation::Add {
-                        entity: entity.clone(),
-                    });
-                } else {
-                    block.operate(InfiniteCanvasOperation::Remove {
-                        ids: vec![entity.id],
-                    });
-                }
-            }
-            CanvasAction::Remove { entities, order } => {
-                if to_after {
-                    block.operate(InfiniteCanvasOperation::Remove {
-                        ids: entities.iter().map(|entity| entity.id).collect(),
-                    });
-                } else {
-                    for entity in entities {
-                        block.operate(InfiniteCanvasOperation::Add {
-                            entity: entity.clone(),
-                        });
-                    }
-                    block.operate(InfiniteCanvasOperation::ExactOrder { ids: order.clone() });
-                }
-            }
-            CanvasAction::Update { before, after } => {
-                let (expected, desired) = if to_after {
-                    (before, after)
-                } else {
-                    (after, before)
-                };
-                let Some(canvas) = block.read() else {
-                    return;
-                };
-                let updates = expected
-                    .iter()
-                    .zip(desired)
-                    .filter_map(|(expected, desired)| {
-                        canvas
-                            .entities()
-                            .iter()
-                            .find(|entity| entity.id == expected.id)
-                            .map(|current| rebase_entity(current, expected, desired))
-                    })
-                    .collect::<Vec<_>>();
-                drop(canvas);
-                if !updates.is_empty() {
-                    block.operate(InfiniteCanvasOperation::Update { entities: updates });
-                }
-            }
-            CanvasAction::Order { before, after } => {
-                block.operate(InfiniteCanvasOperation::ExactOrder {
-                    ids: if to_after {
-                        after.clone()
-                    } else {
-                        before.clone()
-                    },
-                });
-            }
-        }
     }
 
     fn world_to_screen(&self, point: CanvasPoint, rect: Rect) -> Pos2 {
@@ -333,10 +218,7 @@ impl InfiniteCanvasEditor {
         if matches!(entity.kind, CanvasEntityKind::Text { .. }) {
             self.focus_text = Some(id);
         }
-        self.record_action(
-            CanvasAction::Add(entity.clone()),
-            InfiniteCanvasOperation::Add { entity },
-        );
+        self.record_action(InfiniteCanvasOperation::Add { entity });
         self.selection.clear();
         self.selection.insert(id);
     }
@@ -699,19 +581,7 @@ impl InfiniteCanvasEditor {
             && !self.selection.is_empty()
         {
             let ids = self.selection.drain().collect::<Vec<_>>();
-            let removed = entities
-                .iter()
-                .filter(|entity| ids.contains(&entity.id))
-                .cloned()
-                .collect::<Vec<_>>();
-            let order = entities.iter().map(|entity| entity.id).collect();
-            self.record_action(
-                CanvasAction::Remove {
-                    entities: removed,
-                    order,
-                },
-                InfiniteCanvasOperation::Remove { ids },
-            );
+            self.record_action(InfiniteCanvasOperation::Remove { ids });
         }
 
         if self.handle_zoom_and_pan(response) {
@@ -1184,30 +1054,8 @@ impl BlockEditor for InfiniteCanvasEditor {
         self.block.note_backref(id);
     }
 
-    fn supports_undo(&self) -> bool {
-        true
-    }
-
-    fn can_undo(&self) -> bool {
-        self.history.can_undo()
-    }
-
-    fn can_redo(&self) -> bool {
-        self.history.can_redo()
-    }
-
-    fn undo(&mut self) {
-        self.update_group = None;
-        let block = self.block.clone();
-        self.history
-            .undo(|action| Self::apply_action(&block, action, false));
-    }
-
-    fn redo(&mut self) {
-        self.update_group = None;
-        let block = self.block.clone();
-        self.history
-            .redo(|action| Self::apply_action(&block, action, true));
+    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
+        Some(&self.block)
     }
 
     fn block_created(&mut self, id: Uuid, block_type: Uuid, author: Uuid, name: String) -> bool {
@@ -1269,25 +1117,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                 ids: self.selection.iter().copied().collect(),
                 movement,
             };
-            let ordering = self.block.read().map(|canvas| {
-                let before = canvas
-                    .entities()
-                    .iter()
-                    .map(|entity| entity.id)
-                    .collect::<Vec<_>>();
-                let mut reordered = canvas.clone();
-                drop(canvas);
-                InfiniteCanvas::apply_operation(&mut reordered, &operation);
-                let after = reordered
-                    .entities()
-                    .iter()
-                    .map(|entity| entity.id)
-                    .collect::<Vec<_>>();
-                (before, after)
-            });
-            if let Some((before, after)) = ordering {
-                self.record_action(CanvasAction::Order { before, after }, operation);
-            }
+            self.record_action(operation);
         }
         let painted_entities = self
             .block
@@ -1318,95 +1148,6 @@ impl BlockEditor for InfiniteCanvasEditor {
             })
     }
 }
-
-fn rebase_entity(
-    current: &CanvasEntity,
-    expected: &CanvasEntity,
-    desired: &CanvasEntity,
-) -> CanvasEntity {
-    let mut result = current.clone();
-    replace_if_unchanged(
-        &mut result.transform.center.x,
-        expected.transform.center.x,
-        desired.transform.center.x,
-    );
-    replace_if_unchanged(
-        &mut result.transform.center.y,
-        expected.transform.center.y,
-        desired.transform.center.y,
-    );
-    replace_if_unchanged(
-        &mut result.transform.size.x,
-        expected.transform.size.x,
-        desired.transform.size.x,
-    );
-    replace_if_unchanged(
-        &mut result.transform.size.y,
-        expected.transform.size.y,
-        desired.transform.size.y,
-    );
-    replace_if_unchanged(
-        &mut result.transform.rotation,
-        expected.transform.rotation,
-        desired.transform.rotation,
-    );
-    replace_if_unchanged(
-        &mut result.kind,
-        expected.kind.clone(),
-        desired.kind.clone(),
-    );
-    replace_if_unchanged(
-        &mut result.style.foreground,
-        expected.style.foreground,
-        desired.style.foreground,
-    );
-    replace_if_unchanged(
-        &mut result.style.line_width,
-        expected.style.line_width,
-        desired.style.line_width,
-    );
-    replace_if_unchanged(
-        &mut result.style.dashed,
-        expected.style.dashed,
-        desired.style.dashed,
-    );
-    replace_if_unchanged(
-        &mut result.style.fill,
-        expected.style.fill,
-        desired.style.fill,
-    );
-    replace_if_unchanged(
-        &mut result.style.arrow_start,
-        expected.style.arrow_start,
-        desired.style.arrow_start,
-    );
-    replace_if_unchanged(
-        &mut result.style.arrow_end,
-        expected.style.arrow_end,
-        desired.style.arrow_end,
-    );
-    replace_if_unchanged(
-        &mut result.style.corner_radius,
-        expected.style.corner_radius,
-        desired.style.corner_radius,
-    );
-    replace_if_unchanged(
-        &mut result.style.opacity,
-        expected.style.opacity,
-        desired.style.opacity,
-    );
-    result
-}
-
-fn replace_if_unchanged<T: PartialEq>(current: &mut T, expected: T, desired: T) {
-    if *current == expected {
-        *current = desired;
-    }
-}
-
-#[cfg(test)]
-#[path = "infinite_canvas/tests/rebase_entity_preserves_conflicting_remote_fields.rs"]
-mod rebase_entity_preserves_conflicting_remote_fields;
 
 fn common_value<T: Copy + PartialEq>(values: impl IntoIterator<Item = T>) -> CommonValue<T> {
     let mut values = values.into_iter();

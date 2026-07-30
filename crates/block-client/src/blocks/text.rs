@@ -1,9 +1,14 @@
-use std::fmt;
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
 
-use block::{Block, MAX_NAME_BYTES};
+use block::{Block, BlockHistory, HistoryDirection, MAX_NAME_BYTES};
 use eips::{LocalChange, RemoteChange};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+const TEXT_BURST_DELAY: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TextDocument {
@@ -15,6 +20,25 @@ pub struct TextDocument {
 pub struct TextOperation {
     change: RemoteChange<Uuid>,
     item: Option<char>,
+}
+
+pub struct TextHistory;
+
+pub struct TextHistoryAction {
+    edits: Vec<TextHistoryEdit>,
+    last_edit: Instant,
+    start: usize,
+    end: usize,
+}
+
+struct TextHistoryEdit {
+    left: Option<Uuid>,
+    right: Option<Uuid>,
+    fallback_index: usize,
+    before: Vec<char>,
+    after: Vec<char>,
+    removed_ids: Vec<Uuid>,
+    visible_ids: Vec<Uuid>,
 }
 
 impl TextDocument {
@@ -94,6 +118,7 @@ impl fmt::Display for TextDocument {
 
 impl Block for TextDocument {
     type Operation = TextOperation;
+    type History = TextHistory;
 
     const TYPE_ID: Uuid = Uuid::from_u128(0x6f4d_8f85_7991_4cdf_ae41_b526_30df_014b);
     const CRDT: bool = true;
@@ -143,6 +168,150 @@ impl Block for TextDocument {
     }
 }
 
+impl BlockHistory<TextDocument> for TextHistory {
+    type Action = TextHistoryAction;
+
+    fn action(
+        before: &TextDocument,
+        after: &TextDocument,
+        _operations: &[TextOperation],
+    ) -> Option<Self::Action> {
+        let prefix = before
+            .text
+            .iter()
+            .zip(&after.text)
+            .take_while(|(left, right)| left == right)
+            .count();
+        let max_suffix = before.text.len().min(after.text.len()) - prefix;
+        let suffix = before
+            .text
+            .iter()
+            .rev()
+            .zip(after.text.iter().rev())
+            .take(max_suffix)
+            .take_while(|(left, right)| left == right)
+            .count();
+        let before_end = before.text.len() - suffix;
+        let after_end = after.text.len() - suffix;
+        if prefix == before_end && prefix == after_end {
+            return None;
+        }
+        let edit = TextHistoryEdit {
+            left: prefix
+                .checked_sub(1)
+                .and_then(|index| before.item_id(index)),
+            right: before.item_id(before_end),
+            fallback_index: prefix,
+            before: before.text[prefix..before_end].to_vec(),
+            after: after.text[prefix..after_end].to_vec(),
+            removed_ids: (prefix..before_end)
+                .filter_map(|index| before.item_id(index))
+                .collect(),
+            visible_ids: (prefix..after_end)
+                .filter_map(|index| after.item_id(index))
+                .collect(),
+        };
+        Some(TextHistoryAction {
+            edits: vec![edit],
+            last_edit: Instant::now(),
+            start: prefix,
+            end: before_end.max(after_end),
+        })
+    }
+
+    fn action_bytes(action: &Self::Action) -> usize {
+        action
+            .edits
+            .iter()
+            .map(|edit| {
+                (edit.before.len() + edit.after.len()) * size_of::<char>()
+                    + (edit.removed_ids.len() + edit.visible_ids.len()) * size_of::<Uuid>()
+            })
+            .sum()
+    }
+
+    fn merge(previous: &mut Self::Action, next: Self::Action) -> Result<(), Self::Action> {
+        let joins_range = next.last_edit.duration_since(previous.last_edit) <= TEXT_BURST_DELAY
+            && next.start <= previous.end.saturating_add(1)
+            && previous.start <= next.end.saturating_add(1);
+        let preserves_visible_ids = next.edits.iter().all(|next_edit| {
+            !next_edit.removed_ids.iter().any(|removed| {
+                previous
+                    .edits
+                    .iter()
+                    .any(|edit| edit.visible_ids.contains(removed))
+            })
+        });
+        if !joins_range || !preserves_visible_ids {
+            return Err(next);
+        }
+        previous.edits.extend(next.edits);
+        previous.last_edit = next.last_edit;
+        previous.start = previous.start.min(next.start);
+        previous.end = previous.end.max(next.end);
+        Ok(())
+    }
+
+    fn operations(
+        current: &TextDocument,
+        action: &mut Self::Action,
+        direction: HistoryDirection,
+    ) -> Vec<TextOperation> {
+        let mut document = current.clone();
+        let mut operations = Vec::new();
+        match direction {
+            HistoryDirection::Redo => {
+                for edit in &mut action.edits {
+                    apply_text_history_edit(&mut document, edit, true, &mut operations);
+                }
+            }
+            HistoryDirection::Undo => {
+                for edit in action.edits.iter_mut().rev() {
+                    apply_text_history_edit(&mut document, edit, false, &mut operations);
+                }
+            }
+        }
+        operations
+    }
+}
+
+fn apply_text_history_edit(
+    document: &mut TextDocument,
+    edit: &mut TextHistoryEdit,
+    to_after: bool,
+    operations: &mut Vec<TextOperation>,
+) {
+    for id in std::mem::take(&mut edit.visible_ids) {
+        if let Some(operation) = document.remove_item_operation(id) {
+            TextDocument::apply_operation(document, &operation);
+            operations.push(operation);
+        }
+    }
+    let characters = if to_after { &edit.after } else { &edit.before };
+    let mut index = edit
+        .right
+        .and_then(|id| document.item_index(id))
+        .or_else(|| {
+            edit.left
+                .and_then(|id| document.item_index(id))
+                .map(|index| index + 1)
+        })
+        .unwrap_or_else(|| edit.fallback_index.min(document.len()));
+    for character in characters {
+        let id = Uuid::new_v4();
+        let Ok(operation) = document.insert_operation_with_id(index, id, *character) else {
+            continue;
+        };
+        TextDocument::apply_operation(document, &operation);
+        operations.push(operation);
+        edit.visible_ids.push(id);
+        index += 1;
+    }
+}
+
+#[cfg(test)]
+#[path = "text/tests/text_history_undoes_and_redoes_grouped_edits.rs"]
+mod text_history_undoes_and_redoes_grouped_edits;
 #[cfg(test)]
 #[path = "text/tests/text_item_ids_resolve_visible_characters.rs"]
 mod text_item_ids_resolve_visible_characters;

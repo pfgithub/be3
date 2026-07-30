@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use block::Block;
+use block::{Block, BlockHistory, HistoryDirection};
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
@@ -82,6 +82,28 @@ pub struct PixelArt {
     )]
     pixels: Vec<u8>,
     revision: u64,
+}
+
+pub struct PixelArtHistory;
+
+pub struct PixelArtHistoryAction {
+    kind: PixelArtHistoryActionKind,
+}
+
+enum PixelArtHistoryActionKind {
+    Pixels(Vec<PixelDelta>),
+    Resize {
+        before: PixelArt,
+        after: PixelArt,
+        anchor: PixelArtAnchor,
+    },
+}
+
+struct PixelDelta {
+    x: u16,
+    y: u16,
+    before: PixelColor,
+    after: PixelColor,
 }
 
 #[derive(Deserialize)]
@@ -270,6 +292,7 @@ impl Default for PixelArt {
 
 impl Block for PixelArt {
     type Operation = PixelArtOperation;
+    type History = PixelArtHistory;
 
     const TYPE_ID: Uuid = Uuid::from_u128(0x7069_7865_6c2d_6172_742d_626c_6f63_6b01);
 
@@ -289,6 +312,137 @@ impl Block for PixelArt {
     fn implicit_name(&self) -> String {
         "Pixel Art".into()
     }
+}
+
+impl BlockHistory<PixelArt> for PixelArtHistory {
+    type Action = PixelArtHistoryAction;
+
+    fn action(
+        before: &PixelArt,
+        after: &PixelArt,
+        operations: &[PixelArtOperation],
+    ) -> Option<Self::Action> {
+        if before == after {
+            return None;
+        }
+        let kind = if before.width != after.width || before.height != after.height {
+            let anchor = operations
+                .iter()
+                .rev()
+                .find_map(|operation| match operation {
+                    PixelArtOperation::Resize { anchor, .. } => Some(*anchor),
+                    _ => None,
+                })?;
+            PixelArtHistoryActionKind::Resize {
+                before: before.clone(),
+                after: after.clone(),
+                anchor,
+            }
+        } else {
+            let deltas = pixel_deltas(before, after);
+            if deltas.is_empty() {
+                return None;
+            }
+            PixelArtHistoryActionKind::Pixels(deltas)
+        };
+        Some(PixelArtHistoryAction { kind })
+    }
+
+    fn action_bytes(action: &Self::Action) -> usize {
+        match &action.kind {
+            PixelArtHistoryActionKind::Pixels(deltas) => deltas.len() * size_of::<PixelDelta>(),
+            PixelArtHistoryActionKind::Resize { before, after, .. } => {
+                before.pixels.len() + after.pixels.len()
+            }
+        }
+    }
+
+    fn operations(
+        current: &PixelArt,
+        action: &mut Self::Action,
+        direction: HistoryDirection,
+    ) -> Vec<PixelArtOperation> {
+        let to_after = direction == HistoryDirection::Redo;
+        match &action.kind {
+            PixelArtHistoryActionKind::Pixels(deltas) => {
+                let pixels = deltas
+                    .iter()
+                    .filter_map(|delta| {
+                        let (expected, desired) = if to_after {
+                            (delta.before, delta.after)
+                        } else {
+                            (delta.after, delta.before)
+                        };
+                        (current.pixel(delta.x, delta.y) == Some(expected)).then_some(PixelUpdate {
+                            x: delta.x,
+                            y: delta.y,
+                            color: desired,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                (!pixels.is_empty())
+                    .then_some(PixelArtOperation::Paint { pixels })
+                    .into_iter()
+                    .collect()
+            }
+            PixelArtHistoryActionKind::Resize {
+                before,
+                after,
+                anchor,
+            } => {
+                let (source, desired) = if to_after {
+                    (before, after)
+                } else {
+                    (after, before)
+                };
+                let resize = PixelArtOperation::Resize {
+                    width: desired.width,
+                    height: desired.height,
+                    anchor: *anchor,
+                };
+                let mut expected = source.clone();
+                PixelArt::apply_operation(&mut expected, &resize);
+                let mut resized_current = current.clone();
+                PixelArt::apply_operation(&mut resized_current, &resize);
+                let pixels = pixel_deltas(&expected, desired)
+                    .into_iter()
+                    .filter(|delta| resized_current.pixel(delta.x, delta.y) == Some(delta.before))
+                    .map(|delta| PixelUpdate {
+                        x: delta.x,
+                        y: delta.y,
+                        color: delta.after,
+                    })
+                    .collect::<Vec<_>>();
+                let mut operations = vec![resize];
+                if !pixels.is_empty() {
+                    operations.push(PixelArtOperation::Paint { pixels });
+                }
+                operations
+            }
+        }
+    }
+}
+
+fn pixel_deltas(before: &PixelArt, after: &PixelArt) -> Vec<PixelDelta> {
+    if before.width != after.width || before.height != after.height {
+        return Vec::new();
+    }
+    let mut deltas = Vec::new();
+    for y in 0..before.height {
+        for x in 0..before.width {
+            let before = before.pixel(x, y).unwrap();
+            let after = after.pixel(x, y).unwrap();
+            if before != after {
+                deltas.push(PixelDelta {
+                    x,
+                    y,
+                    before,
+                    after,
+                });
+            }
+        }
+    }
+    deltas
 }
 
 #[derive(Clone, Copy)]
@@ -363,6 +517,9 @@ mod pixel_art_fill_ignores_invalid_and_unchanged_targets;
 #[path = "pixel_art/tests/pixel_art_fill_recolors_only_connected_pixels.rs"]
 mod pixel_art_fill_recolors_only_connected_pixels;
 #[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_history_undoes_and_redoes_paint.rs"]
+mod pixel_art_history_undoes_and_redoes_paint;
+#[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_invalid_resize_does_not_change_canvas.rs"]
 mod pixel_art_invalid_resize_does_not_change_canvas;
 #[cfg(test)]
@@ -377,3 +534,6 @@ mod pixel_art_resize_preserves_pixels_for_each_anchor;
 #[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_serialization_round_trips_without_data_loss.rs"]
 mod pixel_art_serialization_round_trips_without_data_loss;
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_deltas_capture_only_changed_pixels.rs"]
+mod pixel_deltas_capture_only_changed_pixels;

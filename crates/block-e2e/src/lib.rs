@@ -21,6 +21,7 @@ mod tests {
 
     impl Block for Counter {
         type Operation = CounterOperation;
+        type History = block::NoHistory;
         const TYPE_ID: Uuid = Uuid::from_u128(1);
 
         fn apply_operation(block: &mut Self, operation: &Self::Operation) {

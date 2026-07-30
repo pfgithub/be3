@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
     type Operation: Clone + Serialize + DeserializeOwned + Send + Sync + 'static;
+    type History: BlockHistory<Self>;
 
     const TYPE_ID: Uuid;
     const CRDT: bool = false;
@@ -14,6 +15,56 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
     fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
 
     fn references(&self) -> Vec<Uuid> {
+        Vec::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryDirection {
+    Undo,
+    Redo,
+}
+
+pub trait BlockHistory<B: Block>: Send + Sync + 'static {
+    type Action: Send + Sync + 'static;
+
+    const ENABLED: bool = true;
+
+    fn action(before: &B, after: &B, operations: &[B::Operation]) -> Option<Self::Action>;
+
+    fn action_bytes(action: &Self::Action) -> usize;
+
+    fn merge(_previous: &mut Self::Action, next: Self::Action) -> Result<(), Self::Action> {
+        Err(next)
+    }
+
+    fn operations(
+        current: &B,
+        action: &mut Self::Action,
+        direction: HistoryDirection,
+    ) -> Vec<B::Operation>;
+}
+
+pub struct NoHistory;
+
+impl<B: Block> BlockHistory<B> for NoHistory {
+    type Action = ();
+
+    const ENABLED: bool = false;
+
+    fn action(_before: &B, _after: &B, _operations: &[B::Operation]) -> Option<Self::Action> {
+        None
+    }
+
+    fn action_bytes(_action: &Self::Action) -> usize {
+        0
+    }
+
+    fn operations(
+        _current: &B,
+        _action: &mut Self::Action,
+        _direction: HistoryDirection,
+    ) -> Vec<B::Operation> {
         Vec::new()
     }
 }

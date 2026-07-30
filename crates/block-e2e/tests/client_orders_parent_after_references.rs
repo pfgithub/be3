@@ -16,6 +16,7 @@ enum ReferenceOperation {
 
 impl Block for ReferencingBlock {
     type Operation = ReferenceOperation;
+    type History = block::NoHistory;
 
     const TYPE_ID: Uuid = Uuid::from_u128(0x7265_6665_7265_6e63_652d_7465_7374_0001);
     const CRDT: bool = true;
