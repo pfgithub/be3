@@ -1118,6 +1118,42 @@ impl BlockApp {
             self.active_tab = None;
             return;
         };
+        if editor.supports_undo() {
+            let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+            let redo_shortcut = egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::Z,
+            );
+            let redo_y_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::Y);
+            let redo_requested = ui
+                .ctx()
+                .input_mut(|input| input.consume_shortcut(&redo_shortcut))
+                || ui
+                    .ctx()
+                    .input_mut(|input| input.consume_shortcut(&redo_y_shortcut));
+            let undo_requested = ui
+                .ctx()
+                .input_mut(|input| input.consume_shortcut(&undo_shortcut));
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(editor.can_undo(), egui::Button::new("Undo"))
+                    .on_hover_text("Undo (Ctrl/Cmd+Z)")
+                    .clicked()
+                    || undo_requested
+                {
+                    editor.undo();
+                }
+                if ui
+                    .add_enabled(editor.can_redo(), egui::Button::new("Redo"))
+                    .on_hover_text("Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)")
+                    .clicked()
+                    || redo_requested
+                {
+                    editor.redo();
+                }
+            });
+            ui.separator();
+        }
         let action = editor.ui(ui, &self.client, frame);
         match action {
             Some(EditorAction::OpenBlock { id, block_type }) => self.open_tab(id, block_type),

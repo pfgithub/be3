@@ -116,6 +116,9 @@ pub enum InfiniteCanvasOperation {
         ids: Vec<Uuid>,
         movement: CanvasLayerMove,
     },
+    ExactOrder {
+        ids: Vec<Uuid>,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -207,6 +210,27 @@ impl Block for InfiniteCanvas {
             InfiniteCanvasOperation::Reorder { ids, movement } => {
                 canvas.reorder(ids, *movement);
             }
+            InfiniteCanvasOperation::ExactOrder { ids } => {
+                let mut ordered = canvas.entities.clone();
+                let mut ranked = canvas
+                    .entities
+                    .iter()
+                    .filter(|entity| ids.contains(&entity.id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                ranked.sort_by_key(|entity| {
+                    ids.iter()
+                        .position(|id| *id == entity.id)
+                        .unwrap_or(usize::MAX)
+                });
+                let mut ranked = ranked.into_iter();
+                for (index, entity) in canvas.entities.iter().enumerate() {
+                    if ids.contains(&entity.id) {
+                        ordered[index] = ranked.next().unwrap();
+                    }
+                }
+                canvas.entities = ordered;
+            }
         }
     }
 
@@ -228,3 +252,7 @@ impl Block for InfiniteCanvas {
         references
     }
 }
+
+#[cfg(test)]
+#[path = "infinite_canvas/tests/infinite_canvas_exact_order_preserves_unlisted_slots.rs"]
+mod infinite_canvas_exact_order_preserves_unlisted_slots;

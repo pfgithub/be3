@@ -10,7 +10,7 @@ use block_client::{
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAction};
+use super::{history::History, BlockEditor, EditorAction};
 
 const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 32.0;
@@ -97,6 +97,23 @@ pub(super) struct PixelArtEditor {
     resize_height: u16,
     resize_anchor: PixelArtAnchor,
     clear_open: bool,
+    history: History<PixelAction>,
+}
+
+struct PixelDelta {
+    x: u16,
+    y: u16,
+    before: PixelColor,
+    after: PixelColor,
+}
+
+enum PixelAction {
+    Pixels(Vec<PixelDelta>),
+    Resize {
+        before: PixelArt,
+        after: PixelArt,
+        anchor: PixelArtAnchor,
+    },
 }
 
 impl PixelArtEditor {
@@ -126,6 +143,118 @@ impl PixelArtEditor {
             resize_height: 32,
             resize_anchor: PixelArtAnchor::Center,
             clear_open: false,
+            history: History::default(),
+        }
+    }
+
+    fn record_pixels(&mut self, operation: PixelArtOperation) {
+        let Some(before) = self.block.read().map(|art| art.clone()) else {
+            return;
+        };
+        let mut after = before.clone();
+        PixelArt::apply_operation(&mut after, &operation);
+        let deltas = pixel_deltas(&before, &after);
+        if deltas.is_empty() {
+            return;
+        }
+        let bytes = deltas.len() * size_of::<PixelDelta>();
+        self.block.operate(operation);
+        self.history.push(PixelAction::Pixels(deltas), bytes);
+    }
+
+    fn record_resize(&mut self, width: u16, height: u16, anchor: PixelArtAnchor) {
+        let Some(before) = self.block.read().map(|art| art.clone()) else {
+            return;
+        };
+        let operation = PixelArtOperation::Resize {
+            width,
+            height,
+            anchor,
+        };
+        let mut after = before.clone();
+        PixelArt::apply_operation(&mut after, &operation);
+        if before == after {
+            return;
+        }
+        let bytes = before.rgba_bytes().len() + after.rgba_bytes().len();
+        self.block.operate(operation);
+        self.history.push(
+            PixelAction::Resize {
+                before,
+                after,
+                anchor,
+            },
+            bytes,
+        );
+    }
+
+    fn apply_action(block: &BlockHandle<PixelArt>, action: &PixelAction, to_after: bool) {
+        match action {
+            PixelAction::Pixels(deltas) => {
+                let Some(art) = block.read() else {
+                    return;
+                };
+                let updates = deltas
+                    .iter()
+                    .filter_map(|delta| {
+                        let (expected, desired) = if to_after {
+                            (delta.before, delta.after)
+                        } else {
+                            (delta.after, delta.before)
+                        };
+                        (art.pixel(delta.x, delta.y) == Some(expected)).then_some(PixelUpdate {
+                            x: delta.x,
+                            y: delta.y,
+                            color: desired,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                drop(art);
+                if !updates.is_empty() {
+                    block.operate(PixelArtOperation::Paint { pixels: updates });
+                }
+            }
+            PixelAction::Resize {
+                before,
+                after,
+                anchor,
+            } => {
+                let (source, desired) = if to_after {
+                    (before, after)
+                } else {
+                    (after, before)
+                };
+                let mut expected = source.clone();
+                PixelArt::apply_operation(
+                    &mut expected,
+                    &PixelArtOperation::Resize {
+                        width: desired.width(),
+                        height: desired.height(),
+                        anchor: *anchor,
+                    },
+                );
+                block.operate(PixelArtOperation::Resize {
+                    width: desired.width(),
+                    height: desired.height(),
+                    anchor: *anchor,
+                });
+                let Some(current) = block.read() else {
+                    return;
+                };
+                let updates = pixel_deltas(&expected, desired)
+                    .into_iter()
+                    .filter(|delta| current.pixel(delta.x, delta.y) == Some(delta.before))
+                    .map(|delta| PixelUpdate {
+                        x: delta.x,
+                        y: delta.y,
+                        color: delta.after,
+                    })
+                    .collect::<Vec<_>>();
+                drop(current);
+                if !updates.is_empty() {
+                    block.operate(PixelArtOperation::Paint { pixels: updates });
+                }
+            }
         }
     }
 
@@ -426,7 +555,7 @@ impl PixelArtEditor {
                 if response.clicked_by(PointerButton::Primary) {
                     if let Some((x, y)) = hovered_pixel {
                         self.remember_color(self.color);
-                        self.block.operate(PixelArtOperation::Fill {
+                        self.record_pixels(PixelArtOperation::Fill {
                             x,
                             y,
                             color: self.color,
@@ -659,7 +788,7 @@ impl PixelArtEditor {
             color,
             frames_remaining: 2,
         });
-        self.block.operate(PixelArtOperation::Paint {
+        self.record_pixels(PixelArtOperation::Paint {
             pixels: pixels
                 .iter()
                 .copied()
@@ -727,11 +856,7 @@ impl PixelArtEditor {
             });
 
         if apply {
-            self.block.operate(PixelArtOperation::Resize {
-                width: self.resize_width,
-                height: self.resize_height,
-                anchor: self.resize_anchor,
-            });
+            self.record_resize(self.resize_width, self.resize_height, self.resize_anchor);
             self.active_drawing = None;
             self.reset_view();
             open = false;
@@ -767,7 +892,7 @@ impl PixelArtEditor {
             });
 
         if clear {
-            self.block.operate(PixelArtOperation::Clear);
+            self.record_pixels(PixelArtOperation::Clear);
             open = false;
         } else if cancel {
             open = false;
@@ -799,6 +924,34 @@ impl BlockEditor for PixelArtEditor {
 
     fn note_backref(&self, id: Uuid) {
         self.block.note_backref(id);
+    }
+
+    fn supports_undo(&self) -> bool {
+        true
+    }
+
+    fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    fn undo(&mut self) {
+        self.active_drawing = None;
+        self.committed_preview = None;
+        let block = self.block.clone();
+        self.history
+            .undo(|action| Self::apply_action(&block, action, false));
+    }
+
+    fn redo(&mut self) {
+        self.active_drawing = None;
+        self.committed_preview = None;
+        let block = self.block.clone();
+        self.history
+            .redo(|action| Self::apply_action(&block, action, true));
     }
 
     fn ui(
@@ -836,6 +989,32 @@ impl BlockEditor for PixelArtEditor {
         None
     }
 }
+
+fn pixel_deltas(before: &PixelArt, after: &PixelArt) -> Vec<PixelDelta> {
+    if before.width() != after.width() || before.height() != after.height() {
+        return Vec::new();
+    }
+    let mut deltas = Vec::new();
+    for y in 0..before.height() {
+        for x in 0..before.width() {
+            let before_color = before.pixel(x, y).unwrap();
+            let after_color = after.pixel(x, y).unwrap();
+            if before_color != after_color {
+                deltas.push(PixelDelta {
+                    x,
+                    y,
+                    before: before_color,
+                    after: after_color,
+                });
+            }
+        }
+    }
+    deltas
+}
+
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_deltas_capture_only_changed_pixels.rs"]
+mod pixel_deltas_capture_only_changed_pixels;
 
 fn checkerboard_image(art: &PixelArt, dark_mode: bool) -> egui::ColorImage {
     let (light, dark) = checkerboard_colors(dark_mode);

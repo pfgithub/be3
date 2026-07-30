@@ -42,8 +42,17 @@ impl TextDocument {
         index: usize,
         character: char,
     ) -> Result<TextOperation, eips::error::IndexError> {
+        self.insert_operation_with_id(index, Uuid::new_v4(), character)
+    }
+
+    pub fn insert_operation_with_id(
+        &self,
+        index: usize,
+        id: Uuid,
+        character: char,
+    ) -> Result<TextOperation, eips::error::IndexError> {
         Ok(TextOperation {
-            change: self.sequence.insert(index, Uuid::new_v4())?,
+            change: self.sequence.insert(index, id)?,
             item: Some(character),
         })
     }
@@ -53,6 +62,19 @@ impl TextDocument {
             change: self.sequence.remove(index)?,
             item: None,
         })
+    }
+
+    pub fn item_id(&self, index: usize) -> Option<Uuid> {
+        self.sequence.get(index).ok()
+    }
+
+    pub fn item_index(&self, id: Uuid) -> Option<usize> {
+        self.sequence.remote_get(&id).ok().flatten()
+    }
+
+    pub fn remove_item_operation(&self, id: Uuid) -> Option<TextOperation> {
+        self.item_index(id)
+            .and_then(|index| self.remove_operation(index).ok())
     }
 }
 
@@ -122,5 +144,11 @@ impl Block for TextDocument {
 }
 
 #[cfg(test)]
+#[path = "text/tests/text_item_ids_resolve_visible_characters.rs"]
+mod text_item_ids_resolve_visible_characters;
+#[cfg(test)]
 #[path = "text/tests/text_operations_are_crdt_updates_and_do_not_keep_a_confirmed_copy.rs"]
 mod text_operations_are_crdt_updates_and_do_not_keep_a_confirmed_copy;
+#[cfg(test)]
+#[path = "text/tests/text_remove_item_operation_targets_stable_id.rs"]
+mod text_remove_item_operation_targets_stable_id;
