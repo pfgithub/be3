@@ -1198,32 +1198,25 @@ fn color_menu(
         CommonValue::Uniform(color) => color,
         CommonValue::Mixed | CommonValue::None => CanvasColor::Auto,
     };
-    let value_label: String = match value {
-        CommonValue::Uniform(CanvasColor::Auto) => "Default".into(),
-        CommonValue::Uniform(CanvasColor::Rgb { .. }) => "Custom".into(),
-        CommonValue::Mixed => "Mixed".into(),
-        CommonValue::None => "None".into(),
-    };
     ui.horizontal(|ui| {
         ui.label(label);
-        ui.menu_button(value_label, |ui| {
-            for (name, color) in COLOR_PRESETS {
-                if color_button(ui, name, color).clicked() {
-                    changed = Some(color);
-                    ui.close();
-                }
+        for (name, color) in COLOR_PRESETS {
+            if color_button(ui, name, color, value == CommonValue::Uniform(color)).clicked() {
+                changed = Some(color);
             }
-            ui.menu_button("Custom color", |ui| {
-                let mut color = resolve_color(current, ui.visuals().text_color());
-                if ui.color_edit_button_srgba(&mut color).changed() {
-                    changed = Some(CanvasColor::Rgb {
-                        red: color.r(),
-                        green: color.g(),
-                        blue: color.b(),
-                    });
-                }
+        }
+        let mut color = resolve_color(current, ui.visuals().text_color());
+        if ui
+            .color_edit_button_srgba(&mut color)
+            .on_hover_text("Custom color")
+            .changed()
+        {
+            changed = Some(CanvasColor::Rgb {
+                red: color.r(),
+                green: color.g(),
+                blue: color.b(),
             });
-        });
+        }
     });
     changed
 }
@@ -1237,45 +1230,45 @@ fn fill_color_menu(
         CommonValue::Uniform(Some(color)) => color,
         CommonValue::Uniform(None) | CommonValue::Mixed | CommonValue::None => CanvasColor::Auto,
     };
-    let value_label: String = match value {
-        CommonValue::Uniform(None) => "No fill".into(),
-        CommonValue::Uniform(Some(CanvasColor::Auto)) => "Default".into(),
-        CommonValue::Uniform(Some(CanvasColor::Rgb { .. })) => "Custom".into(),
-        CommonValue::Mixed => "Mixed".into(),
-        CommonValue::None => "None".into(),
-    };
     ui.horizontal(|ui| {
         ui.label("Fill");
-        ui.menu_button(value_label, |ui| {
-            if ui.button("No fill").clicked() {
-                changed = Some(None);
-                ui.close();
+        if ui
+            .selectable_label(value == CommonValue::Uniform(None), "∅")
+            .on_hover_text("No fill")
+            .clicked()
+        {
+            changed = Some(None);
+        }
+        for (name, color) in COLOR_PRESETS {
+            if color_button(ui, name, color, value == CommonValue::Uniform(Some(color))).clicked() {
+                changed = Some(Some(color));
             }
-            ui.separator();
-            for (name, color) in COLOR_PRESETS {
-                if color_button(ui, name, color).clicked() {
-                    changed = Some(Some(color));
-                    ui.close();
-                }
-            }
-            ui.menu_button("Custom color", |ui| {
-                let mut color = resolve_color(current, ui.visuals().text_color());
-                if ui.color_edit_button_srgba(&mut color).changed() {
-                    changed = Some(Some(CanvasColor::Rgb {
-                        red: color.r(),
-                        green: color.g(),
-                        blue: color.b(),
-                    }));
-                }
-            });
-        });
+        }
+        let mut color = resolve_color(current, ui.visuals().text_color());
+        if ui
+            .color_edit_button_srgba(&mut color)
+            .on_hover_text("Custom color")
+            .changed()
+        {
+            changed = Some(Some(CanvasColor::Rgb {
+                red: color.r(),
+                green: color.g(),
+                blue: color.b(),
+            }));
+        }
     });
     changed
 }
 
-fn color_button(ui: &mut egui::Ui, name: &str, color: CanvasColor) -> egui::Response {
+fn color_button(
+    ui: &mut egui::Ui,
+    name: &str,
+    color: CanvasColor,
+    selected: bool,
+) -> egui::Response {
     let color = resolve_color(color, ui.visuals().text_color());
-    ui.button(egui::RichText::new(format!("● {name}")).color(color))
+    ui.selectable_label(selected, egui::RichText::new("●").color(color))
+        .on_hover_text(name)
 }
 
 fn resolve_color(color: CanvasColor, auto: Color32) -> Color32 {
