@@ -73,6 +73,7 @@ struct BlockApp {
     orphaned_expanded: bool,
     expanded: HashMap<Uuid, ReferenceList>,
     parents: HashMap<Uuid, ReferenceList>,
+    block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     tabs: Vec<Uuid>,
@@ -165,6 +166,7 @@ impl BlockApp {
             orphaned_expanded: false,
             expanded: HashMap::new(),
             parents: HashMap::new(),
+            block_types: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
             tabs: Vec::new(),
@@ -202,6 +204,7 @@ impl BlockApp {
         self.orphaned_expanded = false;
         self.expanded.clear();
         self.parents.clear();
+        self.block_types.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
         self.tabs.clear();
@@ -287,6 +290,7 @@ impl BlockApp {
             return None;
         };
         let id = editor.id();
+        self.block_types.insert(id, block_type);
         self.editors.insert(id, editor);
         Some(id)
     }
@@ -320,6 +324,7 @@ impl BlockApp {
     fn link_cached_block(&mut self, block: block_client::CachedBlock, target: BlockPickerTarget) {
         match target {
             BlockPickerTarget::Root => {
+                self.block_types.insert(block.id, block.block_type);
                 if !self.editors.contains_key(&block.id) {
                     self.editors.insert(
                         block.id,
@@ -372,6 +377,18 @@ impl BlockApp {
         }
     }
 
+    fn ensure_editor(&mut self, id: Uuid) -> bool {
+        if self.editors.contains_key(&id) {
+            return true;
+        }
+        let Some(block_type) = self.block_types.get(&id).copied() else {
+            return false;
+        };
+        self.editors
+            .insert(id, self.registry.open(&self.client, id, block_type));
+        true
+    }
+
     fn queue_placement(&mut self, child: BlockReference, parent: Uuid) {
         if child.id == parent
             || self
@@ -381,11 +398,9 @@ impl BlockApp {
         {
             return;
         }
-        if !self.editors.contains_key(&child.id) {
-            self.editors.insert(
-                child.id,
-                self.registry.open(&self.client, child.id, child.block_type),
-            );
+        self.block_types.insert(child.id, child.block_type);
+        if !self.ensure_editor(parent) {
+            return;
         }
         self.pending_transfers.push(PendingTransfer {
             child,
@@ -400,6 +415,15 @@ impl BlockApp {
         if self.pending_transfers.iter().any(|pending| {
             pending.child.id == dragged.reference.id && pending.destination == Some(destination)
         }) {
+            return;
+        }
+        self.block_types
+            .insert(dragged.reference.id, dragged.reference.block_type);
+        let source_ready = match dragged.source {
+            SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
+            SidebarDragSource::Block(source) => self.ensure_editor(source),
+        };
+        if !source_ready || !self.ensure_editor(destination) {
             return;
         }
         self.pending_transfers.push(PendingTransfer {
@@ -424,6 +448,14 @@ impl BlockApp {
         }) {
             return;
         }
+        self.block_types.insert(reference.id, reference.block_type);
+        let ready = match source {
+            SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
+            SidebarDragSource::Block(source) => self.ensure_editor(source),
+        };
+        if !ready {
+            return;
+        }
         self.pending_transfers.push(PendingTransfer {
             child: reference,
             source: Some(source),
@@ -441,9 +473,8 @@ impl BlockApp {
                 let ready = match transfer.source {
                     None | Some(SidebarDragSource::Orphaned) => Some(true),
                     Some(SidebarDragSource::Root) => {
-                        self.editors
-                            .get(&transfer.child.id)
-                            .map(|child| child.set_parent(BlockParent::Orphaned));
+                        self.client
+                            .set_block_parent(transfer.child.id, BlockParent::Orphaned);
                         Some(true)
                     }
                     Some(SidebarDragSource::Block(source)) => {
@@ -474,17 +505,18 @@ impl BlockApp {
             }
 
             if let Some(parent) = transfer.parent_after {
-                if let Some(child) = self.editors.get(&transfer.child.id) {
-                    if let BlockParent::Uuid(destination) = parent {
+                if let BlockParent::Uuid(destination) = parent {
+                    if let Some(child) = self.editors.get(&transfer.child.id) {
                         child.note_backref(destination);
                     }
-                    child.set_parent(parent);
                 }
+                self.client.set_block_parent(transfer.child.id, parent);
             }
         }
     }
 
     fn open_tab(&mut self, id: Uuid, block_type: Uuid) {
+        self.block_types.insert(id, block_type);
         if !self.editors.contains_key(&id) {
             self.editors
                 .insert(id, self.registry.open(&self.client, id, block_type));
@@ -584,9 +616,9 @@ impl BlockApp {
         match source {
             SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
             SidebarDragSource::Block(id) => self
-                .editors
+                .block_types
                 .get(&id)
-                .is_some_and(|editor| editor.can_delete_child()),
+                .is_some_and(|block_type| self.registry.can_delete_child(*block_type)),
         }
     }
 
@@ -618,13 +650,7 @@ impl BlockApp {
         active: Option<&SidebarActiveLocation>,
         sidebar: &mut SidebarRenderState,
     ) {
-        if !self.editors.contains_key(&reference.id) {
-            self.editors.insert(
-                reference.id,
-                self.registry
-                    .open(&self.client, reference.id, reference.block_type),
-            );
-        }
+        self.block_types.insert(reference.id, reference.block_type);
         let is_reference =
             containing_id.is_some_and(|id| reference.parent != BlockParent::Uuid(id));
         let source = containing_id.map_or_else(
@@ -634,7 +660,7 @@ impl BlockApp {
             },
             SidebarDragSource::Block,
         );
-        let can_add_child = self.editors[&reference.id].can_add_child();
+        let can_add_child = self.registry.can_add_child(reference.block_type);
         let can_delete_child =
             source != SidebarDragSource::Orphaned && self.can_delete_from(source);
         let can_expand = !is_reference && reference.references > 0;

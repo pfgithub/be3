@@ -43,10 +43,6 @@ impl BlockEditor for WorkspaceIndexEditor {
         self.block.note_backref(id);
     }
 
-    fn can_add_child(&self) -> bool {
-        true
-    }
-
     fn add_child(&self, entry: BlockEntry) -> Option<bool> {
         let index = self.block.read()?;
         let already_present = index
@@ -58,10 +54,6 @@ impl BlockEditor for WorkspaceIndexEditor {
             self.block.operate(WorkspaceIndexOperation::Add(entry));
         }
         Some(true)
-    }
-
-    fn can_delete_child(&self) -> bool {
-        true
     }
 
     fn delete_child(&self, entry: BlockEntry) -> Option<bool> {

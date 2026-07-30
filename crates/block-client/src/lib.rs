@@ -309,6 +309,10 @@ impl BlockClient {
         });
     }
 
+    pub fn set_block_parent(&self, id: Uuid, parent: BlockParent) {
+        self.send(WorkerCommand::SetBlockParent { id, parent });
+    }
+
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
         self.debug.read().clone()
     }
@@ -800,9 +804,6 @@ impl WorkerState {
                 self.maybe_send_batch(ids);
             }
             WorkerCommand::SetBlockParent { id, parent } => {
-                if !self.blocks.contains_key(&id) {
-                    fatal(format!("unknown block {id}"));
-                }
                 self.deferred
                     .push_back(DeferredRequest::SetBlockParent { id, parent });
             }
@@ -1073,7 +1074,9 @@ impl WorkerState {
                         },
                         CommandKind::SetBlockParent,
                     ) if expected == id => {
-                        self.blocks[&id].set_parent(parent);
+                        if let Some(block) = self.blocks.get(&id) {
+                            block.set_parent(parent);
+                        }
                     }
                     (
                         PendingRequest::SetBlockName { id: expected, name },

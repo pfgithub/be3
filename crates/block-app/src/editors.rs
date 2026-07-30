@@ -60,14 +60,8 @@ pub trait BlockEditor {
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
     fn note_backref(&self, id: Uuid);
-    fn can_add_child(&self) -> bool {
-        false
-    }
     fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
-    }
-    fn can_delete_child(&self) -> bool {
-        false
     }
     fn delete_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
@@ -99,6 +93,8 @@ struct EditorRegistration {
     display_name: &'static str,
     create: CreateEditor,
     open: OpenEditor,
+    can_add_child: bool,
+    can_delete_child: bool,
 }
 
 pub struct EditorRegistry {
@@ -113,6 +109,8 @@ impl EditorRegistry {
         registry.register(
             InfiniteCanvas::TYPE_ID,
             "Canvas",
+            false,
+            false,
             |client| {
                 Box::new(InfiniteCanvasEditor::new(
                     client.create_block(InfiniteCanvas::new()),
@@ -129,12 +127,16 @@ impl EditorRegistry {
         registry.register(
             TextDocument::TYPE_ID,
             "Text",
+            false,
+            false,
             |client| Box::new(TextEditor::new(client.create_block(TextDocument::new()))),
             |client, id| Box::new(TextEditor::new(client.get_block::<TextDocument>(id))),
         );
         registry.register(
             WebBrowserTab::TYPE_ID,
             "Web Browser Tab",
+            false,
+            false,
             |client| {
                 Box::new(WebBrowserTabEditor::new(
                     client.create_block(WebBrowserTab::new()),
@@ -149,6 +151,8 @@ impl EditorRegistry {
         registry.register(
             WorkspaceIndex::TYPE_ID,
             "Folder",
+            true,
+            true,
             |client| {
                 Box::new(WorkspaceIndexEditor::new(
                     client.create_block(WorkspaceIndex::default()),
@@ -167,6 +171,8 @@ impl EditorRegistry {
         &mut self,
         block_type: Uuid,
         display_name: &'static str,
+        can_add_child: bool,
+        can_delete_child: bool,
         create: CreateEditor,
         open: OpenEditor,
     ) {
@@ -176,6 +182,8 @@ impl EditorRegistry {
                 display_name,
                 create,
                 open,
+                can_add_child,
+                can_delete_child,
             },
         );
     }
@@ -184,6 +192,18 @@ impl EditorRegistry {
         self.registrations
             .get(&block_type)
             .map(|registration| registration.display_name)
+    }
+
+    pub fn can_add_child(&self, block_type: Uuid) -> bool {
+        self.registrations
+            .get(&block_type)
+            .is_some_and(|registration| registration.can_add_child)
+    }
+
+    pub fn can_delete_child(&self, block_type: Uuid) -> bool {
+        self.registrations
+            .get(&block_type)
+            .is_some_and(|registration| registration.can_delete_child)
     }
 
     pub fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<Box<dyn BlockEditor>> {
