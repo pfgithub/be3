@@ -286,6 +286,7 @@ dependencies = [
 name = "block-client"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "block 0.1.0",
  "eips",
  "futures-util",

@@ -881,11 +881,12 @@ impl WorkerState {
         debug.changes_saved = changes_saved;
         drop(debug);
 
-        let blocks: Vec<_> = self
+        let mut blocks: Vec<_> = self
             .blocks
             .values()
             .map(|block| block.debug_snapshot())
             .collect();
+        blocks.sort_by_key(|block| block.id);
         let reference_lists: Vec<_> = self
             .reference_lists
             .iter()
@@ -897,11 +898,12 @@ impl WorkerState {
             .collect();
         let cached_blocks: Vec<_> = self.cached_blocks.read().values().cloned().collect();
 
-        let pending_requests: Vec<_> = self
+        let mut pending_requests: Vec<_> = self
             .requests
             .iter()
             .map(|(request_id, request)| request.debug_snapshot(*request_id))
             .collect();
+        pending_requests.sort_by_key(|request| request.request_id);
         let outbound_messages = self
             .outbound
             .iter()

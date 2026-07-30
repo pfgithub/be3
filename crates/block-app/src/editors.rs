@@ -1,5 +1,6 @@
 mod browser_tab;
 mod infinite_canvas;
+mod pixel_art;
 mod text;
 mod unsupported;
 mod workspace_index;
@@ -10,6 +11,7 @@ use block::{Block, BlockParent};
 use block_client::{
     blocks::{
         infinite_canvas::InfiniteCanvas,
+        pixel_art::PixelArt,
         text::TextDocument,
         web_browser_tab::WebBrowserTab,
         workspace_index::{BlockEntry, WorkspaceIndex},
@@ -20,8 +22,9 @@ use eframe::egui;
 use uuid::Uuid;
 
 use self::{
-    browser_tab::WebBrowserTabEditor, infinite_canvas::InfiniteCanvasEditor, text::TextEditor,
-    unsupported::UnsupportedEditor, workspace_index::WorkspaceIndexEditor,
+    browser_tab::WebBrowserTabEditor, infinite_canvas::InfiniteCanvasEditor,
+    pixel_art::PixelArtEditor, text::TextEditor, unsupported::UnsupportedEditor,
+    workspace_index::WorkspaceIndexEditor,
 };
 
 pub enum EditorAction {
@@ -123,6 +126,14 @@ impl EditorRegistry {
                     client,
                 ))
             },
+        );
+        registry.register(
+            PixelArt::TYPE_ID,
+            "Pixel Art",
+            false,
+            false,
+            |client| Box::new(PixelArtEditor::new(client.create_block(PixelArt::new()))),
+            |client, id| Box::new(PixelArtEditor::new(client.get_block::<PixelArt>(id))),
         );
         registry.register(
             TextDocument::TYPE_ID,

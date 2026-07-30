@@ -5,6 +5,7 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
 block = { path = "../block" }
 eips = { version = "0.2.4", features = ["serde"] }
 futures-util = "0.3"
