@@ -59,6 +59,11 @@ pub enum PixelArtOperation {
     Paint {
         pixels: Vec<PixelUpdate>,
     },
+    Fill {
+        x: u16,
+        y: u16,
+        color: PixelColor,
+    },
     Clear,
     Resize {
         width: u16,
@@ -175,6 +180,46 @@ impl PixelArt {
         }
     }
 
+    fn fill(&mut self, x: u16, y: u16, color: PixelColor) {
+        let Some(offset) = self.pixel_offset(x, y) else {
+            return;
+        };
+        let replacement = color.rgba();
+        let target: [u8; 4] = self.pixels[offset..offset + 4]
+            .try_into()
+            .expect("pixel colors always contain four channels");
+        if target == replacement {
+            return;
+        }
+
+        let width = usize::from(self.width);
+        let height = usize::from(self.height);
+        let start = usize::from(y) * width + usize::from(x);
+        let mut pending = vec![start];
+        self.pixels[offset..offset + 4].copy_from_slice(&replacement);
+
+        while let Some(index) = pending.pop() {
+            let pixel_x = index % width;
+            let pixel_y = index / width;
+            let neighbors = [
+                (pixel_x > 0).then_some(index.wrapping_sub(1)),
+                (pixel_x + 1 < width).then_some(index + 1),
+                (pixel_y > 0).then_some(index.wrapping_sub(width)),
+                (pixel_y + 1 < height).then_some(index + width),
+            ];
+
+            for neighbor in neighbors.into_iter().flatten() {
+                let neighbor_offset = neighbor * 4;
+                if self.pixels[neighbor_offset..neighbor_offset + 4] == target {
+                    self.pixels[neighbor_offset..neighbor_offset + 4].copy_from_slice(&replacement);
+                    pending.push(neighbor);
+                }
+            }
+        }
+
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     fn clear(&mut self) {
         if self.pixels.iter().any(|channel| *channel != 0) {
             self.pixels.fill(0);
@@ -231,6 +276,7 @@ impl Block for PixelArt {
     fn apply_operation(art: &mut Self, operation: &Self::Operation) {
         match operation {
             PixelArtOperation::Paint { pixels } => art.paint(pixels),
+            PixelArtOperation::Fill { x, y, color } => art.fill(*x, *y, *color),
             PixelArtOperation::Clear => art.clear(),
             PixelArtOperation::Resize {
                 width,
@@ -310,6 +356,12 @@ where
 #[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_clear_restores_all_pixels_to_transparency.rs"]
 mod pixel_art_clear_restores_all_pixels_to_transparency;
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_fill_ignores_invalid_and_unchanged_targets.rs"]
+mod pixel_art_fill_ignores_invalid_and_unchanged_targets;
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_fill_recolors_only_connected_pixels.rs"]
+mod pixel_art_fill_recolors_only_connected_pixels;
 #[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_invalid_resize_does_not_change_canvas.rs"]
 mod pixel_art_invalid_resize_does_not_change_canvas;

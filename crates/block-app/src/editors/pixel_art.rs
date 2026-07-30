@@ -10,16 +10,25 @@ use uuid::Uuid;
 
 use super::{BlockEditor, EditorAction};
 
+const MIN_ZOOM: f32 = 0.25;
+const MAX_ZOOM: f32 = 32.0;
+const ZOOM_STEP: f32 = 1.25;
+const PAN_MARGIN: f32 = 32.0;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PixelTool {
     Pencil,
     Eraser,
+    Fill,
+    Eyedropper,
 }
 
 pub(super) struct PixelArtEditor {
     block: BlockHandle<PixelArt>,
     tool: PixelTool,
     color: PixelColor,
+    zoom: f32,
+    pan: Vec2,
     last_painted: Option<(u16, u16)>,
     texture: Option<TextureHandle>,
     texture_revision: Option<u64>,
@@ -38,6 +47,8 @@ impl PixelArtEditor {
             block,
             tool: PixelTool::Pencil,
             color: PixelColor::new(0, 0, 0, 255),
+            zoom: 1.0,
+            pan: Vec2::ZERO,
             last_painted: None,
             texture: None,
             texture_revision: None,
@@ -52,9 +63,35 @@ impl PixelArtEditor {
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) {
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.tool, PixelTool::Pencil, "Pencil");
-            ui.selectable_value(&mut self.tool, PixelTool::Eraser, "Eraser");
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .selectable_value(&mut self.tool, PixelTool::Pencil, "Pencil")
+                .on_hover_text("Pencil (B or P)")
+                .clicked()
+            {
+                self.last_painted = None;
+            }
+            if ui
+                .selectable_value(&mut self.tool, PixelTool::Eraser, "Eraser")
+                .on_hover_text("Eraser (E)")
+                .clicked()
+            {
+                self.last_painted = None;
+            }
+            if ui
+                .selectable_value(&mut self.tool, PixelTool::Fill, "Fill")
+                .on_hover_text("Fill connected pixels (G)")
+                .clicked()
+            {
+                self.last_painted = None;
+            }
+            if ui
+                .selectable_value(&mut self.tool, PixelTool::Eyedropper, "Eyedropper")
+                .on_hover_text("Sample a pixel color (I)")
+                .clicked()
+            {
+                self.last_painted = None;
+            }
             ui.separator();
 
             let mut color = self.color.rgba();
@@ -68,6 +105,28 @@ impl PixelArtEditor {
             }
 
             ui.separator();
+            if ui.small_button("−").on_hover_text("Zoom out (-)").clicked() {
+                self.change_zoom(1.0 / ZOOM_STEP);
+            }
+            if ui
+                .button(format!("{:.0}%", self.zoom * 100.0))
+                .on_hover_text("Fit canvas to viewport (0)")
+                .clicked()
+            {
+                self.reset_view();
+            }
+            if ui.small_button("+").on_hover_text("Zoom in (+)").clicked() {
+                self.change_zoom(ZOOM_STEP);
+            }
+            if ui
+                .small_button("Fit")
+                .on_hover_text("Fit canvas to viewport (0)")
+                .clicked()
+            {
+                self.reset_view();
+            }
+
+            ui.separator();
             if ui.button("Resize").clicked() {
                 self.resize_width = width;
                 self.resize_height = height;
@@ -78,8 +137,21 @@ impl PixelArtEditor {
                 self.clear_open = true;
             }
             ui.separator();
-            ui.weak(format!("{width} × {height}"));
+            ui.weak(format!("{width} × {height} px"));
         });
+    }
+
+    fn reset_view(&mut self) {
+        self.zoom = 1.0;
+        self.pan = Vec2::ZERO;
+    }
+
+    fn change_zoom(&mut self, factor: f32) {
+        let old_zoom = self.zoom;
+        self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        if old_zoom > 0.0 {
+            self.pan *= self.zoom / old_zoom;
+        }
     }
 
     fn update_texture(
@@ -104,62 +176,212 @@ impl PixelArtEditor {
         self.texture_dark_mode = dark_mode;
     }
 
-    fn canvas(&mut self, ui: &mut egui::Ui, width: u16, height: u16) {
-        let available = ui.available_size();
-        let aspect = f32::from(width) / f32::from(height);
-        let size = if available.x / available.y.max(1.0) > aspect {
-            Vec2::new(available.y * aspect, available.y)
-        } else {
-            Vec2::new(available.x, available.x / aspect)
-        }
-        .max(Vec2::splat(1.0));
+    fn canvas(&mut self, ui: &mut egui::Ui, width: u16, height: u16, input_enabled: bool) {
+        let available = ui.available_size().max(Vec2::splat(1.0));
+        let (viewport, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
+        let painter = ui.painter_at(viewport);
+        painter.rect_filled(viewport, 0.0, ui.visuals().extreme_bg_color);
 
-        ui.vertical_centered(|ui| {
-            let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
-            let response = response.on_hover_cursor(egui::CursorIcon::Crosshair);
-            let painter = ui.painter_at(rect);
-            if let Some(texture) = &self.texture {
-                painter.image(
-                    texture.id(),
-                    rect,
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            }
-            paint_grid(&painter, rect, width, height);
+        let fit_scale = (viewport.width() / f32::from(width))
+            .min(viewport.height() / f32::from(height))
+            .max(f32::EPSILON);
+        let old_canvas_size = Vec2::new(
+            f32::from(width) * fit_scale * self.zoom,
+            f32::from(height) * fit_scale * self.zoom,
+        );
+        let old_canvas_rect = Rect::from_center_size(viewport.center() + self.pan, old_canvas_size);
 
-            if response.drag_started_by(PointerButton::Primary) {
-                self.last_painted = None;
-            }
-            let primary_down = ui.input(|input| input.pointer.button_down(PointerButton::Primary));
-            if (primary_down && response.is_pointer_button_down_on())
-                || response.clicked_by(PointerButton::Primary)
-            {
-                if let Some(pixel) = response
-                    .interact_pointer_pos()
-                    .and_then(|position| pixel_at(position, rect, width, height))
-                {
-                    let points = self
-                        .last_painted
-                        .map_or_else(|| vec![pixel], |previous| pixels_on_line(previous, pixel));
-                    let color = match self.tool {
-                        PixelTool::Pencil => self.color,
-                        PixelTool::Eraser => PixelColor::TRANSPARENT,
-                    };
-                    self.block.operate(PixelArtOperation::Paint {
-                        pixels: points
-                            .into_iter()
-                            .map(|(x, y)| PixelUpdate { x, y, color })
-                            .collect(),
-                    });
-                    self.last_painted = Some(pixel);
-                    ui.ctx().request_repaint();
+        if input_enabled && response.hovered() {
+            if let Some(pointer) = response.ctx.pointer_hover_pos() {
+                let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
+                if scroll != 0.0 {
+                    let relative = (pointer - old_canvas_rect.min) / old_canvas_rect.size();
+                    self.zoom = (self.zoom * (scroll * 0.002).exp()).clamp(MIN_ZOOM, MAX_ZOOM);
+                    let new_size = Vec2::new(
+                        f32::from(width) * fit_scale * self.zoom,
+                        f32::from(height) * fit_scale * self.zoom,
+                    );
+                    let new_min = pointer - relative * new_size;
+                    self.pan = new_min + new_size * 0.5 - viewport.center();
                 }
             }
-            if !primary_down {
+        }
+
+        self.handle_shortcuts(ui, &response, input_enabled);
+
+        let canvas_size = Vec2::new(
+            f32::from(width) * fit_scale * self.zoom,
+            f32::from(height) * fit_scale * self.zoom,
+        );
+        constrain_pan(&mut self.pan, viewport.size(), canvas_size);
+
+        let panning = input_enabled
+            && response.ctx.input(|input| {
+                input.pointer.button_down(PointerButton::Middle)
+                    || (input.key_down(egui::Key::Space)
+                        && input.pointer.button_down(PointerButton::Primary))
+            });
+        if panning && response.hovered() {
+            self.pan += response.ctx.input(|input| input.pointer.delta());
+            constrain_pan(&mut self.pan, viewport.size(), canvas_size);
+            self.last_painted = None;
+        }
+
+        let canvas_rect = Rect::from_center_size(viewport.center() + self.pan, canvas_size);
+        if let Some(texture) = &self.texture {
+            painter.image(
+                texture.id(),
+                canvas_rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        paint_grid(&painter, canvas_rect, width, height);
+
+        let pointer = response
+            .ctx
+            .pointer_hover_pos()
+            .filter(|position| viewport.contains(*position));
+        let hovered_pixel =
+            pointer.and_then(|position| pixel_at(position, canvas_rect, width, height));
+        if let Some(pixel) = hovered_pixel {
+            paint_hovered_pixel(&painter, canvas_rect, width, height, pixel);
+            let label_position = viewport.left_bottom() + Vec2::new(6.0, -6.0);
+            painter.text(
+                label_position,
+                egui::Align2::LEFT_BOTTOM,
+                format!("{}, {}", pixel.0, pixel.1),
+                egui::TextStyle::Monospace.resolve(ui.style()),
+                ui.visuals().text_color(),
+            );
+        }
+
+        if response.hovered() && input_enabled {
+            let cursor = if panning {
+                egui::CursorIcon::Grabbing
+            } else if response.ctx.input(|input| input.key_down(egui::Key::Space)) {
+                egui::CursorIcon::Grab
+            } else {
+                egui::CursorIcon::Crosshair
+            };
+            response.ctx.set_cursor_icon(cursor);
+        }
+
+        if !input_enabled || panning {
+            self.last_painted = None;
+            return;
+        }
+
+        if response.clicked_by(PointerButton::Secondary) {
+            if let Some(pixel) = hovered_pixel {
+                self.sample_pixel(pixel);
+            }
+        }
+
+        if response.drag_started_by(PointerButton::Primary) {
+            self.last_painted = None;
+        }
+        let primary_down = ui.input(|input| input.pointer.button_down(PointerButton::Primary));
+        match self.tool {
+            PixelTool::Pencil | PixelTool::Eraser => {
+                if (primary_down && response.is_pointer_button_down_on())
+                    || response.clicked_by(PointerButton::Primary)
+                {
+                    if let Some(pixel) = hovered_pixel {
+                        self.paint_to(pixel);
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+            PixelTool::Fill => {
+                if response.clicked_by(PointerButton::Primary) {
+                    if let Some((x, y)) = hovered_pixel {
+                        self.block.operate(PixelArtOperation::Fill {
+                            x,
+                            y,
+                            color: self.color,
+                        });
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+            PixelTool::Eyedropper => {
+                if response.clicked_by(PointerButton::Primary) {
+                    if let Some(pixel) = hovered_pixel {
+                        self.sample_pixel(pixel);
+                    }
+                }
+            }
+        }
+        if !primary_down {
+            self.last_painted = None;
+        }
+    }
+
+    fn handle_shortcuts(&mut self, ui: &egui::Ui, response: &egui::Response, input_enabled: bool) {
+        if !input_enabled || !response.hovered() || ui.ctx().egui_wants_keyboard_input() {
+            return;
+        }
+
+        ui.input(|input| {
+            if input.key_pressed(egui::Key::B) || input.key_pressed(egui::Key::P) {
+                self.tool = PixelTool::Pencil;
+                self.last_painted = None;
+            } else if input.key_pressed(egui::Key::E) {
+                self.tool = PixelTool::Eraser;
+                self.last_painted = None;
+            } else if input.key_pressed(egui::Key::G) {
+                self.tool = PixelTool::Fill;
+                self.last_painted = None;
+            } else if input.key_pressed(egui::Key::I) {
+                self.tool = PixelTool::Eyedropper;
                 self.last_painted = None;
             }
+
+            if input.key_pressed(egui::Key::Plus) {
+                self.change_zoom(ZOOM_STEP);
+            } else if input.key_pressed(egui::Key::Minus) {
+                self.change_zoom(1.0 / ZOOM_STEP);
+            } else if input.key_pressed(egui::Key::Num0) {
+                self.reset_view();
+            }
         });
+    }
+
+    fn paint_to(&mut self, pixel: (u16, u16)) {
+        let points = match self.last_painted {
+            None => vec![pixel],
+            Some(previous) if previous == pixel => Vec::new(),
+            Some(previous) => pixels_on_line(previous, pixel)
+                .into_iter()
+                .skip(1)
+                .collect(),
+        };
+        if points.is_empty() {
+            return;
+        }
+
+        let color = match self.tool {
+            PixelTool::Eraser => PixelColor::TRANSPARENT,
+            PixelTool::Pencil | PixelTool::Fill | PixelTool::Eyedropper => self.color,
+        };
+        self.block.operate(PixelArtOperation::Paint {
+            pixels: points
+                .into_iter()
+                .map(|(x, y)| PixelUpdate { x, y, color })
+                .collect(),
+        });
+        self.last_painted = Some(pixel);
+    }
+
+    fn sample_pixel(&mut self, pixel: (u16, u16)) {
+        if let Some(color) = self
+            .block
+            .read()
+            .and_then(|art| art.pixel(pixel.0, pixel.1))
+        {
+            self.color = color;
+        }
     }
 
     fn resize_dialog(&mut self, context: &egui::Context, width: u16, height: u16) {
@@ -213,6 +435,7 @@ impl PixelArtEditor {
                 anchor: self.resize_anchor,
             });
             self.last_painted = None;
+            self.reset_view();
             open = false;
         } else if cancel {
             open = false;
@@ -308,7 +531,8 @@ impl BlockEditor for PixelArtEditor {
 
         self.toolbar(ui, width, height);
         ui.separator();
-        self.canvas(ui, width, height);
+        let input_enabled = !self.resize_open && !self.clear_open;
+        self.canvas(ui, width, height, input_enabled);
         self.resize_dialog(ui.ctx(), width, height);
         self.clear_dialog(ui.ctx());
         None
@@ -374,6 +598,49 @@ fn pixel_at(position: Pos2, rect: Rect, width: u16, height: u16) -> Option<(u16,
     let x = (((position.x - rect.left()) / rect.width()) * f32::from(width)).floor() as u16;
     let y = (((position.y - rect.top()) / rect.height()) * f32::from(height)).floor() as u16;
     Some((x.min(width - 1), y.min(height - 1)))
+}
+
+fn paint_hovered_pixel(
+    painter: &egui::Painter,
+    canvas: Rect,
+    width: u16,
+    height: u16,
+    pixel: (u16, u16),
+) {
+    let cell_width = canvas.width() / f32::from(width);
+    let cell_height = canvas.height() / f32::from(height);
+    let min = Pos2::new(
+        canvas.left() + f32::from(pixel.0) * cell_width,
+        canvas.top() + f32::from(pixel.1) * cell_height,
+    );
+    let rect = Rect::from_min_size(min, Vec2::new(cell_width, cell_height));
+    painter.rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(2.0, Color32::WHITE),
+        egui::StrokeKind::Inside,
+    );
+    painter.rect_stroke(
+        rect.shrink(2.0),
+        0.0,
+        Stroke::new(1.0, Color32::BLACK),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn constrain_pan(pan: &mut Vec2, viewport: Vec2, canvas: Vec2) {
+    if canvas.x <= viewport.x {
+        pan.x = 0.0;
+    } else {
+        let limit = (canvas.x - viewport.x) * 0.5 + PAN_MARGIN.min(viewport.x * 0.5);
+        pan.x = pan.x.clamp(-limit, limit);
+    }
+    if canvas.y <= viewport.y {
+        pan.y = 0.0;
+    } else {
+        let limit = (canvas.y - viewport.y) * 0.5 + PAN_MARGIN.min(viewport.y * 0.5);
+        pan.y = pan.y.clamp(-limit, limit);
+    }
 }
 
 fn pixels_on_line(start: (u16, u16), end: (u16, u16)) -> Vec<(u16, u16)> {
