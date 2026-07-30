@@ -51,3 +51,7 @@ impl Block for WorkspaceIndex {
         self.entries.iter().map(|entry| entry.id).collect()
     }
 }
+
+#[cfg(test)]
+#[path = "workspace_index/tests/workspace_index_remove_removes_entry.rs"]
+mod workspace_index_remove_removes_entry;

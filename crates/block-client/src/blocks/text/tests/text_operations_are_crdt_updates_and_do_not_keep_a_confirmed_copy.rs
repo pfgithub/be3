@@ -3,7 +3,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use super::text::TextDocument;
+use super::TextDocument;
 use crate::{BlockShared, ErasedBlock, TypedBlock};
 
 #[test]

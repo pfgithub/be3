@@ -120,3 +120,7 @@ impl Block for TextDocument {
         line[..end].to_owned()
     }
 }
+
+#[cfg(test)]
+#[path = "text/tests/text_operations_are_crdt_updates_and_do_not_keep_a_confirmed_copy.rs"]
+mod text_operations_are_crdt_updates_and_do_not_keep_a_confirmed_copy;

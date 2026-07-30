@@ -1,7 +1,7 @@
 use block::Block;
 use uuid::Uuid;
 
-use super::workspace_index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation};
+use super::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation};
 
 #[test]
 fn workspace_index_remove_removes_entry() {
