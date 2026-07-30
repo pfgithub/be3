@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use block::{Block, BlockParent};
 use block_client::{
     blocks::pixel_art::{
@@ -14,22 +16,78 @@ const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 32.0;
 const ZOOM_STEP: f32 = 1.25;
 const PAN_MARGIN: f32 = 32.0;
+const MAX_BRUSH_SIZE: u16 = 64;
+const MAX_RECENT_COLORS: usize = 12;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PixelTool {
     Pencil,
     Eraser,
     Fill,
     Eyedropper,
+    Line,
+    Rectangle,
+    Ellipse,
+}
+
+impl PixelTool {
+    const fn is_drawing(self) -> bool {
+        matches!(
+            self,
+            Self::Pencil | Self::Eraser | Self::Line | Self::Rectangle | Self::Ellipse
+        )
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Pencil => "Pencil",
+            Self::Eraser => "Eraser",
+            Self::Fill => "Fill",
+            Self::Eyedropper => "Eyedropper",
+            Self::Line => "Line",
+            Self::Rectangle => "Rectangle",
+            Self::Ellipse => "Ellipse",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BrushShape {
+    Square,
+    Circle,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveDrawing {
+    tool: PixelTool,
+    start: (u16, u16),
+    end: (u16, u16),
+    path: Vec<(u16, u16)>,
+}
+
+#[derive(Clone, Debug)]
+struct CommittedPreview {
+    pixels: Vec<(u16, u16)>,
+    color: PixelColor,
+    frames_remaining: u8,
 }
 
 pub(super) struct PixelArtEditor {
     block: BlockHandle<PixelArt>,
     tool: PixelTool,
+    previous_drawing_tool: PixelTool,
     color: PixelColor,
+    recent_colors: Vec<PixelColor>,
+    brush_size: u16,
+    brush_shape: BrushShape,
+    shapes_filled: bool,
+    mirror_horizontal: bool,
+    mirror_vertical: bool,
+    show_grid: bool,
     zoom: f32,
     pan: Vec2,
-    last_painted: Option<(u16, u16)>,
+    active_drawing: Option<ActiveDrawing>,
+    committed_preview: Option<CommittedPreview>,
     texture: Option<TextureHandle>,
     texture_revision: Option<u64>,
     texture_size: [u16; 2],
@@ -46,10 +104,19 @@ impl PixelArtEditor {
         Self {
             block,
             tool: PixelTool::Pencil,
+            previous_drawing_tool: PixelTool::Pencil,
             color: PixelColor::new(0, 0, 0, 255),
+            recent_colors: vec![PixelColor::new(0, 0, 0, 255)],
+            brush_size: 1,
+            brush_shape: BrushShape::Square,
+            shapes_filled: false,
+            mirror_horizontal: false,
+            mirror_vertical: false,
+            show_grid: true,
             zoom: 1.0,
             pan: Vec2::ZERO,
-            last_painted: None,
+            active_drawing: None,
+            committed_preview: None,
             texture: None,
             texture_revision: None,
             texture_size: [0, 0],
@@ -64,47 +131,57 @@ impl PixelArtEditor {
 
     fn toolbar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) {
         ui.horizontal_wrapped(|ui| {
+            ui.strong("Tools");
+            self.tool_button(ui, PixelTool::Pencil, "B or P");
+            self.tool_button(ui, PixelTool::Eraser, "E");
+            self.tool_button(ui, PixelTool::Fill, "G");
+            self.tool_button(ui, PixelTool::Eyedropper, "I");
+            self.tool_button(ui, PixelTool::Line, "L");
+            self.tool_button(ui, PixelTool::Rectangle, "R");
+            self.tool_button(ui, PixelTool::Ellipse, "O");
+            ui.separator();
+
+            ui.strong("Brush");
+            ui.add(
+                egui::DragValue::new(&mut self.brush_size)
+                    .range(1..=MAX_BRUSH_SIZE)
+                    .suffix(" px"),
+            )
+            .on_hover_text("Brush size ([ or ])");
+            ui.selectable_value(&mut self.brush_shape, BrushShape::Square, "Square");
+            ui.selectable_value(&mut self.brush_shape, BrushShape::Circle, "Circle");
+            let shapes_selected = matches!(self.tool, PixelTool::Rectangle | PixelTool::Ellipse);
             if ui
-                .selectable_value(&mut self.tool, PixelTool::Pencil, "Pencil")
-                .on_hover_text("Pencil (B or P)")
+                .add_enabled(
+                    shapes_selected,
+                    egui::Button::new("Filled").selected(self.shapes_filled),
+                )
+                .on_hover_text("Fill rectangles and ellipses (X)")
                 .clicked()
             {
-                self.last_painted = None;
-            }
-            if ui
-                .selectable_value(&mut self.tool, PixelTool::Eraser, "Eraser")
-                .on_hover_text("Eraser (E)")
-                .clicked()
-            {
-                self.last_painted = None;
-            }
-            if ui
-                .selectable_value(&mut self.tool, PixelTool::Fill, "Fill")
-                .on_hover_text("Fill connected pixels (G)")
-                .clicked()
-            {
-                self.last_painted = None;
-            }
-            if ui
-                .selectable_value(&mut self.tool, PixelTool::Eyedropper, "Eyedropper")
-                .on_hover_text("Sample a pixel color (I)")
-                .clicked()
-            {
-                self.last_painted = None;
+                self.shapes_filled = !self.shapes_filled;
             }
             ui.separator();
 
+            ui.strong("Color");
             let mut color = self.color.rgba();
             if ui
                 .color_edit_button_srgba_unmultiplied(&mut color)
-                .on_hover_text("Pencil color")
+                .on_hover_text("Drawing color")
                 .changed()
             {
                 self.color = PixelColor::new(color[0], color[1], color[2], color[3]);
-                self.tool = PixelTool::Pencil;
             }
-
             ui.separator();
+
+            ui.strong("Symmetry");
+            ui.toggle_value(&mut self.mirror_horizontal, "Horizontal")
+                .on_hover_text("Mirror across the vertical canvas axis (H)");
+            ui.toggle_value(&mut self.mirror_vertical, "Vertical")
+                .on_hover_text("Mirror across the horizontal canvas axis (V)");
+            ui.separator();
+
+            ui.strong("View");
             if ui.small_button("−").on_hover_text("Zoom out (-)").clicked() {
                 self.change_zoom(1.0 / ZOOM_STEP);
             }
@@ -125,20 +202,65 @@ impl PixelArtEditor {
             {
                 self.reset_view();
             }
+            ui.checkbox(&mut self.show_grid, "Grid");
 
             ui.separator();
+            ui.strong("Canvas");
             if ui.button("Resize").clicked() {
+                self.active_drawing = None;
+                self.committed_preview = None;
                 self.resize_width = width;
                 self.resize_height = height;
                 self.resize_anchor = PixelArtAnchor::Center;
                 self.resize_open = true;
             }
             if ui.button("Clear").clicked() {
+                self.active_drawing = None;
+                self.committed_preview = None;
                 self.clear_open = true;
             }
             ui.separator();
-            ui.weak(format!("{width} × {height} px"));
+            ui.weak(format!("{} · {width} × {height} px", self.tool.label()));
         });
+
+        let recent_colors = self.recent_colors.clone();
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Recent");
+            for color in recent_colors {
+                if color_swatch(ui, color, color == self.color).clicked() {
+                    self.color = color;
+                    self.remember_color(color);
+                }
+            }
+        });
+    }
+
+    fn tool_button(&mut self, ui: &mut egui::Ui, tool: PixelTool, shortcut: &str) {
+        if ui
+            .selectable_label(self.tool == tool, tool.label())
+            .on_hover_text(format!("{} ({shortcut})", tool.label()))
+            .clicked()
+        {
+            self.select_tool(tool);
+        }
+    }
+
+    fn select_tool(&mut self, tool: PixelTool) {
+        self.active_drawing = None;
+        self.committed_preview = None;
+        if self.tool.is_drawing() {
+            self.previous_drawing_tool = self.tool;
+        }
+        if tool.is_drawing() {
+            self.previous_drawing_tool = tool;
+        }
+        self.tool = tool;
+    }
+
+    fn remember_color(&mut self, color: PixelColor) {
+        self.recent_colors.retain(|recent| *recent != color);
+        self.recent_colors.insert(0, color);
+        self.recent_colors.truncate(MAX_RECENT_COLORS);
     }
 
     fn reset_view(&mut self) {
@@ -224,7 +346,8 @@ impl PixelArtEditor {
         if panning && response.hovered() {
             self.pan += response.ctx.input(|input| input.pointer.delta());
             constrain_pan(&mut self.pan, viewport.size(), canvas_size);
-            self.last_painted = None;
+            self.active_drawing = None;
+            self.committed_preview = None;
         }
 
         let canvas_rect = Rect::from_center_size(viewport.center() + self.pan, canvas_size);
@@ -236,7 +359,6 @@ impl PixelArtEditor {
                 Color32::WHITE,
             );
         }
-        paint_grid(&painter, canvas_rect, width, height);
 
         let pointer = response
             .ctx
@@ -244,17 +366,6 @@ impl PixelArtEditor {
             .filter(|position| viewport.contains(*position));
         let hovered_pixel =
             pointer.and_then(|position| pixel_at(position, canvas_rect, width, height));
-        if let Some(pixel) = hovered_pixel {
-            paint_hovered_pixel(&painter, canvas_rect, width, height, pixel);
-            let label_position = viewport.left_bottom() + Vec2::new(6.0, -6.0);
-            painter.text(
-                label_position,
-                egui::Align2::LEFT_BOTTOM,
-                format!("{}, {}", pixel.0, pixel.1),
-                egui::TextStyle::Monospace.resolve(ui.style()),
-                ui.visuals().text_color(),
-            );
-        }
 
         if response.hovered() && input_enabled {
             let cursor = if panning {
@@ -268,7 +379,8 @@ impl PixelArtEditor {
         }
 
         if !input_enabled || panning {
-            self.last_painted = None;
+            self.active_drawing = None;
+            self.committed_preview = None;
             return;
         }
 
@@ -278,24 +390,40 @@ impl PixelArtEditor {
             }
         }
 
-        if response.drag_started_by(PointerButton::Primary) {
-            self.last_painted = None;
-        }
-        let primary_down = ui.input(|input| input.pointer.button_down(PointerButton::Primary));
+        let (primary_pressed, primary_down, primary_released, shift, space) = ui.input(|input| {
+            (
+                input.pointer.button_pressed(PointerButton::Primary),
+                input.pointer.button_down(PointerButton::Primary),
+                input.pointer.button_released(PointerButton::Primary),
+                input.modifiers.shift,
+                input.key_down(egui::Key::Space),
+            )
+        });
         match self.tool {
-            PixelTool::Pencil | PixelTool::Eraser => {
-                if (primary_down && response.is_pointer_button_down_on())
-                    || response.clicked_by(PointerButton::Primary)
-                {
+            tool if tool.is_drawing() => {
+                if self.active_drawing.is_none() && primary_pressed && !space {
                     if let Some(pixel) = hovered_pixel {
-                        self.paint_to(pixel);
-                        ui.ctx().request_repaint();
+                        self.committed_preview = None;
+                        self.active_drawing = Some(ActiveDrawing {
+                            tool,
+                            start: pixel,
+                            end: pixel,
+                            path: vec![pixel],
+                        });
                     }
+                } else if primary_down {
+                    if let Some(pixel) = hovered_pixel {
+                        self.extend_active_drawing(pixel);
+                    }
+                }
+                if primary_released {
+                    self.commit_active_drawing(width, height, shift);
                 }
             }
             PixelTool::Fill => {
                 if response.clicked_by(PointerButton::Primary) {
                     if let Some((x, y)) = hovered_pixel {
+                        self.remember_color(self.color);
                         self.block.operate(PixelArtOperation::Fill {
                             x,
                             y,
@@ -312,9 +440,98 @@ impl PixelArtEditor {
                     }
                 }
             }
+            PixelTool::Pencil
+            | PixelTool::Eraser
+            | PixelTool::Line
+            | PixelTool::Rectangle
+            | PixelTool::Ellipse => unreachable!(),
         }
-        if !primary_down {
-            self.last_painted = None;
+
+        let (pending, preview_color) = if let Some(drawing) = &self.active_drawing {
+            (
+                rasterize_drawing(
+                    drawing,
+                    width,
+                    height,
+                    self.brush_size,
+                    self.brush_shape,
+                    self.shapes_filled,
+                    self.mirror_horizontal,
+                    self.mirror_vertical,
+                    shift,
+                ),
+                if drawing.tool == PixelTool::Eraser {
+                    PixelColor::TRANSPARENT
+                } else {
+                    self.color
+                },
+            )
+        } else if let Some(preview) = &self.committed_preview {
+            (preview.pixels.clone(), preview.color)
+        } else if let Some(pixel) = hovered_pixel.filter(|_| self.tool.is_drawing()) {
+            let drawing = ActiveDrawing {
+                tool: self.tool,
+                start: pixel,
+                end: pixel,
+                path: vec![pixel],
+            };
+            (
+                rasterize_drawing(
+                    &drawing,
+                    width,
+                    height,
+                    self.brush_size,
+                    self.brush_shape,
+                    self.shapes_filled,
+                    self.mirror_horizontal,
+                    self.mirror_vertical,
+                    shift,
+                ),
+                if self.tool == PixelTool::Eraser {
+                    PixelColor::TRANSPARENT
+                } else {
+                    self.color
+                },
+            )
+        } else {
+            (Vec::new(), self.color)
+        };
+        if !pending.is_empty() {
+            paint_pending_pixels(
+                &painter,
+                canvas_rect,
+                width,
+                height,
+                &pending,
+                preview_color,
+                ui.visuals().dark_mode,
+            );
+        }
+        if self.show_grid {
+            paint_grid(&painter, canvas_rect, width, height);
+        } else {
+            paint_canvas_border(&painter, canvas_rect);
+        }
+
+        if let Some(pixel) = hovered_pixel {
+            paint_hovered_pixel(&painter, canvas_rect, width, height, pixel);
+            let label_position = viewport.left_bottom() + Vec2::new(6.0, -6.0);
+            painter.text(
+                label_position,
+                egui::Align2::LEFT_BOTTOM,
+                format!("{}, {}", pixel.0, pixel.1),
+                egui::TextStyle::Monospace.resolve(ui.style()),
+                ui.visuals().text_color(),
+            );
+        }
+
+        if let Some(preview) = &mut self.committed_preview {
+            preview.frames_remaining = preview.frames_remaining.saturating_sub(1);
+            if preview.frames_remaining == 0 {
+                self.committed_preview = None;
+            } else {
+                ui.ctx().request_repaint();
+            }
         }
     }
 
@@ -323,55 +540,130 @@ impl PixelArtEditor {
             return;
         }
 
-        ui.input(|input| {
-            if input.key_pressed(egui::Key::B) || input.key_pressed(egui::Key::P) {
-                self.tool = PixelTool::Pencil;
-                self.last_painted = None;
+        let (
+            tool,
+            cancel,
+            larger,
+            smaller,
+            toggle_fill,
+            toggle_horizontal,
+            toggle_vertical,
+            zoom_in,
+            zoom_out,
+            fit,
+        ) = ui.input(|input| {
+            let tool = if input.key_pressed(egui::Key::B) || input.key_pressed(egui::Key::P) {
+                Some(PixelTool::Pencil)
             } else if input.key_pressed(egui::Key::E) {
-                self.tool = PixelTool::Eraser;
-                self.last_painted = None;
+                Some(PixelTool::Eraser)
             } else if input.key_pressed(egui::Key::G) {
-                self.tool = PixelTool::Fill;
-                self.last_painted = None;
+                Some(PixelTool::Fill)
             } else if input.key_pressed(egui::Key::I) {
-                self.tool = PixelTool::Eyedropper;
-                self.last_painted = None;
-            }
-
-            if input.key_pressed(egui::Key::Plus) {
-                self.change_zoom(ZOOM_STEP);
-            } else if input.key_pressed(egui::Key::Minus) {
-                self.change_zoom(1.0 / ZOOM_STEP);
-            } else if input.key_pressed(egui::Key::Num0) {
-                self.reset_view();
-            }
+                Some(PixelTool::Eyedropper)
+            } else if input.key_pressed(egui::Key::L) {
+                Some(PixelTool::Line)
+            } else if input.key_pressed(egui::Key::R) {
+                Some(PixelTool::Rectangle)
+            } else if input.key_pressed(egui::Key::O) {
+                Some(PixelTool::Ellipse)
+            } else {
+                None
+            };
+            (
+                tool,
+                input.key_pressed(egui::Key::Escape),
+                input.key_pressed(egui::Key::CloseBracket),
+                input.key_pressed(egui::Key::OpenBracket),
+                input.key_pressed(egui::Key::X),
+                input.key_pressed(egui::Key::H),
+                input.key_pressed(egui::Key::V),
+                input.key_pressed(egui::Key::Plus),
+                input.key_pressed(egui::Key::Minus),
+                input.key_pressed(egui::Key::Num0),
+            )
         });
+
+        if let Some(tool) = tool {
+            self.select_tool(tool);
+        }
+        if cancel {
+            self.active_drawing = None;
+        }
+        if larger {
+            self.brush_size = (self.brush_size + 1).min(MAX_BRUSH_SIZE);
+        }
+        if smaller {
+            self.brush_size = self.brush_size.saturating_sub(1).max(1);
+        }
+        if toggle_fill && matches!(self.tool, PixelTool::Rectangle | PixelTool::Ellipse) {
+            self.shapes_filled = !self.shapes_filled;
+        }
+        if toggle_horizontal {
+            self.mirror_horizontal = !self.mirror_horizontal;
+        }
+        if toggle_vertical {
+            self.mirror_vertical = !self.mirror_vertical;
+        }
+        if zoom_in {
+            self.change_zoom(ZOOM_STEP);
+        } else if zoom_out {
+            self.change_zoom(1.0 / ZOOM_STEP);
+        } else if fit {
+            self.reset_view();
+        }
     }
 
-    fn paint_to(&mut self, pixel: (u16, u16)) {
-        let points = match self.last_painted {
-            None => vec![pixel],
-            Some(previous) if previous == pixel => Vec::new(),
-            Some(previous) => pixels_on_line(previous, pixel)
-                .into_iter()
-                .skip(1)
-                .collect(),
+    fn extend_active_drawing(&mut self, pixel: (u16, u16)) {
+        let Some(drawing) = &mut self.active_drawing else {
+            return;
         };
-        if points.is_empty() {
+        if drawing.end == pixel {
             return;
         }
+        if matches!(drawing.tool, PixelTool::Pencil | PixelTool::Eraser) {
+            drawing
+                .path
+                .extend(pixels_on_line(drawing.end, pixel).into_iter().skip(1));
+        }
+        drawing.end = pixel;
+    }
 
-        let color = match self.tool {
-            PixelTool::Eraser => PixelColor::TRANSPARENT,
-            PixelTool::Pencil | PixelTool::Fill | PixelTool::Eyedropper => self.color,
+    fn commit_active_drawing(&mut self, width: u16, height: u16, constrained: bool) {
+        let Some(drawing) = self.active_drawing.take() else {
+            return;
         };
+        let pixels = rasterize_drawing(
+            &drawing,
+            width,
+            height,
+            self.brush_size,
+            self.brush_shape,
+            self.shapes_filled,
+            self.mirror_horizontal,
+            self.mirror_vertical,
+            constrained,
+        );
+        if pixels.is_empty() {
+            return;
+        }
+        let color = if drawing.tool == PixelTool::Eraser {
+            PixelColor::TRANSPARENT
+        } else {
+            self.remember_color(self.color);
+            self.color
+        };
+        self.committed_preview = Some(CommittedPreview {
+            pixels: pixels.clone(),
+            color,
+            frames_remaining: 2,
+        });
         self.block.operate(PixelArtOperation::Paint {
-            pixels: points
-                .into_iter()
+            pixels: pixels
+                .iter()
+                .copied()
                 .map(|(x, y)| PixelUpdate { x, y, color })
                 .collect(),
         });
-        self.last_painted = Some(pixel);
     }
 
     fn sample_pixel(&mut self, pixel: (u16, u16)) {
@@ -381,6 +673,10 @@ impl PixelArtEditor {
             .and_then(|art| art.pixel(pixel.0, pixel.1))
         {
             self.color = color;
+            self.remember_color(color);
+            if self.tool == PixelTool::Eyedropper {
+                self.tool = self.previous_drawing_tool;
+            }
         }
     }
 
@@ -434,7 +730,7 @@ impl PixelArtEditor {
                 height: self.resize_height,
                 anchor: self.resize_anchor,
             });
-            self.last_painted = None;
+            self.active_drawing = None;
             self.reset_view();
             open = false;
         } else if cancel {
@@ -540,11 +836,7 @@ impl BlockEditor for PixelArtEditor {
 }
 
 fn checkerboard_image(art: &PixelArt, dark_mode: bool) -> egui::ColorImage {
-    let (light, dark): ([u8; 3], [u8; 3]) = if dark_mode {
-        ([82, 82, 82], [58, 58, 58])
-    } else {
-        ([232, 232, 232], [202, 202, 202])
-    };
+    let (light, dark) = checkerboard_colors(dark_mode);
     let width = usize::from(art.width());
     let height = usize::from(art.height());
     let mut pixels = Vec::with_capacity(width * height);
@@ -553,23 +845,387 @@ fn checkerboard_image(art: &PixelArt, dark_mode: bool) -> egui::ColorImage {
             let background = if (x + y) % 2 == 0 { light } else { dark };
             let offset = (y * width + x) * 4;
             let rgba = &art.rgba_bytes()[offset..offset + 4];
-            let alpha = u16::from(rgba[3]);
-            let inverse = 255 - alpha;
-            pixels.push(Color32::from_rgb(
-                ((u16::from(rgba[0]) * alpha + u16::from(background[0]) * inverse) / 255) as u8,
-                ((u16::from(rgba[1]) * alpha + u16::from(background[1]) * inverse) / 255) as u8,
-                ((u16::from(rgba[2]) * alpha + u16::from(background[2]) * inverse) / 255) as u8,
+            pixels.push(composite_pixel(
+                PixelColor::new(rgba[0], rgba[1], rgba[2], rgba[3]),
+                background,
             ));
         }
     }
     egui::ColorImage::new([width, height], pixels)
 }
 
+fn checkerboard_colors(dark_mode: bool) -> ([u8; 3], [u8; 3]) {
+    if dark_mode {
+        ([82, 82, 82], [58, 58, 58])
+    } else {
+        ([232, 232, 232], [202, 202, 202])
+    }
+}
+
+fn composite_pixel(color: PixelColor, background: [u8; 3]) -> Color32 {
+    let alpha = u16::from(color.alpha);
+    let inverse = 255 - alpha;
+    Color32::from_rgb(
+        ((u16::from(color.red) * alpha + u16::from(background[0]) * inverse) / 255) as u8,
+        ((u16::from(color.green) * alpha + u16::from(background[1]) * inverse) / 255) as u8,
+        ((u16::from(color.blue) * alpha + u16::from(background[2]) * inverse) / 255) as u8,
+    )
+}
+
+fn color_swatch(ui: &mut egui::Ui, color: PixelColor, selected: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let half = rect.size() * 0.5;
+        for (offset, background) in [
+            (Vec2::ZERO, Color32::from_gray(220)),
+            (Vec2::new(half.x, 0.0), Color32::from_gray(170)),
+            (Vec2::new(0.0, half.y), Color32::from_gray(170)),
+            (half, Color32::from_gray(220)),
+        ] {
+            painter.rect_filled(
+                Rect::from_min_size(rect.min + offset, half),
+                0.0,
+                background,
+            );
+        }
+        painter.rect_filled(
+            rect,
+            0.0,
+            Color32::from_rgba_unmultiplied(color.red, color.green, color.blue, color.alpha),
+        );
+        painter.rect_stroke(
+            rect,
+            2.0,
+            Stroke::new(
+                if selected { 2.0 } else { 1.0 },
+                if selected {
+                    ui.visuals().selection.stroke.color
+                } else {
+                    ui.visuals().widgets.noninteractive.bg_stroke.color
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response.on_hover_text(format!(
+        "#{:02X}{:02X}{:02X}{:02X}",
+        color.red, color.green, color.blue, color.alpha
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rasterize_drawing(
+    drawing: &ActiveDrawing,
+    width: u16,
+    height: u16,
+    brush_size: u16,
+    brush_shape: BrushShape,
+    shapes_filled: bool,
+    mirror_horizontal: bool,
+    mirror_vertical: bool,
+    constrained: bool,
+) -> Vec<(u16, u16)> {
+    let end = if constrained
+        && matches!(
+            drawing.tool,
+            PixelTool::Line | PixelTool::Rectangle | PixelTool::Ellipse
+        ) {
+        constrained_endpoint(drawing.start, drawing.end, drawing.tool, width, height)
+    } else {
+        drawing.end
+    };
+
+    let filled_shape =
+        shapes_filled && matches!(drawing.tool, PixelTool::Rectangle | PixelTool::Ellipse);
+    let base = match drawing.tool {
+        PixelTool::Pencil | PixelTool::Eraser => drawing.path.clone(),
+        PixelTool::Line => pixels_on_line(drawing.start, end),
+        PixelTool::Rectangle if filled_shape => filled_rectangle(drawing.start, end),
+        PixelTool::Rectangle => rectangle_outline(drawing.start, end),
+        PixelTool::Ellipse if filled_shape => ellipse_pixels(drawing.start, end, true),
+        PixelTool::Ellipse => ellipse_pixels(drawing.start, end, false),
+        PixelTool::Fill | PixelTool::Eyedropper => Vec::new(),
+    };
+
+    let mut pixels = BTreeSet::new();
+    if filled_shape {
+        for pixel in base {
+            insert_with_symmetry(
+                &mut pixels,
+                pixel,
+                width,
+                height,
+                mirror_horizontal,
+                mirror_vertical,
+            );
+        }
+    } else {
+        for center in base {
+            for pixel in brush_stamp(center, brush_size, brush_shape, width, height) {
+                insert_with_symmetry(
+                    &mut pixels,
+                    pixel,
+                    width,
+                    height,
+                    mirror_horizontal,
+                    mirror_vertical,
+                );
+            }
+        }
+    }
+    pixels.into_iter().collect()
+}
+
+fn constrained_endpoint(
+    start: (u16, u16),
+    end: (u16, u16),
+    tool: PixelTool,
+    width: u16,
+    height: u16,
+) -> (u16, u16) {
+    let delta_x = i32::from(end.0) - i32::from(start.0);
+    let delta_y = i32::from(end.1) - i32::from(start.1);
+    let absolute_x = delta_x.abs();
+    let absolute_y = delta_y.abs();
+    let (sign_x, horizontal_limit) = direction_and_limit(start.0, width, delta_x);
+    let (sign_y, vertical_limit) = direction_and_limit(start.1, height, delta_y);
+
+    let (x, y) = if tool == PixelTool::Line {
+        if absolute_x > absolute_y.saturating_mul(2) {
+            (i32::from(end.0), i32::from(start.1))
+        } else if absolute_y > absolute_x.saturating_mul(2) {
+            (i32::from(start.0), i32::from(end.1))
+        } else {
+            let distance = absolute_x
+                .max(absolute_y)
+                .min(horizontal_limit)
+                .min(vertical_limit);
+            (
+                i32::from(start.0) + sign_x * distance,
+                i32::from(start.1) + sign_y * distance,
+            )
+        }
+    } else {
+        let distance = absolute_x
+            .max(absolute_y)
+            .min(horizontal_limit)
+            .min(vertical_limit);
+        (
+            i32::from(start.0) + sign_x * distance,
+            i32::from(start.1) + sign_y * distance,
+        )
+    };
+    (x as u16, y as u16)
+}
+
+fn direction_and_limit(start: u16, length: u16, delta: i32) -> (i32, i32) {
+    if delta < 0 {
+        (-1, i32::from(start))
+    } else if delta > 0 {
+        (1, i32::from(length - 1 - start))
+    } else {
+        let negative = i32::from(start);
+        let positive = i32::from(length - 1 - start);
+        if positive >= negative {
+            (1, positive)
+        } else {
+            (-1, negative)
+        }
+    }
+}
+
+fn brush_stamp(
+    center: (u16, u16),
+    size: u16,
+    shape: BrushShape,
+    width: u16,
+    height: u16,
+) -> Vec<(u16, u16)> {
+    let size = i32::from(size);
+    let low = -((size - 1) / 2);
+    let high = size / 2;
+    let radius = f64::from(size) * 0.5 - 0.25;
+    let mut pixels = Vec::with_capacity((size * size) as usize);
+    for offset_y in low..=high {
+        for offset_x in low..=high {
+            if shape == BrushShape::Circle {
+                let local_x = f64::from(offset_x) - f64::from(low);
+                let local_y = f64::from(offset_y) - f64::from(low);
+                let center_offset = (f64::from(size) - 1.0) * 0.5;
+                let delta_x = local_x - center_offset;
+                let delta_y = local_y - center_offset;
+                if delta_x * delta_x + delta_y * delta_y > radius * radius {
+                    continue;
+                }
+            }
+            let x = i32::from(center.0) + offset_x;
+            let y = i32::from(center.1) + offset_y;
+            if x >= 0 && y >= 0 && x < i32::from(width) && y < i32::from(height) {
+                pixels.push((x as u16, y as u16));
+            }
+        }
+    }
+    pixels
+}
+
+fn insert_with_symmetry(
+    pixels: &mut BTreeSet<(u16, u16)>,
+    pixel: (u16, u16),
+    width: u16,
+    height: u16,
+    mirror_horizontal: bool,
+    mirror_vertical: bool,
+) {
+    let mirrored_x = width - 1 - pixel.0;
+    let mirrored_y = height - 1 - pixel.1;
+    pixels.insert(pixel);
+    if mirror_horizontal {
+        pixels.insert((mirrored_x, pixel.1));
+    }
+    if mirror_vertical {
+        pixels.insert((pixel.0, mirrored_y));
+    }
+    if mirror_horizontal && mirror_vertical {
+        pixels.insert((mirrored_x, mirrored_y));
+    }
+}
+
+fn filled_rectangle(start: (u16, u16), end: (u16, u16)) -> Vec<(u16, u16)> {
+    let (left, right) = ordered(start.0, end.0);
+    let (top, bottom) = ordered(start.1, end.1);
+    let mut pixels =
+        Vec::with_capacity(usize::from(right - left + 1) * usize::from(bottom - top + 1));
+    for y in top..=bottom {
+        for x in left..=right {
+            pixels.push((x, y));
+        }
+    }
+    pixels
+}
+
+fn rectangle_outline(start: (u16, u16), end: (u16, u16)) -> Vec<(u16, u16)> {
+    let (left, right) = ordered(start.0, end.0);
+    let (top, bottom) = ordered(start.1, end.1);
+    let mut pixels = BTreeSet::new();
+    for x in left..=right {
+        pixels.insert((x, top));
+        pixels.insert((x, bottom));
+    }
+    for y in top..=bottom {
+        pixels.insert((left, y));
+        pixels.insert((right, y));
+    }
+    pixels.into_iter().collect()
+}
+
+fn ellipse_pixels(start: (u16, u16), end: (u16, u16), filled: bool) -> Vec<(u16, u16)> {
+    let (left, right) = ordered(start.0, end.0);
+    let (top, bottom) = ordered(start.1, end.1);
+    let mut interior = BTreeSet::new();
+    for y in top..=bottom {
+        for x in left..=right {
+            if ellipse_contains(x, y, left, right, top, bottom) {
+                interior.insert((x, y));
+            }
+        }
+    }
+    let center_x = (u32::from(left) + u32::from(right)) / 2;
+    let center_y = (u32::from(top) + u32::from(bottom)) / 2;
+    for x in center_x as u16..=(u32::from(left) + u32::from(right)).div_ceil(2) as u16 {
+        interior.insert((x, top));
+        interior.insert((x, bottom));
+    }
+    for y in center_y as u16..=(u32::from(top) + u32::from(bottom)).div_ceil(2) as u16 {
+        interior.insert((left, y));
+        interior.insert((right, y));
+    }
+    if filled {
+        return interior.into_iter().collect();
+    }
+
+    interior
+        .iter()
+        .copied()
+        .filter(|(x, y)| {
+            [
+                (i32::from(*x) - 1, i32::from(*y)),
+                (i32::from(*x) + 1, i32::from(*y)),
+                (i32::from(*x), i32::from(*y) - 1),
+                (i32::from(*x), i32::from(*y) + 1),
+            ]
+            .into_iter()
+            .any(|(neighbor_x, neighbor_y)| {
+                neighbor_x < 0
+                    || neighbor_y < 0
+                    || !interior.contains(&(neighbor_x as u16, neighbor_y as u16))
+            })
+        })
+        .collect()
+}
+
+fn ellipse_contains(x: u16, y: u16, left: u16, right: u16, top: u16, bottom: u16) -> bool {
+    if left == right {
+        return x == left;
+    }
+    if top == bottom {
+        return y == top;
+    }
+    let center_x = (f64::from(left) + f64::from(right)) * 0.5;
+    let center_y = (f64::from(top) + f64::from(bottom)) * 0.5;
+    let radius_x = f64::from(right - left) * 0.5;
+    let radius_y = f64::from(bottom - top) * 0.5;
+    let normalized_x = (f64::from(x) - center_x) / radius_x;
+    let normalized_y = (f64::from(y) - center_y) / radius_y;
+    normalized_x * normalized_x + normalized_y * normalized_y <= 1.0 + f64::EPSILON
+}
+
+const fn ordered(first: u16, second: u16) -> (u16, u16) {
+    if first <= second {
+        (first, second)
+    } else {
+        (second, first)
+    }
+}
+
+fn paint_pending_pixels(
+    painter: &egui::Painter,
+    canvas: Rect,
+    width: u16,
+    height: u16,
+    pixels: &[(u16, u16)],
+    color: PixelColor,
+    dark_mode: bool,
+) {
+    let cell = Vec2::new(
+        canvas.width() / f32::from(width),
+        canvas.height() / f32::from(height),
+    );
+    let (light, dark) = checkerboard_colors(dark_mode);
+    for &(x, y) in pixels {
+        let min = Pos2::new(
+            canvas.left() + f32::from(x) * cell.x,
+            canvas.top() + f32::from(y) * cell.y,
+        );
+        let rect = Rect::from_min_size(min, cell);
+        let background = if (x + y) % 2 == 0 { light } else { dark };
+        painter.rect_filled(rect, 0.0, composite_pixel(color, background));
+    }
+}
+
+fn paint_canvas_border(painter: &egui::Painter, rect: Rect) {
+    painter.rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0, Color32::from_black_alpha(160)),
+        egui::StrokeKind::Inside,
+    );
+}
+
 fn paint_grid(painter: &egui::Painter, rect: Rect, width: u16, height: u16) {
     let cell_width = rect.width() / f32::from(width);
     let cell_height = rect.height() / f32::from(height);
-    let border = Stroke::new(1.0, Color32::from_black_alpha(160));
-    painter.rect_stroke(rect, 0.0, border, egui::StrokeKind::Inside);
+    paint_canvas_border(painter, rect);
     if cell_width.min(cell_height) < 6.0 {
         return;
     }
