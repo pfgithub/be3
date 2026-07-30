@@ -399,9 +399,11 @@ impl PixelArtEditor {
                 input.key_down(egui::Key::Space),
             )
         });
+        let canvas_pointer_pressed =
+            primary_pressed && response.hovered() && response.is_pointer_button_down_on();
         match self.tool {
             tool if tool.is_drawing() => {
-                if self.active_drawing.is_none() && primary_pressed && !space {
+                if self.active_drawing.is_none() && canvas_pointer_pressed && !space {
                     if let Some(pixel) = hovered_pixel {
                         self.committed_preview = None;
                         self.active_drawing = Some(ActiveDrawing {
