@@ -40,15 +40,17 @@ fn infinite_canvas_applies_entity_changes() {
     assert_eq!(canvas.entities(), &[initial]);
 
     let mut updated = entity(id, 9.0);
-    updated.style.foreground = CanvasColor::Rgb {
+    updated.style.foreground = CanvasColor::Rgba {
         red: 12,
         green: 34,
         blue: 56,
+        alpha: 78,
     };
-    updated.style.fill = Some(CanvasColor::Rgb {
+    updated.style.fill = Some(CanvasColor::Rgba {
         red: 78,
         green: 90,
         blue: 123,
+        alpha: 145,
     });
     updated.style.line_width = 7.0;
     updated.style.corner_radius = 11.0;

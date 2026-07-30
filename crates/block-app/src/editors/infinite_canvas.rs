@@ -1156,34 +1156,38 @@ const COLOR_PRESETS: [(&str, CanvasColor); 5] = [
     ("Default", CanvasColor::Auto),
     (
         "Red",
-        CanvasColor::Rgb {
+        CanvasColor::Rgba {
             red: 224,
             green: 49,
             blue: 49,
+            alpha: 255,
         },
     ),
     (
         "Orange",
-        CanvasColor::Rgb {
+        CanvasColor::Rgba {
             red: 240,
             green: 140,
             blue: 0,
+            alpha: 255,
         },
     ),
     (
         "Green",
-        CanvasColor::Rgb {
+        CanvasColor::Rgba {
             red: 47,
             green: 158,
             blue: 68,
+            alpha: 255,
         },
     ),
     (
         "Blue",
-        CanvasColor::Rgb {
+        CanvasColor::Rgba {
             red: 25,
             green: 113,
             blue: 194,
+            alpha: 255,
         },
     ),
 ];
@@ -1205,16 +1209,17 @@ fn color_menu(
                 changed = Some(color);
             }
         }
-        let mut color = resolve_color(current, ui.visuals().text_color());
+        let mut color = resolve_color(current, ui.visuals().text_color()).to_srgba_unmultiplied();
         if ui
-            .color_edit_button_srgba(&mut color)
+            .color_edit_button_srgba_unmultiplied(&mut color)
             .on_hover_text("Custom color")
             .changed()
         {
-            changed = Some(CanvasColor::Rgb {
-                red: color.r(),
-                green: color.g(),
-                blue: color.b(),
+            changed = Some(CanvasColor::Rgba {
+                red: color[0],
+                green: color[1],
+                blue: color[2],
+                alpha: color[3],
             });
         }
     });
@@ -1244,16 +1249,17 @@ fn fill_color_menu(
                 changed = Some(Some(color));
             }
         }
-        let mut color = resolve_color(current, ui.visuals().text_color());
+        let mut color = resolve_color(current, ui.visuals().text_color()).to_srgba_unmultiplied();
         if ui
-            .color_edit_button_srgba(&mut color)
+            .color_edit_button_srgba_unmultiplied(&mut color)
             .on_hover_text("Custom color")
             .changed()
         {
-            changed = Some(Some(CanvasColor::Rgb {
-                red: color.r(),
-                green: color.g(),
-                blue: color.b(),
+            changed = Some(Some(CanvasColor::Rgba {
+                red: color[0],
+                green: color[1],
+                blue: color[2],
+                alpha: color[3],
             }));
         }
     });
@@ -1274,7 +1280,12 @@ fn color_button(
 fn resolve_color(color: CanvasColor, auto: Color32) -> Color32 {
     match color {
         CanvasColor::Auto => auto,
-        CanvasColor::Rgb { red, green, blue } => Color32::from_rgb(red, green, blue),
+        CanvasColor::Rgba {
+            red,
+            green,
+            blue,
+            alpha,
+        } => Color32::from_rgba_unmultiplied(red, green, blue, alpha),
     }
 }
 
@@ -1807,11 +1818,12 @@ fn rounded_rectangle_points(entity: &CanvasEntity, radius: f32) -> Vec<CanvasPoi
 }
 
 fn with_opacity(color: Color32, opacity: f32) -> Color32 {
+    let [red, green, blue, alpha] = color.to_srgba_unmultiplied();
     Color32::from_rgba_unmultiplied(
-        color.r(),
-        color.g(),
-        color.b(),
-        (color.a() as f32 * opacity.clamp(0.0, 1.0)).round() as u8,
+        red,
+        green,
+        blue,
+        (alpha as f32 * opacity.clamp(0.0, 1.0)).round() as u8,
     )
 }
 

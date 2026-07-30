@@ -17,17 +17,19 @@ fn infinite_canvas_serialization_round_trips() {
             points: vec![CanvasPoint::new(-0.5, 0.0), CanvasPoint::new(0.5, 1.0)],
         },
         style: CanvasEntityStyle {
-            foreground: CanvasColor::Rgb {
+            foreground: CanvasColor::Rgba {
                 red: 10,
                 green: 20,
                 blue: 30,
+                alpha: 35,
             },
             line_width: 6.5,
             dashed: true,
-            fill: Some(CanvasColor::Rgb {
+            fill: Some(CanvasColor::Rgba {
                 red: 40,
                 green: 50,
                 blue: 60,
+                alpha: 65,
             }),
             arrow_start: true,
             arrow_end: true,
