@@ -8,26 +8,12 @@ mod workspace_index;
 
 use std::collections::HashMap;
 
-use block::{Block, BlockParent};
-use block_client::{
-    blocks::{
-        image::Image,
-        infinite_canvas::InfiniteCanvas,
-        pixel_art::PixelArt,
-        text::TextDocument,
-        web_browser_tab::WebBrowserTab,
-        workspace_index::{BlockEntry, WorkspaceIndex},
-    },
-    BlockClient, BlockRelationships,
-};
+use block::BlockParent;
+use block_client::{blocks::workspace_index::BlockEntry, BlockClient, BlockRelationships};
 use eframe::egui;
 use uuid::Uuid;
 
-use self::{
-    browser_tab::WebBrowserTabEditor, image::ImageEditor, infinite_canvas::InfiniteCanvasEditor,
-    pixel_art::PixelArtEditor, text::TextEditor, unsupported::UnsupportedEditor,
-    workspace_index::WorkspaceIndexEditor,
-};
+use self::unsupported::UnsupportedEditor;
 
 pub enum EditorAction {
     OpenBlock {
@@ -174,6 +160,7 @@ pub trait DynamicArtifactRegeneration {
 }
 
 struct EditorRegistration {
+    block_type: Uuid,
     display_name: &'static str,
     create: Option<CreateEditor>,
     open: OpenEditor,
@@ -209,122 +196,18 @@ impl EditorRegistry {
         let mut registry = Self {
             registrations: HashMap::new(),
         };
-        registry.register_open_only(Image::TYPE_ID, "Image", |client, id| {
-            Box::new(ImageEditor::new(client.get_block::<Image>(id)))
-        });
-        registry.register(
-            InfiniteCanvas::TYPE_ID,
-            "Canvas",
-            false,
-            false,
-            |client| {
-                Box::new(InfiniteCanvasEditor::new(
-                    client.create_block(InfiniteCanvas::new()),
-                    client,
-                ))
-            },
-            |client, id| {
-                Box::new(InfiniteCanvasEditor::new(
-                    client.get_block::<InfiniteCanvas>(id),
-                    client,
-                ))
-            },
-        );
-        registry.register(
-            PixelArt::TYPE_ID,
-            "Pixel Art",
-            false,
-            false,
-            |client| Box::new(PixelArtEditor::new(client.create_block(PixelArt::new()))),
-            |client, id| Box::new(PixelArtEditor::new(client.get_block::<PixelArt>(id))),
-        );
-        registry
-            .registrations
-            .get_mut(&PixelArt::TYPE_ID)
-            .unwrap()
-            .regenerate_dynamic_artifact = Some(pixel_art::dynamic_artifact::regenerate);
-        registry.register(
-            TextDocument::TYPE_ID,
-            "Text",
-            false,
-            false,
-            |client| Box::new(TextEditor::new(client.create_block(TextDocument::new()))),
-            |client, id| Box::new(TextEditor::new(client.get_block::<TextDocument>(id))),
-        );
-        registry.register(
-            WebBrowserTab::TYPE_ID,
-            "Web Browser Tab",
-            false,
-            false,
-            |client| {
-                Box::new(WebBrowserTabEditor::new(
-                    client.create_block(WebBrowserTab::new()),
-                ))
-            },
-            |client, id| {
-                Box::new(WebBrowserTabEditor::new(
-                    client.get_block::<WebBrowserTab>(id),
-                ))
-            },
-        );
-        registry.register(
-            WorkspaceIndex::TYPE_ID,
-            "Folder",
-            true,
-            true,
-            |client| {
-                Box::new(WorkspaceIndexEditor::new(
-                    client.create_block(WorkspaceIndex::default()),
-                ))
-            },
-            |client, id| {
-                Box::new(WorkspaceIndexEditor::new(
-                    client.get_block::<WorkspaceIndex>(id),
-                ))
-            },
-        );
+        registry.register(image::registration());
+        registry.register(infinite_canvas::registration());
+        registry.register(pixel_art::registration());
+        registry.register(text::registration());
+        registry.register(browser_tab::registration());
+        registry.register(workspace_index::registration());
         registry
     }
 
-    fn register(
-        &mut self,
-        block_type: Uuid,
-        display_name: &'static str,
-        can_add_child: bool,
-        can_delete_child: bool,
-        create: CreateEditor,
-        open: OpenEditor,
-    ) {
-        self.registrations.insert(
-            block_type,
-            EditorRegistration {
-                display_name,
-                create: Some(create),
-                open,
-                can_add_child,
-                can_delete_child,
-                regenerate_dynamic_artifact: None,
-            },
-        );
-    }
-
-    fn register_open_only(
-        &mut self,
-        block_type: Uuid,
-        display_name: &'static str,
-        open: OpenEditor,
-    ) {
-        self.registrations.insert(
-            block_type,
-            EditorRegistration {
-                display_name,
-                create: None,
-                open,
-                can_add_child: false,
-                can_delete_child: false,
-                regenerate_dynamic_artifact: None,
-            },
-        );
+    fn register(&mut self, registration: EditorRegistration) {
+        self.registrations
+            .insert(registration.block_type, registration);
     }
 
     pub fn display_name(&self, block_type: Uuid) -> Option<&'static str> {

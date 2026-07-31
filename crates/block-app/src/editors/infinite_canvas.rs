@@ -19,8 +19,30 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use super::{
     image::ImageEditor, BlockEditor, BlockRenderContext, EditorAccess, EditorAction,
-    SidebarDragPayload,
+    EditorRegistration, SidebarDragPayload,
 };
+
+pub(super) fn registration() -> EditorRegistration {
+    EditorRegistration {
+        block_type: InfiniteCanvas::TYPE_ID,
+        display_name: "Canvas",
+        create: Some(|client| {
+            Box::new(InfiniteCanvasEditor::new(
+                client.create_block(InfiniteCanvas::new()),
+                client,
+            ))
+        }),
+        open: |client, id| {
+            Box::new(InfiniteCanvasEditor::new(
+                client.get_block::<InfiniteCanvas>(id),
+                client,
+            ))
+        },
+        can_add_child: false,
+        can_delete_child: false,
+        regenerate_dynamic_artifact: None,
+    }
+}
 
 const MIN_SIZE: f32 = 4.0;
 const HIT_RADIUS: f32 = 7.0;

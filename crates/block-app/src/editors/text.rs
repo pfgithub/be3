@@ -6,7 +6,19 @@ use block_client::{
 use eframe::egui;
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAccess, EditorAction};
+use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+
+pub(super) fn registration() -> EditorRegistration {
+    EditorRegistration {
+        block_type: TextDocument::TYPE_ID,
+        display_name: "Text",
+        create: Some(|client| Box::new(TextEditor::new(client.create_block(TextDocument::new())))),
+        open: |client, id| Box::new(TextEditor::new(client.get_block::<TextDocument>(id))),
+        can_add_child: false,
+        can_delete_child: false,
+        regenerate_dynamic_artifact: None,
+    }
+}
 
 pub(super) struct TextEditor {
     block: BlockHandle<TextDocument>,

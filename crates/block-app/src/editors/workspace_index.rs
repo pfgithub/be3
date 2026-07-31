@@ -6,7 +6,27 @@ use block_client::{
 use eframe::egui;
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAccess, EditorAction};
+use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+
+pub(super) fn registration() -> EditorRegistration {
+    EditorRegistration {
+        block_type: WorkspaceIndex::TYPE_ID,
+        display_name: "Folder",
+        create: Some(|client| {
+            Box::new(WorkspaceIndexEditor::new(
+                client.create_block(WorkspaceIndex::default()),
+            ))
+        }),
+        open: |client, id| {
+            Box::new(WorkspaceIndexEditor::new(
+                client.get_block::<WorkspaceIndex>(id),
+            ))
+        },
+        can_add_child: true,
+        can_delete_child: true,
+        regenerate_dynamic_artifact: None,
+    }
+}
 
 pub(super) struct WorkspaceIndexEditor {
     block: BlockHandle<WorkspaceIndex>,

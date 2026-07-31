@@ -12,7 +12,27 @@ use wry::{
     NewWindowResponse, PageLoadEvent, Rect as WebViewRect, WebView, WebViewBuilder,
 };
 
-use super::{BlockEditor, EditorAccess, EditorAction};
+use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+
+pub(super) fn registration() -> EditorRegistration {
+    EditorRegistration {
+        block_type: WebBrowserTab::TYPE_ID,
+        display_name: "Web Browser Tab",
+        create: Some(|client| {
+            Box::new(WebBrowserTabEditor::new(
+                client.create_block(WebBrowserTab::new()),
+            ))
+        }),
+        open: |client, id| {
+            Box::new(WebBrowserTabEditor::new(
+                client.get_block::<WebBrowserTab>(id),
+            ))
+        },
+        can_add_child: false,
+        can_delete_child: false,
+        regenerate_dynamic_artifact: None,
+    }
+}
 
 const HISTORY_SCRIPT: &str = r#"
 (() => {

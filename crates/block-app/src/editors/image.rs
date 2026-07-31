@@ -1,9 +1,21 @@
 use block::{Block, BlockParent};
-use block_client::{blocks::image::Image, BlockHandle, BlockRelationships};
+use block_client::{blocks::image::Image, BlockClient, BlockHandle, BlockRelationships};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, TextureHandle, Vec2};
 use uuid::Uuid;
 
-use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction};
+use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration};
+
+pub(super) fn registration() -> EditorRegistration {
+    EditorRegistration {
+        block_type: Image::TYPE_ID,
+        display_name: "Image",
+        create: None,
+        open: |client: &BlockClient, id| Box::new(ImageEditor::new(client.get_block::<Image>(id))),
+        can_add_child: false,
+        can_delete_child: false,
+        regenerate_dynamic_artifact: None,
+    }
+}
 
 pub(super) struct ImageEditor {
     block: BlockHandle<Image>,

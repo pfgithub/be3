@@ -14,7 +14,19 @@ use block_client::{
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use uuid::Uuid;
 
-use super::{image::ImageEditor, BlockEditor, EditorAccess, EditorAction};
+use super::{image::ImageEditor, BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+
+pub(super) fn registration() -> EditorRegistration {
+    EditorRegistration {
+        block_type: PixelArt::TYPE_ID,
+        display_name: "Pixel Art",
+        create: Some(|client| Box::new(PixelArtEditor::new(client.create_block(PixelArt::new())))),
+        open: |client, id| Box::new(PixelArtEditor::new(client.get_block::<PixelArt>(id))),
+        can_add_child: false,
+        can_delete_child: false,
+        regenerate_dynamic_artifact: Some(dynamic_artifact::regenerate),
+    }
+}
 
 const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 32.0;
