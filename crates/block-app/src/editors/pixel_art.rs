@@ -148,63 +148,12 @@ impl PixelArtEditor {
         });
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, width: u16, height: u16, palette: &[PixelColor]) {
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("Tools");
-            self.tool_button(ui, PixelTool::Pencil, "B or P");
-            self.tool_button(ui, PixelTool::Eraser, "E");
-            self.tool_button(ui, PixelTool::Fill, "G");
-            self.tool_button(ui, PixelTool::Eyedropper, "I");
-            self.tool_button(ui, PixelTool::ReplaceColor, "C");
-            self.tool_button(ui, PixelTool::Line, "L");
-            self.tool_button(ui, PixelTool::Rectangle, "R");
-            self.tool_button(ui, PixelTool::Ellipse, "O");
-            ui.separator();
+    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) {
+        ui.horizontal(|ui| {
+            ui.strong(self.tool.label());
+            ui.weak(format!("{width} × {height} px"));
 
-            ui.strong("Brush");
-            ui.add(
-                egui::DragValue::new(&mut self.brush_size)
-                    .range(1..=MAX_BRUSH_SIZE)
-                    .suffix(" px"),
-            )
-            .on_hover_text("Brush size ([ or ])");
-            ui.selectable_value(&mut self.brush_shape, BrushShape::Square, "Square");
-            ui.selectable_value(&mut self.brush_shape, BrushShape::Circle, "Circle");
-            let shapes_selected = matches!(self.tool, PixelTool::Rectangle | PixelTool::Ellipse);
-            if ui
-                .add_enabled(
-                    shapes_selected,
-                    egui::Button::new("Filled").selected(self.shapes_filled),
-                )
-                .on_hover_text("Fill rectangles and ellipses (X)")
-                .clicked()
-            {
-                self.shapes_filled = !self.shapes_filled;
-            }
             ui.separator();
-
-            ui.strong("Color");
-            let mut color = self.color.rgba();
-            if ui
-                .color_edit_button_srgba_unmultiplied(&mut color)
-                .on_hover_text("Drawing color")
-                .changed()
-            {
-                self.set_active_color(
-                    PixelColor::new(color[0], color[1], color[2], color[3]),
-                    false,
-                );
-            }
-            ui.separator();
-
-            ui.strong("Symmetry");
-            ui.toggle_value(&mut self.mirror_horizontal, "Horizontal")
-                .on_hover_text("Mirror across the vertical canvas axis (H)");
-            ui.toggle_value(&mut self.mirror_vertical, "Vertical")
-                .on_hover_text("Mirror across the horizontal canvas axis (V)");
-            ui.separator();
-
-            ui.strong("View");
             if ui.small_button("−").on_hover_text("Zoom out (-)").clicked() {
                 self.change_zoom(1.0 / ZOOM_STEP);
             }
@@ -227,46 +176,104 @@ impl PixelArtEditor {
             }
             ui.checkbox(&mut self.show_grid, "Grid");
 
-            ui.separator();
-            ui.strong("Canvas");
-            if ui.button("Resize").clicked() {
-                self.active_drawing = None;
-                self.committed_preview = None;
-                self.resize_width = width;
-                self.resize_height = height;
-                self.resize_anchor = PixelArtAnchor::Center;
-                self.resize_open = true;
-            }
-            if ui.button("Clear").clicked() {
-                self.active_drawing = None;
-                self.committed_preview = None;
-                self.clear_open = true;
-            }
-            ui.separator();
-            ui.weak(format!("{} · {width} × {height} px", self.tool.label()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Clear").clicked() {
+                    self.active_drawing = None;
+                    self.committed_preview = None;
+                    self.clear_open = true;
+                }
+                if ui.button("Resize…").clicked() {
+                    self.active_drawing = None;
+                    self.committed_preview = None;
+                    self.resize_width = width;
+                    self.resize_height = height;
+                    self.resize_anchor = PixelArtAnchor::Center;
+                    self.resize_open = true;
+                }
+            });
         });
+    }
 
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("RGBA");
-            let mut channels = self.color.rgba();
-            let mut channels_changed = false;
-            for (label, channel) in ["R", "G", "B", "A"].into_iter().zip(&mut channels) {
-                ui.label(label);
-                channels_changed |= ui
-                    .add(egui::DragValue::new(channel).range(0..=255))
-                    .changed();
-            }
-            if channels_changed {
+    fn tools_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Tools");
+        ui.add_space(4.0);
+        egui::Grid::new(("pixel-art-tools", self.block.id()))
+            .num_columns(2)
+            .spacing(Vec2::new(4.0, 4.0))
+            .show(ui, |ui| {
+                self.tool_button(ui, PixelTool::Pencil, "B or P");
+                self.tool_button(ui, PixelTool::Eraser, "E");
+                ui.end_row();
+                self.tool_button(ui, PixelTool::Fill, "G");
+                self.tool_button(ui, PixelTool::Eyedropper, "I");
+                ui.end_row();
+                self.tool_button(ui, PixelTool::Line, "L");
+                self.tool_button(ui, PixelTool::ReplaceColor, "C");
+                ui.end_row();
+                self.tool_button(ui, PixelTool::Rectangle, "R");
+                self.tool_button(ui, PixelTool::Ellipse, "O");
+                ui.end_row();
+            });
+
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.strong("Tool options");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Size");
+            ui.add(
+                egui::DragValue::new(&mut self.brush_size)
+                    .range(1..=MAX_BRUSH_SIZE)
+                    .suffix(" px"),
+            )
+            .on_hover_text("Brush size ([ or ])");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Brush");
+            ui.selectable_value(&mut self.brush_shape, BrushShape::Square, "Square");
+            ui.selectable_value(&mut self.brush_shape, BrushShape::Circle, "Circle");
+        });
+        let shapes_selected = matches!(self.tool, PixelTool::Rectangle | PixelTool::Ellipse);
+        if ui
+            .add_enabled(
+                shapes_selected,
+                egui::Button::new("Filled shapes").selected(self.shapes_filled),
+            )
+            .on_hover_text("Fill rectangles and ellipses (X)")
+            .clicked()
+        {
+            self.shapes_filled = !self.shapes_filled;
+        }
+
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.strong("Symmetry");
+        ui.checkbox(&mut self.mirror_horizontal, "Mirror horizontally")
+            .on_hover_text("Mirror across the vertical canvas axis (H)");
+        ui.checkbox(&mut self.mirror_vertical, "Mirror vertically")
+            .on_hover_text("Mirror across the horizontal canvas axis (V)");
+    }
+
+    fn color_panel(&mut self, ui: &mut egui::Ui, palette: &[PixelColor]) {
+        ui.heading("Color");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let mut color = self.color.rgba();
+            if ui
+                .color_edit_button_srgba_unmultiplied(&mut color)
+                .on_hover_text("Drawing color")
+                .changed()
+            {
                 self.set_active_color(
-                    PixelColor::new(channels[0], channels[1], channels[2], channels[3]),
+                    PixelColor::new(color[0], color[1], color[2], color[3]),
                     false,
                 );
             }
-
-            ui.label("Hex");
             let hex_response = ui.add(
                 egui::TextEdit::singleline(&mut self.color_hex)
-                    .desired_width(90.0)
+                    .desired_width(100.0)
                     .hint_text("#RRGGBBAA"),
             );
             if hex_response.changed() {
@@ -277,31 +284,62 @@ impl PixelArtEditor {
             if parse_hex_color(&self.color_hex).is_none() {
                 hex_response.on_hover_text("Enter a color as #RRGGBBAA");
             }
+        });
 
-            if self.tool == PixelTool::ReplaceColor {
-                ui.separator();
-                ui.strong("Replace");
+        let mut channels = self.color.rgba();
+        let mut channels_changed = false;
+        egui::Grid::new(("pixel-art-channels", self.block.id()))
+            .num_columns(2)
+            .show(ui, |ui| {
+                for (label, channel) in ["Red", "Green", "Blue", "Alpha"]
+                    .into_iter()
+                    .zip(&mut channels)
+                {
+                    ui.label(label);
+                    channels_changed |= ui
+                        .add(egui::DragValue::new(channel).range(0..=255))
+                        .changed();
+                    ui.end_row();
+                }
+            });
+        if channels_changed {
+            self.set_active_color(
+                PixelColor::new(channels[0], channels[1], channels[2], channels[3]),
+                false,
+            );
+        }
+
+        if self.tool == PixelTool::ReplaceColor {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Replace");
                 if let Some(source) = self.replace_source_hover {
                     color_swatch(ui, source, false);
                 } else {
-                    ui.weak("hover a source color");
+                    ui.weak("hover canvas");
                 }
                 ui.label("→");
                 color_swatch(ui, self.color, false);
-            }
-        });
+            });
+        }
 
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.strong("Palette");
+        ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.strong("Palette");
             for &color in palette {
                 if color_swatch(ui, color, color == self.color).clicked() {
                     self.set_active_color(color, true);
                 }
             }
+        });
+        ui.horizontal(|ui| {
             let can_add =
                 palette.len() < MAX_PIXEL_ART_PALETTE_COLORS && !palette.contains(&self.color);
             if ui
-                .add_enabled(can_add, egui::Button::new("Add"))
+                .add_enabled(can_add, egui::Button::new("Add color"))
                 .on_hover_text("Add the active color to this artwork's palette")
                 .clicked()
             {
@@ -324,9 +362,13 @@ impl PixelArtEditor {
             }
         });
 
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.strong("Recent");
+        ui.add_space(4.0);
         let recent_colors = self.recent_colors.clone();
         ui.horizontal_wrapped(|ui| {
-            ui.strong("Recent");
             for color in recent_colors {
                 if color_swatch(ui, color, color == self.color).clicked() {
                     self.set_active_color(color, true);
@@ -337,7 +379,10 @@ impl PixelArtEditor {
 
     fn tool_button(&mut self, ui: &mut egui::Ui, tool: PixelTool, shortcut: &str) {
         if ui
-            .selectable_label(self.tool == tool, tool.label())
+            .add_sized(
+                [76.0, 24.0],
+                egui::Button::new(tool.label()).selected(self.tool == tool),
+            )
             .on_hover_text(format!("{} ({shortcut})", tool.label()))
             .clicked()
         {
@@ -966,9 +1011,20 @@ impl BlockEditor for PixelArtEditor {
             self.update_texture(ui.ctx(), image, revision, size, dark_mode);
         }
 
-        self.toolbar(ui, width, height, &palette);
-        ui.separator();
         let input_enabled = !self.resize_open && !self.clear_open;
+        egui::Panel::top(egui::Id::new(("pixel-art-toolbar", self.block.id())))
+            .show_separator_line(true)
+            .show_inside(ui, |ui| self.top_bar(ui, width, height));
+        egui::Panel::left(egui::Id::new(("pixel-art-tools-panel", self.block.id())))
+            .default_size(172.0)
+            .resizable(false)
+            .show_inside(ui, |ui| self.tools_panel(ui));
+        egui::Panel::right(egui::Id::new(("pixel-art-color-panel", self.block.id())))
+            .default_size(210.0)
+            .min_size(190.0)
+            .max_size(280.0)
+            .resizable(true)
+            .show_inside(ui, |ui| self.color_panel(ui, &palette));
         self.canvas(ui, width, height, input_enabled);
         self.resize_dialog(ui.ctx(), width, height);
         self.clear_dialog(ui.ctx());
