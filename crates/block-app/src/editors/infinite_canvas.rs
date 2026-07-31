@@ -147,6 +147,8 @@ pub(super) struct InfiniteCanvasEditor {
     preview_editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     focus_text: Option<Uuid>,
     image_import_error: Option<String>,
+    pending_file_drop_position: Option<CanvasPoint>,
+    paste_shortcut_down: bool,
 }
 
 impl InfiniteCanvasEditor {
@@ -169,6 +171,8 @@ impl InfiniteCanvasEditor {
             preview_editors: HashMap::new(),
             focus_text: None,
             image_import_error: None,
+            pending_file_drop_position: None,
+            paste_shortcut_down: false,
         }
     }
 
@@ -355,18 +359,26 @@ impl InfiniteCanvasEditor {
             count => format!("{count} objects selected"),
         });
 
-        let foreground = common_value(selected.iter().map(|entity| entity.style.foreground));
-        if let Some(color) = color_menu(ui, "Color", foreground) {
-            self.update_selected(entities, |_| true, |style| style.foreground = color);
+        let foreground = common_value(
+            selected
+                .iter()
+                .filter(|entity| !matches!(entity.kind, CanvasEntityKind::Block { .. }))
+                .map(|entity| entity.style.foreground),
+        );
+        if !matches!(foreground, CommonValue::None) {
+            if let Some(color) = color_menu(ui, "Color", foreground) {
+                self.update_selected(
+                    entities,
+                    |kind| !matches!(kind, CanvasEntityKind::Block { .. }),
+                    |style| style.foreground = color,
+                );
+            }
         }
 
         let stroked = selected.iter().copied().filter(|entity| {
             matches!(
                 entity.kind,
-                CanvasEntityKind::Line
-                    | CanvasEntityKind::Rectangle
-                    | CanvasEntityKind::Pen { .. }
-                    | CanvasEntityKind::Block { .. }
+                CanvasEntityKind::Line | CanvasEntityKind::Rectangle | CanvasEntityKind::Pen { .. }
             )
         });
         let width = common_value(stroked.map(|entity| entity.style.line_width));
@@ -394,7 +406,6 @@ impl InfiniteCanvasEditor {
                             CanvasEntityKind::Line
                                 | CanvasEntityKind::Rectangle
                                 | CanvasEntityKind::Pen { .. }
-                                | CanvasEntityKind::Block { .. }
                         )
                     },
                     |style| style.line_width = value,
@@ -611,17 +622,40 @@ impl InfiniteCanvasEditor {
     }
 
     fn import_dropped_images(&mut self, response: &egui::Response, client: &BlockClient) {
-        let dropped = response.ctx.input(|input| input.raw.dropped_files.clone());
+        let (hovering_file, dropped) = response.ctx.input(|input| {
+            (
+                !input.raw.hovered_files.is_empty(),
+                input.raw.dropped_files.clone(),
+            )
+        });
+        if hovering_file {
+            if let Some(position) = response
+                .ctx
+                .pointer_hover_pos()
+                .filter(|position| response.rect.contains(*position))
+            {
+                self.pending_file_drop_position =
+                    Some(self.screen_to_world(position, response.rect));
+            }
+        }
         if dropped.is_empty() {
+            if !hovering_file {
+                self.pending_file_drop_position = None;
+            }
             return;
         }
         self.image_import_error = None;
-        let screen_position = response
-            .ctx
-            .pointer_hover_pos()
-            .filter(|position| response.rect.contains(*position))
-            .unwrap_or_else(|| response.rect.center());
-        let base = self.screen_to_world(screen_position, response.rect);
+        let base = self
+            .pending_file_drop_position
+            .take()
+            .or_else(|| {
+                response
+                    .ctx
+                    .pointer_hover_pos()
+                    .filter(|position| response.rect.contains(*position))
+                    .map(|position| self.screen_to_world(position, response.rect))
+            })
+            .unwrap_or_else(|| self.screen_to_world(response.rect.center(), response.rect));
         for (index, file) in dropped.into_iter().enumerate() {
             let source_name = file
                 .path
@@ -666,11 +700,8 @@ impl InfiniteCanvasEditor {
     }
 
     fn import_clipboard_image(&mut self, response: &egui::Response, client: &BlockClient) {
-        let paste_requested = response.hovered()
-            && !response.ctx.egui_wants_keyboard_input()
-            && response
-                .ctx
-                .input(|input| input.modifiers.command && input.key_pressed(egui::Key::V));
+        let paste_requested = self.image_paste_shortcut_pressed(&response.ctx)
+            && !response.ctx.egui_wants_keyboard_input();
         if !paste_requested {
             return;
         }
@@ -705,6 +736,32 @@ impl InfiniteCanvasEditor {
             .unwrap_or_else(|| response.rect.center());
         let center = self.screen_to_world(screen_position, response.rect);
         self.add_imported_image(client, image, center);
+    }
+
+    fn image_paste_shortcut_pressed(&mut self, context: &egui::Context) -> bool {
+        let event_paste = context.input(|input| {
+            input
+                .raw
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Paste(_)))
+                || (input.modifiers.command && input.key_pressed(egui::Key::V))
+        });
+        #[cfg(target_os = "windows")]
+        let shortcut_down = {
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
+
+            const VK_V: i32 = 0x56;
+            // SAFETY: GetAsyncKeyState reads process-independent keyboard state and has no
+            // pointer or lifetime requirements.
+            unsafe { GetAsyncKeyState(VK_CONTROL as i32) < 0 && GetAsyncKeyState(VK_V) < 0 }
+        };
+        #[cfg(not(target_os = "windows"))]
+        let shortcut_down = false;
+
+        let shortcut_pressed = shortcut_down && !self.paste_shortcut_down;
+        self.paste_shortcut_down = shortcut_down;
+        event_paste || shortcut_pressed
     }
 
     fn handle_zoom_and_pan(&mut self, response: &egui::Response) -> bool {
@@ -1980,13 +2037,12 @@ fn paint_entity(
                     opacity,
                 })
             }) {
-                painter.add(egui::Shape::closed_line(corners.to_vec(), stroke));
                 return;
             }
             painter.add(egui::Shape::convex_polygon(
                 corners.to_vec(),
                 with_opacity(Color32::from_gray(35), opacity),
-                stroke,
+                Stroke::NONE,
             ));
             let center = editor.world_to_screen(entity.transform.center, rect);
             let title = dependency_titles
