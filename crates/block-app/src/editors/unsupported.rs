@@ -3,7 +3,7 @@ use block_client::BlockRelationships;
 use eframe::egui;
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAction};
+use super::{BlockEditor, EditorAccess, EditorAction};
 
 pub(super) struct UnsupportedEditor {
     id: Uuid,
@@ -40,7 +40,7 @@ impl BlockEditor for UnsupportedEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &block_client::BlockClient,
+        _editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         ui.centered_and_justified(|ui| {

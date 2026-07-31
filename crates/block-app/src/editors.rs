@@ -50,6 +50,64 @@ pub struct BlockRenderContext<'a> {
     pub opacity: f32,
 }
 
+pub struct EditorAccess<'a> {
+    active: Uuid,
+    client: &'a BlockClient,
+    registry: &'a EditorRegistry,
+    editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
+}
+
+impl<'a> EditorAccess<'a> {
+    pub fn new(
+        active: Uuid,
+        client: &'a BlockClient,
+        registry: &'a EditorRegistry,
+        editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
+    ) -> Self {
+        Self {
+            active,
+            client,
+            registry,
+            editors,
+        }
+    }
+
+    pub fn client(&self) -> &BlockClient {
+        self.client
+    }
+
+    pub fn insert(&mut self, editor: Box<dyn BlockEditor>) {
+        let id = editor.id();
+        assert_ne!(id, self.active, "cannot replace the active editor");
+        assert!(
+            self.editors.insert(id, editor).is_none(),
+            "editor {id} is already open"
+        );
+    }
+
+    pub fn ensure(&mut self, id: Uuid, block_type: Uuid) {
+        if id != self.active && !self.editors.contains_key(&id) {
+            self.editors
+                .insert(id, self.registry.open(self.client, id, block_type));
+        }
+    }
+
+    pub fn default_preserve_aspect_ratio(&self, id: Uuid) -> bool {
+        self.editors
+            .get(&id)
+            .is_some_and(|editor| editor.default_preserve_aspect_ratio())
+    }
+
+    pub fn render(&mut self, id: Uuid, context: BlockRenderContext<'_>) -> bool {
+        let Some(mut editor) = self.editors.remove(&id) else {
+            return false;
+        };
+        let rendered = editor.render(context);
+        self.editors.insert(id, editor);
+        rendered
+    }
+}
+
 #[derive(Clone)]
 pub struct SidebarDragPayload {
     pub reference: block::BlockReference,
@@ -101,7 +159,7 @@ pub trait BlockEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        client: &BlockClient,
+        editors: &mut EditorAccess<'_>,
         frame: &eframe::Frame,
     ) -> Option<EditorAction>;
 }

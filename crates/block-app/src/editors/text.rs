@@ -6,7 +6,7 @@ use block_client::{
 use eframe::egui;
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAction};
+use super::{BlockEditor, EditorAccess, EditorAction};
 
 pub(super) struct TextEditor {
     block: BlockHandle<TextDocument>,
@@ -50,7 +50,7 @@ impl BlockEditor for TextEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &block_client::BlockClient,
+        _editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         let Some(document) = self.block.read() else {

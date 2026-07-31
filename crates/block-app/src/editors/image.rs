@@ -3,7 +3,7 @@ use block_client::{blocks::image::Image, BlockHandle, BlockRelationships};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, TextureHandle, Vec2};
 use uuid::Uuid;
 
-use super::{BlockEditor, BlockRenderContext, EditorAction};
+use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction};
 
 pub(super) struct ImageEditor {
     block: BlockHandle<Image>,
@@ -121,7 +121,7 @@ impl BlockEditor for ImageEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &block_client::BlockClient,
+        _editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         if !self.ensure_texture(ui.ctx()) {

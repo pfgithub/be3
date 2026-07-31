@@ -10,7 +10,7 @@ use block_client::{
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAction};
+use super::{BlockEditor, EditorAccess, EditorAction};
 
 const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 32.0;
@@ -816,7 +816,7 @@ impl BlockEditor for PixelArtEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &block_client::BlockClient,
+        _editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         let Some(art) = self.block.read() else {

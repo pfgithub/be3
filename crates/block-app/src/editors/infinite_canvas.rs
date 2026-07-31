@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use super::{
-    image::ImageEditor, BlockEditor, BlockRenderContext, EditorAction, EditorRegistry,
+    image::ImageEditor, BlockEditor, BlockRenderContext, EditorAccess, EditorAction,
     SidebarDragPayload,
 };
 
@@ -143,8 +143,6 @@ pub(super) struct InfiniteCanvasEditor {
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
     dependencies: ReferenceList,
-    preview_registry: EditorRegistry,
-    preview_editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     focus_text: Option<Uuid>,
     image_import_error: Option<String>,
     pending_file_drop_position: Option<CanvasPoint>,
@@ -167,8 +165,6 @@ impl InfiniteCanvasEditor {
             pending_block_center: None,
             context_menu_position: None,
             dependencies,
-            preview_registry: EditorRegistry::new(),
-            preview_editors: HashMap::new(),
             focus_text: None,
             image_import_error: None,
             pending_file_drop_position: None,
@@ -264,22 +260,25 @@ impl InfiniteCanvasEditor {
         CanvasPoint::new(width * scale, height * scale)
     }
 
-    fn add_imported_image(&mut self, client: &BlockClient, image: ImageBlock, center: CanvasPoint) {
+    fn add_imported_image(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+        image: ImageBlock,
+        center: CanvasPoint,
+    ) {
         let size = Self::imported_image_size(&image);
-        let block = client.create_block(image);
+        let block = editors.client().create_block(image);
         let id = block.id();
         self.add_block_entity_sized(id, center, size);
         block.note_backref(self.block.id());
         block.set_parent(BlockParent::Uuid(self.block.id()));
-        self.preview_editors
-            .insert(id, Box::new(ImageEditor::new(block)));
+        editors.insert(Box::new(ImageEditor::new(block)));
     }
 
-    fn sync_preview_editors(
-        &mut self,
+    fn ensure_dependency_editors(
         entities: &[CanvasEntity],
         dependencies: &[block::BlockReference],
-        client: &BlockClient,
+        editors: &mut EditorAccess<'_>,
     ) {
         let referenced = entities
             .iter()
@@ -288,21 +287,18 @@ impl InfiniteCanvasEditor {
                 _ => None,
             })
             .collect::<HashSet<_>>();
-        self.preview_editors.retain(|id, _| referenced.contains(id));
         for dependency in dependencies {
-            if referenced.contains(&dependency.id)
-                && !self.preview_editors.contains_key(&dependency.id)
-            {
-                self.preview_editors.insert(
-                    dependency.id,
-                    self.preview_registry
-                        .open(client, dependency.id, dependency.block_type),
-                );
+            if referenced.contains(&dependency.id) {
+                editors.ensure(dependency.id, dependency.block_type);
             }
         }
     }
 
-    fn selection_defaults_to_proportional(&self, entities: &[CanvasEntity]) -> bool {
+    fn selection_defaults_to_proportional(
+        &self,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) -> bool {
         entities
             .iter()
             .filter(|entity| self.selection.contains(&entity.id))
@@ -310,9 +306,7 @@ impl InfiniteCanvasEditor {
                 let CanvasEntityKind::Block { block_id } = entity.kind else {
                     return false;
                 };
-                self.preview_editors
-                    .get(&block_id)
-                    .is_some_and(|editor| editor.default_preserve_aspect_ratio())
+                editors.default_preserve_aspect_ratio(block_id)
             })
     }
 
@@ -621,7 +615,7 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    fn import_dropped_images(&mut self, response: &egui::Response, client: &BlockClient) {
+    fn import_dropped_images(&mut self, response: &egui::Response, editors: &mut EditorAccess<'_>) {
         let (hovering_file, dropped) = response.ctx.input(|input| {
             (
                 !input.raw.hovered_files.is_empty(),
@@ -686,7 +680,7 @@ impl InfiniteCanvasEditor {
                 Ok(image) => {
                     let offset = IMPORT_CASCADE_OFFSET * index as f32;
                     self.add_imported_image(
-                        client,
+                        editors,
                         image,
                         CanvasPoint::new(base.x + offset, base.y + offset),
                     );
@@ -699,7 +693,11 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    fn import_clipboard_image(&mut self, response: &egui::Response, client: &BlockClient) {
+    fn import_clipboard_image(
+        &mut self,
+        response: &egui::Response,
+        editors: &mut EditorAccess<'_>,
+    ) {
         let paste_requested = self.image_paste_shortcut_pressed(&response.ctx)
             && !response.ctx.egui_wants_keyboard_input();
         if !paste_requested {
@@ -735,7 +733,7 @@ impl InfiniteCanvasEditor {
             .filter(|position| response.rect.contains(*position))
             .unwrap_or_else(|| response.rect.center());
         let center = self.screen_to_world(screen_position, response.rect);
-        self.add_imported_image(client, image, center);
+        self.add_imported_image(editors, image, center);
     }
 
     fn image_paste_shortcut_pressed(&mut self, context: &egui::Context) -> bool {
@@ -797,6 +795,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         response: &egui::Response,
         entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
     ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<Uuid>) {
         if response
             .ctx
@@ -951,7 +950,7 @@ impl InfiniteCanvasEditor {
                         });
                     } else if let (Some(bounds), Some(handle)) = (selected_bounds, handle) {
                         let default_preserve_aspect_ratio =
-                            self.selection_defaults_to_proportional(entities);
+                            self.selection_defaults_to_proportional(entities, editors);
                         let preserve_aspect_ratio = default_preserve_aspect_ratio
                             != response.ctx.input(|input| input.modifiers.shift);
                         self.gesture = Some(Gesture::Resize {
@@ -1149,6 +1148,7 @@ impl InfiniteCanvasEditor {
         rect: Rect,
         entities: &[CanvasEntity],
         dependency_titles: &HashMap<Uuid, String>,
+        editors: &mut EditorAccess<'_>,
     ) {
         let preview = self
             .gesture
@@ -1161,22 +1161,7 @@ impl InfiniteCanvasEditor {
             .collect();
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
-            let block_id = match entity.kind {
-                CanvasEntityKind::Block { block_id } => Some(block_id),
-                _ => None,
-            };
-            let mut renderer = block_id.and_then(|block_id| self.preview_editors.remove(&block_id));
-            paint_entity(
-                self,
-                painter,
-                rect,
-                entity,
-                dependency_titles,
-                renderer.as_deref_mut(),
-            );
-            if let (Some(block_id), Some(renderer)) = (block_id, renderer) {
-                self.preview_editors.insert(block_id, renderer);
-            }
+            paint_entity(self, painter, rect, entity, dependency_titles, editors);
         }
 
         if let Some(Gesture::Create {
@@ -1343,7 +1328,7 @@ impl BlockEditor for InfiniteCanvasEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        client: &BlockClient,
+        editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         let Some(canvas) = self.block.read() else {
@@ -1355,7 +1340,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         let entities = canvas.entities().to_vec();
         drop(canvas);
         let dependencies = self.dependencies.read();
-        self.sync_preview_editors(&entities, &dependencies, client);
+        Self::ensure_dependency_editors(&entities, &dependencies, editors);
         let dependency_titles = dependencies
             .iter()
             .map(|dependency| (dependency.id, dependency.name.clone()))
@@ -1381,10 +1366,10 @@ impl BlockEditor for InfiniteCanvasEditor {
             });
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        self.import_dropped_images(&response, client);
-        self.import_clipboard_image(&response, client);
+        self.import_dropped_images(&response, editors);
+        self.import_clipboard_image(&response, editors);
         let (context_layer_move, context_create_block, set_parent) =
-            self.handle_canvas_input(&response, &entities);
+            self.handle_canvas_input(&response, &entities, editors);
         create_block = create_block.or(context_create_block);
         if let Some(movement) = context_layer_move.or(inspector_layer_move) {
             let operation = InfiniteCanvasOperation::Reorder {
@@ -1403,9 +1388,15 @@ impl BlockEditor for InfiniteCanvasEditor {
             response.rect,
             &painted_entities,
             &dependency_titles,
+            editors,
         );
-        self.show_picker(ui.ctx(), client);
-        let action = self.selected_block_action(ui.ctx(), response.rect, &painted_entities, client);
+        self.show_picker(ui.ctx(), editors.client());
+        let action = self.selected_block_action(
+            ui.ctx(),
+            response.rect,
+            &painted_entities,
+            editors.client(),
+        );
         ui.ctx().request_repaint();
         action
             .or_else(|| {
@@ -1969,7 +1960,7 @@ fn paint_entity(
     rect: Rect,
     entity: &CanvasEntity,
     dependency_titles: &HashMap<Uuid, String>,
-    renderer: Option<&mut (dyn BlockEditor + '_)>,
+    editors: &mut EditorAccess<'_>,
 ) {
     let auto = painter.ctx().global_style().visuals.text_color();
     let opacity = entity.style.opacity.clamp(0.0, 1.0);
@@ -2030,13 +2021,14 @@ fn paint_entity(
         }
         CanvasEntityKind::Block { block_id } => {
             let corners = entity_corners(entity).map(|point| editor.world_to_screen(point, rect));
-            if renderer.is_some_and(|renderer| {
-                renderer.render(BlockRenderContext {
+            if editors.render(
+                *block_id,
+                BlockRenderContext {
                     painter,
                     corners,
                     opacity,
-                })
-            }) {
+                },
+            ) {
                 return;
             }
             painter.add(egui::Shape::convex_polygon(

@@ -12,7 +12,7 @@ use wry::{
     NewWindowResponse, PageLoadEvent, Rect as WebViewRect, WebView, WebViewBuilder,
 };
 
-use super::{BlockEditor, EditorAction};
+use super::{BlockEditor, EditorAccess, EditorAction};
 
 const HISTORY_SCRIPT: &str = r#"
 (() => {
@@ -381,7 +381,7 @@ impl BlockEditor for WebBrowserTabEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &block_client::BlockClient,
+        _editors: &mut EditorAccess<'_>,
         frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         self.ensure_webview(frame);

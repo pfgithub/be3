@@ -15,7 +15,9 @@ use std::{
 use block::{BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
 use block_client::{blocks::workspace_index::BlockEntry, BlockClient, ReferenceList};
 use block_picker::{BlockPicker, BlockPickerMenuAction};
-use editors::{BlockEditor, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource};
+use editors::{
+    BlockEditor, EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
+};
 use eframe::egui;
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -1116,7 +1118,7 @@ impl BlockApp {
             });
             return;
         };
-        let Some(editor) = self.editors.get_mut(&active) else {
+        let Some(mut editor) = self.editors.remove(&active) else {
             self.active_tab = None;
             return;
         };
@@ -1159,7 +1161,12 @@ impl BlockApp {
             });
             ui.separator();
         }
-        let action = editor.ui(ui, &self.client, frame);
+        let action = {
+            let mut editors =
+                EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
+            editor.ui(ui, &mut editors, frame)
+        };
+        self.editors.insert(active, editor);
         match action {
             Some(EditorAction::OpenBlock { id, block_type }) => self.open_tab(id, block_type),
             Some(EditorAction::CreateBlock { block_type, parent }) => {
