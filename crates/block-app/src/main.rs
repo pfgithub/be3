@@ -1218,8 +1218,28 @@ impl BlockApp {
             app: self,
             frame,
             actions: Vec::new(),
+            tabs_to_close: Vec::new(),
         };
         DockArea::new(&mut dock_state).show_inside(ui, &mut viewer);
+        let tabs_to_close = std::mem::take(&mut viewer.tabs_to_close);
+        for id in tabs_to_close {
+            let Some(path) = dock_state.find_tab(&DockTab::Block(id)) else {
+                continue;
+            };
+            let editor_count = dock_state
+                .iter_all_tabs()
+                .filter(|(_, tab)| matches!(tab, DockTab::Block(_)))
+                .count();
+            if editor_count == 1 {
+                let leaf = dock_state
+                    .leaf_mut(path.node_path())
+                    .expect("editor tab must be in a dock leaf");
+                leaf.tabs_mut()[path.tab.0] = DockTab::Empty;
+            } else {
+                dock_state.remove_tab(path);
+            }
+            viewer.app.close_tab_resources(id);
+        }
         ensure_empty_workspace(&mut dock_state);
         let actions = std::mem::take(&mut viewer.actions);
         let pending_tabs = viewer
@@ -1509,6 +1529,7 @@ struct BlockTabViewer<'a> {
     app: &'a mut BlockApp,
     frame: &'a eframe::Frame,
     actions: Vec<(Uuid, EditorAction)>,
+    tabs_to_close: Vec<Uuid>,
 }
 
 impl TabViewer for BlockTabViewer<'_> {
@@ -1517,7 +1538,7 @@ impl TabViewer for BlockTabViewer<'_> {
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         match tab {
             DockTab::Files => "Files".into(),
-            DockTab::Empty => "".into(),
+            DockTab::Empty => "Workspace".into(),
             DockTab::Block(id) => self
                 .app
                 .editors
@@ -1545,7 +1566,14 @@ impl TabViewer for BlockTabViewer<'_> {
                 self.app.show_sidebar(&mut content_ui);
                 ui.advance_cursor_after_rect(content_rect);
             }
-            DockTab::Empty => {}
+            DockTab::Empty => {
+                ui.centered_and_justified(|ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("No file open");
+                        ui.weak("Open or create a file from Files to get started.");
+                    });
+                });
+            }
             DockTab::Block(id) => {
                 if let Some(editor) = self.app.editors.get_mut(id) {
                     editor.set_tab_active(true);
@@ -1561,8 +1589,8 @@ impl TabViewer for BlockTabViewer<'_> {
         match tab {
             DockTab::Files | DockTab::Empty => OnCloseResponse::Ignore,
             DockTab::Block(id) => {
-                self.app.close_tab_resources(*id);
-                OnCloseResponse::Close
+                self.tabs_to_close.push(*id);
+                OnCloseResponse::Ignore
             }
         }
     }
