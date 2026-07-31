@@ -1263,7 +1263,7 @@ impl InfiniteCanvasEditor {
             .fixed_pos(position + Vec2::new(0.0, 6.0))
             .show(context, |ui| {
                 if ui
-                    .add_enabled(cached.is_some(), egui::Button::new("Open block"))
+                    .add_enabled(cached.is_some(), egui::Button::new("Edit"))
                     .on_disabled_hover_text("Waiting for cached block metadata")
                     .clicked()
                 {
