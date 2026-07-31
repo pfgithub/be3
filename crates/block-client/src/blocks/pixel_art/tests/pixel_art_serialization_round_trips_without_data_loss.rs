@@ -15,6 +15,12 @@ fn pixel_art_serialization_round_trips_without_data_loss() {
             }],
         },
     );
+    PixelArt::apply_operation(
+        &mut art,
+        &PixelArtOperation::SetPalette {
+            colors: vec![PixelColor::TRANSPARENT, PixelColor::new(12, 34, 56, 78)],
+        },
+    );
 
     let json = serde_json::to_string(&art).unwrap();
     let decoded: PixelArt = serde_json::from_str(&json).unwrap();

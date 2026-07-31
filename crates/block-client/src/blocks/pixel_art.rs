@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 pub const DEFAULT_PIXEL_ART_SIZE: u16 = 32;
 pub const MAX_PIXEL_ART_SIZE: u16 = 2048;
+pub const MAX_PIXEL_ART_PALETTE_COLORS: usize = 32;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct PixelColor {
@@ -64,6 +65,13 @@ pub enum PixelArtOperation {
         y: u16,
         color: PixelColor,
     },
+    ReplaceColor {
+        from: PixelColor,
+        to: PixelColor,
+    },
+    SetPalette {
+        colors: Vec<PixelColor>,
+    },
     Clear,
     Resize {
         width: u16,
@@ -81,6 +89,7 @@ pub struct PixelArt {
         deserialize_with = "deserialize_pixels"
     )]
     pixels: Vec<u8>,
+    palette: Vec<PixelColor>,
     revision: u64,
 }
 
@@ -92,6 +101,10 @@ pub struct PixelArtHistoryAction {
 
 enum PixelArtHistoryActionKind {
     Pixels(Vec<PixelDelta>),
+    Palette {
+        before: Vec<PixelColor>,
+        after: Vec<PixelColor>,
+    },
     Resize {
         before: PixelArt,
         after: PixelArt,
@@ -112,6 +125,7 @@ struct PixelArtData {
     height: u16,
     #[serde(deserialize_with = "deserialize_pixels")]
     pixels: Vec<u8>,
+    palette: Vec<PixelColor>,
     revision: u64,
 }
 
@@ -129,10 +143,20 @@ impl<'de> Deserialize<'de> for PixelArt {
                 "pixel art buffer length does not match its dimensions",
             ));
         }
+        if data.palette.len() > MAX_PIXEL_ART_PALETTE_COLORS
+            || data
+                .palette
+                .iter()
+                .enumerate()
+                .any(|(index, color)| data.palette[..index].contains(color))
+        {
+            return Err(D::Error::custom("pixel art palette is invalid"));
+        }
         Ok(Self {
             width: data.width,
             height: data.height,
             pixels: data.pixels,
+            palette: data.palette,
             revision: data.revision,
         })
     }
@@ -148,6 +172,7 @@ impl PixelArt {
             width,
             height,
             pixels: vec![0; pixel_bytes(width, height)],
+            palette: default_palette(),
             revision: 0,
         }
     }
@@ -162,6 +187,10 @@ impl PixelArt {
 
     pub fn rgba_bytes(&self) -> &[u8] {
         &self.pixels
+    }
+
+    pub fn palette(&self) -> &[PixelColor] {
+        &self.palette
     }
 
     pub const fn revision(&self) -> u64 {
@@ -242,6 +271,32 @@ impl PixelArt {
         self.revision = self.revision.wrapping_add(1);
     }
 
+    fn replace_color(&mut self, from: PixelColor, to: PixelColor) {
+        if from == to {
+            return;
+        }
+        let from = from.rgba();
+        let to = to.rgba();
+        let mut changed = false;
+        for pixel in self.pixels.chunks_exact_mut(4) {
+            if pixel == from {
+                pixel.copy_from_slice(&to);
+                changed = true;
+            }
+        }
+        if changed {
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
+
+    fn set_palette(&mut self, colors: &[PixelColor]) {
+        let colors = normalized_palette(colors);
+        if self.palette != colors {
+            self.palette = colors;
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
+
     fn clear(&mut self) {
         if self.pixels.iter().any(|channel| *channel != 0) {
             self.pixels.fill(0);
@@ -300,6 +355,8 @@ impl Block for PixelArt {
         match operation {
             PixelArtOperation::Paint { pixels } => art.paint(pixels),
             PixelArtOperation::Fill { x, y, color } => art.fill(*x, *y, *color),
+            PixelArtOperation::ReplaceColor { from, to } => art.replace_color(*from, *to),
+            PixelArtOperation::SetPalette { colors } => art.set_palette(colors),
             PixelArtOperation::Clear => art.clear(),
             PixelArtOperation::Resize {
                 width,
@@ -338,6 +395,11 @@ impl BlockHistory<PixelArt> for PixelArtHistory {
                 after: after.clone(),
                 anchor,
             }
+        } else if before.palette != after.palette {
+            PixelArtHistoryActionKind::Palette {
+                before: before.palette.clone(),
+                after: after.palette.clone(),
+            }
         } else {
             let deltas = pixel_deltas(before, after);
             if deltas.is_empty() {
@@ -351,6 +413,9 @@ impl BlockHistory<PixelArt> for PixelArtHistory {
     fn action_bytes(action: &Self::Action) -> usize {
         match &action.kind {
             PixelArtHistoryActionKind::Pixels(deltas) => deltas.len() * size_of::<PixelDelta>(),
+            PixelArtHistoryActionKind::Palette { before, after } => {
+                (before.len() + after.len()) * size_of::<PixelColor>()
+            }
             PixelArtHistoryActionKind::Resize { before, after, .. } => {
                 before.pixels.len() + after.pixels.len()
             }
@@ -382,6 +447,19 @@ impl BlockHistory<PixelArt> for PixelArtHistory {
                     .collect::<Vec<_>>();
                 (!pixels.is_empty())
                     .then_some(PixelArtOperation::Paint { pixels })
+                    .into_iter()
+                    .collect()
+            }
+            PixelArtHistoryActionKind::Palette { before, after } => {
+                let (expected, desired) = if to_after {
+                    (before, after)
+                } else {
+                    (after, before)
+                };
+                (current.palette == *expected)
+                    .then(|| PixelArtOperation::SetPalette {
+                        colors: desired.clone(),
+                    })
                     .into_iter()
                     .collect()
             }
@@ -443,6 +521,41 @@ fn pixel_deltas(before: &PixelArt, after: &PixelArt) -> Vec<PixelDelta> {
         }
     }
     deltas
+}
+
+fn default_palette() -> Vec<PixelColor> {
+    [
+        PixelColor::TRANSPARENT,
+        PixelColor::new(0, 0, 0, 255),
+        PixelColor::new(255, 255, 255, 255),
+        PixelColor::new(128, 128, 128, 255),
+        PixelColor::new(192, 192, 192, 255),
+        PixelColor::new(136, 57, 50, 255),
+        PixelColor::new(237, 118, 20, 255),
+        PixelColor::new(255, 215, 0, 255),
+        PixelColor::new(51, 160, 44, 255),
+        PixelColor::new(40, 200, 170, 255),
+        PixelColor::new(40, 110, 220, 255),
+        PixelColor::new(95, 60, 190, 255),
+        PixelColor::new(190, 60, 190, 255),
+        PixelColor::new(230, 90, 120, 255),
+        PixelColor::new(115, 75, 45, 255),
+        PixelColor::new(242, 194, 156, 255),
+    ]
+    .to_vec()
+}
+
+fn normalized_palette(colors: &[PixelColor]) -> Vec<PixelColor> {
+    let mut palette = Vec::with_capacity(colors.len().min(MAX_PIXEL_ART_PALETTE_COLORS));
+    for &color in colors {
+        if palette.len() == MAX_PIXEL_ART_PALETTE_COLORS {
+            break;
+        }
+        if !palette.contains(&color) {
+            palette.push(color);
+        }
+    }
+    palette
 }
 
 #[derive(Clone, Copy)]
@@ -520,8 +633,17 @@ mod pixel_art_fill_recolors_only_connected_pixels;
 #[path = "pixel_art/tests/pixel_art_history_undoes_and_redoes_paint.rs"]
 mod pixel_art_history_undoes_and_redoes_paint;
 #[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_history_undoes_and_redoes_palette.rs"]
+mod pixel_art_history_undoes_and_redoes_palette;
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_history_undoes_and_redoes_replace_color.rs"]
+mod pixel_art_history_undoes_and_redoes_replace_color;
+#[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_invalid_resize_does_not_change_canvas.rs"]
 mod pixel_art_invalid_resize_does_not_change_canvas;
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_new_has_default_palette.rs"]
+mod pixel_art_new_has_default_palette;
 #[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_new_is_32_by_32_and_transparent.rs"]
 mod pixel_art_new_is_32_by_32_and_transparent;
@@ -529,11 +651,23 @@ mod pixel_art_new_is_32_by_32_and_transparent;
 #[path = "pixel_art/tests/pixel_art_paint_updates_only_valid_targeted_pixels.rs"]
 mod pixel_art_paint_updates_only_valid_targeted_pixels;
 #[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_replace_color_ignores_no_op_and_missing_source.rs"]
+mod pixel_art_replace_color_ignores_no_op_and_missing_source;
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_replace_color_replaces_every_exact_match.rs"]
+mod pixel_art_replace_color_replaces_every_exact_match;
+#[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_resize_preserves_pixels_for_each_anchor.rs"]
 mod pixel_art_resize_preserves_pixels_for_each_anchor;
 #[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_serialization_rejects_invalid_palette.rs"]
+mod pixel_art_serialization_rejects_invalid_palette;
+#[cfg(test)]
 #[path = "pixel_art/tests/pixel_art_serialization_round_trips_without_data_loss.rs"]
 mod pixel_art_serialization_round_trips_without_data_loss;
+#[cfg(test)]
+#[path = "pixel_art/tests/pixel_art_set_palette_deduplicates_and_limits_colors.rs"]
+mod pixel_art_set_palette_deduplicates_and_limits_colors;
 #[cfg(test)]
 #[path = "pixel_art/tests/pixel_deltas_capture_only_changed_pixels.rs"]
 mod pixel_deltas_capture_only_changed_pixels;

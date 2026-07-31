@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use block::{Block, BlockParent};
 use block_client::{
     blocks::pixel_art::{
-        PixelArt, PixelArtAnchor, PixelArtOperation, PixelColor, PixelUpdate, MAX_PIXEL_ART_SIZE,
+        PixelArt, PixelArtAnchor, PixelArtOperation, PixelColor, PixelUpdate,
+        MAX_PIXEL_ART_PALETTE_COLORS, MAX_PIXEL_ART_SIZE,
     },
     BlockHandle, BlockRelationships,
 };
@@ -25,6 +26,7 @@ enum PixelTool {
     Eraser,
     Fill,
     Eyedropper,
+    ReplaceColor,
     Line,
     Rectangle,
     Ellipse,
@@ -44,6 +46,7 @@ impl PixelTool {
             Self::Eraser => "Eraser",
             Self::Fill => "Fill",
             Self::Eyedropper => "Eyedropper",
+            Self::ReplaceColor => "Replace Color",
             Self::Line => "Line",
             Self::Rectangle => "Rectangle",
             Self::Ellipse => "Ellipse",
@@ -77,7 +80,9 @@ pub(super) struct PixelArtEditor {
     tool: PixelTool,
     previous_drawing_tool: PixelTool,
     color: PixelColor,
+    color_hex: String,
     recent_colors: Vec<PixelColor>,
+    replace_source_hover: Option<PixelColor>,
     brush_size: u16,
     brush_shape: BrushShape,
     shapes_filled: bool,
@@ -106,7 +111,9 @@ impl PixelArtEditor {
             tool: PixelTool::Pencil,
             previous_drawing_tool: PixelTool::Pencil,
             color: PixelColor::new(0, 0, 0, 255),
+            color_hex: "#000000FF".into(),
             recent_colors: vec![PixelColor::new(0, 0, 0, 255)],
+            replace_source_hover: None,
             brush_size: 1,
             brush_shape: BrushShape::Square,
             shapes_filled: false,
@@ -141,13 +148,14 @@ impl PixelArtEditor {
         });
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) {
+    fn toolbar(&mut self, ui: &mut egui::Ui, width: u16, height: u16, palette: &[PixelColor]) {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Tools");
             self.tool_button(ui, PixelTool::Pencil, "B or P");
             self.tool_button(ui, PixelTool::Eraser, "E");
             self.tool_button(ui, PixelTool::Fill, "G");
             self.tool_button(ui, PixelTool::Eyedropper, "I");
+            self.tool_button(ui, PixelTool::ReplaceColor, "C");
             self.tool_button(ui, PixelTool::Line, "L");
             self.tool_button(ui, PixelTool::Rectangle, "R");
             self.tool_button(ui, PixelTool::Ellipse, "O");
@@ -182,7 +190,10 @@ impl PixelArtEditor {
                 .on_hover_text("Drawing color")
                 .changed()
             {
-                self.color = PixelColor::new(color[0], color[1], color[2], color[3]);
+                self.set_active_color(
+                    PixelColor::new(color[0], color[1], color[2], color[3]),
+                    false,
+                );
             }
             ui.separator();
 
@@ -235,13 +246,90 @@ impl PixelArtEditor {
             ui.weak(format!("{} · {width} × {height} px", self.tool.label()));
         });
 
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("RGBA");
+            let mut channels = self.color.rgba();
+            let mut channels_changed = false;
+            for (label, channel) in ["R", "G", "B", "A"].into_iter().zip(&mut channels) {
+                ui.label(label);
+                channels_changed |= ui
+                    .add(egui::DragValue::new(channel).range(0..=255))
+                    .changed();
+            }
+            if channels_changed {
+                self.set_active_color(
+                    PixelColor::new(channels[0], channels[1], channels[2], channels[3]),
+                    false,
+                );
+            }
+
+            ui.label("Hex");
+            let hex_response = ui.add(
+                egui::TextEdit::singleline(&mut self.color_hex)
+                    .desired_width(90.0)
+                    .hint_text("#RRGGBBAA"),
+            );
+            if hex_response.changed() {
+                if let Some(color) = parse_hex_color(&self.color_hex) {
+                    self.color = color;
+                }
+            }
+            if parse_hex_color(&self.color_hex).is_none() {
+                hex_response.on_hover_text("Enter a color as #RRGGBBAA");
+            }
+
+            if self.tool == PixelTool::ReplaceColor {
+                ui.separator();
+                ui.strong("Replace");
+                if let Some(source) = self.replace_source_hover {
+                    color_swatch(ui, source, false);
+                } else {
+                    ui.weak("hover a source color");
+                }
+                ui.label("→");
+                color_swatch(ui, self.color, false);
+            }
+        });
+
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Palette");
+            for &color in palette {
+                if color_swatch(ui, color, color == self.color).clicked() {
+                    self.set_active_color(color, true);
+                }
+            }
+            let can_add =
+                palette.len() < MAX_PIXEL_ART_PALETTE_COLORS && !palette.contains(&self.color);
+            if ui
+                .add_enabled(can_add, egui::Button::new("Add"))
+                .on_hover_text("Add the active color to this artwork's palette")
+                .clicked()
+            {
+                let mut colors = palette.to_vec();
+                colors.push(self.color);
+                self.block.operate(PixelArtOperation::SetPalette { colors });
+            }
+            let can_remove = palette.contains(&self.color);
+            if ui
+                .add_enabled(can_remove, egui::Button::new("Remove"))
+                .on_hover_text("Remove the active color from this artwork's palette")
+                .clicked()
+            {
+                let colors = palette
+                    .iter()
+                    .copied()
+                    .filter(|color| *color != self.color)
+                    .collect();
+                self.block.operate(PixelArtOperation::SetPalette { colors });
+            }
+        });
+
         let recent_colors = self.recent_colors.clone();
         ui.horizontal_wrapped(|ui| {
             ui.strong("Recent");
             for color in recent_colors {
                 if color_swatch(ui, color, color == self.color).clicked() {
-                    self.color = color;
-                    self.remember_color(color);
+                    self.set_active_color(color, true);
                 }
             }
         });
@@ -260,6 +348,7 @@ impl PixelArtEditor {
     fn select_tool(&mut self, tool: PixelTool) {
         self.active_drawing = None;
         self.committed_preview = None;
+        self.replace_source_hover = None;
         if self.tool.is_drawing() {
             self.previous_drawing_tool = self.tool;
         }
@@ -273,6 +362,14 @@ impl PixelArtEditor {
         self.recent_colors.retain(|recent| *recent != color);
         self.recent_colors.insert(0, color);
         self.recent_colors.truncate(MAX_RECENT_COLORS);
+    }
+
+    fn set_active_color(&mut self, color: PixelColor, remember: bool) {
+        self.color = color;
+        self.color_hex = format_hex_color(color);
+        if remember {
+            self.remember_color(color);
+        }
     }
 
     fn reset_view(&mut self) {
@@ -378,6 +475,11 @@ impl PixelArtEditor {
             .filter(|position| viewport.contains(*position));
         let hovered_pixel =
             pointer.and_then(|position| pixel_at(position, canvas_rect, width, height));
+        self.replace_source_hover = if self.tool == PixelTool::ReplaceColor {
+            hovered_pixel.and_then(|(x, y)| self.block.read().and_then(|art| art.pixel(x, y)))
+        } else {
+            None
+        };
 
         if response.hovered() && input_enabled {
             let cursor = if panning {
@@ -451,6 +553,18 @@ impl PixelArtEditor {
                 if response.clicked_by(PointerButton::Primary) {
                     if let Some(pixel) = hovered_pixel {
                         self.sample_pixel(pixel);
+                    }
+                }
+            }
+            PixelTool::ReplaceColor => {
+                if response.clicked_by(PointerButton::Primary) {
+                    if let Some(source) = self.replace_source_hover {
+                        self.remember_color(self.color);
+                        self.record_pixels(PixelArtOperation::ReplaceColor {
+                            from: source,
+                            to: self.color,
+                        });
+                        ui.ctx().request_repaint();
                     }
                 }
             }
@@ -530,10 +644,21 @@ impl PixelArtEditor {
         if let Some(pixel) = hovered_pixel {
             paint_hovered_pixel(&painter, canvas_rect, width, height, pixel);
             let label_position = viewport.left_bottom() + Vec2::new(6.0, -6.0);
+            let label = if let Some(source) = self.replace_source_hover {
+                format!(
+                    "{}, {} · {} → {}",
+                    pixel.0,
+                    pixel.1,
+                    format_hex_color(source),
+                    format_hex_color(self.color)
+                )
+            } else {
+                format!("{}, {}", pixel.0, pixel.1)
+            };
             painter.text(
                 label_position,
                 egui::Align2::LEFT_BOTTOM,
-                format!("{}, {}", pixel.0, pixel.1),
+                label,
                 egui::TextStyle::Monospace.resolve(ui.style()),
                 ui.visuals().text_color(),
             );
@@ -574,6 +699,8 @@ impl PixelArtEditor {
                 Some(PixelTool::Fill)
             } else if input.key_pressed(egui::Key::I) {
                 Some(PixelTool::Eyedropper)
+            } else if input.key_pressed(egui::Key::C) {
+                Some(PixelTool::ReplaceColor)
             } else if input.key_pressed(egui::Key::L) {
                 Some(PixelTool::Line)
             } else if input.key_pressed(egui::Key::R) {
@@ -686,8 +813,7 @@ impl PixelArtEditor {
             .read()
             .and_then(|art| art.pixel(pixel.0, pixel.1))
         {
-            self.color = color;
-            self.remember_color(color);
+            self.set_active_color(color, true);
             if self.tool == PixelTool::Eyedropper {
                 self.tool = self.previous_drawing_tool;
             }
@@ -829,6 +955,7 @@ impl BlockEditor for PixelArtEditor {
         let height = art.height();
         let revision = art.revision();
         let size = [width, height];
+        let palette = art.palette().to_vec();
         let dark_mode = ui.visuals().dark_mode;
         let image = (self.texture_revision != Some(revision)
             || self.texture_size != size
@@ -839,7 +966,7 @@ impl BlockEditor for PixelArtEditor {
             self.update_texture(ui.ctx(), image, revision, size, dark_mode);
         }
 
-        self.toolbar(ui, width, height);
+        self.toolbar(ui, width, height, &palette);
         ui.separator();
         let input_enabled = !self.resize_open && !self.clear_open;
         self.canvas(ui, width, height, input_enabled);
@@ -884,6 +1011,26 @@ fn composite_pixel(color: PixelColor, background: [u8; 3]) -> Color32 {
         ((u16::from(color.green) * alpha + u16::from(background[1]) * inverse) / 255) as u8,
         ((u16::from(color.blue) * alpha + u16::from(background[2]) * inverse) / 255) as u8,
     )
+}
+
+fn format_hex_color(color: PixelColor) -> String {
+    format!(
+        "#{:02X}{:02X}{:02X}{:02X}",
+        color.red, color.green, color.blue, color.alpha
+    )
+}
+
+fn parse_hex_color(value: &str) -> Option<PixelColor> {
+    let value = value.strip_prefix('#')?;
+    if value.len() != 8 || !value.is_ascii() {
+        return None;
+    }
+    Some(PixelColor::new(
+        u8::from_str_radix(&value[0..2], 16).ok()?,
+        u8::from_str_radix(&value[2..4], 16).ok()?,
+        u8::from_str_radix(&value[4..6], 16).ok()?,
+        u8::from_str_radix(&value[6..8], 16).ok()?,
+    ))
 }
 
 fn color_swatch(ui: &mut egui::Ui, color: PixelColor, selected: bool) -> egui::Response {
@@ -959,7 +1106,7 @@ fn rasterize_drawing(
         PixelTool::Rectangle => rectangle_outline(drawing.start, end),
         PixelTool::Ellipse if filled_shape => ellipse_pixels(drawing.start, end, true),
         PixelTool::Ellipse => ellipse_pixels(drawing.start, end, false),
-        PixelTool::Fill | PixelTool::Eyedropper => Vec::new(),
+        PixelTool::Fill | PixelTool::Eyedropper | PixelTool::ReplaceColor => Vec::new(),
     };
 
     let mut pixels = BTreeSet::new();
