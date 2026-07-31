@@ -16,7 +16,8 @@ use block::{BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
 use block_client::{blocks::workspace_index::BlockEntry, BlockClient, ReferenceList};
 use block_picker::{BlockPicker, BlockPickerMenuAction};
 use editors::{
-    BlockEditor, EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
+    BlockEditor, DynamicArtifactRegeneration, EditorAccess, EditorAction, EditorRegistry,
+    SidebarDragPayload, SidebarDragSource,
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
@@ -81,6 +82,8 @@ struct BlockApp {
     block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
+    dynamic_artifact_regenerations: HashMap<Uuid, Box<dyn DynamicArtifactRegeneration>>,
+    dynamic_artifact_errors: HashMap<Uuid, String>,
     dock_state: DockState<DockTab>,
     active_tab: Option<Uuid>,
     sidebar_reveal: Option<Uuid>,
@@ -204,6 +207,8 @@ impl BlockApp {
             block_types: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
+            dynamic_artifact_regenerations: HashMap::new(),
+            dynamic_artifact_errors: HashMap::new(),
             dock_state: default_dock_state(),
             active_tab: None,
             sidebar_reveal: None,
@@ -244,6 +249,8 @@ impl BlockApp {
         self.block_types.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
+        self.dynamic_artifact_regenerations.clear();
+        self.dynamic_artifact_errors.clear();
         self.dock_state = default_dock_state();
         self.active_tab = None;
         self.sidebar_reveal = None;
@@ -606,6 +613,8 @@ impl BlockApp {
         self.parents.remove(&id);
         self.references.remove(&id);
         self.backrefs.remove(&id);
+        self.dynamic_artifact_regenerations.remove(&id);
+        self.dynamic_artifact_errors.remove(&id);
         if let Some(editor) = self.editors.get_mut(&id) {
             editor.tab_closed();
         }
@@ -1118,6 +1127,7 @@ impl BlockApp {
         let Some(mut editor) = self.editors.remove(&active) else {
             return None;
         };
+        self.show_dynamic_artifact_bar(ui, active, editor.block_type());
         if let Some(history) = editor
             .history()
             .filter(|history| history.supports_history())
@@ -1164,6 +1174,69 @@ impl BlockApp {
         };
         self.editors.insert(active, editor);
         action
+    }
+
+    fn show_dynamic_artifact_bar(&mut self, ui: &mut egui::Ui, id: Uuid, block_type: Uuid) {
+        let Some(descriptor) = self.client.dynamic_artifact(id) else {
+            return;
+        };
+
+        let completed = self
+            .dynamic_artifact_regenerations
+            .get_mut(&id)
+            .and_then(|regeneration| regeneration.poll());
+        if let Some(result) = completed {
+            self.dynamic_artifact_regenerations.remove(&id);
+            match result {
+                Ok(()) => {
+                    self.dynamic_artifact_errors.remove(&id);
+                }
+                Err(error) => {
+                    self.dynamic_artifact_errors.insert(id, error);
+                }
+            }
+        }
+
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .inner_margin(egui::Margin::symmetric(8, 5))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong("Dynamic artifact");
+                    ui.weak("Generated from another block.");
+                    let running = self.dynamic_artifact_regenerations.contains_key(&id);
+                    if running {
+                        ui.spinner();
+                    }
+                    if ui
+                        .add_enabled(!running, egui::Button::new("Regenerate"))
+                        .clicked()
+                    {
+                        self.dynamic_artifact_errors.remove(&id);
+                        match self.registry.regenerate_dynamic_artifact(
+                            descriptor.source_type,
+                            &self.client,
+                            id,
+                            block_type,
+                            &descriptor.data,
+                        ) {
+                            Ok(regeneration) => {
+                                self.dynamic_artifact_regenerations.insert(id, regeneration);
+                            }
+                            Err(error) => {
+                                self.dynamic_artifact_errors.insert(id, error);
+                            }
+                        }
+                    }
+                });
+                if let Some(error) = self.dynamic_artifact_errors.get(&id) {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+            });
+        ui.separator();
+        if self.dynamic_artifact_regenerations.contains_key(&id) {
+            ui.ctx().request_repaint();
+        }
     }
 
     fn handle_editor_action(&mut self, active: Uuid, action: EditorAction) {

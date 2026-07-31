@@ -1,9 +1,10 @@
 use std::{
+    any::Any,
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     ops::Deref,
     process,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc, OnceLock, Weak,
     },
     thread,
@@ -17,6 +18,7 @@ use block::{
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::{
@@ -31,6 +33,24 @@ const ACCOUNT_HEADER: &str = "x-block-account-id";
 const MAX_HISTORY_ACTIONS: usize = 100;
 const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct DynamicArtifactDescriptor {
+    pub source_type: Uuid,
+    pub data: Vec<u8>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct StoredBlock<B> {
+    value: B,
+    dynamic_artifact: Option<DynamicArtifactDescriptor>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+enum StoredOperation<B, O> {
+    Operate(O),
+    Replace(B),
+}
+
 #[cfg(test)]
 #[path = "history/tests/block_handle_history_is_shared_by_clones.rs"]
 mod block_handle_history_is_shared_by_clones;
@@ -40,6 +60,8 @@ mod cached_blocks_are_populated_from_confirmed_metadata;
 mod client_debug_snapshot_reports_active_worker_state;
 #[cfg(test)]
 mod duplicate_reference_watches_share_subscription;
+#[cfg(test)]
+mod dynamic_artifact_descriptor_survives_creation;
 #[cfg(test)]
 #[path = "history/tests/finish_history_group_starts_a_new_action.rs"]
 mod finish_history_group_starts_a_new_action;
@@ -51,6 +73,8 @@ mod new_history_action_clears_redo;
 #[cfg(test)]
 #[path = "history/tests/no_history_policy_disables_undo.rs"]
 mod no_history_policy_disables_undo;
+#[cfg(test)]
+mod replace_preserves_dynamic_artifact_descriptor;
 
 pub struct BlockClient {
     id: Uuid,
@@ -61,7 +85,14 @@ pub struct BlockClient {
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+    registered_blocks: Arc<RwLock<HashMap<Uuid, RegisteredBlock>>>,
     watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
+}
+
+struct RegisteredBlock {
+    block_type: Uuid,
+    typed: Arc<dyn Any + Send + Sync>,
+    erased: Arc<dyn ErasedBlock>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,6 +211,7 @@ impl BlockClient {
         }));
         let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(id, account_id)));
         let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
+        let registered_blocks = Arc::new(RwLock::new(HashMap::new()));
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
@@ -206,6 +238,7 @@ impl BlockClient {
             debug,
             client_debug,
             cached_blocks,
+            registered_blocks,
             watched_reference_lists,
         }
     }
@@ -225,6 +258,22 @@ impl BlockClient {
     }
 
     pub fn create_block<B: Block>(&self, initial: B) -> BlockHandle<B> {
+        self.create_block_inner(initial, None)
+    }
+
+    pub fn create_dynamic_artifact<B: Block>(
+        &self,
+        initial: B,
+        descriptor: DynamicArtifactDescriptor,
+    ) -> BlockHandle<B> {
+        self.create_block_inner(initial, Some(descriptor))
+    }
+
+    fn create_block_inner<B: Block>(
+        &self,
+        initial: B,
+        dynamic_artifact: Option<DynamicArtifactDescriptor>,
+    ) -> BlockHandle<B> {
         let id = Uuid::new_v4();
         let shared = Arc::new(BlockShared {
             value: RwLock::new(Some(initial.clone())),
@@ -234,23 +283,61 @@ impl BlockClient {
             self.account_id,
             Arc::clone(&shared),
             initial,
+            dynamic_artifact,
         ));
+        self.register_block(id, &block);
         self.send(WorkerCommand::AddBlock(block.clone()));
-        BlockHandle {
-            client_id: self.id,
-            id,
-            block,
-            commands: self.commands.clone(),
-            access: Arc::clone(&self.access),
-        }
+        self.block_handle(id, block)
     }
 
     pub fn get_block<B: Block>(&self, id: Uuid) -> BlockHandle<B> {
+        if let Some(registered) = self.registered_blocks.read().get(&id) {
+            if registered.block_type != B::TYPE_ID {
+                fatal(format!(
+                    "block {id} is registered as {}, not {}",
+                    registered.block_type,
+                    B::TYPE_ID
+                ));
+            }
+            let typed = Arc::clone(&registered.typed);
+            let block = Arc::downcast::<TypedBlock<B>>(typed).unwrap_or_else(|_| {
+                fatal(format!("block {id} has an inconsistent registered type"))
+            });
+            return self.block_handle(id, block);
+        }
         let shared = Arc::new(BlockShared {
             value: RwLock::new(None),
         });
         let block = Arc::new(TypedBlock::<B>::unresolved(id, Arc::clone(&shared)));
+        self.register_block(id, &block);
         self.send(WorkerCommand::AddBlock(block.clone()));
+        self.block_handle(id, block)
+    }
+
+    pub fn dynamic_artifact(&self, id: Uuid) -> Option<DynamicArtifactDescriptor> {
+        self.registered_blocks
+            .read()
+            .get(&id)
+            .and_then(|registered| registered.erased.dynamic_artifact())
+    }
+
+    fn register_block<B: Block>(&self, id: Uuid, block: &Arc<TypedBlock<B>>) {
+        let registered = RegisteredBlock {
+            block_type: B::TYPE_ID,
+            typed: block.clone(),
+            erased: block.clone(),
+        };
+        if self
+            .registered_blocks
+            .write()
+            .insert(id, registered)
+            .is_some()
+        {
+            fatal(format!("block {id} is already registered"));
+        }
+    }
+
+    fn block_handle<B: Block>(&self, id: Uuid, block: Arc<TypedBlock<B>>) -> BlockHandle<B> {
         BlockHandle {
             client_id: self.id,
             id,
@@ -423,6 +510,21 @@ impl<B: Block> BlockHandle<B> {
         self.commands
             .send(WorkerCommand::Operate { id: self.id })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn replace(&self, replacement: B) {
+        self.block.local_replace(replacement);
+        self.commands
+            .send(WorkerCommand::Operate { id: self.id })
+            .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn dynamic_artifact(&self) -> Option<DynamicArtifactDescriptor> {
+        self.block.dynamic_artifact.read().clone()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.block.revision.load(Ordering::Relaxed)
     }
 
     pub fn operate_grouped(&self, operations: impl IntoIterator<Item = B::Operation>) {
@@ -1726,6 +1828,7 @@ trait ErasedBlock: Send + Sync {
     fn id(&self) -> Uuid;
     fn block_type_id(&self) -> Uuid;
     fn author(&self) -> Option<Uuid>;
+    fn dynamic_artifact(&self) -> Option<DynamicArtifactDescriptor>;
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
@@ -1760,6 +1863,8 @@ struct TypedBlock<B: Block> {
     changed: watch::Sender<()>,
     relationships: RwLock<BlockRelationships>,
     name: RwLock<String>,
+    dynamic_artifact: RwLock<Option<DynamicArtifactDescriptor>>,
+    revision: AtomicU64,
     history: RwLock<HistoryStack<HistoryAction<B>>>,
 }
 
@@ -1879,26 +1984,39 @@ struct TypedState<B: Block> {
     confirmed: Option<B>,
     confirmed_seq: u64,
     acknowledged_seq: u64,
-    pending: VecDeque<PendingOperation<B::Operation>>,
+    pending: VecDeque<PendingOperation<B, B::Operation>>,
     in_flight: HashSet<Uuid>,
     buffered: BTreeMap<u64, OperationRecord>,
     ready: bool,
 }
 
-struct PendingOperation<O> {
+struct PendingOperation<B, O> {
     id: Uuid,
-    operation: O,
+    operation: StoredOperation<B, O>,
     implicit_name: String,
     references: ReferenceDelta,
 }
 
 impl<B: Block> TypedBlock<B> {
-    #[cfg(test)]
-    fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
-        Self::created_by(id, Uuid::nil(), shared, initial)
+    fn apply_stored_operation(value: &mut B, operation: &StoredOperation<B, B::Operation>) {
+        match operation {
+            StoredOperation::Operate(operation) => B::apply_operation(value, operation),
+            StoredOperation::Replace(replacement) => value.clone_from(replacement),
+        }
     }
 
-    fn created_by(id: Uuid, author: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
+    #[cfg(test)]
+    fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
+        Self::created_by(id, Uuid::nil(), shared, initial, None)
+    }
+
+    fn created_by(
+        id: Uuid,
+        author: Uuid,
+        shared: Arc<BlockShared<B>>,
+        initial: B,
+        dynamic_artifact: Option<DynamicArtifactDescriptor>,
+    ) -> Self {
         let references = normalized_references(initial.references());
         let name = initial.implicit_name();
         Self {
@@ -1923,6 +2041,8 @@ impl<B: Block> TypedBlock<B> {
                 backrefs: Vec::new(),
             }),
             name: RwLock::new(name),
+            dynamic_artifact: RwLock::new(dynamic_artifact),
+            revision: AtomicU64::new(0),
             history: RwLock::new(HistoryStack::default()),
         }
     }
@@ -1950,6 +2070,8 @@ impl<B: Block> TypedBlock<B> {
                 backrefs: Vec::new(),
             }),
             name: RwLock::new(String::new()),
+            dynamic_artifact: RwLock::new(None),
+            revision: AtomicU64::new(0),
             history: RwLock::new(HistoryStack::default()),
         }
     }
@@ -1959,7 +2081,7 @@ impl<B: Block> TypedBlock<B> {
             return;
         };
         for pending in &state.pending {
-            B::apply_operation(&mut value, &pending.operation);
+            Self::apply_stored_operation(&mut value, &pending.operation);
         }
         *self.shared.value.write() = Some(value);
         self.changed.send_replace(());
@@ -1982,11 +2104,12 @@ impl<B: Block> TypedBlock<B> {
                 self.relationships.write().references.clone_from(&after);
                 state.pending.push_back(PendingOperation {
                     id: Uuid::new_v4(),
-                    operation: operation.clone(),
+                    operation: StoredOperation::Operate(operation.clone()),
                     references: reference_delta(&before, &after),
                     implicit_name,
                 });
             }
+            self.revision.fetch_add(1, Ordering::Relaxed);
             self.changed.send_replace(());
             history_before.and_then(|before| B::History::action(&before, value, &operations))
         };
@@ -1998,6 +2121,27 @@ impl<B: Block> TypedBlock<B> {
                     .push::<B, B::History>(action, history_mode);
             }
         }
+    }
+
+    fn local_replace(&self, replacement: B) {
+        let mut state = self.state.write();
+        let mut visible = self.shared.value.write();
+        let value = visible
+            .as_mut()
+            .unwrap_or_else(|| fatal("cannot replace an unresolved block"));
+        let before = normalized_references(value.references());
+        value.clone_from(&replacement);
+        let after = normalized_references(value.references());
+        self.relationships.write().references.clone_from(&after);
+        state.pending.push_back(PendingOperation {
+            id: Uuid::new_v4(),
+            operation: StoredOperation::Replace(replacement),
+            implicit_name: value.implicit_name(),
+            references: reference_delta(&before, &after),
+        });
+        self.history.write().finish_group();
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        self.changed.send_replace(());
     }
 
     #[cfg(test)]
@@ -2057,6 +2201,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         *self.author.read()
     }
 
+    fn dynamic_artifact(&self) -> Option<DynamicArtifactDescriptor> {
+        self.dynamic_artifact.read().clone()
+    }
+
     fn debug_snapshot(&self) -> BlockDebugSnapshot {
         let state = self.state.read();
         let synchronized = state.ready
@@ -2085,8 +2233,11 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 
     fn initial_data(&self) -> Option<Vec<u8>> {
         self.state.read().initial.as_ref().map(|initial| {
-            serde_json::to_vec(initial)
-                .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
+            serde_json::to_vec(&StoredBlock {
+                value: initial,
+                dynamic_artifact: self.dynamic_artifact.read().clone(),
+            })
+            .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
         })
     }
 
@@ -2132,19 +2283,24 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         name: String,
     ) {
         *self.author.write() = Some(author);
-        let mut value: B = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
+        let stored: StoredBlock<B> = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
             fatal(format!("failed to deserialize block snapshot: {error}"))
         });
+        let mut value = stored.value;
+        *self.dynamic_artifact.write() = stored.dynamic_artifact;
         let mut seq = snapshot_seq;
         for record in operations {
             if record.seq != seq + 1 {
                 fatal("server returned noncontiguous block history");
             }
-            let operation: B::Operation = serde_json::from_slice(&record.operation)
-                .unwrap_or_else(|error| fatal(format!("failed to deserialize operation: {error}")));
-            B::apply_operation(&mut value, &operation);
+            let operation: StoredOperation<B, B::Operation> =
+                serde_json::from_slice(&record.operation).unwrap_or_else(|error| {
+                    fatal(format!("failed to deserialize operation: {error}"))
+                });
+            Self::apply_stored_operation(&mut value, &operation);
             seq = record.seq;
         }
+        self.revision.store(seq, Ordering::Relaxed);
         let references = normalized_references(value.references());
         let mut state = self.state.write();
         {
@@ -2155,7 +2311,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         *self.name.write() = name;
         if B::CRDT {
             for pending in &state.pending {
-                B::apply_operation(&mut value, &pending.operation);
+                Self::apply_stored_operation(&mut value, &pending.operation);
             }
             *self.shared.value.write() = Some(value);
             self.changed.send_replace(());
@@ -2231,7 +2387,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             fatal("update acknowledgement is not contiguous");
         }
         let operation = state.pending.pop_front().unwrap().operation;
-        B::apply_operation(state.confirmed.as_mut().unwrap(), &operation);
+        Self::apply_stored_operation(state.confirmed.as_mut().unwrap(), &operation);
         state.confirmed_seq = seq;
         state.in_flight.remove(&operation_id);
         self.rebuild_visible(&state);
@@ -2287,7 +2443,7 @@ impl<B: Block> TypedBlock<B> {
         };
         for pending in &mut state.pending {
             let before = normalized_references(value.references());
-            B::apply_operation(&mut value, &pending.operation);
+            Self::apply_stored_operation(&mut value, &pending.operation);
             let after = normalized_references(value.references());
             pending.references = reference_delta(&before, &after);
         }
@@ -2295,12 +2451,12 @@ impl<B: Block> TypedBlock<B> {
 
     fn apply_remote_operation(&self, state: &mut TypedState<B>, record: OperationRecord) {
         if B::CRDT {
-            let remote: B::Operation =
+            let remote: StoredOperation<B, B::Operation> =
                 serde_json::from_slice(&record.operation).unwrap_or_else(|error| {
                     fatal(format!("failed to deserialize remote operation: {error}"))
                 });
             if let Some(value) = self.shared.value.write().as_mut() {
-                B::apply_operation(value, &remote);
+                Self::apply_stored_operation(value, &remote);
                 self.changed.send_replace(());
             }
             if let Some(index) = state
@@ -2312,6 +2468,7 @@ impl<B: Block> TypedBlock<B> {
             }
             state.in_flight.remove(&record.operation_id);
             state.confirmed_seq = record.seq;
+            self.revision.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -2321,22 +2478,28 @@ impl<B: Block> TypedBlock<B> {
             .is_some_and(|pending| pending.id == record.operation_id)
         {
             let pending = state.pending.pop_front().unwrap();
-            B::apply_operation(state.confirmed.as_mut().unwrap(), &pending.operation);
+            Self::apply_stored_operation(state.confirmed.as_mut().unwrap(), &pending.operation);
             state.confirmed_seq = record.seq;
             state.in_flight.remove(&record.operation_id);
+            self.revision.fetch_add(1, Ordering::Relaxed);
             self.rebuild_visible(&state);
             return;
         }
 
-        let remote: B::Operation =
-            serde_json::from_slice(&record.operation).unwrap_or_else(|error| {
+        let remote: StoredOperation<B, B::Operation> = serde_json::from_slice(&record.operation)
+            .unwrap_or_else(|error| {
                 fatal(format!("failed to deserialize remote operation: {error}"))
             });
-        B::apply_operation(state.confirmed.as_mut().unwrap(), &remote);
+        Self::apply_stored_operation(state.confirmed.as_mut().unwrap(), &remote);
         state.confirmed_seq = record.seq;
-        for pending in &mut state.pending {
-            B::transform_operation(&mut pending.operation, &remote);
+        if let StoredOperation::Operate(remote) = &remote {
+            for pending in &mut state.pending {
+                if let StoredOperation::Operate(local) = &mut pending.operation {
+                    B::transform_operation(local, remote);
+                }
+            }
         }
+        self.revision.fetch_add(1, Ordering::Relaxed);
         Self::recompute_pending_references(state);
         self.rebuild_visible(&state);
     }
@@ -2395,6 +2558,21 @@ mod tests {
         fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
     }
 
+    fn counter_snapshot(count: i64) -> Vec<u8> {
+        serde_json::to_vec(&StoredBlock {
+            value: Counter { count },
+            dynamic_artifact: None,
+        })
+        .unwrap()
+    }
+
+    fn counter_operation(amount: i64) -> Vec<u8> {
+        serde_json::to_vec(&StoredOperation::<Counter, CounterOperation>::Operate(
+            CounterOperation::Add(amount),
+        ))
+        .unwrap()
+    }
+
     #[test]
     fn created_blocks_are_immediately_readable_and_operate_optimistically() {
         let client = BlockClient::new(Uuid::new_v4());
@@ -2412,13 +2590,13 @@ mod tests {
         let block = TypedBlock::<Counter>::unresolved(Uuid::new_v4(), Arc::clone(&shared));
         assert!(shared.value.read().is_none());
         block.resolve(
-            serde_json::to_vec(&Counter { count: 2 }).unwrap(),
+            counter_snapshot(2),
             0,
             vec![OperationRecord {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
                 author: Uuid::new_v4(),
-                operation: serde_json::to_vec(&CounterOperation::Add(3)).unwrap(),
+                operation: counter_operation(3),
                 references: ReferenceDelta::default(),
             }],
             BlockParent::Root,
@@ -2446,7 +2624,7 @@ mod tests {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
                 author: Uuid::new_v4(),
-                operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
+                operation: counter_operation(1),
                 references: ReferenceDelta::default(),
             });
             finished_tx.send(()).unwrap();
@@ -2478,7 +2656,7 @@ mod tests {
             seq: 1,
             operation_id: Uuid::new_v4(),
             author: Uuid::new_v4(),
-            operation: serde_json::to_vec(&CounterOperation::Add(10)).unwrap(),
+            operation: counter_operation(10),
             references: ReferenceDelta::default(),
         });
 
@@ -2529,7 +2707,7 @@ mod tests {
             seq: 2,
             operation_id: Uuid::new_v4(),
             author: Uuid::new_v4(),
-            operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
+            operation: counter_operation(2),
             references: ReferenceDelta::default(),
         });
         assert_eq!(shared.value.read().as_ref().unwrap().count, 0);
@@ -2538,7 +2716,7 @@ mod tests {
             seq: 1,
             operation_id: Uuid::new_v4(),
             author: Uuid::new_v4(),
-            operation: serde_json::to_vec(&CounterOperation::Add(1)).unwrap(),
+            operation: counter_operation(1),
             references: ReferenceDelta::default(),
         });
         assert_eq!(shared.value.read().as_ref().unwrap().count, 3);
@@ -2557,7 +2735,7 @@ mod tests {
                 seq: 1,
                 operation_id: Uuid::new_v4(),
                 author: Uuid::new_v4(),
-                operation: serde_json::to_vec(&CounterOperation::Add(2)).unwrap(),
+                operation: counter_operation(2),
                 references: ReferenceDelta::default(),
             });
         });
@@ -2598,14 +2776,13 @@ mod tests {
                                 id,
                                 block_type: Counter::TYPE_ID,
                                 author: Uuid::new_v4(),
-                                snapshot: serde_json::to_vec(&Counter { count: 2 }).unwrap(),
+                                snapshot: counter_snapshot(2),
                                 snapshot_seq: 0,
                                 operations: vec![OperationRecord {
                                     seq: 1,
                                     operation_id: Uuid::new_v4(),
                                     author: Uuid::new_v4(),
-                                    operation: serde_json::to_vec(&CounterOperation::Add(3))
-                                        .unwrap(),
+                                    operation: counter_operation(3),
                                     references: ReferenceDelta::default(),
                                 }],
                                 parent: BlockParent::Root,

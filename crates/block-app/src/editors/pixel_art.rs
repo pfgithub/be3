@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
+pub(super) mod dynamic_artifact;
+
 use block::{Block, BlockParent};
 use block_client::{
+    blocks::image::Image,
     blocks::pixel_art::{
         PixelArt, PixelArtAnchor, PixelArtOperation, PixelColor, PixelUpdate,
         MAX_PIXEL_ART_PALETTE_COLORS, MAX_PIXEL_ART_SIZE,
@@ -11,7 +14,7 @@ use block_client::{
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAccess, EditorAction};
+use super::{image::ImageEditor, BlockEditor, EditorAccess, EditorAction};
 
 const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 32.0;
@@ -102,6 +105,7 @@ pub(super) struct PixelArtEditor {
     resize_height: u16,
     resize_anchor: PixelArtAnchor,
     clear_open: bool,
+    export_error: Option<String>,
 }
 
 impl PixelArtEditor {
@@ -133,6 +137,7 @@ impl PixelArtEditor {
             resize_height: 32,
             resize_anchor: PixelArtAnchor::Center,
             clear_open: false,
+            export_error: None,
         }
     }
 
@@ -148,7 +153,8 @@ impl PixelArtEditor {
         });
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) {
+    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) -> bool {
+        let mut export = false;
         ui.horizontal(|ui| {
             ui.strong(self.tool.label());
             ui.weak(format!("{width} × {height} px"));
@@ -177,6 +183,7 @@ impl PixelArtEditor {
             ui.checkbox(&mut self.show_grid, "Grid");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                export = ui.button("Export PNG").clicked();
                 if ui.button("Clear").clicked() {
                     self.active_drawing = None;
                     self.committed_preview = None;
@@ -192,6 +199,7 @@ impl PixelArtEditor {
                 }
             });
         });
+        export
     }
 
     fn tools_panel(&mut self, ui: &mut egui::Ui) {
@@ -987,7 +995,7 @@ impl BlockEditor for PixelArtEditor {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
+        editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         let Some(art) = self.block.read() else {
@@ -1012,9 +1020,37 @@ impl BlockEditor for PixelArtEditor {
         }
 
         let input_enabled = !self.resize_open && !self.clear_open;
-        egui::Panel::top(egui::Id::new(("pixel-art-toolbar", self.block.id())))
+        let export = egui::Panel::top(egui::Id::new(("pixel-art-toolbar", self.block.id())))
             .show_separator_line(true)
-            .show_inside(ui, |ui| self.top_bar(ui, width, height));
+            .show_inside(ui, |ui| self.top_bar(ui, width, height))
+            .inner;
+        let mut action = None;
+        if export {
+            let generated = self
+                .block
+                .read()
+                .map(|art| dynamic_artifact::generate(&art, &self.block.name()));
+            match generated {
+                Some(Ok(image)) => {
+                    let child = editors.client().create_dynamic_artifact(
+                        image,
+                        dynamic_artifact::descriptor(self.block.id()),
+                    );
+                    let id = child.id();
+                    editors.insert(Box::new(ImageEditor::new(child)));
+                    self.export_error = None;
+                    action = Some(EditorAction::OpenBlock {
+                        id,
+                        block_type: Image::TYPE_ID,
+                    });
+                }
+                Some(Err(error)) => self.export_error = Some(error),
+                None => {}
+            }
+        }
+        if let Some(error) = &self.export_error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
         egui::Panel::left(egui::Id::new(("pixel-art-tools-panel", self.block.id())))
             .default_size(172.0)
             .resizable(false)
@@ -1028,7 +1064,7 @@ impl BlockEditor for PixelArtEditor {
         self.canvas(ui, width, height, input_enabled);
         self.resize_dialog(ui.ctx(), width, height);
         self.clear_dialog(ui.ctx());
-        None
+        action
     }
 }
 

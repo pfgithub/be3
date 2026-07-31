@@ -9,6 +9,7 @@ pub(super) struct ImageEditor {
     block: BlockHandle<Image>,
     texture: Option<TextureHandle>,
     texture_error: Option<String>,
+    texture_revision: Option<u64>,
 }
 
 impl ImageEditor {
@@ -17,10 +18,17 @@ impl ImageEditor {
             block,
             texture: None,
             texture_error: None,
+            texture_revision: None,
         }
     }
 
     fn ensure_texture(&mut self, context: &egui::Context) -> bool {
+        let revision = self.block.revision();
+        if self.texture_revision != Some(revision) {
+            self.texture = None;
+            self.texture_error = None;
+            self.texture_revision = Some(revision);
+        }
         if self.texture.is_some() {
             return true;
         }

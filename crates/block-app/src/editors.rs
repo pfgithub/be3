@@ -166,6 +166,12 @@ pub trait BlockEditor {
 
 type CreateEditor = fn(&BlockClient) -> Box<dyn BlockEditor>;
 type OpenEditor = fn(&BlockClient, Uuid) -> Box<dyn BlockEditor>;
+type RegenerateDynamicArtifact =
+    fn(&BlockClient, Uuid, Uuid, &[u8]) -> Result<Box<dyn DynamicArtifactRegeneration>, String>;
+
+pub trait DynamicArtifactRegeneration {
+    fn poll(&mut self) -> Option<Result<(), String>>;
+}
 
 struct EditorRegistration {
     display_name: &'static str,
@@ -173,6 +179,25 @@ struct EditorRegistration {
     open: OpenEditor,
     can_add_child: bool,
     can_delete_child: bool,
+    regenerate_dynamic_artifact: Option<RegenerateDynamicArtifact>,
+}
+
+impl EditorRegistration {
+    fn regenerate_dynamic_artifact(
+        &self,
+        client: &BlockClient,
+        target_id: Uuid,
+        target_type: Uuid,
+        data: &[u8],
+    ) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
+        let regenerate = self.regenerate_dynamic_artifact.ok_or_else(|| {
+            format!(
+                "{} blocks do not support dynamic artifact regeneration",
+                self.display_name
+            )
+        })?;
+        regenerate(client, target_id, target_type, data)
+    }
 }
 
 pub struct EditorRegistry {
@@ -213,6 +238,11 @@ impl EditorRegistry {
             |client| Box::new(PixelArtEditor::new(client.create_block(PixelArt::new()))),
             |client, id| Box::new(PixelArtEditor::new(client.get_block::<PixelArt>(id))),
         );
+        registry
+            .registrations
+            .get_mut(&PixelArt::TYPE_ID)
+            .unwrap()
+            .regenerate_dynamic_artifact = Some(pixel_art::dynamic_artifact::regenerate);
         registry.register(
             TextDocument::TYPE_ID,
             "Text",
@@ -273,6 +303,7 @@ impl EditorRegistry {
                 open,
                 can_add_child,
                 can_delete_child,
+                regenerate_dynamic_artifact: None,
             },
         );
     }
@@ -291,6 +322,7 @@ impl EditorRegistry {
                 open,
                 can_add_child: false,
                 can_delete_child: false,
+                regenerate_dynamic_artifact: None,
             },
         );
     }
@@ -311,6 +343,21 @@ impl EditorRegistry {
         self.registrations
             .get(&block_type)
             .is_some_and(|registration| registration.can_delete_child)
+    }
+
+    pub fn regenerate_dynamic_artifact(
+        &self,
+        source_type: Uuid,
+        client: &BlockClient,
+        target_id: Uuid,
+        target_type: Uuid,
+        data: &[u8],
+    ) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
+        let registration = self
+            .registrations
+            .get(&source_type)
+            .ok_or_else(|| format!("unsupported dynamic artifact source type {source_type}"))?;
+        registration.regenerate_dynamic_artifact(client, target_id, target_type, data)
     }
 
     pub fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<Box<dyn BlockEditor>> {
