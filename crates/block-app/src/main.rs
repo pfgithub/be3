@@ -81,7 +81,7 @@ struct BlockApp {
     block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
-    dock_state: DockState<Uuid>,
+    dock_state: DockState<DockTab>,
     active_tab: Option<Uuid>,
     sidebar_reveal: Option<Uuid>,
     pending_transfers: Vec<PendingTransfer>,
@@ -93,6 +93,34 @@ struct BlockApp {
     pending_destructive_action: Option<PendingDestructiveAction>,
     scheduled_account_switch: Option<Account>,
     allow_close: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum DockTab {
+    Files,
+    Empty,
+    Block(Uuid),
+}
+
+fn default_dock_state() -> DockState<DockTab> {
+    let mut dock_state = DockState::new(vec![DockTab::Files]);
+    let files_path = dock_state
+        .find_tab(&DockTab::Files)
+        .expect("new dock state must contain Files");
+    dock_state[files_path.surface].split_right(files_path.node, 0.22, vec![DockTab::Empty]);
+    dock_state
+}
+
+fn ensure_empty_workspace(dock_state: &mut DockState<DockTab>) {
+    let has_editor = dock_state
+        .iter_all_tabs()
+        .any(|(_, tab)| matches!(tab, DockTab::Block(_)));
+    if has_editor || dock_state.find_tab(&DockTab::Empty).is_some() {
+        return;
+    }
+    if let Some(files_path) = dock_state.find_tab(&DockTab::Files) {
+        dock_state[files_path.surface].split_right(files_path.node, 0.22, vec![DockTab::Empty]);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -176,7 +204,7 @@ impl BlockApp {
             block_types: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
-            dock_state: DockState::new(Vec::new()),
+            dock_state: default_dock_state(),
             active_tab: None,
             sidebar_reveal: None,
             pending_transfers: Vec::new(),
@@ -216,7 +244,7 @@ impl BlockApp {
         self.block_types.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
-        self.dock_state = DockState::new(Vec::new());
+        self.dock_state = default_dock_state();
         self.active_tab = None;
         self.sidebar_reveal = None;
         self.pending_transfers.clear();
@@ -541,12 +569,32 @@ impl BlockApp {
             self.client
                 .watch_references(BlockReferenceList::Backrefs(id))
         });
-        if let Some(path) = self.dock_state.find_tab(&id) {
+        let tab = DockTab::Block(id);
+        if self.dock_state.find_tab(&tab).is_none() {
+            let existing_block = self
+                .dock_state
+                .iter_all_tabs()
+                .find_map(|(path, tab)| matches!(tab, DockTab::Block(_)).then_some(path));
+            if let Some(empty_path) = self.dock_state.find_tab(&DockTab::Empty) {
+                let leaf = self
+                    .dock_state
+                    .leaf_mut(empty_path.node_path())
+                    .expect("blank workspace must be a dock leaf");
+                leaf.tabs_mut()[empty_path.tab.0] = tab;
+            } else if let Some(path) = existing_block {
+                self.dock_state
+                    .set_focused_node_and_surface(path.node_path());
+                self.dock_state.push_to_focused_leaf(tab);
+            } else if let Some(files_path) = self.dock_state.find_tab(&DockTab::Files) {
+                self.dock_state[files_path.surface].split_right(files_path.node, 0.22, vec![tab]);
+            } else {
+                self.dock_state.push_to_focused_leaf(tab);
+            }
+        }
+        if let Some(path) = self.dock_state.find_tab(&tab) {
             let _ = self.dock_state.set_active_tab(path);
             self.dock_state
                 .set_focused_node_and_surface(path.node_path());
-        } else {
-            self.dock_state.push_to_focused_leaf(id);
         }
         if self.active_tab != Some(id) {
             self.sidebar_reveal = None;
@@ -1157,21 +1205,13 @@ impl BlockApp {
     }
 
     fn show_dock(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
-        if self.dock_state.iter_all_tabs().next().is_none() {
-            ui.centered_and_justified(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("No block open");
-                    ui.weak("Create or select a block from the sidebar.");
-                });
-            });
-            return;
-        }
-
-        let mut dock_state = std::mem::replace(&mut self.dock_state, DockState::new(Vec::new()));
-        for (_, id) in dock_state.iter_all_tabs() {
-            if let Some(editor) = self.editors.get_mut(id) {
-                editor.update_open_tab(frame);
-                editor.set_tab_active(false);
+        let mut dock_state = std::mem::replace(&mut self.dock_state, default_dock_state());
+        for (_, tab) in dock_state.iter_all_tabs() {
+            if let DockTab::Block(id) = tab {
+                if let Some(editor) = self.editors.get_mut(id) {
+                    editor.update_open_tab(frame);
+                    editor.set_tab_active(false);
+                }
             }
         }
         let mut viewer = BlockTabViewer {
@@ -1180,17 +1220,43 @@ impl BlockApp {
             actions: Vec::new(),
         };
         DockArea::new(&mut dock_state).show_inside(ui, &mut viewer);
+        ensure_empty_workspace(&mut dock_state);
         let actions = std::mem::take(&mut viewer.actions);
+        let pending_tabs = viewer
+            .app
+            .dock_state
+            .iter_all_tabs()
+            .filter_map(|(_, tab)| match tab {
+                DockTab::Files | DockTab::Empty => None,
+                DockTab::Block(id) => Some(*id),
+            })
+            .collect::<Vec<_>>();
         let previous_active = viewer.app.active_tab;
         let active_tab = dock_state
             .find_active_focused()
-            .map(|(_, tab)| *tab)
-            .or_else(|| dock_state.iter_all_tabs().next().map(|(_, tab)| *tab));
+            .and_then(|(_, tab)| match tab {
+                DockTab::Files | DockTab::Empty => None,
+                DockTab::Block(id) => Some(*id),
+            })
+            .or_else(|| {
+                previous_active.filter(|id| dock_state.find_tab(&DockTab::Block(*id)).is_some())
+            })
+            .or_else(|| {
+                dock_state.iter_all_tabs().find_map(|(_, tab)| match tab {
+                    DockTab::Files | DockTab::Empty => None,
+                    DockTab::Block(id) => Some(*id),
+                })
+            });
         viewer.app.dock_state = dock_state;
         if previous_active != active_tab {
             viewer.app.sidebar_reveal = None;
         }
         viewer.app.active_tab = active_tab;
+        for id in pending_tabs {
+            if let Some(block_type) = viewer.app.block_types.get(&id).copied() {
+                viewer.app.open_tab(id, block_type);
+            }
+        }
         for (active, action) in actions {
             viewer.app.handle_editor_action(active, action);
         }
@@ -1446,14 +1512,19 @@ struct BlockTabViewer<'a> {
 }
 
 impl TabViewer for BlockTabViewer<'_> {
-    type Tab = Uuid;
+    type Tab = DockTab;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        self.app
-            .editors
-            .get(tab)
-            .map_or_else(|| tab.to_string(), |editor| editor.name())
-            .into()
+        match tab {
+            DockTab::Files => "Files".into(),
+            DockTab::Empty => "".into(),
+            DockTab::Block(id) => self
+                .app
+                .editors
+                .get(id)
+                .map_or_else(|| id.to_string(), |editor| editor.name())
+                .into(),
+        }
     }
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
@@ -1461,17 +1532,43 @@ impl TabViewer for BlockTabViewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        if let Some(editor) = self.app.editors.get_mut(tab) {
-            editor.set_tab_active(true);
-        }
-        if let Some(action) = self.app.show_content(ui, self.frame, *tab) {
-            self.actions.push((*tab, action));
+        match tab {
+            DockTab::Files => {
+                let content_rect = ui.available_rect_before_wrap();
+                let mut content_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("blocks-sidebar-content")
+                        .max_rect(content_rect),
+                );
+                content_ui.set_clip_rect(content_rect.intersect(ui.clip_rect()));
+                content_ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                self.app.show_sidebar(&mut content_ui);
+                ui.advance_cursor_after_rect(content_rect);
+            }
+            DockTab::Empty => {}
+            DockTab::Block(id) => {
+                if let Some(editor) = self.app.editors.get_mut(id) {
+                    editor.set_tab_active(true);
+                }
+                if let Some(action) = self.app.show_content(ui, self.frame, *id) {
+                    self.actions.push((*id, action));
+                }
+            }
         }
     }
 
     fn on_close(&mut self, tab: &mut Self::Tab) -> OnCloseResponse {
-        self.app.close_tab_resources(*tab);
-        OnCloseResponse::Close
+        match tab {
+            DockTab::Files | DockTab::Empty => OnCloseResponse::Ignore,
+            DockTab::Block(id) => {
+                self.app.close_tab_resources(*id);
+                OnCloseResponse::Close
+            }
+        }
+    }
+
+    fn is_closeable(&self, tab: &Self::Tab) -> bool {
+        matches!(tab, DockTab::Block(_))
     }
 
     fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
@@ -1537,23 +1634,6 @@ impl eframe::App for BlockApp {
         self.show_rename(ui);
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
-        egui::Panel::left("blocks-sidebar")
-            .default_size(240.0)
-            .min_size(160.0)
-            .max_size(420.0)
-            .resizable(true)
-            .show_inside(ui, |ui| {
-                let content_rect = ui.available_rect_before_wrap();
-                let mut content_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt("blocks-sidebar-content")
-                        .max_rect(content_rect),
-                );
-                content_ui.set_clip_rect(content_rect.intersect(ui.clip_rect()));
-                content_ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                self.show_sidebar(&mut content_ui);
-                ui.advance_cursor_after_rect(content_rect);
-            });
 
         ui.vertical(|ui| {
             egui::Panel::bottom("block-statusbar")
