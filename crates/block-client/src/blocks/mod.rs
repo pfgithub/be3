@@ -1,3 +1,4 @@
+pub mod image;
 pub mod infinite_canvas;
 pub mod pixel_art;
 pub mod text;

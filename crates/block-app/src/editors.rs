@@ -1,4 +1,5 @@
 mod browser_tab;
+mod image;
 mod infinite_canvas;
 mod pixel_art;
 mod text;
@@ -10,6 +11,7 @@ use std::collections::HashMap;
 use block::{Block, BlockParent};
 use block_client::{
     blocks::{
+        image::Image,
         infinite_canvas::InfiniteCanvas,
         pixel_art::PixelArt,
         text::TextDocument,
@@ -22,7 +24,7 @@ use eframe::egui;
 use uuid::Uuid;
 
 use self::{
-    browser_tab::WebBrowserTabEditor, infinite_canvas::InfiniteCanvasEditor,
+    browser_tab::WebBrowserTabEditor, image::ImageEditor, infinite_canvas::InfiniteCanvasEditor,
     pixel_art::PixelArtEditor, text::TextEditor, unsupported::UnsupportedEditor,
     workspace_index::WorkspaceIndexEditor,
 };
@@ -40,6 +42,12 @@ pub enum EditorAction {
         id: Uuid,
         parent: Uuid,
     },
+}
+
+pub struct BlockRenderContext<'a> {
+    pub painter: &'a egui::Painter,
+    pub corners: [egui::Pos2; 4],
+    pub opacity: f32,
 }
 
 #[derive(Clone)]
@@ -84,6 +92,12 @@ pub trait BlockEditor {
     fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
         None
     }
+    fn render(&mut self, _context: BlockRenderContext<'_>) -> bool {
+        false
+    }
+    fn default_preserve_aspect_ratio(&self) -> bool {
+        false
+    }
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -97,7 +111,7 @@ type OpenEditor = fn(&BlockClient, Uuid) -> Box<dyn BlockEditor>;
 
 struct EditorRegistration {
     display_name: &'static str,
-    create: CreateEditor,
+    create: Option<CreateEditor>,
     open: OpenEditor,
     can_add_child: bool,
     can_delete_child: bool,
@@ -112,6 +126,9 @@ impl EditorRegistry {
         let mut registry = Self {
             registrations: HashMap::new(),
         };
+        registry.register_open_only(Image::TYPE_ID, "Image", |client, id| {
+            Box::new(ImageEditor::new(client.get_block::<Image>(id)))
+        });
         registry.register(
             InfiniteCanvas::TYPE_ID,
             "Canvas",
@@ -194,10 +211,28 @@ impl EditorRegistry {
             block_type,
             EditorRegistration {
                 display_name,
-                create,
+                create: Some(create),
                 open,
                 can_add_child,
                 can_delete_child,
+            },
+        );
+    }
+
+    fn register_open_only(
+        &mut self,
+        block_type: Uuid,
+        display_name: &'static str,
+        open: OpenEditor,
+    ) {
+        self.registrations.insert(
+            block_type,
+            EditorRegistration {
+                display_name,
+                create: None,
+                open,
+                can_add_child: false,
+                can_delete_child: false,
             },
         );
     }
@@ -223,7 +258,7 @@ impl EditorRegistry {
     pub fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<Box<dyn BlockEditor>> {
         self.registrations
             .get(&block_type)
-            .map(|registration| (registration.create)(client))
+            .and_then(|registration| registration.create.map(|create| create(client)))
     }
 
     pub fn open(&self, client: &BlockClient, id: Uuid, block_type: Uuid) -> Box<dyn BlockEditor> {

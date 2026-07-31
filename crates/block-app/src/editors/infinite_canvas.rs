@@ -2,18 +2,25 @@ use std::collections::{HashMap, HashSet};
 
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
-    blocks::infinite_canvas::{
-        CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasLayerMove,
-        CanvasPoint, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
+    blocks::{
+        image::Image as ImageBlock,
+        infinite_canvas::{
+            CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasLayerMove,
+            CanvasPoint, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
+        },
     },
     BlockClient, BlockHandle, BlockRelationships, CachedBlock, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
+use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use uuid::Uuid;
 
 use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
-use super::{BlockEditor, EditorAction, SidebarDragPayload};
+use super::{
+    image::ImageEditor, BlockEditor, BlockRenderContext, EditorAction, EditorRegistry,
+    SidebarDragPayload,
+};
 
 const MIN_SIZE: f32 = 4.0;
 const HIT_RADIUS: f32 = 7.0;
@@ -21,6 +28,8 @@ const HANDLE_RADIUS: f32 = 5.0;
 const ROTATE_OFFSET: f32 = 28.0;
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
+const MAX_IMPORTED_IMAGE_SIZE: f32 = 600.0;
+const IMPORT_CASCADE_OFFSET: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum CommonValue<T> {
@@ -110,6 +119,8 @@ enum Gesture {
         bounds: WorldRect,
         current: CanvasPoint,
         originals: Vec<CanvasEntity>,
+        default_preserve_aspect_ratio: bool,
+        preserve_aspect_ratio: bool,
     },
     Rotate {
         bounds: WorldRect,
@@ -132,7 +143,10 @@ pub(super) struct InfiniteCanvasEditor {
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
     dependencies: ReferenceList,
+    preview_registry: EditorRegistry,
+    preview_editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     focus_text: Option<Uuid>,
+    image_import_error: Option<String>,
 }
 
 impl InfiniteCanvasEditor {
@@ -151,7 +165,10 @@ impl InfiniteCanvasEditor {
             pending_block_center: None,
             context_menu_position: None,
             dependencies,
+            preview_registry: EditorRegistry::new(),
+            preview_editors: HashMap::new(),
             focus_text: None,
+            image_import_error: None,
         }
     }
 
@@ -224,12 +241,75 @@ impl InfiniteCanvasEditor {
     }
 
     fn add_block_entity(&mut self, block_id: Uuid, center: CanvasPoint) {
+        self.add_block_entity_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
+    }
+
+    fn add_block_entity_sized(&mut self, block_id: Uuid, center: CanvasPoint, size: CanvasPoint) {
         self.add_entity(CanvasEntity {
             id: Uuid::new_v4(),
-            transform: CanvasTransform::new(center, CanvasPoint::new(180.0, 100.0), 0.0),
+            transform: CanvasTransform::new(center, size, 0.0),
             kind: CanvasEntityKind::Block { block_id },
             style: CanvasEntityStyle::default(),
         });
+    }
+
+    fn imported_image_size(image: &ImageBlock) -> CanvasPoint {
+        let width = image.width() as f32;
+        let height = image.height() as f32;
+        let scale = (MAX_IMPORTED_IMAGE_SIZE / width.max(height)).min(1.0);
+        CanvasPoint::new(width * scale, height * scale)
+    }
+
+    fn add_imported_image(&mut self, client: &BlockClient, image: ImageBlock, center: CanvasPoint) {
+        let size = Self::imported_image_size(&image);
+        let block = client.create_block(image);
+        let id = block.id();
+        self.add_block_entity_sized(id, center, size);
+        block.note_backref(self.block.id());
+        block.set_parent(BlockParent::Uuid(self.block.id()));
+        self.preview_editors
+            .insert(id, Box::new(ImageEditor::new(block)));
+    }
+
+    fn sync_preview_editors(
+        &mut self,
+        entities: &[CanvasEntity],
+        dependencies: &[block::BlockReference],
+        client: &BlockClient,
+    ) {
+        let referenced = entities
+            .iter()
+            .filter_map(|entity| match entity.kind {
+                CanvasEntityKind::Block { block_id } => Some(block_id),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        self.preview_editors.retain(|id, _| referenced.contains(id));
+        for dependency in dependencies {
+            if referenced.contains(&dependency.id)
+                && !self.preview_editors.contains_key(&dependency.id)
+            {
+                self.preview_editors.insert(
+                    dependency.id,
+                    self.preview_registry
+                        .open(client, dependency.id, dependency.block_type),
+                );
+            }
+        }
+    }
+
+    fn selection_defaults_to_proportional(&self, entities: &[CanvasEntity]) -> bool {
+        entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id))
+            .any(|entity| {
+                let CanvasEntityKind::Block { block_id } = entity.kind else {
+                    return false;
+                };
+                self.preview_editors
+                    .get(&block_id)
+                    .is_some_and(|editor| editor.default_preserve_aspect_ratio())
+            })
     }
 
     fn update_selected(
@@ -530,6 +610,103 @@ impl InfiniteCanvasEditor {
         }
     }
 
+    fn import_dropped_images(&mut self, response: &egui::Response, client: &BlockClient) {
+        let dropped = response.ctx.input(|input| input.raw.dropped_files.clone());
+        if dropped.is_empty() {
+            return;
+        }
+        self.image_import_error = None;
+        let screen_position = response
+            .ctx
+            .pointer_hover_pos()
+            .filter(|position| response.rect.contains(*position))
+            .unwrap_or_else(|| response.rect.center());
+        let base = self.screen_to_world(screen_position, response.rect);
+        for (index, file) in dropped.into_iter().enumerate() {
+            let source_name = file
+                .path
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .or_else(|| (!file.name.is_empty()).then_some(file.name))
+                .unwrap_or_else(|| "Image".into());
+            let bytes = match file.bytes {
+                Some(bytes) => bytes.to_vec(),
+                None => match file.path.as_ref().map(std::fs::read) {
+                    Some(Ok(bytes)) => bytes,
+                    Some(Err(error)) => {
+                        self.image_import_error =
+                            Some(format!("Could not read {source_name}: {error}"));
+                        continue;
+                    }
+                    None => {
+                        self.image_import_error =
+                            Some(format!("No image data was available for {source_name}"));
+                        continue;
+                    }
+                },
+            };
+            match ImageBlock::from_compressed(source_name.clone(), bytes) {
+                Ok(image) => {
+                    let offset = IMPORT_CASCADE_OFFSET * index as f32;
+                    self.add_imported_image(
+                        client,
+                        image,
+                        CanvasPoint::new(base.x + offset, base.y + offset),
+                    );
+                }
+                Err(error) => {
+                    self.image_import_error =
+                        Some(format!("Could not import {source_name}: {error}"));
+                }
+            }
+        }
+    }
+
+    fn import_clipboard_image(&mut self, response: &egui::Response, client: &BlockClient) {
+        let paste_requested = response.hovered()
+            && !response.ctx.egui_wants_keyboard_input()
+            && response
+                .ctx
+                .input(|input| input.modifiers.command && input.key_pressed(egui::Key::V));
+        if !paste_requested {
+            return;
+        }
+        let clipboard_image =
+            arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_image());
+        let Ok(clipboard_image) = clipboard_image else {
+            return;
+        };
+        let mut encoded = Vec::new();
+        let encoded_result = PngEncoder::new(&mut encoded).write_image(
+            clipboard_image.bytes.as_ref(),
+            clipboard_image.width as u32,
+            clipboard_image.height as u32,
+            ExtendedColorType::Rgba8,
+        );
+        if let Err(error) = encoded_result {
+            self.image_import_error = Some(format!("Could not encode pasted image: {error}"));
+            return;
+        }
+        let image = match ImageBlock::from_compressed("Pasted Image.png", encoded) {
+            Ok(image) => image,
+            Err(error) => {
+                self.image_import_error = Some(format!("Could not import pasted image: {error}"));
+                return;
+            }
+        };
+        self.image_import_error = None;
+        let screen_position = response
+            .ctx
+            .pointer_hover_pos()
+            .filter(|position| response.rect.contains(*position))
+            .unwrap_or_else(|| response.rect.center());
+        let center = self.screen_to_world(screen_position, response.rect);
+        self.add_imported_image(client, image, center);
+    }
+
     fn handle_zoom_and_pan(&mut self, response: &egui::Response) -> bool {
         if response.hovered() {
             if let Some(pointer) = response.ctx.pointer_hover_pos() {
@@ -716,11 +893,17 @@ impl InfiniteCanvasEditor {
                             originals: self.selected_entities(entities),
                         });
                     } else if let (Some(bounds), Some(handle)) = (selected_bounds, handle) {
+                        let default_preserve_aspect_ratio =
+                            self.selection_defaults_to_proportional(entities);
+                        let preserve_aspect_ratio = default_preserve_aspect_ratio
+                            != response.ctx.input(|input| input.modifiers.shift);
                         self.gesture = Some(Gesture::Resize {
                             handle,
                             bounds,
                             current: world,
                             originals: self.selected_entities(entities),
+                            default_preserve_aspect_ratio,
+                            preserve_aspect_ratio,
                         });
                     } else if let Some(id) = self.entity_at(entities, world) {
                         let additive = response.ctx.input(|input| input.modifiers.shift);
@@ -794,8 +977,17 @@ impl InfiniteCanvasEditor {
                 Some(Gesture::Create { current, .. })
                 | Some(Gesture::SelectBox { current, .. })
                 | Some(Gesture::Move { current, .. })
-                | Some(Gesture::Resize { current, .. })
                 | Some(Gesture::Rotate { current, .. }) => *current = world,
+                Some(Gesture::Resize {
+                    current,
+                    default_preserve_aspect_ratio,
+                    preserve_aspect_ratio,
+                    ..
+                }) => {
+                    *current = world;
+                    *preserve_aspect_ratio = *default_preserve_aspect_ratio
+                        != response.ctx.input(|input| input.modifiers.shift);
+                }
                 Some(Gesture::Pen { points }) => {
                     if points
                         .last()
@@ -895,7 +1087,7 @@ impl InfiniteCanvasEditor {
     }
 
     fn paint(
-        &self,
+        &mut self,
         painter: &egui::Painter,
         rect: Rect,
         entities: &[CanvasEntity],
@@ -912,7 +1104,22 @@ impl InfiniteCanvasEditor {
             .collect();
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
-            paint_entity(self, painter, rect, entity, dependency_titles);
+            let block_id = match entity.kind {
+                CanvasEntityKind::Block { block_id } => Some(block_id),
+                _ => None,
+            };
+            let mut renderer = block_id.and_then(|block_id| self.preview_editors.remove(&block_id));
+            paint_entity(
+                self,
+                painter,
+                rect,
+                entity,
+                dependency_titles,
+                renderer.as_deref_mut(),
+            );
+            if let (Some(block_id), Some(renderer)) = (block_id, renderer) {
+                self.preview_editors.insert(block_id, renderer);
+            }
         }
 
         if let Some(Gesture::Create {
@@ -1090,14 +1297,22 @@ impl BlockEditor for InfiniteCanvasEditor {
         };
         let entities = canvas.entities().to_vec();
         drop(canvas);
-        let dependency_titles = self
-            .dependencies
-            .read()
-            .into_iter()
-            .map(|dependency| (dependency.id, dependency.name))
+        let dependencies = self.dependencies.read();
+        self.sync_preview_editors(&entities, &dependencies, client);
+        let dependency_titles = dependencies
+            .iter()
+            .map(|dependency| (dependency.id, dependency.name.clone()))
             .collect();
 
         let mut create_block = self.show_toolbar(ui, &entities);
+        if let Some(error) = self.image_import_error.clone() {
+            ui.horizontal(|ui| {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+                if ui.small_button("Dismiss").clicked() {
+                    self.image_import_error = None;
+                }
+            });
+        }
         let mut inspector_layer_move = None;
         egui::Panel::right(egui::Id::new(("canvas-inspector", self.block.id())))
             .default_size(240.0)
@@ -1109,6 +1324,8 @@ impl BlockEditor for InfiniteCanvasEditor {
             });
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        self.import_dropped_images(&response, client);
+        self.import_clipboard_image(&response, client);
         let (context_layer_move, context_create_block, set_parent) =
             self.handle_canvas_input(&response, &entities);
         create_block = create_block.or(context_create_block);
@@ -1499,7 +1716,15 @@ fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
             bounds,
             current,
             originals,
-        } => resize_entities(*handle, *bounds, *current, originals),
+            preserve_aspect_ratio,
+            ..
+        } => resize_entities(
+            *handle,
+            *bounds,
+            *current,
+            originals,
+            *preserve_aspect_ratio,
+        ),
         Gesture::Rotate {
             bounds,
             start_angle,
@@ -1534,6 +1759,7 @@ fn resize_entities(
     bounds: WorldRect,
     current: CanvasPoint,
     originals: &[CanvasEntity],
+    preserve_aspect_ratio: bool,
 ) -> Vec<CanvasEntity> {
     let original_size = bounds.size();
     let mut resized = bounds;
@@ -1547,13 +1773,16 @@ fn resize_entities(
     } else if handle.y > 0 {
         resized.max.y = current.y.max(resized.min.y + MIN_SIZE);
     }
+    if preserve_aspect_ratio {
+        resized = proportional_resize_bounds(handle, bounds, resized);
+    }
     let resized_size = resized.size();
-    let scale_x = if handle.x == 0 {
+    let scale_x = if handle.x == 0 && !preserve_aspect_ratio {
         1.0
     } else {
         resized_size.x / original_size.x.max(MIN_SIZE)
     };
-    let scale_y = if handle.y == 0 {
+    let scale_y = if handle.y == 0 && !preserve_aspect_ratio {
         1.0
     } else {
         resized_size.y / original_size.y.max(MIN_SIZE)
@@ -1568,14 +1797,14 @@ fn resize_entities(
                 let end = local_to_world(entity.transform, CanvasPoint::new(0.5, 0.0));
                 let resize_point = |point: CanvasPoint| {
                     CanvasPoint::new(
-                        if handle.x == 0 {
+                        if handle.x == 0 && !preserve_aspect_ratio {
                             point.x
                         } else {
                             resized.min.x
                                 + (point.x - bounds.min.x) / original_size.x.max(MIN_SIZE)
                                     * resized_size.x
                         },
-                        if handle.y == 0 {
+                        if handle.y == 0 && !preserve_aspect_ratio {
                             point.y
                         } else {
                             resized.min.y
@@ -1595,12 +1824,12 @@ fn resize_entities(
             let unit_x = (entity.transform.center.x - bounds.min.x) / original_size.x.max(MIN_SIZE);
             let unit_y = (entity.transform.center.y - bounds.min.y) / original_size.y.max(MIN_SIZE);
             entity.transform.center = CanvasPoint::new(
-                if handle.x == 0 {
+                if handle.x == 0 && !preserve_aspect_ratio {
                     entity.transform.center.x
                 } else {
                     resized.min.x + unit_x * resized_size.x
                 },
-                if handle.y == 0 {
+                if handle.y == 0 && !preserve_aspect_ratio {
                     entity.transform.center.y
                 } else {
                     resized.min.y + unit_y * resized_size.y
@@ -1611,6 +1840,49 @@ fn resize_entities(
             entity
         })
         .collect()
+}
+
+fn proportional_resize_bounds(
+    handle: ResizeHandle,
+    bounds: WorldRect,
+    resized: WorldRect,
+) -> WorldRect {
+    let original_width = bounds.size().x.max(MIN_SIZE);
+    let original_height = bounds.size().y.max(MIN_SIZE);
+    let resized_width = resized.size().x.max(MIN_SIZE);
+    let resized_height = resized.size().y.max(MIN_SIZE);
+    let scale = match (handle.x, handle.y) {
+        (0, _) => resized_height / original_height,
+        (_, 0) => resized_width / original_width,
+        _ => {
+            let horizontal = resized_width / original_width;
+            let vertical = resized_height / original_height;
+            if (horizontal - 1.0).abs() >= (vertical - 1.0).abs() {
+                horizontal
+            } else {
+                vertical
+            }
+        }
+    }
+    .max(MIN_SIZE / original_width)
+    .max(MIN_SIZE / original_height);
+    let width = original_width * scale;
+    let height = original_height * scale;
+    let center = bounds.center();
+    let (min_x, max_x) = match handle.x {
+        -1 => (bounds.max.x - width, bounds.max.x),
+        1 => (bounds.min.x, bounds.min.x + width),
+        _ => (center.x - width * 0.5, center.x + width * 0.5),
+    };
+    let (min_y, max_y) = match handle.y {
+        -1 => (bounds.max.y - height, bounds.max.y),
+        1 => (bounds.min.y, bounds.min.y + height),
+        _ => (center.y - height * 0.5, center.y + height * 0.5),
+    };
+    WorldRect {
+        min: CanvasPoint::new(min_x, min_y),
+        max: CanvasPoint::new(max_x, max_y),
+    }
 }
 
 fn pen_entity(points: Vec<CanvasPoint>) -> CanvasEntity {
@@ -1640,6 +1912,7 @@ fn paint_entity(
     rect: Rect,
     entity: &CanvasEntity,
     dependency_titles: &HashMap<Uuid, String>,
+    renderer: Option<&mut (dyn BlockEditor + '_)>,
 ) {
     let auto = painter.ctx().global_style().visuals.text_color();
     let opacity = entity.style.opacity.clamp(0.0, 1.0);
@@ -1699,12 +1972,19 @@ fn paint_entity(
             ));
         }
         CanvasEntityKind::Block { block_id } => {
-            let corners: Vec<_> = entity_corners(entity)
-                .into_iter()
-                .map(|point| editor.world_to_screen(point, rect))
-                .collect();
+            let corners = entity_corners(entity).map(|point| editor.world_to_screen(point, rect));
+            if renderer.is_some_and(|renderer| {
+                renderer.render(BlockRenderContext {
+                    painter,
+                    corners,
+                    opacity,
+                })
+            }) {
+                painter.add(egui::Shape::closed_line(corners.to_vec(), stroke));
+                return;
+            }
             painter.add(egui::Shape::convex_polygon(
-                corners,
+                corners.to_vec(),
                 with_opacity(Color32::from_gray(35), opacity),
                 stroke,
             ));

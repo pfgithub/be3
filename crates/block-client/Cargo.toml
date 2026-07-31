@@ -9,6 +9,7 @@ base64 = "0.22"
 block = { path = "../block" }
 eips = { version = "0.2.4", features = ["serde"] }
 futures-util = "0.3"
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "pnm", "tga", "tiff", "webp"] }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
