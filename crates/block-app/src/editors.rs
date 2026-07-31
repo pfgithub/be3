@@ -2,6 +2,7 @@ mod browser_tab;
 mod image;
 mod infinite_canvas;
 mod pixel_art;
+mod text;
 mod unsupported;
 mod workspace_index;
 
@@ -204,6 +205,7 @@ impl EditorRegistry {
         registry.register(image::registration());
         registry.register(infinite_canvas::registration());
         registry.register(pixel_art::registration());
+        registry.register(text::registration());
         registry.register(browser_tab::registration());
         registry.register(workspace_index::registration());
         registry
