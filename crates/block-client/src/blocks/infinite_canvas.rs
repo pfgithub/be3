@@ -567,11 +567,4 @@ fn replace_if_unchanged<T: PartialEq>(current: &mut T, expected: T, desired: T) 
 }
 
 #[cfg(test)]
-#[path = "infinite_canvas/tests/infinite_canvas_exact_order_preserves_unlisted_slots.rs"]
-mod infinite_canvas_exact_order_preserves_unlisted_slots;
-#[cfg(test)]
-#[path = "infinite_canvas/tests/infinite_canvas_history_undoes_and_redoes_add.rs"]
-mod infinite_canvas_history_undoes_and_redoes_add;
-#[cfg(test)]
-#[path = "infinite_canvas/tests/rebase_entity_preserves_conflicting_remote_fields.rs"]
-mod rebase_entity_preserves_conflicting_remote_fields;
+mod tests;

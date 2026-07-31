@@ -54,5 +54,4 @@ impl Block for WorkspaceIndex {
 }
 
 #[cfg(test)]
-#[path = "workspace_index/tests/workspace_index_remove_removes_entry.rs"]
-mod workspace_index_remove_removes_entry;
+mod tests;

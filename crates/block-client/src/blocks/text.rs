@@ -310,14 +310,4 @@ fn apply_text_history_edit(
 }
 
 #[cfg(test)]
-#[path = "text/tests/text_history_undoes_and_redoes_grouped_edits.rs"]
-mod text_history_undoes_and_redoes_grouped_edits;
-#[cfg(test)]
-#[path = "text/tests/text_item_ids_resolve_visible_characters.rs"]
-mod text_item_ids_resolve_visible_characters;
-#[cfg(test)]
-#[path = "text/tests/text_operations_are_crdt_updates_and_do_not_keep_a_confirmed_copy.rs"]
-mod text_operations_are_crdt_updates_and_do_not_keep_a_confirmed_copy;
-#[cfg(test)]
-#[path = "text/tests/text_remove_item_operation_targets_stable_id.rs"]
-mod text_remove_item_operation_targets_stable_id;
+mod tests;

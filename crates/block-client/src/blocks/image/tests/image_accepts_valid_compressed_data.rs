@@ -1,4 +1,4 @@
-use super::{support::png_bytes, Image};
+use super::{png_bytes, Image};
 
 #[test]
 fn image_accepts_valid_compressed_data() {

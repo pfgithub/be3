@@ -1,4 +1,4 @@
-use super::{support::png_bytes, Image};
+use super::{png_bytes, Image};
 
 #[test]
 fn image_serialization_preserves_compressed_data() {

@@ -52,62 +52,7 @@ enum StoredOperation<B, O> {
 }
 
 #[cfg(test)]
-#[path = "lib/tests/a_read_guard_blocks_background_updates.rs"]
-mod a_read_guard_blocks_background_updates;
-#[cfg(test)]
-#[path = "lib/tests/block_handle_history_is_shared_by_clones.rs"]
-mod block_handle_history_is_shared_by_clones;
-#[cfg(test)]
-#[path = "lib/tests/cached_blocks_are_populated_from_confirmed_metadata.rs"]
-mod cached_blocks_are_populated_from_confirmed_metadata;
-#[cfg(test)]
-#[path = "lib/tests/client_debug_snapshot_reports_active_worker_state.rs"]
-mod client_debug_snapshot_reports_active_worker_state;
-#[cfg(test)]
-#[path = "lib/tests/created_blocks_are_immediately_readable_and_operate_optimistically.rs"]
-mod created_blocks_are_immediately_readable_and_operate_optimistically;
-#[cfg(test)]
-#[path = "lib/tests/duplicate_reference_watches_share_subscription.rs"]
-mod duplicate_reference_watches_share_subscription;
-#[cfg(test)]
-#[path = "lib/tests/dynamic_artifact_descriptor_survives_creation.rs"]
-mod dynamic_artifact_descriptor_survives_creation;
-#[cfg(test)]
-#[path = "lib/tests/fetched_blocks_are_none_until_resolved.rs"]
-mod fetched_blocks_are_none_until_resolved;
-#[cfg(test)]
-#[path = "lib/tests/finish_history_group_starts_a_new_action.rs"]
-mod finish_history_group_starts_a_new_action;
-#[cfg(test)]
-#[path = "lib/tests/get_block_resolves_from_a_websocket_read_response.rs"]
-mod get_block_resolves_from_a_websocket_read_response;
-#[cfg(test)]
-#[path = "lib/tests/history_test_support.rs"]
-mod history_test_support;
-#[cfg(test)]
-#[path = "lib/tests/lib_test_support.rs"]
-mod lib_test_support;
-#[cfg(test)]
-#[path = "lib/tests/matching_broadcast_before_acknowledgement_is_applied_once.rs"]
-mod matching_broadcast_before_acknowledgement_is_applied_once;
-#[cfg(test)]
-#[path = "lib/tests/new_history_action_clears_redo.rs"]
-mod new_history_action_clears_redo;
-#[cfg(test)]
-#[path = "lib/tests/no_history_policy_disables_undo.rs"]
-mod no_history_policy_disables_undo;
-#[cfg(test)]
-#[path = "lib/tests/remote_operations_rebuild_all_pending_optimistic_operations.rs"]
-mod remote_operations_rebuild_all_pending_optimistic_operations;
-#[cfg(test)]
-#[path = "lib/tests/replace_preserves_dynamic_artifact_descriptor.rs"]
-mod replace_preserves_dynamic_artifact_descriptor;
-#[cfg(test)]
-#[path = "lib/tests/wait_until_observes_current_and_future_values.rs"]
-mod wait_until_observes_current_and_future_values;
-#[cfg(test)]
-#[path = "lib/tests/watched_operations_are_buffered_until_their_sequence_is_contiguous.rs"]
-mod watched_operations_are_buffered_until_their_sequence_is_contiguous;
+mod tests;
 
 pub struct BlockClient {
     id: Uuid,

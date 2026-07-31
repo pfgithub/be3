@@ -1,0 +1,9 @@
+use super::*;
+
+mod infinite_canvas_applies_entity_changes;
+mod infinite_canvas_exact_order_preserves_unlisted_slots;
+mod infinite_canvas_history_undoes_and_redoes_add;
+mod infinite_canvas_reorders_layers;
+mod infinite_canvas_serialization_round_trips;
+mod infinite_canvas_tracks_block_references;
+mod rebase_entity_preserves_conflicting_remote_fields;

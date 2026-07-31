@@ -124,20 +124,4 @@ where
 }
 
 #[cfg(test)]
-#[path = "image/tests/image_accepts_valid_compressed_data.rs"]
-mod image_accepts_valid_compressed_data;
-#[cfg(test)]
-#[path = "image/tests/image_implicit_name_uses_source_name.rs"]
-mod image_implicit_name_uses_source_name;
-#[cfg(test)]
-#[path = "image/tests/image_rejects_invalid_compressed_data.rs"]
-mod image_rejects_invalid_compressed_data;
-#[cfg(test)]
-#[path = "image/tests/image_serialization_preserves_compressed_data.rs"]
-mod image_serialization_preserves_compressed_data;
-#[cfg(test)]
-#[path = "image/tests/image_serialization_uses_base64.rs"]
-mod image_serialization_uses_base64;
-#[cfg(test)]
-#[path = "image/tests/support.rs"]
-mod support;
+mod tests;

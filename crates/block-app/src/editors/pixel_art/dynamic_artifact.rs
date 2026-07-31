@@ -65,5 +65,4 @@ impl DynamicArtifactRegeneration for PixelArtRegeneration {
 }
 
 #[cfg(test)]
-#[path = "dynamic_artifact/tests/pixel_art_export_generates_png.rs"]
-mod pixel_art_export_generates_png;
+mod tests;

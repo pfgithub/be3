@@ -12,11 +12,10 @@ Code style:
 
 Tests:
 - Keep test files seperate from code files.
-- Give every test its own seperate file named the same as the function inside it. Example: tests for `src/a.rs` should go in `src/a/tests/fn_name_1.rs`. Test imports and support functions go in src/a/tests.rs. src/a.rs only imports src/a/tests.rs, it doesn't define every individual test.
+- Give every test its own seperate file named the same as the function inside it. Tests for `src/a.rs` go in `src/a/tests/fn_name_1.rs`; test imports and support functions go in `src/a/tests.rs`. Tests for a crate root such as `src/lib.rs` instead go in `src/tests/fn_name_1.rs`, with imports and support functions in `src/tests.rs`. Import test modules with plain `mod tests;` and plain child `mod fn_name_1;` declarations; do not use `#[path]`. Production files only import their `tests.rs` module and do not define every individual test.
 - Do not add tests for GUI features.
 - Do not add irrelevant or useless tests. If a change needs manual testing, note what needs testing in your final output.
 
 Verification:
 - After making changes, always run: `cargo fmt` and `cargo nextest run`. This will take ~10 seconds excluding compilation time.
 - Do not perform any manual verification besides those commands.
-

@@ -1,6 +1,6 @@
 use block::Block;
 
-use super::{support::png_bytes, Image};
+use super::{png_bytes, Image};
 
 #[test]
 fn image_implicit_name_uses_source_name() {
