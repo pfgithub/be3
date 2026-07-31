@@ -5,6 +5,7 @@ members = [
     "crates/block",
     "crates/block-server",
     "crates/block-client",
+    "crates/text-editor-core",
     "crates/block-e2e",
     "crates/block-app",
     "crates/citygame",

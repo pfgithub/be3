@@ -25,22 +25,22 @@ async fn crdt_text_clients_converge_after_concurrent_insertions() {
 
     let operation = {
         let document = block_a.read().unwrap();
-        document.insert_operation(0, 'a').unwrap()
+        document.insert_operation(0, 0xff).unwrap()
     };
     block_a.operate(operation);
     let operation = {
         let document = block_a.read().unwrap();
-        document.insert_operation(1, 'b').unwrap()
+        document.insert_operation(1, 0x80).unwrap()
     };
     block_a.operate(operation);
     let operation = {
         let document = block_b.read().unwrap();
-        document.insert_operation(0, 'x').unwrap()
+        document.insert_operation(0, 0xfe).unwrap()
     };
     block_b.operate(operation);
     let operation = {
         let document = block_b.read().unwrap();
-        document.insert_operation(1, 'y').unwrap()
+        document.insert_operation(1, 0xc0).unwrap()
     };
     block_b.operate(operation);
     timeout(client_a.synchronized()).await;
@@ -48,10 +48,11 @@ async fn crdt_text_clients_converge_after_concurrent_insertions() {
     timeout(block_a.wait_until(|document| document.len() == 4)).await;
     timeout(block_b.wait_until(|document| document.len() == 4)).await;
 
-    let text_a = block_a.read().unwrap().text();
-    let text_b = block_b.read().unwrap().text();
+    let text_a = block_a.read().unwrap().bytes().to_vec();
+    let text_b = block_b.read().unwrap().bytes().to_vec();
     assert_eq!(text_a, text_b);
-    assert_eq!(text_a.chars().count(), 4);
+    assert_eq!(text_a.len(), 4);
+    assert!(std::str::from_utf8(&text_a).is_err());
 
     drop(block_a);
     drop(block_b);

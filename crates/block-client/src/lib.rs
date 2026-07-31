@@ -442,6 +442,29 @@ pub struct BlockHandle<B: Block> {
     access: Arc<RwLock<()>>,
 }
 
+#[derive(Clone)]
+pub struct HistoryMetadata {
+    value: Arc<dyn Any + Send + Sync>,
+    bytes: usize,
+}
+
+impl HistoryMetadata {
+    pub fn new<T: Any + Send + Sync>(value: T, bytes: usize) -> Self {
+        Self {
+            value: Arc::new(value),
+            bytes,
+        }
+    }
+
+    pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Arc<T>> {
+        Arc::clone(&self.value).downcast().ok()
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockRelationships {
     pub parent: BlockParent,
@@ -484,7 +507,7 @@ impl<B: Block> BlockHandle<B> {
 
     pub fn operate(&self, operation: B::Operation) {
         self.block
-            .local_operations(vec![operation], HistoryMode::Standalone);
+            .local_operations(vec![operation], HistoryMode::Standalone, None);
         self.commands
             .send(WorkerCommand::Operate { id: self.id })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
@@ -506,12 +529,20 @@ impl<B: Block> BlockHandle<B> {
     }
 
     pub fn operate_grouped(&self, operations: impl IntoIterator<Item = B::Operation>) {
+        self.operate_grouped_with_history_metadata(operations, None);
+    }
+
+    pub fn operate_grouped_with_history_metadata(
+        &self,
+        operations: impl IntoIterator<Item = B::Operation>,
+        metadata: Option<HistoryMetadata>,
+    ) {
         let operations = operations.into_iter().collect::<Vec<_>>();
         if operations.is_empty() {
             return;
         }
         self.block
-            .local_operations(operations, HistoryMode::Grouped);
+            .local_operations(operations, HistoryMode::Grouped, metadata);
         self.commands
             .send(WorkerCommand::Operate { id: self.id })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
@@ -534,19 +565,31 @@ impl<B: Block> BlockHandle<B> {
     }
 
     pub fn undo(&self) {
-        if self.block.apply_history(HistoryDirection::Undo) {
+        self.undo_with_history_metadata();
+    }
+
+    pub fn undo_with_history_metadata(&self) -> Option<HistoryMetadata> {
+        let result = self.block.apply_history(HistoryDirection::Undo);
+        if result.applied {
             self.commands
                 .send(WorkerCommand::Operate { id: self.id })
                 .unwrap_or_else(|_| fatal("block client worker stopped"));
         }
+        result.metadata
     }
 
     pub fn redo(&self) {
-        if self.block.apply_history(HistoryDirection::Redo) {
+        self.redo_with_history_metadata();
+    }
+
+    pub fn redo_with_history_metadata(&self) -> Option<HistoryMetadata> {
+        let result = self.block.apply_history(HistoryDirection::Redo);
+        if result.applied {
             self.commands
                 .send(WorkerCommand::Operate { id: self.id })
                 .unwrap_or_else(|_| fatal("block client worker stopped"));
         }
+        result.metadata
     }
 
     pub fn set_parent(&self, parent: BlockParent) {
@@ -708,7 +751,7 @@ impl BlockBatch<'_> {
         }
         block
             .block
-            .local_operations(vec![operation], HistoryMode::Standalone);
+            .local_operations(vec![operation], HistoryMode::Standalone, None);
         self.ids.push(block.id);
     }
 }
@@ -1855,9 +1898,16 @@ enum HistoryMode {
     Grouped,
 }
 
+#[derive(Default)]
+struct HistoryApplyResult {
+    applied: bool,
+    metadata: Option<HistoryMetadata>,
+}
+
 struct HistoryEntry<A> {
     action: A,
     bytes: usize,
+    metadata: Option<HistoryMetadata>,
 }
 
 struct HistoryStack<A> {
@@ -1883,6 +1933,7 @@ impl<A> HistoryStack<A> {
         &mut self,
         mut action: A,
         mode: HistoryMode,
+        metadata: Option<HistoryMetadata>,
     ) {
         self.redo.clear();
         if matches!(mode, HistoryMode::Grouped) && self.group_open {
@@ -1890,7 +1941,9 @@ impl<A> HistoryStack<A> {
                 let old_bytes = previous.bytes;
                 match H::merge(&mut previous.action, action) {
                     Ok(()) => {
-                        previous.bytes = H::action_bytes(&previous.action);
+                        previous.bytes = H::action_bytes(&previous.action).saturating_add(
+                            previous.metadata.as_ref().map_or(0, HistoryMetadata::bytes),
+                        );
                         self.undo_bytes = self
                             .undo_bytes
                             .saturating_sub(old_bytes)
@@ -1902,9 +1955,14 @@ impl<A> HistoryStack<A> {
                 }
             }
         }
-        let bytes = H::action_bytes(&action);
+        let bytes = H::action_bytes(&action)
+            .saturating_add(metadata.as_ref().map_or(0, HistoryMetadata::bytes));
         self.undo_bytes = self.undo_bytes.saturating_add(bytes);
-        self.undo.push_back(HistoryEntry { action, bytes });
+        self.undo.push_back(HistoryEntry {
+            action,
+            bytes,
+            metadata,
+        });
         self.group_open = matches!(mode, HistoryMode::Grouped);
         self.evict();
     }
@@ -1936,22 +1994,24 @@ impl<A> HistoryStack<A> {
         &mut self,
         direction: HistoryDirection,
         apply: impl FnOnce(&mut A) -> R,
-    ) -> Option<R> {
+    ) -> Option<(R, Option<HistoryMetadata>)> {
         self.group_open = false;
         match direction {
             HistoryDirection::Undo => {
                 let mut entry = self.undo.pop_back()?;
                 self.undo_bytes = self.undo_bytes.saturating_sub(entry.bytes);
                 let result = apply(&mut entry.action);
+                let metadata = entry.metadata.clone();
                 self.redo.push(entry);
-                Some(result)
+                Some((result, metadata))
             }
             HistoryDirection::Redo => {
                 let mut entry = self.redo.pop()?;
                 let result = apply(&mut entry.action);
+                let metadata = entry.metadata.clone();
                 self.undo_bytes = self.undo_bytes.saturating_add(entry.bytes);
                 self.undo.push_back(entry);
-                Some(result)
+                Some((result, metadata))
             }
         }
     }
@@ -2065,7 +2125,12 @@ impl<B: Block> TypedBlock<B> {
         self.changed.send_replace(());
     }
 
-    fn local_operations(&self, operations: Vec<B::Operation>, history_mode: HistoryMode) {
+    fn local_operations(
+        &self,
+        operations: Vec<B::Operation>,
+        history_mode: HistoryMode,
+        history_metadata: Option<HistoryMetadata>,
+    ) {
         let mut state = self.state.write();
         let record_history = B::History::ENABLED && !matches!(history_mode, HistoryMode::None);
         let history_action = {
@@ -2096,7 +2161,7 @@ impl<B: Block> TypedBlock<B> {
             if let Some(action) = history_action {
                 self.history
                     .write()
-                    .push::<B, B::History>(action, history_mode);
+                    .push::<B, B::History>(action, history_mode, history_metadata);
             }
         }
     }
@@ -2124,25 +2189,26 @@ impl<B: Block> TypedBlock<B> {
 
     #[cfg(test)]
     fn local_operation(&self, operation: B::Operation) {
-        self.local_operations(vec![operation], HistoryMode::Standalone);
+        self.local_operations(vec![operation], HistoryMode::Standalone, None);
     }
 
-    fn apply_history(&self, direction: HistoryDirection) -> bool {
+    fn apply_history(&self, direction: HistoryDirection) -> HistoryApplyResult {
         let Some(current) = self.shared.value.read().clone() else {
-            return false;
+            return HistoryApplyResult::default();
         };
-        let operations = self
-            .history
-            .write()
-            .apply(direction, |action| {
-                B::History::operations(&current, action, direction)
-            })
-            .unwrap_or_default();
+        let Some((operations, metadata)) = self.history.write().apply(direction, |action| {
+            B::History::operations(&current, action, direction)
+        }) else {
+            return HistoryApplyResult::default();
+        };
         if operations.is_empty() {
-            return false;
+            return HistoryApplyResult::default();
         }
-        self.local_operations(operations, HistoryMode::None);
-        true
+        self.local_operations(operations, HistoryMode::None, None);
+        HistoryApplyResult {
+            applied: true,
+            metadata,
+        }
     }
 
     #[cfg(test)]

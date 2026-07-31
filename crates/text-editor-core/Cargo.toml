@@ -1,0 +1,17 @@
+[package]
+name = "text-editor-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+block = { path = "../block" }
+block-client = { path = "../block-client" }
+similar = "3.1"
+tree-sitter = "0.26"
+tree-sitter-zig = "1.1"
+unicode-segmentation = "1.13"
+uuid = "1"
+
+[dev-dependencies]
+serde_json = "1"

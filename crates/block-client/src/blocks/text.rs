@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fmt,
     time::{Duration, Instant},
 };
@@ -13,13 +14,13 @@ const TEXT_BURST_DELAY: Duration = Duration::from_millis(750);
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TextDocument {
     sequence: eips::Eips<Uuid>,
-    text: Vec<char>,
+    bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TextOperation {
     change: RemoteChange<Uuid>,
-    item: Option<char>,
+    item: Option<u8>,
 }
 
 pub struct TextHistory;
@@ -35,8 +36,8 @@ struct TextHistoryEdit {
     left: Option<Uuid>,
     right: Option<Uuid>,
     fallback_index: usize,
-    before: Vec<char>,
-    after: Vec<char>,
+    before: Vec<u8>,
+    after: Vec<u8>,
     removed_ids: Vec<Uuid>,
     visible_ids: Vec<Uuid>,
 }
@@ -45,39 +46,54 @@ impl TextDocument {
     pub fn new() -> Self {
         Self {
             sequence: eips::Eips::new(),
-            text: Vec::new(),
+            bytes: Vec::new(),
         }
     }
 
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let mut document = Self::new();
+        for byte in bytes.as_ref() {
+            let operation = document
+                .insert_operation(document.len(), *byte)
+                .expect("appending a byte to a text document failed");
+            Self::apply_operation(&mut document, &operation);
+        }
+        document
+    }
+
     pub fn len(&self) -> usize {
-        self.text.len()
+        self.bytes.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty()
+        self.bytes.is_empty()
     }
 
-    pub fn text(&self) -> String {
-        self.text.iter().collect()
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn text_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.bytes)
     }
 
     pub fn insert_operation(
         &self,
         index: usize,
-        character: char,
+        byte: u8,
     ) -> Result<TextOperation, eips::error::IndexError> {
-        self.insert_operation_with_id(index, Uuid::new_v4(), character)
+        self.insert_operation_with_id(index, Uuid::new_v4(), byte)
     }
 
     pub fn insert_operation_with_id(
         &self,
         index: usize,
         id: Uuid,
-        character: char,
+        byte: u8,
     ) -> Result<TextOperation, eips::error::IndexError> {
         Ok(TextOperation {
             change: self.sequence.insert(index, id)?,
-            item: Some(character),
+            item: Some(byte),
         })
     }
 
@@ -110,9 +126,7 @@ impl Default for TextDocument {
 
 impl fmt::Display for TextDocument {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.text
-            .iter()
-            .try_for_each(|character| write!(formatter, "{character}"))
+        formatter.write_str(&self.text_lossy())
     }
 }
 
@@ -131,40 +145,40 @@ impl Block for TextDocument {
         match local {
             LocalChange::AlreadyApplied | LocalChange::None => {}
             LocalChange::Insert(index) => {
-                block.text.insert(
+                block.bytes.insert(
                     index,
                     operation
                         .item
-                        .expect("eips insertion operation omitted its character"),
+                        .expect("eips insertion operation omitted its byte"),
                 );
             }
             LocalChange::Remove(index) => {
-                block.text.remove(index);
+                block.bytes.remove(index);
             }
             LocalChange::Move { old, new } => {
-                let character = block.text.remove(old);
-                block.text.insert(new, character);
+                let byte = block.bytes.remove(old);
+                block.bytes.insert(new, byte);
             }
         }
     }
 
     fn implicit_name(&self) -> String {
-        let line: String = self
-            .text
+        let line_end = self
+            .bytes
             .iter()
-            .take_while(|character| **character != '\n')
-            .collect();
-        let mut end = line.len();
-        if end > MAX_NAME_BYTES {
-            end = MAX_NAME_BYTES;
-            while !line.is_char_boundary(end) {
-                end -= 1;
+            .position(|byte| *byte == b'\n')
+            .unwrap_or(self.bytes.len());
+        let mut name = String::new();
+        for character in String::from_utf8_lossy(&self.bytes[..line_end]).chars() {
+            if name.len() + character.len_utf8() > MAX_NAME_BYTES {
+                break;
             }
+            name.push(character);
         }
-        if end == 0 {
+        if name.is_empty() {
             return "Untitled".to_owned();
         }
-        line[..end].to_owned()
+        name
     }
 }
 
@@ -177,22 +191,22 @@ impl BlockHistory<TextDocument> for TextHistory {
         _operations: &[TextOperation],
     ) -> Option<Self::Action> {
         let prefix = before
-            .text
+            .bytes
             .iter()
-            .zip(&after.text)
+            .zip(&after.bytes)
             .take_while(|(left, right)| left == right)
             .count();
-        let max_suffix = before.text.len().min(after.text.len()) - prefix;
+        let max_suffix = before.bytes.len().min(after.bytes.len()) - prefix;
         let suffix = before
-            .text
+            .bytes
             .iter()
             .rev()
-            .zip(after.text.iter().rev())
+            .zip(after.bytes.iter().rev())
             .take(max_suffix)
             .take_while(|(left, right)| left == right)
             .count();
-        let before_end = before.text.len() - suffix;
-        let after_end = after.text.len() - suffix;
+        let before_end = before.bytes.len() - suffix;
+        let after_end = after.bytes.len() - suffix;
         if prefix == before_end && prefix == after_end {
             return None;
         }
@@ -202,8 +216,8 @@ impl BlockHistory<TextDocument> for TextHistory {
                 .and_then(|index| before.item_id(index)),
             right: before.item_id(before_end),
             fallback_index: prefix,
-            before: before.text[prefix..before_end].to_vec(),
-            after: after.text[prefix..after_end].to_vec(),
+            before: before.bytes[prefix..before_end].to_vec(),
+            after: after.bytes[prefix..after_end].to_vec(),
             removed_ids: (prefix..before_end)
                 .filter_map(|index| before.item_id(index))
                 .collect(),
@@ -224,7 +238,8 @@ impl BlockHistory<TextDocument> for TextHistory {
             .edits
             .iter()
             .map(|edit| {
-                (edit.before.len() + edit.after.len()) * size_of::<char>()
+                edit.before.len()
+                    + edit.after.len()
                     + (edit.removed_ids.len() + edit.visible_ids.len()) * size_of::<Uuid>()
             })
             .sum()
@@ -281,25 +296,41 @@ fn apply_text_history_edit(
     to_after: bool,
     operations: &mut Vec<TextOperation>,
 ) {
-    for id in std::mem::take(&mut edit.visible_ids) {
-        if let Some(operation) = document.remove_item_operation(id) {
-            TextDocument::apply_operation(document, &operation);
-            operations.push(operation);
-        }
-    }
-    let characters = if to_after { &edit.after } else { &edit.before };
-    let mut index = edit
-        .right
-        .and_then(|id| document.item_index(id))
+    let current_len = if to_after {
+        edit.before.len()
+    } else {
+        edit.after.len()
+    };
+    let first_visible = edit
+        .visible_ids
+        .iter()
+        .filter_map(|id| document.item_index(*id))
+        .min();
+    let mut index = first_visible
+        .or_else(|| {
+            edit.right
+                .and_then(|id| document.item_index(id))
+                .map(|right| right.saturating_sub(current_len))
+        })
         .or_else(|| {
             edit.left
                 .and_then(|id| document.item_index(id))
-                .map(|index| index + 1)
+                .map(|left| left + 1)
         })
         .unwrap_or_else(|| edit.fallback_index.min(document.len()));
-    for character in characters {
+    for _ in 0..current_len.min(document.len().saturating_sub(index)) {
+        let Ok(operation) = document.remove_operation(index) else {
+            break;
+        };
+        TextDocument::apply_operation(document, &operation);
+        operations.push(operation);
+    }
+    edit.visible_ids.clear();
+    let characters = if to_after { &edit.after } else { &edit.before };
+    index = index.min(document.len());
+    for byte in characters {
         let id = Uuid::new_v4();
-        let Ok(operation) = document.insert_operation_with_id(index, id, *character) else {
+        let Ok(operation) = document.insert_operation_with_id(index, id, *byte) else {
             continue;
         };
         TextDocument::apply_operation(document, &operation);
