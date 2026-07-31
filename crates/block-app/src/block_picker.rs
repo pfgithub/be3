@@ -1,15 +1,10 @@
 use std::collections::HashSet;
 
-use block::Block;
-use block_client::{
-    blocks::{
-        infinite_canvas::InfiniteCanvas, pixel_art::PixelArt, text::TextDocument,
-        web_browser_tab::WebBrowserTab, workspace_index::WorkspaceIndex,
-    },
-    BlockClient, CachedBlock,
-};
+use block_client::{BlockClient, CachedBlock};
 use eframe::egui;
 use uuid::Uuid;
+
+use crate::editors::EditorRegistry;
 
 pub enum BlockPickerMenuAction {
     New(Uuid),
@@ -24,16 +19,13 @@ pub struct BlockPicker {
 }
 
 impl BlockPicker {
-    pub fn show_menu(ui: &mut egui::Ui) -> Option<BlockPickerMenuAction> {
+    pub fn show_menu(
+        ui: &mut egui::Ui,
+        registry: &EditorRegistry,
+    ) -> Option<BlockPickerMenuAction> {
         let mut action = None;
         ui.menu_button("New block", |ui| {
-            for (label, block_type) in [
-                ("Text block", TextDocument::TYPE_ID),
-                ("Pixel Art", PixelArt::TYPE_ID),
-                ("Canvas", InfiniteCanvas::TYPE_ID),
-                ("Folder", WorkspaceIndex::TYPE_ID),
-                ("Browser Tab", WebBrowserTab::TYPE_ID),
-            ] {
+            for &(label, block_type) in registry.new_block_actions() {
                 if ui.button(label).clicked() {
                     action = Some(BlockPickerMenuAction::New(block_type));
                     ui.close();

@@ -552,7 +552,12 @@ impl InfiniteCanvasEditor {
         movement
     }
 
-    fn show_toolbar(&mut self, ui: &mut egui::Ui, entities: &[CanvasEntity]) -> Option<Uuid> {
+    fn show_toolbar(
+        &mut self,
+        ui: &mut egui::Ui,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) -> Option<Uuid> {
         let mut create_block = None;
         ui.horizontal(|ui| {
             for (tool, label) in [
@@ -569,7 +574,7 @@ impl InfiniteCanvasEditor {
                 }
             }
             ui.menu_button("Block", |ui| {
-                if let Some(action) = BlockPicker::show_menu(ui) {
+                if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
                     self.tool = Tool::Block;
                     self.armed_block = None;
                     self.armed_block_needs_parent = false;
@@ -911,7 +916,7 @@ impl InfiniteCanvasEditor {
                     ui.close();
                 }
                 ui.menu_button("Block", |ui| {
-                    if let Some(action) = BlockPicker::show_menu(ui) {
+                    if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
                         self.tool = Tool::Block;
                         self.armed_block = None;
                         self.armed_block_needs_parent = false;
@@ -1368,7 +1373,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             .map(|dependency| (dependency.id, dependency.name.clone()))
             .collect();
 
-        let mut create_block = self.show_toolbar(ui, &entities);
+        let mut create_block = self.show_toolbar(ui, &entities, editors);
         if let Some(error) = self.image_import_error.clone() {
             ui.horizontal(|ui| {
                 ui.colored_label(ui.visuals().error_fg_color, error);

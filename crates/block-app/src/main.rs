@@ -829,7 +829,7 @@ impl BlockApp {
                 });
             }
             response.context_menu(|ui| {
-                match block_context_menu(ui, can_add_child, can_delete_child) {
+                match block_context_menu(ui, &self.registry, can_add_child, can_delete_child) {
                     Some(BlockContextMenuAction::Picker(action)) => picker_action = Some(action),
                     Some(BlockContextMenuAction::Rename) => {
                         self.rename = Some(RenameState {
@@ -844,7 +844,7 @@ impl BlockApp {
             row_response = Some(response);
             if can_add_child {
                 ui.menu_button("+", |ui| {
-                    picker_action = BlockPicker::show_menu(ui);
+                    picker_action = BlockPicker::show_menu(ui, &self.registry);
                 })
                 .response
                 .on_hover_text("Add a child");
@@ -944,7 +944,7 @@ impl BlockApp {
             ui.heading("Blocks");
             ui.add_space(ui.available_width() - 28.0);
             ui.menu_button("+", |ui| {
-                picker_action = BlockPicker::show_menu(ui);
+                picker_action = BlockPicker::show_menu(ui, &self.registry);
             })
             .response
             .on_hover_text("Create block");
@@ -1415,7 +1415,9 @@ impl BlockApp {
                 let can_delete =
                     source != SidebarDragSource::Orphaned && self.can_delete_from(source);
                 response.context_menu(|ui| {
-                    if let Some(action) = block_context_menu(ui, can_add, can_delete) {
+                    if let Some(action) =
+                        block_context_menu(ui, &self.registry, can_add, can_delete)
+                    {
                         context_action = Some((parent.clone(), source, false, action));
                     }
                 });
@@ -1556,7 +1558,7 @@ impl BlockApp {
             let can_add = self.registry.can_add_child(reference.block_type);
             let can_delete = source != SidebarDragSource::Orphaned && self.can_delete_from(source);
             response.context_menu(|ui| {
-                if let Some(action) = block_context_menu(ui, can_add, can_delete) {
+                if let Some(action) = block_context_menu(ui, &self.registry, can_add, can_delete) {
                     *context_action = Some((reference.clone(), source, is_reference, action));
                 }
             });
@@ -1685,13 +1687,14 @@ enum BlockContextMenuAction {
 
 fn block_context_menu(
     ui: &mut egui::Ui,
+    registry: &EditorRegistry,
     can_add: bool,
     can_delete: bool,
 ) -> Option<BlockContextMenuAction> {
     let mut action = None;
     ui.add_enabled_ui(can_add, |ui| {
         ui.menu_button("Add", |ui| {
-            if let Some(picker_action) = BlockPicker::show_menu(ui) {
+            if let Some(picker_action) = BlockPicker::show_menu(ui, registry) {
                 action = Some(BlockContextMenuAction::Picker(picker_action));
             }
         });

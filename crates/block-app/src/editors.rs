@@ -62,6 +62,10 @@ impl<'a> EditorAccess<'a> {
         self.client
     }
 
+    pub fn registry(&self) -> &EditorRegistry {
+        self.registry
+    }
+
     pub fn insert(&mut self, editor: Box<dyn BlockEditor>) {
         let id = editor.id();
         assert_ne!(id, self.active, "cannot replace the active editor");
@@ -189,12 +193,14 @@ impl EditorRegistration {
 
 pub struct EditorRegistry {
     registrations: HashMap<Uuid, EditorRegistration>,
+    new_block_actions: Vec<(&'static str, Uuid)>,
 }
 
 impl EditorRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
             registrations: HashMap::new(),
+            new_block_actions: Vec::new(),
         };
         registry.register(image::registration());
         registry.register(infinite_canvas::registration());
@@ -206,8 +212,16 @@ impl EditorRegistry {
     }
 
     fn register(&mut self, registration: EditorRegistration) {
+        if registration.create.is_some() {
+            self.new_block_actions
+                .push((registration.display_name, registration.block_type));
+        }
         self.registrations
             .insert(registration.block_type, registration);
+    }
+
+    pub fn new_block_actions(&self) -> &[(&'static str, Uuid)] {
+        &self.new_block_actions
     }
 
     pub fn display_name(&self, block_type: Uuid) -> Option<&'static str> {
