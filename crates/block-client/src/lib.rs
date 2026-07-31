@@ -52,29 +52,62 @@ enum StoredOperation<B, O> {
 }
 
 #[cfg(test)]
-#[path = "history/tests/block_handle_history_is_shared_by_clones.rs"]
+#[path = "lib/tests/a_read_guard_blocks_background_updates.rs"]
+mod a_read_guard_blocks_background_updates;
+#[cfg(test)]
+#[path = "lib/tests/block_handle_history_is_shared_by_clones.rs"]
 mod block_handle_history_is_shared_by_clones;
 #[cfg(test)]
+#[path = "lib/tests/cached_blocks_are_populated_from_confirmed_metadata.rs"]
 mod cached_blocks_are_populated_from_confirmed_metadata;
 #[cfg(test)]
+#[path = "lib/tests/client_debug_snapshot_reports_active_worker_state.rs"]
 mod client_debug_snapshot_reports_active_worker_state;
 #[cfg(test)]
+#[path = "lib/tests/created_blocks_are_immediately_readable_and_operate_optimistically.rs"]
+mod created_blocks_are_immediately_readable_and_operate_optimistically;
+#[cfg(test)]
+#[path = "lib/tests/duplicate_reference_watches_share_subscription.rs"]
 mod duplicate_reference_watches_share_subscription;
 #[cfg(test)]
+#[path = "lib/tests/dynamic_artifact_descriptor_survives_creation.rs"]
 mod dynamic_artifact_descriptor_survives_creation;
 #[cfg(test)]
-#[path = "history/tests/finish_history_group_starts_a_new_action.rs"]
+#[path = "lib/tests/fetched_blocks_are_none_until_resolved.rs"]
+mod fetched_blocks_are_none_until_resolved;
+#[cfg(test)]
+#[path = "lib/tests/finish_history_group_starts_a_new_action.rs"]
 mod finish_history_group_starts_a_new_action;
 #[cfg(test)]
+#[path = "lib/tests/get_block_resolves_from_a_websocket_read_response.rs"]
+mod get_block_resolves_from_a_websocket_read_response;
+#[cfg(test)]
+#[path = "lib/tests/history_test_support.rs"]
 mod history_test_support;
 #[cfg(test)]
-#[path = "history/tests/new_history_action_clears_redo.rs"]
+#[path = "lib/tests/lib_test_support.rs"]
+mod lib_test_support;
+#[cfg(test)]
+#[path = "lib/tests/matching_broadcast_before_acknowledgement_is_applied_once.rs"]
+mod matching_broadcast_before_acknowledgement_is_applied_once;
+#[cfg(test)]
+#[path = "lib/tests/new_history_action_clears_redo.rs"]
 mod new_history_action_clears_redo;
 #[cfg(test)]
-#[path = "history/tests/no_history_policy_disables_undo.rs"]
+#[path = "lib/tests/no_history_policy_disables_undo.rs"]
 mod no_history_policy_disables_undo;
 #[cfg(test)]
+#[path = "lib/tests/remote_operations_rebuild_all_pending_optimistic_operations.rs"]
+mod remote_operations_rebuild_all_pending_optimistic_operations;
+#[cfg(test)]
+#[path = "lib/tests/replace_preserves_dynamic_artifact_descriptor.rs"]
 mod replace_preserves_dynamic_artifact_descriptor;
+#[cfg(test)]
+#[path = "lib/tests/wait_until_observes_current_and_future_values.rs"]
+mod wait_until_observes_current_and_future_values;
+#[cfg(test)]
+#[path = "lib/tests/watched_operations_are_buffered_until_their_sequence_is_contiguous.rs"]
+mod watched_operations_are_buffered_until_their_sequence_is_contiguous;
 
 pub struct BlockClient {
     id: Uuid,
@@ -2521,293 +2554,4 @@ fn reference_delta(before: &[Uuid], after: &[Uuid]) -> ReferenceDelta {
 fn fatal(message: impl AsRef<str>) -> ! {
     eprintln!("fatal block client error: {}", message.as_ref());
     process::abort()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde::{Deserialize, Serialize};
-    use std::time::Duration;
-    use tokio::net::TcpListener;
-    use tokio_tungstenite::accept_async;
-
-    #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-    struct Counter {
-        count: i64,
-    }
-
-    #[derive(Clone, Debug, Deserialize, Serialize)]
-    enum CounterOperation {
-        Add(i64),
-    }
-
-    impl Block for Counter {
-        type Operation = CounterOperation;
-        type History = block::NoHistory;
-        const TYPE_ID: Uuid = Uuid::from_u128(1);
-
-        fn apply_operation(block: &mut Self, operation: &Self::Operation) {
-            let CounterOperation::Add(amount) = operation;
-            block.count += amount;
-        }
-
-        fn implicit_name(&self) -> String {
-            format!("Counter {}", self.count)
-        }
-
-        fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
-    }
-
-    fn counter_snapshot(count: i64) -> Vec<u8> {
-        serde_json::to_vec(&StoredBlock {
-            value: Counter { count },
-            dynamic_artifact: None,
-        })
-        .unwrap()
-    }
-
-    fn counter_operation(amount: i64) -> Vec<u8> {
-        serde_json::to_vec(&StoredOperation::<Counter, CounterOperation>::Operate(
-            CounterOperation::Add(amount),
-        ))
-        .unwrap()
-    }
-
-    #[test]
-    fn created_blocks_are_immediately_readable_and_operate_optimistically() {
-        let client = BlockClient::new(Uuid::new_v4());
-        let block = client.create_block(Counter { count: 1 });
-        assert_eq!(block.read().unwrap().count, 1);
-        block.operate(CounterOperation::Add(2));
-        assert_eq!(block.read().unwrap().count, 3);
-    }
-
-    #[test]
-    fn fetched_blocks_are_none_until_resolved() {
-        let shared = Arc::new(BlockShared {
-            value: RwLock::new(None),
-        });
-        let block = TypedBlock::<Counter>::unresolved(Uuid::new_v4(), Arc::clone(&shared));
-        assert!(shared.value.read().is_none());
-        block.resolve(
-            counter_snapshot(2),
-            0,
-            vec![OperationRecord {
-                seq: 1,
-                operation_id: Uuid::new_v4(),
-                author: Uuid::new_v4(),
-                operation: counter_operation(3),
-                references: ReferenceDelta::default(),
-            }],
-            BlockParent::Root,
-            "Counter 5".into(),
-        );
-        assert_eq!(shared.value.read().as_ref().unwrap().count, 5);
-    }
-
-    #[test]
-    fn a_read_guard_blocks_background_updates() {
-        let shared = Arc::new(BlockShared {
-            value: RwLock::new(Some(Counter { count: 0 })),
-        });
-        let block = Arc::new(TypedBlock::<Counter>::created(
-            Uuid::new_v4(),
-            Arc::clone(&shared),
-            Counter { count: 0 },
-        ));
-        block.created();
-        let read = shared.value.read();
-        let block_for_thread = Arc::clone(&block);
-        let (finished_tx, finished_rx) = mpsc::channel();
-        let update = thread::spawn(move || {
-            block_for_thread.remote_operation(OperationRecord {
-                seq: 1,
-                operation_id: Uuid::new_v4(),
-                author: Uuid::new_v4(),
-                operation: counter_operation(1),
-                references: ReferenceDelta::default(),
-            });
-            finished_tx.send(()).unwrap();
-        });
-
-        assert!(finished_rx.try_recv().is_err());
-        drop(read);
-        finished_rx.recv().unwrap();
-        update.join().unwrap();
-        assert_eq!(shared.value.read().as_ref().unwrap().count, 1);
-    }
-
-    #[test]
-    fn remote_operations_rebuild_all_pending_optimistic_operations() {
-        let shared = Arc::new(BlockShared {
-            value: RwLock::new(Some(Counter { count: 0 })),
-        });
-        let block = TypedBlock::<Counter>::created(
-            Uuid::new_v4(),
-            Arc::clone(&shared),
-            Counter { count: 0 },
-        );
-        block.created();
-        block.local_operation(CounterOperation::Add(2));
-        block.local_operation(CounterOperation::Add(3));
-        let first = block.next_update().unwrap();
-
-        block.remote_operation(OperationRecord {
-            seq: 1,
-            operation_id: Uuid::new_v4(),
-            author: Uuid::new_v4(),
-            operation: counter_operation(10),
-            references: ReferenceDelta::default(),
-        });
-
-        assert_eq!(shared.value.read().as_ref().unwrap().count, 15);
-        assert!(block.next_update().is_none());
-        assert!(block.sequence_conflict(first.operation_id, 2));
-        assert_eq!(block.next_update().unwrap().seq, Some(2));
-    }
-
-    #[test]
-    fn matching_broadcast_before_acknowledgement_is_applied_once() {
-        let shared = Arc::new(BlockShared {
-            value: RwLock::new(Some(Counter { count: 0 })),
-        });
-        let block = TypedBlock::<Counter>::created(
-            Uuid::new_v4(),
-            Arc::clone(&shared),
-            Counter { count: 0 },
-        );
-        block.created();
-        block.local_operation(CounterOperation::Add(4));
-        let update = block.next_update().unwrap();
-        block.remote_operation(OperationRecord {
-            seq: 1,
-            operation_id: update.operation_id,
-            author: Uuid::new_v4(),
-            operation: update.operation,
-            references: ReferenceDelta::default(),
-        });
-        block.acknowledge(update.operation_id, 1);
-
-        assert_eq!(shared.value.read().as_ref().unwrap().count, 4);
-    }
-
-    #[test]
-    fn watched_operations_are_buffered_until_their_sequence_is_contiguous() {
-        let shared = Arc::new(BlockShared {
-            value: RwLock::new(Some(Counter { count: 0 })),
-        });
-        let block = TypedBlock::<Counter>::created(
-            Uuid::new_v4(),
-            Arc::clone(&shared),
-            Counter { count: 0 },
-        );
-        block.created();
-
-        block.remote_operation(OperationRecord {
-            seq: 2,
-            operation_id: Uuid::new_v4(),
-            author: Uuid::new_v4(),
-            operation: counter_operation(2),
-            references: ReferenceDelta::default(),
-        });
-        assert_eq!(shared.value.read().as_ref().unwrap().count, 0);
-
-        block.remote_operation(OperationRecord {
-            seq: 1,
-            operation_id: Uuid::new_v4(),
-            author: Uuid::new_v4(),
-            operation: counter_operation(1),
-            references: ReferenceDelta::default(),
-        });
-        assert_eq!(shared.value.read().as_ref().unwrap().count, 3);
-    }
-
-    #[tokio::test]
-    async fn wait_until_observes_current_and_future_values() {
-        let client = BlockClient::new(Uuid::new_v4());
-        let block = client.create_block(Counter { count: 1 });
-        block.wait_until(|counter| counter.count == 1).await;
-
-        let block_for_update = block.clone();
-        let update = tokio::spawn(async move {
-            tokio::task::yield_now().await;
-            block_for_update.block.remote_operation(OperationRecord {
-                seq: 1,
-                operation_id: Uuid::new_v4(),
-                author: Uuid::new_v4(),
-                operation: counter_operation(2),
-                references: ReferenceDelta::default(),
-            });
-        });
-
-        block.wait_until(|counter| counter.count == 3).await;
-        update.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn get_block_resolves_from_a_websocket_read_response() {
-        let id = Uuid::new_v4();
-        let (address_tx, address_rx) = mpsc::channel();
-        let server = thread::spawn(move || {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(async move {
-                    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-                    address_tx.send(listener.local_addr().unwrap()).unwrap();
-                    let (stream, _) = listener.accept().await.unwrap();
-                    let mut socket = accept_async(stream).await.unwrap();
-                    let request = socket.next().await.unwrap().unwrap();
-                    let request: ClientMessage =
-                        serde_json::from_str(&request.into_text().unwrap()).unwrap();
-                    let ClientMessage::ReadBlock {
-                        request_id,
-                        id: requested_id,
-                        ..
-                    } = request
-                    else {
-                        panic!("expected read request");
-                    };
-                    assert_eq!(requested_id, id);
-                    socket
-                        .send(Message::Text(
-                            serde_json::to_string(&ServerMessage::ReadBlock {
-                                request_id,
-                                command: CommandKind::ReadBlock,
-                                id,
-                                block_type: Counter::TYPE_ID,
-                                author: Uuid::new_v4(),
-                                snapshot: counter_snapshot(2),
-                                snapshot_seq: 0,
-                                operations: vec![OperationRecord {
-                                    seq: 1,
-                                    operation_id: Uuid::new_v4(),
-                                    author: Uuid::new_v4(),
-                                    operation: counter_operation(3),
-                                    references: ReferenceDelta::default(),
-                                }],
-                                parent: BlockParent::Root,
-                                name: "Counter 5".into(),
-                            })
-                            .unwrap(),
-                        ))
-                        .await
-                        .unwrap();
-                    while socket.next().await.is_some() {}
-                });
-        });
-
-        let address = address_rx.recv().unwrap();
-        let client = BlockClient::new(Uuid::new_v4());
-        let block = client.get_block::<Counter>(id);
-        assert!(block.read().is_none());
-        client.connect(format!("ws://{address}"));
-        tokio::time::timeout(Duration::from_secs(2), block.loaded())
-            .await
-            .unwrap();
-        assert_eq!(block.read().unwrap().count, 5);
-
-        drop(block);
-        drop(client);
-        server.join().unwrap();
-    }
 }
