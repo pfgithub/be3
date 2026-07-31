@@ -101,13 +101,18 @@ impl Block for HistoryBlock {
 
 impl BlockHistory<HistoryBlock> for HistoryPolicy {
     type Action = HistoryAction;
+    type Snapshot = HistoryBlock;
+
+    fn snapshot(block: &HistoryBlock) -> Self::Snapshot {
+        block.clone()
+    }
 
     fn action(
-        before: &HistoryBlock,
+        before: HistoryBlock,
         after: &HistoryBlock,
         _operations: &[HistoryOperation],
     ) -> Option<Self::Action> {
-        (before != after).then_some(HistoryAction {
+        (before != *after).then_some(HistoryAction {
             before: before.value,
             after: after.value,
         })

@@ -284,9 +284,14 @@ impl Block for InfiniteCanvas {
 
 impl BlockHistory<InfiniteCanvas> for InfiniteCanvasHistory {
     type Action = InfiniteCanvasHistoryAction;
+    type Snapshot = InfiniteCanvas;
+
+    fn snapshot(block: &InfiniteCanvas) -> Self::Snapshot {
+        block.clone()
+    }
 
     fn action(
-        before: &InfiniteCanvas,
+        before: InfiniteCanvas,
         after: &InfiniteCanvas,
         operations: &[InfiniteCanvasOperation],
     ) -> Option<Self::Action> {

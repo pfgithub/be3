@@ -373,13 +373,18 @@ impl Block for PixelArt {
 
 impl BlockHistory<PixelArt> for PixelArtHistory {
     type Action = PixelArtHistoryAction;
+    type Snapshot = PixelArt;
+
+    fn snapshot(block: &PixelArt) -> Self::Snapshot {
+        block.clone()
+    }
 
     fn action(
-        before: &PixelArt,
+        before: PixelArt,
         after: &PixelArt,
         operations: &[PixelArtOperation],
     ) -> Option<Self::Action> {
-        if before == after {
+        if before == *after {
             return None;
         }
         let kind = if before.width != after.width || before.height != after.height {
@@ -401,7 +406,7 @@ impl BlockHistory<PixelArt> for PixelArtHistory {
                 after: after.palette.clone(),
             }
         } else {
-            let deltas = pixel_deltas(before, after);
+            let deltas = pixel_deltas(&before, after);
             if deltas.is_empty() {
                 return None;
             }

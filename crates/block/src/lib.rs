@@ -27,10 +27,17 @@ pub enum HistoryDirection {
 
 pub trait BlockHistory<B: Block>: Send + Sync + 'static {
     type Action: Send + Sync + 'static;
+    type Snapshot;
 
     const ENABLED: bool = true;
 
-    fn action(before: &B, after: &B, operations: &[B::Operation]) -> Option<Self::Action>;
+    fn snapshot(block: &B) -> Self::Snapshot;
+
+    fn action(
+        before: Self::Snapshot,
+        after: &B,
+        operations: &[B::Operation],
+    ) -> Option<Self::Action>;
 
     fn action_bytes(action: &Self::Action) -> usize;
 
@@ -39,33 +46,48 @@ pub trait BlockHistory<B: Block>: Send + Sync + 'static {
     }
 
     fn operations(
-        current: &B,
+        _current: &B,
+        _action: &mut Self::Action,
+        _direction: HistoryDirection,
+    ) -> Vec<B::Operation> {
+        Vec::new()
+    }
+
+    fn apply_operations<T: BlockHistoryTransaction<B>>(
+        transaction: &mut T,
         action: &mut Self::Action,
         direction: HistoryDirection,
-    ) -> Vec<B::Operation>;
+    ) {
+        for operation in Self::operations(transaction.current(), action, direction) {
+            transaction.apply(operation);
+        }
+    }
+}
+
+pub trait BlockHistoryTransaction<B: Block> {
+    fn current(&self) -> &B;
+
+    fn apply(&mut self, operation: B::Operation);
 }
 
 pub struct NoHistory;
 
 impl<B: Block> BlockHistory<B> for NoHistory {
     type Action = ();
+    type Snapshot = B;
 
     const ENABLED: bool = false;
 
-    fn action(_before: &B, _after: &B, _operations: &[B::Operation]) -> Option<Self::Action> {
+    fn snapshot(block: &B) -> Self::Snapshot {
+        block.clone()
+    }
+
+    fn action(_before: B, _after: &B, _operations: &[B::Operation]) -> Option<Self::Action> {
         None
     }
 
     fn action_bytes(_action: &Self::Action) -> usize {
         0
-    }
-
-    fn operations(
-        _current: &B,
-        _action: &mut Self::Action,
-        _direction: HistoryDirection,
-    ) -> Vec<B::Operation> {
-        Vec::new()
     }
 }
 

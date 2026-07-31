@@ -12,9 +12,9 @@ use std::{
 };
 
 use block::{
-    Block, BlockHistory, BlockOperation, BlockParent, BlockReference, BlockReferenceList,
-    BlockUpdate, ClientMessage, CommandKind, ErrorCode, HistoryDirection, OperationRecord,
-    ReferenceDelta, ServerMessage,
+    Block, BlockHistory, BlockHistoryTransaction, BlockOperation, BlockParent, BlockReference,
+    BlockReferenceList, BlockUpdate, ClientMessage, CommandKind, ErrorCode, HistoryDirection,
+    OperationRecord, ReferenceDelta, ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -442,6 +442,45 @@ pub struct BlockHandle<B: Block> {
     access: Arc<RwLock<()>>,
 }
 
+struct AppliedCrdtOperation<O> {
+    operation: O,
+    implicit_name: String,
+    references: ReferenceDelta,
+}
+
+pub struct CrdtOperationTransaction<'a, B: Block> {
+    current: &'a mut B,
+    applied: Vec<AppliedCrdtOperation<B::Operation>>,
+}
+
+impl<B: Block> CrdtOperationTransaction<'_, B> {
+    pub fn current(&self) -> &B {
+        self.current
+    }
+
+    pub fn apply(&mut self, operation: B::Operation) {
+        let before = normalized_references(self.current.references());
+        B::apply_operation(self.current, &operation);
+        let implicit_name = self.current.implicit_name();
+        let after = normalized_references(self.current.references());
+        self.applied.push(AppliedCrdtOperation {
+            operation,
+            implicit_name,
+            references: reference_delta(&before, &after),
+        });
+    }
+}
+
+impl<B: Block> BlockHistoryTransaction<B> for CrdtOperationTransaction<'_, B> {
+    fn current(&self) -> &B {
+        self.current()
+    }
+
+    fn apply(&mut self, operation: B::Operation) {
+        self.apply(operation);
+    }
+}
+
 #[derive(Clone)]
 pub struct HistoryMetadata {
     value: Arc<dyn Any + Send + Sync>,
@@ -546,6 +585,22 @@ impl<B: Block> BlockHandle<B> {
         self.commands
             .send(WorkerCommand::Operate { id: self.id })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+
+    pub fn edit_crdt_grouped_with_history_metadata<R>(
+        &self,
+        metadata: Option<HistoryMetadata>,
+        edit: impl FnOnce(&mut CrdtOperationTransaction<'_, B>) -> R,
+    ) -> R {
+        let (result, changed) = self
+            .block
+            .local_crdt_edit(HistoryMode::Grouped, metadata, edit);
+        if changed {
+            self.commands
+                .send(WorkerCommand::Operate { id: self.id })
+                .unwrap_or_else(|_| fatal("block client worker stopped"));
+        }
+        result
     }
 
     pub fn finish_history_group(&self) {
@@ -2138,7 +2193,7 @@ impl<B: Block> TypedBlock<B> {
             let value = visible
                 .as_mut()
                 .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
-            let history_before = record_history.then(|| value.clone());
+            let history_before = record_history.then(|| B::History::snapshot(value));
             for operation in &operations {
                 let before = normalized_references(value.references());
                 B::apply_operation(value, operation);
@@ -2154,7 +2209,7 @@ impl<B: Block> TypedBlock<B> {
             }
             self.revision.fetch_add(1, Ordering::Relaxed);
             self.changed.send_replace(());
-            history_before.and_then(|before| B::History::action(&before, value, &operations))
+            history_before.and_then(|before| B::History::action(before, value, &operations))
         };
         drop(state);
         if !matches!(history_mode, HistoryMode::None) {
@@ -2164,6 +2219,68 @@ impl<B: Block> TypedBlock<B> {
                     .push::<B, B::History>(action, history_mode, history_metadata);
             }
         }
+    }
+
+    fn local_crdt_edit<R>(
+        &self,
+        history_mode: HistoryMode,
+        history_metadata: Option<HistoryMetadata>,
+        edit: impl FnOnce(&mut CrdtOperationTransaction<'_, B>) -> R,
+    ) -> (R, bool) {
+        assert!(B::CRDT, "in-place editing requires a CRDT block");
+        let mut state = self.state.write();
+        let record_history = B::History::ENABLED && !matches!(history_mode, HistoryMode::None);
+        let (result, applied, history_action) = {
+            let mut visible = self.shared.value.write();
+            let value = visible
+                .as_mut()
+                .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
+            let history_before = record_history.then(|| B::History::snapshot(value));
+            let mut transaction = CrdtOperationTransaction {
+                current: value,
+                applied: Vec::new(),
+            };
+            let result = edit(&mut transaction);
+            let CrdtOperationTransaction {
+                current: _,
+                applied,
+            } = transaction;
+            let operations = applied
+                .iter()
+                .map(|applied| applied.operation.clone())
+                .collect::<Vec<_>>();
+            let history_action =
+                history_before.and_then(|before| B::History::action(before, value, &operations));
+            (result, applied, history_action)
+        };
+        if applied.is_empty() {
+            return (result, false);
+        }
+        for applied in applied {
+            let after = normalized_references(
+                self.shared
+                    .value
+                    .read()
+                    .as_ref()
+                    .map_or_else(Vec::new, |value| value.references()),
+            );
+            self.relationships.write().references = after;
+            state.pending.push_back(PendingOperation {
+                id: Uuid::new_v4(),
+                operation: StoredOperation::Operate(applied.operation),
+                references: applied.references,
+                implicit_name: applied.implicit_name,
+            });
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        self.changed.send_replace(());
+        drop(state);
+        if let Some(action) = history_action {
+            self.history
+                .write()
+                .push::<B, B::History>(action, history_mode, history_metadata);
+        }
+        (result, true)
     }
 
     fn local_replace(&self, replacement: B) {
@@ -2193,6 +2310,9 @@ impl<B: Block> TypedBlock<B> {
     }
 
     fn apply_history(&self, direction: HistoryDirection) -> HistoryApplyResult {
+        if B::CRDT {
+            return self.apply_crdt_history(direction);
+        }
         let Some(current) = self.shared.value.read().clone() else {
             return HistoryApplyResult::default();
         };
@@ -2205,6 +2325,50 @@ impl<B: Block> TypedBlock<B> {
             return HistoryApplyResult::default();
         }
         self.local_operations(operations, HistoryMode::None, None);
+        HistoryApplyResult {
+            applied: true,
+            metadata,
+        }
+    }
+
+    fn apply_crdt_history(&self, direction: HistoryDirection) -> HistoryApplyResult {
+        let mut state = self.state.write();
+        let (applied, metadata) = {
+            let mut visible = self.shared.value.write();
+            let value = visible
+                .as_mut()
+                .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
+            let mut transaction = CrdtOperationTransaction {
+                current: value,
+                applied: Vec::new(),
+            };
+            let Some(((), metadata)) = self.history.write().apply(direction, |action| {
+                B::History::apply_operations(&mut transaction, action, direction);
+            }) else {
+                return HistoryApplyResult::default();
+            };
+            (transaction.applied, metadata)
+        };
+        if applied.is_empty() {
+            return HistoryApplyResult::default();
+        }
+        for applied in applied {
+            self.relationships.write().references = normalized_references(
+                self.shared
+                    .value
+                    .read()
+                    .as_ref()
+                    .map_or_else(Vec::new, |value| value.references()),
+            );
+            state.pending.push_back(PendingOperation {
+                id: Uuid::new_v4(),
+                operation: StoredOperation::Operate(applied.operation),
+                implicit_name: applied.implicit_name,
+                references: applied.references,
+            });
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        self.changed.send_replace(());
         HistoryApplyResult {
             applied: true,
             metadata,

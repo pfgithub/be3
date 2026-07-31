@@ -1,6 +1,5 @@
 use std::{cmp::Ordering, mem::size_of};
 
-use block::Block;
 use block_client::{blocks::text::TextDocument, BlockHandle, HistoryMetadata};
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 use unicode_segmentation::UnicodeSegmentation;
@@ -1265,41 +1264,33 @@ impl Core {
             return Vec::new();
         }
         self.prepare_history_group(classification);
-        let Some(document) = self.document.read() else {
-            return Vec::new();
-        };
-        let mut working = document.clone();
-        drop(document);
-        let mut operations = Vec::new();
-        let mut result_positions = Vec::new();
-        for (position, delete_len, insert) in replacements {
-            let index = position.resolve(&working);
-            for _ in 0..delete_len.min(working.len().saturating_sub(index)) {
-                let Ok(operation) = working.remove_operation(index) else {
-                    break;
-                };
-                TextDocument::apply_operation(&mut working, &operation);
-                operations.push(operation);
-            }
-            let insert_len = insert.len();
-            for (offset, byte) in insert.into_iter().enumerate() {
-                let Ok(operation) = working.insert_operation(index + offset, byte) else {
-                    break;
-                };
-                TextDocument::apply_operation(&mut working, &operation);
-                operations.push(operation);
-            }
-            result_positions.push(Position::at(&working, index + insert_len));
-        }
-        if operations.is_empty() {
-            return result_positions;
-        }
         let metadata_bytes = history_cursors.len() * size_of::<CursorPosition>();
-        self.document.operate_grouped_with_history_metadata(
-            operations,
+        self.document.edit_crdt_grouped_with_history_metadata(
             Some(HistoryMetadata::new(history_cursors, metadata_bytes)),
-        );
-        result_positions
+            |transaction| {
+                let mut result_positions = Vec::new();
+                for (position, delete_len, insert) in replacements {
+                    let index = position.resolve(transaction.current());
+                    for _ in 0..delete_len.min(transaction.current().len().saturating_sub(index)) {
+                        let Ok(operation) = transaction.current().remove_operation(index) else {
+                            break;
+                        };
+                        transaction.apply(operation);
+                    }
+                    let insert_len = insert.len();
+                    for (offset, byte) in insert.into_iter().enumerate() {
+                        let Ok(operation) =
+                            transaction.current().insert_operation(index + offset, byte)
+                        else {
+                            break;
+                        };
+                        transaction.apply(operation);
+                    }
+                    result_positions.push(Position::at(transaction.current(), index + insert_len));
+                }
+                result_positions
+            },
+        )
     }
 
     fn prepare_history_group(&mut self, classification: UndoClassification) {

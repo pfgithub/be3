@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{Block, BlockHistory, HistoryDirection, MAX_NAME_BYTES};
+use block::{Block, BlockHistory, BlockHistoryTransaction, HistoryDirection, MAX_NAME_BYTES};
 use eips::{LocalChange, RemoteChange};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -30,6 +30,11 @@ pub struct TextHistoryAction {
     last_edit: Instant,
     start: usize,
     end: usize,
+}
+
+pub struct TextHistorySnapshot {
+    bytes: Vec<u8>,
+    ids: Vec<Uuid>,
 }
 
 struct TextHistoryEdit {
@@ -184,9 +189,23 @@ impl Block for TextDocument {
 
 impl BlockHistory<TextDocument> for TextHistory {
     type Action = TextHistoryAction;
+    type Snapshot = TextHistorySnapshot;
+
+    fn snapshot(block: &TextDocument) -> Self::Snapshot {
+        TextHistorySnapshot {
+            bytes: block.bytes.clone(),
+            ids: (0..block.len())
+                .map(|index| {
+                    block
+                        .item_id(index)
+                        .expect("visible text item omitted its CRDT ID")
+                })
+                .collect(),
+        }
+    }
 
     fn action(
-        before: &TextDocument,
+        before: TextHistorySnapshot,
         after: &TextDocument,
         _operations: &[TextOperation],
     ) -> Option<Self::Action> {
@@ -213,13 +232,13 @@ impl BlockHistory<TextDocument> for TextHistory {
         let edit = TextHistoryEdit {
             left: prefix
                 .checked_sub(1)
-                .and_then(|index| before.item_id(index)),
-            right: before.item_id(before_end),
+                .and_then(|index| before.ids.get(index).copied()),
+            right: before.ids.get(before_end).copied(),
             fallback_index: prefix,
             before: before.bytes[prefix..before_end].to_vec(),
             after: after.bytes[prefix..after_end].to_vec(),
             removed_ids: (prefix..before_end)
-                .filter_map(|index| before.item_id(index))
+                .filter_map(|index| before.ids.get(index).copied())
                 .collect(),
             visible_ids: (prefix..after_end)
                 .filter_map(|index| after.item_id(index))
@@ -267,34 +286,30 @@ impl BlockHistory<TextDocument> for TextHistory {
         Ok(())
     }
 
-    fn operations(
-        current: &TextDocument,
+    fn apply_operations<T: BlockHistoryTransaction<TextDocument>>(
+        transaction: &mut T,
         action: &mut Self::Action,
         direction: HistoryDirection,
-    ) -> Vec<TextOperation> {
-        let mut document = current.clone();
-        let mut operations = Vec::new();
+    ) {
         match direction {
             HistoryDirection::Redo => {
                 for edit in &mut action.edits {
-                    apply_text_history_edit(&mut document, edit, true, &mut operations);
+                    apply_text_history_edit(transaction, edit, true);
                 }
             }
             HistoryDirection::Undo => {
                 for edit in action.edits.iter_mut().rev() {
-                    apply_text_history_edit(&mut document, edit, false, &mut operations);
+                    apply_text_history_edit(transaction, edit, false);
                 }
             }
         }
-        operations
     }
 }
 
-fn apply_text_history_edit(
-    document: &mut TextDocument,
+fn apply_text_history_edit<T: BlockHistoryTransaction<TextDocument>>(
+    transaction: &mut T,
     edit: &mut TextHistoryEdit,
     to_after: bool,
-    operations: &mut Vec<TextOperation>,
 ) {
     let current_len = if to_after {
         edit.before.len()
@@ -304,37 +319,38 @@ fn apply_text_history_edit(
     let first_visible = edit
         .visible_ids
         .iter()
-        .filter_map(|id| document.item_index(*id))
+        .filter_map(|id| transaction.current().item_index(*id))
         .min();
     let mut index = first_visible
         .or_else(|| {
             edit.right
-                .and_then(|id| document.item_index(id))
+                .and_then(|id| transaction.current().item_index(id))
                 .map(|right| right.saturating_sub(current_len))
         })
         .or_else(|| {
             edit.left
-                .and_then(|id| document.item_index(id))
+                .and_then(|id| transaction.current().item_index(id))
                 .map(|left| left + 1)
         })
-        .unwrap_or_else(|| edit.fallback_index.min(document.len()));
-    for _ in 0..current_len.min(document.len().saturating_sub(index)) {
-        let Ok(operation) = document.remove_operation(index) else {
+        .unwrap_or_else(|| edit.fallback_index.min(transaction.current().len()));
+    for _ in 0..current_len.min(transaction.current().len().saturating_sub(index)) {
+        let Ok(operation) = transaction.current().remove_operation(index) else {
             break;
         };
-        TextDocument::apply_operation(document, &operation);
-        operations.push(operation);
+        transaction.apply(operation);
     }
     edit.visible_ids.clear();
     let characters = if to_after { &edit.after } else { &edit.before };
-    index = index.min(document.len());
+    index = index.min(transaction.current().len());
     for byte in characters {
         let id = Uuid::new_v4();
-        let Ok(operation) = document.insert_operation_with_id(index, id, *byte) else {
+        let Ok(operation) = transaction
+            .current()
+            .insert_operation_with_id(index, id, *byte)
+        else {
             continue;
         };
-        TextDocument::apply_operation(document, &operation);
-        operations.push(operation);
+        transaction.apply(operation);
         edit.visible_ids.push(id);
         index += 1;
     }
