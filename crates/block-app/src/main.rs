@@ -19,6 +19,7 @@ use editors::{
     BlockEditor, EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
 };
 use eframe::egui;
+use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -80,7 +81,7 @@ struct BlockApp {
     block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
-    tabs: Vec<Uuid>,
+    dock_state: DockState<Uuid>,
     active_tab: Option<Uuid>,
     sidebar_reveal: Option<Uuid>,
     pending_transfers: Vec<PendingTransfer>,
@@ -175,7 +176,7 @@ impl BlockApp {
             block_types: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
-            tabs: Vec::new(),
+            dock_state: DockState::new(Vec::new()),
             active_tab: None,
             sidebar_reveal: None,
             pending_transfers: Vec::new(),
@@ -215,7 +216,7 @@ impl BlockApp {
         self.block_types.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
-        self.tabs.clear();
+        self.dock_state = DockState::new(Vec::new());
         self.active_tab = None;
         self.sidebar_reveal = None;
         self.pending_transfers.clear();
@@ -540,8 +541,12 @@ impl BlockApp {
             self.client
                 .watch_references(BlockReferenceList::Backrefs(id))
         });
-        if !self.tabs.contains(&id) {
-            self.tabs.push(id);
+        if let Some(path) = self.dock_state.find_tab(&id) {
+            let _ = self.dock_state.set_active_tab(path);
+            self.dock_state
+                .set_focused_node_and_surface(path.node_path());
+        } else {
+            self.dock_state.push_to_focused_leaf(id);
         }
         if self.active_tab != Some(id) {
             self.sidebar_reveal = None;
@@ -549,11 +554,7 @@ impl BlockApp {
         self.active_tab = Some(id);
     }
 
-    fn close_tab(&mut self, id: Uuid) {
-        let Some(index) = self.tabs.iter().position(|open| *open == id) else {
-            return;
-        };
-        self.tabs.remove(index);
+    fn close_tab_resources(&mut self, id: Uuid) {
         self.parents.remove(&id);
         self.references.remove(&id);
         self.backrefs.remove(&id);
@@ -561,11 +562,7 @@ impl BlockApp {
             editor.tab_closed();
         }
         if self.active_tab == Some(id) {
-            self.active_tab = if self.tabs.is_empty() {
-                None
-            } else {
-                Some(self.tabs[index.min(self.tabs.len() - 1)])
-            };
+            self.active_tab = None;
             self.sidebar_reveal = None;
         }
     }
@@ -1064,63 +1061,14 @@ impl BlockApp {
         });
     }
 
-    fn show_tabs(&mut self, ui: &mut egui::Ui) {
-        let mut activate = None;
-        let mut close = None;
-        egui::ScrollArea::horizontal()
-            .id_salt("block-tabs")
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for id in &self.tabs {
-                        let active = self.active_tab == Some(*id);
-                        egui::Frame::new()
-                            .fill(if active {
-                                ui.visuals().extreme_bg_color
-                            } else {
-                                ui.visuals().faint_bg_color
-                            })
-                            .inner_margin(egui::Margin::symmetric(8, 4))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    let label = self
-                                        .editors
-                                        .get(id)
-                                        .map_or_else(|| id.to_string(), |editor| editor.name());
-                                    if ui.selectable_label(active, label).clicked() {
-                                        activate = Some(*id);
-                                    }
-                                    if ui.small_button("×").clicked() {
-                                        close = Some(*id);
-                                    }
-                                });
-                            });
-                    }
-                });
-            });
-        if let Some(id) = activate {
-            if self.active_tab != Some(id) {
-                self.sidebar_reveal = None;
-            }
-            self.active_tab = Some(id);
-        }
-        if let Some(id) = close {
-            self.close_tab(id);
-        }
-    }
-
-    fn show_content(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
-        let Some(active) = self.active_tab else {
-            ui.centered_and_justified(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("No block open");
-                    ui.weak("Create or select a block from the sidebar.");
-                });
-            });
-            return;
-        };
+    fn show_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        frame: &eframe::Frame,
+        active: Uuid,
+    ) -> Option<EditorAction> {
         let Some(mut editor) = self.editors.remove(&active) else {
-            self.active_tab = None;
-            return;
+            return None;
         };
         if let Some(history) = editor
             .history()
@@ -1167,9 +1115,13 @@ impl BlockApp {
             editor.ui(ui, &mut editors, frame)
         };
         self.editors.insert(active, editor);
+        action
+    }
+
+    fn handle_editor_action(&mut self, active: Uuid, action: EditorAction) {
         match action {
-            Some(EditorAction::OpenBlock { id, block_type }) => self.open_tab(id, block_type),
-            Some(EditorAction::CreateBlock { block_type, parent }) => {
+            EditorAction::OpenBlock { id, block_type } => self.open_tab(id, block_type),
+            EditorAction::CreateBlock { block_type, parent } => {
                 if let Some(id) = self.create_block_editor(block_type) {
                     let name = self
                         .registry
@@ -1195,13 +1147,52 @@ impl BlockApp {
                     }
                 }
             }
-            Some(EditorAction::SetParent { id, parent }) => {
+            EditorAction::SetParent { id, parent } => {
                 if let Some(child) = self.editors.get(&id) {
                     child.note_backref(parent);
                     child.set_parent(BlockParent::Uuid(parent));
                 }
             }
-            None => {}
+        }
+    }
+
+    fn show_dock(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
+        if self.dock_state.iter_all_tabs().next().is_none() {
+            ui.centered_and_justified(|ui| {
+                ui.vertical_centered(|ui| {
+                    ui.heading("No block open");
+                    ui.weak("Create or select a block from the sidebar.");
+                });
+            });
+            return;
+        }
+
+        let mut dock_state = std::mem::replace(&mut self.dock_state, DockState::new(Vec::new()));
+        for (_, id) in dock_state.iter_all_tabs() {
+            if let Some(editor) = self.editors.get_mut(id) {
+                editor.update_open_tab(frame);
+                editor.set_tab_active(false);
+            }
+        }
+        let mut viewer = BlockTabViewer {
+            app: self,
+            frame,
+            actions: Vec::new(),
+        };
+        DockArea::new(&mut dock_state).show_inside(ui, &mut viewer);
+        let actions = std::mem::take(&mut viewer.actions);
+        let previous_active = viewer.app.active_tab;
+        let active_tab = dock_state
+            .find_active_focused()
+            .map(|(_, tab)| *tab)
+            .or_else(|| dock_state.iter_all_tabs().next().map(|(_, tab)| *tab));
+        viewer.app.dock_state = dock_state;
+        if previous_active != active_tab {
+            viewer.app.sidebar_reveal = None;
+        }
+        viewer.app.active_tab = active_tab;
+        for (active, action) in actions {
+            viewer.app.handle_editor_action(active, action);
         }
     }
 
@@ -1448,6 +1439,46 @@ impl BlockApp {
     }
 }
 
+struct BlockTabViewer<'a> {
+    app: &'a mut BlockApp,
+    frame: &'a eframe::Frame,
+    actions: Vec<(Uuid, EditorAction)>,
+}
+
+impl TabViewer for BlockTabViewer<'_> {
+    type Tab = Uuid;
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        self.app
+            .editors
+            .get(tab)
+            .map_or_else(|| tab.to_string(), |editor| editor.name())
+            .into()
+    }
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(*tab)
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        if let Some(editor) = self.app.editors.get_mut(tab) {
+            editor.set_tab_active(true);
+        }
+        if let Some(action) = self.app.show_content(ui, self.frame, *tab) {
+            self.actions.push((*tab, action));
+        }
+    }
+
+    fn on_close(&mut self, tab: &mut Self::Tab) -> OnCloseResponse {
+        self.app.close_tab_resources(*tab);
+        OnCloseResponse::Close
+    }
+
+    fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
+        [false, false]
+    }
+}
+
 enum BlockContextMenuAction {
     Picker(BlockPickerMenuAction),
     Rename,
@@ -1525,18 +1556,10 @@ impl eframe::App for BlockApp {
             });
 
         ui.vertical(|ui| {
-            self.show_tabs(ui);
-            for id in &self.tabs {
-                if let Some(editor) = self.editors.get_mut(id) {
-                    editor.update_open_tab(frame);
-                    editor.set_tab_active(self.active_tab == Some(*id));
-                }
-            }
-            ui.separator();
             egui::Panel::bottom("block-statusbar")
                 .resizable(false)
                 .show_inside(ui, |ui| self.show_statusbar(ui));
-            self.show_content(ui, frame);
+            self.show_dock(ui, frame);
         });
         self.show_discard_confirmation(ui.ctx());
         ui.ctx().request_repaint_after(Duration::from_millis(100));
