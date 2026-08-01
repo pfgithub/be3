@@ -137,7 +137,6 @@ struct BlockApp {
     pending_destructive_action: Option<PendingDestructiveAction>,
     scheduled_account_switch: Option<Account>,
     allow_close: bool,
-    logged_egui_errors: HashSet<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -299,42 +298,7 @@ impl BlockApp {
             pending_destructive_action: None,
             scheduled_account_switch: None,
             allow_close: false,
-            logged_egui_errors: HashSet::new(),
         })
-    }
-
-    fn log_egui_errors(&mut self, context: &egui::Context) {
-        context.graphics_mut(|graphics| {
-            let Some(debug) = graphics.get_mut(egui::LayerId::debug()) else {
-                return;
-            };
-            let errors = debug
-                .all_entries()
-                .filter_map(|entry| match &entry.shape {
-                    egui::Shape::Text(text) => {
-                        let text = text.galley.text();
-                        ["Double use of", "First use of", "Second use of"]
-                            .into_iter()
-                            .filter_map(|prefix| text.find(prefix))
-                            .min()
-                            .map(|start| text[start..].to_owned())
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            if errors.is_empty() {
-                return;
-            }
-            for error in errors {
-                if self.logged_egui_errors.insert(error.clone()) {
-                    eprintln!("egui error: {error}");
-                }
-            }
-            let shape_count = debug.all_entries().len();
-            for index in 0..shape_count {
-                debug.reset_shape(egui::layers::ShapeIdx(index));
-            }
-        });
     }
 
     fn request_account_switch(&mut self, account: Account) {
@@ -1911,7 +1875,6 @@ impl eframe::App for BlockApp {
 
         self.show_dock(ui, frame);
         self.show_discard_confirmation(ui.ctx());
-        self.log_egui_errors(ui.ctx());
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
 }
