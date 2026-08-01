@@ -9,7 +9,7 @@ fn classifies_markdown_image() {
     let plain = parse_embeds(url.as_bytes(), true);
 
     assert_eq!(image.len(), 1);
-    assert_eq!(image[0].range, 0..markdown_image.len());
+    assert_eq!(image[0].range, 8..8 + url.len());
     assert!(image[0].large);
     assert_eq!(plain.len(), 1);
     assert!(!plain[0].large);

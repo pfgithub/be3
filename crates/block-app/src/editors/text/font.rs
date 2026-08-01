@@ -44,13 +44,14 @@ pub(super) struct DocumentLayout {
     pub embeds: Vec<EmbedLayout>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct ResolvedEmbed {
     pub range: Range<usize>,
     pub id: Uuid,
     pub label: String,
     pub large: bool,
     pub available: bool,
+    pub preview_aspect_ratio: Option<f32>,
 }
 
 pub(super) struct EmbedLayout {
@@ -234,43 +235,6 @@ impl TextRenderer {
                 .iter()
                 .filter(|embed| embed.range.start >= start && embed.range.end <= end)
                 .collect::<Vec<_>>();
-            if let Some(embed) = line_embeds.iter().find(|embed| embed.large) {
-                let width = full_width.max(1.0);
-                let line_len = end.saturating_sub(start).max(1);
-                for byte in start..=end {
-                    positions[byte] = Some(BytePosition {
-                        line: line_index,
-                        x: (byte - start) as f32 / line_len as f32 * width,
-                    });
-                }
-                lines.push(LineLayout {
-                    start,
-                    end,
-                    y,
-                    width,
-                    height: LARGE_EMBED_HEIGHT,
-                    baseline: 0.0,
-                    glyphs: Vec::new(),
-                });
-                embed_layouts.push(EmbedLayout {
-                    range: embed.range.clone(),
-                    id: embed.id,
-                    label: embed.label.clone(),
-                    large: true,
-                    available: embed.available,
-                    rect: Rect::from_min_size(
-                        Pos2::new(0.0, y),
-                        Vec2::new(width, LARGE_EMBED_HEIGHT),
-                    ),
-                });
-                y += LARGE_EMBED_HEIGHT;
-                let Some(newline) = newline else {
-                    break;
-                };
-                start = newline + 1;
-                line_index += 1;
-                continue;
-            }
             let display_start = Instant::now();
             let display = display_line(&bytes[start..end], start, newline.is_some(), &line_embeds);
             timings.display_lines += display_start.elapsed();
@@ -304,7 +268,7 @@ impl TextRenderer {
                 baseline,
                 glyphs,
             });
-            for embed in line_embeds {
+            for embed in &line_embeds {
                 let Some(left) = positions[embed.range.start] else {
                     continue;
                 };
@@ -327,6 +291,18 @@ impl TextRenderer {
                 });
             }
             y += height;
+            if let Some(embed) = line_embeds.iter().find(|embed| embed.large) {
+                let preview_size = preview_size(full_width, embed.preview_aspect_ratio);
+                embed_layouts.push(EmbedLayout {
+                    range: embed.range.clone(),
+                    id: embed.id,
+                    label: embed.label.clone(),
+                    large: true,
+                    available: embed.available,
+                    rect: Rect::from_min_size(Pos2::new(0.0, y), preview_size),
+                });
+                y += preview_size.y;
+            }
 
             let Some(newline) = newline else {
                 break;
@@ -654,6 +630,19 @@ impl TextRenderer {
             }
         }
         self.glyphs.insert(key, result);
+    }
+}
+
+fn preview_size(full_width: f32, aspect_ratio: Option<f32>) -> Vec2 {
+    let bounds = Vec2::new(full_width.max(1.0), LARGE_EMBED_HEIGHT);
+    let Some(aspect_ratio) = aspect_ratio.filter(|aspect| aspect.is_finite() && *aspect > 0.0)
+    else {
+        return bounds;
+    };
+    if bounds.x / bounds.y > aspect_ratio {
+        Vec2::new(bounds.y * aspect_ratio, bounds.y)
+    } else {
+        Vec2::new(bounds.x, bounds.x / aspect_ratio)
     }
 }
 

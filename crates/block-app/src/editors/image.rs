@@ -147,6 +147,11 @@ impl BlockEditor for ImageEditor {
         true
     }
 
+    fn render_aspect_ratio(&self) -> Option<f32> {
+        let image = self.block.read()?;
+        (image.height() != 0).then(|| image.width() as f32 / image.height() as f32)
+    }
+
     fn default_preserve_aspect_ratio(&self) -> bool {
         true
     }

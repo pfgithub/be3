@@ -89,6 +89,12 @@ impl<'a> EditorAccess<'a> {
             .is_some_and(|editor| editor.default_preserve_aspect_ratio())
     }
 
+    pub fn render_aspect_ratio(&self, id: Uuid) -> Option<f32> {
+        self.editors
+            .get(&id)
+            .and_then(|editor| editor.render_aspect_ratio())
+    }
+
     pub fn render(&mut self, id: Uuid, context: BlockRenderContext<'_>) -> bool {
         let Some(mut editor) = self.editors.remove(&id) else {
             return false;
@@ -143,6 +149,9 @@ pub trait BlockEditor {
     }
     fn render(&mut self, _context: BlockRenderContext<'_>) -> bool {
         false
+    }
+    fn render_aspect_ratio(&self) -> Option<f32> {
+        None
     }
     fn default_preserve_aspect_ratio(&self) -> bool {
         false

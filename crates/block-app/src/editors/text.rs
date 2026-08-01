@@ -305,7 +305,6 @@ impl TextEditor {
         parsed
             .into_iter()
             .filter(|embed| embed.id != self.block.id())
-            .filter(|embed| !embed.large || !self.range_is_being_edited(&embed.range))
             .map(|embed| {
                 let metadata = referenced.get(&embed.id).cloned().or_else(|| {
                     editors
@@ -318,6 +317,10 @@ impl TextEditor {
                         editors.ensure(embed.id, *block_type);
                     }
                 }
+                let preview_aspect_ratio = embed
+                    .large
+                    .then(|| editors.render_aspect_ratio(embed.id))
+                    .flatten();
                 let label = metadata
                     .as_ref()
                     .map(|(_, name)| name)
@@ -330,25 +333,10 @@ impl TextEditor {
                     label,
                     large: embed.large,
                     available: metadata.is_some(),
+                    preview_aspect_ratio,
                 }
             })
             .collect()
-    }
-
-    fn range_is_being_edited(&self, range: &Range<usize>) -> bool {
-        self.core.cursor_positions().iter().any(|cursor| {
-            let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
-                return false;
-            };
-            let Some(focus) = self.core.position_index(cursor.pos.focus) else {
-                return false;
-            };
-            if anchor == focus {
-                anchor > range.start && anchor < range.end
-            } else {
-                anchor.min(focus) < range.end && anchor.max(focus) > range.start
-            }
-        })
     }
 
     fn keyboard_input(&mut self, ui: &egui::Ui, id: egui::Id, suppress_text_paste: bool) -> bool {
@@ -1151,7 +1139,7 @@ fn parse_embeds(bytes: &[u8], markdown: bool) -> Vec<ParsedEmbed> {
                 .then(|| markdown_image_range(bytes, &url.range))
                 .flatten();
             ParsedEmbed {
-                range: image_range.clone().unwrap_or(url.range),
+                range: url.range,
                 id: url.id,
                 large: image_range.is_some(),
             }
