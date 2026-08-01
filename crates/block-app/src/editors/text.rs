@@ -8,12 +8,12 @@ use eframe::egui::{
 };
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
-    EditorCommand, LRDirection, Language, MoveMode, SynHlColorScope, SyntaxNodeDirection,
-    UDDirection, VerticalMoveMode,
+    EditorCommand, LRDirection, Language, MoveMode, SynHlColorScope, SyntaxHighlight,
+    SyntaxNodeDirection, UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
-use self::font::{BytePosition, DocumentLayout, TextRenderer, LINE_HEIGHT};
+use self::font::{BytePosition, DocumentLayout, TextRenderer};
 use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -22,6 +22,7 @@ const MULTI_CLICK_DISTANCE: f32 = 6.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HighlightLanguage {
+    Markdown,
     PlainText,
     Zig,
 }
@@ -29,6 +30,7 @@ enum HighlightLanguage {
 impl HighlightLanguage {
     const fn label(self) -> &'static str {
         match self {
+            Self::Markdown => "Markdown",
             Self::PlainText => "Plain text",
             Self::Zig => "Zig",
         }
@@ -36,6 +38,7 @@ impl HighlightLanguage {
 
     const fn core_language(self) -> Option<Language> {
         match self {
+            Self::Markdown => Some(Language::Markdown),
             Self::PlainText => None,
             Self::Zig => Some(Language::Zig),
         }
@@ -72,13 +75,14 @@ struct TextEditor {
 impl TextEditor {
     fn new(block: BlockHandle<TextDocument>) -> Self {
         let mut core = Core::new(block.clone());
+        core.set_syntax_highlighter(Some(Language::Markdown));
         core.execute_command(EditorCommand::SetCursorPosition(core.position(0)));
         Self {
             block,
             core,
             renderer: TextRenderer::new(),
             selecting: false,
-            highlight_language: HighlightLanguage::PlainText,
+            highlight_language: HighlightLanguage::Markdown,
             click_count: 0,
             last_click: None,
         }
@@ -91,6 +95,11 @@ impl TextEditor {
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
                 .selected_text(self.highlight_language.label())
                 .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.highlight_language,
+                        HighlightLanguage::Markdown,
+                        HighlightLanguage::Markdown.label(),
+                    );
                     ui.selectable_value(
                         &mut self.highlight_language,
                         HighlightLanguage::PlainText,
@@ -351,6 +360,7 @@ impl TextEditor {
         painter: &egui::Painter,
         origin: Pos2,
         layout: &DocumentLayout,
+        highlight: &SyntaxHighlight,
     ) -> Option<Rect> {
         let selection_color = ui.visuals().selection.bg_fill;
         let cursor_color = ui.visuals().selection.stroke.color;
@@ -389,7 +399,7 @@ impl TextEditor {
                         Pos2::new(origin.x + left.x.min(right.x), y),
                         Pos2::new(
                             origin.x + left.x.max(right.x).max(left.x.min(right.x) + 1.0),
-                            y + LINE_HEIGHT,
+                            y + layout.lines[left.line].height,
                         ),
                     ),
                     0.0,
@@ -401,13 +411,13 @@ impl TextEditor {
                     origin.x + position.x,
                     origin.y + layout.lines[position.line].y,
                 );
-                let rect = Rect::from_min_size(top, Vec2::new(2.0, LINE_HEIGHT));
+                let rect =
+                    Rect::from_min_size(top, Vec2::new(2.0, layout.lines[position.line].height));
                 painter.rect_filled(rect, 0.0, cursor_color);
                 cursor_rect = Some(rect);
             }
         }
 
-        let highlight = self.core.highlight();
         let renderer = match &mut self.renderer {
             Ok(renderer) => renderer,
             Err(_) => return cursor_rect,
@@ -418,7 +428,7 @@ impl TextEditor {
                 painter,
                 origin,
                 line,
-                |byte| syntax_color(highlight.advance_and_read(byte)),
+                |byte| syntax_color(highlight.style_at(byte).color),
                 |byte| selected_bytes.get(byte).copied().unwrap_or(false),
                 syntax_color(SynHlColorScope::Invisible),
             );
@@ -472,8 +482,9 @@ impl BlockEditor for TextEditor {
             });
             return None;
         };
+        let highlight = self.core.highlight();
         let layout = match &self.renderer {
-            Ok(renderer) => renderer.layout(&bytes),
+            Ok(renderer) => renderer.layout(&bytes, &highlight),
             Err(error) => {
                 ui.centered_and_justified(|ui| {
                     ui.colored_label(ui.visuals().error_fg_color, error);
@@ -495,7 +506,7 @@ impl BlockEditor for TextEditor {
                     .rect_filled(response.rect, 0.0, Color32::from_rgb(29, 37, 44));
                 let origin = response.rect.min + PADDING;
                 reveal_cursor |= self.pointer_input(ui, &response, origin, &layout);
-                let cursor = self.paint(ui, &painter, origin, &layout);
+                let cursor = self.paint(ui, &painter, origin, &layout, &highlight);
                 if reveal_cursor {
                     if let Some(cursor) = cursor {
                         ui.scroll_to_rect(cursor.expand2(Vec2::new(8.0, 3.0)), None);
@@ -507,8 +518,11 @@ impl BlockEditor for TextEditor {
 }
 
 fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
-    let line = ((point.y / LINE_HEIGHT).floor().max(0.0) as usize)
-        .min(layout.lines.len().saturating_sub(1));
+    let line = layout
+        .lines
+        .iter()
+        .position(|line| point.y < line.y + line.height)
+        .unwrap_or_else(|| layout.lines.len().saturating_sub(1));
     let line_layout = &layout.lines[line];
     (line_layout.start..=line_layout.end)
         .filter_map(|byte| {
@@ -545,6 +559,9 @@ fn syntax_hex(scope: SynHlColorScope) -> u32 {
         SynHlColorScope::VariableMutable => 0xb7c5d3,
         SynHlColorScope::Comment => 0xff9d1c,
         SynHlColorScope::MarkdownPlainText => 0xffffff,
+        SynHlColorScope::MarkdownSymbol => 0x718ca1,
+        SynHlColorScope::MarkdownLink => 0x70e1e8,
+        SynHlColorScope::MarkdownCode => 0x8bd49c,
         SynHlColorScope::Unstyled => 0xb7c5d3,
         SynHlColorScope::Invisible => 0x43515c,
     }

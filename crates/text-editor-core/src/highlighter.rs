@@ -1,8 +1,10 @@
 use block_client::{blocks::text::TextDocument, BlockHandle};
 use tree_sitter::{InputEdit, Node, Parser, Point, Tree};
+use tree_sitter_md::{MarkdownCursor, MarkdownParser, MarkdownTree};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Language {
+    Markdown,
     Zig,
 }
 
@@ -23,6 +25,9 @@ pub enum SynHlColorScope {
     Keyword,
     Comment,
     MarkdownPlainText,
+    MarkdownSymbol,
+    MarkdownLink,
+    MarkdownCode,
     Unstyled,
     Invisible,
 }
@@ -45,35 +50,94 @@ impl SynHlColorScope {
             Self::Keyword => "keyword",
             Self::Comment => "comment",
             Self::MarkdownPlainText => "markdown_plain_text",
+            Self::MarkdownSymbol => "markdown_symbol",
+            Self::MarkdownLink => "markdown_link",
+            Self::MarkdownCode => "markdown_code",
             Self::Unstyled => "unstyled",
             Self::Invisible => "invisible",
         }
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SynHlFontFamily {
+    #[default]
+    Proportional,
+    Monospace,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SynHlTextSize {
+    #[default]
+    Body,
+    Heading(u8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SynHlStyle {
+    pub color: SynHlColorScope,
+    pub family: SynHlFontFamily,
+    pub size: SynHlTextSize,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+}
+
+impl SynHlStyle {
+    const fn plain(color: SynHlColorScope) -> Self {
+        Self {
+            color,
+            family: SynHlFontFamily::Proportional,
+            size: SynHlTextSize::Body,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+        }
+    }
+}
+
 pub struct SyntaxHighlight {
-    scopes: Vec<SynHlColorScope>,
+    styles: Vec<SynHlStyle>,
 }
 
 impl SyntaxHighlight {
     pub(crate) fn plaintext(len: usize) -> Self {
         Self {
-            scopes: vec![SynHlColorScope::Unstyled; len],
+            styles: vec![SynHlStyle::plain(SynHlColorScope::Unstyled); len],
         }
     }
 
     pub fn advance_and_read(&self, byte_index: usize) -> SynHlColorScope {
-        self.scopes
+        self.styles
             .get(byte_index)
-            .copied()
+            .map(|style| style.color)
             .unwrap_or(SynHlColorScope::Invalid)
     }
+
+    pub fn style_at(&self, byte_index: usize) -> SynHlStyle {
+        self.styles
+            .get(byte_index)
+            .copied()
+            .unwrap_or(SynHlStyle::plain(SynHlColorScope::Invalid))
+    }
+}
+
+enum ParserBackend {
+    Zig {
+        parser: Parser,
+        tree: Option<Tree>,
+    },
+    Markdown {
+        parser: MarkdownParser,
+        tree: Option<MarkdownTree>,
+    },
 }
 
 pub struct Highlighter {
     document: BlockHandle<TextDocument>,
-    parser: Parser,
-    tree: Option<Tree>,
+    backend: ParserBackend,
     parsed_revision: Option<u64>,
     parsed_bytes: Vec<u8>,
     language: Language,
@@ -81,16 +145,22 @@ pub struct Highlighter {
 
 impl Highlighter {
     pub fn new(document: BlockHandle<TextDocument>, language: Language) -> Self {
-        let mut parser = Parser::new();
-        match language {
-            Language::Zig => parser
-                .set_language(&tree_sitter_zig::LANGUAGE.into())
-                .expect("tree-sitter Zig language is incompatible"),
-        }
+        let backend = match language {
+            Language::Markdown => ParserBackend::Markdown {
+                parser: MarkdownParser::default(),
+                tree: None,
+            },
+            Language::Zig => {
+                let mut parser = Parser::new();
+                parser
+                    .set_language(&tree_sitter_zig::LANGUAGE.into())
+                    .expect("tree-sitter Zig language is incompatible");
+                ParserBackend::Zig { parser, tree: None }
+            }
+        };
         Self {
             document,
-            parser,
-            tree: None,
+            backend,
             parsed_revision: None,
             parsed_bytes: Vec::new(),
             language,
@@ -99,12 +169,16 @@ impl Highlighter {
 
     fn ensure_parsed(&mut self) -> Option<()> {
         let revision = self.document.revision();
-        if self.parsed_revision == Some(revision) && self.tree.is_some() {
+        let has_tree = match &self.backend {
+            ParserBackend::Zig { tree, .. } => tree.is_some(),
+            ParserBackend::Markdown { tree, .. } => tree.is_some(),
+        };
+        if self.parsed_revision == Some(revision) && has_tree {
             return Some(());
         }
         let document = self.document.read()?;
         let bytes = document.bytes();
-        if let Some(tree) = self.tree.as_mut() {
+        let edit = if self.parsed_revision.is_some() {
             let prefix = self
                 .parsed_bytes
                 .iter()
@@ -122,16 +196,31 @@ impl Highlighter {
                 .count();
             let old_end = self.parsed_bytes.len() - suffix;
             let new_end = bytes.len() - suffix;
-            tree.edit(&InputEdit {
+            Some(InputEdit {
                 start_byte: prefix,
                 old_end_byte: old_end,
                 new_end_byte: new_end,
                 start_position: byte_point(&self.parsed_bytes, prefix),
                 old_end_position: byte_point(&self.parsed_bytes, old_end),
                 new_end_position: byte_point(bytes, new_end),
-            });
+            })
+        } else {
+            None
+        };
+        match &mut self.backend {
+            ParserBackend::Zig { parser, tree } => {
+                if let (Some(tree), Some(edit)) = (tree.as_mut(), edit.as_ref()) {
+                    tree.edit(edit);
+                }
+                *tree = parser.parse(bytes, tree.as_ref());
+            }
+            ParserBackend::Markdown { parser, tree } => {
+                if let (Some(tree), Some(edit)) = (tree.as_mut(), edit.as_ref()) {
+                    tree.edit(edit);
+                }
+                *tree = parser.parse(bytes, tree.as_ref());
+            }
         }
-        self.tree = self.parser.parse(bytes, self.tree.as_ref());
         self.parsed_bytes.clear();
         self.parsed_bytes.extend_from_slice(bytes);
         self.parsed_revision = Some(revision);
@@ -140,26 +229,57 @@ impl Highlighter {
 
     pub fn highlight(&mut self) -> SyntaxHighlight {
         if self.ensure_parsed().is_none() {
-            return SyntaxHighlight { scopes: Vec::new() };
+            return SyntaxHighlight { styles: Vec::new() };
         }
         let document = self.document.read().expect("parsed document disappeared");
         let bytes = document.bytes();
-        let mut scopes = match self.language {
-            Language::Zig => zig_scopes(bytes),
-        };
+        if self.language == Language::Markdown {
+            let styles = match &self.backend {
+                ParserBackend::Markdown {
+                    tree: Some(tree), ..
+                } => markdown_styles(tree, bytes.len()),
+                _ => vec![SynHlStyle::plain(SynHlColorScope::MarkdownPlainText); bytes.len()],
+            };
+            return SyntaxHighlight { styles };
+        }
+        let mut scopes = zig_scopes(bytes);
         for index in 1..scopes.len() {
             if bytes[index].is_ascii_whitespace() {
                 scopes[index] = scopes[index - 1];
             }
         }
-        SyntaxHighlight { scopes }
+        SyntaxHighlight {
+            styles: scopes.into_iter().map(SynHlStyle::plain).collect(),
+        }
     }
 
     pub(crate) fn node_chain(&mut self, start: usize, end: usize) -> Vec<(usize, usize)> {
         if self.ensure_parsed().is_none() {
             return Vec::new();
         }
-        let tree = self.tree.as_ref().expect("parser omitted a syntax tree");
+        if let ParserBackend::Markdown {
+            tree: Some(tree), ..
+        } = &self.backend
+        {
+            let document_len = tree.block_tree().root_node().end_byte();
+            let query_end = if start == end {
+                start.saturating_add(1).min(document_len)
+            } else {
+                end.min(document_len)
+            };
+            let mut result = Vec::new();
+            let mut cursor = tree.walk();
+            collect_markdown_chain(&mut cursor, start.min(document_len), query_end, &mut result);
+            result.reverse();
+            result.dedup();
+            return result;
+        }
+        let ParserBackend::Zig {
+            tree: Some(tree), ..
+        } = &self.backend
+        else {
+            return Vec::new();
+        };
         let root = tree.root_node();
         let document_len = root.end_byte();
         let bytes = self
@@ -189,6 +309,181 @@ impl Highlighter {
             node = current.parent();
         }
         result
+    }
+}
+
+fn markdown_styles(tree: &MarkdownTree, len: usize) -> Vec<SynHlStyle> {
+    let mut styles = vec![SynHlStyle::plain(SynHlColorScope::MarkdownPlainText); len];
+    let mut cursor = tree.walk();
+    style_markdown_node(&mut cursor, &mut styles);
+    styles
+}
+
+fn style_markdown_node(cursor: &mut MarkdownCursor<'_>, styles: &mut [SynHlStyle]) {
+    let node = cursor.node();
+    let range = node.start_byte().min(styles.len())..node.end_byte().min(styles.len());
+    let kind = node.kind();
+
+    match kind {
+        "strong_emphasis" => {
+            for style in &mut styles[range.clone()] {
+                style.bold = true;
+            }
+        }
+        "emphasis" => {
+            for style in &mut styles[range.clone()] {
+                style.italic = true;
+            }
+        }
+        "strikethrough" => {
+            for style in &mut styles[range.clone()] {
+                style.strikethrough = true;
+            }
+        }
+        "atx_heading" => {
+            let level = node
+                .child(0)
+                .and_then(|marker| marker.kind().strip_prefix("atx_h"))
+                .and_then(|value| value.strip_suffix("_marker"))
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(6);
+            set_heading(&mut styles[range.clone()], level);
+        }
+        "setext_heading" => {
+            let mut child = node.walk();
+            let level = node
+                .children(&mut child)
+                .find_map(|child| match child.kind() {
+                    "setext_h1_underline" => Some(1),
+                    "setext_h2_underline" => Some(2),
+                    _ => None,
+                })
+                .unwrap_or(2);
+            set_heading(&mut styles[range.clone()], level);
+        }
+        "block_quote" => {
+            for style in &mut styles[range.clone()] {
+                style.italic = true;
+            }
+        }
+        "pipe_table_header" => {
+            for style in &mut styles[range.clone()] {
+                style.bold = true;
+            }
+        }
+        "code_span" | "indented_code_block" | "code_fence_content" => {
+            for style in &mut styles[range.clone()] {
+                style.color = SynHlColorScope::MarkdownCode;
+                style.family = SynHlFontFamily::Monospace;
+                style.size = SynHlTextSize::Body;
+                style.bold = false;
+                style.italic = false;
+            }
+        }
+        "info_string" => {
+            for style in &mut styles[range.clone()] {
+                style.color = SynHlColorScope::MarkdownLink;
+                style.family = SynHlFontFamily::Monospace;
+            }
+        }
+        "link_text" | "link_label" | "image_description" | "uri_autolink" | "email_autolink" => {
+            for style in &mut styles[range.clone()] {
+                style.color = SynHlColorScope::MarkdownLink;
+                style.underline = true;
+            }
+        }
+        "link_destination" | "link_title" => {
+            for style in &mut styles[range.clone()] {
+                style.color = SynHlColorScope::MarkdownLink;
+                style.family = SynHlFontFamily::Monospace;
+            }
+        }
+        "backslash_escape" => {
+            if let Some(style) = styles.get_mut(range.start) {
+                set_markdown_symbol(style);
+            }
+        }
+        "emphasis_delimiter"
+        | "code_span_delimiter"
+        | "fenced_code_block_delimiter"
+        | "block_quote_marker"
+        | "block_continuation"
+        | "list_marker_plus"
+        | "list_marker_minus"
+        | "list_marker_star"
+        | "list_marker_dot"
+        | "list_marker_parenthesis"
+        | "task_list_marker_checked"
+        | "task_list_marker_unchecked"
+        | "thematic_break"
+        | "setext_h1_underline"
+        | "setext_h2_underline"
+        | "pipe_table_delimiter_row"
+        | "pipe_table_delimiter_cell"
+        | "pipe_table_align_left"
+        | "pipe_table_align_right"
+        | "hard_line_break"
+        | "atx_h1_marker"
+        | "atx_h2_marker"
+        | "atx_h3_marker"
+        | "atx_h4_marker"
+        | "atx_h5_marker"
+        | "atx_h6_marker"
+        | "["
+        | "]"
+        | "("
+        | ")"
+        | "!"
+        | "|"
+        | "~" => {
+            for style in &mut styles[range.clone()] {
+                set_markdown_symbol(style);
+            }
+        }
+        _ => {}
+    }
+
+    if cursor.goto_first_child() {
+        loop {
+            style_markdown_node(cursor, styles);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+fn set_heading(styles: &mut [SynHlStyle], level: u8) {
+    for style in styles {
+        style.bold = true;
+        style.size = SynHlTextSize::Heading(level.clamp(1, 6));
+    }
+}
+
+fn set_markdown_symbol(style: &mut SynHlStyle) {
+    *style = SynHlStyle::plain(SynHlColorScope::MarkdownSymbol);
+}
+
+fn collect_markdown_chain(
+    cursor: &mut MarkdownCursor<'_>,
+    start: usize,
+    end: usize,
+    result: &mut Vec<(usize, usize)>,
+) {
+    let node = cursor.node();
+    if node.start_byte() > start || node.end_byte() < end {
+        return;
+    }
+    result.push((node.start_byte(), node.end_byte()));
+    if cursor.goto_first_child() {
+        loop {
+            collect_markdown_chain(cursor, start, end, result);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
     }
 }
 

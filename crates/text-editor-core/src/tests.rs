@@ -6,6 +6,10 @@ use super::*;
 mod core;
 mod ctrl_d;
 mod has_stop;
+mod markdown_block_styles;
+mod markdown_incremental_edit;
+mod markdown_inline_styles;
+mod markdown_invalid_utf8;
 mod raw_bytes;
 mod zig_syn_hl;
 
@@ -16,10 +20,14 @@ struct EditorTester {
 
 impl EditorTester {
     fn new(initial: impl AsRef<[u8]>) -> Self {
+        Self::with_language(initial, Language::Zig)
+    }
+
+    fn with_language(initial: impl AsRef<[u8]>, language: Language) -> Self {
         let client = BlockClient::new(Uuid::new_v4());
         let block = client.create_block(TextDocument::from_bytes(initial));
         let mut editor = Core::new(block);
-        editor.set_syntax_highlighter(Some(Language::Zig));
+        editor.set_syntax_highlighter(Some(language));
         Self {
             _client: client,
             editor,

@@ -5,13 +5,19 @@ use std::{
     ptr,
 };
 
-use eframe::egui::{self, Color32, Pos2, Rect, TextureHandle, Vec2};
+use eframe::egui::{self, Color32, Pos2, Rect, Stroke, TextureHandle, Vec2};
 use freetype::freetype as ft;
 use harfbuzz_rs::{shape, Direction, Face as HbFace, Font as HbFont, Tag, UnicodeBuffer};
+use text_editor_core::{SynHlFontFamily, SynHlStyle, SynHlTextSize, SyntaxHighlight};
 use unicode_script::{Script, UnicodeScript};
 
-pub(super) const PIXEL_SIZE: u32 = 18;
-pub(super) const LINE_HEIGHT: f32 = 25.0;
+unsafe extern "C" {
+    fn FT_GlyphSlot_Embolden(slot: ft::FT_GlyphSlot);
+    fn FT_GlyphSlot_Oblique(slot: ft::FT_GlyphSlot);
+}
+
+const BODY_PIXEL_SIZE: u32 = 18;
+const CODE_PIXEL_SIZE: u32 = 17;
 
 pub(super) struct TextRenderer {
     library: ft::FT_Library,
@@ -30,6 +36,8 @@ pub(super) struct LineLayout {
     pub end: usize,
     pub y: f32,
     pub width: f32,
+    pub height: f32,
+    baseline: f32,
     glyphs: Vec<PositionedGlyph>,
 }
 
@@ -42,6 +50,9 @@ pub(super) struct BytePosition {
 struct FontFace {
     face: ft::FT_Face,
     path: PathBuf,
+    family: SynHlFontFamily,
+    bold: bool,
+    italic: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -53,12 +64,18 @@ struct PositionedGlyph {
     x_offset: f32,
     y_offset: f32,
     invisible: bool,
+    style: SynHlStyle,
+    pixel_size: u32,
+    advance: f32,
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 struct GlyphKey {
     font_index: usize,
     id: u32,
+    pixel_size: u32,
+    bold: bool,
+    italic: bool,
 }
 
 struct RasterizedGlyph {
@@ -80,6 +97,7 @@ struct FontRun<'a> {
     start: usize,
     script: Option<Script>,
     font_index: usize,
+    style: SynHlStyle,
 }
 
 struct DisplayLine {
@@ -95,7 +113,7 @@ impl TextRenderer {
         }
 
         let mut fonts = Vec::new();
-        for path in font_paths() {
+        for (path, family, bold, italic) in font_paths() {
             let Some(path_text) = path.to_str() else {
                 continue;
             };
@@ -106,13 +124,16 @@ impl TextRenderer {
             if unsafe { ft::FT_New_Face(library, path_c.as_ptr(), 0, &mut face) } != 0 {
                 continue;
             }
-            if unsafe { ft::FT_Set_Pixel_Sizes(face, 0, PIXEL_SIZE) } != 0 {
+            if unsafe { ft::FT_Set_Pixel_Sizes(face, 0, BODY_PIXEL_SIZE) } != 0 {
                 unsafe { ft::FT_Done_Face(face) };
                 continue;
             }
             fonts.push(FontFace {
                 face,
                 path: path.clone(),
+                family,
+                bold,
+                italic,
             });
         }
 
@@ -128,11 +149,12 @@ impl TextRenderer {
         })
     }
 
-    pub fn layout(&self, bytes: &[u8]) -> DocumentLayout {
+    pub fn layout(&self, bytes: &[u8], highlight: &SyntaxHighlight) -> DocumentLayout {
         let mut lines = Vec::new();
         let mut positions = vec![None; bytes.len() + 1];
         let mut start = 0;
         let mut line_index = 0;
+        let mut y = 0.0;
 
         loop {
             let newline = bytes[start..]
@@ -141,7 +163,8 @@ impl TextRenderer {
                 .map(|offset| start + offset);
             let end = newline.unwrap_or(bytes.len());
             let display = display_line(&bytes[start..end], start, newline.is_some());
-            let (glyphs, width, line_positions) = self.layout_line(bytes, &display);
+            let (glyphs, width, line_positions, baseline, height) =
+                self.layout_line(bytes, &display, highlight);
             for (doc_byte, x) in line_positions {
                 if let Some(position) = positions.get_mut(doc_byte) {
                     *position = Some(BytePosition {
@@ -161,10 +184,13 @@ impl TextRenderer {
             lines.push(LineLayout {
                 start,
                 end,
-                y: line_index as f32 * LINE_HEIGHT,
+                y,
                 width,
+                height,
+                baseline,
                 glyphs,
             });
+            y += height;
 
             let Some(newline) = newline else {
                 break;
@@ -175,7 +201,7 @@ impl TextRenderer {
 
         let width = lines.iter().map(|line| line.width).fold(0.0_f32, f32::max);
         DocumentLayout {
-            size: Vec2::new(width + 24.0, lines.len() as f32 * LINE_HEIGHT + 16.0),
+            size: Vec2::new(width + 24.0, y + 16.0),
             lines,
             positions,
         }
@@ -185,19 +211,21 @@ impl TextRenderer {
         &self,
         document: &[u8],
         display: &DisplayLine,
-    ) -> (Vec<PositionedGlyph>, f32, Vec<(usize, f32)>) {
+        highlight: &SyntaxHighlight,
+    ) -> (Vec<PositionedGlyph>, f32, Vec<(usize, f32)>, f32, f32) {
         let mut glyphs = Vec::new();
         let mut positions = Vec::new();
         let mut pen_x: f32 = 0.0;
 
-        for run in self.font_runs(&display.text) {
+        for run in self.font_runs(&display.text, display, highlight) {
             let Ok(face) = HbFace::from_file(&self.fonts[run.font_index].path, 0) else {
                 continue;
             };
             let mut font = HbFont::new(face);
-            let scale = PIXEL_SIZE as i32 * 64;
+            let pixel_size = style_pixel_size(run.style);
+            let scale = pixel_size as i32 * 64;
             font.set_scale(scale, scale);
-            font.set_ppem(PIXEL_SIZE, PIXEL_SIZE);
+            font.set_ppem(pixel_size, pixel_size);
             let mut buffer = UnicodeBuffer::new().add_str(run.value);
             if let Some(script) = run.script {
                 let tag = script.as_iso15924_tag().to_be_bytes();
@@ -240,6 +268,9 @@ impl TextRenderer {
                     invisible: document
                         .get(doc_byte)
                         .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r')),
+                    style: run.style,
+                    pixel_size,
+                    advance,
                 });
                 pen_x += advance;
             }
@@ -268,20 +299,58 @@ impl TextRenderer {
         if display.text.is_empty() {
             positions.push((display.display_to_document[0], 0.0));
         }
-        (glyphs, pen_x, positions)
+        let (baseline, height) = self.line_metrics(&glyphs);
+        (glyphs, pen_x, positions, baseline, height)
     }
 
-    fn font_runs<'a>(&self, value: &'a str) -> Vec<FontRun<'a>> {
+    fn font_runs<'a>(
+        &self,
+        value: &'a str,
+        display: &DisplayLine,
+        highlight: &SyntaxHighlight,
+    ) -> Vec<FontRun<'a>> {
         script_runs(value)
             .into_iter()
-            .flat_map(|run| split_font_runs(run, |character| self.font_index_for(character)))
+            .flat_map(|run| {
+                split_font_runs(run, |display_byte, character| {
+                    let style = highlight.style_at(map_display_byte(display, display_byte));
+                    (
+                        self.font_index_for(character, style.family, style.bold, style.italic),
+                        style,
+                    )
+                })
+            })
             .collect()
     }
 
-    fn font_index_for(&self, character: char) -> Option<usize> {
-        self.fonts.iter().position(|font| unsafe {
-            ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0
-        })
+    fn font_index_for(
+        &self,
+        character: char,
+        family: SynHlFontFamily,
+        bold: bool,
+        italic: bool,
+    ) -> Option<usize> {
+        self.fonts
+            .iter()
+            .position(|font| {
+                font.family == family
+                    && font.bold == bold
+                    && font.italic == italic
+                    && unsafe { ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0 }
+            })
+            .or_else(|| {
+                self.fonts.iter().position(|font| {
+                    font.family == family
+                        && unsafe {
+                            ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0
+                        }
+                })
+            })
+            .or_else(|| {
+                self.fonts.iter().position(|font| unsafe {
+                    ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0
+                })
+            })
     }
 
     pub fn paint_line(
@@ -294,7 +363,7 @@ impl TextRenderer {
         byte_is_selected: impl Fn(usize) -> bool,
         invisible_color: Color32,
     ) {
-        let baseline = origin.y + line.y + self.ascender();
+        let baseline = origin.y + line.y + line.baseline;
         for glyph in &line.glyphs {
             if glyph.invisible && !byte_is_selected(glyph.doc_byte) {
                 continue;
@@ -302,6 +371,9 @@ impl TextRenderer {
             let key = GlyphKey {
                 font_index: glyph.font_index,
                 id: glyph.id,
+                pixel_size: glyph.pixel_size,
+                bold: glyph.style.bold && !self.fonts[glyph.font_index].bold,
+                italic: glyph.style.italic && !self.fonts[glyph.font_index].italic,
             };
             self.ensure_glyph(context, key);
             let Some(rasterized) = self.glyphs.get(&key) else {
@@ -324,22 +396,40 @@ impl TextRenderer {
                     color_for_byte(glyph.doc_byte)
                 },
             );
+            let color = color_for_byte(glyph.doc_byte);
+            let left = origin.x + glyph.x.min(glyph.x + glyph.advance);
+            let right = origin.x + glyph.x.max(glyph.x + glyph.advance);
+            if glyph.style.underline {
+                let y = baseline + (glyph.pixel_size as f32 * 0.12).max(1.0);
+                painter.line_segment(
+                    [Pos2::new(left, y), Pos2::new(right, y)],
+                    Stroke::new((glyph.pixel_size as f32 / 16.0).max(1.0), color),
+                );
+            }
+            if glyph.style.strikethrough {
+                let y = baseline - glyph.pixel_size as f32 * 0.32;
+                painter.line_segment(
+                    [Pos2::new(left, y), Pos2::new(right, y)],
+                    Stroke::new((glyph.pixel_size as f32 / 16.0).max(1.0), color),
+                );
+            }
         }
     }
 
-    fn ascender(&self) -> f32 {
-        self.fonts
-            .iter()
-            .map(|font| unsafe {
-                if ft::FT_Set_Pixel_Sizes(font.face, 0, PIXEL_SIZE) != 0
-                    || (*font.face).size.is_null()
+    fn line_metrics(&self, glyphs: &[PositionedGlyph]) -> (f32, f32) {
+        let mut ascender = BODY_PIXEL_SIZE as f32;
+        let mut descender = BODY_PIXEL_SIZE as f32 * 0.3;
+        for glyph in glyphs {
+            let face = self.fonts[glyph.font_index].face;
+            unsafe {
+                if ft::FT_Set_Pixel_Sizes(face, 0, glyph.pixel_size) == 0 && !(*face).size.is_null()
                 {
-                    PIXEL_SIZE as f32
-                } else {
-                    (*(*font.face).size).metrics.ascender as f32 / 64.0
+                    ascender = ascender.max((*(*face).size).metrics.ascender as f32 / 64.0);
+                    descender = descender.max(-(*(*face).size).metrics.descender as f32 / 64.0);
                 }
-            })
-            .fold(PIXEL_SIZE as f32, f32::max)
+            }
+        }
+        (ascender + 3.0, ascender + descender + 7.0)
     }
 
     fn ensure_glyph(&mut self, context: &egui::Context, key: GlyphKey) {
@@ -353,10 +443,16 @@ impl TextRenderer {
             bearing: Vec2::ZERO,
         };
         unsafe {
-            if ft::FT_Set_Pixel_Sizes(face, 0, PIXEL_SIZE) == 0
+            if ft::FT_Set_Pixel_Sizes(face, 0, key.pixel_size) == 0
                 && ft::FT_Load_Glyph(face, key.id, ft::FT_LOAD_DEFAULT as i32) == 0
             {
                 let slot = (*face).glyph;
+                if key.bold {
+                    FT_GlyphSlot_Embolden(slot);
+                }
+                if key.italic {
+                    FT_GlyphSlot_Oblique(slot);
+                }
                 if ft::FT_Render_Glyph(slot, ft::FT_Render_Mode::FT_RENDER_MODE_NORMAL) == 0 {
                     let bitmap = &(*slot).bitmap;
                     let width = bitmap.width.max(0) as usize;
@@ -378,7 +474,10 @@ impl TextRenderer {
                         }
                         let image = egui::ColorImage::from_rgba_unmultiplied([width, rows], &rgba);
                         result.texture = Some(context.load_texture(
-                            format!("editor-glyph-{}-{}", key.font_index, key.id),
+                            format!(
+                                "editor-glyph-{}-{}-{}-{}-{}",
+                                key.font_index, key.id, key.pixel_size, key.bold, key.italic
+                            ),
                             image,
                             egui::TextureOptions::LINEAR,
                         ));
@@ -519,45 +618,101 @@ fn script_runs(value: &str) -> Vec<TextRun<'_>> {
 
 fn split_font_runs<'a>(
     run: TextRun<'a>,
-    mut font_index_for: impl FnMut(char) -> Option<usize>,
+    mut font_and_style_for: impl FnMut(usize, char) -> (Option<usize>, SynHlStyle),
 ) -> Vec<FontRun<'a>> {
     let mut runs = Vec::new();
     let mut start = 0;
-    let mut current = None;
+    let mut current: Option<(usize, SynHlStyle)> = None;
     for (index, character) in run.value.char_indices() {
-        let font_index = font_index_for(character).or(current).unwrap_or(0);
+        let (font_index, style) = font_and_style_for(run.start + index, character);
+        let font_index = font_index
+            .or_else(|| current.map(|(font_index, _)| font_index))
+            .unwrap_or(0);
         match current {
-            None => current = Some(font_index),
-            Some(active) if active == font_index => {}
-            Some(active) => {
+            None => current = Some((font_index, style)),
+            Some(active) if active == (font_index, style) => {}
+            Some((active_font, active_style)) => {
                 runs.push(FontRun {
                     value: &run.value[start..index],
                     start: run.start + start,
                     script: run.script,
-                    font_index: active,
+                    font_index: active_font,
+                    style: active_style,
                 });
                 start = index;
-                current = Some(font_index);
+                current = Some((font_index, style));
             }
         }
     }
-    if let Some(font_index) = current {
+    if let Some((font_index, style)) = current {
         runs.push(FontRun {
             value: &run.value[start..],
             start: run.start + start,
             script: run.script,
             font_index,
+            style,
         });
     }
     runs
 }
 
-fn font_paths() -> Vec<PathBuf> {
+fn style_pixel_size(style: SynHlStyle) -> u32 {
+    if style.family == SynHlFontFamily::Monospace {
+        return CODE_PIXEL_SIZE;
+    }
+    match style.size {
+        SynHlTextSize::Body => BODY_PIXEL_SIZE,
+        SynHlTextSize::Heading(1) => 32,
+        SynHlTextSize::Heading(2) => 28,
+        SynHlTextSize::Heading(3) => 24,
+        SynHlTextSize::Heading(4) => 21,
+        SynHlTextSize::Heading(5) => 19,
+        SynHlTextSize::Heading(_) => 18,
+    }
+}
+
+fn font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
     FONT_CANDIDATES
         .iter()
-        .map(Path::new)
-        .filter(|path| path.exists())
-        .map(Path::to_owned)
+        .map(|path| (*path, SynHlFontFamily::Proportional, false, false))
+        .chain(
+            BOLD_FONT_CANDIDATES
+                .iter()
+                .map(|path| (*path, SynHlFontFamily::Proportional, true, false)),
+        )
+        .chain(
+            ITALIC_FONT_CANDIDATES
+                .iter()
+                .map(|path| (*path, SynHlFontFamily::Proportional, false, true)),
+        )
+        .chain(
+            BOLD_ITALIC_FONT_CANDIDATES
+                .iter()
+                .map(|path| (*path, SynHlFontFamily::Proportional, true, true)),
+        )
+        .chain(
+            MONOSPACE_FONT_CANDIDATES
+                .iter()
+                .map(|path| (*path, SynHlFontFamily::Monospace, false, false)),
+        )
+        .chain(
+            MONOSPACE_BOLD_FONT_CANDIDATES
+                .iter()
+                .map(|path| (*path, SynHlFontFamily::Monospace, true, false)),
+        )
+        .chain(
+            MONOSPACE_ITALIC_FONT_CANDIDATES
+                .iter()
+                .map(|path| (*path, SynHlFontFamily::Monospace, false, true)),
+        )
+        .chain(
+            MONOSPACE_BOLD_ITALIC_FONT_CANDIDATES
+                .iter()
+                .map(|path| (*path, SynHlFontFamily::Monospace, true, true)),
+        )
+        .map(|(path, family, bold, italic)| (Path::new(path), family, bold, italic))
+        .filter(|(path, _, _, _)| path.exists())
+        .map(|(path, family, bold, italic)| (path.to_owned(), family, bold, italic))
         .collect()
 }
 
@@ -585,4 +740,59 @@ const FONT_CANDIDATES: &[&str] = &[
     "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+];
+
+const BOLD_FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\verdanab.ttf",
+    "C:\\Windows\\Fonts\\segoeuib.ttf",
+    "C:\\Windows\\Fonts\\arialbd.ttf",
+    "/System/Library/Fonts/Supplemental/Verdana Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+];
+
+const ITALIC_FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\verdanai.ttf",
+    "C:\\Windows\\Fonts\\segoeuii.ttf",
+    "C:\\Windows\\Fonts\\ariali.ttf",
+    "/System/Library/Fonts/Supplemental/Verdana Italic.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+];
+
+const BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\verdanaz.ttf",
+    "C:\\Windows\\Fonts\\segoeuiz.ttf",
+    "C:\\Windows\\Fonts\\arialbi.ttf",
+    "/System/Library/Fonts/Supplemental/Verdana Bold Italic.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf",
+];
+
+const MONOSPACE_FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\consola.ttf",
+    "C:\\Windows\\Fonts\\cour.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/System/Library/Fonts/Monaco.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+];
+
+const MONOSPACE_BOLD_FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\consolab.ttf",
+    "C:\\Windows\\Fonts\\courbd.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+];
+
+const MONOSPACE_ITALIC_FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\consolai.ttf",
+    "C:\\Windows\\Fonts\\couri.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf",
+];
+
+const MONOSPACE_BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
+    "C:\\Windows\\Fonts\\consolaz.ttf",
+    "C:\\Windows\\Fonts\\courbi.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-BoldOblique.ttf",
 ];
