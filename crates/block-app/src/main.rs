@@ -19,6 +19,7 @@ use block_client::{
 };
 use block_picker::{BlockPicker, BlockPickerMenuAction};
 use editors::{
+    direct_editor_tab_ui,
     image::{pick_image_file, ImageEditor},
     BlockEditor, DynamicArtifactRegeneration, EditorAccess, EditorAction, EditorRegistry,
     SidebarDragPayload, SidebarDragSource,
@@ -1289,7 +1290,9 @@ impl BlockApp {
             });
             ui.separator();
         }
-        let action = {
+        let action = if editor.direct_editor_capabilities().is_some() {
+            direct_editor_tab_ui(editor.as_mut(), ui, &self.client)
+        } else {
             let mut editors =
                 EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
             editor.ui(ui, &mut editors, frame)

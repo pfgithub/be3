@@ -13,8 +13,7 @@ use egui_material_icons::icons::{ICON_ADD, ICON_DATABASE, ICON_DELETE, ICON_SCHE
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAccess, EditorAction,
-    EditorRegistration,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAction, EditorRegistration,
 };
 
 const ROW_HEADER_WIDTH: f32 = 44.0;
@@ -567,43 +566,6 @@ impl BlockEditor for DatabaseEditor {
         }
         self.grid(ui, &rows, &fields, scale);
         None
-    }
-
-    fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
-    ) -> Option<EditorAction> {
-        let Some((schema_id, rows, fields)) = self.data(editors.client()) else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        };
-        let mut action = self.controls(ui, schema_id, &rows, &fields);
-
-        if fields.is_empty() {
-            ui.centered_and_justified(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.weak("This spreadsheet has no columns.");
-                    if ui.button("Add columns").clicked() {
-                        action = Some(EditorAction::OpenBlock {
-                            id: schema_id,
-                            block_type: DatabaseSchema::TYPE_ID,
-                        });
-                    }
-                });
-            });
-            return action;
-        }
-
-        egui::ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                self.grid(ui, &rows, &fields, 1.0);
-            });
-        action
     }
 }
 

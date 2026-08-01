@@ -16,15 +16,14 @@ use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD,
     ICON_CIRCLE, ICON_COLORIZE, ICON_CROP_SQUARE, ICON_DELETE, ICON_DIAGONAL_LINE, ICON_DOWNLOAD,
     ICON_DRAW, ICON_FIND_REPLACE, ICON_FIT_SCREEN, ICON_FORMAT_COLOR_FILL, ICON_GRID_ON,
-    ICON_INK_ERASER, ICON_NORTH_EAST, ICON_NORTH_WEST, ICON_PALETTE, ICON_RESIZE, ICON_SOUTH_EAST,
-    ICON_SOUTH_WEST, ICON_SQUARE, ICON_TUNE, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+    ICON_INK_ERASER, ICON_NORTH_EAST, ICON_NORTH_WEST, ICON_RESIZE, ICON_SOUTH_EAST,
+    ICON_SOUTH_WEST, ICON_SQUARE, ICON_ZOOM_IN, ICON_ZOOM_OUT,
 };
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAccess, EditorAction,
-    EditorRegistration,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAction, EditorRegistration,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -46,7 +45,6 @@ const ZOOM_STEP: f32 = 1.25;
 const PAN_MARGIN: f32 = 32.0;
 const MAX_BRUSH_SIZE: u16 = 64;
 const MAX_RECENT_COLORS: usize = 12;
-const COMPACT_SIDEBAR_WIDTH: f32 = 760.0;
 const DIRECT_EDITOR_LONG_SIDE: f32 = 256.0;
 const DIRECT_EDITOR_SHORT_SIDE: f32 = 24.0;
 
@@ -146,8 +144,6 @@ pub(super) struct PixelArtEditor {
     resize_anchor: PixelArtAnchor,
     clear_open: bool,
     export_error: Option<String>,
-    tools_open: bool,
-    color_open: bool,
 }
 
 impl PixelArtEditor {
@@ -180,8 +176,6 @@ impl PixelArtEditor {
             resize_anchor: PixelArtAnchor::Center,
             clear_open: false,
             export_error: None,
-            tools_open: false,
-            color_open: false,
         }
     }
 
@@ -197,20 +191,11 @@ impl PixelArtEditor {
         });
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16, compact: bool) -> bool {
+    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) -> bool {
         let mut export = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong(self.tool.label());
             ui.weak(format!("{width} × {height} px"));
-
-            if compact {
-                if ui.button(ICON_TUNE).on_hover_text("Tools").clicked() {
-                    self.tools_open = !self.tools_open;
-                }
-                if ui.button(ICON_PALETTE).on_hover_text("Color").clicked() {
-                    self.color_open = !self.color_open;
-                }
-            }
 
             ui.separator();
             if ui
@@ -1184,7 +1169,7 @@ impl BlockEditor for PixelArtEditor {
         let width = art.width();
         let height = art.height();
         drop(art);
-        let export = self.top_bar(ui, width, height, false);
+        let export = self.top_bar(ui, width, height);
         self.show_export_error(ui);
         export.then(|| self.export(client)).flatten()
     }
@@ -1234,70 +1219,6 @@ impl BlockEditor for PixelArtEditor {
         self.resize_dialog(ui.ctx(), width, height);
         self.clear_dialog(ui.ctx());
         None
-    }
-
-    fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
-    ) -> Option<EditorAction> {
-        let Some(art) = self.block.read() else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        };
-        let width = art.width();
-        let height = art.height();
-        let palette = art.palette().to_vec();
-        let dark_mode = ui.visuals().dark_mode;
-        drop(art);
-        self.ensure_texture(ui.ctx(), dark_mode);
-
-        let input_enabled = !self.resize_open && !self.clear_open;
-        let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
-        let export = egui::Panel::top(egui::Id::new(("pixel-art-toolbar", self.block.id())))
-            .show_separator_line(true)
-            .show_inside(ui, |ui| self.top_bar(ui, width, height, compact))
-            .inner;
-        let mut action = None;
-        if export {
-            action = self.export(editors.client());
-        }
-        self.show_export_error(ui);
-        if compact {
-            let mut tools_open = self.tools_open;
-            egui::Window::new("Tools")
-                .id(egui::Id::new(("pixel-art-tools-window", self.block.id())))
-                .default_width(172.0)
-                .open(&mut tools_open)
-                .show(ui.ctx(), |ui| self.tools_panel(ui));
-            self.tools_open = tools_open;
-
-            let mut color_open = self.color_open;
-            egui::Window::new("Color")
-                .id(egui::Id::new(("pixel-art-color-window", self.block.id())))
-                .default_width(210.0)
-                .open(&mut color_open)
-                .show(ui.ctx(), |ui| self.color_panel(ui, &palette));
-            self.color_open = color_open;
-        } else {
-            egui::Panel::left(egui::Id::new(("pixel-art-tools-panel", self.block.id())))
-                .default_size(172.0)
-                .resizable(false)
-                .show_inside(ui, |ui| self.tools_panel(ui));
-            egui::Panel::right(egui::Id::new(("pixel-art-color-panel", self.block.id())))
-                .default_size(210.0)
-                .min_size(190.0)
-                .max_size(280.0)
-                .resizable(true)
-                .show_inside(ui, |ui| self.color_panel(ui, &palette));
-        }
-        self.canvas(ui, width, height, input_enabled);
-        self.resize_dialog(ui.ctx(), width, height);
-        self.clear_dialog(ui.ctx());
-        action
     }
 }
 

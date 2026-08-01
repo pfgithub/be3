@@ -20,6 +20,8 @@ use uuid::Uuid;
 
 use self::unsupported::UnsupportedEditor;
 
+const COMPACT_DIRECT_EDITOR_WIDTH: f32 = 760.0;
+
 pub enum EditorAction {
     OpenBlock {
         id: Uuid,
@@ -275,10 +277,107 @@ pub trait BlockEditor {
     }
     fn ui(
         &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        frame: &eframe::Frame,
-    ) -> Option<EditorAction>;
+        _ui: &mut egui::Ui,
+        _editors: &mut EditorAccess<'_>,
+        _frame: &eframe::Frame,
+    ) -> Option<EditorAction> {
+        None
+    }
+}
+
+pub fn direct_editor_tab_ui(
+    editor: &mut dyn BlockEditor,
+    ui: &mut egui::Ui,
+    client: &BlockClient,
+) -> Option<EditorAction> {
+    let id = editor.id();
+    let compact = ui.available_width() < COMPACT_DIRECT_EDITOR_WIDTH;
+    let mut action = None;
+
+    egui::Panel::top(egui::Id::new(("direct-editor-tab-toolbar", id)))
+        .show_separator_line(true)
+        .show_inside(ui, |ui| {
+            let next_action = editor.direct_editor_top_bar(ui, client);
+            if action.is_none() {
+                action = next_action;
+            }
+        });
+
+    if compact {
+        let available = ui.available_rect_before_wrap();
+        if editor.direct_editor_has_left_sidebar() {
+            egui::Window::new("Left sidebar")
+                .id(egui::Id::new(("direct-editor-tab-left-window", id)))
+                .default_width(240.0)
+                .default_pos(available.left_top() + egui::vec2(16.0, 16.0))
+                .show(ui.ctx(), |ui| {
+                    let next_action = editor.direct_editor_left_sidebar(ui, client);
+                    if action.is_none() {
+                        action = next_action;
+                    }
+                });
+        }
+        if editor.direct_editor_has_right_sidebar() {
+            egui::Window::new("Right sidebar")
+                .id(egui::Id::new(("direct-editor-tab-right-window", id)))
+                .pivot(egui::Align2::RIGHT_TOP)
+                .default_width(240.0)
+                .default_pos(available.right_top() + egui::vec2(-16.0, 16.0))
+                .show(ui.ctx(), |ui| {
+                    let next_action = editor.direct_editor_right_sidebar(ui, client);
+                    if action.is_none() {
+                        action = next_action;
+                    }
+                });
+        }
+    } else {
+        if editor.direct_editor_has_left_sidebar() {
+            egui::Panel::left(egui::Id::new(("direct-editor-tab-left", id)))
+                .default_size(240.0)
+                .min_size(200.0)
+                .max_size(340.0)
+                .resizable(true)
+                .show_inside(ui, |ui| {
+                    let next_action = editor.direct_editor_left_sidebar(ui, client);
+                    if action.is_none() {
+                        action = next_action;
+                    }
+                });
+        }
+        if editor.direct_editor_has_right_sidebar() {
+            egui::Panel::right(egui::Id::new(("direct-editor-tab-right", id)))
+                .default_size(240.0)
+                .min_size(200.0)
+                .max_size(340.0)
+                .resizable(true)
+                .show_inside(ui, |ui| {
+                    let next_action = editor.direct_editor_right_sidebar(ui, client);
+                    if action.is_none() {
+                        action = next_action;
+                    }
+                });
+        }
+    }
+
+    let viewport_size = ui.available_size().max(egui::Vec2::splat(1.0));
+    let intrinsic_size = editor
+        .direct_editor_intrinsic_size(client)
+        .unwrap_or_default();
+    let content_size = egui::vec2(
+        viewport_size.x.max(intrinsic_size.x),
+        viewport_size.y.max(intrinsic_size.y),
+    );
+    egui::ScrollArea::both()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_min_size(content_size);
+            let next_action = editor.direct_editor_ui(ui, client, 1.0);
+            if action.is_none() {
+                action = next_action;
+            }
+        });
+
+    action
 }
 
 type CreateEditor = fn(&BlockClient) -> Box<dyn BlockEditor>;
