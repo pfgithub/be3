@@ -1722,7 +1722,8 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .unwrap_or_else(|| screen_rect(self, entity_bounds(entity), canvas_rect));
                 direct_editor_rects.push(screen);
                 let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
-                    .order(egui::Order::Foreground)
+                    // .order(egui::Order::Foreground)
+                    .constrain(false)
                     .fixed_pos(screen.min)
                     .show(ui.ctx(), |ui| {
                         ui.set_clip_rect(screen.intersect(ui.clip_rect()));
