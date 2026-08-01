@@ -114,7 +114,7 @@ fn show_snapshot(ui: &mut egui::Ui, snapshot: &ClientDebugSnapshot) {
                     monospace(ui, block.id);
                     ui.weak("·");
                     monospace(ui, block.block_type);
-                    ui.weak("Â·");
+                    ui.weak("·");
                     monospace(ui, block.author);
                 });
             }

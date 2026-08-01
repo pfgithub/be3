@@ -25,6 +25,10 @@ use editors::{
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
+use egui_material_icons::icons::{
+    ICON_ADD, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK, ICON_CHEVRON_RIGHT, ICON_CIRCLE,
+    ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_REDO, ICON_REFRESH, ICON_UNDO,
+};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -67,7 +71,8 @@ fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> 
     eframe::run_native(
         APP_ID,
         options,
-        Box::new(move |_creation_context| {
+        Box::new(move |creation_context| {
+            egui_material_icons::initialize(&creation_context.egui_ctx);
             BlockApp::new(storage_root)
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
                 .map_err(Into::into)
@@ -864,16 +869,14 @@ impl BlockApp {
                         is_closed_active_ancestor,
                         if can_expand {
                             if was_expanded {
-                                "▾"
+                                ICON_KEYBOARD_ARROW_DOWN
                             } else {
-                                "▸"
+                                ICON_KEYBOARD_ARROW_RIGHT
                             }
+                        } else if is_reference {
+                            ICON_ARROW_FORWARD
                         } else {
-                            if is_reference {
-                                "→"
-                            } else {
-                                "•"
-                            }
+                            ICON_CIRCLE
                         },
                     )
                     .small(),
@@ -950,7 +953,7 @@ impl BlockApp {
             });
             row_response = Some(response);
             if can_add_child {
-                ui.menu_button("+", |ui| {
+                ui.menu_button(ICON_ADD, |ui| {
                     picker_action = BlockPicker::show_menu(ui, &self.registry);
                 })
                 .response
@@ -1050,7 +1053,7 @@ impl BlockApp {
         ui.horizontal(|ui| {
             ui.heading("Blocks");
             ui.add_space(ui.available_width() - 28.0);
-            ui.menu_button("+", |ui| {
+            ui.menu_button(ICON_ADD, |ui| {
                 picker_action = BlockPicker::show_menu(ui, &self.registry);
             })
             .response
@@ -1098,11 +1101,17 @@ impl BlockApp {
         let at_top = highlight.rect.bottom() < viewport.top();
         let at_bottom = highlight.rect.top() > viewport.bottom();
         let (arrow, y) = if at_top {
-            ("↑", viewport.top())
+            (ICON_ARROW_UPWARD, viewport.top())
         } else if at_bottom {
-            ("↓", viewport.bottom() - ui.spacing().interact_size.y)
+            (
+                egui_material_icons::icons::ICON_ARROW_DOWNWARD,
+                viewport.bottom() - ui.spacing().interact_size.y,
+            )
         } else if highlight.collapsed {
-            ("↑", viewport.bottom() - ui.spacing().interact_size.y)
+            (
+                ICON_ARROW_UPWARD,
+                viewport.bottom() - ui.spacing().interact_size.y,
+            )
         } else {
             return;
         };
@@ -1113,7 +1122,7 @@ impl BlockApp {
         if ui
             .put(
                 rect,
-                egui::Button::new(format!("{arrow} ({})", active.name)),
+                egui::Button::new(format!("{} ({})", arrow.codepoint, active.name)),
             )
             .clicked()
         {
@@ -1135,9 +1144,9 @@ impl BlockApp {
                 egui::Button::selectable(
                     is_closed_active_ancestor,
                     if self.orphaned_expanded {
-                        "\u{25bc}"
+                        ICON_KEYBOARD_ARROW_DOWN
                     } else {
-                        "\u{25b6}"
+                        ICON_KEYBOARD_ARROW_RIGHT
                     },
                 )
                 .small(),
@@ -1191,7 +1200,10 @@ impl BlockApp {
         let debug = self.client.network_debug_snapshot();
         ui.horizontal(|ui| {
             if debug.changes_saved {
-                ui.small("\u{2713} All changes saved");
+                ui.horizontal(|ui| {
+                    ui.small(ICON_CHECK);
+                    ui.small("All changes saved");
+                });
             } else {
                 ui.spinner();
                 ui.small("Submitting changes\u{2026}");
@@ -1256,7 +1268,8 @@ impl BlockApp {
                 .input_mut(|input| input.consume_shortcut(&undo_shortcut));
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(history.can_undo(), egui::Button::new("Undo"))
+                    .add_enabled(history.can_undo(), egui::Button::new(ICON_UNDO))
+                    .on_hover_text("Undo")
                     .on_hover_text("Undo (Ctrl/Cmd+Z)")
                     .clicked()
                     || undo_requested
@@ -1264,7 +1277,8 @@ impl BlockApp {
                     history.undo();
                 }
                 if ui
-                    .add_enabled(history.can_redo(), egui::Button::new("Redo"))
+                    .add_enabled(history.can_redo(), egui::Button::new(ICON_REDO))
+                    .on_hover_text("Redo")
                     .on_hover_text("Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)")
                     .clicked()
                     || redo_requested
@@ -1316,7 +1330,8 @@ impl BlockApp {
                         ui.spinner();
                     }
                     if ui
-                        .add_enabled(!running, egui::Button::new("Regenerate"))
+                        .add_enabled(!running, egui::Button::new(ICON_REFRESH))
+                        .on_hover_text("Regenerate")
                         .clicked()
                     {
                         self.dynamic_artifact_errors.remove(&id);
@@ -1513,7 +1528,7 @@ impl BlockApp {
             for parent in parents {
                 self.record_reference_types(parent);
                 let source = sidebar_source(parent.parent);
-                ui.small("›");
+                ui.small(ICON_CHEVRON_RIGHT);
                 let response = ui
                     .small_button(&parent.name)
                     .on_hover_text(parent.id.to_string());
@@ -1531,7 +1546,7 @@ impl BlockApp {
                     }
                 });
             }
-            ui.small("›");
+            ui.small(ICON_CHEVRON_RIGHT);
             ui.small(current_name);
             ui.separator();
             ui.menu_button(

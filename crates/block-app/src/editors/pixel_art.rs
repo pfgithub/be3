@@ -12,6 +12,14 @@ use block_client::{
     BlockHandle, BlockRelationships,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
+use egui_material_icons::icons::{
+    ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD,
+    ICON_CIRCLE, ICON_COLORIZE, ICON_CROP_SQUARE, ICON_DELETE, ICON_DIAGONAL_LINE, ICON_DOWNLOAD,
+    ICON_DRAW, ICON_FIND_REPLACE, ICON_FIT_SCREEN, ICON_FORMAT_COLOR_FILL, ICON_INK_ERASER,
+    ICON_NORTH_EAST, ICON_NORTH_WEST, ICON_PALETTE, ICON_RESIZE, ICON_SOUTH_EAST, ICON_SOUTH_WEST,
+    ICON_SQUARE, ICON_TUNE, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+};
+use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
 use super::{image::ImageEditor, BlockEditor, EditorAccess, EditorAction, EditorRegistration};
@@ -66,6 +74,19 @@ impl PixelTool {
             Self::Line => "Line",
             Self::Rectangle => "Rectangle",
             Self::Ellipse => "Ellipse",
+        }
+    }
+
+    const fn icon(self) -> MaterialIcon {
+        match self {
+            Self::Pencil => ICON_DRAW,
+            Self::Eraser => ICON_INK_ERASER,
+            Self::Fill => ICON_FORMAT_COLOR_FILL,
+            Self::Eyedropper => ICON_COLORIZE,
+            Self::ReplaceColor => ICON_FIND_REPLACE,
+            Self::Line => ICON_DIAGONAL_LINE,
+            Self::Rectangle => ICON_CROP_SQUARE,
+            Self::Ellipse => ICON_CIRCLE,
         }
     }
 }
@@ -177,16 +198,20 @@ impl PixelArtEditor {
             ui.weak(format!("{width} × {height} px"));
 
             if compact {
-                if ui.button("Tools").clicked() {
+                if ui.button(ICON_TUNE).on_hover_text("Tools").clicked() {
                     self.tools_open = !self.tools_open;
                 }
-                if ui.button("Color").clicked() {
+                if ui.button(ICON_PALETTE).on_hover_text("Color").clicked() {
                     self.color_open = !self.color_open;
                 }
             }
 
             ui.separator();
-            if ui.small_button("−").on_hover_text("Zoom out (-)").clicked() {
+            if ui
+                .small_button(ICON_ZOOM_OUT)
+                .on_hover_text("Zoom out (-)")
+                .clicked()
+            {
                 self.change_zoom(1.0 / ZOOM_STEP);
             }
             if ui
@@ -196,11 +221,15 @@ impl PixelArtEditor {
             {
                 self.reset_view();
             }
-            if ui.small_button("+").on_hover_text("Zoom in (+)").clicked() {
+            if ui
+                .small_button(ICON_ZOOM_IN)
+                .on_hover_text("Zoom in (+)")
+                .clicked()
+            {
                 self.change_zoom(ZOOM_STEP);
             }
             if ui
-                .small_button("Fit")
+                .small_button(ICON_FIT_SCREEN)
                 .on_hover_text("Fit canvas to viewport (0)")
                 .clicked()
             {
@@ -209,13 +238,16 @@ impl PixelArtEditor {
             ui.checkbox(&mut self.show_grid, "Grid");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                export = ui.button("Export PNG").clicked();
-                if ui.button("Clear").clicked() {
+                export = ui
+                    .button(ICON_DOWNLOAD)
+                    .on_hover_text("Export PNG")
+                    .clicked();
+                if ui.button(ICON_DELETE).on_hover_text("Clear").clicked() {
                     self.active_drawing = None;
                     self.committed_preview = None;
                     self.clear_open = true;
                 }
-                if ui.button("Resize…").clicked() {
+                if ui.button(ICON_RESIZE).on_hover_text("Resize").clicked() {
                     self.active_drawing = None;
                     self.committed_preview = None;
                     self.resize_width = width;
@@ -265,14 +297,16 @@ impl PixelArtEditor {
         });
         ui.horizontal(|ui| {
             ui.label("Brush");
-            ui.selectable_value(&mut self.brush_shape, BrushShape::Square, "Square");
-            ui.selectable_value(&mut self.brush_shape, BrushShape::Circle, "Circle");
+            ui.selectable_value(&mut self.brush_shape, BrushShape::Square, ICON_SQUARE)
+                .on_hover_text("Square");
+            ui.selectable_value(&mut self.brush_shape, BrushShape::Circle, ICON_CIRCLE)
+                .on_hover_text("Circle");
         });
         let shapes_selected = matches!(self.tool, PixelTool::Rectangle | PixelTool::Ellipse);
         if ui
             .add_enabled(
                 shapes_selected,
-                egui::Button::new("Filled shapes").selected(self.shapes_filled),
+                egui::Button::new(ICON_FORMAT_COLOR_FILL).selected(self.shapes_filled),
             )
             .on_hover_text("Fill rectangles and ellipses (X)")
             .clicked()
@@ -352,7 +386,7 @@ impl PixelArtEditor {
                 } else {
                     ui.weak("hover canvas");
                 }
-                ui.label("→");
+                ui.label(ICON_ARROW_FORWARD);
                 color_swatch(ui, self.color, false);
             });
         }
@@ -373,7 +407,7 @@ impl PixelArtEditor {
             let can_add =
                 palette.len() < MAX_PIXEL_ART_PALETTE_COLORS && !palette.contains(&self.color);
             if ui
-                .add_enabled(can_add, egui::Button::new("Add color"))
+                .add_enabled(can_add, egui::Button::new(ICON_ADD))
                 .on_hover_text("Add the active color to this artwork's palette")
                 .clicked()
             {
@@ -383,7 +417,7 @@ impl PixelArtEditor {
             }
             let can_remove = palette.contains(&self.color);
             if ui
-                .add_enabled(can_remove, egui::Button::new("Remove"))
+                .add_enabled(can_remove, egui::Button::new(ICON_DELETE))
                 .on_hover_text("Remove the active color from this artwork's palette")
                 .clicked()
             {
@@ -415,7 +449,7 @@ impl PixelArtEditor {
         if ui
             .add_sized(
                 [76.0, 24.0],
-                egui::Button::new(tool.label()).selected(self.tool == tool),
+                egui::Button::new(tool.icon()).selected(self.tool == tool),
             )
             .on_hover_text(format!("{} ({shortcut})", tool.label()))
             .clicked()
@@ -725,10 +759,11 @@ impl PixelArtEditor {
             let label_position = viewport.left_bottom() + Vec2::new(6.0, -6.0);
             let label = if let Some(source) = self.replace_source_hover {
                 format!(
-                    "{}, {} · {} → {}",
+                    "{}, {} · {} {} {}",
                     pixel.0,
                     pixel.1,
                     format_hex_color(source),
+                    ICON_ARROW_FORWARD.codepoint,
                     format_hex_color(self.color)
                 )
             } else {
@@ -1628,19 +1663,19 @@ fn pixels_on_line(start: (u16, u16), end: (u16, u16)) -> Vec<(u16, u16)> {
 fn anchor_selector(ui: &mut egui::Ui, anchor: &mut PixelArtAnchor) {
     for row in [
         [
-            (PixelArtAnchor::TopLeft, "↖"),
-            (PixelArtAnchor::Top, "↑"),
-            (PixelArtAnchor::TopRight, "↗"),
+            (PixelArtAnchor::TopLeft, ICON_NORTH_WEST),
+            (PixelArtAnchor::Top, ICON_ARROW_UPWARD),
+            (PixelArtAnchor::TopRight, ICON_NORTH_EAST),
         ],
         [
-            (PixelArtAnchor::Left, "←"),
-            (PixelArtAnchor::Center, "•"),
-            (PixelArtAnchor::Right, "→"),
+            (PixelArtAnchor::Left, ICON_ARROW_BACK),
+            (PixelArtAnchor::Center, ICON_CIRCLE),
+            (PixelArtAnchor::Right, ICON_ARROW_FORWARD),
         ],
         [
-            (PixelArtAnchor::BottomLeft, "↙"),
-            (PixelArtAnchor::Bottom, "↓"),
-            (PixelArtAnchor::BottomRight, "↘"),
+            (PixelArtAnchor::BottomLeft, ICON_SOUTH_WEST),
+            (PixelArtAnchor::Bottom, ICON_ARROW_DOWNWARD),
+            (PixelArtAnchor::BottomRight, ICON_SOUTH_EAST),
         ],
     ] {
         ui.horizontal(|ui| {

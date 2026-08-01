@@ -6,6 +6,7 @@ use block_client::{
     BlockHandle, BlockRelationships,
 };
 use eframe::egui;
+use egui_material_icons::icons::{ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_REFRESH};
 use uuid::Uuid;
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -425,14 +426,17 @@ impl BlockEditor for WebBrowserTabEditor {
         let mut focus_parent = false;
         ui.horizontal(|ui| {
             back = ui
-                .add_enabled(back_index.is_some(), egui::Button::new("\u{2190}"))
+                .add_enabled(back_index.is_some(), egui::Button::new(ICON_ARROW_BACK))
                 .on_hover_text("Back")
                 .clicked();
             forward = ui
-                .add_enabled(forward_index.is_some(), egui::Button::new("\u{2192}"))
+                .add_enabled(
+                    forward_index.is_some(),
+                    egui::Button::new(ICON_ARROW_FORWARD),
+                )
                 .on_hover_text("Forward")
                 .clicked();
-            reload = ui.button("\u{21bb}").on_hover_text("Reload").clicked();
+            reload = ui.button(ICON_REFRESH).on_hover_text("Reload").clicked();
 
             let go_width = 32.0;
             let address_width =

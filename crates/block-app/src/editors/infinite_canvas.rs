@@ -12,6 +12,10 @@ use block_client::{
     BlockClient, BlockHandle, BlockRelationships, CachedBlock, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
+use egui_material_icons::icons::{
+    ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW, ICON_FORMAT_COLOR_RESET,
+    ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_TUNE,
+};
 use uuid::Uuid;
 
 use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
@@ -564,20 +568,24 @@ impl InfiniteCanvasEditor {
     ) -> Option<Uuid> {
         let mut create_block = None;
         ui.horizontal_wrapped(|ui| {
-            for (tool, label) in [
-                (Tool::Select, "Select"),
-                (Tool::Line, "Line"),
-                (Tool::Rectangle, "Rectangle"),
-                (Tool::Text, "Text"),
-                (Tool::Pen, "Pen"),
+            for (tool, icon, label) in [
+                (Tool::Select, ICON_SELECT, "Select"),
+                (Tool::Line, ICON_DIAGONAL_LINE, "Line"),
+                (Tool::Rectangle, ICON_RECTANGLE, "Rectangle"),
+                (Tool::Text, ICON_TEXT_FIELDS, "Text"),
+                (Tool::Pen, ICON_DRAW, "Pen"),
             ] {
-                if ui.selectable_label(self.tool == tool, label).clicked() {
+                if ui
+                    .selectable_label(self.tool == tool, icon)
+                    .on_hover_text(label)
+                    .clicked()
+                {
                     self.tool = tool;
                     self.armed_block = None;
                     self.armed_block_needs_parent = false;
                 }
             }
-            ui.menu_button("Block", |ui| {
+            ui.menu_button(ICON_DATA_OBJECT, |ui| {
                 if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
                     self.tool = Tool::Block;
                     self.armed_block = None;
@@ -601,9 +609,11 @@ impl InfiniteCanvasEditor {
                         }
                     }
                 }
-            });
+            })
+            .response
+            .on_hover_text("Block");
 
-            if compact && ui.button("Inspector").clicked() {
+            if compact && ui.button(ICON_TUNE).on_hover_text("Inspector").clicked() {
                 self.inspector_open = !self.inspector_open;
             }
 
@@ -1548,7 +1558,7 @@ fn fill_color_menu(
     ui.horizontal(|ui| {
         ui.label("Fill");
         if ui
-            .selectable_label(value == CommonValue::Uniform(None), "∅")
+            .selectable_label(value == CommonValue::Uniform(None), ICON_FORMAT_COLOR_RESET)
             .on_hover_text("No fill")
             .clicked()
         {
@@ -1583,7 +1593,7 @@ fn color_button(
     selected: bool,
 ) -> egui::Response {
     let color = resolve_color(color, ui.visuals().text_color());
-    ui.selectable_label(selected, egui::RichText::new("●").color(color))
+    ui.selectable_label(selected, ICON_CIRCLE.rich_text().color(color))
         .on_hover_text(name)
 }
 

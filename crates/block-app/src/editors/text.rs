@@ -13,6 +13,11 @@ use eframe::egui::{
     self, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton, Pos2, Rect, Sense,
     Vec2,
 };
+use egui_material_icons::icons::{
+    ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC,
+    ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE,
+    ICON_LINK, ICON_TITLE,
+};
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
     EditorCommand, LRDirection, Language, MarkdownCommand, MoveMode, SynHlColorScope,
@@ -170,23 +175,31 @@ impl TextEditor {
             self.profiler.toggle(ui);
             if self.highlight_language == HighlightLanguage::Markdown {
                 ui.separator();
-                if ui.button("B").on_hover_text("Bold").clicked() {
+                if ui.button(ICON_FORMAT_BOLD).on_hover_text("Bold").clicked() {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::Bold));
                 }
-                if ui.button("I").on_hover_text("Italic").clicked() {
+                if ui
+                    .button(ICON_FORMAT_ITALIC)
+                    .on_hover_text("Italic")
+                    .clicked()
+                {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::Italic));
                 }
-                if ui.button("S").on_hover_text("Strikethrough").clicked() {
+                if ui
+                    .button(ICON_FORMAT_STRIKETHROUGH)
+                    .on_hover_text("Strikethrough")
+                    .clicked()
+                {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::Strikethrough));
                 }
-                if ui.button("Code").on_hover_text("Inline code").clicked() {
+                if ui.button(ICON_CODE).on_hover_text("Inline code").clicked() {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::InlineCode));
                 }
-                ui.menu_button("Heading", |ui| {
+                ui.menu_button(ICON_TITLE, |ui| {
                     for level in 1..=6 {
                         if ui.button(format!("Heading {level}")).clicked() {
                             self.core.execute_command(EditorCommand::Markdown(
@@ -195,28 +208,38 @@ impl TextEditor {
                             ui.close();
                         }
                     }
-                });
-                if ui.button("• List").on_hover_text("Bulleted list").clicked() {
+                })
+                .response
+                .on_hover_text("Heading");
+                if ui
+                    .button(ICON_FORMAT_LIST_BULLETED)
+                    .on_hover_text("Bulleted list")
+                    .clicked()
+                {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::BulletedList));
                 }
                 if ui
-                    .button("1. List")
+                    .button(ICON_FORMAT_LIST_NUMBERED)
                     .on_hover_text("Numbered list")
                     .clicked()
                 {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::NumberedList));
                 }
-                if ui.button("☐ List").on_hover_text("Checklist").clicked() {
+                if ui
+                    .button(ICON_CHECKLIST)
+                    .on_hover_text("Checklist")
+                    .clicked()
+                {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::Checklist));
                 }
-                if ui.button("Link").clicked() {
+                if ui.button(ICON_LINK).on_hover_text("Link").clicked() {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::Link));
                 }
-                if ui.button("Image").clicked() {
+                if ui.button(ICON_IMAGE).on_hover_text("Image").clicked() {
                     self.core
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::Image));
                 }
@@ -855,8 +878,8 @@ impl TextEditor {
                 painter.text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "✓",
-                    egui::FontId::proportional(14.0),
+                    ICON_CHECK.codepoint,
+                    egui::FontId::new(14.0, ICON_CHECK.font_family()),
                     ui.visuals().selection.stroke.color,
                 );
             }

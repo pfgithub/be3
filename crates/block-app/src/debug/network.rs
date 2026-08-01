@@ -1,5 +1,8 @@
 use block_client::{NetworkDirection, NetworkTrafficEntry};
 use eframe::egui;
+use egui_material_icons::icons::{
+    ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_PAUSE, ICON_PLAY_ARROW, ICON_SKIP_NEXT,
+};
 
 use crate::BlockApp;
 
@@ -16,7 +19,8 @@ impl BlockApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(!debug.sending_paused, egui::Button::new("Pause"))
+                        .add_enabled(!debug.sending_paused, egui::Button::new(ICON_PAUSE))
+                        .on_hover_text("Pause sending")
                         .clicked()
                     {
                         self.client.pause_sending();
@@ -24,7 +28,7 @@ impl BlockApp {
                     if ui
                         .add_enabled(
                             debug.sending_paused && debug.queued_messages > 0,
-                            egui::Button::new("Step"),
+                            egui::Button::new(ICON_SKIP_NEXT),
                         )
                         .on_hover_text("Send the next queued message")
                         .clicked()
@@ -32,7 +36,8 @@ impl BlockApp {
                         self.client.step_sending();
                     }
                     if ui
-                        .add_enabled(debug.sending_paused, egui::Button::new("Resume"))
+                        .add_enabled(debug.sending_paused, egui::Button::new(ICON_PLAY_ARROW))
+                        .on_hover_text("Resume sending")
                         .clicked()
                     {
                         self.client.resume_sending();
@@ -62,11 +67,11 @@ impl BlockApp {
 
 fn show_traffic_entry(ui: &mut egui::Ui, entry: &NetworkTrafficEntry) {
     let (arrow, color) = match entry.direction {
-        NetworkDirection::Sent => ("\u{2192}", ui.visuals().hyperlink_color),
-        NetworkDirection::Received => ("\u{2190}", ui.visuals().warn_fg_color),
+        NetworkDirection::Sent => (ICON_ARROW_FORWARD, ui.visuals().hyperlink_color),
+        NetworkDirection::Received => (ICON_ARROW_BACK, ui.visuals().warn_fg_color),
     };
     ui.horizontal_top(|ui| {
-        ui.colored_label(color, arrow);
+        ui.label(arrow.rich_text().color(color));
         ui.small(format!("{}", entry.timestamp_ms));
         ui.add(
             egui::Label::new(egui::RichText::new(&entry.payload).monospace())
