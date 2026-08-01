@@ -58,7 +58,7 @@ Skip that command when the keystore already exists. Build and 16 KB-align the
 APK from the repository root:
 
 ```powershell
-.\scripts\build-block-android.ps1
+.\scripts\build-block-android.ps1 -AndroidSdk '/absolute/path/to/target/android-sdk'
 ```
 
 The build script links the native library with 16 KB ELF page alignment, uses
