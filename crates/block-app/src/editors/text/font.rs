@@ -28,6 +28,7 @@ unsafe extern "C" {
 
 const BODY_PIXEL_SIZE: u32 = 18;
 const CODE_PIXEL_SIZE: u32 = 17;
+const LARGE_EMBED_HEIGHT: f32 = 180.0;
 
 pub(super) struct TextRenderer {
     library: ft::FT_Library,
@@ -47,11 +48,15 @@ pub(super) struct ResolvedEmbed {
     pub range: Range<usize>,
     pub id: Uuid,
     pub label: String,
+    pub large: bool,
     pub available: bool,
 }
 
 pub(super) struct EmbedLayout {
     pub range: Range<usize>,
+    pub id: Uuid,
+    pub label: String,
+    pub large: bool,
     pub available: bool,
     pub rect: Rect,
 }
@@ -208,7 +213,7 @@ impl TextRenderer {
         bytes: &[u8],
         highlight: &SyntaxHighlight,
         embeds: &[ResolvedEmbed],
-        _full_width: f32,
+        full_width: f32,
     ) -> (DocumentLayout, LayoutTimings) {
         let mut timings = LayoutTimings::default();
         let mut lines = Vec::new();
@@ -228,6 +233,43 @@ impl TextRenderer {
                 .iter()
                 .filter(|embed| embed.range.start >= start && embed.range.end <= end)
                 .collect::<Vec<_>>();
+            if let Some(embed) = line_embeds.iter().find(|embed| embed.large) {
+                let width = full_width.max(1.0);
+                let line_len = end.saturating_sub(start).max(1);
+                for byte in start..=end {
+                    positions[byte] = Some(BytePosition {
+                        line: line_index,
+                        x: (byte - start) as f32 / line_len as f32 * width,
+                    });
+                }
+                lines.push(LineLayout {
+                    start,
+                    end,
+                    y,
+                    width,
+                    height: LARGE_EMBED_HEIGHT,
+                    baseline: 0.0,
+                    glyphs: Vec::new(),
+                });
+                embed_layouts.push(EmbedLayout {
+                    range: embed.range.clone(),
+                    id: embed.id,
+                    label: embed.label.clone(),
+                    large: true,
+                    available: embed.available,
+                    rect: Rect::from_min_size(
+                        Pos2::new(0.0, y),
+                        Vec2::new(width, LARGE_EMBED_HEIGHT),
+                    ),
+                });
+                y += LARGE_EMBED_HEIGHT;
+                let Some(newline) = newline else {
+                    break;
+                };
+                start = newline + 1;
+                line_index += 1;
+                continue;
+            }
             let display_start = Instant::now();
             let display = display_line(&bytes[start..end], start, newline.is_some(), &line_embeds);
             timings.display_lines += display_start.elapsed();
@@ -270,6 +312,9 @@ impl TextRenderer {
                 };
                 embed_layouts.push(EmbedLayout {
                     range: embed.range.clone(),
+                    id: embed.id,
+                    label: embed.label.clone(),
+                    large: false,
                     available: embed.available,
                     rect: Rect::from_min_max(
                         Pos2::new(left.x, y + 1.0),

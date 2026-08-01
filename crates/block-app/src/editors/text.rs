@@ -1,6 +1,8 @@
 mod font;
 mod profiling;
-use std::{collections::HashMap, sync::Arc, time::Instant};
+#[cfg(test)]
+mod tests;
+use std::{collections::HashMap, ops::Range, sync::Arc, time::Instant};
 
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
@@ -22,11 +24,22 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
-use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload};
+use super::{
+    BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration,
+    SidebarDragPayload,
+};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParsedEmbed {
+    range: Range<usize>,
+    id: Uuid,
+    large: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HighlightLanguage {
     Markdown,
@@ -178,7 +191,10 @@ impl TextEditor {
     }
 
     fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
-        let parsed = parse_block_urls(bytes);
+        let parsed = parse_embeds(
+            bytes,
+            self.highlight_language == HighlightLanguage::Markdown,
+        );
         let references = self.dependencies.read();
         let referenced = references
             .iter()
@@ -194,6 +210,11 @@ impl TextEditor {
                         .cached_block(embed.id)
                         .map(|block| (block.block_type, block.name))
                 });
+                if embed.large {
+                    if let Some((block_type, _)) = &metadata {
+                        editors.ensure(embed.id, *block_type);
+                    }
+                }
                 let label = metadata
                     .as_ref()
                     .map(|(_, name)| name)
@@ -204,6 +225,7 @@ impl TextEditor {
                     range: embed.range,
                     id: embed.id,
                     label,
+                    large: embed.large,
                     available: metadata.is_some(),
                 }
             })
@@ -560,9 +582,59 @@ impl TextEditor {
         painter: &egui::Painter,
         origin: Pos2,
         layout: &DocumentLayout,
+        editors: &mut EditorAccess<'_>,
     ) {
         for embed in &layout.embeds {
             let rect = embed.rect.translate(origin.to_vec2());
+            if embed.large {
+                painter.rect_filled(rect, 6.0, Color32::from_rgb(35, 46, 56));
+                let rendered = editors.render(
+                    embed.id,
+                    BlockRenderContext {
+                        painter,
+                        corners: [
+                            rect.left_top(),
+                            rect.right_top(),
+                            rect.right_bottom(),
+                            rect.left_bottom(),
+                        ],
+                        opacity: 1.0,
+                    },
+                );
+                if !rendered {
+                    let title = painter.layout_no_wrap(
+                        embed.label.clone(),
+                        egui::FontId::proportional(18.0),
+                        ui.visuals().text_color(),
+                    );
+                    let status = painter.layout_no_wrap(
+                        if embed.available {
+                            "Preview unavailable".to_owned()
+                        } else {
+                            "Block unavailable".to_owned()
+                        },
+                        egui::FontId::proportional(13.0),
+                        ui.visuals().weak_text_color(),
+                    );
+                    let gap = 6.0;
+                    let total_height = title.size().y + gap + status.size().y;
+                    let top = rect.center().y - total_height * 0.5;
+                    painter.galley(
+                        Pos2::new(rect.center().x - title.size().x * 0.5, top),
+                        title,
+                        ui.visuals().text_color(),
+                    );
+                    painter.galley(
+                        Pos2::new(
+                            rect.center().x - status.size().x * 0.5,
+                            top + total_height - status.size().y,
+                        ),
+                        status,
+                        ui.visuals().weak_text_color(),
+                    );
+                }
+                continue;
+            }
             let selected = self.core.cursor_positions().iter().any(|cursor| {
                 let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
                     return false;
@@ -717,7 +789,7 @@ impl BlockEditor for TextEditor {
                 let pointer_start = Instant::now();
                 reveal_cursor |= self.pointer_input(ui, &response, origin, &layout);
                 profile.pointer = pointer_start.elapsed();
-                self.paint_embeds(ui, &painter, origin, &layout);
+                self.paint_embeds(ui, &painter, origin, &layout, editors);
                 let pointer = response
                     .interact_pointer_pos()
                     .or_else(|| response.ctx.pointer_hover_pos());
@@ -788,6 +860,48 @@ impl BlockEditor for TextEditor {
                 })
             })
     }
+}
+
+fn parse_embeds(bytes: &[u8], markdown: bool) -> Vec<ParsedEmbed> {
+    parse_block_urls(bytes)
+        .into_iter()
+        .map(|url| {
+            let image_range = markdown
+                .then(|| markdown_image_range(bytes, &url.range))
+                .flatten();
+            ParsedEmbed {
+                range: image_range.clone().unwrap_or(url.range),
+                id: url.id,
+                large: image_range.is_some(),
+            }
+        })
+        .collect()
+}
+
+fn markdown_image_range(bytes: &[u8], url: &Range<usize>) -> Option<Range<usize>> {
+    if url.start < 3
+        || bytes.get(url.start - 2..url.start)? != b"]("
+        || bytes.get(url.end) != Some(&b')')
+    {
+        return None;
+    }
+    let line_start = bytes[..url.start - 2]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |newline| newline + 1);
+    let image_start = bytes[line_start..url.start - 2]
+        .windows(2)
+        .rposition(|window| window == b"![")?
+        + line_start;
+    let image_end = url.end + 1;
+    let line_end = bytes[image_end..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(bytes.len(), |newline| image_end + newline);
+    let whitespace = |byte: &u8| matches!(*byte, b' ' | b'\t' | b'\r');
+    (bytes[line_start..image_start].iter().all(whitespace)
+        && bytes[image_end..line_end].iter().all(whitespace))
+    .then_some(image_start..image_end)
 }
 
 fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
