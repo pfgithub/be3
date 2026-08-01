@@ -1,7 +1,7 @@
 mod font;
 mod profiling;
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use block::{Block, BlockParent};
 use block_client::{blocks::text::TextDocument, BlockClient, BlockHandle, BlockRelationships};
@@ -75,6 +75,13 @@ struct TextEditor {
     click_count: u8,
     last_click: Option<(f64, Pos2)>,
     profiler: TextProfiler,
+    layout_cache: Option<CachedLayout>,
+}
+
+struct CachedLayout {
+    bytes: Vec<u8>,
+    language: HighlightLanguage,
+    layout: Arc<DocumentLayout>,
 }
 
 impl TextEditor {
@@ -91,6 +98,7 @@ impl TextEditor {
             click_count: 0,
             last_click: None,
             profiler: TextProfiler::default(),
+            layout_cache: None,
         }
     }
 
@@ -532,22 +540,35 @@ impl BlockEditor for TextEditor {
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
         let layout_start = Instant::now();
-        let layout = match &self.renderer {
-            Ok(renderer) => {
-                let (layout, detail) = renderer.layout_profiled(&bytes, &highlight);
-                profile.layout_detail = detail;
-                layout
-            }
-            Err(error) => {
-                ui.centered_and_justified(|ui| {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
+        let layout =
+            if let Some(cached) = self.layout_cache.as_ref().filter(|cached| {
+                cached.language == self.highlight_language && cached.bytes == bytes
+            }) {
+                Arc::clone(&cached.layout)
+            } else {
+                let layout = match &self.renderer {
+                    Ok(renderer) => {
+                        let (layout, detail) = renderer.layout_profiled(&bytes, &highlight);
+                        profile.layout_detail = detail;
+                        Arc::new(layout)
+                    }
+                    Err(error) => {
+                        ui.centered_and_justified(|ui| {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        });
+                        profile.layout = layout_start.elapsed();
+                        profile.total = frame_start.elapsed();
+                        self.profiler.record(profile);
+                        return None;
+                    }
+                };
+                self.layout_cache = Some(CachedLayout {
+                    bytes,
+                    language: self.highlight_language,
+                    layout: Arc::clone(&layout),
                 });
-                profile.layout = layout_start.elapsed();
-                profile.total = frame_start.elapsed();
-                self.profiler.record(profile);
-                return None;
-            }
-        };
+                layout
+            };
         profile.layout = layout_start.elapsed();
         profile.line_count = layout.lines.len();
 

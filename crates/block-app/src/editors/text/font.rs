@@ -8,7 +8,9 @@ use std::{
 
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, TextureHandle, Vec2};
 use freetype::freetype as ft;
-use harfbuzz_rs::{shape, Direction, Face as HbFace, Font as HbFont, Tag, UnicodeBuffer};
+use harfbuzz_rs::{
+    shape, Direction, Face as HbFace, Font as HbFont, Owned, Shared, Tag, UnicodeBuffer,
+};
 use text_editor_core::{
     MarkdownTable, MarkdownTableAlignment, SynHlFontFamily, SynHlStyle, SynHlTextSize,
     SyntaxHighlight,
@@ -55,10 +57,24 @@ pub(super) struct BytePosition {
 
 struct FontFace {
     face: ft::FT_Face,
-    path: PathBuf,
+    hb_fonts: HashMap<u32, Owned<HbFont<'static>>>,
     family: SynHlFontFamily,
     bold: bool,
     italic: bool,
+}
+
+impl FontFace {
+    fn hb_font(&self, pixel_size: u32) -> &HbFont<'static> {
+        &self.hb_fonts[&pixel_size]
+    }
+}
+
+fn configured_hb_font(face: Shared<HbFace<'static>>, pixel_size: u32) -> Owned<HbFont<'static>> {
+    let mut font = HbFont::new(face);
+    let scale = pixel_size as i32 * 64;
+    font.set_scale(scale, scale);
+    font.set_ppem(pixel_size, pixel_size);
+    font
 }
 
 #[derive(Clone, Copy)]
@@ -140,9 +156,18 @@ impl TextRenderer {
                 unsafe { ft::FT_Done_Face(face) };
                 continue;
             }
+            let Ok(hb_face) = HbFace::from_file(&path, 0) else {
+                unsafe { ft::FT_Done_Face(face) };
+                continue;
+            };
+            let hb_face = hb_face.to_shared();
+            let hb_fonts = [17, 18, 19, 21, 24, 28, 32]
+                .into_iter()
+                .map(|pixel_size| (pixel_size, configured_hb_font(hb_face.clone(), pixel_size)))
+                .collect();
             fonts.push(FontFace {
                 face,
-                path: path.clone(),
+                hb_fonts,
                 family,
                 bold,
                 italic,
@@ -258,14 +283,8 @@ impl TextRenderer {
         timings.font_runs = font_runs_start.elapsed();
         for run in font_runs {
             let shape_start = Instant::now();
-            let Ok(face) = HbFace::from_file(&self.fonts[run.font_index].path, 0) else {
-                continue;
-            };
-            let mut font = HbFont::new(face);
             let pixel_size = style_pixel_size(run.style);
-            let scale = pixel_size as i32 * 64;
-            font.set_scale(scale, scale);
-            font.set_ppem(pixel_size, pixel_size);
+            let font = self.fonts[run.font_index].hb_font(pixel_size);
             let mut buffer = UnicodeBuffer::new().add_str(run.value);
             if let Some(script) = run.script {
                 let tag = script.as_iso15924_tag().to_be_bytes();
@@ -278,7 +297,7 @@ impl TextRenderer {
             }
             buffer = buffer.guess_segment_properties();
             let rtl = buffer.get_direction() == Direction::Rtl;
-            let output = shape(&font, buffer, &[]);
+            let output = shape(font, buffer, &[]);
             timings.shape += shape_start.elapsed();
             let finalize_start = Instant::now();
             let run_start_x = pen_x;
