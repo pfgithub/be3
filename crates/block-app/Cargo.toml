@@ -22,6 +22,9 @@ build_targets = ["aarch64-linux-android"]
 min_sdk_version = 23
 target_sdk_version = 35
 
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
 [package.metadata.android.signing.dev]
 path = "../../target/android-debug.keystore"
 keystore_password = "android"
