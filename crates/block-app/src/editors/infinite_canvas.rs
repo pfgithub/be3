@@ -275,15 +275,24 @@ impl InfiniteCanvasEditor {
         self.selection.insert(id);
     }
 
-    fn add_block_entity(&mut self, block_id: Uuid, center: CanvasPoint) {
-        self.add_block_entity_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
+    fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
+        self.add_direct_editor_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
     }
 
-    fn add_block_entity_sized(&mut self, block_id: Uuid, center: CanvasPoint, size: CanvasPoint) {
+    fn add_direct_editor_sized(
+        &mut self,
+        block_id: Uuid,
+        center: CanvasPoint,
+        content_size: CanvasPoint,
+    ) {
+        let size = direct_editor_entity_size(Vec2::new(content_size.x, content_size.y), 1.0);
         self.add_entity(CanvasEntity {
             id: Uuid::new_v4(),
             transform: CanvasTransform::new(center, size, 0.0),
-            kind: CanvasEntityKind::Block { block_id },
+            kind: CanvasEntityKind::DirectEditor {
+                block_id,
+                scale: 1.0,
+            },
             style: CanvasEntityStyle::default(),
         });
     }
@@ -303,7 +312,7 @@ impl InfiniteCanvasEditor {
     ) {
         let size = Self::imported_image_size(&image);
         let id = create_image_block(editors, image, self.block.id());
-        self.add_block_entity_sized(id, center, size);
+        self.add_direct_editor_sized(id, center, size);
     }
 
     fn ensure_dependency_editors(
@@ -377,7 +386,7 @@ impl InfiniteCanvasEditor {
             })
     }
 
-    fn reconcile_direct_editors(
+    fn autosize_direct_editors(
         &mut self,
         entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
@@ -385,31 +394,14 @@ impl InfiniteCanvasEditor {
         let mut before = Vec::new();
         let mut after = Vec::new();
         for entity in entities {
-            let (block_id, scale, converting) = match entity.kind {
-                CanvasEntityKind::Block { block_id }
-                    if editors.direct_editor_capabilities(block_id).is_some() =>
-                {
-                    (block_id, 1.0, true)
-                }
-                CanvasEntityKind::DirectEditor {
-                    block_id, scale, ..
-                } => (block_id, scale, false),
-                _ => continue,
+            let CanvasEntityKind::DirectEditor { block_id, scale } = entity.kind else {
+                continue;
             };
             let Some(intrinsic) = editors.direct_editor_intrinsic_size(block_id) else {
                 continue;
             };
-            let desired = CanvasPoint::new(
-                ((intrinsic.x + DIRECT_EDITOR_PADDING * 2.0) * scale).max(MIN_SIZE),
-                ((intrinsic.y
-                    + DIRECT_EDITOR_PADDING * 2.0
-                    + DIRECT_EDITOR_TITLE_HEIGHT
-                    + DIRECT_EDITOR_TITLE_GAP)
-                    * scale)
-                    .max(MIN_SIZE),
-            );
-            if !converting
-                && (entity.transform.size.x - desired.x).abs() < 0.01
+            let desired = direct_editor_entity_size(intrinsic, scale);
+            if (entity.transform.size.x - desired.x).abs() < 0.01
                 && (entity.transform.size.y - desired.y).abs() < 0.01
                 && entity.transform.rotation == 0.0
             {
@@ -417,7 +409,6 @@ impl InfiniteCanvasEditor {
             }
             let bounds = entity_bounds(entity);
             let mut updated = entity.clone();
-            updated.kind = CanvasEntityKind::DirectEditor { block_id, scale };
             updated.transform.size = desired;
             updated.transform.rotation = 0.0;
             updated.transform.center = CanvasPoint::new(
@@ -456,6 +447,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
+        editors: &mut EditorAccess<'_>,
         show_heading: bool,
     ) -> Option<CanvasLayerMove> {
         if show_heading {
@@ -475,6 +467,43 @@ impl InfiniteCanvasEditor {
             1 => "1 object selected".into(),
             count => format!("{count} objects selected"),
         });
+
+        if let [entity] = selected.as_slice() {
+            let block_mode = match entity.kind {
+                CanvasEntityKind::Block { block_id } => Some((block_id, false)),
+                CanvasEntityKind::DirectEditor { block_id, .. } => Some((block_id, true)),
+                _ => None,
+            };
+            if let Some((block_id, direct)) = block_mode {
+                ui.separator();
+                ui.strong("Block");
+                let available = direct || editors.direct_editor_capabilities(block_id).is_some();
+                let label = if direct {
+                    "Show preview only"
+                } else {
+                    "Use direct editor"
+                };
+                if ui
+                    .add_enabled(available, egui::Button::new(label))
+                    .on_disabled_hover_text("Waiting for the block editor to load")
+                    .clicked()
+                {
+                    let updated = if direct {
+                        if self.focused_editor == Some(entity.id) {
+                            self.focused_editor = None;
+                        }
+                        direct_editor_to_preview(entity, block_id)
+                    } else {
+                        editors
+                            .direct_editor_intrinsic_size(block_id)
+                            .map(|intrinsic| preview_to_direct_editor(entity, block_id, intrinsic))
+                    };
+                    if let Some(updated) = updated {
+                        self.record_update(vec![(*entity).clone()], vec![updated], true);
+                    }
+                }
+            }
+        }
 
         let foreground = common_value(
             selected
@@ -782,7 +811,7 @@ impl InfiniteCanvasEditor {
     fn show_picker(&mut self, context: &egui::Context, client: &BlockClient) {
         if let Some(block) = self.picker.show(context, client) {
             if let Some(center) = self.pending_block_center.take() {
-                self.add_block_entity(block.id, center);
+                self.add_direct_editor(block.id, center);
                 self.tool = Tool::Select;
             } else {
                 self.armed_block = Some(block);
@@ -985,7 +1014,7 @@ impl InfiniteCanvasEditor {
         if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
             if dragged.reference.id != self.block.id() {
                 if let Some(world) = world {
-                    self.add_block_entity(dragged.reference.id, world);
+                    self.add_direct_editor(dragged.reference.id, world);
                 }
             }
         }
@@ -1213,7 +1242,7 @@ impl InfiniteCanvasEditor {
                 }
                 Tool::Block => {
                     if let Some(block) = self.armed_block.take() {
-                        self.add_block_entity(block.id, world);
+                        self.add_direct_editor(block.id, world);
                         if std::mem::take(&mut self.armed_block_needs_parent) {
                             set_parent = Some(block.id);
                         }
@@ -1575,7 +1604,7 @@ impl BlockEditor for InfiniteCanvasEditor {
 
     fn block_created(&mut self, id: Uuid, block_type: Uuid, author: Uuid, name: String) -> bool {
         if let Some(center) = self.pending_block_center.take() {
-            self.add_block_entity(id, center);
+            self.add_direct_editor(id, center);
             self.tool = Tool::Select;
             true
         } else {
@@ -1690,7 +1719,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         if let Some((_, block_id, _)) = focused_direct_editor(self.focused_editor, &entities) {
             return editors.direct_editor_right_sidebar(block_id, ui);
         }
-        if let Some(movement) = self.show_inspector(ui, &entities, true) {
+        if let Some(movement) = self.show_inspector(ui, &entities, editors, true) {
             self.record_action(InfiniteCanvasOperation::Reorder {
                 ids: self.selection.iter().copied().collect(),
                 movement,
@@ -1717,7 +1746,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         drop(canvas);
         let dependencies = self.dependencies.read();
         Self::ensure_dependency_editors(&entities, &dependencies, editors);
-        self.reconcile_direct_editors(&entities, editors);
+        self.autosize_direct_editors(&entities, editors);
         if let Some(current) = self.block.read() {
             entities = current.entities().to_vec();
         }
@@ -2075,6 +2104,52 @@ fn entity_bounds(entity: &CanvasEntity) -> WorldRect {
 struct DirectEditorLayout {
     title_bar: WorldRect,
     content: WorldRect,
+}
+
+fn direct_editor_entity_size(intrinsic: Vec2, scale: f32) -> CanvasPoint {
+    CanvasPoint::new(
+        ((intrinsic.x + DIRECT_EDITOR_PADDING * 2.0) * scale).max(MIN_SIZE),
+        ((intrinsic.y
+            + DIRECT_EDITOR_PADDING * 2.0
+            + DIRECT_EDITOR_TITLE_HEIGHT
+            + DIRECT_EDITOR_TITLE_GAP)
+            * scale)
+            .max(MIN_SIZE),
+    )
+}
+
+fn direct_editor_to_preview(entity: &CanvasEntity, block_id: Uuid) -> Option<CanvasEntity> {
+    let content = direct_editor_layout(entity)?.content;
+    let content_size = content.size();
+    let mut preview = entity.clone();
+    preview.kind = CanvasEntityKind::Block { block_id };
+    preview.transform.center = content.center();
+    preview.transform.size =
+        CanvasPoint::new(content_size.x.max(MIN_SIZE), content_size.y.max(MIN_SIZE));
+    preview.transform.rotation = 0.0;
+    Some(preview)
+}
+
+fn preview_to_direct_editor(
+    entity: &CanvasEntity,
+    block_id: Uuid,
+    intrinsic: Vec2,
+) -> CanvasEntity {
+    let content = entity_bounds(entity);
+    let content_size = content.size();
+    let scale = (content_size.x / intrinsic.x)
+        .min(content_size.y / intrinsic.y)
+        .max(f32::EPSILON);
+    let mut direct = entity.clone();
+    direct.kind = CanvasEntityKind::DirectEditor { block_id, scale };
+    direct.transform.center = CanvasPoint::new(
+        content.center().x,
+        content.center().y - (DIRECT_EDITOR_TITLE_HEIGHT + DIRECT_EDITOR_TITLE_GAP) * scale * 0.5,
+    );
+    direct.transform.size =
+        direct_editor_entity_size(Vec2::new(content_size.x, content_size.y), scale);
+    direct.transform.rotation = 0.0;
+    direct
 }
 
 fn direct_editor_layout(entity: &CanvasEntity) -> Option<DirectEditorLayout> {
