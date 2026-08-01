@@ -1701,6 +1701,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let canvas_rect = response.rect;
+        let canvas_clip_rect = ui.clip_rect();
         if self.focused_editor.is_none() {
             self.import_dropped_images(&response, editors);
             self.import_clipboard_image(&response, editors);
@@ -1720,13 +1721,13 @@ impl BlockEditor for InfiniteCanvasEditor {
                 let screen = direct_editor_layout(entity)
                     .map(|layout| screen_rect(self, layout.content, canvas_rect))
                     .unwrap_or_else(|| screen_rect(self, entity_bounds(entity), canvas_rect));
-                direct_editor_rects.push(screen);
+                let visible_screen = screen.intersect(canvas_clip_rect);
+                direct_editor_rects.push(visible_screen);
                 let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
-                    // .order(egui::Order::Foreground)
                     .constrain(false)
                     .fixed_pos(screen.min)
                     .show(ui.ctx(), |ui| {
-                        ui.set_clip_rect(screen.intersect(ui.clip_rect()));
+                        ui.set_clip_rect(visible_screen.intersect(ui.clip_rect()));
                         ui.set_max_size(screen.size());
                         ui.set_min_size(screen.size());
                         editors.direct_editor_ui(block_id, ui, scale * self.render_scale, viewport)
