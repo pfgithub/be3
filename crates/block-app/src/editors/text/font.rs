@@ -3,6 +3,7 @@ use std::{
     ffi::CString,
     path::{Path, PathBuf},
     ptr,
+    time::{Duration, Instant},
 };
 
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, TextureHandle, Vec2};
@@ -13,6 +14,8 @@ use text_editor_core::{
     SyntaxHighlight,
 };
 use unicode_script::{Script, UnicodeScript};
+
+use super::profiling::LayoutTimings;
 
 unsafe extern "C" {
     fn FT_GlyphSlot_Embolden(slot: ft::FT_GlyphSlot);
@@ -87,6 +90,12 @@ struct RasterizedGlyph {
     bearing: Vec2,
 }
 
+pub(super) struct PaintLineProfile {
+    pub rasterize: Duration,
+    pub glyph_count: usize,
+    pub cache_misses: usize,
+}
+
 #[derive(Clone, Copy)]
 struct TextRun<'a> {
     value: &'a str,
@@ -152,7 +161,12 @@ impl TextRenderer {
         })
     }
 
-    pub fn layout(&self, bytes: &[u8], highlight: &SyntaxHighlight) -> DocumentLayout {
+    pub fn layout_profiled(
+        &self,
+        bytes: &[u8],
+        highlight: &SyntaxHighlight,
+    ) -> (DocumentLayout, LayoutTimings) {
+        let mut timings = LayoutTimings::default();
         let mut lines = Vec::new();
         let mut positions = vec![None; bytes.len() + 1];
         let mut start = 0;
@@ -165,9 +179,14 @@ impl TextRenderer {
                 .position(|byte| *byte == b'\n')
                 .map(|offset| start + offset);
             let end = newline.unwrap_or(bytes.len());
+            let display_start = Instant::now();
             let display = display_line(&bytes[start..end], start, newline.is_some());
-            let (glyphs, width, line_positions, baseline, height) =
+            timings.display_lines += display_start.elapsed();
+            let (glyphs, width, line_positions, baseline, height, line_timings) =
                 self.layout_line(bytes, &display, highlight);
+            timings.font_runs += line_timings.font_runs;
+            timings.shape += line_timings.shape;
+            timings.line_finalize += line_timings.line_finalize;
             for (doc_byte, x) in line_positions {
                 if let Some(position) = positions.get_mut(doc_byte) {
                     *position = Some(BytePosition {
@@ -202,13 +221,18 @@ impl TextRenderer {
             line_index += 1;
         }
 
+        let tables_start = Instant::now();
         align_markdown_tables(&mut lines, &mut positions, highlight.markdown_tables());
+        timings.tables = tables_start.elapsed();
         let width = lines.iter().map(|line| line.width).fold(0.0_f32, f32::max);
-        DocumentLayout {
-            size: Vec2::new(width + 24.0, y + 16.0),
-            lines,
-            positions,
-        }
+        (
+            DocumentLayout {
+                size: Vec2::new(width + 24.0, y + 16.0),
+                lines,
+                positions,
+            },
+            timings,
+        )
     }
 
     fn layout_line(
@@ -216,12 +240,24 @@ impl TextRenderer {
         document: &[u8],
         display: &DisplayLine,
         highlight: &SyntaxHighlight,
-    ) -> (Vec<PositionedGlyph>, f32, Vec<(usize, f32)>, f32, f32) {
+    ) -> (
+        Vec<PositionedGlyph>,
+        f32,
+        Vec<(usize, f32)>,
+        f32,
+        f32,
+        LayoutTimings,
+    ) {
+        let mut timings = LayoutTimings::default();
         let mut glyphs = Vec::new();
         let mut positions = Vec::new();
         let mut pen_x: f32 = 0.0;
 
-        for run in self.font_runs(&display.text, display, highlight) {
+        let font_runs_start = Instant::now();
+        let font_runs = self.font_runs(&display.text, display, highlight);
+        timings.font_runs = font_runs_start.elapsed();
+        for run in font_runs {
+            let shape_start = Instant::now();
             let Ok(face) = HbFace::from_file(&self.fonts[run.font_index].path, 0) else {
                 continue;
             };
@@ -243,6 +279,8 @@ impl TextRenderer {
             buffer = buffer.guess_segment_properties();
             let rtl = buffer.get_direction() == Direction::Rtl;
             let output = shape(&font, buffer, &[]);
+            timings.shape += shape_start.elapsed();
+            let finalize_start = Instant::now();
             let run_start_x = pen_x;
             let mut clusters: BTreeMap<usize, (f32, f32)> = BTreeMap::new();
             for (info, position) in output
@@ -298,13 +336,16 @@ impl TextRenderer {
             if clusters.is_empty() {
                 positions.push((map_display_byte(display, run.start), run_start_x));
             }
+            timings.line_finalize += finalize_start.elapsed();
         }
 
+        let finalize_start = Instant::now();
         if display.text.is_empty() {
             positions.push((display.display_to_document[0], 0.0));
         }
         let (baseline, height) = self.line_metrics(&glyphs);
-        (glyphs, pen_x, positions, baseline, height)
+        timings.line_finalize += finalize_start.elapsed();
+        (glyphs, pen_x, positions, baseline, height, timings)
     }
 
     fn font_runs<'a>(
@@ -366,7 +407,12 @@ impl TextRenderer {
         color_for_byte: impl Fn(usize) -> Color32,
         byte_is_selected: impl Fn(usize) -> bool,
         invisible_color: Color32,
-    ) {
+    ) -> PaintLineProfile {
+        let mut profile = PaintLineProfile {
+            rasterize: Duration::ZERO,
+            glyph_count: line.glyphs.len(),
+            cache_misses: 0,
+        };
         let baseline = origin.y + line.y + line.baseline;
         for glyph in &line.glyphs {
             if glyph.invisible && !byte_is_selected(glyph.doc_byte) {
@@ -379,7 +425,12 @@ impl TextRenderer {
                 bold: glyph.style.bold && !self.fonts[glyph.font_index].bold,
                 italic: glyph.style.italic && !self.fonts[glyph.font_index].italic,
             };
-            self.ensure_glyph(context, key);
+            if !self.glyphs.contains_key(&key) {
+                profile.cache_misses += 1;
+                let rasterize_start = Instant::now();
+                self.ensure_glyph(context, key);
+                profile.rasterize += rasterize_start.elapsed();
+            }
             let Some(rasterized) = self.glyphs.get(&key) else {
                 continue;
             };
@@ -418,6 +469,7 @@ impl TextRenderer {
                 );
             }
         }
+        profile
     }
 
     fn line_metrics(&self, glyphs: &[PositionedGlyph]) -> (f32, f32) {

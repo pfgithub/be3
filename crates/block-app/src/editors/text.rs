@@ -1,4 +1,7 @@
 mod font;
+mod profiling;
+
+use std::time::Instant;
 
 use block::{Block, BlockParent};
 use block_client::{blocks::text::TextDocument, BlockClient, BlockHandle, BlockRelationships};
@@ -14,6 +17,7 @@ use text_editor_core::{
 use uuid::Uuid;
 
 use self::font::{BytePosition, DocumentLayout, TextRenderer};
+use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
 use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -70,6 +74,7 @@ struct TextEditor {
     highlight_language: HighlightLanguage,
     click_count: u8,
     last_click: Option<(f64, Pos2)>,
+    profiler: TextProfiler,
 }
 
 impl TextEditor {
@@ -85,6 +90,7 @@ impl TextEditor {
             highlight_language: HighlightLanguage::Markdown,
             click_count: 0,
             last_click: None,
+            profiler: TextProfiler::default(),
         }
     }
 
@@ -111,6 +117,7 @@ impl TextEditor {
                         HighlightLanguage::Zig.label(),
                     );
                 });
+            self.profiler.toggle(ui);
         });
         if self.highlight_language != previous {
             self.core
@@ -361,7 +368,8 @@ impl TextEditor {
         origin: Pos2,
         layout: &DocumentLayout,
         highlight: &SyntaxHighlight,
-    ) -> Option<Rect> {
+    ) -> (Option<Rect>, PaintTimings) {
+        let selection_start = Instant::now();
         let selection_color = ui.visuals().selection.bg_fill;
         let cursor_color = ui.visuals().selection.stroke.color;
         let mut cursor_rect = None;
@@ -418,12 +426,25 @@ impl TextEditor {
             }
         }
 
+        let selection = selection_start.elapsed();
         let renderer = match &mut self.renderer {
             Ok(renderer) => renderer,
-            Err(_) => return cursor_rect,
+            Err(_) => {
+                return (
+                    cursor_rect,
+                    PaintTimings {
+                        selection,
+                        ..PaintTimings::default()
+                    },
+                )
+            }
         };
+        let glyph_start = Instant::now();
+        let mut rasterize = std::time::Duration::ZERO;
+        let mut glyph_count = 0;
+        let mut cache_misses = 0;
         for line in &layout.lines {
-            renderer.paint_line(
+            let line_profile = renderer.paint_line(
                 ui.ctx(),
                 painter,
                 origin,
@@ -432,8 +453,20 @@ impl TextEditor {
                 |byte| selected_bytes.get(byte).copied().unwrap_or(false),
                 syntax_color(SynHlColorScope::Invisible),
             );
+            rasterize += line_profile.rasterize;
+            glyph_count += line_profile.glyph_count;
+            cache_misses += line_profile.cache_misses;
         }
-        cursor_rect
+        (
+            cursor_rect,
+            PaintTimings {
+                selection,
+                glyphs: glyph_start.elapsed(),
+                rasterize,
+                glyph_count,
+                cache_misses,
+            },
+        )
     }
 }
 
@@ -472,26 +505,51 @@ impl BlockEditor for TextEditor {
         _editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
+        self.profiler.show(ui.ctx());
+        let frame_start = Instant::now();
+        let mut profile = FrameProfile::default();
         let id = egui::Id::new(("text-editor", self.block.id()));
+        let keyboard_start = Instant::now();
         let mut reveal_cursor = self.keyboard_input(ui, id);
+        profile.keyboard = keyboard_start.elapsed();
+        let toolbar_start = Instant::now();
         self.language_selector(ui);
         ui.separator();
+        profile.toolbar = toolbar_start.elapsed();
+        let document_start = Instant::now();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
+            profile.document = document_start.elapsed();
+            profile.total = frame_start.elapsed();
+            self.profiler.record(profile);
             return None;
         };
+        profile.document = document_start.elapsed();
+        profile.document_bytes = bytes.len();
+        let highlight_start = Instant::now();
         let highlight = self.core.highlight();
+        profile.highlight = highlight_start.elapsed();
+        let layout_start = Instant::now();
         let layout = match &self.renderer {
-            Ok(renderer) => renderer.layout(&bytes, &highlight),
+            Ok(renderer) => {
+                let (layout, detail) = renderer.layout_profiled(&bytes, &highlight);
+                profile.layout_detail = detail;
+                layout
+            }
             Err(error) => {
                 ui.centered_and_justified(|ui| {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 });
+                profile.layout = layout_start.elapsed();
+                profile.total = frame_start.elapsed();
+                self.profiler.record(profile);
                 return None;
             }
         };
+        profile.layout = layout_start.elapsed();
+        profile.line_count = layout.lines.len();
 
         egui::ScrollArea::both()
             .id_salt(id.with("scroll"))
@@ -505,14 +563,19 @@ impl BlockEditor for TextEditor {
                 ui.painter()
                     .rect_filled(response.rect, 0.0, Color32::from_rgb(29, 37, 44));
                 let origin = response.rect.min + PADDING;
+                let pointer_start = Instant::now();
                 reveal_cursor |= self.pointer_input(ui, &response, origin, &layout);
-                let cursor = self.paint(ui, &painter, origin, &layout, &highlight);
+                profile.pointer = pointer_start.elapsed();
+                let (cursor, paint) = self.paint(ui, &painter, origin, &layout, &highlight);
+                profile.paint = paint;
                 if reveal_cursor {
                     if let Some(cursor) = cursor {
                         ui.scroll_to_rect(cursor.expand2(Vec2::new(8.0, 3.0)), None);
                     }
                 }
             });
+        profile.total = frame_start.elapsed();
+        self.profiler.record(profile);
         None
     }
 }
