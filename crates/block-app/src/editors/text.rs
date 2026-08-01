@@ -2,7 +2,12 @@ mod font;
 mod profiling;
 #[cfg(test)]
 mod tests;
-use std::{collections::HashMap, ops::Range, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
@@ -32,11 +37,12 @@ use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration,
-    SidebarDragPayload,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorRegistration, SidebarDragPayload,
 };
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
+const DIRECT_EDITOR_WIDTH: f32 = 600.0;
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
 
@@ -109,6 +115,7 @@ struct TextEditor {
     click_count: u8,
     last_click: Option<(f64, Pos2)>,
     profiler: TextProfiler,
+    toolbar_profile: Duration,
     layout_cache: Option<CachedLayout>,
     picker: BlockPicker,
     dependencies: ReferenceList,
@@ -140,6 +147,7 @@ impl TextEditor {
             click_count: 0,
             last_click: None,
             profiler: TextProfiler::default(),
+            toolbar_profile: Duration::default(),
             layout_cache: None,
             picker: BlockPicker::default(),
             dependencies,
@@ -991,20 +999,43 @@ impl BlockEditor for TextEditor {
         true
     }
 
-    fn ui(
+    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
+        Some(DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: false,
+            supports_pan_and_zoom: false,
+        })
+    }
+
+    fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {
+        let bytes = self.block.read()?.bytes().to_vec();
+        let highlight = self.core.highlight();
+        let embeds = self.resolve_embeds(&bytes, editors);
+        let height = match &self.renderer {
+            Ok(renderer) => {
+                renderer
+                    .layout_profiled(
+                        &bytes,
+                        &highlight,
+                        &embeds,
+                        DIRECT_EDITOR_WIDTH - PADDING.x * 2.0,
+                    )
+                    .0
+                    .size
+                    .y
+            }
+            Err(_) => PADDING.y * 2.0,
+        };
+        Some(Vec2::new(DIRECT_EDITOR_WIDTH, height))
+    }
+
+    fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         self.profiler.show(ui.ctx());
-        let frame_start = Instant::now();
-        let mut profile = FrameProfile::default();
-        let id = egui::Id::new(("text-editor", self.block.id()));
-        let keyboard_start = Instant::now();
-        let pasted_image = self.paste_clipboard_image(ui, id, editors);
-        let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
-        profile.keyboard = keyboard_start.elapsed();
         let toolbar_start = Instant::now();
         let create_block = self.toolbar(ui, editors);
         if let Some(error) = self.image_import_error.clone() {
@@ -1015,8 +1046,28 @@ impl BlockEditor for TextEditor {
                 }
             });
         }
-        ui.separator();
-        profile.toolbar = toolbar_start.elapsed();
+        self.toolbar_profile = toolbar_start.elapsed();
+        create_block.map(|block_type| EditorAction::CreateBlock {
+            block_type,
+            parent: Some(self.block.id()),
+        })
+    }
+
+    fn direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        _scale: f32,
+        _viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        let frame_start = Instant::now();
+        let mut profile = FrameProfile::default();
+        profile.toolbar = std::mem::take(&mut self.toolbar_profile);
+        let id = egui::Id::new(("text-editor", self.block.id()));
+        let keyboard_start = Instant::now();
+        let pasted_image = self.paste_clipboard_image(ui, id, editors);
+        let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
+        profile.keyboard = keyboard_start.elapsed();
         let linked_block = self.show_picker(ui.ctx(), editors.client());
         let document_start = Instant::now();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
@@ -1024,7 +1075,7 @@ impl BlockEditor for TextEditor {
                 ui.spinner();
             });
             profile.document = document_start.elapsed();
-            profile.total = frame_start.elapsed();
+            profile.total = frame_start.elapsed() + profile.toolbar;
             self.profiler.record(profile);
             return None;
         };
@@ -1061,7 +1112,7 @@ impl BlockEditor for TextEditor {
                         ui.colored_label(ui.visuals().error_fg_color, error);
                     });
                     profile.layout = layout_start.elapsed();
-                    profile.total = frame_start.elapsed();
+                    profile.total = frame_start.elapsed() + profile.toolbar;
                     self.profiler.record(profile);
                     return None;
                 }
@@ -1078,97 +1129,76 @@ impl BlockEditor for TextEditor {
         profile.layout = layout_start.elapsed();
         profile.line_count = layout.lines.len();
 
-        let mut edit_block = None;
-        egui::ScrollArea::both()
-            .id_salt(id.with("scroll"))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let desired = layout.size.max(ui.available_size());
-                let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-                let response = ui.interact(rect, id, Sense::click_and_drag());
-                let painter = ui.painter_at(rect);
-                let response = response.on_hover_cursor(egui::CursorIcon::Text);
-                ui.painter()
-                    .rect_filled(response.rect, 0.0, Color32::from_rgb(29, 37, 44));
-                let origin = response.rect.min + PADDING;
-                edit_block =
-                    self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
-                let pointer_start = Instant::now();
-                reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
-                profile.pointer = pointer_start.elapsed();
-                self.paint_embeds(ui, &painter, origin, &layout, editors);
-                let pointer = response
-                    .interact_pointer_pos()
-                    .or_else(|| response.ctx.pointer_hover_pos());
-                let drop_index = response
-                    .dnd_hover_payload::<SidebarDragPayload>()
-                    .filter(|dragged| dragged.reference.id != self.block.id())
-                    .and_then(|_| pointer)
-                    .map(|pointer| hit_test(&layout, pointer - origin))
-                    .and_then(|byte| {
-                        self.core.position_index(
-                            self.core
-                                .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster),
-                        )
-                    });
-                if let Some(byte) = drop_index {
-                    response.ctx.set_cursor_icon(egui::CursorIcon::Alias);
-                    if let Some(position) =
-                        layout.positions.get(byte).and_then(|position| *position)
-                    {
-                        let top = Pos2::new(
-                            origin.x + position.x,
-                            origin.y + layout.lines[position.line].y,
-                        );
-                        painter.rect_filled(
-                            Rect::from_min_size(
-                                top,
-                                Vec2::new(2.0, layout.lines[position.line].height),
-                            ),
-                            0.0,
-                            ui.visuals().selection.stroke.color,
-                        );
-                    }
-                }
-                if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
-                    if dragged.reference.id != self.block.id() {
-                        if let Some(byte) =
-                            pointer.map(|pointer| hit_test(&layout, pointer - origin))
-                        {
-                            let position = self
-                                .core
-                                .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
-                            self.core
-                                .execute_command(EditorCommand::SetCursorPosition(position));
-                            self.insert_embed(dragged.reference.id);
-                            reveal_cursor = true;
-                        }
-                    }
-                }
-                let (cursor, paint) = self.paint(ui, &painter, origin, &layout, &highlight);
-                self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
-                profile.paint = paint;
-                if reveal_cursor {
-                    if let Some(cursor) = cursor {
-                        ui.scroll_to_rect(cursor.expand2(Vec2::new(8.0, 3.0)), None);
-                    }
-                }
+        let desired = layout.size.max(ui.available_size());
+        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        let painter = ui.painter_at(rect);
+        let response = response.on_hover_cursor(egui::CursorIcon::Text);
+        ui.painter()
+            .rect_filled(response.rect, 0.0, Color32::from_rgb(29, 37, 44));
+        let origin = response.rect.min + PADDING;
+        let edit_block = self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
+        let pointer_start = Instant::now();
+        reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
+        profile.pointer = pointer_start.elapsed();
+        self.paint_embeds(ui, &painter, origin, &layout, editors);
+        let pointer = response
+            .interact_pointer_pos()
+            .or_else(|| response.ctx.pointer_hover_pos());
+        let drop_index = response
+            .dnd_hover_payload::<SidebarDragPayload>()
+            .filter(|dragged| dragged.reference.id != self.block.id())
+            .and_then(|_| pointer)
+            .map(|pointer| hit_test(&layout, pointer - origin))
+            .and_then(|byte| {
+                self.core.position_index(
+                    self.core
+                        .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster),
+                )
             });
-        profile.total = frame_start.elapsed();
+        if let Some(byte) = drop_index {
+            response.ctx.set_cursor_icon(egui::CursorIcon::Alias);
+            if let Some(position) = layout.positions.get(byte).and_then(|position| *position) {
+                let top = Pos2::new(
+                    origin.x + position.x,
+                    origin.y + layout.lines[position.line].y,
+                );
+                painter.rect_filled(
+                    Rect::from_min_size(top, Vec2::new(2.0, layout.lines[position.line].height)),
+                    0.0,
+                    ui.visuals().selection.stroke.color,
+                );
+            }
+        }
+        if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
+            if dragged.reference.id != self.block.id() {
+                if let Some(byte) = pointer.map(|pointer| hit_test(&layout, pointer - origin)) {
+                    let position = self
+                        .core
+                        .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
+                    self.core
+                        .execute_command(EditorCommand::SetCursorPosition(position));
+                    self.insert_embed(dragged.reference.id);
+                    reveal_cursor = true;
+                }
+            }
+        }
+        let (cursor, paint) = self.paint(ui, &painter, origin, &layout, &highlight);
+        self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
+        profile.paint = paint;
+        if reveal_cursor {
+            if let Some(cursor) = cursor {
+                ui.scroll_to_rect(cursor.expand2(Vec2::new(8.0, 3.0)), None);
+            }
+        }
+        profile.total = frame_start.elapsed() + profile.toolbar;
         self.profiler.record(profile);
-        edit_block
-            .or_else(|| {
-                linked_block.map(|id| EditorAction::SetParent {
-                    id,
-                    parent: self.block.id(),
-                })
+        edit_block.or_else(|| {
+            linked_block.map(|id| EditorAction::SetParent {
+                id,
+                parent: self.block.id(),
             })
-            .or_else(|| {
-                create_block.map(|block_type| EditorAction::CreateBlock {
-                    block_type,
-                    parent: Some(self.block.id()),
-                })
-            })
+        })
     }
 }
 
