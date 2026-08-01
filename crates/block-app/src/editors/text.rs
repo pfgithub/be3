@@ -355,6 +355,7 @@ impl TextEditor {
         let selection_color = ui.visuals().selection.bg_fill;
         let cursor_color = ui.visuals().selection.stroke.color;
         let mut cursor_rect = None;
+        let mut selected_bytes = vec![false; layout.positions.len().saturating_sub(1)];
         for cursor in self.core.cursor_positions() {
             let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
                 continue;
@@ -367,6 +368,8 @@ impl TextEditor {
             } else {
                 (focus, anchor)
             };
+            let selected_len = selected_bytes.len();
+            selected_bytes[start.min(selected_len)..end.min(selected_len)].fill(true);
             for byte in start..end {
                 let Some(left) = layout.positions.get(byte).and_then(|position| *position) else {
                     continue;
@@ -410,9 +413,15 @@ impl TextEditor {
             Err(_) => return cursor_rect,
         };
         for line in &layout.lines {
-            renderer.paint_line(ui.ctx(), painter, origin, line, |byte| {
-                syntax_color(highlight.advance_and_read(byte))
-            });
+            renderer.paint_line(
+                ui.ctx(),
+                painter,
+                origin,
+                line,
+                |byte| syntax_color(highlight.advance_and_read(byte)),
+                |byte| selected_bytes.get(byte).copied().unwrap_or(false),
+                syntax_color(SynHlColorScope::Invisible),
+            );
         }
         cursor_rect
     }

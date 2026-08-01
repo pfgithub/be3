@@ -52,6 +52,7 @@ struct PositionedGlyph {
     x: f32,
     x_offset: f32,
     y_offset: f32,
+    invisible: bool,
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
@@ -139,8 +140,8 @@ impl TextRenderer {
                 .position(|byte| *byte == b'\n')
                 .map(|offset| start + offset);
             let end = newline.unwrap_or(bytes.len());
-            let display = display_line(&bytes[start..end], start);
-            let (glyphs, width, line_positions) = self.layout_line(&display);
+            let display = display_line(&bytes[start..end], start, newline.is_some());
+            let (glyphs, width, line_positions) = self.layout_line(bytes, &display);
             for (doc_byte, x) in line_positions {
                 if let Some(position) = positions.get_mut(doc_byte) {
                     *position = Some(BytePosition {
@@ -180,7 +181,11 @@ impl TextRenderer {
         }
     }
 
-    fn layout_line(&self, display: &DisplayLine) -> (Vec<PositionedGlyph>, f32, Vec<(usize, f32)>) {
+    fn layout_line(
+        &self,
+        document: &[u8],
+        display: &DisplayLine,
+    ) -> (Vec<PositionedGlyph>, f32, Vec<(usize, f32)>) {
         let mut glyphs = Vec::new();
         let mut positions = Vec::new();
         let mut pen_x: f32 = 0.0;
@@ -224,13 +229,17 @@ impl TextRenderer {
                         bounds.1 = bounds.1.max(right);
                     })
                     .or_insert((left, right));
+                let doc_byte = map_display_byte(display, cluster);
                 glyphs.push(PositionedGlyph {
                     font_index: run.font_index,
                     id: info.codepoint,
-                    doc_byte: map_display_byte(display, cluster),
+                    doc_byte,
                     x: pen_x,
                     x_offset: position.x_offset as f32 / 64.0,
                     y_offset: position.y_offset as f32 / 64.0,
+                    invisible: document
+                        .get(doc_byte)
+                        .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r')),
                 });
                 pen_x += advance;
             }
@@ -282,9 +291,14 @@ impl TextRenderer {
         origin: Pos2,
         line: &LineLayout,
         color_for_byte: impl Fn(usize) -> Color32,
+        byte_is_selected: impl Fn(usize) -> bool,
+        invisible_color: Color32,
     ) {
         let baseline = origin.y + line.y + self.ascender();
         for glyph in &line.glyphs {
+            if glyph.invisible && !byte_is_selected(glyph.doc_byte) {
+                continue;
+            }
             let key = GlyphKey {
                 font_index: glyph.font_index,
                 id: glyph.id,
@@ -304,7 +318,11 @@ impl TextRenderer {
                 texture.id(),
                 Rect::from_min_size(position.round(), rasterized.size),
                 Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                color_for_byte(glyph.doc_byte),
+                if glyph.invisible {
+                    invisible_color
+                } else {
+                    color_for_byte(glyph.doc_byte)
+                },
             );
         }
     }
@@ -390,7 +408,7 @@ impl Drop for TextRenderer {
     }
 }
 
-fn display_line(bytes: &[u8], document_start: usize) -> DisplayLine {
+fn display_line(bytes: &[u8], document_start: usize, has_newline: bool) -> DisplayLine {
     let mut text = String::new();
     let mut display_to_document = vec![document_start];
     let mut index = 0;
@@ -409,18 +427,52 @@ fn display_line(bytes: &[u8], document_start: usize) -> DisplayLine {
             }
             Err(_) => ('\u{fffd}', 1),
         };
-        let display_start = text.len();
-        text.push(character);
-        let display_len = text.len() - display_start;
-        for offset in 1..=display_len {
-            let mapped = document_start + index + (offset * consumed / display_len);
-            display_to_document.push(mapped);
-        }
+        let display_character = if consumed == 1 {
+            match bytes[index] {
+                b' ' => '·',
+                b'\t' => '⇥',
+                b'\r' => '␍',
+                _ => character,
+            }
+        } else {
+            character
+        };
+        append_display_character(
+            &mut text,
+            &mut display_to_document,
+            display_character,
+            document_start + index,
+            consumed,
+        );
         index += consumed;
+    }
+    if has_newline {
+        append_display_character(
+            &mut text,
+            &mut display_to_document,
+            '⏎',
+            document_start + bytes.len(),
+            1,
+        );
     }
     DisplayLine {
         text,
         display_to_document,
+    }
+}
+
+fn append_display_character(
+    text: &mut String,
+    display_to_document: &mut Vec<usize>,
+    character: char,
+    document_start: usize,
+    document_len: usize,
+) {
+    let display_start = text.len();
+    text.push(character);
+    let display_len = text.len() - display_start;
+    for offset in 1..=display_len {
+        display_to_document.push(document_start + offset * document_len / display_len);
     }
 }
 
