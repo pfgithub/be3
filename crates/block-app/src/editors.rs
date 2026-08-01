@@ -1,6 +1,8 @@
 #[cfg(not(target_os = "android"))]
 mod browser_tab;
 mod clipboard;
+mod database;
+mod database_schema;
 pub(crate) mod image;
 mod infinite_canvas;
 mod pixel_art;
@@ -215,6 +217,8 @@ impl EditorRegistry {
             registrations: HashMap::new(),
             new_block_actions: Vec::new(),
         };
+        registry.register(database::registration());
+        registry.register(database_schema::registration());
         registry.register(image::registration());
         registry.register(infinite_canvas::registration());
         registry.register(pixel_art::registration());

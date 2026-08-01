@@ -1,3 +1,5 @@
+pub mod database;
+pub mod database_schema;
 pub mod image;
 pub mod infinite_canvas;
 pub mod pixel_art;
