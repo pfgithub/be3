@@ -695,23 +695,7 @@ impl BlockApp {
     }
 
     fn collapse_reference(&mut self, id: Uuid) {
-        self.collapse_reference_inner(id, &mut HashSet::new());
-    }
-
-    fn collapse_reference_inner(&mut self, id: Uuid, visited: &mut HashSet<Uuid>) {
-        if !visited.insert(id) {
-            return;
-        }
-        let children = self
-            .expanded
-            .remove(&id)
-            .map(|list| list.read())
-            .unwrap_or_default();
-        for child in children {
-            if child.parent == BlockParent::Uuid(id) {
-                self.collapse_reference_inner(child.id, visited);
-            }
-        }
+        self.expanded.remove(&id);
     }
 
     fn show_reference(
