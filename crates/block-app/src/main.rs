@@ -1341,10 +1341,7 @@ impl BlockApp {
         }
     }
 
-    fn show_statusbar(&mut self, ui: &mut egui::Ui) {
-        let Some(active) = self.active_tab else {
-            return;
-        };
+    fn show_statusbar(&mut self, ui: &mut egui::Ui, active: Uuid) {
         let Some(editor) = self.editors.get(&active) else {
             return;
         };
@@ -1639,6 +1636,9 @@ impl TabViewer for BlockTabViewer<'_> {
                 if let Some(editor) = self.app.editors.get_mut(id) {
                     editor.set_tab_active(true);
                 }
+                egui::Panel::bottom(egui::Id::new(("block-statusbar", *id)))
+                    .resizable(false)
+                    .show_inside(ui, |ui| self.app.show_statusbar(ui, *id));
                 if let Some(action) = self.app.show_content(ui, self.frame, *id) {
                     self.actions.push((*id, action));
                 }
@@ -1725,12 +1725,7 @@ impl eframe::App for BlockApp {
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
 
-        ui.vertical(|ui| {
-            egui::Panel::bottom("block-statusbar")
-                .resizable(false)
-                .show_inside(ui, |ui| self.show_statusbar(ui));
-            self.show_dock(ui, frame);
-        });
+        self.show_dock(ui, frame);
         self.show_discard_confirmation(ui.ctx());
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
