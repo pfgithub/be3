@@ -708,7 +708,9 @@ impl BlockApp {
             .map(|list| list.read())
             .unwrap_or_default();
         for child in children {
-            self.collapse_reference_inner(child.id, visited);
+            if child.parent == BlockParent::Uuid(id) {
+                self.collapse_reference_inner(child.id, visited);
+            }
         }
     }
 
