@@ -25,6 +25,8 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
 use super::{
+    clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
+    image::create_image_block,
     BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration,
     SidebarDragPayload,
 };
@@ -105,6 +107,8 @@ struct TextEditor {
     picker: BlockPicker,
     dependencies: ReferenceList,
     pending_create: bool,
+    clipboard_image_paste: ClipboardImagePaste,
+    image_import_error: Option<String>,
 }
 
 struct CachedLayout {
@@ -134,6 +138,8 @@ impl TextEditor {
             picker: BlockPicker::default(),
             dependencies,
             pending_create: false,
+            clipboard_image_paste: ClipboardImagePaste::default(),
+            image_import_error: None,
         }
     }
 
@@ -244,6 +250,42 @@ impl TextEditor {
             .execute_command(EditorCommand::InsertText(directive.as_bytes()));
     }
 
+    fn insert_image_embed(&mut self, id: Uuid, source_name: &str) {
+        let directive = image_embed_directive(
+            id,
+            source_name,
+            self.highlight_language == HighlightLanguage::Markdown,
+        );
+        self.core
+            .execute_command(EditorCommand::InsertText(directive.as_bytes()));
+    }
+
+    fn paste_clipboard_image(
+        &mut self,
+        ui: &egui::Ui,
+        id: egui::Id,
+        editors: &mut EditorAccess<'_>,
+    ) -> bool {
+        let focused = ui.memory(|memory| memory.has_focus(id));
+        let Some(result) = self.clipboard_image_paste.poll(ui.ctx(), focused) else {
+            return false;
+        };
+        match result {
+            ClipboardImagePasteResult::NoImage => false,
+            ClipboardImagePasteResult::Error(error) => {
+                self.image_import_error = Some(error);
+                false
+            }
+            ClipboardImagePasteResult::Image(image) => {
+                let source_name = image.source_name().to_owned();
+                let image_id = create_image_block(editors, image, self.block.id());
+                self.insert_image_embed(image_id, &source_name);
+                self.image_import_error = None;
+                true
+            }
+        }
+    }
+
     fn show_picker(&mut self, context: &egui::Context, client: &BlockClient) -> Option<Uuid> {
         let block = self.picker.show(context, client)?;
         self.insert_embed(block.id);
@@ -309,7 +351,7 @@ impl TextEditor {
         })
     }
 
-    fn keyboard_input(&mut self, ui: &egui::Ui, id: egui::Id) -> bool {
+    fn keyboard_input(&mut self, ui: &egui::Ui, id: egui::Id, suppress_text_paste: bool) -> bool {
         if !ui.memory(|memory| memory.has_focus(id)) {
             return false;
         }
@@ -338,6 +380,7 @@ impl TextEditor {
                     }
                     true
                 }
+                Event::Paste(_) if suppress_text_paste => false,
                 Event::Paste(text) => {
                     self.core
                         .execute_command(EditorCommand::Paste(text.as_bytes()));
@@ -921,10 +964,19 @@ impl BlockEditor for TextEditor {
         let mut profile = FrameProfile::default();
         let id = egui::Id::new(("text-editor", self.block.id()));
         let keyboard_start = Instant::now();
-        let mut reveal_cursor = self.keyboard_input(ui, id);
+        let pasted_image = self.paste_clipboard_image(ui, id, editors);
+        let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
         profile.keyboard = keyboard_start.elapsed();
         let toolbar_start = Instant::now();
         let create_block = self.toolbar(ui, editors);
+        if let Some(error) = self.image_import_error.clone() {
+            ui.horizontal(|ui| {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+                if ui.small_button("Dismiss").clicked() {
+                    self.image_import_error = None;
+                }
+            });
+        }
         ui.separator();
         profile.toolbar = toolbar_start.elapsed();
         let linked_block = self.show_picker(ui.ctx(), editors.client());
@@ -1079,6 +1131,15 @@ impl BlockEditor for TextEditor {
                     parent: Some(self.block.id()),
                 })
             })
+    }
+}
+
+fn image_embed_directive(id: Uuid, source_name: &str, markdown: bool) -> String {
+    let url = block_url(id);
+    if markdown {
+        format!("![{source_name}]({url})")
+    } else {
+        url
     }
 }
 

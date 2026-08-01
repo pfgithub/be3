@@ -1,4 +1,5 @@
 mod browser_tab;
+mod clipboard;
 mod image;
 mod infinite_canvas;
 mod pixel_art;

@@ -101,6 +101,19 @@ impl ImageEditor {
     }
 }
 
+pub(super) fn create_image_block(
+    editors: &mut EditorAccess<'_>,
+    image: Image,
+    parent: Uuid,
+) -> Uuid {
+    let block = editors.client().create_block(image);
+    let id = block.id();
+    block.note_backref(parent);
+    block.set_parent(BlockParent::Uuid(parent));
+    editors.insert(Box::new(ImageEditor::new(block)));
+    id
+}
+
 impl BlockEditor for ImageEditor {
     fn id(&self) -> Uuid {
         self.block.id()

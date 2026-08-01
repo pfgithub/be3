@@ -12,14 +12,15 @@ use block_client::{
     BlockClient, BlockHandle, BlockRelationships, CachedBlock, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
-use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use uuid::Uuid;
 
 use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use super::{
-    image::ImageEditor, BlockEditor, BlockRenderContext, EditorAccess, EditorAction,
-    EditorRegistration, SidebarDragPayload,
+    clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
+    image::create_image_block,
+    BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration,
+    SidebarDragPayload,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -168,7 +169,7 @@ pub(super) struct InfiniteCanvasEditor {
     focus_text: Option<Uuid>,
     image_import_error: Option<String>,
     pending_file_drop_position: Option<CanvasPoint>,
-    paste_shortcut_down: bool,
+    clipboard_image_paste: ClipboardImagePaste,
 }
 
 impl InfiniteCanvasEditor {
@@ -190,7 +191,7 @@ impl InfiniteCanvasEditor {
             focus_text: None,
             image_import_error: None,
             pending_file_drop_position: None,
-            paste_shortcut_down: false,
+            clipboard_image_paste: ClipboardImagePaste::default(),
         }
     }
 
@@ -289,12 +290,8 @@ impl InfiniteCanvasEditor {
         center: CanvasPoint,
     ) {
         let size = Self::imported_image_size(&image);
-        let block = editors.client().create_block(image);
-        let id = block.id();
+        let id = create_image_block(editors, image, self.block.id());
         self.add_block_entity_sized(id, center, size);
-        block.note_backref(self.block.id());
-        block.set_parent(BlockParent::Uuid(self.block.id()));
-        editors.insert(Box::new(ImageEditor::new(block)));
     }
 
     fn ensure_dependency_editors(
@@ -725,33 +722,15 @@ impl InfiniteCanvasEditor {
         response: &egui::Response,
         editors: &mut EditorAccess<'_>,
     ) {
-        let paste_requested = self.image_paste_shortcut_pressed(&response.ctx)
-            && !response.ctx.egui_wants_keyboard_input();
-        if !paste_requested {
-            return;
-        }
-        let clipboard_image =
-            arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_image());
-        let Ok(clipboard_image) = clipboard_image else {
+        let enabled = !response.ctx.egui_wants_keyboard_input();
+        let Some(result) = self.clipboard_image_paste.poll(&response.ctx, enabled) else {
             return;
         };
-        let mut encoded = Vec::new();
-        let encoded_result = PngEncoder::new(&mut encoded).write_image(
-            clipboard_image.bytes.as_ref(),
-            clipboard_image.width as u32,
-            clipboard_image.height as u32,
-            ExtendedColorType::Rgba8,
-        );
-        if let Err(error) = encoded_result {
-            self.image_import_error = Some(format!("Could not encode pasted image: {error}"));
-            return;
-        }
-        let image = match ImageBlock::from_compressed("Pasted Image.png", encoded) {
-            Ok(image) => image,
-            Err(error) => {
-                self.image_import_error = Some(format!("Could not import pasted image: {error}"));
-                return;
+        let ClipboardImagePasteResult::Image(image) = result else {
+            if let ClipboardImagePasteResult::Error(error) = result {
+                self.image_import_error = Some(error);
             }
+            return;
         };
         self.image_import_error = None;
         let screen_position = response
@@ -761,32 +740,6 @@ impl InfiniteCanvasEditor {
             .unwrap_or_else(|| response.rect.center());
         let center = self.screen_to_world(screen_position, response.rect);
         self.add_imported_image(editors, image, center);
-    }
-
-    fn image_paste_shortcut_pressed(&mut self, context: &egui::Context) -> bool {
-        let event_paste = context.input(|input| {
-            input
-                .raw
-                .events
-                .iter()
-                .any(|event| matches!(event, egui::Event::Paste(_)))
-                || (input.modifiers.command && input.key_pressed(egui::Key::V))
-        });
-        #[cfg(target_os = "windows")]
-        let shortcut_down = {
-            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
-
-            const VK_V: i32 = 0x56;
-            // SAFETY: GetAsyncKeyState reads process-independent keyboard state and has no
-            // pointer or lifetime requirements.
-            unsafe { GetAsyncKeyState(VK_CONTROL as i32) < 0 && GetAsyncKeyState(VK_V) < 0 }
-        };
-        #[cfg(not(target_os = "windows"))]
-        let shortcut_down = false;
-
-        let shortcut_pressed = shortcut_down && !self.paste_shortcut_down;
-        self.paste_shortcut_down = shortcut_down;
-        event_paste || shortcut_pressed
     }
 
     fn handle_zoom_and_pan(&mut self, response: &egui::Response) -> bool {
