@@ -34,6 +34,7 @@ const ZOOM_STEP: f32 = 1.25;
 const PAN_MARGIN: f32 = 32.0;
 const MAX_BRUSH_SIZE: u16 = 64;
 const MAX_RECENT_COLORS: usize = 12;
+const COMPACT_SIDEBAR_WIDTH: f32 = 760.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PixelTool {
@@ -118,6 +119,8 @@ pub(super) struct PixelArtEditor {
     resize_anchor: PixelArtAnchor,
     clear_open: bool,
     export_error: Option<String>,
+    tools_open: bool,
+    color_open: bool,
 }
 
 impl PixelArtEditor {
@@ -150,6 +153,8 @@ impl PixelArtEditor {
             resize_anchor: PixelArtAnchor::Center,
             clear_open: false,
             export_error: None,
+            tools_open: false,
+            color_open: false,
         }
     }
 
@@ -165,11 +170,20 @@ impl PixelArtEditor {
         });
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) -> bool {
+    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16, compact: bool) -> bool {
         let mut export = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.strong(self.tool.label());
             ui.weak(format!("{width} × {height} px"));
+
+            if compact {
+                if ui.button("Tools").clicked() {
+                    self.tools_open = !self.tools_open;
+                }
+                if ui.button("Color").clicked() {
+                    self.color_open = !self.color_open;
+                }
+            }
 
             ui.separator();
             if ui.small_button("−").on_hover_text("Zoom out (-)").clicked() {
@@ -1032,9 +1046,10 @@ impl BlockEditor for PixelArtEditor {
         }
 
         let input_enabled = !self.resize_open && !self.clear_open;
+        let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
         let export = egui::Panel::top(egui::Id::new(("pixel-art-toolbar", self.block.id())))
             .show_separator_line(true)
-            .show_inside(ui, |ui| self.top_bar(ui, width, height))
+            .show_inside(ui, |ui| self.top_bar(ui, width, height, compact))
             .inner;
         let mut action = None;
         if export {
@@ -1063,16 +1078,34 @@ impl BlockEditor for PixelArtEditor {
         if let Some(error) = &self.export_error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
-        egui::Panel::left(egui::Id::new(("pixel-art-tools-panel", self.block.id())))
-            .default_size(172.0)
-            .resizable(false)
-            .show_inside(ui, |ui| self.tools_panel(ui));
-        egui::Panel::right(egui::Id::new(("pixel-art-color-panel", self.block.id())))
-            .default_size(210.0)
-            .min_size(190.0)
-            .max_size(280.0)
-            .resizable(true)
-            .show_inside(ui, |ui| self.color_panel(ui, &palette));
+        if compact {
+            let mut tools_open = self.tools_open;
+            egui::Window::new("Tools")
+                .id(egui::Id::new(("pixel-art-tools-window", self.block.id())))
+                .default_width(172.0)
+                .open(&mut tools_open)
+                .show(ui.ctx(), |ui| self.tools_panel(ui));
+            self.tools_open = tools_open;
+
+            let mut color_open = self.color_open;
+            egui::Window::new("Color")
+                .id(egui::Id::new(("pixel-art-color-window", self.block.id())))
+                .default_width(210.0)
+                .open(&mut color_open)
+                .show(ui.ctx(), |ui| self.color_panel(ui, &palette));
+            self.color_open = color_open;
+        } else {
+            egui::Panel::left(egui::Id::new(("pixel-art-tools-panel", self.block.id())))
+                .default_size(172.0)
+                .resizable(false)
+                .show_inside(ui, |ui| self.tools_panel(ui));
+            egui::Panel::right(egui::Id::new(("pixel-art-color-panel", self.block.id())))
+                .default_size(210.0)
+                .min_size(190.0)
+                .max_size(280.0)
+                .resizable(true)
+                .show_inside(ui, |ui| self.color_panel(ui, &palette));
+        }
         self.canvas(ui, width, height, input_enabled);
         self.resize_dialog(ui.ctx(), width, height);
         self.clear_dialog(ui.ctx());

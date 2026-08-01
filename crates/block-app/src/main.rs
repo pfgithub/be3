@@ -25,6 +25,7 @@ use tokio::net::TcpListener;
 use uuid::Uuid;
 
 const APP_ID: &str = "Block";
+const COMPACT_FILES_WIDTH: f32 = 700.0;
 const ACCOUNTS: [Account; 5] = [
     Account {
         name: "Account A",
@@ -113,6 +114,7 @@ struct BlockApp {
     dynamic_artifact_regenerations: HashMap<Uuid, Box<dyn DynamicArtifactRegeneration>>,
     dynamic_artifact_errors: HashMap<Uuid, String>,
     dock_state: DockState<DockTab>,
+    files_compact: bool,
     active_tab: Option<Uuid>,
     sidebar_reveal: Option<Uuid>,
     pending_transfers: Vec<PendingTransfer>,
@@ -151,6 +153,39 @@ fn ensure_empty_workspace(dock_state: &mut DockState<DockTab>) {
     }
     if let Some(files_path) = dock_state.find_tab(&DockTab::Files) {
         dock_state[files_path.surface].split_right(files_path.node, 0.22, vec![DockTab::Empty]);
+    }
+}
+
+fn set_files_compact(dock_state: &mut DockState<DockTab>, compact: bool) {
+    let active = dock_state
+        .find_active_focused()
+        .map(|(_, tab)| *tab)
+        .unwrap_or(DockTab::Files);
+    let Some(files_path) = dock_state.find_tab(&DockTab::Files) else {
+        return;
+    };
+    let target = dock_state
+        .iter_all_tabs()
+        .find_map(|(path, tab)| (*tab != DockTab::Files).then_some(path.node_path()));
+    let Some(target) = target else {
+        return;
+    };
+
+    dock_state.set_focused_node_and_surface(target);
+    dock_state.remove_tab(files_path);
+    if compact {
+        dock_state.push_to_focused_leaf(DockTab::Files);
+    } else if let Some(target) = dock_state.find_tab(&active).or_else(|| {
+        dock_state
+            .iter_all_tabs()
+            .find_map(|(path, tab)| (*tab != DockTab::Files).then_some(path))
+    }) {
+        dock_state[target.surface].split_left(target.node, 0.78, vec![DockTab::Files]);
+    }
+
+    if let Some(active_path) = dock_state.find_tab(&active) {
+        let _ = dock_state.set_active_tab(active_path);
+        dock_state.set_focused_node_and_surface(active_path.node_path());
     }
 }
 
@@ -239,6 +274,7 @@ impl BlockApp {
             dynamic_artifact_regenerations: HashMap::new(),
             dynamic_artifact_errors: HashMap::new(),
             dock_state: default_dock_state(),
+            files_compact: false,
             active_tab: None,
             sidebar_reveal: None,
             pending_transfers: Vec::new(),
@@ -281,6 +317,7 @@ impl BlockApp {
         self.dynamic_artifact_regenerations.clear();
         self.dynamic_artifact_errors.clear();
         self.dock_state = default_dock_state();
+        self.files_compact = false;
         self.active_tab = None;
         self.sidebar_reveal = None;
         self.pending_transfers.clear();
@@ -1294,6 +1331,11 @@ impl BlockApp {
 
     fn show_dock(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
         let mut dock_state = std::mem::replace(&mut self.dock_state, default_dock_state());
+        let files_compact = ui.available_width() < COMPACT_FILES_WIDTH;
+        if files_compact != self.files_compact {
+            set_files_compact(&mut dock_state, files_compact);
+            self.files_compact = files_compact;
+        }
         for (_, tab) in dock_state.iter_all_tabs() {
             if let DockTab::Block(id) = tab {
                 if let Some(editor) = self.editors.get_mut(id) {

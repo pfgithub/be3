@@ -53,6 +53,7 @@ const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
 const MAX_IMPORTED_IMAGE_SIZE: f32 = 600.0;
 const IMPORT_CASCADE_OFFSET: f32 = 24.0;
+const COMPACT_SIDEBAR_WIDTH: f32 = 700.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum CommonValue<T> {
@@ -170,6 +171,7 @@ pub(super) struct InfiniteCanvasEditor {
     image_import_error: Option<String>,
     pending_file_drop_position: Option<CanvasPoint>,
     clipboard_image_paste: ClipboardImagePaste,
+    inspector_open: bool,
 }
 
 impl InfiniteCanvasEditor {
@@ -192,6 +194,7 @@ impl InfiniteCanvasEditor {
             image_import_error: None,
             pending_file_drop_position: None,
             clipboard_image_paste: ClipboardImagePaste::default(),
+            inspector_open: false,
         }
     }
 
@@ -355,9 +358,12 @@ impl InfiniteCanvasEditor {
         &mut self,
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
+        show_heading: bool,
     ) -> Option<CanvasLayerMove> {
-        ui.heading("Inspector");
-        ui.separator();
+        if show_heading {
+            ui.heading("Inspector");
+            ui.separator();
+        }
         let selected = entities
             .iter()
             .filter(|entity| self.selection.contains(&entity.id))
@@ -554,9 +560,10 @@ impl InfiniteCanvasEditor {
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
         editors: &EditorAccess<'_>,
+        compact: bool,
     ) -> Option<Uuid> {
         let mut create_block = None;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (tool, label) in [
                 (Tool::Select, "Select"),
                 (Tool::Line, "Line"),
@@ -586,6 +593,10 @@ impl InfiniteCanvasEditor {
                     }
                 }
             });
+
+            if compact && ui.button("Inspector").clicked() {
+                self.inspector_open = !self.inspector_open;
+            }
 
             if let Some(block) = &self.armed_block {
                 ui.weak(format!(
@@ -1326,7 +1337,8 @@ impl BlockEditor for InfiniteCanvasEditor {
             .map(|dependency| (dependency.id, dependency.name.clone()))
             .collect();
 
-        let mut create_block = self.show_toolbar(ui, &entities, editors);
+        let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
+        let mut create_block = self.show_toolbar(ui, &entities, editors, compact);
         if let Some(error) = self.image_import_error.clone() {
             ui.horizontal(|ui| {
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -1336,14 +1348,26 @@ impl BlockEditor for InfiniteCanvasEditor {
             });
         }
         let mut inspector_layer_move = None;
-        egui::Panel::right(egui::Id::new(("canvas-inspector", self.block.id())))
-            .default_size(240.0)
-            .min_size(200.0)
-            .max_size(340.0)
-            .resizable(true)
-            .show_inside(ui, |ui| {
-                inspector_layer_move = self.show_inspector(ui, &entities);
-            });
+        if compact {
+            let mut open = self.inspector_open;
+            egui::Window::new("Inspector")
+                .id(egui::Id::new(("canvas-inspector-window", self.block.id())))
+                .default_width(240.0)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    inspector_layer_move = self.show_inspector(ui, &entities, false);
+                });
+            self.inspector_open = open;
+        } else {
+            egui::Panel::right(egui::Id::new(("canvas-inspector", self.block.id())))
+                .default_size(240.0)
+                .min_size(200.0)
+                .max_size(340.0)
+                .resizable(true)
+                .show_inside(ui, |ui| {
+                    inspector_layer_move = self.show_inspector(ui, &entities, true);
+                });
+        }
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         self.import_dropped_images(&response, editors);
