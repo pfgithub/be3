@@ -80,9 +80,19 @@ pub fn run() -> eframe::Result {
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
     let mut options = native_options();
     options.android_app = Some(app);
-    if let Err(error) = run_native(options) {
-        eprintln!("Block stopped: {error}");
-    }
+    let exit_code = match run_native(options) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("Block stopped: {error}");
+            1
+        }
+    };
+
+    // android-activity may start a later Activity instance on a new android_main thread in the
+    // same process. Eframe stores its event loop in thread-local state while winit permits only
+    // one event loop per process, so that later instance cannot reuse the original loop. End this
+    // native-only process once the loop exits so Android starts the next Activity in a clean one.
+    std::process::exit(exit_code);
 }
 
 struct BlockApp {
