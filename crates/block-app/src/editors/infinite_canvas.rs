@@ -1600,6 +1600,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .fixed_pos(screen.min)
                     .show(ui.ctx(), |ui| {
                         ui.set_clip_rect(screen.intersect(ui.clip_rect()));
+                        ui.set_max_size(screen.size());
                         ui.set_min_size(screen.size());
                         editors.direct_editor_ui(
                             block_id,
