@@ -6,6 +6,7 @@ license.workspace = true
 autobins = false
 
 [lib]
+name = "block_app_lib"
 path = "src/main.rs"
 crate-type = ["cdylib", "rlib"]
 
