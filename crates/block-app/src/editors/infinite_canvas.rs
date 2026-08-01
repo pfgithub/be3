@@ -1364,7 +1364,15 @@ impl InfiniteCanvasEditor {
             .collect();
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
-            paint_entity(self, painter, rect, entity, dependency_details, editors);
+            paint_entity(
+                self,
+                painter,
+                rect,
+                entity,
+                dependency_details,
+                editors,
+                1.0,
+            );
         }
 
         if let Some(Gesture::Create {
@@ -1520,6 +1528,51 @@ impl BlockEditor for InfiniteCanvasEditor {
         Some(&self.block)
     }
 
+    fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
+        let Some(canvas) = self.block.read() else {
+            return false;
+        };
+        let entities = canvas.entities().to_vec();
+        drop(canvas);
+
+        let intrinsic = canvas_intrinsic_size(&entities);
+        let width = context.corners[0].distance(context.corners[1]);
+        let height = context.corners[0].distance(context.corners[3]);
+        self.render_scale = (width / intrinsic.x)
+            .min(height / intrinsic.y)
+            .max(f32::EPSILON);
+        let center = Pos2::ZERO
+            + context
+                .corners
+                .iter()
+                .fold(Vec2::ZERO, |center, corner| center + corner.to_vec2())
+                / context.corners.len() as f32;
+        let rect = Rect::from_center_size(center, Vec2::new(width, height));
+        let dependencies = self.dependencies.read();
+        Self::ensure_dependency_editors(&entities, &dependencies, editors);
+        let dependency_details = dependencies
+            .iter()
+            .map(|dependency| {
+                (
+                    dependency.id,
+                    (dependency.name.clone(), dependency.block_type),
+                )
+            })
+            .collect();
+        for entity in &entities {
+            paint_entity(
+                self,
+                context.painter,
+                rect,
+                entity,
+                &dependency_details,
+                editors,
+                context.opacity,
+            );
+        }
+        true
+    }
+
     fn block_created(&mut self, id: Uuid, block_type: Uuid, author: Uuid, name: String) -> bool {
         if let Some(center) = self.pending_block_center.take() {
             self.add_block_entity(id, center);
@@ -1548,21 +1601,7 @@ impl BlockEditor for InfiniteCanvasEditor {
 
     fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
         let canvas = self.block.read()?;
-        let bounds = canvas
-            .entities()
-            .iter()
-            .map(entity_bounds)
-            .reduce(WorldRect::union);
-        let size = bounds.map_or_else(
-            || Vec2::splat(100.0),
-            |bounds| {
-                Vec2::new(
-                    bounds.min.x.abs().max(bounds.max.x.abs()) * 2.0,
-                    bounds.min.y.abs().max(bounds.max.y.abs()) * 2.0,
-                )
-            },
-        );
-        Some(size.max(Vec2::splat(100.0)))
+        Some(canvas_intrinsic_size(canvas.entities()))
     }
 
     fn direct_editor_top_bar(
@@ -1789,6 +1828,21 @@ fn focused_direct_editor(
         } if entity.id == focused => Some((entity.id, block_id, scale)),
         _ => None,
     })
+}
+
+fn canvas_intrinsic_size(entities: &[CanvasEntity]) -> Vec2 {
+    let bounds = entities.iter().map(entity_bounds).reduce(WorldRect::union);
+    bounds
+        .map_or_else(
+            || Vec2::splat(100.0),
+            |bounds| {
+                Vec2::new(
+                    bounds.min.x.abs().max(bounds.max.x.abs()) * 2.0,
+                    bounds.min.y.abs().max(bounds.max.y.abs()) * 2.0,
+                )
+            },
+        )
+        .max(Vec2::splat(100.0))
 }
 
 fn common_value<T: Copy + PartialEq>(values: impl IntoIterator<Item = T>) -> CommonValue<T> {
@@ -2381,9 +2435,10 @@ fn paint_entity(
     entity: &CanvasEntity,
     dependency_details: &HashMap<Uuid, (String, Uuid)>,
     editors: &mut EditorAccess<'_>,
+    parent_opacity: f32,
 ) {
     let auto = painter.ctx().global_style().visuals.text_color();
-    let opacity = entity.style.opacity.clamp(0.0, 1.0);
+    let opacity = (entity.style.opacity * parent_opacity).clamp(0.0, 1.0);
     let color = with_opacity(resolve_color(entity.style.foreground, auto), opacity);
     let stroke = Stroke::new(
         (entity.style.line_width.max(0.0) * editor.render_scale).max(0.1),

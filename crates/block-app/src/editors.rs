@@ -172,12 +172,8 @@ impl<'a> EditorAccess<'a> {
     }
 
     pub fn render(&mut self, id: Uuid, context: BlockRenderContext<'_>) -> bool {
-        let Some(mut editor) = self.editors.remove(&id) else {
-            return false;
-        };
-        let rendered = editor.render(context);
-        self.editors.insert(id, editor);
-        rendered
+        self.with_editor(id, |editor, editors| editor.render(context, editors))
+            .unwrap_or(false)
     }
 
     pub fn direct_editor_capabilities(&self, id: Uuid) -> Option<DirectEditorCapabilities> {
@@ -292,7 +288,11 @@ pub trait BlockEditor {
     fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
         None
     }
-    fn render(&mut self, _context: BlockRenderContext<'_>) -> bool {
+    fn render(
+        &mut self,
+        _context: BlockRenderContext<'_>,
+        _editors: &mut EditorAccess<'_>,
+    ) -> bool {
         false
     }
     fn render_aspect_ratio(&self) -> Option<f32> {

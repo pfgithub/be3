@@ -188,7 +188,11 @@ impl BlockEditor for ImageEditor {
         self.block.note_backref(id);
     }
 
-    fn render(&mut self, context: BlockRenderContext<'_>) -> bool {
+    fn render(
+        &mut self,
+        context: BlockRenderContext<'_>,
+        _editors: &mut super::EditorAccess<'_>,
+    ) -> bool {
         if !self.ensure_texture(context.painter.ctx()) {
             return false;
         }

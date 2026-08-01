@@ -505,7 +505,11 @@ impl BlockEditor for DatabaseEditor {
         self.block.note_backref(id);
     }
 
-    fn render(&mut self, context: BlockRenderContext<'_>) -> bool {
+    fn render(
+        &mut self,
+        context: BlockRenderContext<'_>,
+        _editors: &mut super::EditorAccess<'_>,
+    ) -> bool {
         let Some(database) = self.block.read() else {
             return false;
         };

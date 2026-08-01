@@ -1171,7 +1171,11 @@ impl BlockEditor for PixelArtEditor {
         Some(&self.block)
     }
 
-    fn render(&mut self, context: BlockRenderContext<'_>) -> bool {
+    fn render(
+        &mut self,
+        context: BlockRenderContext<'_>,
+        _editors: &mut super::EditorAccess<'_>,
+    ) -> bool {
         let dark_mode = context.painter.ctx().global_style().visuals.dark_mode;
         if self
             .ensure_texture(context.painter.ctx(), dark_mode)
