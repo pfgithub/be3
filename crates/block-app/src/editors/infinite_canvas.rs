@@ -911,6 +911,7 @@ impl InfiniteCanvasEditor {
         response: &egui::Response,
         entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
+        direct_editor_rects: &[Rect],
     ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<Uuid>) {
         let escape_pressed = response
             .ctx
@@ -938,13 +939,23 @@ impl InfiniteCanvasEditor {
             self.record_action(InfiniteCanvasOperation::Remove { ids });
         }
 
+        let pointer = response
+            .interact_pointer_pos()
+            .or_else(|| response.ctx.pointer_hover_pos());
+        if self.focused_editor.is_some()
+            && pointer.is_some_and(|pointer| {
+                direct_editor_rects
+                    .iter()
+                    .any(|rect| rect.contains(pointer))
+            })
+        {
+            return (None, None, None);
+        }
+
         if self.handle_zoom_and_pan(response) {
             return (None, None, None);
         }
 
-        let pointer = response
-            .interact_pointer_pos()
-            .or_else(|| response.ctx.pointer_hover_pos());
         let world = pointer.map(|point| self.screen_to_world(point, response.rect));
 
         if let Some(dragged) = response.dnd_hover_payload::<SidebarDragPayload>() {
@@ -1559,11 +1570,13 @@ impl BlockEditor for InfiniteCanvasEditor {
             &dependency_titles,
             editors,
         );
+        let mut direct_editor_rects = Vec::new();
         if let Some((entity_id, block_id, scale)) =
             focused.filter(|_| self.focused_editor.is_some())
         {
             if let Some(entity) = entities.iter().find(|entity| entity.id == entity_id) {
                 let screen = screen_rect(self, entity_bounds(entity), canvas_rect);
+                direct_editor_rects.push(screen);
                 let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
                     .order(egui::Order::Foreground)
                     .fixed_pos(screen.min)
@@ -1615,6 +1628,9 @@ impl BlockEditor for InfiniteCanvasEditor {
             });
         let (top_action, mut create_block) = top_bar.inner;
         action = action.or(top_action);
+        if focused.is_some() {
+            direct_editor_rects.push(top_bar.response.rect);
+        }
         let sidebar_top = top_bar
             .response
             .rect
@@ -1623,28 +1639,35 @@ impl BlockEditor for InfiniteCanvasEditor {
         let sidebar_height = (canvas_rect.bottom() - sidebar_top).max(1.0);
 
         let mut inspector_layer_move = None;
-        let mut sidebar_action = None;
-        let focused_sidebar = focused.filter(|(_, block_id, _)| {
-            self.focused_editor.is_some() && editors.direct_editor_has_sidebar(*block_id)
+        let mut left_sidebar_action = None;
+        let mut right_sidebar_action = None;
+        let focused_left_sidebar = focused.filter(|(_, block_id, _)| {
+            self.focused_editor.is_some() && editors.direct_editor_has_left_sidebar(*block_id)
         });
-        if let Some((_, block_id, _)) = focused_sidebar {
+        if let Some((_, block_id, _)) = focused_left_sidebar {
             if compact {
-                egui::Window::new("Editor")
+                if let Some(window) = egui::Window::new("Left sidebar")
                     .id(egui::Id::new((
-                        "canvas-direct-editor-sidebar-window",
+                        "canvas-direct-editor-left-sidebar-window",
                         block_id,
                     )))
                     .default_width(240.0)
+                    .default_pos(Pos2::new(canvas_rect.left() + 16.0, sidebar_top + 16.0))
                     .show(ui.ctx(), |ui| {
-                        sidebar_action = editors.direct_editor_sidebar(block_id, ui);
-                    });
+                        left_sidebar_action = editors.direct_editor_left_sidebar(block_id, ui);
+                    })
+                {
+                    direct_editor_rects.push(window.response.rect);
+                }
             } else {
-                egui::Window::new("Editor")
-                    .id(egui::Id::new(("canvas-direct-editor-sidebar", block_id)))
+                if let Some(window) = egui::Window::new("Left sidebar")
+                    .id(egui::Id::new((
+                        "canvas-direct-editor-left-sidebar",
+                        block_id,
+                    )))
                     .order(egui::Order::Foreground)
                     .title_bar(false)
-                    .pivot(egui::Align2::RIGHT_TOP)
-                    .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
+                    .fixed_pos(Pos2::new(canvas_rect.left(), sidebar_top))
                     .constrain_to(canvas_rect)
                     .default_width(240.0)
                     .min_width(200.0)
@@ -1655,8 +1678,55 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .resizable([true, false])
                     .vscroll(true)
                     .show(ui.ctx(), |ui| {
-                        sidebar_action = editors.direct_editor_sidebar(block_id, ui);
-                    });
+                        left_sidebar_action = editors.direct_editor_left_sidebar(block_id, ui);
+                    })
+                {
+                    direct_editor_rects.push(window.response.rect);
+                }
+            }
+        }
+        let focused_right_sidebar = focused.filter(|(_, block_id, _)| {
+            self.focused_editor.is_some() && editors.direct_editor_has_right_sidebar(*block_id)
+        });
+        if let Some((_, block_id, _)) = focused_right_sidebar {
+            if compact {
+                if let Some(window) = egui::Window::new("Right sidebar")
+                    .id(egui::Id::new((
+                        "canvas-direct-editor-right-sidebar-window",
+                        block_id,
+                    )))
+                    .pivot(egui::Align2::RIGHT_TOP)
+                    .default_width(240.0)
+                    .default_pos(Pos2::new(canvas_rect.right() - 16.0, sidebar_top + 16.0))
+                    .show(ui.ctx(), |ui| {
+                        right_sidebar_action = editors.direct_editor_right_sidebar(block_id, ui);
+                    })
+                {
+                    direct_editor_rects.push(window.response.rect);
+                }
+            } else if let Some(window) = egui::Window::new("Right sidebar")
+                .id(egui::Id::new((
+                    "canvas-direct-editor-right-sidebar",
+                    block_id,
+                )))
+                .order(egui::Order::Foreground)
+                .title_bar(false)
+                .pivot(egui::Align2::RIGHT_TOP)
+                .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
+                .constrain_to(canvas_rect)
+                .default_width(240.0)
+                .min_width(200.0)
+                .max_width(340.0)
+                .default_height(sidebar_height)
+                .min_height(sidebar_height)
+                .max_height(sidebar_height)
+                .resizable([true, false])
+                .vscroll(true)
+                .show(ui.ctx(), |ui| {
+                    right_sidebar_action = editors.direct_editor_right_sidebar(block_id, ui);
+                })
+            {
+                direct_editor_rects.push(window.response.rect);
             }
         } else if self.focused_editor.is_none() && compact {
             let mut open = self.inspector_open;
@@ -1688,9 +1758,9 @@ impl BlockEditor for InfiniteCanvasEditor {
                     inspector_layer_move = self.show_inspector(ui, &entities, true);
                 });
         }
-        action = action.or(sidebar_action);
+        action = action.or(left_sidebar_action).or(right_sidebar_action);
         let (context_layer_move, context_create_block, set_parent) =
-            self.handle_canvas_input(&response, &entities, editors);
+            self.handle_canvas_input(&response, &entities, editors, &direct_editor_rects);
         create_block = create_block.or(context_create_block);
         if let Some(movement) = context_layer_move.or(inspector_layer_move) {
             let operation = InfiniteCanvasOperation::Reorder {

@@ -134,15 +134,36 @@ impl<'a> EditorAccess<'a> {
         action
     }
 
-    pub fn direct_editor_has_sidebar(&self, id: Uuid) -> bool {
+    pub fn direct_editor_has_left_sidebar(&self, id: Uuid) -> bool {
         self.editors
             .get(&id)
-            .is_some_and(|editor| editor.direct_editor_has_sidebar())
+            .is_some_and(|editor| editor.direct_editor_has_left_sidebar())
     }
 
-    pub fn direct_editor_sidebar(&mut self, id: Uuid, ui: &mut egui::Ui) -> Option<EditorAction> {
+    pub fn direct_editor_left_sidebar(
+        &mut self,
+        id: Uuid,
+        ui: &mut egui::Ui,
+    ) -> Option<EditorAction> {
         let mut editor = self.editors.remove(&id)?;
-        let action = editor.direct_editor_sidebar(ui, self.client);
+        let action = editor.direct_editor_left_sidebar(ui, self.client);
+        self.editors.insert(id, editor);
+        action
+    }
+
+    pub fn direct_editor_has_right_sidebar(&self, id: Uuid) -> bool {
+        self.editors
+            .get(&id)
+            .is_some_and(|editor| editor.direct_editor_has_right_sidebar())
+    }
+
+    pub fn direct_editor_right_sidebar(
+        &mut self,
+        id: Uuid,
+        ui: &mut egui::Ui,
+    ) -> Option<EditorAction> {
+        let mut editor = self.editors.remove(&id)?;
+        let action = editor.direct_editor_right_sidebar(ui, self.client);
         self.editors.insert(id, editor);
         action
     }
@@ -224,10 +245,20 @@ pub trait BlockEditor {
     ) -> Option<EditorAction> {
         None
     }
-    fn direct_editor_has_sidebar(&self) -> bool {
+    fn direct_editor_has_left_sidebar(&self) -> bool {
         false
     }
-    fn direct_editor_sidebar(
+    fn direct_editor_left_sidebar(
+        &mut self,
+        _ui: &mut egui::Ui,
+        _client: &BlockClient,
+    ) -> Option<EditorAction> {
+        None
+    }
+    fn direct_editor_has_right_sidebar(&self) -> bool {
+        false
+    }
+    fn direct_editor_right_sidebar(
         &mut self,
         _ui: &mut egui::Ui,
         _client: &BlockClient,

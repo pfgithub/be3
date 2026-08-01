@@ -1189,18 +1189,29 @@ impl BlockEditor for PixelArtEditor {
         export.then(|| self.export(client)).flatten()
     }
 
-    fn direct_editor_has_sidebar(&self) -> bool {
+    fn direct_editor_has_left_sidebar(&self) -> bool {
         true
     }
 
-    fn direct_editor_sidebar(
+    fn direct_editor_left_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        _client: &BlockClient,
+    ) -> Option<EditorAction> {
+        self.tools_panel(ui);
+        None
+    }
+
+    fn direct_editor_has_right_sidebar(&self) -> bool {
+        true
+    }
+
+    fn direct_editor_right_sidebar(
         &mut self,
         ui: &mut egui::Ui,
         _client: &BlockClient,
     ) -> Option<EditorAction> {
         let palette = self.block.read()?.palette().to_vec();
-        self.tools_panel(ui);
-        ui.separator();
         self.color_panel(ui, &palette);
         None
     }
