@@ -1723,10 +1723,14 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .unwrap_or_else(|| screen_rect(self, entity_bounds(entity), canvas_rect));
                 let visible_screen = screen.intersect(canvas_clip_rect);
                 direct_editor_rects.push(visible_screen);
-                let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
-                    .constrain(false)
-                    .fixed_pos(screen.min)
-                    .show(ui.ctx(), |ui| {
+                let embedded = ui
+                    .new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(("canvas-direct-editor", entity_id))
+                            .max_rect(screen)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    )
+                    .scope(|ui| {
                         ui.set_clip_rect(visible_screen.intersect(ui.clip_rect()));
                         ui.set_max_size(screen.size());
                         ui.set_min_size(screen.size());
