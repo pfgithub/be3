@@ -23,7 +23,6 @@ use self::unsupported::UnsupportedEditor;
 const COMPACT_DIRECT_EDITOR_WIDTH: f32 = 760.0;
 const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
 const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
-const DIRECT_EDITOR_PAN_MARGIN: f32 = 32.0;
 
 pub enum EditorAction {
     OpenBlock {
@@ -99,7 +98,7 @@ impl DirectEditorViewport {
 }
 
 pub struct EditorAccess<'a> {
-    active: Uuid,
+    active: Vec<Uuid>,
     client: &'a BlockClient,
     registry: &'a EditorRegistry,
     editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
@@ -113,7 +112,7 @@ impl<'a> EditorAccess<'a> {
         editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
     ) -> Self {
         Self {
-            active,
+            active: vec![active],
             client,
             registry,
             editors,
@@ -130,7 +129,10 @@ impl<'a> EditorAccess<'a> {
 
     pub fn insert(&mut self, editor: Box<dyn BlockEditor>) {
         let id = editor.id();
-        assert_ne!(id, self.active, "cannot replace the active editor");
+        assert!(
+            !self.active.contains(&id),
+            "cannot replace an active editor"
+        );
         assert!(
             self.editors.insert(id, editor).is_none(),
             "editor {id} is already open"
@@ -138,10 +140,23 @@ impl<'a> EditorAccess<'a> {
     }
 
     pub fn ensure(&mut self, id: Uuid, block_type: Uuid) {
-        if id != self.active && !self.editors.contains_key(&id) {
+        if !self.active.contains(&id) && !self.editors.contains_key(&id) {
             self.editors
                 .insert(id, self.registry.open(self.client, id, block_type));
         }
+    }
+
+    fn with_editor<T>(
+        &mut self,
+        id: Uuid,
+        callback: impl FnOnce(&mut dyn BlockEditor, &mut Self) -> T,
+    ) -> Option<T> {
+        let mut editor = self.editors.remove(&id)?;
+        self.active.push(id);
+        let result = callback(editor.as_mut(), self);
+        assert_eq!(self.active.pop(), Some(id));
+        self.editors.insert(id, editor);
+        Some(result)
     }
 
     pub fn default_preserve_aspect_ratio(&self, id: Uuid) -> bool {
@@ -172,10 +187,9 @@ impl<'a> EditorAccess<'a> {
     }
 
     pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
-        let mut editor = self.editors.remove(&id)?;
-        let size = editor.direct_editor_intrinsic_size(self.client);
-        self.editors.insert(id, editor);
-        size
+        self.with_editor(id, |editor, editors| {
+            editor.direct_editor_intrinsic_size(editors)
+        })?
     }
 
     pub fn direct_editor_top_bar(
@@ -184,16 +198,16 @@ impl<'a> EditorAccess<'a> {
         ui: &mut egui::Ui,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let mut editor = self.editors.remove(&id)?;
-        let action = editor.direct_editor_top_bar(ui, self.client, viewport);
-        self.editors.insert(id, editor);
-        action
+        self.with_editor(id, |editor, editors| {
+            editor.direct_editor_top_bar(ui, editors, viewport)
+        })?
     }
 
-    pub fn direct_editor_has_left_sidebar(&self, id: Uuid) -> bool {
-        self.editors
-            .get(&id)
-            .is_some_and(|editor| editor.direct_editor_has_left_sidebar())
+    pub fn direct_editor_has_left_sidebar(&mut self, id: Uuid) -> bool {
+        self.with_editor(id, |editor, editors| {
+            editor.direct_editor_has_left_sidebar(editors)
+        })
+        .unwrap_or(false)
     }
 
     pub fn direct_editor_left_sidebar(
@@ -201,16 +215,16 @@ impl<'a> EditorAccess<'a> {
         id: Uuid,
         ui: &mut egui::Ui,
     ) -> Option<EditorAction> {
-        let mut editor = self.editors.remove(&id)?;
-        let action = editor.direct_editor_left_sidebar(ui, self.client);
-        self.editors.insert(id, editor);
-        action
+        self.with_editor(id, |editor, editors| {
+            editor.direct_editor_left_sidebar(ui, editors)
+        })?
     }
 
-    pub fn direct_editor_has_right_sidebar(&self, id: Uuid) -> bool {
-        self.editors
-            .get(&id)
-            .is_some_and(|editor| editor.direct_editor_has_right_sidebar())
+    pub fn direct_editor_has_right_sidebar(&mut self, id: Uuid) -> bool {
+        self.with_editor(id, |editor, editors| {
+            editor.direct_editor_has_right_sidebar(editors)
+        })
+        .unwrap_or(false)
     }
 
     pub fn direct_editor_right_sidebar(
@@ -218,10 +232,9 @@ impl<'a> EditorAccess<'a> {
         id: Uuid,
         ui: &mut egui::Ui,
     ) -> Option<EditorAction> {
-        let mut editor = self.editors.remove(&id)?;
-        let action = editor.direct_editor_right_sidebar(ui, self.client);
-        self.editors.insert(id, editor);
-        action
+        self.with_editor(id, |editor, editors| {
+            editor.direct_editor_right_sidebar(ui, editors)
+        })?
     }
 
     pub fn direct_editor_ui(
@@ -231,10 +244,9 @@ impl<'a> EditorAccess<'a> {
         scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let mut editor = self.editors.remove(&id)?;
-        let action = editor.direct_editor_ui(ui, self.client, scale, viewport);
-        self.editors.insert(id, editor);
-        action
+        self.with_editor(id, |editor, editors| {
+            editor.direct_editor_ui(ui, editors, scale, viewport)
+        })?
     }
 }
 
@@ -292,41 +304,44 @@ pub trait BlockEditor {
     fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
         None
     }
-    fn direct_editor_intrinsic_size(&mut self, _client: &BlockClient) -> Option<egui::Vec2> {
+    fn direct_editor_intrinsic_size(
+        &mut self,
+        _editors: &mut EditorAccess<'_>,
+    ) -> Option<egui::Vec2> {
         None
     }
     fn direct_editor_top_bar(
         &mut self,
         _ui: &mut egui::Ui,
-        _client: &BlockClient,
+        _editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         None
     }
-    fn direct_editor_has_left_sidebar(&self) -> bool {
+    fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
         false
     }
     fn direct_editor_left_sidebar(
         &mut self,
         _ui: &mut egui::Ui,
-        _client: &BlockClient,
+        _editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         None
     }
-    fn direct_editor_has_right_sidebar(&self) -> bool {
+    fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
         false
     }
     fn direct_editor_right_sidebar(
         &mut self,
         _ui: &mut egui::Ui,
-        _client: &BlockClient,
+        _editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         None
     }
     fn direct_editor_ui(
         &mut self,
         _ui: &mut egui::Ui,
-        _client: &BlockClient,
+        _editors: &mut EditorAccess<'_>,
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
@@ -345,7 +360,7 @@ pub trait BlockEditor {
 pub fn direct_editor_tab_ui(
     editor: &mut dyn BlockEditor,
     ui: &mut egui::Ui,
-    client: &BlockClient,
+    editors: &mut EditorAccess<'_>,
 ) -> Option<EditorAction> {
     let id = editor.id();
     let compact = ui.available_width() < COMPACT_DIRECT_EDITOR_WIDTH;
@@ -361,7 +376,7 @@ pub fn direct_editor_tab_ui(
     egui::Panel::top(egui::Id::new(("direct-editor-tab-toolbar", id)))
         .show_separator_line(true)
         .show_inside(ui, |ui| {
-            let next_action = editor.direct_editor_top_bar(ui, client, &mut viewport);
+            let next_action = editor.direct_editor_top_bar(ui, editors, &mut viewport);
             if action.is_none() {
                 action = next_action;
             }
@@ -369,53 +384,53 @@ pub fn direct_editor_tab_ui(
 
     if compact {
         let available = ui.available_rect_before_wrap();
-        if editor.direct_editor_has_left_sidebar() {
+        if editor.direct_editor_has_left_sidebar(editors) {
             egui::Window::new("Left sidebar")
                 .id(egui::Id::new(("direct-editor-tab-left-window", id)))
                 .default_width(240.0)
                 .default_pos(available.left_top() + egui::vec2(16.0, 16.0))
                 .show(ui.ctx(), |ui| {
-                    let next_action = editor.direct_editor_left_sidebar(ui, client);
+                    let next_action = editor.direct_editor_left_sidebar(ui, editors);
                     if action.is_none() {
                         action = next_action;
                     }
                 });
         }
-        if editor.direct_editor_has_right_sidebar() {
+        if editor.direct_editor_has_right_sidebar(editors) {
             egui::Window::new("Right sidebar")
                 .id(egui::Id::new(("direct-editor-tab-right-window", id)))
                 .pivot(egui::Align2::RIGHT_TOP)
                 .default_width(240.0)
                 .default_pos(available.right_top() + egui::vec2(-16.0, 16.0))
                 .show(ui.ctx(), |ui| {
-                    let next_action = editor.direct_editor_right_sidebar(ui, client);
+                    let next_action = editor.direct_editor_right_sidebar(ui, editors);
                     if action.is_none() {
                         action = next_action;
                     }
                 });
         }
     } else {
-        if editor.direct_editor_has_left_sidebar() {
+        if editor.direct_editor_has_left_sidebar(editors) {
             egui::Panel::left(egui::Id::new(("direct-editor-tab-left", id)))
                 .default_size(240.0)
                 .min_size(200.0)
                 .max_size(340.0)
                 .resizable(true)
                 .show_inside(ui, |ui| {
-                    let next_action = editor.direct_editor_left_sidebar(ui, client);
+                    let next_action = editor.direct_editor_left_sidebar(ui, editors);
                     if action.is_none() {
                         action = next_action;
                     }
                 });
         }
-        if editor.direct_editor_has_right_sidebar() {
+        if editor.direct_editor_has_right_sidebar(editors) {
             egui::Panel::right(egui::Id::new(("direct-editor-tab-right", id)))
                 .default_size(240.0)
                 .min_size(200.0)
                 .max_size(340.0)
                 .resizable(true)
                 .show_inside(ui, |ui| {
-                    let next_action = editor.direct_editor_right_sidebar(ui, client);
+                    let next_action = editor.direct_editor_right_sidebar(ui, editors);
                     if action.is_none() {
                         action = next_action;
                     }
@@ -425,7 +440,7 @@ pub fn direct_editor_tab_ui(
 
     let viewport_size = ui.available_size().max(egui::Vec2::splat(1.0));
     let intrinsic_size = editor
-        .direct_editor_intrinsic_size(client)
+        .direct_editor_intrinsic_size(editors)
         .unwrap_or_default();
     let content_size = egui::vec2(
         viewport_size.x.max(intrinsic_size.x),
@@ -434,7 +449,6 @@ pub fn direct_editor_tab_ui(
     if capabilities.supports_pan_and_zoom {
         let (viewport_rect, _) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
         let transformed_size = content_size * viewport_state.zoom;
-        constrain_direct_editor_pan(&mut viewport_state.pan, viewport_size, transformed_size);
         let content_rect = egui::Rect::from_center_size(
             viewport_rect.center() + viewport_state.pan,
             transformed_size,
@@ -449,12 +463,19 @@ pub fn direct_editor_tab_ui(
             .scope(|ui| {
                 ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
                 ui.set_min_size(transformed_size);
-                editor.direct_editor_ui(ui, client, viewport_state.zoom, &mut viewport)
+                editor.direct_editor_ui(ui, editors, viewport_state.zoom, &mut viewport)
             })
             .inner;
         if action.is_none() {
             action = next_action;
         }
+
+        handle_direct_editor_background_input(
+            ui.ctx(),
+            viewport_rect,
+            content_rect,
+            &mut viewport_state,
+        );
 
         for command in viewport.drain() {
             match command {
@@ -476,11 +497,6 @@ pub fn direct_editor_tab_ui(
                 }
             }
         }
-        constrain_direct_editor_pan(
-            &mut viewport_state.pan,
-            viewport_size,
-            content_size * viewport_state.zoom,
-        );
         ui.ctx()
             .data_mut(|data| data.insert_temp(viewport_id, viewport_state));
     } else {
@@ -488,7 +504,7 @@ pub fn direct_editor_tab_ui(
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_min_size(content_size);
-                let next_action = editor.direct_editor_ui(ui, client, 1.0, &mut viewport);
+                let next_action = editor.direct_editor_ui(ui, editors, 1.0, &mut viewport);
                 if action.is_none() {
                     action = next_action;
                 }
@@ -496,6 +512,42 @@ pub fn direct_editor_tab_ui(
     }
 
     action
+}
+
+fn handle_direct_editor_background_input(
+    context: &egui::Context,
+    viewport_rect: egui::Rect,
+    content_rect: egui::Rect,
+    viewport: &mut DirectEditorTabViewport,
+) {
+    let Some(pointer) = context
+        .pointer_hover_pos()
+        .filter(|pointer| viewport_rect.contains(*pointer) && !content_rect.contains(*pointer))
+    else {
+        return;
+    };
+    let (scroll, panning, delta) = context.input(|input| {
+        (
+            input.smooth_scroll_delta.y,
+            input.pointer.button_down(egui::PointerButton::Middle)
+                || (input.key_down(egui::Key::Space)
+                    && input.pointer.button_down(egui::PointerButton::Primary)),
+            input.pointer.delta(),
+        )
+    });
+    if panning {
+        viewport.pan += delta;
+    }
+    if scroll != 0.0 {
+        let old_zoom = viewport.zoom;
+        let new_zoom = (old_zoom * (scroll * 0.002).exp())
+            .clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+        if new_zoom != old_zoom {
+            viewport.pan = (pointer - viewport_rect.center())
+                - ((pointer - viewport_rect.center()) - viewport.pan) * (new_zoom / old_zoom);
+            viewport.zoom = new_zoom;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -509,20 +561,6 @@ impl Default for DirectEditorTabViewport {
         Self {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
-        }
-    }
-}
-
-fn constrain_direct_editor_pan(pan: &mut egui::Vec2, viewport: egui::Vec2, content: egui::Vec2) {
-    for (pan, viewport, content) in [
-        (&mut pan.x, viewport.x, content.x),
-        (&mut pan.y, viewport.y, content.y),
-    ] {
-        if content <= viewport {
-            *pan = 0.0;
-        } else {
-            let limit = (content - viewport) * 0.5 + DIRECT_EDITOR_PAN_MARGIN.min(viewport * 0.5);
-            *pan = pan.clamp(-limit, limit);
         }
     }
 }

@@ -1290,11 +1290,11 @@ impl BlockApp {
             });
             ui.separator();
         }
+        let mut editors =
+            EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
         let action = if editor.direct_editor_capabilities().is_some() {
-            direct_editor_tab_ui(editor.as_mut(), ui, &self.client)
+            direct_editor_tab_ui(editor.as_mut(), ui, &mut editors)
         } else {
-            let mut editors =
-                EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
             editor.ui(ui, &mut editors, frame)
         };
         self.editors.insert(active, editor);

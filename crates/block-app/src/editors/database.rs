@@ -531,8 +531,11 @@ impl BlockEditor for DatabaseEditor {
         })
     }
 
-    fn direct_editor_intrinsic_size(&mut self, client: &BlockClient) -> Option<egui::Vec2> {
-        let (_, rows, fields) = self.data(client)?;
+    fn direct_editor_intrinsic_size(
+        &mut self,
+        editors: &mut super::EditorAccess<'_>,
+    ) -> Option<egui::Vec2> {
+        let (_, rows, fields) = self.data(editors.client())?;
         Some(egui::vec2(
             ROW_HEADER_WIDTH
                 + fields
@@ -546,21 +549,21 @@ impl BlockEditor for DatabaseEditor {
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
-        client: &BlockClient,
+        editors: &mut super::EditorAccess<'_>,
         _viewport: &mut super::DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let (schema_id, rows, fields) = self.data(client)?;
+        let (schema_id, rows, fields) = self.data(editors.client())?;
         self.controls(ui, schema_id, &rows, &fields)
     }
 
     fn direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
-        client: &BlockClient,
+        editors: &mut super::EditorAccess<'_>,
         scale: f32,
         _viewport: &mut super::DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let (_, rows, fields) = self.data(client)?;
+        let (_, rows, fields) = self.data(editors.client())?;
         if fields.is_empty() {
             let rect = ui.available_rect_before_wrap();
             ui.painter()

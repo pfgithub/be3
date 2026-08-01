@@ -1200,7 +1200,10 @@ impl BlockEditor for PixelArtEditor {
         })
     }
 
-    fn direct_editor_intrinsic_size(&mut self, _client: &BlockClient) -> Option<Vec2> {
+    fn direct_editor_intrinsic_size(
+        &mut self,
+        _editors: &mut super::EditorAccess<'_>,
+    ) -> Option<Vec2> {
         let art = self.block.read()?;
         let width = f32::from(art.width());
         let height = f32::from(art.height());
@@ -1212,7 +1215,7 @@ impl BlockEditor for PixelArtEditor {
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
-        client: &BlockClient,
+        editors: &mut super::EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let art = self.block.read()?;
@@ -1221,30 +1224,30 @@ impl BlockEditor for PixelArtEditor {
         drop(art);
         let export = self.top_bar(ui, width, height, viewport);
         self.show_export_error(ui);
-        export.then(|| self.export(client)).flatten()
+        export.then(|| self.export(editors.client())).flatten()
     }
 
-    fn direct_editor_has_left_sidebar(&self) -> bool {
+    fn direct_editor_has_left_sidebar(&self, _editors: &mut super::EditorAccess<'_>) -> bool {
         true
     }
 
     fn direct_editor_left_sidebar(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &BlockClient,
+        _editors: &mut super::EditorAccess<'_>,
     ) -> Option<EditorAction> {
         self.tools_panel(ui);
         None
     }
 
-    fn direct_editor_has_right_sidebar(&self) -> bool {
+    fn direct_editor_has_right_sidebar(&self, _editors: &mut super::EditorAccess<'_>) -> bool {
         true
     }
 
     fn direct_editor_right_sidebar(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &BlockClient,
+        _editors: &mut super::EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let palette = self.block.read()?.palette().to_vec();
         self.color_panel(ui, &palette);
@@ -1254,7 +1257,7 @@ impl BlockEditor for PixelArtEditor {
     fn direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _client: &BlockClient,
+        _editors: &mut super::EditorAccess<'_>,
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {

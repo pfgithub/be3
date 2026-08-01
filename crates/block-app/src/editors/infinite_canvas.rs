@@ -14,8 +14,8 @@ use block_client::{
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW,
-    ICON_FORMAT_COLOR_RESET, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_TUNE,
-    ICON_ZOOM_IN, ICON_ZOOM_OUT,
+    ICON_FORMAT_COLOR_RESET, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_ZOOM_IN,
+    ICON_ZOOM_OUT,
 };
 use uuid::Uuid;
 
@@ -24,8 +24,8 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, DirectEditorViewport, DirectEditorViewportCommand,
-    EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorRegistration, SidebarDragPayload,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -55,12 +55,9 @@ const MIN_SIZE: f32 = 4.0;
 const HIT_RADIUS: f32 = 7.0;
 const HANDLE_RADIUS: f32 = 5.0;
 const ROTATE_OFFSET: f32 = 28.0;
-const MIN_ZOOM: f32 = 0.1;
-const MAX_ZOOM: f32 = 8.0;
 const ZOOM_STEP: f32 = 1.25;
 const MAX_IMPORTED_IMAGE_SIZE: f32 = 600.0;
 const IMPORT_CASCADE_OFFSET: f32 = 24.0;
-const COMPACT_SIDEBAR_WIDTH: f32 = 700.0;
 const DIRECT_EDITOR_PADDING: f32 = 12.0;
 const DIRECT_EDITOR_TITLE_HEIGHT: f32 = 28.0;
 const DIRECT_EDITOR_TITLE_GAP: f32 = 8.0;
@@ -175,8 +172,7 @@ enum Gesture {
 pub(super) struct InfiniteCanvasEditor {
     block: BlockHandle<InfiniteCanvas>,
     tool: Tool,
-    camera: CanvasPoint,
-    zoom: f32,
+    render_scale: f32,
     selection: HashSet<Uuid>,
     gesture: Option<Gesture>,
     picker: BlockPicker,
@@ -189,7 +185,6 @@ pub(super) struct InfiniteCanvasEditor {
     image_import_error: Option<String>,
     pending_file_drop_position: Option<CanvasPoint>,
     clipboard_image_paste: ClipboardImagePaste,
-    inspector_open: bool,
     focused_editor: Option<Uuid>,
 }
 
@@ -199,8 +194,7 @@ impl InfiniteCanvasEditor {
         Self {
             block,
             tool: Tool::Select,
-            camera: CanvasPoint::default(),
-            zoom: 1.0,
+            render_scale: 1.0,
             selection: HashSet::new(),
             gesture: None,
             picker: BlockPicker::default(),
@@ -213,7 +207,6 @@ impl InfiniteCanvasEditor {
             image_import_error: None,
             pending_file_drop_position: None,
             clipboard_image_paste: ClipboardImagePaste::default(),
-            inspector_open: false,
             focused_editor: None,
         }
     }
@@ -237,18 +230,14 @@ impl InfiniteCanvasEditor {
     }
 
     fn world_to_screen(&self, point: CanvasPoint, rect: Rect) -> Pos2 {
-        rect.center()
-            + Vec2::new(
-                (point.x - self.camera.x) * self.zoom,
-                (point.y - self.camera.y) * self.zoom,
-            )
+        rect.center() + Vec2::new(point.x, point.y) * self.render_scale
     }
 
     fn screen_to_world(&self, point: Pos2, rect: Rect) -> CanvasPoint {
         let relative = point - rect.center();
         CanvasPoint::new(
-            self.camera.x + relative.x / self.zoom,
-            self.camera.y + relative.y / self.zoom,
+            relative.x / self.render_scale,
+            relative.y / self.render_scale,
         )
     }
 
@@ -272,7 +261,7 @@ impl InfiniteCanvasEditor {
         entities
             .iter()
             .rev()
-            .find(|entity| hit_entity(entity, point, HIT_RADIUS / self.zoom))
+            .find(|entity| hit_entity(entity, point, HIT_RADIUS / self.render_scale))
             .map(|entity| entity.id)
     }
 
@@ -679,7 +668,7 @@ impl InfiniteCanvasEditor {
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
-        compact: bool,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<Uuid> {
         let mut create_block = None;
         ui.horizontal_wrapped(|ui| {
@@ -713,7 +702,7 @@ impl InfiniteCanvasEditor {
                         BlockPickerMenuAction::ImportImage => match pick_image_file() {
                             Ok(Some(image)) => {
                                 self.image_import_error = None;
-                                self.add_imported_image(editors, image, self.camera);
+                                self.add_imported_image(editors, image, CanvasPoint::default());
                                 self.tool = Tool::Select;
                             }
                             Ok(None) => {}
@@ -728,31 +717,27 @@ impl InfiniteCanvasEditor {
             .response
             .on_hover_text("Block");
 
-            if compact && ui.button(ICON_TUNE).on_hover_text("Inspector").clicked() {
-                self.inspector_open = !self.inspector_open;
-            }
-
             ui.separator();
             if ui
                 .small_button(ICON_ZOOM_OUT)
                 .on_hover_text("Zoom out")
                 .clicked()
             {
-                self.zoom = (self.zoom / ZOOM_STEP).clamp(MIN_ZOOM, MAX_ZOOM);
+                viewport.change_zoom(1.0 / ZOOM_STEP, None);
             }
             if ui
-                .button(format!("{:.0}%", self.zoom * 100.0))
+                .button(format!("{:.0}%", viewport.zoom() * 100.0))
                 .on_hover_text("Reset zoom to 100%")
                 .clicked()
             {
-                self.zoom = 1.0;
+                viewport.change_zoom(1.0 / viewport.zoom(), None);
             }
             if ui
                 .small_button(ICON_ZOOM_IN)
                 .on_hover_text("Zoom in")
                 .clicked()
             {
-                self.zoom = (self.zoom * ZOOM_STEP).clamp(MIN_ZOOM, MAX_ZOOM);
+                viewport.change_zoom(ZOOM_STEP, None);
             }
 
             if let Some(block) = &self.armed_block {
@@ -910,16 +895,16 @@ impl InfiniteCanvasEditor {
         self.add_imported_image(editors, image, center);
     }
 
-    fn handle_zoom_and_pan(&mut self, response: &egui::Response) -> bool {
+    fn handle_zoom_and_pan(
+        &mut self,
+        response: &egui::Response,
+        viewport: &mut DirectEditorViewport,
+    ) -> bool {
         if response.hovered() {
             if let Some(pointer) = response.ctx.pointer_hover_pos() {
                 let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
                 if scroll != 0.0 {
-                    let before = self.screen_to_world(pointer, response.rect);
-                    self.zoom = (self.zoom * (scroll * 0.002).exp()).clamp(MIN_ZOOM, MAX_ZOOM);
-                    let after = self.screen_to_world(pointer, response.rect);
-                    self.camera.x += before.x - after.x;
-                    self.camera.y += before.y - after.y;
+                    viewport.change_zoom((scroll * 0.002).exp(), Some(pointer));
                 }
             }
         }
@@ -931,8 +916,7 @@ impl InfiniteCanvasEditor {
         });
         if panning && response.hovered() {
             let delta = response.ctx.input(|input| input.pointer.delta());
-            self.camera.x -= delta.x / self.zoom;
-            self.camera.y -= delta.y / self.zoom;
+            viewport.pan(delta);
             self.gesture = None;
             return true;
         }
@@ -945,6 +929,7 @@ impl InfiniteCanvasEditor {
         entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
         direct_editor_rects: &[Rect],
+        viewport: &mut DirectEditorViewport,
     ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<Uuid>) {
         let escape_pressed = response
             .ctx
@@ -985,7 +970,7 @@ impl InfiniteCanvasEditor {
             return (None, None, None);
         }
 
-        if self.handle_zoom_and_pan(response) {
+        if self.handle_zoom_and_pan(response, viewport) {
             return (None, None, None);
         }
 
@@ -1066,7 +1051,7 @@ impl InfiniteCanvasEditor {
                             BlockPickerMenuAction::ImportImage => match pick_image_file() {
                                 Ok(Some(image)) => {
                                     self.image_import_error = None;
-                                    let center = self.context_menu_position.unwrap_or(self.camera);
+                                    let center = self.context_menu_position.unwrap_or_default();
                                     self.add_imported_image(editors, image, center);
                                     self.tool = Tool::Select;
                                 }
@@ -1159,7 +1144,7 @@ impl InfiniteCanvasEditor {
                                 && point_near_bounds(
                                     entity_bounds(entity),
                                     world,
-                                    HIT_RADIUS / self.zoom,
+                                    HIT_RADIUS / self.render_scale,
                                 );
                             let title_bar = direct_editor_layout(entity)
                                 .is_some_and(|layout| layout.title_bar.contains(world));
@@ -1244,6 +1229,7 @@ impl InfiniteCanvasEditor {
             .ctx
             .input(|input| input.pointer.button_down(PointerButton::Primary));
         if primary_down {
+            let pen_point_distance = 1.0 / self.render_scale;
             match self.gesture.as_mut() {
                 Some(Gesture::Create { current, .. })
                 | Some(Gesture::SelectBox { current, .. })
@@ -1264,7 +1250,7 @@ impl InfiniteCanvasEditor {
                 Some(Gesture::Pen { points }) => {
                     if points
                         .last()
-                        .is_none_or(|last| distance(*last, world) > 1.0 / self.zoom)
+                        .is_none_or(|last| distance(*last, world) > pen_point_distance)
                     {
                         points.push(world);
                     }
@@ -1552,12 +1538,136 @@ impl BlockEditor for InfiniteCanvasEditor {
         }
     }
 
-    fn ui(
+    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
+        Some(DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: true,
+            supports_pan_and_zoom: true,
+        })
+    }
+
+    fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
+        let canvas = self.block.read()?;
+        let bounds = canvas
+            .entities()
+            .iter()
+            .map(entity_bounds)
+            .reduce(WorldRect::union);
+        let size = bounds.map_or_else(
+            || Vec2::splat(100.0),
+            |bounds| {
+                Vec2::new(
+                    bounds.min.x.abs().max(bounds.max.x.abs()) * 2.0,
+                    bounds.min.y.abs().max(bounds.max.y.abs()) * 2.0,
+                )
+            },
+        );
+        Some(size.max(Vec2::splat(100.0)))
+    }
+
+    fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        let canvas = self.block.read()?;
+        let entities = canvas.entities().to_vec();
+        drop(canvas);
+        let focused = focused_direct_editor(self.focused_editor, &entities);
+        if self.focused_editor.is_some() && focused.is_none() {
+            self.focused_editor = None;
+        }
+
+        let mut action = None;
+        let mut create_block = None;
+        if let Some((_, block_id, _)) = focused {
+            ui.horizontal(|ui| {
+                if ui
+                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
+                    .clicked()
+                {
+                    self.focused_editor = None;
+                }
+            });
+            if self.focused_editor.is_some() {
+                action = editors.direct_editor_top_bar(block_id, ui, viewport);
+            }
+        } else {
+            create_block = self.show_toolbar(ui, &entities, editors, viewport);
+        }
+        if let Some(error) = self.image_import_error.clone() {
+            ui.horizontal(|ui| {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+                if ui.small_button("Dismiss").clicked() {
+                    self.image_import_error = None;
+                }
+            });
+        }
+        action.or_else(|| {
+            create_block.map(|block_type| EditorAction::CreateBlock {
+                block_type,
+                parent: Some(self.block.id()),
+            })
+        })
+    }
+
+    fn direct_editor_has_left_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
+        let Some(canvas) = self.block.read() else {
+            return false;
+        };
+        focused_direct_editor(self.focused_editor, canvas.entities())
+            .is_some_and(|(_, block_id, _)| editors.direct_editor_has_left_sidebar(block_id))
+    }
+
+    fn direct_editor_left_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        let canvas = self.block.read()?;
+        let focused = focused_direct_editor(self.focused_editor, canvas.entities());
+        drop(canvas);
+        focused.and_then(|(_, block_id, _)| editors.direct_editor_left_sidebar(block_id, ui))
+    }
+
+    fn direct_editor_has_right_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
+        let Some(canvas) = self.block.read() else {
+            return false;
+        };
+        focused_direct_editor(self.focused_editor, canvas.entities()).map_or(true, |focused| {
+            editors.direct_editor_has_right_sidebar(focused.1)
+        })
+    }
+
+    fn direct_editor_right_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        let canvas = self.block.read()?;
+        let entities = canvas.entities().to_vec();
+        drop(canvas);
+        if let Some((_, block_id, _)) = focused_direct_editor(self.focused_editor, &entities) {
+            return editors.direct_editor_right_sidebar(block_id, ui);
+        }
+        if let Some(movement) = self.show_inspector(ui, &entities, true) {
+            self.record_action(InfiniteCanvasOperation::Reorder {
+                ids: self.selection.iter().copied().collect(),
+                movement,
+            });
+        }
+        None
+    }
+
+    fn direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        scale: f32,
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        self.render_scale = scale.max(f32::EPSILON);
         let Some(canvas) = self.block.read() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -1582,21 +1692,12 @@ impl BlockEditor for InfiniteCanvasEditor {
             })
             .collect();
 
-        let focused = self.focused_editor.and_then(|focused| {
-            entities.iter().find_map(|entity| match entity.kind {
-                CanvasEntityKind::DirectEditor {
-                    block_id, scale, ..
-                } if entity.id == focused => Some((entity.id, block_id, scale)),
-                _ => None,
-            })
-        });
+        let focused = focused_direct_editor(self.focused_editor, &entities);
         if self.focused_editor.is_some() && focused.is_none() {
             self.focused_editor = None;
         }
 
-        let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
         let mut action = None;
-        let mut direct_viewport = DirectEditorViewport::new(self.zoom);
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let canvas_rect = response.rect;
@@ -1627,244 +1728,21 @@ impl BlockEditor for InfiniteCanvasEditor {
                         ui.set_clip_rect(screen.intersect(ui.clip_rect()));
                         ui.set_max_size(screen.size());
                         ui.set_min_size(screen.size());
-                        editors.direct_editor_ui(
-                            block_id,
-                            ui,
-                            scale * self.zoom,
-                            &mut direct_viewport,
-                        )
+                        editors.direct_editor_ui(block_id, ui, scale * self.render_scale, viewport)
                     })
                     .inner;
                 action = action.or(embedded);
             }
         }
 
-        let top_bar = egui::Area::new(egui::Id::new(("canvas-top-bar", self.block.id())))
-            .order(egui::Order::Foreground)
-            .fixed_pos(canvas_rect.min)
-            .show(ui.ctx(), |ui| {
-                ui.set_width(canvas_rect.width());
-                egui::Frame::side_top_panel(ui.style())
-                    .show(ui, |ui| {
-                        let mut top_action = None;
-                        let mut create_block = None;
-                        if let Some((_, block_id, _)) = focused {
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
-                                    .clicked()
-                                {
-                                    self.focused_editor = None;
-                                }
-                            });
-                            if self.focused_editor.is_some() {
-                                top_action = editors.direct_editor_top_bar(
-                                    block_id,
-                                    ui,
-                                    &mut direct_viewport,
-                                );
-                            }
-                        } else {
-                            create_block = self.show_toolbar(ui, &entities, editors, compact);
-                        }
-                        if let Some(error) = self.image_import_error.clone() {
-                            ui.horizontal(|ui| {
-                                ui.colored_label(ui.visuals().error_fg_color, error);
-                                if ui.small_button("Dismiss").clicked() {
-                                    self.image_import_error = None;
-                                }
-                            });
-                        }
-                        (top_action, create_block)
-                    })
-                    .inner
-            });
-        let (top_action, mut create_block) = top_bar.inner;
-        action = action.or(top_action);
-        if focused.is_some() {
-            direct_editor_rects.push(top_bar.response.rect);
-        }
-        let sidebar_top = top_bar
-            .response
-            .rect
-            .bottom()
-            .clamp(canvas_rect.top(), canvas_rect.bottom());
-        let sidebar_height = (canvas_rect.bottom() - sidebar_top).max(1.0);
-        let sidebar_rect = Rect::from_min_max(
-            Pos2::new(canvas_rect.left(), sidebar_top),
-            canvas_rect.right_bottom(),
+        let (context_layer_move, context_create_block, set_parent) = self.handle_canvas_input(
+            &response,
+            &entities,
+            editors,
+            &direct_editor_rects,
+            viewport,
         );
-
-        let mut inspector_layer_move = None;
-        let mut left_sidebar_action = None;
-        let mut right_sidebar_action = None;
-        let focused_left_sidebar = focused.filter(|(_, block_id, _)| {
-            self.focused_editor.is_some() && editors.direct_editor_has_left_sidebar(*block_id)
-        });
-        if let Some((_, block_id, _)) = focused_left_sidebar {
-            if compact {
-                if let Some(window) = egui::Window::new("Left sidebar")
-                    .id(egui::Id::new((
-                        "canvas-direct-editor-left-sidebar-window",
-                        block_id,
-                    )))
-                    .default_width(240.0)
-                    .default_pos(Pos2::new(canvas_rect.left() + 16.0, sidebar_top + 16.0))
-                    .constrain_to(sidebar_rect)
-                    .show(ui.ctx(), |ui| {
-                        left_sidebar_action = editors.direct_editor_left_sidebar(block_id, ui);
-                    })
-                {
-                    direct_editor_rects.push(window.response.rect);
-                }
-            } else {
-                if let Some(window) = egui::Window::new("Left sidebar")
-                    .id(egui::Id::new((
-                        "canvas-direct-editor-left-sidebar",
-                        block_id,
-                    )))
-                    .order(egui::Order::Foreground)
-                    .title_bar(false)
-                    .fixed_pos(Pos2::new(canvas_rect.left(), sidebar_top))
-                    .constrain_to(sidebar_rect)
-                    .default_width(240.0)
-                    .min_width(200.0)
-                    .max_width(340.0)
-                    .default_height(sidebar_height)
-                    .min_height(sidebar_height)
-                    .max_height(sidebar_height)
-                    .resizable([true, false])
-                    .vscroll(true)
-                    .show(ui.ctx(), |ui| {
-                        left_sidebar_action = editors.direct_editor_left_sidebar(block_id, ui);
-                    })
-                {
-                    direct_editor_rects.push(window.response.rect);
-                }
-            }
-        }
-        let focused_right_sidebar = focused.filter(|(_, block_id, _)| {
-            self.focused_editor.is_some() && editors.direct_editor_has_right_sidebar(*block_id)
-        });
-        if let Some((_, block_id, _)) = focused_right_sidebar {
-            if compact {
-                if let Some(window) = egui::Window::new("Right sidebar")
-                    .id(egui::Id::new((
-                        "canvas-direct-editor-right-sidebar-window",
-                        block_id,
-                    )))
-                    .pivot(egui::Align2::RIGHT_TOP)
-                    .default_width(240.0)
-                    .default_pos(Pos2::new(canvas_rect.right() - 16.0, sidebar_top + 16.0))
-                    .constrain_to(sidebar_rect)
-                    .show(ui.ctx(), |ui| {
-                        right_sidebar_action = editors.direct_editor_right_sidebar(block_id, ui);
-                    })
-                {
-                    direct_editor_rects.push(window.response.rect);
-                }
-            } else if let Some(window) = egui::Window::new("Right sidebar")
-                .id(egui::Id::new((
-                    "canvas-direct-editor-right-sidebar",
-                    block_id,
-                )))
-                .order(egui::Order::Foreground)
-                .title_bar(false)
-                .pivot(egui::Align2::RIGHT_TOP)
-                .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
-                .constrain_to(sidebar_rect)
-                .default_width(240.0)
-                .min_width(200.0)
-                .max_width(340.0)
-                .default_height(sidebar_height)
-                .min_height(sidebar_height)
-                .max_height(sidebar_height)
-                .resizable([true, false])
-                .vscroll(true)
-                .show(ui.ctx(), |ui| {
-                    right_sidebar_action = editors.direct_editor_right_sidebar(block_id, ui);
-                })
-            {
-                direct_editor_rects.push(window.response.rect);
-            }
-        } else if self.focused_editor.is_none() && compact {
-            let mut open = self.inspector_open;
-            egui::Window::new("Inspector")
-                .id(egui::Id::new(("canvas-inspector-window", self.block.id())))
-                .default_width(240.0)
-                .constrain_to(sidebar_rect)
-                .open(&mut open)
-                .show(ui.ctx(), |ui| {
-                    inspector_layer_move = self.show_inspector(ui, &entities, false);
-                });
-            self.inspector_open = open;
-        } else if self.focused_editor.is_none() {
-            egui::Window::new("Inspector")
-                .id(egui::Id::new(("canvas-inspector", self.block.id())))
-                .order(egui::Order::Foreground)
-                .title_bar(false)
-                .pivot(egui::Align2::RIGHT_TOP)
-                .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
-                .constrain_to(sidebar_rect)
-                .default_width(240.0)
-                .min_width(200.0)
-                .max_width(340.0)
-                .default_height(sidebar_height)
-                .min_height(sidebar_height)
-                .max_height(sidebar_height)
-                .resizable([true, false])
-                .vscroll(true)
-                .show(ui.ctx(), |ui| {
-                    inspector_layer_move = self.show_inspector(ui, &entities, true);
-                });
-        }
-        action = action.or(left_sidebar_action).or(right_sidebar_action);
-        if let Some((entity_id, _, _)) = focused {
-            for command in direct_viewport.drain() {
-                match command {
-                    DirectEditorViewportCommand::Pan(delta) => {
-                        self.camera.x -= delta.x / self.zoom;
-                        self.camera.y -= delta.y / self.zoom;
-                        self.gesture = None;
-                    }
-                    DirectEditorViewportCommand::Zoom { factor, anchor } => {
-                        let anchor = anchor.unwrap_or_else(|| {
-                            direct_editor_rects
-                                .first()
-                                .map_or_else(|| canvas_rect.center(), Rect::center)
-                        });
-                        let before = self.screen_to_world(anchor, canvas_rect);
-                        self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
-                        let after = self.screen_to_world(anchor, canvas_rect);
-                        self.camera.x += before.x - after.x;
-                        self.camera.y += before.y - after.y;
-                    }
-                    DirectEditorViewportCommand::Fit => {
-                        if let Some(bounds) = entities
-                            .iter()
-                            .find(|entity| entity.id == entity_id)
-                            .and_then(direct_editor_layout)
-                            .map(|layout| layout.content)
-                        {
-                            let width = (bounds.max.x - bounds.min.x).max(f32::EPSILON);
-                            let height = (bounds.max.y - bounds.min.y).max(f32::EPSILON);
-                            self.zoom = (canvas_rect.width() / width)
-                                .min(canvas_rect.height() / height)
-                                .clamp(MIN_ZOOM, MAX_ZOOM);
-                            self.camera = CanvasPoint::new(
-                                (bounds.min.x + bounds.max.x) * 0.5,
-                                (bounds.min.y + bounds.max.y) * 0.5,
-                            );
-                            self.gesture = None;
-                        }
-                    }
-                }
-            }
-        }
-        let (context_layer_move, context_create_block, set_parent) =
-            self.handle_canvas_input(&response, &entities, editors, &direct_editor_rects);
-        create_block = create_block.or(context_create_block);
-        if let Some(movement) = context_layer_move.or(inspector_layer_move) {
+        if let Some(movement) = context_layer_move {
             let operation = InfiniteCanvasOperation::Reorder {
                 ids: self.selection.iter().copied().collect(),
                 movement,
@@ -1886,12 +1764,25 @@ impl BlockEditor for InfiniteCanvasEditor {
                 })
             })
             .or_else(|| {
-                create_block.map(|block_type| EditorAction::CreateBlock {
+                context_create_block.map(|block_type| EditorAction::CreateBlock {
                     block_type,
                     parent: Some(self.block.id()),
                 })
             })
     }
+}
+
+fn focused_direct_editor(
+    focused: Option<Uuid>,
+    entities: &[CanvasEntity],
+) -> Option<(Uuid, Uuid, f32)> {
+    let focused = focused?;
+    entities.iter().find_map(|entity| match entity.kind {
+        CanvasEntityKind::DirectEditor {
+            block_id, scale, ..
+        } if entity.id == focused => Some((entity.id, block_id, scale)),
+        _ => None,
+    })
 }
 
 fn common_value<T: Copy + PartialEq>(values: impl IntoIterator<Item = T>) -> CommonValue<T> {
@@ -2489,7 +2380,7 @@ fn paint_entity(
     let opacity = entity.style.opacity.clamp(0.0, 1.0);
     let color = with_opacity(resolve_color(entity.style.foreground, auto), opacity);
     let stroke = Stroke::new(
-        (entity.style.line_width.max(0.0) * editor.zoom).max(0.1),
+        (entity.style.line_width.max(0.0) * editor.render_scale).max(0.1),
         color,
     );
     match &entity.kind {
@@ -2506,7 +2397,7 @@ fn paint_entity(
                 ),
                 stroke,
                 entity.style,
-                editor.zoom,
+                editor.render_scale,
             );
         }
         CanvasEntityKind::Rectangle => {
@@ -2523,7 +2414,7 @@ fn paint_entity(
         }
         CanvasEntityKind::Text { text } => {
             let center = editor.world_to_screen(entity.transform.center, rect);
-            let font = egui::FontId::proportional((18.0 * editor.zoom).clamp(8.0, 48.0));
+            let font = egui::FontId::proportional((18.0 * editor.render_scale).clamp(8.0, 48.0));
             let galley = painter.layout_no_wrap(text.clone(), font, color);
             let position = center - galley.size() * 0.5;
             painter.add(
@@ -2566,15 +2457,15 @@ fn paint_entity(
                 .unwrap_or_else(|| "Loading…".into());
             let title_galley = painter.layout_no_wrap(
                 title,
-                egui::FontId::proportional((18.0 * editor.zoom).clamp(8.0, 42.0)),
+                egui::FontId::proportional((18.0 * editor.render_scale).clamp(8.0, 42.0)),
                 color,
             );
             let preview_galley = painter.layout_no_wrap(
                 "(TODO: preview)".into(),
-                egui::FontId::proportional((12.0 * editor.zoom).clamp(7.0, 30.0)),
+                egui::FontId::proportional((12.0 * editor.render_scale).clamp(7.0, 30.0)),
                 color,
             );
-            let gap = (4.0 * editor.zoom).clamp(2.0, 10.0);
+            let gap = (4.0 * editor.render_scale).clamp(2.0, 10.0);
             let total_height = title_galley.size().y + gap + preview_galley.size().y;
             let title_center_offset = -total_height * 0.5 + title_galley.size().y * 0.5;
             let preview_center_offset = total_height * 0.5 - preview_galley.size().y * 0.5;
@@ -2609,17 +2500,17 @@ fn paint_entity(
             let visuals = &painter.ctx().global_style().visuals;
             painter.rect(
                 outer,
-                (6.0 * scale * editor.zoom).clamp(2.0, 12.0),
+                (6.0 * scale * editor.render_scale).clamp(2.0, 12.0),
                 with_opacity(visuals.panel_fill, opacity),
                 Stroke::new(
-                    (1.0 * editor.zoom).max(0.5),
+                    editor.render_scale.max(0.5),
                     with_opacity(visuals.widgets.noninteractive.bg_stroke.color, opacity),
                 ),
                 egui::StrokeKind::Inside,
             );
             painter.rect_filled(
                 title_bar,
-                (4.0 * scale * editor.zoom).clamp(1.0, 8.0),
+                (4.0 * scale * editor.render_scale).clamp(1.0, 8.0),
                 with_opacity(visuals.widgets.inactive.bg_fill, opacity),
             );
 
@@ -2644,8 +2535,8 @@ fn paint_entity(
                 .get(block_id)
                 .map(|(title, block_type)| (title.as_str(), Some(*block_type)))
                 .unwrap_or(("Loading...", None));
-            let font_size = (16.0 * scale * editor.zoom).clamp(8.0, 32.0);
-            let left_padding = (6.0 * scale * editor.zoom).clamp(3.0, 12.0);
+            let font_size = (16.0 * scale * editor.render_scale).clamp(8.0, 32.0);
+            let left_padding = (6.0 * scale * editor.render_scale).clamp(3.0, 12.0);
             let title_painter = painter.with_clip_rect(title_bar);
             let mut title_x = title_bar.left() + left_padding;
             if let Some(icon) =
