@@ -91,3 +91,9 @@ The device status must be `device`. Install or update the app, then launch it:
 If ADB reports `unauthorized`, reconnect the phone and accept its USB debugging
 prompt. If multiple devices are connected, pass `-s SERIAL` immediately after
 `adb.exe`, using a serial listed by `adb devices`.
+
+Logs
+
+```
+.\target\android-sdk\platform-tools\adb.exe logcat -v threadtime "AndroidRuntime:E" "libc:F" "DEBUG:F" "RustStdoutStderr:V" "*:S"
+```
