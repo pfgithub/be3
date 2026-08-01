@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     ffi::CString,
+    ops::Range,
     path::{Path, PathBuf},
     ptr,
     time::{Duration, Instant},
@@ -16,6 +17,7 @@ use text_editor_core::{
     SyntaxHighlight,
 };
 use unicode_script::{Script, UnicodeScript};
+use uuid::Uuid;
 
 use super::profiling::LayoutTimings;
 
@@ -26,6 +28,7 @@ unsafe extern "C" {
 
 const BODY_PIXEL_SIZE: u32 = 18;
 const CODE_PIXEL_SIZE: u32 = 17;
+const FULL_EMBED_HEIGHT: f32 = 180.0;
 
 pub(super) struct TextRenderer {
     library: ft::FT_Library,
@@ -37,6 +40,25 @@ pub(super) struct DocumentLayout {
     pub size: Vec2,
     pub lines: Vec<LineLayout>,
     pub positions: Vec<Option<BytePosition>>,
+    pub embeds: Vec<EmbedLayout>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ResolvedEmbed {
+    pub range: Range<usize>,
+    pub id: Uuid,
+    pub label: String,
+    pub full_line: bool,
+    pub available: bool,
+}
+
+pub(super) struct EmbedLayout {
+    pub range: Range<usize>,
+    pub id: Uuid,
+    pub label: String,
+    pub full_line: bool,
+    pub available: bool,
+    pub rect: Rect,
 }
 
 pub(super) struct LineLayout {
@@ -190,9 +212,12 @@ impl TextRenderer {
         &self,
         bytes: &[u8],
         highlight: &SyntaxHighlight,
+        embeds: &[ResolvedEmbed],
+        full_width: f32,
     ) -> (DocumentLayout, LayoutTimings) {
         let mut timings = LayoutTimings::default();
         let mut lines = Vec::new();
+        let mut embed_layouts = Vec::new();
         let mut positions = vec![None; bytes.len() + 1];
         let mut start = 0;
         let mut line_index = 0;
@@ -204,8 +229,49 @@ impl TextRenderer {
                 .position(|byte| *byte == b'\n')
                 .map(|offset| start + offset);
             let end = newline.unwrap_or(bytes.len());
+            let line_embeds = embeds
+                .iter()
+                .filter(|embed| embed.range.start >= start && embed.range.end <= end)
+                .collect::<Vec<_>>();
+            if let Some(embed) = line_embeds.iter().find(|embed| embed.full_line) {
+                let width = full_width.max(1.0);
+                let line_len = end.saturating_sub(start).max(1);
+                for byte in start..=end {
+                    positions[byte] = Some(BytePosition {
+                        line: line_index,
+                        x: (byte - start) as f32 / line_len as f32 * width,
+                    });
+                }
+                lines.push(LineLayout {
+                    start,
+                    end,
+                    y,
+                    width,
+                    height: FULL_EMBED_HEIGHT,
+                    baseline: 0.0,
+                    glyphs: Vec::new(),
+                });
+                embed_layouts.push(EmbedLayout {
+                    range: embed.range.clone(),
+                    id: embed.id,
+                    label: embed.label.clone(),
+                    full_line: true,
+                    available: embed.available,
+                    rect: Rect::from_min_size(
+                        Pos2::new(0.0, y),
+                        Vec2::new(width, FULL_EMBED_HEIGHT),
+                    ),
+                });
+                y += FULL_EMBED_HEIGHT;
+                let Some(newline) = newline else {
+                    break;
+                };
+                start = newline + 1;
+                line_index += 1;
+                continue;
+            }
             let display_start = Instant::now();
-            let display = display_line(&bytes[start..end], start, newline.is_some());
+            let display = display_line(&bytes[start..end], start, newline.is_some(), &line_embeds);
             timings.display_lines += display_start.elapsed();
             let (glyphs, width, line_positions, baseline, height, line_timings) =
                 self.layout_line(bytes, &display, highlight);
@@ -237,6 +303,25 @@ impl TextRenderer {
                 baseline,
                 glyphs,
             });
+            for embed in line_embeds {
+                let Some(left) = positions[embed.range.start] else {
+                    continue;
+                };
+                let Some(right) = positions[embed.range.end] else {
+                    continue;
+                };
+                embed_layouts.push(EmbedLayout {
+                    range: embed.range.clone(),
+                    id: embed.id,
+                    label: embed.label.clone(),
+                    full_line: false,
+                    available: embed.available,
+                    rect: Rect::from_min_max(
+                        Pos2::new(left.x, y + 1.0),
+                        Pos2::new(right.x.max(left.x + 1.0), y + height - 1.0),
+                    ),
+                });
+            }
             y += height;
 
             let Some(newline) = newline else {
@@ -255,6 +340,7 @@ impl TextRenderer {
                 size: Vec2::new(width + 24.0, y + 16.0),
                 lines,
                 positions,
+                embeds: embed_layouts,
             },
             timings,
         )
@@ -721,11 +807,31 @@ impl Drop for TextRenderer {
     }
 }
 
-fn display_line(bytes: &[u8], document_start: usize, has_newline: bool) -> DisplayLine {
+fn display_line(
+    bytes: &[u8],
+    document_start: usize,
+    has_newline: bool,
+    embeds: &[&ResolvedEmbed],
+) -> DisplayLine {
     let mut text = String::new();
     let mut display_to_document = vec![document_start];
     let mut index = 0;
     while index < bytes.len() {
+        let document_index = document_start + index;
+        if let Some(embed) = embeds
+            .iter()
+            .find(|embed| embed.range.start == document_index)
+        {
+            append_display_text(
+                &mut text,
+                &mut display_to_document,
+                &format!(" {} ", embed.label),
+                embed.range.start,
+                embed.range.len(),
+            );
+            index = embed.range.end - document_start;
+            continue;
+        }
         let (character, consumed) = match std::str::from_utf8(&bytes[index..]) {
             Ok(valid) => (
                 valid.chars().next().expect("nonempty UTF-8 text"),
@@ -771,6 +877,21 @@ fn display_line(bytes: &[u8], document_start: usize, has_newline: bool) -> Displ
     DisplayLine {
         text,
         display_to_document,
+    }
+}
+
+fn append_display_text(
+    text: &mut String,
+    display_to_document: &mut Vec<usize>,
+    value: &str,
+    document_start: usize,
+    document_len: usize,
+) {
+    let display_start = text.len();
+    text.push_str(value);
+    let display_len = text.len() - display_start;
+    for offset in 1..=display_len {
+        display_to_document.push(document_start + offset * document_len / display_len);
     }
 }
 

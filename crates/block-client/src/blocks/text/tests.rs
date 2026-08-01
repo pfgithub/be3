@@ -7,3 +7,4 @@ mod text_item_ids_resolve_visible_characters;
 mod text_operations_are_crdt_updates_and_do_not_keep_a_confirmed_copy;
 mod text_remove_item_operation_targets_stable_id;
 mod text_serialization_preserves_invalid_utf8_bytes;
+mod text_tracks_embedded_block_references;

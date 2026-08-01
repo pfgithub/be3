@@ -1,10 +1,14 @@
 mod font;
 mod profiling;
+#[cfg(test)]
+mod tests;
 
-use std::{sync::Arc, time::Instant};
+use std::{collections::HashMap, ops::Range, sync::Arc, time::Instant};
 
-use block::{Block, BlockParent};
-use block_client::{blocks::text::TextDocument, BlockClient, BlockHandle, BlockRelationships};
+use block::{Block, BlockParent, BlockReferenceList};
+use block_client::{
+    blocks::text::TextDocument, BlockClient, BlockHandle, BlockRelationships, ReferenceList,
+};
 use eframe::egui::{
     self, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton, Pos2, Rect, Sense,
     Vec2,
@@ -16,13 +20,24 @@ use text_editor_core::{
 };
 use uuid::Uuid;
 
-use self::font::{BytePosition, DocumentLayout, TextRenderer};
+use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
+
+use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
-use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
+const EMBED_PREFIX: &[u8] = b"{{_BLOCKEDITOR:";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParsedEmbed {
+    range: Range<usize>,
+    settings: Range<usize>,
+    id: Uuid,
+    full_line: bool,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HighlightLanguage {
@@ -55,10 +70,13 @@ pub(super) fn registration() -> EditorRegistration {
         display_name: "Text",
         create: Some(|client| {
             let block = client.create_block(TextDocument::new());
-            Box::new(TextEditor::new(block))
+            Box::new(TextEditor::new(block, client))
         }),
         open: |client: &BlockClient, id| {
-            Box::new(TextEditor::new(client.get_block::<TextDocument>(id)))
+            Box::new(TextEditor::new(
+                client.get_block::<TextDocument>(id),
+                client,
+            ))
         },
         can_add_child: false,
         can_delete_child: false,
@@ -76,19 +94,25 @@ struct TextEditor {
     last_click: Option<(f64, Pos2)>,
     profiler: TextProfiler,
     layout_cache: Option<CachedLayout>,
+    picker: BlockPicker,
+    dependencies: ReferenceList,
+    pending_create: bool,
 }
 
 struct CachedLayout {
     bytes: Vec<u8>,
     language: HighlightLanguage,
+    embeds: Vec<ResolvedEmbed>,
+    width: f32,
     layout: Arc<DocumentLayout>,
 }
 
 impl TextEditor {
-    fn new(block: BlockHandle<TextDocument>) -> Self {
+    fn new(block: BlockHandle<TextDocument>, client: &BlockClient) -> Self {
         let mut core = Core::new(block.clone());
         core.set_syntax_highlighter(Some(Language::Markdown));
         core.execute_command(EditorCommand::SetCursorPosition(core.position(0)));
+        let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
         Self {
             block,
             core,
@@ -99,11 +123,15 @@ impl TextEditor {
             last_click: None,
             profiler: TextProfiler::default(),
             layout_cache: None,
+            picker: BlockPicker::default(),
+            dependencies,
+            pending_create: false,
         }
     }
 
-    fn language_selector(&mut self, ui: &mut egui::Ui) {
+    fn toolbar(&mut self, ui: &mut egui::Ui, editors: &EditorAccess<'_>) -> Option<Uuid> {
         let previous = self.highlight_language;
+        let mut create_block = None;
         ui.horizontal(|ui| {
             ui.label("Language:");
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
@@ -126,11 +154,78 @@ impl TextEditor {
                     );
                 });
             self.profiler.toggle(ui);
+            ui.menu_button("Insert", |ui| {
+                ui.menu_button("Block", |ui| {
+                    if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
+                        match action {
+                            BlockPickerMenuAction::New(block_type) => {
+                                self.pending_create = true;
+                                create_block = Some(block_type);
+                            }
+                            BlockPickerMenuAction::LinkExisting => {
+                                self.picker.open([self.block.id()]);
+                            }
+                        }
+                    }
+                });
+            });
         });
         if self.highlight_language != previous {
             self.core
                 .set_syntax_highlighter(self.highlight_language.core_language());
         }
+        create_block
+    }
+
+    fn insert_embed(&mut self, id: Uuid) {
+        let directive = format_embed(id);
+        self.core
+            .execute_command(EditorCommand::InsertText(directive.as_bytes()));
+    }
+
+    fn show_picker(&mut self, context: &egui::Context, client: &BlockClient) -> Option<Uuid> {
+        let block = self.picker.show(context, client)?;
+        self.insert_embed(block.id);
+        Some(block.id)
+    }
+
+    fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
+        let parsed = parse_embeds(bytes);
+        let references = self.dependencies.read();
+        let referenced = references
+            .iter()
+            .map(|reference| (reference.id, (reference.block_type, reference.name.clone())))
+            .collect::<HashMap<_, _>>();
+        parsed
+            .into_iter()
+            .filter(|embed| embed.id != self.block.id())
+            .map(|embed| {
+                // Settings are deliberately opaque, but retain their byte range in the parser.
+                let _settings = &bytes[embed.settings.clone()];
+                let metadata = referenced.get(&embed.id).cloned().or_else(|| {
+                    editors
+                        .client()
+                        .cached_block(embed.id)
+                        .map(|block| (block.block_type, block.name))
+                });
+                if let Some((block_type, _)) = &metadata {
+                    editors.ensure(embed.id, *block_type);
+                }
+                let label = metadata
+                    .as_ref()
+                    .map(|(_, name)| name)
+                    .filter(|name| !name.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| embed.id.to_string());
+                ResolvedEmbed {
+                    range: embed.range,
+                    id: embed.id,
+                    label,
+                    full_line: embed.full_line,
+                    available: metadata.is_some(),
+                }
+            })
+            .collect()
     }
 
     fn keyboard_input(&mut self, ui: &egui::Ui, id: egui::Id) -> bool {
@@ -476,6 +571,92 @@ impl TextEditor {
             },
         )
     }
+
+    fn paint_embeds(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        origin: Pos2,
+        layout: &DocumentLayout,
+        editors: &mut EditorAccess<'_>,
+    ) {
+        for embed in &layout.embeds {
+            let rect = embed.rect.translate(origin.to_vec2());
+            if !embed.full_line {
+                let selected = self.core.cursor_positions().into_iter().any(|cursor| {
+                    let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
+                        return false;
+                    };
+                    let Some(focus) = self.core.position_index(cursor.pos.focus) else {
+                        return false;
+                    };
+                    let (start, end) = if anchor <= focus {
+                        (anchor, focus)
+                    } else {
+                        (focus, anchor)
+                    };
+                    start < embed.range.end && end > embed.range.start
+                });
+                painter.rect_filled(
+                    rect,
+                    5.0,
+                    if selected {
+                        ui.visuals().selection.bg_fill
+                    } else {
+                        Color32::from_rgb(49, 65, 78)
+                    },
+                );
+                continue;
+            }
+
+            painter.rect_filled(rect, 6.0, Color32::from_rgb(35, 46, 56));
+            let rendered = editors.render(
+                embed.id,
+                BlockRenderContext {
+                    painter,
+                    corners: [
+                        rect.left_top(),
+                        rect.right_top(),
+                        rect.right_bottom(),
+                        rect.left_bottom(),
+                    ],
+                    opacity: 1.0,
+                },
+            );
+            if !rendered {
+                let title = painter.layout_no_wrap(
+                    embed.label.clone(),
+                    egui::FontId::proportional(18.0),
+                    ui.visuals().text_color(),
+                );
+                let status = painter.layout_no_wrap(
+                    if embed.available {
+                        "Preview unavailable".to_owned()
+                    } else {
+                        "Block unavailable".to_owned()
+                    },
+                    egui::FontId::proportional(13.0),
+                    ui.visuals().weak_text_color(),
+                );
+                let gap = 6.0;
+                let total_height = title.size().y + gap + status.size().y;
+                let top = rect.center().y - total_height * 0.5;
+                painter.galley(
+                    Pos2::new(rect.center().x - title.size().x * 0.5, top),
+                    title,
+                    ui.visuals().text_color(),
+                );
+                painter.galley(
+                    Pos2::new(
+                        rect.center().x - status.size().x * 0.5,
+                        top + total_height - status.size().y,
+                    ),
+                    status,
+                    ui.visuals().weak_text_color(),
+                );
+            }
+        }
+    }
 }
 
 impl BlockEditor for TextEditor {
@@ -507,10 +688,18 @@ impl BlockEditor for TextEditor {
         Some(&self.block)
     }
 
+    fn block_created(&mut self, id: Uuid, _block_type: Uuid, _author: Uuid, _name: String) -> bool {
+        if !std::mem::take(&mut self.pending_create) {
+            return false;
+        }
+        self.insert_embed(id);
+        true
+    }
+
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
+        editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
         self.profiler.show(ui.ctx());
@@ -521,9 +710,10 @@ impl BlockEditor for TextEditor {
         let mut reveal_cursor = self.keyboard_input(ui, id);
         profile.keyboard = keyboard_start.elapsed();
         let toolbar_start = Instant::now();
-        self.language_selector(ui);
+        let create_block = self.toolbar(ui, editors);
         ui.separator();
         profile.toolbar = toolbar_start.elapsed();
+        let linked_block = self.show_picker(ui.ctx(), editors.client());
         let document_start = Instant::now();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
@@ -540,35 +730,42 @@ impl BlockEditor for TextEditor {
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
         let layout_start = Instant::now();
-        let layout =
-            if let Some(cached) = self.layout_cache.as_ref().filter(|cached| {
-                cached.language == self.highlight_language && cached.bytes == bytes
-            }) {
-                Arc::clone(&cached.layout)
-            } else {
-                let layout = match &self.renderer {
-                    Ok(renderer) => {
-                        let (layout, detail) = renderer.layout_profiled(&bytes, &highlight);
-                        profile.layout_detail = Some(detail);
-                        Arc::new(layout)
-                    }
-                    Err(error) => {
-                        ui.centered_and_justified(|ui| {
-                            ui.colored_label(ui.visuals().error_fg_color, error);
-                        });
-                        profile.layout = layout_start.elapsed();
-                        profile.total = frame_start.elapsed();
-                        self.profiler.record(profile);
-                        return None;
-                    }
-                };
-                self.layout_cache = Some(CachedLayout {
-                    bytes,
-                    language: self.highlight_language,
-                    layout: Arc::clone(&layout),
-                });
-                layout
+        let embeds = self.resolve_embeds(&bytes, editors);
+        let full_width = (ui.available_width() - PADDING.x * 2.0).max(1.0);
+        let layout = if let Some(cached) = self.layout_cache.as_ref().filter(|cached| {
+            cached.language == self.highlight_language
+                && cached.bytes == bytes
+                && cached.embeds == embeds
+                && cached.width == full_width
+        }) {
+            Arc::clone(&cached.layout)
+        } else {
+            let layout = match &self.renderer {
+                Ok(renderer) => {
+                    let (layout, detail) =
+                        renderer.layout_profiled(&bytes, &highlight, &embeds, full_width);
+                    profile.layout_detail = Some(detail);
+                    Arc::new(layout)
+                }
+                Err(error) => {
+                    ui.centered_and_justified(|ui| {
+                        ui.colored_label(ui.visuals().error_fg_color, error);
+                    });
+                    profile.layout = layout_start.elapsed();
+                    profile.total = frame_start.elapsed();
+                    self.profiler.record(profile);
+                    return None;
+                }
             };
+            self.layout_cache = Some(CachedLayout {
+                bytes,
+                language: self.highlight_language,
+                embeds,
+                width: full_width,
+                layout: Arc::clone(&layout),
+            });
+            layout
+        };
         profile.layout = layout_start.elapsed();
         profile.line_count = layout.lines.len();
 
@@ -587,6 +784,7 @@ impl BlockEditor for TextEditor {
                 let pointer_start = Instant::now();
                 reveal_cursor |= self.pointer_input(ui, &response, origin, &layout);
                 profile.pointer = pointer_start.elapsed();
+                self.paint_embeds(ui, &painter, origin, &layout, editors);
                 let (cursor, paint) = self.paint(ui, &painter, origin, &layout, &highlight);
                 profile.paint = paint;
                 if reveal_cursor {
@@ -597,8 +795,82 @@ impl BlockEditor for TextEditor {
             });
         profile.total = frame_start.elapsed();
         self.profiler.record(profile);
-        None
+        linked_block
+            .map(|id| EditorAction::SetParent {
+                id,
+                parent: self.block.id(),
+            })
+            .or_else(|| {
+                create_block.map(|block_type| EditorAction::CreateBlock {
+                    block_type,
+                    parent: Some(self.block.id()),
+                })
+            })
     }
+}
+
+fn parse_embeds(bytes: &[u8]) -> Vec<ParsedEmbed> {
+    let mut embeds = Vec::new();
+    let mut index = 0;
+    while index + EMBED_PREFIX.len() <= bytes.len() {
+        if !bytes[index..].starts_with(EMBED_PREFIX) {
+            index += 1;
+            continue;
+        }
+        let payload_start = index + EMBED_PREFIX.len();
+        let Some(close_offset) = bytes[payload_start..]
+            .windows(2)
+            .position(|window| window == b"}}")
+        else {
+            index += 1;
+            continue;
+        };
+        let close = payload_start + close_offset;
+        if bytes[payload_start..close].contains(&b'\n') {
+            index += 1;
+            continue;
+        }
+        let Some(separator_offset) = bytes[payload_start..close]
+            .iter()
+            .position(|byte| *byte == b':')
+        else {
+            index += 1;
+            continue;
+        };
+        let separator = payload_start + separator_offset;
+        let Ok(uuid_text) = std::str::from_utf8(&bytes[payload_start..separator]) else {
+            index += 1;
+            continue;
+        };
+        let Ok(id) = Uuid::parse_str(uuid_text) else {
+            index += 1;
+            continue;
+        };
+        let end = close + 2;
+        let line_start = bytes[..index]
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |newline| newline + 1);
+        let line_end = bytes[end..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |newline| end + newline);
+        let line_whitespace = |byte: &u8| matches!(*byte, b' ' | b'\t' | b'\r');
+        let full_line = bytes[line_start..index].iter().all(line_whitespace)
+            && bytes[end..line_end].iter().all(line_whitespace);
+        embeds.push(ParsedEmbed {
+            range: index..end,
+            settings: separator + 1..close,
+            id,
+            full_line,
+        });
+        index = end;
+    }
+    embeds
+}
+
+fn format_embed(id: Uuid) -> String {
+    format!("{{{{_BLOCKEDITOR:{id}:}}}}")
 }
 
 fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
