@@ -9,7 +9,7 @@ use block_client::{
         PixelArt, PixelArtAnchor, PixelArtOperation, PixelColor, PixelUpdate,
         MAX_PIXEL_ART_PALETTE_COLORS, MAX_PIXEL_ART_SIZE,
     },
-    BlockHandle, BlockRelationships,
+    BlockClient, BlockHandle, BlockRelationships,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use egui_material_icons::icons::{
@@ -22,7 +22,10 @@ use egui_material_icons::icons::{
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
-use super::{image::ImageEditor, BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+use super::{
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAccess, EditorAction,
+    EditorRegistration,
+};
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -44,6 +47,8 @@ const PAN_MARGIN: f32 = 32.0;
 const MAX_BRUSH_SIZE: u16 = 64;
 const MAX_RECENT_COLORS: usize = 12;
 const COMPACT_SIDEBAR_WIDTH: f32 = 760.0;
+const DIRECT_EDITOR_LONG_SIDE: f32 = 256.0;
+const DIRECT_EDITOR_SHORT_SIDE: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PixelTool {
@@ -519,6 +524,85 @@ impl PixelArtEditor {
         self.texture_revision = Some(revision);
         self.texture_size = size;
         self.texture_dark_mode = dark_mode;
+    }
+
+    fn ensure_texture(&mut self, context: &egui::Context, dark_mode: bool) -> Option<(u16, u16)> {
+        let art = self.block.read()?;
+        let width = art.width();
+        let height = art.height();
+        let revision = art.revision();
+        let size = [width, height];
+        let image = (self.texture_revision != Some(revision)
+            || self.texture_size != size
+            || self.texture_dark_mode != dark_mode)
+            .then(|| checkerboard_image(&art, dark_mode));
+        drop(art);
+        if let Some(image) = image {
+            self.update_texture(context, image, revision, size, dark_mode);
+        }
+        Some((width, height))
+    }
+
+    fn paint_texture(&self, context: BlockRenderContext<'_>) {
+        let Some(texture) = &self.texture else {
+            return;
+        };
+        let tint =
+            Color32::from_white_alpha((context.opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let mut mesh = egui::Mesh::with_texture(texture.id());
+        mesh.vertices.extend([
+            egui::epaint::Vertex {
+                pos: context.corners[0],
+                uv: Pos2::new(0.0, 0.0),
+                color: tint,
+            },
+            egui::epaint::Vertex {
+                pos: context.corners[1],
+                uv: Pos2::new(1.0, 0.0),
+                color: tint,
+            },
+            egui::epaint::Vertex {
+                pos: context.corners[2],
+                uv: Pos2::new(1.0, 1.0),
+                color: tint,
+            },
+            egui::epaint::Vertex {
+                pos: context.corners[3],
+                uv: Pos2::new(0.0, 1.0),
+                color: tint,
+            },
+        ]);
+        mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+        context.painter.add(mesh);
+    }
+
+    fn export(&mut self, client: &BlockClient) -> Option<EditorAction> {
+        let generated = self
+            .block
+            .read()
+            .map(|art| dynamic_artifact::generate(&art, &self.block.name()));
+        match generated {
+            Some(Ok(image)) => {
+                let child = client
+                    .create_dynamic_artifact(image, dynamic_artifact::descriptor(self.block.id()));
+                self.export_error = None;
+                Some(EditorAction::OpenBlock {
+                    id: child.id(),
+                    block_type: Image::TYPE_ID,
+                })
+            }
+            Some(Err(error)) => {
+                self.export_error = Some(error);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn show_export_error(&self, ui: &mut egui::Ui) {
+        if let Some(error) = &self.export_error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
     }
 
     fn canvas(&mut self, ui: &mut egui::Ui, width: u16, height: u16, input_enabled: bool) {
@@ -1054,6 +1138,93 @@ impl BlockEditor for PixelArtEditor {
         Some(&self.block)
     }
 
+    fn render(&mut self, context: BlockRenderContext<'_>) -> bool {
+        let dark_mode = context.painter.ctx().global_style().visuals.dark_mode;
+        if self
+            .ensure_texture(context.painter.ctx(), dark_mode)
+            .is_none()
+        {
+            return false;
+        }
+        self.paint_texture(context);
+        true
+    }
+
+    fn render_aspect_ratio(&self) -> Option<f32> {
+        let art = self.block.read()?;
+        Some(f32::from(art.width()) / f32::from(art.height()))
+    }
+
+    fn default_preserve_aspect_ratio(&self) -> bool {
+        true
+    }
+
+    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
+        Some(DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: true,
+        })
+    }
+
+    fn direct_editor_intrinsic_size(&mut self, _client: &BlockClient) -> Option<Vec2> {
+        let art = self.block.read()?;
+        let width = f32::from(art.width());
+        let height = f32::from(art.height());
+        let pixel_size = (DIRECT_EDITOR_LONG_SIDE / width.max(height))
+            .max(DIRECT_EDITOR_SHORT_SIDE / width.min(height));
+        Some(Vec2::new(width * pixel_size, height * pixel_size))
+    }
+
+    fn direct_editor_top_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        client: &BlockClient,
+    ) -> Option<EditorAction> {
+        let art = self.block.read()?;
+        let width = art.width();
+        let height = art.height();
+        drop(art);
+        let export = self.top_bar(ui, width, height, false);
+        self.show_export_error(ui);
+        export.then(|| self.export(client)).flatten()
+    }
+
+    fn direct_editor_has_sidebar(&self) -> bool {
+        true
+    }
+
+    fn direct_editor_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        _client: &BlockClient,
+    ) -> Option<EditorAction> {
+        let palette = self.block.read()?.palette().to_vec();
+        self.tools_panel(ui);
+        ui.separator();
+        self.color_panel(ui, &palette);
+        None
+    }
+
+    fn direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _client: &BlockClient,
+        _scale: f32,
+    ) -> Option<EditorAction> {
+        let dark_mode = ui.visuals().dark_mode;
+        let Some((width, height)) = self.ensure_texture(ui.ctx(), dark_mode) else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return None;
+        };
+        let input_enabled = !self.resize_open && !self.clear_open;
+        self.canvas(ui, width, height, input_enabled);
+        self.resize_dialog(ui.ctx(), width, height);
+        self.clear_dialog(ui.ctx());
+        None
+    }
+
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1068,18 +1239,10 @@ impl BlockEditor for PixelArtEditor {
         };
         let width = art.width();
         let height = art.height();
-        let revision = art.revision();
-        let size = [width, height];
         let palette = art.palette().to_vec();
         let dark_mode = ui.visuals().dark_mode;
-        let image = (self.texture_revision != Some(revision)
-            || self.texture_size != size
-            || self.texture_dark_mode != dark_mode)
-            .then(|| checkerboard_image(&art, dark_mode));
         drop(art);
-        if let Some(image) = image {
-            self.update_texture(ui.ctx(), image, revision, size, dark_mode);
-        }
+        self.ensure_texture(ui.ctx(), dark_mode);
 
         let input_enabled = !self.resize_open && !self.clear_open;
         let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
@@ -1089,31 +1252,9 @@ impl BlockEditor for PixelArtEditor {
             .inner;
         let mut action = None;
         if export {
-            let generated = self
-                .block
-                .read()
-                .map(|art| dynamic_artifact::generate(&art, &self.block.name()));
-            match generated {
-                Some(Ok(image)) => {
-                    let child = editors.client().create_dynamic_artifact(
-                        image,
-                        dynamic_artifact::descriptor(self.block.id()),
-                    );
-                    let id = child.id();
-                    editors.insert(Box::new(ImageEditor::new(child)));
-                    self.export_error = None;
-                    action = Some(EditorAction::OpenBlock {
-                        id,
-                        block_type: Image::TYPE_ID,
-                    });
-                }
-                Some(Err(error)) => self.export_error = Some(error),
-                None => {}
-            }
+            action = self.export(editors.client());
         }
-        if let Some(error) = &self.export_error {
-            ui.colored_label(ui.visuals().error_fg_color, error);
-        }
+        self.show_export_error(ui);
         if compact {
             let mut tools_open = self.tools_open;
             egui::Window::new("Tools")
