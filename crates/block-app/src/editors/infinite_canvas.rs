@@ -15,6 +15,7 @@ use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW,
     ICON_FORMAT_COLOR_RESET, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_TUNE,
+    ICON_ZOOM_IN, ICON_ZOOM_OUT,
 };
 use uuid::Uuid;
 
@@ -56,6 +57,7 @@ const HANDLE_RADIUS: f32 = 5.0;
 const ROTATE_OFFSET: f32 = 28.0;
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
+const ZOOM_STEP: f32 = 1.25;
 const MAX_IMPORTED_IMAGE_SIZE: f32 = 600.0;
 const IMPORT_CASCADE_OFFSET: f32 = 24.0;
 const COMPACT_SIDEBAR_WIDTH: f32 = 700.0;
@@ -728,6 +730,29 @@ impl InfiniteCanvasEditor {
 
             if compact && ui.button(ICON_TUNE).on_hover_text("Inspector").clicked() {
                 self.inspector_open = !self.inspector_open;
+            }
+
+            ui.separator();
+            if ui
+                .small_button(ICON_ZOOM_OUT)
+                .on_hover_text("Zoom out")
+                .clicked()
+            {
+                self.zoom = (self.zoom / ZOOM_STEP).clamp(MIN_ZOOM, MAX_ZOOM);
+            }
+            if ui
+                .button(format!("{:.0}%", self.zoom * 100.0))
+                .on_hover_text("Reset zoom to 100%")
+                .clicked()
+            {
+                self.zoom = 1.0;
+            }
+            if ui
+                .small_button(ICON_ZOOM_IN)
+                .on_hover_text("Zoom in")
+                .clicked()
+            {
+                self.zoom = (self.zoom * ZOOM_STEP).clamp(MIN_ZOOM, MAX_ZOOM);
             }
 
             if let Some(block) = &self.armed_block {

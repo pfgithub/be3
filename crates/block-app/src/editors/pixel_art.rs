@@ -215,10 +215,10 @@ impl PixelArtEditor {
             }
             if ui
                 .button(format!("{:.0}%", viewport.zoom() * 100.0))
-                .on_hover_text("Fit canvas to viewport (0)")
+                .on_hover_text("Reset zoom to 100%")
                 .clicked()
             {
-                viewport.fit();
+                viewport.change_zoom(1.0 / viewport.zoom(), None);
             }
             if ui
                 .small_button(ICON_ZOOM_IN)
