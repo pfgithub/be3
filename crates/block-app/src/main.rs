@@ -58,12 +58,12 @@ fn native_options() -> eframe::NativeOptions {
     }
 }
 
-fn run_native(options: eframe::NativeOptions) -> eframe::Result {
+fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> eframe::Result {
     eframe::run_native(
         APP_ID,
         options,
-        Box::new(|_creation_context| {
-            BlockApp::new()
+        Box::new(move |_creation_context| {
+            BlockApp::new(storage_root)
                 .map(|app| Box::new(app) as Box<dyn eframe::App>)
                 .map_err(Into::into)
         }),
@@ -72,15 +72,16 @@ fn run_native(options: eframe::NativeOptions) -> eframe::Result {
 
 #[cfg(not(target_os = "android"))]
 pub fn run() -> eframe::Result {
-    run_native(native_options())
+    run_native(native_options(), None)
 }
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    let storage_root = app.internal_data_path();
     let mut options = native_options();
     options.android_app = Some(app);
-    let exit_code = match run_native(options) {
+    let exit_code = match run_native(options, storage_root) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("Block stopped: {error}");
@@ -211,8 +212,9 @@ enum BlockPickerTarget {
 }
 
 impl BlockApp {
-    fn new() -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let data_dir = eframe::storage_dir(APP_ID)
+    fn new(storage_root: Option<PathBuf>) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let data_dir = storage_root
+            .or_else(|| eframe::storage_dir(APP_ID))
             .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?
             .join("blocks");
         let url = start_embedded_server(data_dir)?;
