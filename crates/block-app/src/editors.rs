@@ -21,6 +21,9 @@ use uuid::Uuid;
 use self::unsupported::UnsupportedEditor;
 
 const COMPACT_DIRECT_EDITOR_WIDTH: f32 = 760.0;
+const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
+const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
+const DIRECT_EDITOR_PAN_MARGIN: f32 = 32.0;
 
 pub enum EditorAction {
     OpenBlock {
@@ -47,6 +50,52 @@ pub struct BlockRenderContext<'a> {
 pub struct DirectEditorCapabilities {
     pub allow_rotation: bool,
     pub preserve_aspect_ratio: bool,
+    pub supports_pan_and_zoom: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DirectEditorViewportCommand {
+    Pan(egui::Vec2),
+    Zoom {
+        factor: f32,
+        anchor: Option<egui::Pos2>,
+    },
+    Fit,
+}
+
+pub struct DirectEditorViewport {
+    zoom: f32,
+    commands: Vec<DirectEditorViewportCommand>,
+}
+
+impl DirectEditorViewport {
+    pub fn new(zoom: f32) -> Self {
+        Self {
+            zoom,
+            commands: Vec::new(),
+        }
+    }
+
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    pub fn pan(&mut self, delta: egui::Vec2) {
+        self.commands.push(DirectEditorViewportCommand::Pan(delta));
+    }
+
+    pub fn change_zoom(&mut self, factor: f32, anchor: Option<egui::Pos2>) {
+        self.commands
+            .push(DirectEditorViewportCommand::Zoom { factor, anchor });
+    }
+
+    pub fn fit(&mut self) {
+        self.commands.push(DirectEditorViewportCommand::Fit);
+    }
+
+    pub fn drain(&mut self) -> impl Iterator<Item = DirectEditorViewportCommand> + '_ {
+        self.commands.drain(..)
+    }
 }
 
 pub struct EditorAccess<'a> {
@@ -129,9 +178,14 @@ impl<'a> EditorAccess<'a> {
         size
     }
 
-    pub fn direct_editor_top_bar(&mut self, id: Uuid, ui: &mut egui::Ui) -> Option<EditorAction> {
+    pub fn direct_editor_top_bar(
+        &mut self,
+        id: Uuid,
+        ui: &mut egui::Ui,
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
         let mut editor = self.editors.remove(&id)?;
-        let action = editor.direct_editor_top_bar(ui, self.client);
+        let action = editor.direct_editor_top_bar(ui, self.client, viewport);
         self.editors.insert(id, editor);
         action
     }
@@ -175,9 +229,10 @@ impl<'a> EditorAccess<'a> {
         id: Uuid,
         ui: &mut egui::Ui,
         scale: f32,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let mut editor = self.editors.remove(&id)?;
-        let action = editor.direct_editor_ui(ui, self.client, scale);
+        let action = editor.direct_editor_ui(ui, self.client, scale, viewport);
         self.editors.insert(id, editor);
         action
     }
@@ -244,6 +299,7 @@ pub trait BlockEditor {
         &mut self,
         _ui: &mut egui::Ui,
         _client: &BlockClient,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         None
     }
@@ -272,6 +328,7 @@ pub trait BlockEditor {
         _ui: &mut egui::Ui,
         _client: &BlockClient,
         _scale: f32,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         None
     }
@@ -293,11 +350,18 @@ pub fn direct_editor_tab_ui(
     let id = editor.id();
     let compact = ui.available_width() < COMPACT_DIRECT_EDITOR_WIDTH;
     let mut action = None;
+    let capabilities = editor.direct_editor_capabilities().unwrap();
+    let viewport_id = egui::Id::new(("direct-editor-tab-viewport", id));
+    let mut viewport_state = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<DirectEditorTabViewport>(viewport_id))
+        .unwrap_or_default();
+    let mut viewport = DirectEditorViewport::new(viewport_state.zoom);
 
     egui::Panel::top(egui::Id::new(("direct-editor-tab-toolbar", id)))
         .show_separator_line(true)
         .show_inside(ui, |ui| {
-            let next_action = editor.direct_editor_top_bar(ui, client);
+            let next_action = editor.direct_editor_top_bar(ui, client, &mut viewport);
             if action.is_none() {
                 action = next_action;
             }
@@ -367,17 +431,100 @@ pub fn direct_editor_tab_ui(
         viewport_size.x.max(intrinsic_size.x),
         viewport_size.y.max(intrinsic_size.y),
     );
-    egui::ScrollArea::both()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.set_min_size(content_size);
-            let next_action = editor.direct_editor_ui(ui, client, 1.0);
-            if action.is_none() {
-                action = next_action;
+    if capabilities.supports_pan_and_zoom {
+        let (viewport_rect, _) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
+        let transformed_size = content_size * viewport_state.zoom;
+        constrain_direct_editor_pan(&mut viewport_state.pan, viewport_size, transformed_size);
+        let content_rect = egui::Rect::from_center_size(
+            viewport_rect.center() + viewport_state.pan,
+            transformed_size,
+        );
+        let next_action = ui
+            .new_child(
+                egui::UiBuilder::new()
+                    .id_salt(("direct-editor-tab-content", id))
+                    .max_rect(content_rect)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            )
+            .scope(|ui| {
+                ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
+                ui.set_min_size(transformed_size);
+                editor.direct_editor_ui(ui, client, viewport_state.zoom, &mut viewport)
+            })
+            .inner;
+        if action.is_none() {
+            action = next_action;
+        }
+
+        for command in viewport.drain() {
+            match command {
+                DirectEditorViewportCommand::Pan(delta) => viewport_state.pan += delta,
+                DirectEditorViewportCommand::Zoom { factor, anchor } => {
+                    let old_zoom = viewport_state.zoom;
+                    let new_zoom =
+                        (old_zoom * factor).clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+                    if new_zoom != old_zoom {
+                        let anchor = anchor.unwrap_or_else(|| viewport_rect.center());
+                        viewport_state.pan = (anchor - viewport_rect.center())
+                            - ((anchor - viewport_rect.center()) - viewport_state.pan)
+                                * (new_zoom / old_zoom);
+                        viewport_state.zoom = new_zoom;
+                    }
+                }
+                DirectEditorViewportCommand::Fit => {
+                    viewport_state = DirectEditorTabViewport::default();
+                }
             }
-        });
+        }
+        constrain_direct_editor_pan(
+            &mut viewport_state.pan,
+            viewport_size,
+            content_size * viewport_state.zoom,
+        );
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(viewport_id, viewport_state));
+    } else {
+        egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_min_size(content_size);
+                let next_action = editor.direct_editor_ui(ui, client, 1.0, &mut viewport);
+                if action.is_none() {
+                    action = next_action;
+                }
+            });
+    }
 
     action
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DirectEditorTabViewport {
+    zoom: f32,
+    pan: egui::Vec2,
+}
+
+impl Default for DirectEditorTabViewport {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            pan: egui::Vec2::ZERO,
+        }
+    }
+}
+
+fn constrain_direct_editor_pan(pan: &mut egui::Vec2, viewport: egui::Vec2, content: egui::Vec2) {
+    for (pan, viewport, content) in [
+        (&mut pan.x, viewport.x, content.x),
+        (&mut pan.y, viewport.y, content.y),
+    ] {
+        if content <= viewport {
+            *pan = 0.0;
+        } else {
+            let limit = (content - viewport) * 0.5 + DIRECT_EDITOR_PAN_MARGIN.min(viewport * 0.5);
+            *pan = pan.clamp(-limit, limit);
+        }
+    }
 }
 
 type CreateEditor = fn(&BlockClient) -> Box<dyn BlockEditor>;

@@ -23,7 +23,8 @@ use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAction, EditorRegistration,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
+    EditorRegistration,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -39,10 +40,7 @@ pub(super) fn registration() -> EditorRegistration {
     }
 }
 
-const MIN_ZOOM: f32 = 0.25;
-const MAX_ZOOM: f32 = 32.0;
 const ZOOM_STEP: f32 = 1.25;
-const PAN_MARGIN: f32 = 32.0;
 const MAX_BRUSH_SIZE: u16 = 64;
 const MAX_RECENT_COLORS: usize = 12;
 const DIRECT_EDITOR_LONG_SIDE: f32 = 256.0;
@@ -130,8 +128,6 @@ pub(super) struct PixelArtEditor {
     mirror_horizontal: bool,
     mirror_vertical: bool,
     show_grid: bool,
-    zoom: f32,
-    pan: Vec2,
     active_drawing: Option<ActiveDrawing>,
     committed_preview: Option<CommittedPreview>,
     texture: Option<TextureHandle>,
@@ -162,8 +158,6 @@ impl PixelArtEditor {
             mirror_horizontal: false,
             mirror_vertical: false,
             show_grid: true,
-            zoom: 1.0,
-            pan: Vec2::ZERO,
             active_drawing: None,
             committed_preview: None,
             texture: None,
@@ -191,7 +185,13 @@ impl PixelArtEditor {
         });
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui, width: u16, height: u16) -> bool {
+    fn top_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        width: u16,
+        height: u16,
+        viewport: &mut DirectEditorViewport,
+    ) -> bool {
         let mut export = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong(self.tool.label());
@@ -203,28 +203,28 @@ impl PixelArtEditor {
                 .on_hover_text("Zoom out (-)")
                 .clicked()
             {
-                self.change_zoom(1.0 / ZOOM_STEP);
+                viewport.change_zoom(1.0 / ZOOM_STEP, None);
             }
             if ui
-                .button(format!("{:.0}%", self.zoom * 100.0))
+                .button(format!("{:.0}%", viewport.zoom() * 100.0))
                 .on_hover_text("Fit canvas to viewport (0)")
                 .clicked()
             {
-                self.reset_view();
+                viewport.fit();
             }
             if ui
                 .small_button(ICON_ZOOM_IN)
                 .on_hover_text("Zoom in (+)")
                 .clicked()
             {
-                self.change_zoom(ZOOM_STEP);
+                viewport.change_zoom(ZOOM_STEP, None);
             }
             if ui
                 .small_button(ICON_FIT_SCREEN)
                 .on_hover_text("Fit canvas to viewport (0)")
                 .clicked()
             {
-                self.reset_view();
+                viewport.fit();
             }
             ui.checkbox(&mut self.show_grid, "Grid");
 
@@ -476,19 +476,6 @@ impl PixelArtEditor {
         }
     }
 
-    fn reset_view(&mut self) {
-        self.zoom = 1.0;
-        self.pan = Vec2::ZERO;
-    }
-
-    fn change_zoom(&mut self, factor: f32) {
-        let old_zoom = self.zoom;
-        self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
-        if old_zoom > 0.0 {
-            self.pan *= self.zoom / old_zoom;
-        }
-    }
-
     fn update_texture(
         &mut self,
         context: &egui::Context,
@@ -590,7 +577,14 @@ impl PixelArtEditor {
         }
     }
 
-    fn canvas(&mut self, ui: &mut egui::Ui, width: u16, height: u16, input_enabled: bool) {
+    fn canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        width: u16,
+        height: u16,
+        input_enabled: bool,
+        viewport_controls: &mut DirectEditorViewport,
+    ) {
         let available = ui.available_size().max(Vec2::splat(1.0));
         let (viewport, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
         let painter = ui.painter_at(viewport);
@@ -599,35 +593,18 @@ impl PixelArtEditor {
         let fit_scale = (viewport.width() / f32::from(width))
             .min(viewport.height() / f32::from(height))
             .max(f32::EPSILON);
-        let old_canvas_size = Vec2::new(
-            f32::from(width) * fit_scale * self.zoom,
-            f32::from(height) * fit_scale * self.zoom,
-        );
-        let old_canvas_rect = Rect::from_center_size(viewport.center() + self.pan, old_canvas_size);
-
         if input_enabled && response.hovered() {
             if let Some(pointer) = response.ctx.pointer_hover_pos() {
                 let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
                 if scroll != 0.0 {
-                    let relative = (pointer - old_canvas_rect.min) / old_canvas_rect.size();
-                    self.zoom = (self.zoom * (scroll * 0.002).exp()).clamp(MIN_ZOOM, MAX_ZOOM);
-                    let new_size = Vec2::new(
-                        f32::from(width) * fit_scale * self.zoom,
-                        f32::from(height) * fit_scale * self.zoom,
-                    );
-                    let new_min = pointer - relative * new_size;
-                    self.pan = new_min + new_size * 0.5 - viewport.center();
+                    viewport_controls.change_zoom((scroll * 0.002).exp(), Some(pointer));
                 }
             }
         }
 
-        self.handle_shortcuts(ui, &response, input_enabled);
+        self.handle_shortcuts(ui, &response, input_enabled, viewport_controls);
 
-        let canvas_size = Vec2::new(
-            f32::from(width) * fit_scale * self.zoom,
-            f32::from(height) * fit_scale * self.zoom,
-        );
-        constrain_pan(&mut self.pan, viewport.size(), canvas_size);
+        let canvas_size = Vec2::new(f32::from(width) * fit_scale, f32::from(height) * fit_scale);
 
         let panning = input_enabled
             && response.ctx.input(|input| {
@@ -636,13 +613,12 @@ impl PixelArtEditor {
                         && input.pointer.button_down(PointerButton::Primary))
             });
         if panning && response.hovered() {
-            self.pan += response.ctx.input(|input| input.pointer.delta());
-            constrain_pan(&mut self.pan, viewport.size(), canvas_size);
+            viewport_controls.pan(response.ctx.input(|input| input.pointer.delta()));
             self.active_drawing = None;
             self.committed_preview = None;
         }
 
-        let canvas_rect = Rect::from_center_size(viewport.center() + self.pan, canvas_size);
+        let canvas_rect = Rect::from_center_size(viewport.center(), canvas_size);
         if let Some(texture) = &self.texture {
             painter.image(
                 texture.id(),
@@ -858,7 +834,13 @@ impl PixelArtEditor {
         }
     }
 
-    fn handle_shortcuts(&mut self, ui: &egui::Ui, response: &egui::Response, input_enabled: bool) {
+    fn handle_shortcuts(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        input_enabled: bool,
+        viewport: &mut DirectEditorViewport,
+    ) {
         if !input_enabled || !response.hovered() || ui.ctx().egui_wants_keyboard_input() {
             return;
         }
@@ -930,11 +912,11 @@ impl PixelArtEditor {
             self.mirror_vertical = !self.mirror_vertical;
         }
         if zoom_in {
-            self.change_zoom(ZOOM_STEP);
+            viewport.change_zoom(ZOOM_STEP, None);
         } else if zoom_out {
-            self.change_zoom(1.0 / ZOOM_STEP);
+            viewport.change_zoom(1.0 / ZOOM_STEP, None);
         } else if fit {
-            self.reset_view();
+            viewport.fit();
         }
     }
 
@@ -1004,7 +986,13 @@ impl PixelArtEditor {
         }
     }
 
-    fn resize_dialog(&mut self, context: &egui::Context, width: u16, height: u16) {
+    fn resize_dialog(
+        &mut self,
+        context: &egui::Context,
+        width: u16,
+        height: u16,
+        viewport: &mut DirectEditorViewport,
+    ) {
         if !self.resize_open {
             return;
         }
@@ -1051,7 +1039,7 @@ impl PixelArtEditor {
         if apply {
             self.record_resize(self.resize_width, self.resize_height, self.resize_anchor);
             self.active_drawing = None;
-            self.reset_view();
+            viewport.fit();
             open = false;
         } else if cancel {
             open = false;
@@ -1148,6 +1136,7 @@ impl BlockEditor for PixelArtEditor {
         Some(DirectEditorCapabilities {
             allow_rotation: false,
             preserve_aspect_ratio: true,
+            supports_pan_and_zoom: true,
         })
     }
 
@@ -1164,12 +1153,13 @@ impl BlockEditor for PixelArtEditor {
         &mut self,
         ui: &mut egui::Ui,
         client: &BlockClient,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let art = self.block.read()?;
         let width = art.width();
         let height = art.height();
         drop(art);
-        let export = self.top_bar(ui, width, height);
+        let export = self.top_bar(ui, width, height, viewport);
         self.show_export_error(ui);
         export.then(|| self.export(client)).flatten()
     }
@@ -1206,6 +1196,7 @@ impl BlockEditor for PixelArtEditor {
         ui: &mut egui::Ui,
         _client: &BlockClient,
         _scale: f32,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let dark_mode = ui.visuals().dark_mode;
         let Some((width, height)) = self.ensure_texture(ui.ctx(), dark_mode) else {
@@ -1215,8 +1206,8 @@ impl BlockEditor for PixelArtEditor {
             return None;
         };
         let input_enabled = !self.resize_open && !self.clear_open;
-        self.canvas(ui, width, height, input_enabled);
-        self.resize_dialog(ui.ctx(), width, height);
+        self.canvas(ui, width, height, input_enabled, viewport);
+        self.resize_dialog(ui.ctx(), width, height, viewport);
         self.clear_dialog(ui.ctx());
         None
     }
@@ -1689,21 +1680,6 @@ fn paint_hovered_pixel(
         Stroke::new(1.0, Color32::BLACK),
         egui::StrokeKind::Inside,
     );
-}
-
-fn constrain_pan(pan: &mut Vec2, viewport: Vec2, canvas: Vec2) {
-    if canvas.x <= viewport.x {
-        pan.x = 0.0;
-    } else {
-        let limit = (canvas.x - viewport.x) * 0.5 + PAN_MARGIN.min(viewport.x * 0.5);
-        pan.x = pan.x.clamp(-limit, limit);
-    }
-    if canvas.y <= viewport.y {
-        pan.y = 0.0;
-    } else {
-        let limit = (canvas.y - viewport.y) * 0.5 + PAN_MARGIN.min(viewport.y * 0.5);
-        pan.y = pan.y.clamp(-limit, limit);
-    }
 }
 
 fn pixels_on_line(start: (u16, u16), end: (u16, u16)) -> Vec<(u16, u16)> {

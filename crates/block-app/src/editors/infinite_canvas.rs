@@ -23,8 +23,8 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration,
-    SidebarDragPayload,
+    BlockEditor, BlockRenderContext, DirectEditorViewport, DirectEditorViewportCommand,
+    EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -1571,6 +1571,7 @@ impl BlockEditor for InfiniteCanvasEditor {
 
         let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
         let mut action = None;
+        let mut direct_viewport = DirectEditorViewport::new(self.zoom);
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let canvas_rect = response.rect;
@@ -1600,7 +1601,12 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .show(ui.ctx(), |ui| {
                         ui.set_clip_rect(screen.intersect(ui.clip_rect()));
                         ui.set_min_size(screen.size());
-                        editors.direct_editor_ui(block_id, ui, scale * self.zoom)
+                        editors.direct_editor_ui(
+                            block_id,
+                            ui,
+                            scale * self.zoom,
+                            &mut direct_viewport,
+                        )
                     })
                     .inner;
                 action = action.or(embedded);
@@ -1626,7 +1632,11 @@ impl BlockEditor for InfiniteCanvasEditor {
                                 }
                             });
                             if self.focused_editor.is_some() {
-                                top_action = editors.direct_editor_top_bar(block_id, ui);
+                                top_action = editors.direct_editor_top_bar(
+                                    block_id,
+                                    ui,
+                                    &mut direct_viewport,
+                                );
                             }
                         } else {
                             create_block = self.show_toolbar(ui, &entities, editors, compact);
@@ -1776,6 +1786,48 @@ impl BlockEditor for InfiniteCanvasEditor {
                 });
         }
         action = action.or(left_sidebar_action).or(right_sidebar_action);
+        if let Some((entity_id, _, _)) = focused {
+            for command in direct_viewport.drain() {
+                match command {
+                    DirectEditorViewportCommand::Pan(delta) => {
+                        self.camera.x -= delta.x / self.zoom;
+                        self.camera.y -= delta.y / self.zoom;
+                        self.gesture = None;
+                    }
+                    DirectEditorViewportCommand::Zoom { factor, anchor } => {
+                        let anchor = anchor.unwrap_or_else(|| {
+                            direct_editor_rects
+                                .first()
+                                .map_or_else(|| canvas_rect.center(), Rect::center)
+                        });
+                        let before = self.screen_to_world(anchor, canvas_rect);
+                        self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+                        let after = self.screen_to_world(anchor, canvas_rect);
+                        self.camera.x += before.x - after.x;
+                        self.camera.y += before.y - after.y;
+                    }
+                    DirectEditorViewportCommand::Fit => {
+                        if let Some(bounds) = entities
+                            .iter()
+                            .find(|entity| entity.id == entity_id)
+                            .and_then(direct_editor_layout)
+                            .map(|layout| layout.content)
+                        {
+                            let width = (bounds.max.x - bounds.min.x).max(f32::EPSILON);
+                            let height = (bounds.max.y - bounds.min.y).max(f32::EPSILON);
+                            self.zoom = (canvas_rect.width() / width)
+                                .min(canvas_rect.height() / height)
+                                .clamp(MIN_ZOOM, MAX_ZOOM);
+                            self.camera = CanvasPoint::new(
+                                (bounds.min.x + bounds.max.x) * 0.5,
+                                (bounds.min.y + bounds.max.y) * 0.5,
+                            );
+                            self.gesture = None;
+                        }
+                    }
+                }
+            }
+        }
         let (context_layer_move, context_create_block, set_parent) =
             self.handle_canvas_input(&response, &entities, editors, &direct_editor_rects);
         create_block = create_block.or(context_create_block);

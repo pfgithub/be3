@@ -527,6 +527,7 @@ impl BlockEditor for DatabaseEditor {
         Some(DirectEditorCapabilities {
             allow_rotation: false,
             preserve_aspect_ratio: true,
+            supports_pan_and_zoom: false,
         })
     }
 
@@ -546,6 +547,7 @@ impl BlockEditor for DatabaseEditor {
         &mut self,
         ui: &mut egui::Ui,
         client: &BlockClient,
+        _viewport: &mut super::DirectEditorViewport,
     ) -> Option<EditorAction> {
         let (schema_id, rows, fields) = self.data(client)?;
         self.controls(ui, schema_id, &rows, &fields)
@@ -556,6 +558,7 @@ impl BlockEditor for DatabaseEditor {
         ui: &mut egui::Ui,
         client: &BlockClient,
         scale: f32,
+        _viewport: &mut super::DirectEditorViewport,
     ) -> Option<EditorAction> {
         let (_, rows, fields) = self.data(client)?;
         if fields.is_empty() {
