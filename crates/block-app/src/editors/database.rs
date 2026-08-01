@@ -167,6 +167,18 @@ impl DatabaseEditor {
         if !ui.memory(|memory| memory.has_focus(focus_id)) {
             return;
         }
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                focus_id,
+                egui::EventFilter {
+                    tab: true,
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+            memory.move_focus(egui::FocusDirection::None);
+        });
 
         if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)) {
             self.move_selection(rows, fields, -1, 0);
@@ -259,6 +271,7 @@ impl DatabaseEditor {
                 selection.is_some(),
                 egui::TextEdit::singleline(&mut self.edit_buffer)
                     .id(formula_id)
+                    .lock_focus(true)
                     .desired_width(f32::INFINITY)
                     .hint_text("Select a cell"),
             );
@@ -395,6 +408,7 @@ impl BlockEditor for DatabaseEditor {
 
         let mut action = None;
         let mut operations = Vec::new();
+        self.handle_keyboard(ui, &rows, &fields, &mut operations);
         ui.horizontal(|ui| {
             if ui.button(format!("{} Row", ICON_ADD.codepoint)).clicked() {
                 let row_id = Uuid::new_v4();
@@ -465,7 +479,6 @@ impl BlockEditor for DatabaseEditor {
 
         self.formula_bar(ui, &rows, &fields, &mut operations);
         ui.separator();
-        self.handle_keyboard(ui, &rows, &fields, &mut operations);
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
