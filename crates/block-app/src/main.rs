@@ -27,8 +27,9 @@ use editors::{
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
 use egui_material_icons::icons::{
-    ICON_ADD, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK, ICON_CHEVRON_RIGHT, ICON_CIRCLE,
-    ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_REDO, ICON_REFRESH, ICON_UNDO,
+    ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK,
+    ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT,
+    ICON_REDO, ICON_REFRESH, ICON_UNDO,
 };
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -139,11 +140,74 @@ struct BlockApp {
     allow_close: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 enum DockTab {
     Files,
     Empty,
-    Block(Uuid),
+    Block(BlockTab),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct BlockTab {
+    id: Uuid,
+    history: Vec<BlockTabHistoryItem>,
+    history_index: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct BlockTabHistoryItem {
+    id: Uuid,
+    block_type: Uuid,
+}
+
+impl BlockTab {
+    fn new(id: Uuid, block_type: Uuid) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            history: vec![BlockTabHistoryItem { id, block_type }],
+            history_index: 0,
+        }
+    }
+
+    fn current(&self) -> BlockTabHistoryItem {
+        self.history[self.history_index]
+    }
+
+    fn can_go_back(&self) -> bool {
+        self.history_index > 0
+    }
+
+    fn can_go_forward(&self) -> bool {
+        self.history_index + 1 < self.history.len()
+    }
+
+    fn navigate(&mut self, item: BlockTabHistoryItem) {
+        if self.current().id == item.id {
+            return;
+        }
+        self.history.truncate(self.history_index + 1);
+        self.history.push(item);
+        self.history_index += 1;
+    }
+
+    fn go_back(&mut self) {
+        if self.can_go_back() {
+            self.history_index -= 1;
+        }
+    }
+
+    fn go_forward(&mut self) {
+        if self.can_go_forward() {
+            self.history_index += 1;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TabNavigation {
+    Back,
+    Forward,
+    Open(BlockTabHistoryItem),
 }
 
 fn default_dock_state() -> DockState<DockTab> {
@@ -170,7 +234,7 @@ fn ensure_empty_workspace(dock_state: &mut DockState<DockTab>) {
 fn set_files_compact(dock_state: &mut DockState<DockTab>, compact: bool) {
     let active = dock_state
         .find_active_focused()
-        .map(|(_, tab)| *tab)
+        .map(|(_, tab)| tab.clone())
         .unwrap_or(DockTab::Files);
     let Some(files_path) = dock_state.find_tab(&DockTab::Files) else {
         return;
@@ -687,6 +751,46 @@ impl BlockApp {
     }
 
     fn open_tab(&mut self, id: Uuid, block_type: Uuid) {
+        self.ensure_block_open(id, block_type);
+        let existing_tab = self.dock_state.iter_all_tabs().find_map(|(path, tab)| {
+            matches!(tab, DockTab::Block(tab) if tab.current().id == id).then_some(path)
+        });
+        if let Some(path) = existing_tab {
+            let _ = self.dock_state.set_active_tab(path);
+            self.dock_state
+                .set_focused_node_and_surface(path.node_path());
+        } else {
+            let tab = DockTab::Block(BlockTab::new(id, block_type));
+            let existing_block = self
+                .dock_state
+                .iter_all_tabs()
+                .find_map(|(path, tab)| matches!(tab, DockTab::Block(_)).then_some(path));
+            if let Some(empty_path) = self.dock_state.find_tab(&DockTab::Empty) {
+                let leaf = self
+                    .dock_state
+                    .leaf_mut(empty_path.node_path())
+                    .expect("blank workspace must be a dock leaf");
+                leaf.tabs_mut()[empty_path.tab.0] = tab;
+                let _ = self.dock_state.set_active_tab(empty_path);
+                self.dock_state
+                    .set_focused_node_and_surface(empty_path.node_path());
+            } else if let Some(path) = existing_block {
+                self.dock_state
+                    .set_focused_node_and_surface(path.node_path());
+                self.dock_state.push_to_focused_leaf(tab);
+            } else if let Some(files_path) = self.dock_state.find_tab(&DockTab::Files) {
+                self.dock_state[files_path.surface].split_right(files_path.node, 0.22, vec![tab]);
+            } else {
+                self.dock_state.push_to_focused_leaf(tab);
+            }
+        }
+        if self.active_tab != Some(id) {
+            self.sidebar_reveal = None;
+        }
+        self.active_tab = Some(id);
+    }
+
+    fn ensure_block_open(&mut self, id: Uuid, block_type: Uuid) {
         self.block_types.insert(id, block_type);
         if !self.editors.contains_key(&id) {
             self.editors
@@ -703,37 +807,35 @@ impl BlockApp {
             self.client
                 .watch_references(BlockReferenceList::Backrefs(id))
         });
-        let tab = DockTab::Block(id);
-        if self.dock_state.find_tab(&tab).is_none() {
-            let existing_block = self
-                .dock_state
-                .iter_all_tabs()
-                .find_map(|(path, tab)| matches!(tab, DockTab::Block(_)).then_some(path));
-            if let Some(empty_path) = self.dock_state.find_tab(&DockTab::Empty) {
-                let leaf = self
-                    .dock_state
-                    .leaf_mut(empty_path.node_path())
-                    .expect("blank workspace must be a dock leaf");
-                leaf.tabs_mut()[empty_path.tab.0] = tab;
-            } else if let Some(path) = existing_block {
-                self.dock_state
-                    .set_focused_node_and_surface(path.node_path());
-                self.dock_state.push_to_focused_leaf(tab);
-            } else if let Some(files_path) = self.dock_state.find_tab(&DockTab::Files) {
-                self.dock_state[files_path.surface].split_right(files_path.node, 0.22, vec![tab]);
-            } else {
-                self.dock_state.push_to_focused_leaf(tab);
-            }
+    }
+
+    fn navigate_tab(&mut self, tab_id: Uuid, navigation: TabNavigation) {
+        let destination = match navigation {
+            TabNavigation::Open(item) => Some(item),
+            TabNavigation::Back | TabNavigation::Forward => None,
+        };
+        if let Some(item) = destination {
+            self.ensure_block_open(item.id, item.block_type);
         }
-        if let Some(path) = self.dock_state.find_tab(&tab) {
-            let _ = self.dock_state.set_active_tab(path);
-            self.dock_state
-                .set_focused_node_and_surface(path.node_path());
+        let Some(tab) = self
+            .dock_state
+            .iter_all_tabs_mut()
+            .find_map(|(_, tab)| match tab {
+                DockTab::Block(tab) if tab.id == tab_id => Some(tab),
+                DockTab::Files | DockTab::Empty | DockTab::Block(_) => None,
+            })
+        else {
+            return;
+        };
+        match navigation {
+            TabNavigation::Back => tab.go_back(),
+            TabNavigation::Forward => tab.go_forward(),
+            TabNavigation::Open(item) => tab.navigate(item),
         }
-        if self.active_tab != Some(id) {
-            self.sidebar_reveal = None;
-        }
-        self.active_tab = Some(id);
+        let current = tab.current();
+        self.ensure_block_open(current.id, current.block_type);
+        self.active_tab = Some(current.id);
+        self.sidebar_reveal = None;
     }
 
     fn close_tab_resources(&mut self, id: Uuid) {
@@ -1239,34 +1341,57 @@ impl BlockApp {
         });
     }
 
-    fn show_content(&mut self, ui: &mut egui::Ui, active: Uuid) -> Option<EditorAction> {
+    fn show_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        active: Uuid,
+        can_go_back: bool,
+        can_go_forward: bool,
+    ) -> (Option<EditorAction>, Option<TabNavigation>) {
         let Some(mut editor) = self.editors.remove(&active) else {
-            return None;
+            return (None, None);
         };
         self.show_dynamic_artifact_bar(ui, active, editor.block_type());
-        if let Some(history) = editor
-            .history()
-            .filter(|history| history.supports_history())
-        {
-            let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
-            let redo_shortcut = egui::KeyboardShortcut::new(
-                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                egui::Key::Z,
-            );
-            let redo_y_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::Y);
-            let redo_requested = ui
+        let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+        let redo_shortcut = egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            egui::Key::Z,
+        );
+        let redo_y_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::Y);
+        let redo_requested = ui
+            .ctx()
+            .input_mut(|input| input.consume_shortcut(&redo_shortcut))
+            || ui
                 .ctx()
-                .input_mut(|input| input.consume_shortcut(&redo_shortcut))
-                || ui
-                    .ctx()
-                    .input_mut(|input| input.consume_shortcut(&redo_y_shortcut));
-            let undo_requested = ui
-                .ctx()
-                .input_mut(|input| input.consume_shortcut(&undo_shortcut));
-            ui.horizontal(|ui| {
+                .input_mut(|input| input.consume_shortcut(&redo_y_shortcut));
+        let undo_requested = ui
+            .ctx()
+            .input_mut(|input| input.consume_shortcut(&undo_shortcut));
+        let block_type = editor.block_type();
+        let current_name = editor.name();
+        let relationships = editor.relationships();
+        let mut navigation = None;
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(can_go_back, egui::Button::new(ICON_ARROW_BACK))
+                .on_hover_text("Back")
+                .clicked()
+            {
+                navigation = Some(TabNavigation::Back);
+            }
+            if ui
+                .add_enabled(can_go_forward, egui::Button::new(ICON_ARROW_FORWARD))
+                .on_hover_text("Forward")
+                .clicked()
+            {
+                navigation = Some(TabNavigation::Forward);
+            }
+            if let Some(history) = editor
+                .history()
+                .filter(|history| history.supports_history())
+            {
                 if ui
                     .add_enabled(history.can_undo(), egui::Button::new(ICON_UNDO))
-                    .on_hover_text("Undo")
                     .on_hover_text("Undo (Ctrl/Cmd+Z)")
                     .clicked()
                     || undo_requested
@@ -1282,14 +1407,65 @@ impl BlockApp {
                 {
                     history.redo();
                 }
-            });
+            }
             ui.separator();
-        }
+            if let Some(item) = self.show_breadcrumbs(
+                ui,
+                active,
+                block_type,
+                &current_name,
+                relationships.as_ref(),
+            ) {
+                navigation = Some(TabNavigation::Open(item));
+            }
+        });
+        ui.separator();
         let mut editors =
             EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
         let action = direct_editor_tab_ui(editor.as_mut(), ui, &mut editors);
         self.editors.insert(active, editor);
-        action
+        (action, navigation)
+    }
+
+    fn show_breadcrumbs(
+        &mut self,
+        ui: &mut egui::Ui,
+        active: Uuid,
+        block_type: Uuid,
+        current_name: &str,
+        relationships: Option<&block_client::BlockRelationships>,
+    ) -> Option<BlockTabHistoryItem> {
+        let mut navigate = None;
+        let parents =
+            relationships.and_then(|_| self.parents.get(&active).map(ReferenceList::read));
+        let root = parents
+            .as_ref()
+            .and_then(|parents| parents.first().map(|parent| parent.parent))
+            .or_else(|| relationships.map(|relationships| relationships.parent));
+        ui.label(match root {
+            Some(BlockParent::Orphaned) => "Recently Deleted",
+            Some(BlockParent::Root) => "Root",
+            Some(BlockParent::Uuid(_)) | None => "Unknown",
+        });
+        if let Some(parents) = parents {
+            for parent in parents {
+                self.record_reference_types(&parent);
+                ui.label(ICON_CHEVRON_RIGHT);
+                if ui
+                    .button(self.registry.icon_label(parent.block_type, &parent.name))
+                    .on_hover_text(parent.id.to_string())
+                    .clicked()
+                {
+                    navigate = Some(BlockTabHistoryItem {
+                        id: parent.id,
+                        block_type: parent.block_type,
+                    });
+                }
+            }
+        }
+        ui.label(ICON_CHEVRON_RIGHT);
+        ui.label(self.registry.icon_label(block_type, current_name));
+        navigate
     }
 
     fn show_dynamic_artifact_bar(&mut self, ui: &mut egui::Ui, id: Uuid, block_type: Uuid) {
@@ -1356,9 +1532,12 @@ impl BlockApp {
         }
     }
 
-    fn handle_editor_action(&mut self, active: Uuid, action: EditorAction) {
+    fn handle_editor_action(&mut self, tab_id: Uuid, active: Uuid, action: EditorAction) {
         match action {
-            EditorAction::OpenBlock { id, block_type } => self.open_tab(id, block_type),
+            EditorAction::OpenBlock { id, block_type } => self.navigate_tab(
+                tab_id,
+                TabNavigation::Open(BlockTabHistoryItem { id, block_type }),
+            ),
             EditorAction::CreateBlock { block_type, parent } => {
                 if let Some(id) = self.create_block_editor(block_type) {
                     let name = self
@@ -1408,6 +1587,7 @@ impl BlockApp {
         let mut viewer = BlockTabViewer {
             app: self,
             actions: Vec::new(),
+            navigations: Vec::new(),
             tabs_to_close: Vec::new(),
         };
         DockArea::new(&mut dock_state).show_inside(ui, &mut viewer);
@@ -1415,8 +1595,15 @@ impl BlockApp {
             editor.finish_frame();
         }
         let tabs_to_close = std::mem::take(&mut viewer.tabs_to_close);
-        for id in tabs_to_close {
-            let Some(path) = dock_state.find_tab(&DockTab::Block(id)) else {
+        for tab_id in tabs_to_close {
+            let Some((path, current)) =
+                dock_state
+                    .iter_all_tabs()
+                    .find_map(|(path, tab)| match tab {
+                        DockTab::Block(tab) if tab.id == tab_id => Some((path, tab.current())),
+                        DockTab::Files | DockTab::Empty | DockTab::Block(_) => None,
+                    })
+            else {
                 continue;
             };
             let editor_count = dock_state
@@ -1431,7 +1618,7 @@ impl BlockApp {
             } else {
                 dock_state.remove_tab(path);
             }
-            viewer.app.close_tab_resources(id);
+            viewer.app.close_tab_resources(current.id);
         }
         ensure_empty_workspace(&mut dock_state);
         let actions = std::mem::take(&mut viewer.actions);
@@ -1441,7 +1628,7 @@ impl BlockApp {
             .iter_all_tabs()
             .filter_map(|(_, tab)| match tab {
                 DockTab::Files | DockTab::Empty => None,
-                DockTab::Block(id) => Some(*id),
+                DockTab::Block(tab) => Some(tab.current()),
             })
             .collect::<Vec<_>>();
         let previous_active = viewer.app.active_tab;
@@ -1449,15 +1636,19 @@ impl BlockApp {
             .find_active_focused()
             .and_then(|(_, tab)| match tab {
                 DockTab::Files | DockTab::Empty => None,
-                DockTab::Block(id) => Some(*id),
+                DockTab::Block(tab) => Some(tab.current().id),
             })
             .or_else(|| {
-                previous_active.filter(|id| dock_state.find_tab(&DockTab::Block(*id)).is_some())
+                previous_active.filter(|id| {
+                    dock_state.iter_all_tabs().any(
+                        |(_, tab)| matches!(tab, DockTab::Block(tab) if tab.current().id == *id),
+                    )
+                })
             })
             .or_else(|| {
                 dock_state.iter_all_tabs().find_map(|(_, tab)| match tab {
                     DockTab::Files | DockTab::Empty => None,
-                    DockTab::Block(id) => Some(*id),
+                    DockTab::Block(tab) => Some(tab.current().id),
                 })
             });
         viewer.app.dock_state = dock_state;
@@ -1465,19 +1656,20 @@ impl BlockApp {
             viewer.app.sidebar_reveal = None;
         }
         viewer.app.active_tab = active_tab;
-        for id in pending_tabs {
-            if let Some(block_type) = viewer.app.block_types.get(&id).copied() {
-                viewer.app.open_tab(id, block_type);
-            }
+        for item in pending_tabs {
+            viewer.app.open_tab(item.id, item.block_type);
         }
-        for (active, action) in actions {
-            viewer.app.handle_editor_action(active, action);
+        for (tab_id, navigation) in std::mem::take(&mut viewer.navigations) {
+            viewer.app.navigate_tab(tab_id, navigation);
+        }
+        for (tab_id, active, action) in actions {
+            viewer.app.handle_editor_action(tab_id, active, action);
         }
     }
 
-    fn show_statusbar(&mut self, ui: &mut egui::Ui, active: Uuid) {
+    fn show_statusbar(&mut self, ui: &mut egui::Ui, active: Uuid) -> Option<BlockTabHistoryItem> {
         let Some(editor) = self.editors.get(&active) else {
-            return;
+            return None;
         };
         let block_type = editor.block_type();
         let type_name = self
@@ -1494,53 +1686,21 @@ impl BlockApp {
             .backrefs
             .get(&active)
             .map(|list| (list.is_loaded(), list.read()));
-        let current_name = editor.name();
         let mut navigate = None;
         let mut context_action = None;
 
         ui.horizontal_wrapped(|ui| {
-            ui.small(format!("Type: {type_name}"));
+            ui.label(format!("Type: {type_name}"));
             ui.separator();
             let Some(relationships) = &relationships else {
-                ui.small("Relationships loading…");
+                ui.label("Relationships loading…");
                 return;
             };
 
-            let Some(parents) = &parents else {
-                ui.small("Parents loading…");
+            let Some(_parents) = &parents else {
+                ui.label("Parents loading…");
                 return;
             };
-            let root = parents
-                .first()
-                .map_or(relationships.parent, |parent| parent.parent);
-            ui.small(match root {
-                BlockParent::Orphaned => "Recently Deleted",
-                BlockParent::Root => "Root",
-                BlockParent::Uuid(_) => "Unknown",
-            });
-            for parent in parents {
-                self.record_reference_types(parent);
-                let source = sidebar_source(parent.parent);
-                ui.small(ICON_CHEVRON_RIGHT);
-                let response = ui
-                    .small_button(self.registry.icon_label(parent.block_type, &parent.name))
-                    .on_hover_text(parent.id.to_string());
-                if response.clicked() {
-                    navigate = Some((parent.id, parent.block_type));
-                }
-                let can_add = self.registry.can_add_child(parent.block_type);
-                let can_delete =
-                    source != SidebarDragSource::Orphaned && self.can_delete_from(source);
-                response.context_menu(|ui| {
-                    if let Some(action) =
-                        block_context_menu(ui, &self.registry, can_add, can_delete)
-                    {
-                        context_action = Some((parent.clone(), source, false, action));
-                    }
-                });
-            }
-            ui.small(ICON_CHEVRON_RIGHT);
-            ui.small(self.registry.icon_label(block_type, &current_name));
             ui.separator();
             ui.menu_button(
                 format!(
@@ -1624,9 +1784,7 @@ impl BlockApp {
                 }
             }
         }
-        if let Some((id, block_type)) = navigate {
-            self.open_tab(id, block_type);
-        }
+        navigate.map(|(id, block_type)| BlockTabHistoryItem { id, block_type })
     }
 
     fn record_reference_types(&mut self, reference: &BlockReference) {
@@ -1722,7 +1880,8 @@ impl BlockApp {
 
 struct BlockTabViewer<'a> {
     app: &'a mut BlockApp,
-    actions: Vec<(Uuid, EditorAction)>,
+    actions: Vec<(Uuid, Uuid, EditorAction)>,
+    navigations: Vec<(Uuid, TabNavigation)>,
     tabs_to_close: Vec<Uuid>,
 }
 
@@ -1733,17 +1892,21 @@ impl TabViewer for BlockTabViewer<'_> {
         match tab {
             DockTab::Files => "Files".into(),
             DockTab::Empty => "Workspace".into(),
-            DockTab::Block(id) => self
+            DockTab::Block(tab) => self
                 .app
                 .editors
-                .get(id)
-                .map_or_else(|| id.to_string(), |editor| editor.name())
+                .get(&tab.current().id)
+                .map_or_else(|| tab.current().id.to_string(), |editor| editor.name())
                 .into(),
         }
     }
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
-        egui::Id::new(*tab)
+        match tab {
+            DockTab::Files => egui::Id::new("files-tab"),
+            DockTab::Empty => egui::Id::new("empty-tab"),
+            DockTab::Block(tab) => egui::Id::new(tab.id),
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
@@ -1768,15 +1931,28 @@ impl TabViewer for BlockTabViewer<'_> {
                     });
                 });
             }
-            DockTab::Block(id) => {
-                if let Some(editor) = self.app.editors.get_mut(id) {
+            DockTab::Block(tab) => {
+                let current = tab.current();
+                if let Some(editor) = self.app.editors.get_mut(&current.id) {
                     editor.set_tab_active(true);
                 }
-                egui::Panel::bottom(egui::Id::new(("block-statusbar", *id)))
+                let mut status_navigation = None;
+                egui::Panel::bottom(egui::Id::new(("block-statusbar", tab.id)))
                     .resizable(false)
-                    .show_inside(ui, |ui| self.app.show_statusbar(ui, *id));
-                if let Some(action) = self.app.show_content(ui, *id) {
-                    self.actions.push((*id, action));
+                    .show_inside(ui, |ui| {
+                        status_navigation = self.app.show_statusbar(ui, current.id)
+                    });
+                if let Some(item) = status_navigation {
+                    self.navigations.push((tab.id, TabNavigation::Open(item)));
+                }
+                let (action, navigation) =
+                    self.app
+                        .show_content(ui, current.id, tab.can_go_back(), tab.can_go_forward());
+                if let Some(action) = action {
+                    self.actions.push((tab.id, current.id, action));
+                }
+                if let Some(navigation) = navigation {
+                    self.navigations.push((tab.id, navigation));
                 }
             }
         }
@@ -1785,8 +1961,8 @@ impl TabViewer for BlockTabViewer<'_> {
     fn on_close(&mut self, tab: &mut Self::Tab) -> OnCloseResponse {
         match tab {
             DockTab::Files | DockTab::Empty => OnCloseResponse::Ignore,
-            DockTab::Block(id) => {
-                self.tabs_to_close.push(*id);
+            DockTab::Block(tab) => {
+                self.tabs_to_close.push(tab.id);
                 OnCloseResponse::Ignore
             }
         }
