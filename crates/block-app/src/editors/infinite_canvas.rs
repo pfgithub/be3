@@ -1139,8 +1139,8 @@ impl InfiniteCanvasEditor {
                             let title_bar = direct_editor_layout(entity)
                                 .is_some_and(|layout| layout.title_bar.contains(world));
                             self.selection.clear();
-                            self.selection.insert(id);
                             if selected_border || title_bar {
+                                self.selection.insert(id);
                                 self.gesture = Some(Gesture::Move {
                                     start: world,
                                     current: world,
@@ -1665,6 +1665,10 @@ impl BlockEditor for InfiniteCanvasEditor {
             .bottom()
             .clamp(canvas_rect.top(), canvas_rect.bottom());
         let sidebar_height = (canvas_rect.bottom() - sidebar_top).max(1.0);
+        let sidebar_rect = Rect::from_min_max(
+            Pos2::new(canvas_rect.left(), sidebar_top),
+            canvas_rect.right_bottom(),
+        );
 
         let mut inspector_layer_move = None;
         let mut left_sidebar_action = None;
@@ -1681,6 +1685,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                     )))
                     .default_width(240.0)
                     .default_pos(Pos2::new(canvas_rect.left() + 16.0, sidebar_top + 16.0))
+                    .constrain_to(sidebar_rect)
                     .show(ui.ctx(), |ui| {
                         left_sidebar_action = editors.direct_editor_left_sidebar(block_id, ui);
                     })
@@ -1696,7 +1701,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .order(egui::Order::Foreground)
                     .title_bar(false)
                     .fixed_pos(Pos2::new(canvas_rect.left(), sidebar_top))
-                    .constrain_to(canvas_rect)
+                    .constrain_to(sidebar_rect)
                     .default_width(240.0)
                     .min_width(200.0)
                     .max_width(340.0)
@@ -1726,6 +1731,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .pivot(egui::Align2::RIGHT_TOP)
                     .default_width(240.0)
                     .default_pos(Pos2::new(canvas_rect.right() - 16.0, sidebar_top + 16.0))
+                    .constrain_to(sidebar_rect)
                     .show(ui.ctx(), |ui| {
                         right_sidebar_action = editors.direct_editor_right_sidebar(block_id, ui);
                     })
@@ -1741,7 +1747,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                 .title_bar(false)
                 .pivot(egui::Align2::RIGHT_TOP)
                 .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
-                .constrain_to(canvas_rect)
+                .constrain_to(sidebar_rect)
                 .default_width(240.0)
                 .min_width(200.0)
                 .max_width(340.0)
@@ -1761,6 +1767,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             egui::Window::new("Inspector")
                 .id(egui::Id::new(("canvas-inspector-window", self.block.id())))
                 .default_width(240.0)
+                .constrain_to(sidebar_rect)
                 .open(&mut open)
                 .show(ui.ctx(), |ui| {
                     inspector_layer_move = self.show_inspector(ui, &entities, false);
@@ -1773,7 +1780,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                 .title_bar(false)
                 .pivot(egui::Align2::RIGHT_TOP)
                 .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
-                .constrain_to(canvas_rect)
+                .constrain_to(sidebar_rect)
                 .default_width(240.0)
                 .min_width(200.0)
                 .max_width(340.0)
