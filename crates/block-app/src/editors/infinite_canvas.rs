@@ -59,6 +59,9 @@ const MAX_ZOOM: f32 = 8.0;
 const MAX_IMPORTED_IMAGE_SIZE: f32 = 600.0;
 const IMPORT_CASCADE_OFFSET: f32 = 24.0;
 const COMPACT_SIDEBAR_WIDTH: f32 = 700.0;
+const DIRECT_EDITOR_PADDING: f32 = 12.0;
+const DIRECT_EDITOR_TITLE_HEIGHT: f32 = 28.0;
+const DIRECT_EDITOR_TITLE_GAP: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum CommonValue<T> {
@@ -406,8 +409,13 @@ impl InfiniteCanvasEditor {
                 continue;
             };
             let desired = CanvasPoint::new(
-                (intrinsic.x * scale).max(MIN_SIZE),
-                (intrinsic.y * scale).max(MIN_SIZE),
+                ((intrinsic.x + DIRECT_EDITOR_PADDING * 2.0) * scale).max(MIN_SIZE),
+                ((intrinsic.y
+                    + DIRECT_EDITOR_PADDING * 2.0
+                    + DIRECT_EDITOR_TITLE_HEIGHT
+                    + DIRECT_EDITOR_TITLE_GAP)
+                    * scale)
+                    .max(MIN_SIZE),
             );
             if !converting
                 && (entity.transform.size.x - desired.x).abs() < 0.01
@@ -1128,9 +1136,11 @@ impl InfiniteCanvasEditor {
                                     world,
                                     HIT_RADIUS / self.zoom,
                                 );
+                            let title_bar = direct_editor_layout(entity)
+                                .is_some_and(|layout| layout.title_bar.contains(world));
                             self.selection.clear();
                             self.selection.insert(id);
-                            if selected_border {
+                            if selected_border || title_bar {
                                 self.gesture = Some(Gesture::Move {
                                     start: world,
                                     current: world,
@@ -1329,7 +1339,7 @@ impl InfiniteCanvasEditor {
         painter: &egui::Painter,
         rect: Rect,
         entities: &[CanvasEntity],
-        dependency_titles: &HashMap<Uuid, String>,
+        dependency_details: &HashMap<Uuid, (String, Uuid)>,
         editors: &mut EditorAccess<'_>,
     ) {
         let preview = self
@@ -1343,7 +1353,7 @@ impl InfiniteCanvasEditor {
             .collect();
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
-            paint_entity(self, painter, rect, entity, dependency_titles, editors);
+            paint_entity(self, painter, rect, entity, dependency_details, editors);
         }
 
         if let Some(Gesture::Create {
@@ -1537,9 +1547,14 @@ impl BlockEditor for InfiniteCanvasEditor {
         if let Some(current) = self.block.read() {
             entities = current.entities().to_vec();
         }
-        let dependency_titles = dependencies
+        let dependency_details = dependencies
             .iter()
-            .map(|dependency| (dependency.id, dependency.name.clone()))
+            .map(|dependency| {
+                (
+                    dependency.id,
+                    (dependency.name.clone(), dependency.block_type),
+                )
+            })
             .collect();
 
         let focused = self.focused_editor.and_then(|focused| {
@@ -1567,7 +1582,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             &painter,
             canvas_rect,
             &entities,
-            &dependency_titles,
+            &dependency_details,
             editors,
         );
         let mut direct_editor_rects = Vec::new();
@@ -1575,7 +1590,9 @@ impl BlockEditor for InfiniteCanvasEditor {
             focused.filter(|_| self.focused_editor.is_some())
         {
             if let Some(entity) = entities.iter().find(|entity| entity.id == entity_id) {
-                let screen = screen_rect(self, entity_bounds(entity), canvas_rect);
+                let screen = direct_editor_layout(entity)
+                    .map(|layout| screen_rect(self, layout.content, canvas_rect))
+                    .unwrap_or_else(|| screen_rect(self, entity_bounds(entity), canvas_rect));
                 direct_editor_rects.push(screen);
                 let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
                     .order(egui::Order::Foreground)
@@ -2018,6 +2035,38 @@ fn entity_bounds(entity: &CanvasEntity) -> WorldRect {
     }
 }
 
+#[derive(Clone, Copy)]
+struct DirectEditorLayout {
+    title_bar: WorldRect,
+    content: WorldRect,
+}
+
+fn direct_editor_layout(entity: &CanvasEntity) -> Option<DirectEditorLayout> {
+    let CanvasEntityKind::DirectEditor { scale, .. } = entity.kind else {
+        return None;
+    };
+    let bounds = entity_bounds(entity);
+    let padding = DIRECT_EDITOR_PADDING * scale;
+    let title_height = DIRECT_EDITOR_TITLE_HEIGHT * scale;
+    let title_gap = DIRECT_EDITOR_TITLE_GAP * scale;
+    Some(DirectEditorLayout {
+        title_bar: WorldRect {
+            min: CanvasPoint::new(bounds.min.x + padding, bounds.min.y + padding),
+            max: CanvasPoint::new(
+                bounds.max.x - padding,
+                bounds.min.y + padding + title_height,
+            ),
+        },
+        content: WorldRect {
+            min: CanvasPoint::new(
+                bounds.min.x + padding,
+                bounds.min.y + padding + title_height + title_gap,
+            ),
+            max: CanvasPoint::new(bounds.max.x - padding, bounds.max.y - padding),
+        },
+    })
+}
+
 fn hit_entity(entity: &CanvasEntity, point: CanvasPoint, radius: f32) -> bool {
     match &entity.kind {
         CanvasEntityKind::Line => {
@@ -2348,7 +2397,7 @@ fn paint_entity(
     painter: &egui::Painter,
     rect: Rect,
     entity: &CanvasEntity,
-    dependency_titles: &HashMap<Uuid, String>,
+    dependency_details: &HashMap<Uuid, (String, Uuid)>,
     editors: &mut EditorAccess<'_>,
 ) {
     let auto = painter.ctx().global_style().visuals.text_color();
@@ -2408,7 +2457,7 @@ fn paint_entity(
                 stroke,
             ));
         }
-        CanvasEntityKind::Block { block_id } | CanvasEntityKind::DirectEditor { block_id, .. } => {
+        CanvasEntityKind::Block { block_id } => {
             let corners = entity_corners(entity).map(|point| editor.world_to_screen(point, rect));
             if editors.render(
                 *block_id,
@@ -2426,9 +2475,9 @@ fn paint_entity(
                 Stroke::NONE,
             ));
             let center = editor.world_to_screen(entity.transform.center, rect);
-            let title = dependency_titles
+            let title = dependency_details
                 .get(block_id)
-                .cloned()
+                .map(|(title, _)| title.clone())
                 .unwrap_or_else(|| "Loading…".into());
             let title_galley = painter.layout_no_wrap(
                 title,
@@ -2463,6 +2512,75 @@ fn paint_entity(
                     color,
                 )
                 .with_angle_and_anchor(entity.transform.rotation, egui::Align2::CENTER_CENTER),
+            );
+        }
+        CanvasEntityKind::DirectEditor { block_id, scale } => {
+            let Some(layout) = direct_editor_layout(entity) else {
+                return;
+            };
+            let outer = screen_rect(editor, entity_bounds(entity), rect);
+            let title_bar = screen_rect(editor, layout.title_bar, rect);
+            let content = screen_rect(editor, layout.content, rect);
+            let visuals = &painter.ctx().global_style().visuals;
+            painter.rect(
+                outer,
+                (6.0 * scale * editor.zoom).clamp(2.0, 12.0),
+                with_opacity(visuals.panel_fill, opacity),
+                Stroke::new(
+                    (1.0 * editor.zoom).max(0.5),
+                    with_opacity(visuals.widgets.noninteractive.bg_stroke.color, opacity),
+                ),
+                egui::StrokeKind::Inside,
+            );
+            painter.rect_filled(
+                title_bar,
+                (4.0 * scale * editor.zoom).clamp(1.0, 8.0),
+                with_opacity(visuals.widgets.inactive.bg_fill, opacity),
+            );
+
+            let content_corners = [
+                content.left_top(),
+                content.right_top(),
+                content.right_bottom(),
+                content.left_bottom(),
+            ];
+            if !editors.render(
+                *block_id,
+                BlockRenderContext {
+                    painter,
+                    corners: content_corners,
+                    opacity,
+                },
+            ) {
+                painter.rect_filled(content, 0.0, with_opacity(Color32::from_gray(35), opacity));
+            }
+
+            let (title, block_type) = dependency_details
+                .get(block_id)
+                .map(|(title, block_type)| (title.as_str(), Some(*block_type)))
+                .unwrap_or(("Loading...", None));
+            let font_size = (16.0 * scale * editor.zoom).clamp(8.0, 32.0);
+            let left_padding = (6.0 * scale * editor.zoom).clamp(3.0, 12.0);
+            let title_painter = painter.with_clip_rect(title_bar);
+            let mut title_x = title_bar.left() + left_padding;
+            if let Some(icon) =
+                block_type.and_then(|block_type| editors.registry().icon(block_type))
+            {
+                title_painter.text(
+                    Pos2::new(title_x, title_bar.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    icon.codepoint,
+                    egui::FontId::new(font_size, icon.font_family()),
+                    color,
+                );
+                title_x += font_size + left_padding;
+            }
+            title_painter.text(
+                Pos2::new(title_x, title_bar.center().y),
+                egui::Align2::LEFT_CENTER,
+                title,
+                egui::FontId::proportional(font_size),
+                color,
             );
         }
     }
