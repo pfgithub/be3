@@ -8,8 +8,8 @@ use eframe::egui::{
 };
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
-    EditorCommand, LRDirection, MoveMode, SynHlColorScope, SyntaxNodeDirection, UDDirection,
-    VerticalMoveMode,
+    EditorCommand, LRDirection, Language, MoveMode, SynHlColorScope, SyntaxNodeDirection,
+    UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
@@ -17,6 +17,30 @@ use self::font::{BytePosition, DocumentLayout, TextRenderer, LINE_HEIGHT};
 use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
+const MULTI_CLICK_DELAY: f64 = 0.3;
+const MULTI_CLICK_DISTANCE: f32 = 6.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HighlightLanguage {
+    PlainText,
+    Zig,
+}
+
+impl HighlightLanguage {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::PlainText => "Plain text",
+            Self::Zig => "Zig",
+        }
+    }
+
+    const fn core_language(self) -> Option<Language> {
+        match self {
+            Self::PlainText => None,
+            Self::Zig => Some(Language::Zig),
+        }
+    }
+}
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -40,6 +64,9 @@ struct TextEditor {
     core: Core,
     renderer: Result<TextRenderer, String>,
     selecting: bool,
+    highlight_language: HighlightLanguage,
+    click_count: u8,
+    last_click: Option<(f64, Pos2)>,
 }
 
 impl TextEditor {
@@ -51,6 +78,34 @@ impl TextEditor {
             core,
             renderer: TextRenderer::new(),
             selecting: false,
+            highlight_language: HighlightLanguage::PlainText,
+            click_count: 0,
+            last_click: None,
+        }
+    }
+
+    fn language_selector(&mut self, ui: &mut egui::Ui) {
+        let previous = self.highlight_language;
+        ui.horizontal(|ui| {
+            ui.label("Language:");
+            egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
+                .selected_text(self.highlight_language.label())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.highlight_language,
+                        HighlightLanguage::PlainText,
+                        HighlightLanguage::PlainText.label(),
+                    );
+                    ui.selectable_value(
+                        &mut self.highlight_language,
+                        HighlightLanguage::Zig,
+                        HighlightLanguage::Zig.label(),
+                    );
+                });
+        });
+        if self.highlight_language != previous {
+            self.core
+                .set_syntax_highlighter(self.highlight_language.core_language());
         }
     }
 
@@ -231,12 +286,11 @@ impl TextEditor {
         origin: Pos2,
         layout: &DocumentLayout,
     ) -> bool {
-        let (pressed, down, double, triple, modifiers) = ui.input(|input| {
+        let (pressed, down, time, modifiers) = ui.input(|input| {
             (
                 input.pointer.button_pressed(PointerButton::Primary),
                 input.pointer.button_down(PointerButton::Primary),
-                input.pointer.button_double_clicked(PointerButton::Primary),
-                input.pointer.button_triple_clicked(PointerButton::Primary),
+                input.time,
                 input.modifiers,
             )
         });
@@ -249,12 +303,27 @@ impl TextEditor {
         let target = hit_test(layout, pointer - origin);
         if pressed && response.contains_pointer() {
             response.request_focus();
-            let mode = if triple {
-                DragSelectionMode::select(CursorLeftRightStop::Line)
-            } else if double {
-                DragSelectionMode::select(CursorLeftRightStop::Word)
-            } else {
-                DragSelectionMode::default()
+            self.click_count = self.last_click.map_or(1, |(last_time, last_position)| {
+                if time - last_time <= MULTI_CLICK_DELAY
+                    && pointer.distance(last_position) <= MULTI_CLICK_DISTANCE
+                {
+                    self.click_count.saturating_add(1).min(4)
+                } else {
+                    1
+                }
+            });
+            self.last_click = Some((time, pointer));
+            if self.click_count == 4 {
+                self.core.execute_command(EditorCommand::SelectAll);
+                self.selecting = false;
+                self.click_count = 0;
+                self.last_click = None;
+                return true;
+            }
+            let mode = match self.click_count {
+                2 => DragSelectionMode::select(CursorLeftRightStop::Word),
+                3 => DragSelectionMode::select(CursorLeftRightStop::Line),
+                _ => DragSelectionMode::default(),
             };
             self.core.execute_command(EditorCommand::Click {
                 position: self.core.position(target),
@@ -386,6 +455,8 @@ impl BlockEditor for TextEditor {
     ) -> Option<EditorAction> {
         let id = egui::Id::new(("text-editor", self.block.id()));
         let mut reveal_cursor = self.keyboard_input(ui, id);
+        self.language_selector(ui);
+        ui.separator();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
