@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "android"))]
 mod browser_tab;
 mod clipboard;
 mod image;
@@ -216,6 +217,7 @@ impl EditorRegistry {
         registry.register(infinite_canvas::registration());
         registry.register(pixel_art::registration());
         registry.register(text::registration());
+        #[cfg(not(target_os = "android"))]
         registry.register(browser_tab::registration());
         registry.register(workspace_index::registration());
         registry

@@ -1,7 +1,9 @@
 use block_client::blocks::image::Image;
 use eframe::egui;
+#[cfg(not(target_os = "android"))]
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(super) enum ClipboardImagePasteResult {
     NoImage,
     Image(Image),
@@ -37,6 +39,7 @@ impl ClipboardImagePaste {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn read_clipboard_image() -> ClipboardImagePasteResult {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(clipboard) => clipboard,
@@ -62,6 +65,11 @@ fn read_clipboard_image() -> ClipboardImagePasteResult {
             ClipboardImagePasteResult::Error(format!("Could not import pasted image: {error}"))
         }
     }
+}
+
+#[cfg(target_os = "android")]
+fn read_clipboard_image() -> ClipboardImagePasteResult {
+    ClipboardImagePasteResult::NoImage
 }
 
 #[cfg(target_os = "windows")]

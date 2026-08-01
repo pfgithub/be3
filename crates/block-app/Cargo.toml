@@ -3,13 +3,42 @@ name = "block-app"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+autobins = false
+
+[lib]
+path = "src/main.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "block-app"
+path = "src/desktop.rs"
+
+[package.metadata.android]
+package = "com.be3.block"
+apk_name = "block-app"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 35
+
+[package.metadata.android.signing.dev]
+path = "../../target/android-debug.keystore"
+keystore_password = "android"
+
+[package.metadata.android.application]
+label = "Block"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout"
+exported = true
 
 [dependencies]
-arboard = "3.6"
 block = { path = "../block" }
 block-client = { path = "../block-client" }
 block-server = { path = "../block-server" }
-eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "persistence", "wgpu", "wayland", "x11"] }
+eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "persistence", "wgpu"] }
 egui_dock = "0.19.1"
 freetype = "0.7"
 harfbuzz_rs = "2"
@@ -19,7 +48,14 @@ text-editor-core = { path = "../text-editor-core" }
 tokio = { version = "1", features = ["net", "rt-multi-thread"] }
 unicode-script = "0.5"
 uuid = { version = "1", features = ["serde", "v4"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+arboard = "3.6"
+eframe = { version = "0.34.3", default-features = false, features = ["wayland", "x11"] }
 wry = "0.55.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30.13", features = ["android-native-activity"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse"] }

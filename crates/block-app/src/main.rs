@@ -48,15 +48,17 @@ const ACCOUNTS: [Account; 5] = [
     },
 ];
 
-fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
+fn native_options() -> eframe::NativeOptions {
+    eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_app_id(APP_ID)
             .with_inner_size([1100.0, 720.0]),
         ..Default::default()
-    };
+    }
+}
 
+fn run_native(options: eframe::NativeOptions) -> eframe::Result {
     eframe::run_native(
         APP_ID,
         options,
@@ -66,6 +68,21 @@ fn main() -> eframe::Result {
                 .map_err(Into::into)
         }),
     )
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn run() -> eframe::Result {
+    run_native(native_options())
+}
+
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    let mut options = native_options();
+    options.android_app = Some(app);
+    if let Err(error) = run_native(options) {
+        eprintln!("Block stopped: {error}");
+    }
 }
 
 struct BlockApp {
