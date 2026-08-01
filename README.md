@@ -11,7 +11,7 @@ clipboard integrations are unavailable on Android.
 - Java Development Kit 17 or newer
 - Android SDK command-line tools
 - Android SDK Platform 35, Build-Tools 35.0.0, Platform-Tools, and NDK
-  27.3.13750724
+  29.0.14206865
 - `cargo-apk` 0.10.0
 
 Install the Rust target and APK packaging tool:
@@ -26,7 +26,7 @@ packages:
 
 ```powershell
 sdkmanager --licenses
-sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.3.13750724"
+sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
 ```
 
 Set the SDK paths for the current PowerShell session. Replace the SDK path if
@@ -34,7 +34,7 @@ your installation is elsewhere:
 
 ```powershell
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
-$env:ANDROID_NDK_HOME = "$env:ANDROID_HOME\ndk\27.3.13750724"
+$env:ANDROID_NDK_HOME = "$env:ANDROID_HOME\ndk\29.0.14206865"
 ```
 
 ### Build the APK
@@ -54,14 +54,16 @@ keytool -genkeypair -v `
   -validity 10000
 ```
 
-Skip that command when the keystore already exists. Build the APK from the
-repository root:
+Skip that command when the keystore already exists. Build and 16 KB-align the
+APK from the repository root:
 
 ```powershell
-cd crates\block-app
-cargo apk build --lib --target aarch64-linux-android
-cd ..\..
+.\scripts\build-block-android.ps1
 ```
+
+The build script links the native library with 16 KB ELF page alignment, uses
+NDK r29's compatible C++ runtime, and applies 16 KB APK ZIP alignment before
+signing the result.
 
 The signed development APK is written to:
 
