@@ -1,5 +1,7 @@
 use super::*;
 
+mod direct_editor_serialization_round_trips;
+mod direct_editor_transform_constraints_are_enforced;
 mod infinite_canvas_applies_entity_changes;
 mod infinite_canvas_exact_order_preserves_unlisted_slots;
 mod infinite_canvas_history_undoes_and_redoes_add;

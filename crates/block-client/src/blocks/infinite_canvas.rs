@@ -46,6 +46,7 @@ pub enum CanvasEntityKind {
     Text { text: String },
     Pen { points: Vec<CanvasPoint> },
     Block { block_id: Uuid },
+    DirectEditor { block_id: Uuid, scale: f32 },
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -213,12 +214,13 @@ impl Block for InfiniteCanvas {
     fn apply_operation(canvas: &mut Self, operation: &Self::Operation) {
         match operation {
             InfiniteCanvasOperation::Add { entity } => {
+                let entity = normalized_entity(entity.clone());
                 if !canvas
                     .entities
                     .iter()
                     .any(|existing| existing.id == entity.id)
                 {
-                    canvas.entities.push(entity.clone());
+                    canvas.entities.push(entity);
                 }
             }
             InfiniteCanvasOperation::Update { entities } => {
@@ -228,7 +230,7 @@ impl Block for InfiniteCanvas {
                         .iter_mut()
                         .find(|entity| entity.id == update.id)
                     {
-                        *entity = update.clone();
+                        *entity = normalized_entity(update.clone());
                     }
                 }
             }
@@ -272,7 +274,8 @@ impl Block for InfiniteCanvas {
             .entities
             .iter()
             .filter_map(|entity| match entity.kind {
-                CanvasEntityKind::Block { block_id } => Some(block_id),
+                CanvasEntityKind::Block { block_id }
+                | CanvasEntityKind::DirectEditor { block_id, .. } => Some(block_id),
                 _ => None,
             })
             .collect();
@@ -280,6 +283,16 @@ impl Block for InfiniteCanvas {
         references.retain(|reference| seen.insert(*reference));
         references
     }
+}
+
+fn normalized_entity(mut entity: CanvasEntity) -> CanvasEntity {
+    if let CanvasEntityKind::DirectEditor { scale, .. } = &mut entity.kind {
+        entity.transform.rotation = 0.0;
+        if !scale.is_finite() || *scale <= 0.0 {
+            *scale = 1.0;
+        }
+    }
+    entity
 }
 
 impl BlockHistory<InfiniteCanvas> for InfiniteCanvasHistory {

@@ -13,8 +13,8 @@ use block_client::{
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::icons::{
-    ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW, ICON_FORMAT_COLOR_RESET,
-    ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_TUNE,
+    ICON_ARROW_BACK, ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW,
+    ICON_FORMAT_COLOR_RESET, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_TUNE,
 };
 use uuid::Uuid;
 
@@ -115,6 +115,13 @@ impl WorldRect {
             && self.min.y <= other.max.y
             && self.max.y >= other.min.y
     }
+
+    fn contains(self, point: CanvasPoint) -> bool {
+        point.x >= self.min.x
+            && point.x <= self.max.x
+            && point.y >= self.min.y
+            && point.y <= self.max.y
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -149,6 +156,7 @@ enum Gesture {
         current: CanvasPoint,
         originals: Vec<CanvasEntity>,
         default_preserve_aspect_ratio: bool,
+        force_preserve_aspect_ratio: bool,
         preserve_aspect_ratio: bool,
     },
     Rotate {
@@ -177,6 +185,7 @@ pub(super) struct InfiniteCanvasEditor {
     pending_file_drop_position: Option<CanvasPoint>,
     clipboard_image_paste: ClipboardImagePaste,
     inspector_open: bool,
+    focused_editor: Option<Uuid>,
 }
 
 impl InfiniteCanvasEditor {
@@ -200,6 +209,7 @@ impl InfiniteCanvasEditor {
             pending_file_drop_position: None,
             clipboard_image_paste: ClipboardImagePaste::default(),
             inspector_open: false,
+            focused_editor: None,
         }
     }
 
@@ -310,7 +320,8 @@ impl InfiniteCanvasEditor {
         let referenced = entities
             .iter()
             .filter_map(|entity| match entity.kind {
-                CanvasEntityKind::Block { block_id } => Some(block_id),
+                CanvasEntityKind::Block { block_id }
+                | CanvasEntityKind::DirectEditor { block_id, .. } => Some(block_id),
                 _ => None,
             })
             .collect::<HashSet<_>>();
@@ -329,12 +340,95 @@ impl InfiniteCanvasEditor {
         entities
             .iter()
             .filter(|entity| self.selection.contains(&entity.id))
-            .any(|entity| {
-                let CanvasEntityKind::Block { block_id } = entity.kind else {
-                    return false;
-                };
-                editors.default_preserve_aspect_ratio(block_id)
+            .any(|entity| match entity.kind {
+                CanvasEntityKind::Block { block_id } => {
+                    editors.default_preserve_aspect_ratio(block_id)
+                }
+                CanvasEntityKind::DirectEditor { block_id, .. } => editors
+                    .direct_editor_capabilities(block_id)
+                    .is_some_and(|capabilities| capabilities.preserve_aspect_ratio),
+                _ => false,
             })
+    }
+
+    fn selection_allows_rotation(
+        &self,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) -> bool {
+        entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id))
+            .all(|entity| match entity.kind {
+                CanvasEntityKind::DirectEditor { block_id, .. } => editors
+                    .direct_editor_capabilities(block_id)
+                    .is_none_or(|capabilities| capabilities.allow_rotation),
+                _ => true,
+            })
+    }
+
+    fn selection_forces_proportional(
+        &self,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) -> bool {
+        entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id))
+            .any(|entity| match entity.kind {
+                CanvasEntityKind::DirectEditor { block_id, .. } => editors
+                    .direct_editor_capabilities(block_id)
+                    .is_some_and(|capabilities| capabilities.preserve_aspect_ratio),
+                _ => false,
+            })
+    }
+
+    fn reconcile_direct_editors(
+        &mut self,
+        entities: &[CanvasEntity],
+        editors: &mut EditorAccess<'_>,
+    ) {
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        for entity in entities {
+            let (block_id, scale, converting) = match entity.kind {
+                CanvasEntityKind::Block { block_id }
+                    if editors.direct_editor_capabilities(block_id).is_some() =>
+                {
+                    (block_id, 1.0, true)
+                }
+                CanvasEntityKind::DirectEditor {
+                    block_id, scale, ..
+                } => (block_id, scale, false),
+                _ => continue,
+            };
+            let Some(intrinsic) = editors.direct_editor_intrinsic_size(block_id) else {
+                continue;
+            };
+            let desired = CanvasPoint::new(
+                (intrinsic.x * scale).max(MIN_SIZE),
+                (intrinsic.y * scale).max(MIN_SIZE),
+            );
+            if !converting
+                && (entity.transform.size.x - desired.x).abs() < 0.01
+                && (entity.transform.size.y - desired.y).abs() < 0.01
+                && entity.transform.rotation == 0.0
+            {
+                continue;
+            }
+            let bounds = entity_bounds(entity);
+            let mut updated = entity.clone();
+            updated.kind = CanvasEntityKind::DirectEditor { block_id, scale };
+            updated.transform.size = desired;
+            updated.transform.rotation = 0.0;
+            updated.transform.center = CanvasPoint::new(
+                bounds.min.x + desired.x * 0.5,
+                bounds.min.y + desired.y * 0.5,
+            );
+            before.push(entity.clone());
+            after.push(updated);
+        }
+        self.record_update(before, after, true);
     }
 
     fn update_selected(
@@ -386,14 +480,24 @@ impl InfiniteCanvasEditor {
         let foreground = common_value(
             selected
                 .iter()
-                .filter(|entity| !matches!(entity.kind, CanvasEntityKind::Block { .. }))
+                .filter(|entity| {
+                    !matches!(
+                        entity.kind,
+                        CanvasEntityKind::Block { .. } | CanvasEntityKind::DirectEditor { .. }
+                    )
+                })
                 .map(|entity| entity.style.foreground),
         );
         if !matches!(foreground, CommonValue::None) {
             if let Some(color) = color_menu(ui, "Color", foreground) {
                 self.update_selected(
                     entities,
-                    |kind| !matches!(kind, CanvasEntityKind::Block { .. }),
+                    |kind| {
+                        !matches!(
+                            kind,
+                            CanvasEntityKind::Block { .. } | CanvasEntityKind::DirectEditor { .. }
+                        )
+                    },
                     |style| style.foreground = color,
                 );
             }
@@ -808,17 +912,23 @@ impl InfiniteCanvasEditor {
         entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
     ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<Uuid>) {
-        if response
+        let escape_pressed = response
             .ctx
-            .input(|input| input.key_pressed(egui::Key::Escape))
+            .input(|input| input.key_pressed(egui::Key::Escape));
+        if escape_pressed
+            && self.focused_editor.is_some()
+            && !response.ctx.egui_wants_keyboard_input()
         {
+            self.focused_editor = None;
+        } else if escape_pressed {
             self.gesture = None;
             self.armed_block = None;
             self.armed_block_needs_parent = false;
             self.picker.close();
             self.tool = Tool::Select;
         }
-        if self.tool == Tool::Select
+        if self.focused_editor.is_none()
+            && self.tool == Tool::Select
             && response.ctx.input(|input| {
                 input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
             })
@@ -949,17 +1059,29 @@ impl InfiniteCanvasEditor {
         let primary_pressed = response
             .ctx
             .input(|input| input.pointer.button_pressed(PointerButton::Primary));
+        if primary_pressed
+            && pointer.is_some_and(|pointer| response.rect.contains(pointer))
+            && self.focused_editor.is_some_and(|focused| {
+                entities
+                    .iter()
+                    .find(|entity| entity.id == focused)
+                    .is_none_or(|entity| !entity_bounds(entity).contains(world))
+            })
+        {
+            self.focused_editor = None;
+        }
         if primary_pressed && response.hovered() {
             match self.tool {
                 Tool::Select => {
                     let selected_bounds = self.selected_bounds(entities);
                     let handle = selected_bounds
                         .and_then(|bounds| resize_handle_at(self, bounds, response.rect, world));
-                    let rotate = selected_bounds.is_some_and(|bounds| {
-                        rotate_handle_at(self, bounds, response.rect)
-                            .distance(self.world_to_screen(world, response.rect))
-                            <= HANDLE_RADIUS + 3.0
-                    });
+                    let rotate = self.selection_allows_rotation(entities, editors)
+                        && selected_bounds.is_some_and(|bounds| {
+                            rotate_handle_at(self, bounds, response.rect)
+                                .distance(self.world_to_screen(world, response.rect))
+                                <= HANDLE_RADIUS + 3.0
+                        });
                     if rotate {
                         let bounds = selected_bounds.unwrap();
                         let center = bounds.center();
@@ -972,17 +1094,43 @@ impl InfiniteCanvasEditor {
                     } else if let (Some(bounds), Some(handle)) = (selected_bounds, handle) {
                         let default_preserve_aspect_ratio =
                             self.selection_defaults_to_proportional(entities, editors);
-                        let preserve_aspect_ratio = default_preserve_aspect_ratio
-                            != response.ctx.input(|input| input.modifiers.shift);
+                        let force_preserve_aspect_ratio =
+                            self.selection_forces_proportional(entities, editors);
+                        let preserve_aspect_ratio = force_preserve_aspect_ratio
+                            || default_preserve_aspect_ratio
+                                != response.ctx.input(|input| input.modifiers.shift);
                         self.gesture = Some(Gesture::Resize {
                             handle,
                             bounds,
                             current: world,
                             originals: self.selected_entities(entities),
                             default_preserve_aspect_ratio,
+                            force_preserve_aspect_ratio,
                             preserve_aspect_ratio,
                         });
                     } else if let Some(id) = self.entity_at(entities, world) {
+                        let entity = entities.iter().find(|entity| entity.id == id).unwrap();
+                        if matches!(entity.kind, CanvasEntityKind::DirectEditor { .. }) {
+                            let selected_border = self.selection.contains(&id)
+                                && point_near_bounds(
+                                    entity_bounds(entity),
+                                    world,
+                                    HIT_RADIUS / self.zoom,
+                                );
+                            self.selection.clear();
+                            self.selection.insert(id);
+                            if selected_border {
+                                self.gesture = Some(Gesture::Move {
+                                    start: world,
+                                    current: world,
+                                    originals: self.selected_entities(entities),
+                                });
+                            } else {
+                                self.focused_editor = Some(id);
+                                self.gesture = None;
+                            }
+                            return (layer_move, create_block, set_parent);
+                        }
                         let additive = response.ctx.input(|input| input.modifiers.shift);
                         if additive {
                             if !self.selection.insert(id) {
@@ -1058,12 +1206,14 @@ impl InfiniteCanvasEditor {
                 Some(Gesture::Resize {
                     current,
                     default_preserve_aspect_ratio,
+                    force_preserve_aspect_ratio,
                     preserve_aspect_ratio,
                     ..
                 }) => {
                     *current = world;
-                    *preserve_aspect_ratio = *default_preserve_aspect_ratio
-                        != response.ctx.input(|input| input.modifiers.shift);
+                    *preserve_aspect_ratio = *force_preserve_aspect_ratio
+                        || *default_preserve_aspect_ratio
+                            != response.ctx.input(|input| input.modifiers.shift);
                 }
                 Some(Gesture::Pen { points }) => {
                     if points
@@ -1240,7 +1390,13 @@ impl InfiniteCanvasEditor {
         }
 
         if let Some(bounds) = self.selected_bounds_with_preview(entities, &preview) {
-            paint_selection(self, painter, rect, bounds);
+            paint_selection(
+                self,
+                painter,
+                rect,
+                bounds,
+                self.selection_allows_rotation(entities, editors),
+            );
         }
     }
 
@@ -1362,17 +1518,49 @@ impl BlockEditor for InfiniteCanvasEditor {
             });
             return None;
         };
-        let entities = canvas.entities().to_vec();
+        let mut entities = canvas.entities().to_vec();
         drop(canvas);
         let dependencies = self.dependencies.read();
         Self::ensure_dependency_editors(&entities, &dependencies, editors);
+        self.reconcile_direct_editors(&entities, editors);
+        if let Some(current) = self.block.read() {
+            entities = current.entities().to_vec();
+        }
         let dependency_titles = dependencies
             .iter()
             .map(|dependency| (dependency.id, dependency.name.clone()))
             .collect();
 
+        let focused = self.focused_editor.and_then(|focused| {
+            entities.iter().find_map(|entity| match entity.kind {
+                CanvasEntityKind::DirectEditor {
+                    block_id, scale, ..
+                } if entity.id == focused => Some((entity.id, block_id, scale)),
+                _ => None,
+            })
+        });
+        if self.focused_editor.is_some() && focused.is_none() {
+            self.focused_editor = None;
+        }
+
         let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
-        let mut create_block = self.show_toolbar(ui, &entities, editors, compact);
+        let mut action = None;
+        let mut create_block = None;
+        if let Some((_, block_id, _)) = focused {
+            ui.horizontal(|ui| {
+                if ui
+                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
+                    .clicked()
+                {
+                    self.focused_editor = None;
+                }
+            });
+            if self.focused_editor.is_some() {
+                action = editors.direct_editor_top_bar(block_id, ui);
+            }
+        } else {
+            create_block = self.show_toolbar(ui, &entities, editors, compact);
+        }
         if let Some(error) = self.image_import_error.clone() {
             ui.horizontal(|ui| {
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -1382,7 +1570,32 @@ impl BlockEditor for InfiniteCanvasEditor {
             });
         }
         let mut inspector_layer_move = None;
-        if compact {
+        let mut sidebar_action = None;
+        let focused_sidebar = focused.filter(|(_, block_id, _)| {
+            self.focused_editor.is_some() && editors.direct_editor_has_sidebar(*block_id)
+        });
+        if let Some((_, block_id, _)) = focused_sidebar {
+            if compact {
+                egui::Window::new("Editor")
+                    .id(egui::Id::new((
+                        "canvas-direct-editor-sidebar-window",
+                        block_id,
+                    )))
+                    .default_width(240.0)
+                    .show(ui.ctx(), |ui| {
+                        sidebar_action = editors.direct_editor_sidebar(block_id, ui);
+                    });
+            } else {
+                egui::Panel::right(egui::Id::new(("canvas-direct-editor-sidebar", block_id)))
+                    .default_size(240.0)
+                    .min_size(200.0)
+                    .max_size(340.0)
+                    .resizable(true)
+                    .show_inside(ui, |ui| {
+                        sidebar_action = editors.direct_editor_sidebar(block_id, ui);
+                    });
+            }
+        } else if self.focused_editor.is_none() && compact {
             let mut open = self.inspector_open;
             egui::Window::new("Inspector")
                 .id(egui::Id::new(("canvas-inspector-window", self.block.id())))
@@ -1392,7 +1605,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                     inspector_layer_move = self.show_inspector(ui, &entities, false);
                 });
             self.inspector_open = open;
-        } else {
+        } else if self.focused_editor.is_none() {
             egui::Panel::right(egui::Id::new(("canvas-inspector", self.block.id())))
                 .default_size(240.0)
                 .min_size(200.0)
@@ -1402,10 +1615,37 @@ impl BlockEditor for InfiniteCanvasEditor {
                     inspector_layer_move = self.show_inspector(ui, &entities, true);
                 });
         }
+        action = action.or(sidebar_action);
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        self.import_dropped_images(&response, editors);
-        self.import_clipboard_image(&response, editors);
+        if self.focused_editor.is_none() {
+            self.import_dropped_images(&response, editors);
+            self.import_clipboard_image(&response, editors);
+        }
+        self.paint(
+            &painter,
+            response.rect,
+            &entities,
+            &dependency_titles,
+            editors,
+        );
+        if let Some((entity_id, block_id, scale)) =
+            focused.filter(|_| self.focused_editor.is_some())
+        {
+            if let Some(entity) = entities.iter().find(|entity| entity.id == entity_id) {
+                let screen = screen_rect(self, entity_bounds(entity), response.rect);
+                let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(screen.min)
+                    .show(ui.ctx(), |ui| {
+                        ui.set_clip_rect(screen.intersect(ui.clip_rect()));
+                        ui.set_min_size(screen.size());
+                        editors.direct_editor_ui(block_id, ui, scale * self.zoom)
+                    })
+                    .inner;
+                action = action.or(embedded);
+            }
+        }
         let (context_layer_move, context_create_block, set_parent) =
             self.handle_canvas_input(&response, &entities, editors);
         create_block = create_block.or(context_create_block);
@@ -1416,21 +1656,12 @@ impl BlockEditor for InfiniteCanvasEditor {
             };
             self.record_action(operation);
         }
-        let painted_entities = self
-            .block
-            .read()
-            .map(|canvas| canvas.entities().to_vec())
-            .unwrap_or(entities);
-        self.paint(
-            &painter,
-            response.rect,
-            &painted_entities,
-            &dependency_titles,
-            editors,
-        );
         self.show_picker(ui.ctx(), editors.client());
-        let action =
-            self.selected_block_action(ui.ctx(), response.rect, &painted_entities, editors);
+        if self.focused_editor.is_none() {
+            action = action.or_else(|| {
+                self.selected_block_action(ui.ctx(), response.rect, &entities, editors)
+            });
+        }
         ui.ctx().request_repaint();
         action
             .or_else(|| {
@@ -1732,6 +1963,14 @@ fn resize_handle_at(
         })
 }
 
+fn point_near_bounds(bounds: WorldRect, point: CanvasPoint, radius: f32) -> bool {
+    bounds.contains(point)
+        && ((point.x - bounds.min.x).abs() <= radius
+            || (point.x - bounds.max.x).abs() <= radius
+            || (point.y - bounds.min.y).abs() <= radius
+            || (point.y - bounds.max.y).abs() <= radius)
+}
+
 fn resize_handles(bounds: WorldRect) -> [(ResizeHandle, CanvasPoint); 8] {
     let center = bounds.center();
     [
@@ -1919,6 +2158,9 @@ fn resize_entities(
             );
             entity.transform.size.x = (entity.transform.size.x * scale_x).max(MIN_SIZE);
             entity.transform.size.y = (entity.transform.size.y * scale_y).max(MIN_SIZE);
+            if let CanvasEntityKind::DirectEditor { scale, .. } = &mut entity.kind {
+                *scale = (*scale * scale_x).max(f32::EPSILON);
+            }
             entity
         })
         .collect()
@@ -2053,7 +2295,7 @@ fn paint_entity(
                 stroke,
             ));
         }
-        CanvasEntityKind::Block { block_id } => {
+        CanvasEntityKind::Block { block_id } | CanvasEntityKind::DirectEditor { block_id, .. } => {
             let corners = entity_corners(entity).map(|point| editor.world_to_screen(point, rect));
             if editors.render(
                 *block_id,
@@ -2216,6 +2458,7 @@ fn paint_selection(
     painter: &egui::Painter,
     rect: Rect,
     bounds: WorldRect,
+    allow_rotation: bool,
 ) {
     let screen = screen_rect(editor, bounds, rect);
     painter.rect_stroke(
@@ -2231,10 +2474,12 @@ fn paint_selection(
             Color32::LIGHT_BLUE,
         );
     }
-    let rotate = rotate_handle_at(editor, bounds, rect);
-    painter.line_segment(
-        [Pos2::new(screen.center().x, screen.top()), rotate],
-        Stroke::new(1.0, Color32::LIGHT_BLUE),
-    );
-    painter.circle_filled(rotate, HANDLE_RADIUS, Color32::LIGHT_BLUE);
+    if allow_rotation {
+        let rotate = rotate_handle_at(editor, bounds, rect);
+        painter.line_segment(
+            [Pos2::new(screen.center().x, screen.top()), rotate],
+            Stroke::new(1.0, Color32::LIGHT_BLUE),
+        );
+        painter.circle_filled(rotate, HANDLE_RADIUS, Color32::LIGHT_BLUE);
+    }
 }

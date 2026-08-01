@@ -12,7 +12,10 @@ use eframe::egui;
 use egui_material_icons::icons::{ICON_ADD, ICON_DATABASE, ICON_DELETE, ICON_SCHEMA};
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+use super::{
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAccess, EditorAction,
+    EditorRegistration,
+};
 
 const ROW_HEADER_WIDTH: f32 = 44.0;
 const ROW_HEIGHT: f32 = 28.0;
@@ -82,6 +85,19 @@ impl DatabaseEditor {
         {
             self.schema = Some(client.get_block::<DatabaseSchema>(schema_id));
         }
+    }
+
+    fn data(
+        &mut self,
+        client: &BlockClient,
+    ) -> Option<(Uuid, Vec<DatabaseRow>, Vec<DatabaseField>)> {
+        let database = self.block.read()?;
+        let schema_id = database.schema_id();
+        let rows = database.rows().to_vec();
+        drop(database);
+        self.ensure_schema(client, schema_id);
+        let fields = self.schema.as_ref()?.read()?.fields().to_vec();
+        Some((schema_id, rows, fields))
     }
 
     fn begin_edit(
@@ -332,16 +348,22 @@ impl DatabaseEditor {
         });
     }
 
-    fn cell_editor(&mut self, ui: &mut egui::Ui, row: &DatabaseRow, field: &DatabaseField) {
+    fn cell_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        row: &DatabaseRow,
+        field: &DatabaseField,
+        scale: f32,
+    ) {
         let address = CellAddress {
             row_id: row.id,
             field_id: field.id,
         };
         let selected = self.selected == Some(address);
-        let size = egui::vec2(column_width(field.field_type), ROW_HEIGHT);
+        let size = egui::vec2(column_width(field.field_type), ROW_HEIGHT) * scale;
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
         paint_cell_background(ui, rect, selected);
-        paint_cell_text(ui, rect, &cell_text(row, field), field.field_type);
+        paint_cell_text(ui, rect, &cell_text(row, field), field.field_type, scale);
         if response.clicked() {
             self.select_cell(row, field);
             ui.memory_mut(|memory| memory.request_focus(grid_focus_id(self.block.id())));
@@ -350,65 +372,16 @@ impl DatabaseEditor {
             self.begin_edit(row, field, None);
         }
     }
-}
 
-impl BlockEditor for DatabaseEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        Database::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
-    }
-
-    fn note_backref(&self, id: Uuid) {
-        self.block.note_backref(id);
-    }
-
-    fn ui(
+    fn controls(
         &mut self,
         ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
+        schema_id: Uuid,
+        rows: &[DatabaseRow],
+        fields: &[DatabaseField],
     ) -> Option<EditorAction> {
-        let Some(database) = self.block.read() else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        };
-        let schema_id = database.schema_id();
-        let rows = database.rows().to_vec();
-        drop(database);
-
-        self.ensure_schema(editors.client(), schema_id);
-        let Some(schema_handle) = &self.schema else {
-            return None;
-        };
-        let Some(schema) = schema_handle.read() else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        };
-        let fields = schema.fields().to_vec();
-        drop(schema);
-
         let mut action = None;
         let mut operations = Vec::new();
-        self.handle_keyboard(ui, &rows, &fields, &mut operations);
         ui.horizontal(|ui| {
             if ui.button(format!("{} Row", ICON_ADD.codepoint)).clicked() {
                 let row_id = Uuid::new_v4();
@@ -445,9 +418,6 @@ impl BlockEditor for DatabaseEditor {
                 .on_hover_text("Edit columns and data types")
                 .clicked()
             {
-                if schema_id != self.block.id() {
-                    editors.ensure(schema_id, DatabaseSchema::TYPE_ID);
-                }
                 action = Some(EditorAction::OpenBlock {
                     id: schema_id,
                     block_type: DatabaseSchema::TYPE_ID,
@@ -455,15 +425,169 @@ impl BlockEditor for DatabaseEditor {
             }
         });
         ui.separator();
+        self.formula_bar(ui, rows, fields, &mut operations);
+        for operation in operations {
+            self.block.operate(operation);
+        }
+        action
+    }
+
+    fn grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        rows: &[DatabaseRow],
+        fields: &[DatabaseField],
+        scale: f32,
+    ) {
+        let mut operations = Vec::new();
+        self.handle_keyboard(ui, rows, fields, &mut operations);
+        egui::Grid::new(("database-grid", self.block.id()))
+            .num_columns(fields.len() + 1)
+            .spacing(egui::Vec2::ZERO)
+            .show(ui, |ui| {
+                spreadsheet_header(
+                    ui,
+                    egui::vec2(ROW_HEADER_WIDTH, ROW_HEIGHT) * scale,
+                    "",
+                    scale,
+                );
+                for (column_index, field) in fields.iter().enumerate() {
+                    let response = spreadsheet_header(
+                        ui,
+                        egui::vec2(column_width(field.field_type), ROW_HEIGHT) * scale,
+                        &field.name,
+                        scale,
+                    );
+                    response.on_hover_text(format!(
+                        "Column {} · {}",
+                        column_name(column_index),
+                        field_type_label(field.field_type),
+                    ));
+                }
+                ui.end_row();
+
+                for (row_index, row) in rows.iter().enumerate() {
+                    let selected = self.selected.is_some_and(|cell| cell.row_id == row.id);
+                    spreadsheet_row_header(ui, row_index + 1, selected, scale);
+                    for field in fields {
+                        self.cell_editor(ui, row, field, scale);
+                    }
+                    ui.end_row();
+                }
+            });
+        for operation in operations {
+            self.block.operate(operation);
+        }
+    }
+}
+
+impl BlockEditor for DatabaseEditor {
+    fn id(&self) -> Uuid {
+        self.block.id()
+    }
+
+    fn block_type(&self) -> Uuid {
+        Database::TYPE_ID
+    }
+
+    fn name(&self) -> String {
+        self.block.name()
+    }
+
+    fn relationships(&self) -> Option<BlockRelationships> {
+        self.block.read().map(|_| self.block.relationships())
+    }
+
+    fn set_parent(&self, parent: BlockParent) {
+        self.block.set_parent(parent);
+    }
+
+    fn note_backref(&self, id: Uuid) {
+        self.block.note_backref(id);
+    }
+
+    fn render(&mut self, context: BlockRenderContext<'_>) -> bool {
+        let Some(database) = self.block.read() else {
+            return false;
+        };
+        let rows = database.rows().to_vec();
+        drop(database);
+        let Some(fields) = self
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.read())
+            .map(|schema| schema.fields().to_vec())
+        else {
+            return false;
+        };
+        paint_database_preview(context, &rows, &fields);
+        true
+    }
+
+    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
+        Some(DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: true,
+        })
+    }
+
+    fn direct_editor_intrinsic_size(&mut self, client: &BlockClient) -> Option<egui::Vec2> {
+        let (_, rows, fields) = self.data(client)?;
+        Some(egui::vec2(
+            ROW_HEADER_WIDTH
+                + fields
+                    .iter()
+                    .map(|field| column_width(field.field_type))
+                    .sum::<f32>(),
+            ROW_HEIGHT * (rows.len() + 1) as f32,
+        ))
+    }
+
+    fn direct_editor_top_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        client: &BlockClient,
+    ) -> Option<EditorAction> {
+        let (schema_id, rows, fields) = self.data(client)?;
+        self.controls(ui, schema_id, &rows, &fields)
+    }
+
+    fn direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        client: &BlockClient,
+        scale: f32,
+    ) -> Option<EditorAction> {
+        let (_, rows, fields) = self.data(client)?;
+        if fields.is_empty() {
+            let rect = ui.available_rect_before_wrap();
+            ui.painter()
+                .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
+            return None;
+        }
+        self.grid(ui, &rows, &fields, scale);
+        None
+    }
+
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        _frame: &eframe::Frame,
+    ) -> Option<EditorAction> {
+        let Some((schema_id, rows, fields)) = self.data(editors.client()) else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return None;
+        };
+        let mut action = self.controls(ui, schema_id, &rows, &fields);
 
         if fields.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.vertical_centered(|ui| {
                     ui.weak("This spreadsheet has no columns.");
                     if ui.button("Add columns").clicked() {
-                        if schema_id != self.block.id() {
-                            editors.ensure(schema_id, DatabaseSchema::TYPE_ID);
-                        }
                         action = Some(EditorAction::OpenBlock {
                             id: schema_id,
                             block_type: DatabaseSchema::TYPE_ID,
@@ -471,54 +595,24 @@ impl BlockEditor for DatabaseEditor {
                     }
                 });
             });
-            for operation in operations {
-                self.block.operate(operation);
-            }
             return action;
         }
 
-        self.formula_bar(ui, &rows, &fields, &mut operations);
-        ui.separator();
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                egui::Grid::new(("database-grid", self.block.id()))
-                    .num_columns(fields.len() + 1)
-                    .spacing(egui::Vec2::ZERO)
-                    .show(ui, |ui| {
-                        spreadsheet_header(ui, egui::vec2(ROW_HEADER_WIDTH, ROW_HEIGHT), "");
-                        for (column_index, field) in fields.iter().enumerate() {
-                            let response = spreadsheet_header(
-                                ui,
-                                egui::vec2(column_width(field.field_type), ROW_HEIGHT),
-                                &field.name,
-                            );
-                            response.on_hover_text(format!(
-                                "Column {} · {}",
-                                column_name(column_index),
-                                field_type_label(field.field_type),
-                            ));
-                        }
-                        ui.end_row();
-
-                        for (row_index, row) in rows.iter().enumerate() {
-                            let selected = self.selected.is_some_and(|cell| cell.row_id == row.id);
-                            spreadsheet_row_header(ui, row_index + 1, selected);
-                            for field in &fields {
-                                self.cell_editor(ui, row, field);
-                            }
-                            ui.end_row();
-                        }
-                    });
+                self.grid(ui, &rows, &fields, 1.0);
             });
-        for operation in operations {
-            self.block.operate(operation);
-        }
         action
     }
 }
 
-fn spreadsheet_header(ui: &mut egui::Ui, size: egui::Vec2, text: &str) -> egui::Response {
+fn spreadsheet_header(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    text: &str,
+    scale: f32,
+) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
     let visuals = ui.visuals();
     ui.painter().rect(
@@ -529,17 +623,17 @@ fn spreadsheet_header(ui: &mut egui::Ui, size: egui::Vec2, text: &str) -> egui::
         egui::StrokeKind::Inside,
     );
     ui.painter().with_clip_rect(rect).text(
-        rect.left_center() + egui::vec2(8.0, 0.0),
+        rect.left_center() + egui::vec2(8.0 * scale, 0.0),
         egui::Align2::LEFT_CENTER,
         text,
-        egui::TextStyle::Button.resolve(ui.style()),
+        egui::FontId::proportional((14.0 * scale).max(6.0)),
         visuals.strong_text_color(),
     );
     response
 }
 
-fn spreadsheet_row_header(ui: &mut egui::Ui, number: usize, selected: bool) {
-    let size = egui::vec2(ROW_HEADER_WIDTH, ROW_HEIGHT);
+fn spreadsheet_row_header(ui: &mut egui::Ui, number: usize, selected: bool, scale: f32) {
+    let size = egui::vec2(ROW_HEADER_WIDTH, ROW_HEIGHT) * scale;
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let visuals = ui.visuals();
     let fill = if selected {
@@ -558,7 +652,7 @@ fn spreadsheet_row_header(ui: &mut egui::Ui, number: usize, selected: bool) {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         number,
-        egui::TextStyle::Small.resolve(ui.style()),
+        egui::FontId::proportional((12.0 * scale).max(6.0)),
         visuals.text_color(),
     );
 }
@@ -582,14 +676,20 @@ fn paint_cell_background(ui: &egui::Ui, rect: egui::Rect, selected: bool) {
     }
 }
 
-fn paint_cell_text(ui: &egui::Ui, rect: egui::Rect, text: &str, field_type: DatabaseFieldType) {
+fn paint_cell_text(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    text: &str,
+    field_type: DatabaseFieldType,
+    scale: f32,
+) {
     let (position, alignment) = match field_type {
         DatabaseFieldType::String => (
-            rect.left_center() + egui::vec2(6.0, 0.0),
+            rect.left_center() + egui::vec2(6.0 * scale, 0.0),
             egui::Align2::LEFT_CENTER,
         ),
         DatabaseFieldType::Number => (
-            rect.right_center() - egui::vec2(6.0, 0.0),
+            rect.right_center() - egui::vec2(6.0 * scale, 0.0),
             egui::Align2::RIGHT_CENTER,
         ),
     };
@@ -597,9 +697,142 @@ fn paint_cell_text(ui: &egui::Ui, rect: egui::Rect, text: &str, field_type: Data
         position,
         alignment,
         text,
-        egui::TextStyle::Body.resolve(ui.style()),
+        egui::FontId::proportional((14.0 * scale).max(6.0)),
         ui.visuals().text_color(),
     );
+}
+
+fn paint_database_preview(
+    context: BlockRenderContext<'_>,
+    rows: &[DatabaseRow],
+    fields: &[DatabaseField],
+) {
+    let rect = egui::Rect::from_min_max(context.corners[0], context.corners[2]);
+    let intrinsic_width = ROW_HEADER_WIDTH
+        + fields
+            .iter()
+            .map(|field| column_width(field.field_type))
+            .sum::<f32>();
+    let scale = (rect.width() / intrinsic_width.max(1.0)).max(0.01);
+    let row_height = ROW_HEIGHT * scale;
+    let row_header_width = ROW_HEADER_WIDTH * scale;
+    let visuals = &context.painter.ctx().global_style().visuals;
+    let stroke = egui::Stroke::new(
+        scale.max(0.5),
+        preview_color(
+            visuals.widgets.noninteractive.bg_stroke.color,
+            context.opacity,
+        ),
+    );
+    let header_fill = preview_color(visuals.faint_bg_color, context.opacity);
+    let cell_fill = preview_color(visuals.extreme_bg_color, context.opacity);
+    let text_color = preview_color(visuals.text_color(), context.opacity);
+    let strong_text = preview_color(visuals.strong_text_color(), context.opacity);
+    let font = egui::FontId::proportional((14.0 * scale).max(6.0));
+    let small_font = egui::FontId::proportional((12.0 * scale).max(6.0));
+
+    let mut x = rect.left();
+    paint_preview_cell(
+        context.painter,
+        egui::Rect::from_min_size(
+            egui::pos2(x, rect.top()),
+            egui::vec2(row_header_width, row_height),
+        ),
+        header_fill,
+        stroke,
+        "",
+        egui::Align2::LEFT_CENTER,
+        strong_text,
+        font.clone(),
+        8.0 * scale,
+    );
+    x += row_header_width;
+    for field in fields {
+        let width = column_width(field.field_type) * scale;
+        paint_preview_cell(
+            context.painter,
+            egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(width, row_height)),
+            header_fill,
+            stroke,
+            &field.name,
+            egui::Align2::LEFT_CENTER,
+            strong_text,
+            font.clone(),
+            8.0 * scale,
+        );
+        x += width;
+    }
+
+    for (row_index, row) in rows.iter().enumerate() {
+        let y = rect.top() + row_height * (row_index + 1) as f32;
+        paint_preview_cell(
+            context.painter,
+            egui::Rect::from_min_size(
+                egui::pos2(rect.left(), y),
+                egui::vec2(row_header_width, row_height),
+            ),
+            header_fill,
+            stroke,
+            &(row_index + 1).to_string(),
+            egui::Align2::CENTER_CENTER,
+            text_color,
+            small_font.clone(),
+            0.0,
+        );
+        let mut x = rect.left() + row_header_width;
+        for field in fields {
+            let width = column_width(field.field_type) * scale;
+            let alignment = match field.field_type {
+                DatabaseFieldType::String => egui::Align2::LEFT_CENTER,
+                DatabaseFieldType::Number => egui::Align2::RIGHT_CENTER,
+            };
+            paint_preview_cell(
+                context.painter,
+                egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(width, row_height)),
+                cell_fill,
+                stroke,
+                &cell_text(row, field),
+                alignment,
+                text_color,
+                font.clone(),
+                6.0 * scale,
+            );
+            x += width;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_preview_cell(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    fill: egui::Color32,
+    stroke: egui::Stroke,
+    text: &str,
+    alignment: egui::Align2,
+    text_color: egui::Color32,
+    font: egui::FontId,
+    inset: f32,
+) {
+    painter.rect(rect, 0.0, fill, stroke, egui::StrokeKind::Inside);
+    let position = match alignment {
+        egui::Align2::LEFT_CENTER => rect.left_center() + egui::vec2(inset, 0.0),
+        egui::Align2::RIGHT_CENTER => rect.right_center() - egui::vec2(inset, 0.0),
+        _ => rect.center(),
+    };
+    painter
+        .with_clip_rect(rect.shrink(1.0))
+        .text(position, alignment, text, font, text_color);
+}
+
+fn preview_color(color: egui::Color32, opacity: f32) -> egui::Color32 {
+    let [red, green, blue, alpha] = color.to_srgba_unmultiplied();
+    egui::Color32::from_rgba_unmultiplied(
+        red,
+        green,
+        blue,
+        (alpha as f32 * opacity.clamp(0.0, 1.0)).round() as u8,
+    )
 }
 
 fn take_typed_text(ui: &mut egui::Ui) -> Option<String> {

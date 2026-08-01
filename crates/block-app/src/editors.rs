@@ -41,6 +41,12 @@ pub struct BlockRenderContext<'a> {
     pub opacity: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct DirectEditorCapabilities {
+    pub allow_rotation: bool,
+    pub preserve_aspect_ratio: bool,
+}
+
 pub struct EditorAccess<'a> {
     active: Uuid,
     client: &'a BlockClient,
@@ -107,6 +113,51 @@ impl<'a> EditorAccess<'a> {
         self.editors.insert(id, editor);
         rendered
     }
+
+    pub fn direct_editor_capabilities(&self, id: Uuid) -> Option<DirectEditorCapabilities> {
+        self.editors
+            .get(&id)
+            .and_then(|editor| editor.direct_editor_capabilities())
+    }
+
+    pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
+        let mut editor = self.editors.remove(&id)?;
+        let size = editor.direct_editor_intrinsic_size(self.client);
+        self.editors.insert(id, editor);
+        size
+    }
+
+    pub fn direct_editor_top_bar(&mut self, id: Uuid, ui: &mut egui::Ui) -> Option<EditorAction> {
+        let mut editor = self.editors.remove(&id)?;
+        let action = editor.direct_editor_top_bar(ui, self.client);
+        self.editors.insert(id, editor);
+        action
+    }
+
+    pub fn direct_editor_has_sidebar(&self, id: Uuid) -> bool {
+        self.editors
+            .get(&id)
+            .is_some_and(|editor| editor.direct_editor_has_sidebar())
+    }
+
+    pub fn direct_editor_sidebar(&mut self, id: Uuid, ui: &mut egui::Ui) -> Option<EditorAction> {
+        let mut editor = self.editors.remove(&id)?;
+        let action = editor.direct_editor_sidebar(ui, self.client);
+        self.editors.insert(id, editor);
+        action
+    }
+
+    pub fn direct_editor_ui(
+        &mut self,
+        id: Uuid,
+        ui: &mut egui::Ui,
+        scale: f32,
+    ) -> Option<EditorAction> {
+        let mut editor = self.editors.remove(&id)?;
+        let action = editor.direct_editor_ui(ui, self.client, scale);
+        self.editors.insert(id, editor);
+        action
+    }
 }
 
 #[derive(Clone)]
@@ -159,6 +210,37 @@ pub trait BlockEditor {
     }
     fn default_preserve_aspect_ratio(&self) -> bool {
         false
+    }
+    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
+        None
+    }
+    fn direct_editor_intrinsic_size(&mut self, _client: &BlockClient) -> Option<egui::Vec2> {
+        None
+    }
+    fn direct_editor_top_bar(
+        &mut self,
+        _ui: &mut egui::Ui,
+        _client: &BlockClient,
+    ) -> Option<EditorAction> {
+        None
+    }
+    fn direct_editor_has_sidebar(&self) -> bool {
+        false
+    }
+    fn direct_editor_sidebar(
+        &mut self,
+        _ui: &mut egui::Ui,
+        _client: &BlockClient,
+    ) -> Option<EditorAction> {
+        None
+    }
+    fn direct_editor_ui(
+        &mut self,
+        _ui: &mut egui::Ui,
+        _client: &BlockClient,
+        _scale: f32,
+    ) -> Option<EditorAction> {
+        None
     }
     fn ui(
         &mut self,
