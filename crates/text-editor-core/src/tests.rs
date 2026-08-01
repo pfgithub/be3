@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use super::*;
 
+mod block_urls_are_single_cursor_units;
 mod core;
 mod ctrl_d;
 mod has_stop;

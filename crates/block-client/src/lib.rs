@@ -2,6 +2,7 @@ use std::{
     any::Any,
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     ops::Deref,
+    ops::Range,
     process,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -30,6 +31,8 @@ use uuid::Uuid;
 pub mod blocks;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
+pub const BLOCK_URL_PREFIX: &str = "https://blocks.pfg.pw/0/";
+const UUID_TEXT_BYTES: usize = 36;
 const MAX_HISTORY_ACTIONS: usize = 100;
 const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
@@ -79,6 +82,51 @@ pub struct CachedBlock {
     pub block_type: Uuid,
     pub author: Uuid,
     pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockUrl {
+    pub range: Range<usize>,
+    pub id: Uuid,
+}
+
+pub fn block_url(id: Uuid) -> String {
+    format!("{BLOCK_URL_PREFIX}{id}")
+}
+
+pub fn parse_block_urls(bytes: &[u8]) -> Vec<BlockUrl> {
+    let prefix = BLOCK_URL_PREFIX.as_bytes();
+    let mut urls = Vec::new();
+    let mut index = 0;
+    while index + prefix.len() + UUID_TEXT_BYTES <= bytes.len() {
+        if !bytes[index..].starts_with(prefix) {
+            index += 1;
+            continue;
+        }
+        let uuid_start = index + prefix.len();
+        let end = uuid_start + UUID_TEXT_BYTES;
+        let Ok(uuid) = std::str::from_utf8(&bytes[uuid_start..end]) else {
+            index += 1;
+            continue;
+        };
+        let Ok(id) = Uuid::parse_str(uuid) else {
+            index += 1;
+            continue;
+        };
+        if bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'/'))
+        {
+            index += 1;
+            continue;
+        }
+        urls.push(BlockUrl {
+            range: index..end,
+            id,
+        });
+        index = end;
+    }
+    urls
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

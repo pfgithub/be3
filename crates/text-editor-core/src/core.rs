@@ -1,6 +1,8 @@
 use std::{cmp::Ordering, mem::size_of};
 
-use block_client::{blocks::text::TextDocument, BlockHandle, HistoryMetadata};
+use block_client::{
+    blocks::text::TextDocument, parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_PREFIX,
+};
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
@@ -323,6 +325,24 @@ impl Core {
         self.document
             .read()
             .map(|document| position.resolve(&document))
+    }
+
+    pub fn cursor_stop(&self, byte_index: usize, stop: CursorLeftRightStop) -> Position {
+        let Some(document) = self.document.read() else {
+            return Position::END;
+        };
+        Position::at(
+            &document,
+            to_boundary(
+                document.bytes(),
+                byte_index,
+                LRDirection::Left,
+                stop,
+                BoundaryMode::Select,
+                true,
+                self.soft_tab_width(),
+            ),
+        )
     }
 
     pub fn select(&mut self, selection: Selection) {
@@ -1453,6 +1473,15 @@ fn has_stop(
 ) -> Option<BetweenCharsStop> {
     if index == 0 || index >= bytes.len() {
         return Some(BetweenCharsStop::Both);
+    }
+    let url_length = BLOCK_URL_PREFIX.len() + 36;
+    let search_start = index.saturating_sub(url_length);
+    let search_end = (index + url_length).min(bytes.len());
+    if parse_block_urls(&bytes[search_start..search_end])
+        .iter()
+        .any(|url| url.range.start + search_start < index && index < url.range.end + search_start)
+    {
+        return None;
     }
     let left = bytes[index - 1];
     let right = bytes[index];

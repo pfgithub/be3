@@ -1,13 +1,11 @@
 mod font;
 mod profiling;
-#[cfg(test)]
-mod tests;
-
-use std::{collections::HashMap, ops::Range, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
-    blocks::text::TextDocument, BlockClient, BlockHandle, BlockRelationships, ReferenceList,
+    block_url, blocks::text::TextDocument, parse_block_urls, BlockClient, BlockHandle,
+    BlockRelationships, ReferenceList,
 };
 use eframe::egui::{
     self, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton, Pos2, Rect, Sense,
@@ -24,21 +22,11 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
-use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration};
+use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
-const EMBED_PREFIX: &[u8] = b"https://blocks.pfg.pw/0/";
-const UUID_TEXT_BYTES: usize = 36;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ParsedEmbed {
-    range: Range<usize>,
-    id: Uuid,
-    full_line: bool,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HighlightLanguage {
     Markdown,
@@ -178,7 +166,7 @@ impl TextEditor {
     }
 
     fn insert_embed(&mut self, id: Uuid) {
-        let directive = format_embed(id);
+        let directive = block_url(id);
         self.core
             .execute_command(EditorCommand::InsertText(directive.as_bytes()));
     }
@@ -190,7 +178,7 @@ impl TextEditor {
     }
 
     fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
-        let parsed = parse_embeds(bytes);
+        let parsed = parse_block_urls(bytes);
         let references = self.dependencies.read();
         let referenced = references
             .iter()
@@ -206,9 +194,6 @@ impl TextEditor {
                         .cached_block(embed.id)
                         .map(|block| (block.block_type, block.name))
                 });
-                if let Some((block_type, _)) = &metadata {
-                    editors.ensure(embed.id, *block_type);
-                }
                 let label = metadata
                     .as_ref()
                     .map(|(_, name)| name)
@@ -219,7 +204,6 @@ impl TextEditor {
                     range: embed.range,
                     id: embed.id,
                     label,
-                    full_line: embed.full_line,
                     available: metadata.is_some(),
                 }
             })
@@ -576,83 +560,34 @@ impl TextEditor {
         painter: &egui::Painter,
         origin: Pos2,
         layout: &DocumentLayout,
-        editors: &mut EditorAccess<'_>,
     ) {
         for embed in &layout.embeds {
             let rect = embed.rect.translate(origin.to_vec2());
-            if !embed.full_line {
-                let selected = self.core.cursor_positions().into_iter().any(|cursor| {
-                    let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
-                        return false;
-                    };
-                    let Some(focus) = self.core.position_index(cursor.pos.focus) else {
-                        return false;
-                    };
-                    let (start, end) = if anchor <= focus {
-                        (anchor, focus)
-                    } else {
-                        (focus, anchor)
-                    };
-                    start < embed.range.end && end > embed.range.start
-                });
-                painter.rect_filled(
-                    rect,
-                    5.0,
-                    if selected {
-                        ui.visuals().selection.bg_fill
-                    } else {
-                        Color32::from_rgb(49, 65, 78)
-                    },
-                );
-                continue;
-            }
-
-            painter.rect_filled(rect, 6.0, Color32::from_rgb(35, 46, 56));
-            let rendered = editors.render(
-                embed.id,
-                BlockRenderContext {
-                    painter,
-                    corners: [
-                        rect.left_top(),
-                        rect.right_top(),
-                        rect.right_bottom(),
-                        rect.left_bottom(),
-                    ],
-                    opacity: 1.0,
+            let selected = self.core.cursor_positions().iter().any(|cursor| {
+                let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
+                    return false;
+                };
+                let Some(focus) = self.core.position_index(cursor.pos.focus) else {
+                    return false;
+                };
+                let (start, end) = if anchor <= focus {
+                    (anchor, focus)
+                } else {
+                    (focus, anchor)
+                };
+                start < embed.range.end && end > embed.range.start
+            });
+            painter.rect_filled(
+                rect,
+                5.0,
+                if selected {
+                    ui.visuals().selection.bg_fill
+                } else if embed.available {
+                    Color32::from_rgb(49, 65, 78)
+                } else {
+                    Color32::from_rgb(72, 55, 61)
                 },
             );
-            if !rendered {
-                let title = painter.layout_no_wrap(
-                    embed.label.clone(),
-                    egui::FontId::proportional(18.0),
-                    ui.visuals().text_color(),
-                );
-                let status = painter.layout_no_wrap(
-                    if embed.available {
-                        "Preview unavailable".to_owned()
-                    } else {
-                        "Block unavailable".to_owned()
-                    },
-                    egui::FontId::proportional(13.0),
-                    ui.visuals().weak_text_color(),
-                );
-                let gap = 6.0;
-                let total_height = title.size().y + gap + status.size().y;
-                let top = rect.center().y - total_height * 0.5;
-                painter.galley(
-                    Pos2::new(rect.center().x - title.size().x * 0.5, top),
-                    title,
-                    ui.visuals().text_color(),
-                );
-                painter.galley(
-                    Pos2::new(
-                        rect.center().x - status.size().x * 0.5,
-                        top + total_height - status.size().y,
-                    ),
-                    status,
-                    ui.visuals().weak_text_color(),
-                );
-            }
         }
     }
 }
@@ -782,7 +717,55 @@ impl BlockEditor for TextEditor {
                 let pointer_start = Instant::now();
                 reveal_cursor |= self.pointer_input(ui, &response, origin, &layout);
                 profile.pointer = pointer_start.elapsed();
-                self.paint_embeds(ui, &painter, origin, &layout, editors);
+                self.paint_embeds(ui, &painter, origin, &layout);
+                let pointer = response
+                    .interact_pointer_pos()
+                    .or_else(|| response.ctx.pointer_hover_pos());
+                let drop_index = response
+                    .dnd_hover_payload::<SidebarDragPayload>()
+                    .filter(|dragged| dragged.reference.id != self.block.id())
+                    .and_then(|_| pointer)
+                    .map(|pointer| hit_test(&layout, pointer - origin))
+                    .and_then(|byte| {
+                        self.core.position_index(
+                            self.core
+                                .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster),
+                        )
+                    });
+                if let Some(byte) = drop_index {
+                    response.ctx.set_cursor_icon(egui::CursorIcon::Alias);
+                    if let Some(position) =
+                        layout.positions.get(byte).and_then(|position| *position)
+                    {
+                        let top = Pos2::new(
+                            origin.x + position.x,
+                            origin.y + layout.lines[position.line].y,
+                        );
+                        painter.rect_filled(
+                            Rect::from_min_size(
+                                top,
+                                Vec2::new(2.0, layout.lines[position.line].height),
+                            ),
+                            0.0,
+                            ui.visuals().selection.stroke.color,
+                        );
+                    }
+                }
+                if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
+                    if dragged.reference.id != self.block.id() {
+                        if let Some(byte) =
+                            pointer.map(|pointer| hit_test(&layout, pointer - origin))
+                        {
+                            let position = self
+                                .core
+                                .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
+                            self.core
+                                .execute_command(EditorCommand::SetCursorPosition(position));
+                            self.insert_embed(dragged.reference.id);
+                            reveal_cursor = true;
+                        }
+                    }
+                }
                 let (cursor, paint) = self.paint(ui, &painter, origin, &layout, &highlight);
                 profile.paint = paint;
                 if reveal_cursor {
@@ -805,56 +788,6 @@ impl BlockEditor for TextEditor {
                 })
             })
     }
-}
-
-fn parse_embeds(bytes: &[u8]) -> Vec<ParsedEmbed> {
-    let mut embeds = Vec::new();
-    let mut index = 0;
-    while index + EMBED_PREFIX.len() + UUID_TEXT_BYTES <= bytes.len() {
-        if !bytes[index..].starts_with(EMBED_PREFIX) {
-            index += 1;
-            continue;
-        }
-        let uuid_start = index + EMBED_PREFIX.len();
-        let end = uuid_start + UUID_TEXT_BYTES;
-        let Ok(uuid_text) = std::str::from_utf8(&bytes[uuid_start..end]) else {
-            index += 1;
-            continue;
-        };
-        let Ok(id) = Uuid::parse_str(uuid_text) else {
-            index += 1;
-            continue;
-        };
-        if bytes
-            .get(end)
-            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'/'))
-        {
-            index += 1;
-            continue;
-        }
-        let line_start = bytes[..index]
-            .iter()
-            .rposition(|byte| *byte == b'\n')
-            .map_or(0, |newline| newline + 1);
-        let line_end = bytes[end..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(bytes.len(), |newline| end + newline);
-        let line_whitespace = |byte: &u8| matches!(*byte, b' ' | b'\t' | b'\r');
-        let full_line = bytes[line_start..index].iter().all(line_whitespace)
-            && bytes[end..line_end].iter().all(line_whitespace);
-        embeds.push(ParsedEmbed {
-            range: index..end,
-            id,
-            full_line,
-        });
-        index = end;
-    }
-    embeds
-}
-
-fn format_embed(id: Uuid) -> String {
-    format!("https://blocks.pfg.pw/0/{id}")
 }
 
 fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {

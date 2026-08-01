@@ -10,9 +10,9 @@ use eips::{LocalChange, RemoteChange};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::parse_block_urls;
+
 const TEXT_BURST_DELAY: Duration = Duration::from_millis(750);
-const BLOCK_EMBED_PREFIX: &[u8] = b"https://blocks.pfg.pw/0/";
-const UUID_TEXT_BYTES: usize = 36;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TextDocument {
@@ -195,37 +195,12 @@ impl Block for TextDocument {
 }
 
 fn embedded_block_references(bytes: &[u8]) -> Vec<Uuid> {
-    let mut references = Vec::new();
     let mut seen = HashSet::new();
-    let mut index = 0;
-    while index + BLOCK_EMBED_PREFIX.len() + UUID_TEXT_BYTES <= bytes.len() {
-        if !bytes[index..].starts_with(BLOCK_EMBED_PREFIX) {
-            index += 1;
-            continue;
-        }
-        let uuid_start = index + BLOCK_EMBED_PREFIX.len();
-        let end = uuid_start + UUID_TEXT_BYTES;
-        let Ok(uuid) = std::str::from_utf8(&bytes[uuid_start..end]) else {
-            index += 1;
-            continue;
-        };
-        let Ok(id) = Uuid::parse_str(uuid) else {
-            index += 1;
-            continue;
-        };
-        if bytes
-            .get(end)
-            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'/'))
-        {
-            index += 1;
-            continue;
-        }
-        if seen.insert(id) {
-            references.push(id);
-        }
-        index = end;
-    }
-    references
+    parse_block_urls(bytes)
+        .into_iter()
+        .map(|url| url.id)
+        .filter(|id| seen.insert(*id))
+        .collect()
 }
 
 impl BlockHistory<TextDocument> for TextHistory {
