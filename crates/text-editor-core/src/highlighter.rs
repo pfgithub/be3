@@ -323,6 +323,30 @@ fn style_markdown_node(cursor: &mut MarkdownCursor<'_>, styles: &mut [SynHlStyle
     let node = cursor.node();
     let range = node.start_byte().min(styles.len())..node.end_byte().min(styles.len());
     let kind = node.kind();
+    let parent_kind = node.parent().map(|parent| parent.kind());
+
+    let contextual_symbol = match kind {
+        "[" | "]" => parent_kind.is_some_and(|parent| {
+            matches!(
+                parent,
+                "image"
+                    | "inline_link"
+                    | "shortcut_link"
+                    | "collapsed_reference_link"
+                    | "full_reference_link"
+            )
+        }),
+        "(" | ")" => parent_kind.is_some_and(|parent| matches!(parent, "image" | "inline_link")),
+        "!" => parent_kind == Some("image"),
+        "|" => parent_kind.is_some_and(|parent| parent.starts_with("pipe_table")),
+        "~" => parent_kind == Some("strikethrough"),
+        _ => false,
+    };
+    if contextual_symbol {
+        for style in &mut styles[range.clone()] {
+            set_markdown_symbol(style);
+        }
+    }
 
     match kind {
         "strong_emphasis" => {
@@ -428,14 +452,7 @@ fn style_markdown_node(cursor: &mut MarkdownCursor<'_>, styles: &mut [SynHlStyle
         | "atx_h3_marker"
         | "atx_h4_marker"
         | "atx_h5_marker"
-        | "atx_h6_marker"
-        | "["
-        | "]"
-        | "("
-        | ")"
-        | "!"
-        | "|"
-        | "~" => {
+        | "atx_h6_marker" => {
             for style in &mut styles[range.clone()] {
                 set_markdown_symbol(style);
             }

@@ -10,6 +10,7 @@ mod markdown_block_styles;
 mod markdown_incremental_edit;
 mod markdown_inline_styles;
 mod markdown_invalid_utf8;
+mod markdown_plain_punctuation;
 mod raw_bytes;
 mod zig_syn_hl;
 
