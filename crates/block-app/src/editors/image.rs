@@ -7,7 +7,13 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, TextureHandle, Vec2};
 use egui_material_icons::icons::ICON_IMAGE;
 use uuid::Uuid;
 
-use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration};
+use super::{
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorRegistration,
+};
+
+const DIRECT_EDITOR_LONG_SIDE: f32 = 1024.0;
+const DIRECT_EDITOR_SHORT_SIDE: f32 = 24.0;
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -209,26 +215,50 @@ impl BlockEditor for ImageEditor {
         true
     }
 
-    fn ui(
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
+        DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: true,
+            supports_pan_and_zoom: false,
+        }
+    }
+
+    fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
+        let image = self.block.read()?;
+        let width = image.width() as f32;
+        let height = image.height() as f32;
+        let scale = (DIRECT_EDITOR_LONG_SIDE / width.max(height))
+            .min(1.0)
+            .max(DIRECT_EDITOR_SHORT_SIDE / width.min(height));
+        Some(Vec2::new(width * scale, height * scale))
+    }
+
+    fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
+        true
+    }
+
+    fn direct_editor_right_sidebar(
         &mut self,
         ui: &mut egui::Ui,
         _editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
-        egui::Panel::right(egui::Id::new(("image-sidebar", self.block.id())))
-            .default_size(220.0)
-            .min_size(160.0)
-            .max_size(320.0)
-            .resizable(true)
-            .show_inside(ui, |ui| {
-                ui.heading("Image");
-                if ui.button("Replace image...").clicked() {
-                    self.replace_from_file();
-                }
-                if let Some(error) = &self.import_error {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
-                }
-            });
+        ui.heading("Image");
+        if ui.button("Replace image...").clicked() {
+            self.replace_from_file();
+        }
+        if let Some(error) = &self.import_error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        None
+    }
+
+    fn direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _editors: &mut EditorAccess<'_>,
+        _scale: f32,
+        _viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
         if !self.ensure_texture(ui.ctx()) {
             ui.centered_and_justified(|ui| {
                 if let Some(error) = &self.texture_error {

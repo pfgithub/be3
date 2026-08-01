@@ -179,7 +179,7 @@ impl<'a> EditorAccess<'a> {
     pub fn direct_editor_capabilities(&self, id: Uuid) -> Option<DirectEditorCapabilities> {
         self.editors
             .get(&id)
-            .and_then(|editor| editor.direct_editor_capabilities())
+            .map(|editor| editor.direct_editor_capabilities())
     }
 
     pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
@@ -302,9 +302,7 @@ pub trait BlockEditor {
     fn default_preserve_aspect_ratio(&self) -> bool {
         false
     }
-    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
-        None
-    }
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities;
     fn direct_editor_intrinsic_size(
         &mut self,
         _editors: &mut EditorAccess<'_>,
@@ -348,14 +346,6 @@ pub trait BlockEditor {
     ) -> Option<EditorAction> {
         None
     }
-    fn ui(
-        &mut self,
-        _ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
-    ) -> Option<EditorAction> {
-        None
-    }
 }
 
 pub fn direct_editor_tab_ui(
@@ -366,7 +356,7 @@ pub fn direct_editor_tab_ui(
     let id = editor.id();
     let compact = ui.available_width() < COMPACT_DIRECT_EDITOR_WIDTH;
     let mut action = None;
-    let capabilities = editor.direct_editor_capabilities().unwrap();
+    let capabilities = editor.direct_editor_capabilities();
     let viewport_id = egui::Id::new(("direct-editor-tab-viewport", id));
     let mut viewport_state = ui
         .ctx()

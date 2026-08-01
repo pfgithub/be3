@@ -9,7 +9,13 @@ use eframe::egui;
 use egui_material_icons::icons::{ICON_ADD, ICON_DELETE, ICON_SCHEMA};
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+use super::{
+    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorRegistration,
+};
+
+const DIRECT_EDITOR_WIDTH: f32 = 600.0;
+const DIRECT_EDITOR_ROW_HEIGHT: f32 = 40.0;
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -67,11 +73,31 @@ impl BlockEditor for DatabaseSchemaEditor {
         self.block.note_backref(id);
     }
 
-    fn ui(
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
+        DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: false,
+            supports_pan_and_zoom: false,
+        }
+    }
+
+    fn direct_editor_intrinsic_size(
+        &mut self,
+        _editors: &mut EditorAccess<'_>,
+    ) -> Option<egui::Vec2> {
+        let field_count = self.block.read()?.fields().len();
+        Some(egui::vec2(
+            DIRECT_EDITOR_WIDTH,
+            DIRECT_EDITOR_ROW_HEIGHT * (field_count + 2) as f32,
+        ))
+    }
+
+    fn direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
         _editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
+        _scale: f32,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let Some(schema) = self.block.read() else {
             ui.centered_and_justified(|ui| {

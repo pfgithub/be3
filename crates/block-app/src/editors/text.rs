@@ -999,12 +999,12 @@ impl BlockEditor for TextEditor {
         true
     }
 
-    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
-        Some(DirectEditorCapabilities {
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
+        DirectEditorCapabilities {
             allow_rotation: false,
             preserve_aspect_ratio: false,
             supports_pan_and_zoom: false,
-        })
+        }
     }
 
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {

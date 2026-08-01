@@ -1591,12 +1591,12 @@ impl BlockEditor for InfiniteCanvasEditor {
         }
     }
 
-    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
-        Some(DirectEditorCapabilities {
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
+        DirectEditorCapabilities {
             allow_rotation: false,
             preserve_aspect_ratio: true,
             supports_pan_and_zoom: true,
-        })
+        }
     }
 
     fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {

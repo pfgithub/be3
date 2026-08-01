@@ -419,12 +419,12 @@ impl BlockEditor for WebBrowserTabEditor {
         self.close_webview();
     }
 
-    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
-        Some(DirectEditorCapabilities {
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
+        DirectEditorCapabilities {
             allow_rotation: false,
             preserve_aspect_ratio: true,
             supports_pan_and_zoom: false,
-        })
+        }
     }
 
     fn direct_editor_intrinsic_size(

@@ -7,7 +7,13 @@ use eframe::egui;
 use egui_material_icons::icons::ICON_FOLDER;
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+use super::{
+    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorRegistration,
+};
+
+const DIRECT_EDITOR_WIDTH: f32 = 400.0;
+const DIRECT_EDITOR_ROW_HEIGHT: f32 = 24.0;
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -91,11 +97,31 @@ impl BlockEditor for WorkspaceIndexEditor {
         Some(true)
     }
 
-    fn ui(
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
+        DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: false,
+            supports_pan_and_zoom: false,
+        }
+    }
+
+    fn direct_editor_intrinsic_size(
+        &mut self,
+        _editors: &mut EditorAccess<'_>,
+    ) -> Option<egui::Vec2> {
+        let entry_count = self.block.read()?.entries().len().max(1);
+        Some(egui::vec2(
+            DIRECT_EDITOR_WIDTH,
+            DIRECT_EDITOR_ROW_HEIGHT * entry_count as f32,
+        ))
+    }
+
+    fn direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
         _editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
+        _scale: f32,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let Some(index) = self.block.read() else {
             ui.centered_and_justified(|ui| {
@@ -111,11 +137,9 @@ impl BlockEditor for WorkspaceIndexEditor {
             return None;
         }
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for entry in index.entries() {
-                ui.label(entry.id.to_string());
-            }
-        });
+        for entry in index.entries() {
+            ui.label(entry.id.to_string());
+        }
         None
     }
 }

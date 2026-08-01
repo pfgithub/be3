@@ -1239,12 +1239,7 @@ impl BlockApp {
         });
     }
 
-    fn show_content(
-        &mut self,
-        ui: &mut egui::Ui,
-        frame: &eframe::Frame,
-        active: Uuid,
-    ) -> Option<EditorAction> {
+    fn show_content(&mut self, ui: &mut egui::Ui, active: Uuid) -> Option<EditorAction> {
         let Some(mut editor) = self.editors.remove(&active) else {
             return None;
         };
@@ -1292,11 +1287,7 @@ impl BlockApp {
         }
         let mut editors =
             EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
-        let action = if editor.direct_editor_capabilities().is_some() {
-            direct_editor_tab_ui(editor.as_mut(), ui, &mut editors)
-        } else {
-            editor.ui(ui, &mut editors, frame)
-        };
+        let action = direct_editor_tab_ui(editor.as_mut(), ui, &mut editors);
         self.editors.insert(active, editor);
         action
     }
@@ -1416,7 +1407,6 @@ impl BlockApp {
         }
         let mut viewer = BlockTabViewer {
             app: self,
-            frame,
             actions: Vec::new(),
             tabs_to_close: Vec::new(),
         };
@@ -1732,7 +1722,6 @@ impl BlockApp {
 
 struct BlockTabViewer<'a> {
     app: &'a mut BlockApp,
-    frame: &'a eframe::Frame,
     actions: Vec<(Uuid, EditorAction)>,
     tabs_to_close: Vec<Uuid>,
 }
@@ -1786,7 +1775,7 @@ impl TabViewer for BlockTabViewer<'_> {
                 egui::Panel::bottom(egui::Id::new(("block-statusbar", *id)))
                     .resizable(false)
                     .show_inside(ui, |ui| self.app.show_statusbar(ui, *id));
-                if let Some(action) = self.app.show_content(ui, self.frame, *id) {
+                if let Some(action) = self.app.show_content(ui, *id) {
                     self.actions.push((*id, action));
                 }
             }

@@ -3,7 +3,11 @@ use block_client::BlockRelationships;
 use eframe::egui;
 use uuid::Uuid;
 
-use super::{BlockEditor, EditorAccess, EditorAction};
+use super::{
+    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
+};
+
+const DIRECT_EDITOR_SIZE: egui::Vec2 = egui::vec2(400.0, 120.0);
 
 pub(super) struct UnsupportedEditor {
     id: Uuid,
@@ -37,11 +41,27 @@ impl BlockEditor for UnsupportedEditor {
 
     fn note_backref(&self, _id: Uuid) {}
 
-    fn ui(
+    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
+        DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: false,
+            supports_pan_and_zoom: false,
+        }
+    }
+
+    fn direct_editor_intrinsic_size(
+        &mut self,
+        _editors: &mut EditorAccess<'_>,
+    ) -> Option<egui::Vec2> {
+        Some(DIRECT_EDITOR_SIZE)
+    }
+
+    fn direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
         _editors: &mut EditorAccess<'_>,
-        _frame: &eframe::Frame,
+        _scale: f32,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
