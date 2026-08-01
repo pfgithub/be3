@@ -4,6 +4,7 @@ use block_client::{
     BlockHandle, BlockRelationships,
 };
 use eframe::egui;
+use egui_material_icons::icons::ICON_FOLDER;
 use uuid::Uuid;
 
 use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
@@ -12,6 +13,7 @@ pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
         block_type: WorkspaceIndex::TYPE_ID,
         display_name: "Folder",
+        icon: ICON_FOLDER,
         create: Some(|client| {
             Box::new(WorkspaceIndexEditor::new(
                 client.create_block(WorkspaceIndex::default()),

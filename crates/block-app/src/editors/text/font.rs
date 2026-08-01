@@ -49,6 +49,7 @@ pub(super) struct ResolvedEmbed {
     pub range: Range<usize>,
     pub id: Uuid,
     pub label: String,
+    pub icon: Option<&'static str>,
     pub large: bool,
     pub available: bool,
     pub preview_aspect_ratio: Option<f32>,
@@ -58,6 +59,7 @@ pub(super) struct EmbedLayout {
     pub range: Range<usize>,
     pub id: Uuid,
     pub label: String,
+    pub icon: Option<&'static str>,
     pub large: bool,
     pub available: bool,
     pub rect: Rect,
@@ -279,6 +281,7 @@ impl TextRenderer {
                     range: embed.range.clone(),
                     id: embed.id,
                     label: embed.label.clone(),
+                    icon: embed.icon,
                     large: false,
                     available: embed.available,
                     rect: Rect::from_min_max(
@@ -297,6 +300,7 @@ impl TextRenderer {
                     range: embed.range.clone(),
                     id: embed.id,
                     label: embed.label.clone(),
+                    icon: embed.icon,
                     large: true,
                     available: embed.available,
                     rect: Rect::from_min_size(Pos2::new(0.0, y), preview_size),
@@ -818,7 +822,11 @@ fn display_line(
             append_display_text(
                 &mut text,
                 &mut display_to_document,
-                &format!(" {} ", embed.label),
+                &if embed.icon.is_some() {
+                    format!("   {} ", embed.label)
+                } else {
+                    format!(" {} ", embed.label)
+                },
                 embed.range.start,
                 embed.range.len(),
             );

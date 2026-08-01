@@ -6,7 +6,9 @@ use block_client::{
     BlockHandle, BlockRelationships,
 };
 use eframe::egui;
-use egui_material_icons::icons::{ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_REFRESH};
+use egui_material_icons::icons::{
+    ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_LANGUAGE, ICON_REFRESH,
+};
 use uuid::Uuid;
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -19,6 +21,7 @@ pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
         block_type: WebBrowserTab::TYPE_ID,
         display_name: "Web Browser Tab",
+        icon: ICON_LANGUAGE,
         create: Some(|client| {
             Box::new(WebBrowserTabEditor::new(
                 client.create_block(WebBrowserTab::new()),

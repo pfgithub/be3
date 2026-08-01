@@ -4,6 +4,7 @@ use block_client::{
     BlockClient, BlockHandle, BlockRelationships,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, TextureHandle, Vec2};
+use egui_material_icons::icons::ICON_IMAGE;
 use uuid::Uuid;
 
 use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration};
@@ -12,6 +13,7 @@ pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
         block_type: Image::TYPE_ID,
         display_name: "Image",
+        icon: ICON_IMAGE,
         create: None,
         open: |client: &BlockClient, id| Box::new(ImageEditor::new(client.get_block::<Image>(id))),
         can_add_child: false,

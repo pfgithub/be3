@@ -14,7 +14,7 @@ use eframe::egui::{
     Vec2,
 };
 use egui_material_icons::icons::{
-    ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC,
+    ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_DESCRIPTION, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC,
     ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE,
     ICON_LINK, ICON_TITLE,
 };
@@ -83,6 +83,7 @@ pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
         block_type: TextDocument::TYPE_ID,
         display_name: "Text",
+        icon: ICON_DESCRIPTION,
         create: Some(|client| {
             let block = client.create_block(TextDocument::new());
             Box::new(TextEditor::new(block, client))
@@ -364,6 +365,10 @@ impl TextEditor {
                     range: embed.range,
                     id: embed.id,
                     label,
+                    icon: metadata
+                        .as_ref()
+                        .and_then(|(block_type, _)| editors.registry().icon(*block_type))
+                        .map(|icon| icon.codepoint),
                     large: embed.large,
                     available: metadata.is_some(),
                     preview_aspect_ratio,
@@ -842,6 +847,18 @@ impl TextEditor {
                     Color32::from_rgb(72, 55, 61)
                 },
             );
+            if let Some(icon) = embed.icon {
+                painter.text(
+                    Pos2::new(rect.left() + 13.0, rect.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    icon,
+                    egui::FontId::new(
+                        16.0,
+                        egui::FontFamily::Name(egui_material_icons::FONT_FAMILY.into()),
+                    ),
+                    ui.visuals().text_color(),
+                );
+            }
         }
     }
 

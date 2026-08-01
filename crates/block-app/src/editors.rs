@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use block::BlockParent;
 use block_client::{blocks::workspace_index::BlockEntry, BlockClient, BlockRelationships};
 use eframe::egui;
+use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
 use self::unsupported::UnsupportedEditor;
@@ -177,6 +178,7 @@ pub trait DynamicArtifactRegeneration {
 struct EditorRegistration {
     block_type: Uuid,
     display_name: &'static str,
+    icon: MaterialIcon,
     create: Option<CreateEditor>,
     open: OpenEditor,
     can_add_child: bool,
@@ -240,6 +242,19 @@ impl EditorRegistry {
         self.registrations
             .get(&block_type)
             .map(|registration| registration.display_name)
+    }
+
+    pub fn icon(&self, block_type: Uuid) -> Option<MaterialIcon> {
+        self.registrations
+            .get(&block_type)
+            .map(|registration| registration.icon)
+    }
+
+    pub fn icon_label(&self, block_type: Uuid, label: &str) -> String {
+        self.icon(block_type).map_or_else(
+            || label.to_owned(),
+            |icon| format!("{} {label}", icon.codepoint),
+        )
     }
 
     pub fn can_add_child(&self, block_type: Uuid) -> bool {

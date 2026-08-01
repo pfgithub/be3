@@ -15,9 +15,9 @@ use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, Text
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_DOWNWARD, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD,
     ICON_CIRCLE, ICON_COLORIZE, ICON_CROP_SQUARE, ICON_DELETE, ICON_DIAGONAL_LINE, ICON_DOWNLOAD,
-    ICON_DRAW, ICON_FIND_REPLACE, ICON_FIT_SCREEN, ICON_FORMAT_COLOR_FILL, ICON_INK_ERASER,
-    ICON_NORTH_EAST, ICON_NORTH_WEST, ICON_PALETTE, ICON_RESIZE, ICON_SOUTH_EAST, ICON_SOUTH_WEST,
-    ICON_SQUARE, ICON_TUNE, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+    ICON_DRAW, ICON_FIND_REPLACE, ICON_FIT_SCREEN, ICON_FORMAT_COLOR_FILL, ICON_GRID_ON,
+    ICON_INK_ERASER, ICON_NORTH_EAST, ICON_NORTH_WEST, ICON_PALETTE, ICON_RESIZE, ICON_SOUTH_EAST,
+    ICON_SOUTH_WEST, ICON_SQUARE, ICON_TUNE, ICON_ZOOM_IN, ICON_ZOOM_OUT,
 };
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
@@ -28,6 +28,7 @@ pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
         block_type: PixelArt::TYPE_ID,
         display_name: "Pixel Art",
+        icon: ICON_GRID_ON,
         create: Some(|client| Box::new(PixelArtEditor::new(client.create_block(PixelArt::new())))),
         open: |client, id| Box::new(PixelArtEditor::new(client.get_block::<PixelArt>(id))),
         can_add_child: false,

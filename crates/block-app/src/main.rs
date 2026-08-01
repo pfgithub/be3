@@ -807,7 +807,8 @@ impl BlockApp {
     }
 
     fn reference_label(&self, reference: &BlockReference) -> String {
-        reference.name.clone()
+        self.registry
+            .icon_label(reference.block_type, &reference.name)
     }
 
     fn can_delete_from(&self, source: SidebarDragSource) -> bool {
@@ -1530,7 +1531,7 @@ impl BlockApp {
                 let source = sidebar_source(parent.parent);
                 ui.small(ICON_CHEVRON_RIGHT);
                 let response = ui
-                    .small_button(&parent.name)
+                    .small_button(self.registry.icon_label(parent.block_type, &parent.name))
                     .on_hover_text(parent.id.to_string());
                 if response.clicked() {
                     navigate = Some((parent.id, parent.block_type));
@@ -1547,7 +1548,7 @@ impl BlockApp {
                 });
             }
             ui.small(ICON_CHEVRON_RIGHT);
-            ui.small(current_name);
+            ui.small(self.registry.icon_label(block_type, &current_name));
             ui.separator();
             ui.menu_button(
                 format!(
@@ -1673,7 +1674,10 @@ impl BlockApp {
             let is_reference =
                 containing_id.is_some_and(|id| reference.parent != BlockParent::Uuid(id));
             let response = ui
-                .button(&reference.name)
+                .button(
+                    self.registry
+                        .icon_label(reference.block_type, &reference.name),
+                )
                 .on_hover_text(reference.id.to_string());
             if response.clicked() {
                 *navigate = Some((reference.id, reference.block_type));

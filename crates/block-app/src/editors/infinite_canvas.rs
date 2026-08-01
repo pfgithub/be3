@@ -31,6 +31,7 @@ pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
         block_type: InfiniteCanvas::TYPE_ID,
         display_name: "Canvas",
+        icon: ICON_DRAW,
         create: Some(|client| {
             Box::new(InfiniteCanvasEditor::new(
                 client.create_block(InfiniteCanvas::new()),
@@ -1261,7 +1262,7 @@ impl InfiniteCanvasEditor {
         context: &egui::Context,
         rect: Rect,
         entities: &[CanvasEntity],
-        client: &BlockClient,
+        editors: &EditorAccess<'_>,
     ) -> Option<EditorAction> {
         if self.selection.len() != 1 {
             return None;
@@ -1275,7 +1276,11 @@ impl InfiniteCanvasEditor {
         let bounds = entity_bounds(entity);
         let position =
             self.world_to_screen(CanvasPoint::new(bounds.center().x, bounds.max.y), rect);
-        let cached = client.cached_block(block_id);
+        let cached = editors.client().cached_block(block_id);
+        let label = cached.as_ref().map_or_else(
+            || "Loading…".to_owned(),
+            |block| editors.registry().icon_label(block.block_type, &block.name),
+        );
         let mut action = None;
         egui::Area::new(egui::Id::new(("open-canvas-block", entity.id)))
             .order(egui::Order::Foreground)
@@ -1283,7 +1288,7 @@ impl InfiniteCanvasEditor {
             .fixed_pos(position + Vec2::new(0.0, 6.0))
             .show(context, |ui| {
                 if ui
-                    .add_enabled(cached.is_some(), egui::Button::new("Edit"))
+                    .add_enabled(cached.is_some(), egui::Button::new(label))
                     .on_disabled_hover_text("Waiting for cached block metadata")
                     .clicked()
                 {
@@ -1424,12 +1429,8 @@ impl BlockEditor for InfiniteCanvasEditor {
             editors,
         );
         self.show_picker(ui.ctx(), editors.client());
-        let action = self.selected_block_action(
-            ui.ctx(),
-            response.rect,
-            &painted_entities,
-            editors.client(),
-        );
+        let action =
+            self.selected_block_action(ui.ctx(), response.rect, &painted_entities, editors);
         ui.ctx().request_repaint();
         action
             .or_else(|| {
