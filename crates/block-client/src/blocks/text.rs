@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 const TEXT_BURST_DELAY: Duration = Duration::from_millis(750);
-const BLOCK_EMBED_PREFIX: &[u8] = b"{{_BLOCKEDITOR:";
+const BLOCK_EMBED_PREFIX: &[u8] = b"https://blocks.pfg.pw/0/";
+const UUID_TEXT_BYTES: usize = 36;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TextDocument {
@@ -197,33 +198,14 @@ fn embedded_block_references(bytes: &[u8]) -> Vec<Uuid> {
     let mut references = Vec::new();
     let mut seen = HashSet::new();
     let mut index = 0;
-    while index + BLOCK_EMBED_PREFIX.len() <= bytes.len() {
+    while index + BLOCK_EMBED_PREFIX.len() + UUID_TEXT_BYTES <= bytes.len() {
         if !bytes[index..].starts_with(BLOCK_EMBED_PREFIX) {
             index += 1;
             continue;
         }
-        let payload_start = index + BLOCK_EMBED_PREFIX.len();
-        let Some(close_offset) = bytes[payload_start..]
-            .windows(2)
-            .position(|window| window == b"}}")
-        else {
-            index += 1;
-            continue;
-        };
-        let close = payload_start + close_offset;
-        if bytes[payload_start..close].contains(&b'\n') {
-            index += 1;
-            continue;
-        }
-        let Some(separator_offset) = bytes[payload_start..close]
-            .iter()
-            .position(|byte| *byte == b':')
-        else {
-            index += 1;
-            continue;
-        };
-        let separator = payload_start + separator_offset;
-        let Ok(uuid) = std::str::from_utf8(&bytes[payload_start..separator]) else {
+        let uuid_start = index + BLOCK_EMBED_PREFIX.len();
+        let end = uuid_start + UUID_TEXT_BYTES;
+        let Ok(uuid) = std::str::from_utf8(&bytes[uuid_start..end]) else {
             index += 1;
             continue;
         };
@@ -231,10 +213,17 @@ fn embedded_block_references(bytes: &[u8]) -> Vec<Uuid> {
             index += 1;
             continue;
         };
+        if bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'/'))
+        {
+            index += 1;
+            continue;
+        }
         if seen.insert(id) {
             references.push(id);
         }
-        index = close + 2;
+        index = end;
     }
     references
 }

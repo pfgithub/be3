@@ -3,10 +3,11 @@ use super::{parse_embeds, BLOCK_ID};
 #[test]
 fn rejects_malformed_directives() {
     let malformed = [
-        "{{_BLOCKEDITOR:not-a-uuid:}}".to_owned(),
-        format!("{{{{_BLOCKEDITOR:{BLOCK_ID}}}}}"),
-        format!("{{{{_BLOCKEDITOR:{BLOCK_ID}:missing-close"),
-        format!("{{{{_BLOCKEDITOR:{BLOCK_ID}:multi\nline}}}}"),
+        "https://blocks.pfg.pw/0/not-a-uuid".to_owned(),
+        format!("https://blocks.pfg.pw/1/{BLOCK_ID}"),
+        format!("https://blocks.pfg.pw/0/{BLOCK_ID}suffix"),
+        format!("https://blocks.pfg.pw/0/{BLOCK_ID}/extra"),
+        format!("{{{{_BLOCKEDITOR:{BLOCK_ID}:}}}}"),
     ];
 
     for text in malformed {

@@ -7,12 +7,13 @@ fn text_tracks_embedded_block_references() {
     let [first, second] = std::array::from_fn(|_| Uuid::new_v4());
     let document = TextDocument::from_bytes(format!(
         concat!(
-            "inline {{{{_BLOCKEDITOR:{first}:opaque:settings}}}}\n",
-            "{{{{_BLOCKEDITOR:{second}:}}}}\n",
-            "duplicate {{{{_BLOCKEDITOR:{first}:}}}}\n",
-            "{{{{_BLOCKEDITOR:not-a-uuid:}}}}\n",
-            "{{{{_BLOCKEDITOR:{second}:multi\nline}}}}\n",
-            "{{{{_BLOCKEDITOR:{second}}}}}"
+            "inline https://blocks.pfg.pw/0/{first}\n",
+            "https://blocks.pfg.pw/0/{second}\n",
+            "duplicate https://blocks.pfg.pw/0/{first}\n",
+            "https://blocks.pfg.pw/0/not-a-uuid\n",
+            "https://blocks.pfg.pw/1/{second}\n",
+            "https://blocks.pfg.pw/0/{second}/extra\n",
+            "{{{{_BLOCKEDITOR:{second}:}}}}"
         ),
         first = first,
         second = second,

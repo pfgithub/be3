@@ -29,12 +29,12 @@ use super::{BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorR
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
-const EMBED_PREFIX: &[u8] = b"{{_BLOCKEDITOR:";
+const EMBED_PREFIX: &[u8] = b"https://blocks.pfg.pw/0/";
+const UUID_TEXT_BYTES: usize = 36;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ParsedEmbed {
     range: Range<usize>,
-    settings: Range<usize>,
     id: Uuid,
     full_line: bool,
 }
@@ -200,8 +200,6 @@ impl TextEditor {
             .into_iter()
             .filter(|embed| embed.id != self.block.id())
             .map(|embed| {
-                // Settings are deliberately opaque, but retain their byte range in the parser.
-                let _settings = &bytes[embed.settings.clone()];
                 let metadata = referenced.get(&embed.id).cloned().or_else(|| {
                     editors
                         .client()
@@ -812,33 +810,14 @@ impl BlockEditor for TextEditor {
 fn parse_embeds(bytes: &[u8]) -> Vec<ParsedEmbed> {
     let mut embeds = Vec::new();
     let mut index = 0;
-    while index + EMBED_PREFIX.len() <= bytes.len() {
+    while index + EMBED_PREFIX.len() + UUID_TEXT_BYTES <= bytes.len() {
         if !bytes[index..].starts_with(EMBED_PREFIX) {
             index += 1;
             continue;
         }
-        let payload_start = index + EMBED_PREFIX.len();
-        let Some(close_offset) = bytes[payload_start..]
-            .windows(2)
-            .position(|window| window == b"}}")
-        else {
-            index += 1;
-            continue;
-        };
-        let close = payload_start + close_offset;
-        if bytes[payload_start..close].contains(&b'\n') {
-            index += 1;
-            continue;
-        }
-        let Some(separator_offset) = bytes[payload_start..close]
-            .iter()
-            .position(|byte| *byte == b':')
-        else {
-            index += 1;
-            continue;
-        };
-        let separator = payload_start + separator_offset;
-        let Ok(uuid_text) = std::str::from_utf8(&bytes[payload_start..separator]) else {
+        let uuid_start = index + EMBED_PREFIX.len();
+        let end = uuid_start + UUID_TEXT_BYTES;
+        let Ok(uuid_text) = std::str::from_utf8(&bytes[uuid_start..end]) else {
             index += 1;
             continue;
         };
@@ -846,7 +825,13 @@ fn parse_embeds(bytes: &[u8]) -> Vec<ParsedEmbed> {
             index += 1;
             continue;
         };
-        let end = close + 2;
+        if bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'/'))
+        {
+            index += 1;
+            continue;
+        }
         let line_start = bytes[..index]
             .iter()
             .rposition(|byte| *byte == b'\n')
@@ -860,7 +845,6 @@ fn parse_embeds(bytes: &[u8]) -> Vec<ParsedEmbed> {
             && bytes[end..line_end].iter().all(line_whitespace);
         embeds.push(ParsedEmbed {
             range: index..end,
-            settings: separator + 1..close,
             id,
             full_line,
         });
@@ -870,7 +854,7 @@ fn parse_embeds(bytes: &[u8]) -> Vec<ParsedEmbed> {
 }
 
 fn format_embed(id: Uuid) -> String {
-    format!("{{{{_BLOCKEDITOR:{id}:}}}}")
+    format!("https://blocks.pfg.pw/0/{id}")
 }
 
 fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
