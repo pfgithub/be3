@@ -15,8 +15,8 @@ use eframe::egui::{
 };
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
-    EditorCommand, LRDirection, Language, MoveMode, SynHlColorScope, SyntaxHighlight,
-    SyntaxNodeDirection, UDDirection, VerticalMoveMode,
+    EditorCommand, LRDirection, Language, MarkdownCommand, MoveMode, SynHlColorScope,
+    SyntaxHighlight, SyntaxNodeDirection, UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
@@ -38,6 +38,13 @@ struct ParsedEmbed {
     range: Range<usize>,
     id: Uuid,
     large: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MarkdownCheckbox {
+    line_start: usize,
+    marker: Range<usize>,
+    checked: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -155,6 +162,59 @@ impl TextEditor {
                     );
                 });
             self.profiler.toggle(ui);
+            if self.highlight_language == HighlightLanguage::Markdown {
+                ui.separator();
+                if ui.button("B").on_hover_text("Bold").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::Bold));
+                }
+                if ui.button("I").on_hover_text("Italic").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::Italic));
+                }
+                if ui.button("S").on_hover_text("Strikethrough").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::Strikethrough));
+                }
+                if ui.button("Code").on_hover_text("Inline code").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::InlineCode));
+                }
+                ui.menu_button("Heading", |ui| {
+                    for level in 1..=6 {
+                        if ui.button(format!("Heading {level}")).clicked() {
+                            self.core.execute_command(EditorCommand::Markdown(
+                                MarkdownCommand::Heading(level),
+                            ));
+                            ui.close();
+                        }
+                    }
+                });
+                if ui.button("• List").on_hover_text("Bulleted list").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::BulletedList));
+                }
+                if ui
+                    .button("1. List")
+                    .on_hover_text("Numbered list")
+                    .clicked()
+                {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::NumberedList));
+                }
+                if ui.button("☐ List").on_hover_text("Checklist").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::Checklist));
+                }
+                if ui.button("Link").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::Link));
+                }
+                if ui.button("Image").clicked() {
+                    self.core
+                        .execute_command(EditorCommand::Markdown(MarkdownCommand::Image));
+                }
+            }
             ui.menu_button("Insert", |ui| {
                 ui.menu_button("Block", |ui| {
                     if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
@@ -203,6 +263,7 @@ impl TextEditor {
         parsed
             .into_iter()
             .filter(|embed| embed.id != self.block.id())
+            .filter(|embed| !embed.large || !self.range_is_being_edited(&embed.range))
             .map(|embed| {
                 let metadata = referenced.get(&embed.id).cloned().or_else(|| {
                     editors
@@ -230,6 +291,22 @@ impl TextEditor {
                 }
             })
             .collect()
+    }
+
+    fn range_is_being_edited(&self, range: &Range<usize>) -> bool {
+        self.core.cursor_positions().iter().any(|cursor| {
+            let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
+                return false;
+            };
+            let Some(focus) = self.core.position_index(cursor.pos.focus) else {
+                return false;
+            };
+            if anchor == focus {
+                anchor > range.start && anchor < range.end
+            } else {
+                anchor.min(focus) < range.end && anchor.max(focus) > range.start
+            }
+        })
     }
 
     fn keyboard_input(&mut self, ui: &egui::Ui, id: egui::Id) -> bool {
@@ -383,6 +460,12 @@ impl TextEditor {
                     }))
             }
             Key::A if modifiers.command => self.core.execute_command(EditorCommand::SelectAll),
+            Key::B if modifiers.command => self
+                .core
+                .execute_command(EditorCommand::Markdown(MarkdownCommand::Bold)),
+            Key::I if modifiers.command => self
+                .core
+                .execute_command(EditorCommand::Markdown(MarkdownCommand::Italic)),
             Key::Z if modifiers.command => {
                 self.core.execute_command(if modifiers.shift {
                     EditorCommand::Redo
@@ -408,6 +491,7 @@ impl TextEditor {
         response: &egui::Response,
         origin: Pos2,
         layout: &DocumentLayout,
+        checkboxes: &[MarkdownCheckbox],
     ) -> bool {
         let (pressed, down, time, modifiers) = ui.input(|input| {
             (
@@ -427,10 +511,20 @@ impl TextEditor {
         let target = hit_test(layout, local_pointer);
         if pressed && response.contains_pointer() {
             response.request_focus();
+            if let Some(checkbox) = checkboxes.iter().find(|checkbox| {
+                checkbox_rect(layout, checkbox)
+                    .is_some_and(|rect| rect.contains(local_pointer.to_pos2()))
+            }) {
+                self.core.execute_command(EditorCommand::Markdown(
+                    MarkdownCommand::ToggleCheckbox(self.core.position(checkbox.line_start)),
+                ));
+                self.selecting = false;
+                return true;
+            }
             if let Some(embed) = layout
                 .embeds
                 .iter()
-                .find(|embed| !embed.large && embed.rect.contains(local_pointer.to_pos2()))
+                .find(|embed| embed.rect.contains(local_pointer.to_pos2()))
             {
                 self.core.execute_command(EditorCommand::Click {
                     position: self.core.position(embed.range.start),
@@ -687,6 +781,47 @@ impl TextEditor {
         }
     }
 
+    fn paint_checkboxes(
+        &self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        origin: Pos2,
+        layout: &DocumentLayout,
+        checkboxes: &[MarkdownCheckbox],
+    ) {
+        for checkbox in checkboxes {
+            let Some(marker_rect) = checkbox_marker_rect(layout, checkbox) else {
+                continue;
+            };
+            let Some(rect) = checkbox_rect(layout, checkbox) else {
+                continue;
+            };
+            let marker_rect = marker_rect.translate(origin.to_vec2());
+            let rect = rect.translate(origin.to_vec2());
+            painter.rect_filled(marker_rect, 0.0, Color32::from_rgb(29, 37, 44));
+            painter.rect(
+                rect,
+                3.0,
+                if checkbox.checked {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    Color32::TRANSPARENT
+                },
+                egui::Stroke::new(1.5, ui.visuals().widgets.inactive.fg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
+            if checkbox.checked {
+                painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "✓",
+                    egui::FontId::proportional(14.0),
+                    ui.visuals().selection.stroke.color,
+                );
+            }
+        }
+    }
+
     fn selected_inline_embed<'a>(
         &self,
         layout: &'a DocumentLayout,
@@ -805,6 +940,11 @@ impl BlockEditor for TextEditor {
         };
         profile.document = document_start.elapsed();
         profile.document_bytes = bytes.len();
+        let checkboxes = if self.highlight_language == HighlightLanguage::Markdown {
+            parse_markdown_checkboxes(&bytes)
+        } else {
+            Vec::new()
+        };
         let highlight_start = Instant::now();
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
@@ -864,7 +1004,7 @@ impl BlockEditor for TextEditor {
                 edit_block =
                     self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
                 let pointer_start = Instant::now();
-                reveal_cursor |= self.pointer_input(ui, &response, origin, &layout);
+                reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
                 profile.pointer = pointer_start.elapsed();
                 self.paint_embeds(ui, &painter, origin, &layout, editors);
                 let pointer = response
@@ -916,6 +1056,7 @@ impl BlockEditor for TextEditor {
                     }
                 }
                 let (cursor, paint) = self.paint(ui, &painter, origin, &layout, &highlight);
+                self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
                 profile.paint = paint;
                 if reveal_cursor {
                     if let Some(cursor) = cursor {
@@ -955,6 +1096,70 @@ fn parse_embeds(bytes: &[u8], markdown: bool) -> Vec<ParsedEmbed> {
             }
         })
         .collect()
+}
+
+fn parse_markdown_checkboxes(bytes: &[u8]) -> Vec<MarkdownCheckbox> {
+    let mut result = Vec::new();
+    let mut line_start = 0;
+    loop {
+        let line_end = bytes[line_start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |offset| line_start + offset);
+        let indent = bytes[line_start..line_end]
+            .iter()
+            .take_while(|byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        let start = line_start + indent;
+        if let Some(marker) = bytes.get(start..start + 6) {
+            if matches!(marker[0], b'-' | b'*' | b'+')
+                && marker[1] == b' '
+                && marker[2] == b'['
+                && matches!(marker[3], b' ' | b'x' | b'X')
+                && marker[4..6] == *b"] "
+            {
+                result.push(MarkdownCheckbox {
+                    line_start,
+                    marker: start + 2..start + 5,
+                    checked: matches!(marker[3], b'x' | b'X'),
+                });
+            }
+        }
+        if line_end == bytes.len() {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+    result
+}
+
+fn checkbox_marker_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) -> Option<Rect> {
+    let left = layout
+        .positions
+        .get(checkbox.marker.start)
+        .copied()
+        .flatten()?;
+    let right = layout
+        .positions
+        .get(checkbox.marker.end)
+        .copied()
+        .flatten()?;
+    (left.line == right.line).then(|| {
+        let line = &layout.lines[left.line];
+        Rect::from_min_max(
+            Pos2::new(left.x, line.y),
+            Pos2::new(right.x.max(left.x + 18.0), line.y + line.height),
+        )
+    })
+}
+
+fn checkbox_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) -> Option<Rect> {
+    let marker = checkbox_marker_rect(layout, checkbox)?;
+    let size = marker.height().min(18.0);
+    Some(Rect::from_center_size(
+        Pos2::new(marker.left() + size * 0.5, marker.center().y),
+        Vec2::splat(size),
+    ))
 }
 
 fn markdown_image_range(bytes: &[u8], url: &Range<usize>) -> Option<Range<usize>> {

@@ -255,6 +255,22 @@ pub enum EditorCommand<'a> {
     },
     Drag(Position),
     ReplaceWholeFile(&'a [u8]),
+    Markdown(MarkdownCommand),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkdownCommand {
+    Bold,
+    Italic,
+    Strikethrough,
+    InlineCode,
+    Link,
+    Image,
+    Heading(u8),
+    BulletedList,
+    NumberedList,
+    Checklist,
+    ToggleCheckbox(Position),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -496,6 +512,7 @@ impl Core {
             } => self.click(position, mode, extend, select_syntax_node),
             EditorCommand::Drag(position) => self.drag(position),
             EditorCommand::ReplaceWholeFile(bytes) => self.replace_whole_file(bytes),
+            EditorCommand::Markdown(command) => self.markdown(command),
         }
         self.normalize_cursors();
     }
@@ -734,6 +751,27 @@ impl Core {
                 self.config.indent_with.byte(),
                 indent_count * self.config.indent_with.count(),
             ));
+            if after_indent {
+                let content_start = start + indent_bytes;
+                if let Some(marker) = markdown_list_marker(document.bytes(), content_start) {
+                    let marker_end = content_start + marker.len;
+                    let end = line_end(document.bytes(), range.left);
+                    let empty_item = document.bytes()[marker_end.min(end)..end]
+                        .iter()
+                        .all(u8::is_ascii_whitespace);
+                    if empty_item && range.left >= marker_end {
+                        replacements.push((
+                            Position::at(&document, content_start),
+                            marker.len,
+                            Vec::new(),
+                        ));
+                        continue;
+                    }
+                    if range.left >= marker_end {
+                        insertion.extend(marker.continuation);
+                    }
+                }
+            }
             if !after_indent {
                 insertion.push(b'\n');
             }
@@ -744,11 +782,170 @@ impl Core {
         let positions = self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
-            history_cursors,
+            history_cursors.clone(),
         );
         for (cursor, position) in self.cursor_positions.iter_mut().zip(positions) {
             *cursor = CursorPosition::at(position);
         }
+    }
+
+    fn markdown(&mut self, command: MarkdownCommand) {
+        match command {
+            MarkdownCommand::Bold => self.wrap_markdown_selection(b"**", b"**", b"bold"),
+            MarkdownCommand::Italic => self.wrap_markdown_selection(b"_", b"_", b"italic"),
+            MarkdownCommand::Strikethrough => self.wrap_markdown_selection(b"~~", b"~~", b"text"),
+            MarkdownCommand::InlineCode => self.wrap_markdown_selection(b"`", b"`", b"code"),
+            MarkdownCommand::Link => self.wrap_markdown_selection(b"[", b"](url)", b"link text"),
+            MarkdownCommand::Image => self.wrap_markdown_selection(b"![", b"](url)", b"alt text"),
+            MarkdownCommand::Heading(level) => {
+                self.prefix_markdown_lines(MarkdownLinePrefix::Heading(level.clamp(1, 6)))
+            }
+            MarkdownCommand::BulletedList => {
+                self.prefix_markdown_lines(MarkdownLinePrefix::BulletedList)
+            }
+            MarkdownCommand::NumberedList => {
+                self.prefix_markdown_lines(MarkdownLinePrefix::NumberedList)
+            }
+            MarkdownCommand::Checklist => self.prefix_markdown_lines(MarkdownLinePrefix::Checklist),
+            MarkdownCommand::ToggleCheckbox(position) => self.toggle_markdown_checkbox(position),
+        }
+    }
+
+    fn wrap_markdown_selection(&mut self, before: &[u8], after: &[u8], placeholder: &[u8]) {
+        let history_cursors = self.cursor_positions.clone();
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let mut selection_lengths = Vec::new();
+        let replacements = self
+            .cursor_positions
+            .iter()
+            .map(|cursor| {
+                let range = resolve_selection(&document, cursor.pos);
+                let selected = &document.bytes()[range.left..range.right];
+                let contents = if selected.is_empty() {
+                    placeholder
+                } else {
+                    selected
+                };
+                let mut replacement =
+                    Vec::with_capacity(before.len() + contents.len() + after.len());
+                replacement.extend(before);
+                replacement.extend(contents);
+                replacement.extend(after);
+                selection_lengths.push(contents.len());
+                (
+                    Position::at(&document, range.left),
+                    range.right - range.left,
+                    replacement,
+                )
+            })
+            .collect();
+        drop(document);
+        let positions = self.apply_replacements(
+            replacements,
+            UndoClassification::AlwaysSplit,
+            history_cursors.clone(),
+        );
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        for (((cursor, end), contents_len), original) in self
+            .cursor_positions
+            .iter_mut()
+            .zip(positions)
+            .zip(selection_lengths)
+            .zip(history_cursors)
+        {
+            let end = end.resolve(&document).saturating_sub(after.len());
+            let start = end.saturating_sub(contents_len);
+            let original_range = resolve_selection(&document, original.pos);
+            cursor.pos = if original_range.left == original_range.right {
+                Selection::range(Position::at(&document, start), Position::at(&document, end))
+            } else if original_range.is_right {
+                Selection::range(Position::at(&document, start), Position::at(&document, end))
+            } else {
+                Selection::range(Position::at(&document, end), Position::at(&document, start))
+            };
+            cursor.vertical_move_start = None;
+            cursor.node_select_start = None;
+            cursor.drag_info = None;
+        }
+    }
+
+    fn prefix_markdown_lines(&mut self, kind: MarkdownLinePrefix) {
+        let history_cursors = self.cursor_positions.clone();
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let mut starts = Vec::new();
+        for cursor in &self.cursor_positions {
+            let range = resolve_selection(&document, cursor.pos);
+            let mut start = line_start(document.bytes(), range.left);
+            loop {
+                if !starts.contains(&start) {
+                    starts.push(start);
+                }
+                let next = next_line_start(document.bytes(), start);
+                if next >= range.right || next == document.len() {
+                    break;
+                }
+                start = next;
+            }
+        }
+        starts.sort_unstable();
+        let all_prefixed = starts.iter().all(|start| {
+            let (_, indent) =
+                measure_indent(document.bytes(), *start, self.config.indent_with.count());
+            kind.matches(document.bytes(), *start + indent)
+        });
+        let replacements = starts
+            .into_iter()
+            .enumerate()
+            .map(|(index, start)| {
+                let (_, indent) =
+                    measure_indent(document.bytes(), start, self.config.indent_with.count());
+                let content_start = start + indent;
+                let remove = markdown_block_prefix_len(document.bytes(), content_start);
+                let insert = if all_prefixed {
+                    Vec::new()
+                } else {
+                    kind.bytes(index + 1)
+                };
+                (Position::at(&document, content_start), remove, insert)
+            })
+            .collect();
+        drop(document);
+        self.apply_replacements(
+            replacements,
+            UndoClassification::AlwaysSplit,
+            history_cursors,
+        );
+    }
+
+    fn toggle_markdown_checkbox(&mut self, position: Position) {
+        let history_cursors = self.cursor_positions.clone();
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let index = position.resolve(&document);
+        let start = line_start(document.bytes(), index);
+        let (_, indent) = measure_indent(document.bytes(), start, self.config.indent_with.count());
+        let content_start = start + indent;
+        let bytes = document.bytes();
+        let state = match bytes.get(content_start..content_start + 6) {
+            Some(b"- [ ] ") | Some(b"* [ ] ") | Some(b"+ [ ] ") => b'x',
+            Some(b"- [x] ") | Some(b"* [x] ") | Some(b"+ [x] ") | Some(b"- [X] ")
+            | Some(b"* [X] ") | Some(b"+ [X] ") => b' ',
+            _ => return,
+        };
+        let state_position = Position::at(&document, content_start + 3);
+        drop(document);
+        self.apply_replacements(
+            vec![(state_position, 1, vec![state])],
+            UndoClassification::AlwaysSplit,
+            history_cursors,
+        );
     }
 
     fn insert_line(&mut self, direction: UDDirection) {
@@ -1395,6 +1592,98 @@ fn measure_indent(bytes: &[u8], start: usize, width: usize) -> (usize, usize) {
         count += 1;
     }
     (segments.div_ceil(width), count)
+}
+
+struct MarkdownListMarker {
+    len: usize,
+    continuation: Vec<u8>,
+}
+
+fn markdown_list_marker(bytes: &[u8], start: usize) -> Option<MarkdownListMarker> {
+    let rest = bytes.get(start..)?;
+    if let Some(marker) = rest.get(..6).filter(|marker| {
+        matches!(marker[0], b'-' | b'*' | b'+')
+            && marker[1] == b' '
+            && marker[2] == b'['
+            && matches!(marker[3], b' ' | b'x' | b'X')
+            && marker[4..6] == *b"] "
+    }) {
+        let mut continuation = marker.to_vec();
+        continuation[3] = b' ';
+        return Some(MarkdownListMarker {
+            len: marker.len(),
+            continuation,
+        });
+    }
+    if rest.len() >= 2 && matches!(rest[0], b'-' | b'*' | b'+') && rest[1] == b' ' {
+        return Some(MarkdownListMarker {
+            len: 2,
+            continuation: rest[..2].to_vec(),
+        });
+    }
+    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+    if digits > 0
+        && matches!(rest.get(digits), Some(b'.' | b')'))
+        && rest.get(digits + 1) == Some(&b' ')
+    {
+        let number = std::str::from_utf8(&rest[..digits])
+            .ok()?
+            .parse::<u64>()
+            .ok()?
+            .saturating_add(1);
+        let mut continuation = number.to_string().into_bytes();
+        continuation.push(rest[digits]);
+        continuation.push(b' ');
+        return Some(MarkdownListMarker {
+            len: digits + 2,
+            continuation,
+        });
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
+enum MarkdownLinePrefix {
+    Heading(u8),
+    BulletedList,
+    NumberedList,
+    Checklist,
+}
+
+impl MarkdownLinePrefix {
+    fn bytes(self, number: usize) -> Vec<u8> {
+        match self {
+            Self::Heading(level) => {
+                let mut result = vec![b'#'; usize::from(level)];
+                result.push(b' ');
+                result
+            }
+            Self::BulletedList => b"- ".to_vec(),
+            Self::NumberedList => format!("{number}. ").into_bytes(),
+            Self::Checklist => b"- [ ] ".to_vec(),
+        }
+    }
+
+    fn matches(self, bytes: &[u8], start: usize) -> bool {
+        let expected = self.bytes(1);
+        match self {
+            Self::NumberedList => markdown_list_marker(bytes, start).is_some_and(|marker| {
+                bytes
+                    .get(start + marker.len.saturating_sub(2))
+                    .is_some_and(|byte| matches!(byte, b'.' | b')'))
+            }),
+            _ => bytes.get(start..start + expected.len()) == Some(expected.as_slice()),
+        }
+    }
+}
+
+fn markdown_block_prefix_len(bytes: &[u8], start: usize) -> usize {
+    let rest = bytes.get(start..).unwrap_or_default();
+    let hashes = rest.iter().take_while(|byte| **byte == b'#').count();
+    if (1..=6).contains(&hashes) && rest.get(hashes) == Some(&b' ') {
+        return hashes + 1;
+    }
+    markdown_list_marker(bytes, start).map_or(0, |marker| marker.len)
 }
 
 fn to_boundary(
