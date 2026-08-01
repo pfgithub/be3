@@ -282,7 +282,8 @@ pub trait BlockEditor {
     ) -> bool {
         false
     }
-    fn update_open_tab(&mut self, _frame: &eframe::Frame) {}
+    fn update(&mut self, _frame: &eframe::Frame) {}
+    fn finish_frame(&mut self) {}
     fn set_tab_active(&mut self, _active: bool) {}
     fn tab_closed(&mut self) {}
     fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {

@@ -1410,13 +1410,9 @@ impl BlockApp {
             set_files_compact(&mut dock_state, files_compact);
             self.files_compact = files_compact;
         }
-        for (_, tab) in dock_state.iter_all_tabs() {
-            if let DockTab::Block(id) = tab {
-                if let Some(editor) = self.editors.get_mut(id) {
-                    editor.update_open_tab(frame);
-                    editor.set_tab_active(false);
-                }
-            }
+        for editor in self.editors.values_mut() {
+            editor.update(frame);
+            editor.set_tab_active(false);
         }
         let mut viewer = BlockTabViewer {
             app: self,
@@ -1425,6 +1421,9 @@ impl BlockApp {
             tabs_to_close: Vec::new(),
         };
         DockArea::new(&mut dock_state).show_inside(ui, &mut viewer);
+        for editor in viewer.app.editors.values_mut() {
+            editor.finish_frame();
+        }
         let tabs_to_close = std::mem::take(&mut viewer.tabs_to_close);
         for id in tabs_to_close {
             let Some(path) = dock_state.find_tab(&DockTab::Block(id)) else {

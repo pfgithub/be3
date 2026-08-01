@@ -15,7 +15,12 @@ use wry::{
     NewWindowResponse, PageLoadEvent, Rect as WebViewRect, WebView, WebViewBuilder,
 };
 
-use super::{BlockEditor, EditorAccess, EditorAction, EditorRegistration};
+use super::{
+    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorRegistration,
+};
+
+const DIRECT_EDITOR_SIZE: egui::Vec2 = egui::Vec2::new(1024.0, 768.0);
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -83,6 +88,7 @@ pub(super) struct WebBrowserTabEditor {
     programmatic_navigation: Option<String>,
     natural_navigation: Option<String>,
     creation_failed: bool,
+    displayed_last_frame: bool,
 }
 
 impl WebBrowserTabEditor {
@@ -101,6 +107,7 @@ impl WebBrowserTabEditor {
             programmatic_navigation: None,
             natural_navigation: None,
             creation_failed: false,
+            displayed_last_frame: false,
         }
     }
 
@@ -386,14 +393,24 @@ impl BlockEditor for WebBrowserTabEditor {
         self.block.note_backref(id);
     }
 
-    fn update_open_tab(&mut self, frame: &eframe::Frame) {
-        self.ensure_webview(frame);
+    fn update(&mut self, frame: &eframe::Frame) {
+        if std::mem::take(&mut self.displayed_last_frame) {
+            self.ensure_webview(frame);
+        } else {
+            self.set_visible(false);
+        }
         self.process_events();
         self.synchronize();
     }
 
     fn set_tab_active(&mut self, active: bool) {
-        if !active {
+        if active {
+            self.displayed_last_frame = true;
+        }
+    }
+
+    fn finish_frame(&mut self) {
+        if !self.displayed_last_frame {
             self.set_visible(false);
         }
     }
@@ -402,20 +419,29 @@ impl BlockEditor for WebBrowserTabEditor {
         self.close_webview();
     }
 
-    fn ui(
+    fn direct_editor_capabilities(&self) -> Option<DirectEditorCapabilities> {
+        Some(DirectEditorCapabilities {
+            allow_rotation: false,
+            preserve_aspect_ratio: true,
+            supports_pan_and_zoom: false,
+        })
+    }
+
+    fn direct_editor_intrinsic_size(
+        &mut self,
+        _editors: &mut EditorAccess<'_>,
+    ) -> Option<egui::Vec2> {
+        Some(DIRECT_EDITOR_SIZE)
+    }
+
+    fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
         _editors: &mut EditorAccess<'_>,
-        frame: &eframe::Frame,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.ensure_webview(frame);
-        self.process_events();
-        self.synchronize();
-
         let Some(tab) = self.block.read() else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
+            ui.spinner();
             return None;
         };
         let back_index = tab.index().checked_sub(1);
@@ -482,10 +508,32 @@ impl BlockEditor for WebBrowserTabEditor {
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
-        ui.separator();
+
+        None
+    }
+
+    fn direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _editors: &mut EditorAccess<'_>,
+        _scale: f32,
+        _viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        self.displayed_last_frame = true;
+        if self.webview.is_none() {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return None;
+        }
         let (response, _) = ui.allocate_painter(ui.available_size(), egui::Sense::hover());
-        self.update_bounds(ui.ctx(), response.rect);
-        self.set_visible(true);
+        let visible = response.rect.intersect(ui.clip_rect());
+        if visible.is_positive() {
+            self.update_bounds(ui.ctx(), visible);
+            self.set_visible(true);
+        } else {
+            self.set_visible(false);
+        }
         None
     }
 }
