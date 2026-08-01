@@ -1089,7 +1089,7 @@ impl InfiniteCanvasEditor {
             .ctx
             .input(|input| input.pointer.button_pressed(PointerButton::Primary));
         if primary_pressed
-            && pointer.is_some_and(|pointer| response.rect.contains(pointer))
+            && response.hovered()
             && self.focused_editor.is_some_and(|focused| {
                 entities
                     .iter()

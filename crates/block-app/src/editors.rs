@@ -448,6 +448,9 @@ pub fn direct_editor_tab_ui(
     );
     if capabilities.supports_pan_and_zoom {
         let (viewport_rect, _) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
+        if let Some(previous_center) = viewport_state.center.replace(viewport_rect.center()) {
+            viewport_state.pan += previous_center - viewport_rect.center();
+        }
         let transformed_size = content_size * viewport_state.zoom;
         let content_rect = egui::Rect::from_center_size(
             viewport_rect.center() + viewport_state.pan,
@@ -554,6 +557,7 @@ fn handle_direct_editor_background_input(
 struct DirectEditorTabViewport {
     zoom: f32,
     pan: egui::Vec2,
+    center: Option<egui::Pos2>,
 }
 
 impl Default for DirectEditorTabViewport {
@@ -561,6 +565,7 @@ impl Default for DirectEditorTabViewport {
         Self {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            center: None,
         }
     }
 }
