@@ -8,7 +8,10 @@ use std::{
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, TextureHandle, Vec2};
 use freetype::freetype as ft;
 use harfbuzz_rs::{shape, Direction, Face as HbFace, Font as HbFont, Tag, UnicodeBuffer};
-use text_editor_core::{SynHlFontFamily, SynHlStyle, SynHlTextSize, SyntaxHighlight};
+use text_editor_core::{
+    MarkdownTable, MarkdownTableAlignment, SynHlFontFamily, SynHlStyle, SynHlTextSize,
+    SyntaxHighlight,
+};
 use unicode_script::{Script, UnicodeScript};
 
 unsafe extern "C" {
@@ -199,6 +202,7 @@ impl TextRenderer {
             line_index += 1;
         }
 
+        align_markdown_tables(&mut lines, &mut positions, highlight.markdown_tables());
         let width = lines.iter().map(|line| line.width).fold(0.0_f32, f32::max);
         DocumentLayout {
             size: Vec2::new(width + 24.0, y + 16.0),
@@ -490,6 +494,145 @@ impl TextRenderer {
         }
         self.glyphs.insert(key, result);
     }
+}
+
+fn align_markdown_tables(
+    lines: &mut [LineLayout],
+    positions: &mut [Option<BytePosition>],
+    tables: &[MarkdownTable],
+) {
+    for table in tables {
+        let rows = table
+            .rows
+            .iter()
+            .filter_map(|row| {
+                let line_index = positions
+                    .get(row.range.start)
+                    .and_then(|position| *position)?
+                    .line;
+                let line = lines.get(line_index)?;
+                let cells = row
+                    .cells
+                    .iter()
+                    .filter_map(|cell| {
+                        let start = byte_x(positions, cell.start, line_index)?;
+                        let end = byte_x(positions, cell.end, line_index)?;
+                        Some((cell.clone(), start, end))
+                    })
+                    .collect::<Vec<_>>();
+                (!cells.is_empty()).then_some((line_index, line.start, line.end, line.width, cells))
+            })
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            continue;
+        }
+
+        let column_count = rows
+            .iter()
+            .map(|(_, _, _, _, cells)| cells.len())
+            .max()
+            .unwrap_or(0);
+        let mut column_widths = vec![0.0_f32; column_count];
+        let mut gap_widths = vec![0.0_f32; column_count.saturating_sub(1)];
+        let mut prefix_width = 0.0_f32;
+        for (_, _, _, _, cells) in &rows {
+            prefix_width = prefix_width.max(cells[0].1);
+            for (column, (_, start, end)) in cells.iter().enumerate() {
+                column_widths[column] = column_widths[column].max((end - start).max(0.0));
+                if let Some((_, next_start, _)) = cells.get(column + 1) {
+                    gap_widths[column] = gap_widths[column].max((next_start - end).max(0.0));
+                }
+            }
+        }
+
+        for (line_index, line_start, line_end, natural_line_width, cells) in rows {
+            let mut segments = Vec::new();
+            let first_start = cells[0].0.start;
+            segments.push(LayoutSegment {
+                position_range: line_start..first_start,
+                glyph_range: line_start..first_start,
+                offset: prefix_width - cells[0].1,
+            });
+
+            let mut target_x = prefix_width;
+            for (column, (cell, natural_start, natural_end)) in cells.iter().enumerate() {
+                let cell_width = (natural_end - natural_start).max(0.0);
+                let spare = (column_widths[column] - cell_width).max(0.0);
+                let alignment = table
+                    .alignments
+                    .get(column)
+                    .copied()
+                    .unwrap_or(MarkdownTableAlignment::Left);
+                let leading = match alignment {
+                    MarkdownTableAlignment::Left => 0.0,
+                    MarkdownTableAlignment::Center => spare / 2.0,
+                    MarkdownTableAlignment::Right => spare,
+                };
+                segments.push(LayoutSegment {
+                    position_range: cell.start..cell.end.saturating_add(1),
+                    glyph_range: cell.clone(),
+                    offset: target_x + leading - natural_start,
+                });
+                target_x += column_widths[column];
+
+                if let Some((next, next_start, _)) = cells.get(column + 1) {
+                    segments.push(LayoutSegment {
+                        position_range: cell.end.saturating_add(1)..next.start,
+                        glyph_range: cell.end..next.start,
+                        offset: target_x - natural_end,
+                    });
+                    let natural_gap = (next_start - natural_end).max(0.0);
+                    target_x += gap_widths[column].max(natural_gap);
+                }
+            }
+
+            let (_, _, last_natural_end) = cells.last().expect("table row has a cell");
+            let last_end = cells.last().expect("table row has a cell").0.end;
+            let suffix_offset = target_x - last_natural_end;
+            segments.push(LayoutSegment {
+                position_range: last_end.saturating_add(1)..line_end.saturating_add(1),
+                glyph_range: last_end..line_end.saturating_add(1),
+                offset: suffix_offset,
+            });
+
+            for segment in &segments {
+                for position in positions
+                    .get_mut(segment.position_range.clone())
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                {
+                    if position.line == line_index {
+                        position.x += segment.offset;
+                    }
+                }
+            }
+            let line = &mut lines[line_index];
+            for glyph in &mut line.glyphs {
+                if let Some(segment) = segments
+                    .iter()
+                    .find(|segment| segment.glyph_range.contains(&glyph.doc_byte))
+                {
+                    glyph.x += segment.offset;
+                }
+            }
+            line.width = natural_line_width + suffix_offset;
+        }
+    }
+}
+
+struct LayoutSegment {
+    position_range: std::ops::Range<usize>,
+    glyph_range: std::ops::Range<usize>,
+    offset: f32,
+}
+
+fn byte_x(positions: &[Option<BytePosition>], byte: usize, line: usize) -> Option<f32> {
+    positions
+        .get(byte)
+        .and_then(|position| *position)
+        .filter(|position| position.line == line)
+        .map(|position| position.x)
 }
 
 impl Drop for TextRenderer {

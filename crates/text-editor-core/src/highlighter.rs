@@ -1,4 +1,5 @@
 use block_client::{blocks::text::TextDocument, BlockHandle};
+use std::ops::Range;
 use tree_sitter::{InputEdit, Node, Parser, Point, Tree};
 use tree_sitter_md::{MarkdownCursor, MarkdownParser, MarkdownTree};
 
@@ -98,14 +99,35 @@ impl SynHlStyle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkdownTableAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownTableRow {
+    pub range: Range<usize>,
+    pub cells: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownTable {
+    pub rows: Vec<MarkdownTableRow>,
+    pub alignments: Vec<MarkdownTableAlignment>,
+}
+
 pub struct SyntaxHighlight {
     styles: Vec<SynHlStyle>,
+    markdown_tables: Vec<MarkdownTable>,
 }
 
 impl SyntaxHighlight {
     pub(crate) fn plaintext(len: usize) -> Self {
         Self {
             styles: vec![SynHlStyle::plain(SynHlColorScope::Unstyled); len],
+            markdown_tables: Vec::new(),
         }
     }
 
@@ -121,6 +143,10 @@ impl SyntaxHighlight {
             .get(byte_index)
             .copied()
             .unwrap_or(SynHlStyle::plain(SynHlColorScope::Invalid))
+    }
+
+    pub fn markdown_tables(&self) -> &[MarkdownTable] {
+        &self.markdown_tables
     }
 }
 
@@ -229,18 +255,27 @@ impl Highlighter {
 
     pub fn highlight(&mut self) -> SyntaxHighlight {
         if self.ensure_parsed().is_none() {
-            return SyntaxHighlight { styles: Vec::new() };
+            return SyntaxHighlight {
+                styles: Vec::new(),
+                markdown_tables: Vec::new(),
+            };
         }
         let document = self.document.read().expect("parsed document disappeared");
         let bytes = document.bytes();
         if self.language == Language::Markdown {
-            let styles = match &self.backend {
+            let (styles, markdown_tables) = match &self.backend {
                 ParserBackend::Markdown {
                     tree: Some(tree), ..
-                } => markdown_styles(tree, bytes.len()),
-                _ => vec![SynHlStyle::plain(SynHlColorScope::MarkdownPlainText); bytes.len()],
+                } => (markdown_styles(tree, bytes.len()), markdown_tables(tree)),
+                _ => (
+                    vec![SynHlStyle::plain(SynHlColorScope::MarkdownPlainText); bytes.len()],
+                    Vec::new(),
+                ),
             };
-            return SyntaxHighlight { styles };
+            return SyntaxHighlight {
+                styles,
+                markdown_tables,
+            };
         }
         let mut scopes = zig_scopes(bytes);
         for index in 1..scopes.len() {
@@ -250,6 +285,7 @@ impl Highlighter {
         }
         SyntaxHighlight {
             styles: scopes.into_iter().map(SynHlStyle::plain).collect(),
+            markdown_tables: Vec::new(),
         }
     }
 
@@ -317,6 +353,101 @@ fn markdown_styles(tree: &MarkdownTree, len: usize) -> Vec<SynHlStyle> {
     let mut cursor = tree.walk();
     style_markdown_node(&mut cursor, &mut styles);
     styles
+}
+
+fn markdown_tables(tree: &MarkdownTree) -> Vec<MarkdownTable> {
+    let mut tables = Vec::new();
+    let mut cursor = tree.walk();
+    collect_markdown_tables(&mut cursor, &mut tables);
+    tables
+}
+
+fn collect_markdown_tables(cursor: &mut MarkdownCursor<'_>, tables: &mut Vec<MarkdownTable>) {
+    if cursor.node().kind() == "pipe_table" {
+        tables.push(markdown_table(cursor));
+        return;
+    }
+    if cursor.goto_first_child() {
+        loop {
+            collect_markdown_tables(cursor, tables);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+fn markdown_table(cursor: &mut MarkdownCursor<'_>) -> MarkdownTable {
+    let mut rows = Vec::new();
+    let mut alignments = Vec::new();
+    if cursor.goto_first_child() {
+        loop {
+            let kind = cursor.node().kind();
+            if matches!(
+                kind,
+                "pipe_table_header" | "pipe_table_delimiter_row" | "pipe_table_row"
+            ) {
+                let delimiter = kind == "pipe_table_delimiter_row";
+                let row = markdown_table_row(cursor, delimiter, &mut alignments);
+                rows.push(row);
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+    MarkdownTable { rows, alignments }
+}
+
+fn markdown_table_row(
+    cursor: &mut MarkdownCursor<'_>,
+    delimiter: bool,
+    alignments: &mut Vec<MarkdownTableAlignment>,
+) -> MarkdownTableRow {
+    let node = cursor.node();
+    let range = node.start_byte()..node.end_byte();
+    let mut cells = Vec::new();
+    if cursor.goto_first_child() {
+        loop {
+            let node = cursor.node();
+            if matches!(node.kind(), "pipe_table_cell" | "pipe_table_delimiter_cell") {
+                cells.push(node.start_byte()..node.end_byte());
+                if delimiter {
+                    alignments.push(markdown_table_alignment(cursor));
+                }
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+    MarkdownTableRow { range, cells }
+}
+
+fn markdown_table_alignment(cursor: &mut MarkdownCursor<'_>) -> MarkdownTableAlignment {
+    let mut left = false;
+    let mut right = false;
+    if cursor.goto_first_child() {
+        loop {
+            match cursor.node().kind() {
+                "pipe_table_align_left" => left = true,
+                "pipe_table_align_right" => right = true,
+                _ => {}
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+    match (left, right) {
+        (true, true) => MarkdownTableAlignment::Center,
+        (_, true) => MarkdownTableAlignment::Right,
+        _ => MarkdownTableAlignment::Left,
+    }
 }
 
 fn style_markdown_node(cursor: &mut MarkdownCursor<'_>, styles: &mut [SynHlStyle]) {
