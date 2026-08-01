@@ -1545,30 +1545,83 @@ impl BlockEditor for InfiniteCanvasEditor {
 
         let compact = ui.available_width() < COMPACT_SIDEBAR_WIDTH;
         let mut action = None;
-        let mut create_block = None;
-        if let Some((_, block_id, _)) = focused {
-            ui.horizontal(|ui| {
-                if ui
-                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
-                    .clicked()
-                {
-                    self.focused_editor = None;
-                }
-            });
-            if self.focused_editor.is_some() {
-                action = editors.direct_editor_top_bar(block_id, ui);
+        let (response, painter) =
+            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let canvas_rect = response.rect;
+        if self.focused_editor.is_none() {
+            self.import_dropped_images(&response, editors);
+            self.import_clipboard_image(&response, editors);
+        }
+        self.paint(
+            &painter,
+            canvas_rect,
+            &entities,
+            &dependency_titles,
+            editors,
+        );
+        if let Some((entity_id, block_id, scale)) =
+            focused.filter(|_| self.focused_editor.is_some())
+        {
+            if let Some(entity) = entities.iter().find(|entity| entity.id == entity_id) {
+                let screen = screen_rect(self, entity_bounds(entity), canvas_rect);
+                let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(screen.min)
+                    .show(ui.ctx(), |ui| {
+                        ui.set_clip_rect(screen.intersect(ui.clip_rect()));
+                        ui.set_min_size(screen.size());
+                        editors.direct_editor_ui(block_id, ui, scale * self.zoom)
+                    })
+                    .inner;
+                action = action.or(embedded);
             }
-        } else {
-            create_block = self.show_toolbar(ui, &entities, editors, compact);
         }
-        if let Some(error) = self.image_import_error.clone() {
-            ui.horizontal(|ui| {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-                if ui.small_button("Dismiss").clicked() {
-                    self.image_import_error = None;
-                }
+
+        let top_bar = egui::Area::new(egui::Id::new(("canvas-top-bar", self.block.id())))
+            .order(egui::Order::Foreground)
+            .fixed_pos(canvas_rect.min)
+            .show(ui.ctx(), |ui| {
+                ui.set_width(canvas_rect.width());
+                egui::Frame::side_top_panel(ui.style())
+                    .show(ui, |ui| {
+                        let mut top_action = None;
+                        let mut create_block = None;
+                        if let Some((_, block_id, _)) = focused {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
+                                    .clicked()
+                                {
+                                    self.focused_editor = None;
+                                }
+                            });
+                            if self.focused_editor.is_some() {
+                                top_action = editors.direct_editor_top_bar(block_id, ui);
+                            }
+                        } else {
+                            create_block = self.show_toolbar(ui, &entities, editors, compact);
+                        }
+                        if let Some(error) = self.image_import_error.clone() {
+                            ui.horizontal(|ui| {
+                                ui.colored_label(ui.visuals().error_fg_color, error);
+                                if ui.small_button("Dismiss").clicked() {
+                                    self.image_import_error = None;
+                                }
+                            });
+                        }
+                        (top_action, create_block)
+                    })
+                    .inner
             });
-        }
+        let (top_action, mut create_block) = top_bar.inner;
+        action = action.or(top_action);
+        let sidebar_top = top_bar
+            .response
+            .rect
+            .bottom()
+            .clamp(canvas_rect.top(), canvas_rect.bottom());
+        let sidebar_height = (canvas_rect.bottom() - sidebar_top).max(1.0);
+
         let mut inspector_layer_move = None;
         let mut sidebar_action = None;
         let focused_sidebar = focused.filter(|(_, block_id, _)| {
@@ -1586,12 +1639,22 @@ impl BlockEditor for InfiniteCanvasEditor {
                         sidebar_action = editors.direct_editor_sidebar(block_id, ui);
                     });
             } else {
-                egui::Panel::right(egui::Id::new(("canvas-direct-editor-sidebar", block_id)))
-                    .default_size(240.0)
-                    .min_size(200.0)
-                    .max_size(340.0)
-                    .resizable(true)
-                    .show_inside(ui, |ui| {
+                egui::Window::new("Editor")
+                    .id(egui::Id::new(("canvas-direct-editor-sidebar", block_id)))
+                    .order(egui::Order::Foreground)
+                    .title_bar(false)
+                    .pivot(egui::Align2::RIGHT_TOP)
+                    .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
+                    .constrain_to(canvas_rect)
+                    .default_width(240.0)
+                    .min_width(200.0)
+                    .max_width(340.0)
+                    .default_height(sidebar_height)
+                    .min_height(sidebar_height)
+                    .max_height(sidebar_height)
+                    .resizable([true, false])
+                    .vscroll(true)
+                    .show(ui.ctx(), |ui| {
                         sidebar_action = editors.direct_editor_sidebar(block_id, ui);
                     });
             }
@@ -1606,46 +1669,26 @@ impl BlockEditor for InfiniteCanvasEditor {
                 });
             self.inspector_open = open;
         } else if self.focused_editor.is_none() {
-            egui::Panel::right(egui::Id::new(("canvas-inspector", self.block.id())))
-                .default_size(240.0)
-                .min_size(200.0)
-                .max_size(340.0)
-                .resizable(true)
-                .show_inside(ui, |ui| {
+            egui::Window::new("Inspector")
+                .id(egui::Id::new(("canvas-inspector", self.block.id())))
+                .order(egui::Order::Foreground)
+                .title_bar(false)
+                .pivot(egui::Align2::RIGHT_TOP)
+                .fixed_pos(Pos2::new(canvas_rect.right(), sidebar_top))
+                .constrain_to(canvas_rect)
+                .default_width(240.0)
+                .min_width(200.0)
+                .max_width(340.0)
+                .default_height(sidebar_height)
+                .min_height(sidebar_height)
+                .max_height(sidebar_height)
+                .resizable([true, false])
+                .vscroll(true)
+                .show(ui.ctx(), |ui| {
                     inspector_layer_move = self.show_inspector(ui, &entities, true);
                 });
         }
         action = action.or(sidebar_action);
-        let (response, painter) =
-            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        if self.focused_editor.is_none() {
-            self.import_dropped_images(&response, editors);
-            self.import_clipboard_image(&response, editors);
-        }
-        self.paint(
-            &painter,
-            response.rect,
-            &entities,
-            &dependency_titles,
-            editors,
-        );
-        if let Some((entity_id, block_id, scale)) =
-            focused.filter(|_| self.focused_editor.is_some())
-        {
-            if let Some(entity) = entities.iter().find(|entity| entity.id == entity_id) {
-                let screen = screen_rect(self, entity_bounds(entity), response.rect);
-                let embedded = egui::Area::new(egui::Id::new(("canvas-direct-editor", entity_id)))
-                    .order(egui::Order::Foreground)
-                    .fixed_pos(screen.min)
-                    .show(ui.ctx(), |ui| {
-                        ui.set_clip_rect(screen.intersect(ui.clip_rect()));
-                        ui.set_min_size(screen.size());
-                        editors.direct_editor_ui(block_id, ui, scale * self.zoom)
-                    })
-                    .inner;
-                action = action.or(embedded);
-            }
-        }
         let (context_layer_move, context_create_block, set_parent) =
             self.handle_canvas_input(&response, &entities, editors);
         create_block = create_block.or(context_create_block);
