@@ -26,7 +26,7 @@ use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    image::create_image_block,
+    image::{create_image_block, pick_image_file},
     BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration,
     SidebarDragPayload,
 };
@@ -143,7 +143,7 @@ impl TextEditor {
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, editors: &EditorAccess<'_>) -> Option<Uuid> {
+    fn toolbar(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> Option<Uuid> {
         let previous = self.highlight_language;
         let mut create_block = None;
         ui.horizontal(|ui| {
@@ -229,6 +229,16 @@ impl TextEditor {
                                 self.pending_create = true;
                                 create_block = Some(block_type);
                             }
+                            BlockPickerMenuAction::ImportImage => match pick_image_file() {
+                                Ok(Some(image)) => {
+                                    let source_name = image.source_name().to_owned();
+                                    let id = create_image_block(editors, image, self.block.id());
+                                    self.insert_image_embed(id, &source_name);
+                                    self.image_import_error = None;
+                                }
+                                Ok(None) => {}
+                                Err(error) => self.image_import_error = Some(error),
+                            },
                             BlockPickerMenuAction::LinkExisting => {
                                 self.picker.open([self.block.id()]);
                             }

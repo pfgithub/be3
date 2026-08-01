@@ -12,10 +12,14 @@ use std::{
     time::Duration,
 };
 
-use block::{BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
-use block_client::{blocks::workspace_index::BlockEntry, BlockClient, ReferenceList};
+use block::{Block, BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
+use block_client::{
+    blocks::{image::Image, workspace_index::BlockEntry},
+    BlockClient, ReferenceList,
+};
 use block_picker::{BlockPicker, BlockPickerMenuAction};
 use editors::{
+    image::{pick_image_file, ImageEditor},
     BlockEditor, DynamicArtifactRegeneration, EditorAccess, EditorAction, EditorRegistry,
     SidebarDragPayload, SidebarDragSource,
 };
@@ -123,6 +127,7 @@ struct BlockApp {
     network_debug_open: bool,
     block_picker: BlockPicker,
     block_picker_target: Option<BlockPickerTarget>,
+    image_import_error: Option<String>,
     pending_destructive_action: Option<PendingDestructiveAction>,
     scheduled_account_switch: Option<Account>,
     allow_close: bool,
@@ -283,6 +288,7 @@ impl BlockApp {
             network_debug_open: false,
             block_picker: BlockPicker::default(),
             block_picker_target: None,
+            image_import_error: None,
             pending_destructive_action: None,
             scheduled_account_switch: None,
             allow_close: false,
@@ -326,6 +332,7 @@ impl BlockApp {
         self.network_debug_open = false;
         self.block_picker = BlockPicker::default();
         self.block_picker_target = None;
+        self.image_import_error = None;
         self.pending_destructive_action = None;
         self.scheduled_account_switch = None;
         self.allow_close = false;
@@ -471,11 +478,59 @@ impl BlockApp {
                 };
                 self.create_block(block_type, parent);
             }
+            BlockPickerMenuAction::ImportImage => match pick_image_file() {
+                Ok(Some(image)) => {
+                    self.image_import_error = None;
+                    self.create_imported_image(image, target);
+                }
+                Ok(None) => {}
+                Err(error) => self.image_import_error = Some(error),
+            },
             BlockPickerMenuAction::LinkExisting => {
                 self.block_picker.open(excluded);
                 self.block_picker_target = Some(target);
             }
         }
+    }
+
+    fn create_imported_image(&mut self, image: Image, target: BlockPickerTarget) {
+        let name = image.implicit_name();
+        let block = self.client.create_block(image);
+        let id = block.id();
+        self.block_types.insert(id, Image::TYPE_ID);
+        self.editors.insert(id, Box::new(ImageEditor::new(block)));
+        match target {
+            BlockPickerTarget::Root => {
+                self.editors[&id].set_parent(BlockParent::Root);
+                self.open_tab(id, Image::TYPE_ID);
+            }
+            BlockPickerTarget::Block(parent) => self.queue_placement(
+                BlockReference {
+                    id,
+                    block_type: Image::TYPE_ID,
+                    author: self.account.id,
+                    name,
+                    parent: BlockParent::Root,
+                    references: 0,
+                },
+                parent,
+            ),
+        }
+    }
+
+    fn show_image_import_error(&mut self, context: &egui::Context) {
+        let Some(error) = self.image_import_error.clone() else {
+            return;
+        };
+        egui::Window::new("Could not import image")
+            .collapsible(false)
+            .resizable(false)
+            .show(context, |ui| {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+                if ui.button("Dismiss").clicked() {
+                    self.image_import_error = None;
+                }
+            });
     }
 
     fn show_block_picker(&mut self, context: &egui::Context) {
@@ -1792,6 +1847,7 @@ impl eframe::App for BlockApp {
         self.intercept_close(ui.ctx());
         self.process_pending_transfers();
         self.show_block_picker(ui.ctx());
+        self.show_image_import_error(ui.ctx());
         self.show_rename(ui);
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());

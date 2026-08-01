@@ -18,7 +18,7 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    image::create_image_block,
+    image::{create_image_block, pick_image_file},
     BlockEditor, BlockRenderContext, EditorAccess, EditorAction, EditorRegistration,
     SidebarDragPayload,
 };
@@ -559,7 +559,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &mut EditorAccess<'_>,
         compact: bool,
     ) -> Option<Uuid> {
         let mut create_block = None;
@@ -587,6 +587,15 @@ impl InfiniteCanvasEditor {
                         BlockPickerMenuAction::New(block_type) => {
                             create_block = Some(block_type);
                         }
+                        BlockPickerMenuAction::ImportImage => match pick_image_file() {
+                            Ok(Some(image)) => {
+                                self.image_import_error = None;
+                                self.add_imported_image(editors, image, self.camera);
+                                self.tool = Tool::Select;
+                            }
+                            Ok(None) => {}
+                            Err(error) => self.image_import_error = Some(error),
+                        },
                         BlockPickerMenuAction::LinkExisting => {
                             self.picker.open([self.block.id()]);
                         }
@@ -786,7 +795,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         response: &egui::Response,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &mut EditorAccess<'_>,
     ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<Uuid>) {
         if response
             .ctx
@@ -889,6 +898,16 @@ impl InfiniteCanvasEditor {
                             BlockPickerMenuAction::New(block_type) => {
                                 create_block = Some(block_type);
                             }
+                            BlockPickerMenuAction::ImportImage => match pick_image_file() {
+                                Ok(Some(image)) => {
+                                    self.image_import_error = None;
+                                    let center = self.context_menu_position.unwrap_or(self.camera);
+                                    self.add_imported_image(editors, image, center);
+                                    self.tool = Tool::Select;
+                                }
+                                Ok(None) => {}
+                                Err(error) => self.image_import_error = Some(error),
+                            },
                             BlockPickerMenuAction::LinkExisting => {
                                 self.picker.open([self.block.id()]);
                             }

@@ -17,8 +17,10 @@ pub struct Image {
     data: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum ImageOperation {}
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub enum ImageOperation {
+    Replace { image: Image },
+}
 
 #[derive(Deserialize)]
 struct ImageData {
@@ -94,8 +96,10 @@ impl Block for Image {
 
     const TYPE_ID: Uuid = Uuid::from_u128(0x696d_6167_652d_626c_6f63_6b2d_7479_7001);
 
-    fn apply_operation(_image: &mut Self, operation: &Self::Operation) {
-        match *operation {}
+    fn apply_operation(image: &mut Self, operation: &Self::Operation) {
+        match operation {
+            ImageOperation::Replace { image: replacement } => *image = replacement.clone(),
+        }
     }
 
     fn implicit_name(&self) -> String {

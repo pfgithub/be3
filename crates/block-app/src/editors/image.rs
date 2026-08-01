@@ -1,5 +1,8 @@
 use block::{Block, BlockParent};
-use block_client::{blocks::image::Image, BlockClient, BlockHandle, BlockRelationships};
+use block_client::{
+    blocks::image::{Image, ImageOperation},
+    BlockClient, BlockHandle, BlockRelationships,
+};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, TextureHandle, Vec2};
 use uuid::Uuid;
 
@@ -17,20 +20,22 @@ pub(super) fn registration() -> EditorRegistration {
     }
 }
 
-pub(super) struct ImageEditor {
+pub(crate) struct ImageEditor {
     block: BlockHandle<Image>,
     texture: Option<TextureHandle>,
     texture_error: Option<String>,
     texture_revision: Option<u64>,
+    import_error: Option<String>,
 }
 
 impl ImageEditor {
-    pub(super) fn new(block: BlockHandle<Image>) -> Self {
+    pub(crate) fn new(block: BlockHandle<Image>) -> Self {
         Self {
             block,
             texture: None,
             texture_error: None,
             texture_revision: None,
+            import_error: None,
         }
     }
 
@@ -99,6 +104,48 @@ impl ImageEditor {
         mesh.indices.extend([0, 1, 2, 0, 2, 3]);
         painter.add(mesh);
     }
+
+    fn replace_from_file(&mut self) {
+        match pick_image_file() {
+            Ok(Some(image)) => {
+                self.block.operate(ImageOperation::Replace { image });
+                self.import_error = None;
+            }
+            Ok(None) => {}
+            Err(error) => self.import_error = Some(error),
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter(
+            "Images",
+            &[
+                "bmp", "gif", "ico", "jpg", "jpeg", "png", "pnm", "tga", "tif", "tiff", "webp",
+            ],
+        )
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let source_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Image")
+        .to_owned();
+    let data = std::fs::read(&path)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    Image::from_compressed(source_name, data)
+        .map(Some)
+        .map_err(|error| format!("Could not import {}: {error}", path.display()))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
+    Err("Choosing an image file is not available on Android".into())
 }
 
 pub(super) fn create_image_block(
@@ -162,6 +209,20 @@ impl BlockEditor for ImageEditor {
         _editors: &mut EditorAccess<'_>,
         _frame: &eframe::Frame,
     ) -> Option<EditorAction> {
+        egui::Panel::right(egui::Id::new(("image-sidebar", self.block.id())))
+            .default_size(220.0)
+            .min_size(160.0)
+            .max_size(320.0)
+            .resizable(true)
+            .show_inside(ui, |ui| {
+                ui.heading("Image");
+                if ui.button("Replace image...").clicked() {
+                    self.replace_from_file();
+                }
+                if let Some(error) = &self.import_error {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+            });
         if !self.ensure_texture(ui.ctx()) {
             ui.centered_and_justified(|ui| {
                 if let Some(error) = &self.texture_error {

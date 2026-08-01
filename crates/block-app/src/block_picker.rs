@@ -8,6 +8,7 @@ use crate::editors::EditorRegistry;
 
 pub enum BlockPickerMenuAction {
     New(Uuid),
+    ImportImage,
     LinkExisting,
 }
 
@@ -25,6 +26,10 @@ impl BlockPicker {
     ) -> Option<BlockPickerMenuAction> {
         let mut action = None;
         ui.menu_button("New block", |ui| {
+            if ui.button("Image").clicked() {
+                action = Some(BlockPickerMenuAction::ImportImage);
+                ui.close();
+            }
             for &(label, block_type) in registry.new_block_actions() {
                 if ui.button(label).clicked() {
                     action = Some(BlockPickerMenuAction::New(block_type));

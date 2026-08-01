@@ -1,7 +1,7 @@
 #[cfg(not(target_os = "android"))]
 mod browser_tab;
 mod clipboard;
-mod image;
+pub(crate) mod image;
 mod infinite_canvas;
 mod pixel_art;
 mod text;
