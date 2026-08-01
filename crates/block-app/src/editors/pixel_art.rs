@@ -131,6 +131,10 @@ pub(super) struct PixelArtEditor {
     active_drawing: Option<ActiveDrawing>,
     committed_preview: Option<CommittedPreview>,
     texture: Option<TextureHandle>,
+    edit_texture: Option<TextureHandle>,
+    texture_image: Option<egui::ColorImage>,
+    texture_preview: Vec<(u16, u16)>,
+    texture_preview_color: Option<PixelColor>,
     texture_revision: Option<u64>,
     texture_size: [u16; 2],
     texture_dark_mode: bool,
@@ -161,6 +165,10 @@ impl PixelArtEditor {
             active_drawing: None,
             committed_preview: None,
             texture: None,
+            edit_texture: None,
+            texture_image: None,
+            texture_preview: Vec::new(),
+            texture_preview_color: None,
             texture_revision: None,
             texture_size: [0, 0],
             texture_dark_mode: false,
@@ -484,6 +492,7 @@ impl PixelArtEditor {
         size: [u16; 2],
         dark_mode: bool,
     ) {
+        let edit_image = image.clone();
         if let Some(texture) = &mut self.texture {
             texture.set(image, egui::TextureOptions::NEAREST);
         } else {
@@ -493,6 +502,18 @@ impl PixelArtEditor {
                 egui::TextureOptions::NEAREST,
             ));
         }
+        if let Some(texture) = &mut self.edit_texture {
+            texture.set(edit_image.clone(), egui::TextureOptions::NEAREST);
+        } else {
+            self.edit_texture = Some(context.load_texture(
+                format!("pixel-art-edit-{}", self.block.id()),
+                edit_image.clone(),
+                egui::TextureOptions::NEAREST,
+            ));
+        }
+        self.texture_image = Some(edit_image);
+        self.texture_preview.clear();
+        self.texture_preview_color = None;
         self.texture_revision = Some(revision);
         self.texture_size = size;
         self.texture_dark_mode = dark_mode;
@@ -513,6 +534,61 @@ impl PixelArtEditor {
             self.update_texture(context, image, revision, size, dark_mode);
         }
         Some((width, height))
+    }
+
+    fn update_texture_preview(&mut self, pixels: &[(u16, u16)], color: PixelColor) {
+        if self.texture_preview == pixels
+            && (pixels.is_empty() || self.texture_preview_color == Some(color))
+        {
+            return;
+        }
+        let (Some(texture), Some(image)) = (&mut self.edit_texture, &self.texture_image) else {
+            return;
+        };
+
+        let mut changed = BTreeSet::new();
+        changed.extend(self.texture_preview.iter().map(|&(x, y)| (y, x)));
+        changed.extend(pixels.iter().map(|&(x, y)| (y, x)));
+        let mut changed = changed.into_iter().peekable();
+        while let Some((y, start_x)) = changed.next() {
+            let mut end_x = start_x;
+            while changed
+                .peek()
+                .is_some_and(|&(next_y, x)| next_y == y && x == end_x + 1)
+            {
+                end_x = changed.next().expect("peeked changed pixel").1;
+            }
+
+            let row = (start_x..=end_x)
+                .map(|x| {
+                    if pixels.binary_search(&(x, y)).is_ok() {
+                        let (light, dark) = checkerboard_colors(self.texture_dark_mode);
+                        let background = if (x + y) % 2 == 0 { light } else { dark };
+                        composite_pixel(color, background)
+                    } else {
+                        image[(usize::from(x), usize::from(y))]
+                    }
+                })
+                .collect();
+            texture.set_partial(
+                [usize::from(start_x), usize::from(y)],
+                egui::ColorImage::new([usize::from(end_x - start_x + 1), 1], row),
+                egui::TextureOptions::NEAREST,
+            );
+        }
+        self.texture_preview = pixels.to_vec();
+        self.texture_preview_color = (!pixels.is_empty()).then_some(color);
+    }
+
+    fn paint_edit_texture(&self, painter: &egui::Painter, canvas: Rect) {
+        if let Some(texture) = &self.edit_texture {
+            painter.image(
+                texture.id(),
+                canvas,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
     }
 
     fn paint_texture(&self, context: BlockRenderContext<'_>) {
@@ -619,15 +695,6 @@ impl PixelArtEditor {
         }
 
         let canvas_rect = Rect::from_center_size(viewport.center(), canvas_size);
-        if let Some(texture) = &self.texture {
-            painter.image(
-                texture.id(),
-                canvas_rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        }
-
         let pointer = response
             .ctx
             .pointer_hover_pos()
@@ -654,6 +721,8 @@ impl PixelArtEditor {
         if !input_enabled || panning {
             self.active_drawing = None;
             self.committed_preview = None;
+            self.update_texture_preview(&[], self.color);
+            self.paint_edit_texture(&painter, canvas_rect);
             return;
         }
 
@@ -783,17 +852,8 @@ impl PixelArtEditor {
         } else {
             (Vec::new(), self.color)
         };
-        if !pending.is_empty() {
-            paint_pending_pixels(
-                &painter,
-                canvas_rect,
-                width,
-                height,
-                &pending,
-                preview_color,
-                ui.visuals().dark_mode,
-            );
-        }
+        self.update_texture_preview(&pending, preview_color);
+        self.paint_edit_texture(&painter, canvas_rect);
         if self.show_grid {
             paint_grid(&painter, canvas_rect, width, height);
         } else {
@@ -1583,31 +1643,6 @@ const fn ordered(first: u16, second: u16) -> (u16, u16) {
         (first, second)
     } else {
         (second, first)
-    }
-}
-
-fn paint_pending_pixels(
-    painter: &egui::Painter,
-    canvas: Rect,
-    width: u16,
-    height: u16,
-    pixels: &[(u16, u16)],
-    color: PixelColor,
-    dark_mode: bool,
-) {
-    let cell = Vec2::new(
-        canvas.width() / f32::from(width),
-        canvas.height() / f32::from(height),
-    );
-    let (light, dark) = checkerboard_colors(dark_mode);
-    for &(x, y) in pixels {
-        let min = Pos2::new(
-            canvas.left() + f32::from(x) * cell.x,
-            canvas.top() + f32::from(y) * cell.y,
-        );
-        let rect = Rect::from_min_size(min, cell);
-        let background = if (x + y) % 2 == 0 { light } else { dark };
-        painter.rect_filled(rect, 0.0, composite_pixel(color, background));
     }
 }
 
