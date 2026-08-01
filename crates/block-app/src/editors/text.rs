@@ -549,7 +549,7 @@ impl BlockEditor for TextEditor {
                 let layout = match &self.renderer {
                     Ok(renderer) => {
                         let (layout, detail) = renderer.layout_profiled(&bytes, &highlight);
-                        profile.layout_detail = detail;
+                        profile.layout_detail = Some(detail);
                         Arc::new(layout)
                     }
                     Err(error) => {

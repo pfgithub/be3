@@ -30,7 +30,7 @@ pub(super) struct FrameProfile {
     pub document: Duration,
     pub highlight: Duration,
     pub layout: Duration,
-    pub layout_detail: LayoutTimings,
+    pub layout_detail: Option<LayoutTimings>,
     pub pointer: Duration,
     pub paint: PaintTimings,
     pub document_bytes: usize,
@@ -96,28 +96,34 @@ impl TextProfiler {
                         self.timing_row(ui, "  Document read + copy", |sample| sample.document);
                         self.timing_row(ui, "  Syntax highlight", |sample| sample.highlight);
                         self.timing_row(ui, "  Layout total", |sample| sample.layout);
-                        self.timing_row(ui, "    Display-line conversion", |sample| {
-                            sample.layout_detail.display_lines
+                        self.conditional_timing_row(ui, "    Display-line conversion", |sample| {
+                            sample.layout_detail.map(|detail| detail.display_lines)
                         });
-                        self.timing_row(ui, "    Font/style run detection", |sample| {
-                            sample.layout_detail.font_runs
+                        self.conditional_timing_row(
+                            ui,
+                            "    Font/style run detection",
+                            |sample| sample.layout_detail.map(|detail| detail.font_runs),
+                        );
+                        self.conditional_timing_row(ui, "    HarfBuzz shaping", |sample| {
+                            sample.layout_detail.map(|detail| detail.shape)
                         });
-                        self.timing_row(ui, "    HarfBuzz shaping", |sample| {
-                            sample.layout_detail.shape
-                        });
-                        self.timing_row(ui, "    Line positions + metrics", |sample| {
-                            sample.layout_detail.line_finalize
-                        });
-                        self.timing_row(ui, "    Markdown table alignment", |sample| {
-                            sample.layout_detail.tables
-                        });
+                        self.conditional_timing_row(
+                            ui,
+                            "    Line positions + metrics",
+                            |sample| sample.layout_detail.map(|detail| detail.line_finalize),
+                        );
+                        self.conditional_timing_row(
+                            ui,
+                            "    Markdown table alignment",
+                            |sample| sample.layout_detail.map(|detail| detail.tables),
+                        );
                         self.timing_row(ui, "  Pointer hit testing", |sample| sample.pointer);
                         self.timing_row(ui, "  Selection + cursor paint", |sample| {
                             sample.paint.selection
                         });
                         self.timing_row(ui, "  Glyph paint", |sample| sample.paint.glyphs);
-                        self.timing_row(ui, "    Glyph rasterization", |sample| {
-                            sample.paint.rasterize
+                        self.conditional_timing_row(ui, "    Glyph rasterization", |sample| {
+                            (sample.paint.cache_misses != 0).then_some(sample.paint.rasterize)
                         });
                     });
                 if let Some(current) = self.current() {
@@ -148,9 +154,31 @@ impl TextProfiler {
         ui.end_row();
     }
 
+    fn conditional_timing_row(
+        &self,
+        ui: &mut egui::Ui,
+        name: &str,
+        value: impl Fn(&FrameProfile) -> Option<Duration>,
+    ) {
+        let current = self.recent_samples().find_map(&value).unwrap_or_default();
+        let (average, peak) = self.aggregate_optional(value);
+        ui.label(name);
+        ui.monospace(format_duration(current));
+        ui.monospace(format_duration(average));
+        ui.monospace(format_duration(peak));
+        ui.end_row();
+    }
+
     fn current(&self) -> Option<&FrameProfile> {
         (self.sample_count != 0).then(|| {
             let index = (self.next_sample + SAMPLE_CAPACITY - 1) % SAMPLE_CAPACITY;
+            &self.samples[index]
+        })
+    }
+
+    fn recent_samples(&self) -> impl Iterator<Item = &FrameProfile> {
+        (0..self.sample_count).map(|offset| {
+            let index = (self.next_sample + SAMPLE_CAPACITY - 1 - offset) % SAMPLE_CAPACITY;
             &self.samples[index]
         })
     }
@@ -167,6 +195,28 @@ impl TextProfiler {
             peak = peak.max(duration);
         }
         (total / self.sample_count as u32, peak)
+    }
+
+    fn aggregate_optional(
+        &self,
+        value: impl Fn(&FrameProfile) -> Option<Duration>,
+    ) -> (Duration, Duration) {
+        let mut total = Duration::ZERO;
+        let mut peak = Duration::ZERO;
+        let mut count = 0;
+        for sample in &self.samples[..self.sample_count] {
+            let Some(duration) = value(sample) else {
+                continue;
+            };
+            total += duration;
+            peak = peak.max(duration);
+            count += 1;
+        }
+        if count == 0 {
+            (Duration::ZERO, Duration::ZERO)
+        } else {
+            (total / count, peak)
+        }
     }
 }
 
