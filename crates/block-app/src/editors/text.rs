@@ -423,9 +423,28 @@ impl TextEditor {
             }
             return false;
         };
-        let target = hit_test(layout, pointer - origin);
+        let local_pointer = pointer - origin;
+        let target = hit_test(layout, local_pointer);
         if pressed && response.contains_pointer() {
             response.request_focus();
+            if let Some(embed) = layout
+                .embeds
+                .iter()
+                .find(|embed| !embed.large && embed.rect.contains(local_pointer.to_pos2()))
+            {
+                self.core.execute_command(EditorCommand::Click {
+                    position: self.core.position(embed.range.start),
+                    mode: DragSelectionMode::move_to(CursorLeftRightStop::Byte),
+                    extend: false,
+                    select_syntax_node: false,
+                });
+                self.core
+                    .execute_command(EditorCommand::Drag(self.core.position(embed.range.end)));
+                self.selecting = false;
+                self.click_count = 0;
+                self.last_click = None;
+                return true;
+            }
             self.click_count = self.last_click.map_or(1, |(last_time, last_position)| {
                 if time - last_time <= MULTI_CLICK_DELAY
                     && pointer.distance(last_position) <= MULTI_CLICK_DISTANCE
@@ -496,6 +515,11 @@ impl TextEditor {
             let selected_len = selected_bytes.len();
             selected_bytes[start.min(selected_len)..end.min(selected_len)].fill(true);
             for byte in start..end {
+                if layout.embeds.iter().any(|embed| {
+                    !embed.large && byte >= embed.range.start && byte < embed.range.end
+                }) {
+                    continue;
+                }
                 let Some(left) = layout.positions.get(byte).and_then(|position| *position) else {
                     continue;
                 };
@@ -662,6 +686,56 @@ impl TextEditor {
             );
         }
     }
+
+    fn selected_inline_embed<'a>(
+        &self,
+        layout: &'a DocumentLayout,
+    ) -> Option<&'a font::EmbedLayout> {
+        let cursors = self.core.cursor_positions();
+        let cursor = (cursors.len() == 1).then(|| &cursors[0])?;
+        let anchor = self.core.position_index(cursor.pos.anchor)?;
+        let focus = self.core.position_index(cursor.pos.focus)?;
+        let selection = anchor.min(focus)..anchor.max(focus);
+        layout
+            .embeds
+            .iter()
+            .find(|embed| !embed.large && embed.range == selection)
+    }
+
+    fn selected_embed_action(
+        &self,
+        context: &egui::Context,
+        origin: Pos2,
+        layout: &DocumentLayout,
+        client: &BlockClient,
+    ) -> Option<EditorAction> {
+        let embed = self.selected_inline_embed(layout)?;
+        let rect = embed.rect.translate(origin.to_vec2());
+        let cached = client.cached_block(embed.id);
+        let mut action = None;
+        egui::Area::new(egui::Id::new((
+            "open-text-embed",
+            self.block.id(),
+            embed.range.start,
+        )))
+        .order(egui::Order::Foreground)
+        .pivot(egui::Align2::CENTER_TOP)
+        .fixed_pos(rect.center_bottom() + Vec2::new(0.0, 6.0))
+        .show(context, |ui| {
+            if ui
+                .add_enabled(cached.is_some(), egui::Button::new("Edit"))
+                .on_disabled_hover_text("Waiting for cached block metadata")
+                .clicked()
+            {
+                let cached = cached.as_ref().unwrap();
+                action = Some(EditorAction::OpenBlock {
+                    id: cached.id,
+                    block_type: cached.block_type,
+                });
+            }
+        });
+        action
+    }
 }
 
 impl BlockEditor for TextEditor {
@@ -774,6 +848,7 @@ impl BlockEditor for TextEditor {
         profile.layout = layout_start.elapsed();
         profile.line_count = layout.lines.len();
 
+        let mut edit_block = None;
         egui::ScrollArea::both()
             .id_salt(id.with("scroll"))
             .auto_shrink([false, false])
@@ -786,6 +861,8 @@ impl BlockEditor for TextEditor {
                 ui.painter()
                     .rect_filled(response.rect, 0.0, Color32::from_rgb(29, 37, 44));
                 let origin = response.rect.min + PADDING;
+                edit_block =
+                    self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
                 let pointer_start = Instant::now();
                 reveal_cursor |= self.pointer_input(ui, &response, origin, &layout);
                 profile.pointer = pointer_start.elapsed();
@@ -848,10 +925,12 @@ impl BlockEditor for TextEditor {
             });
         profile.total = frame_start.elapsed();
         self.profiler.record(profile);
-        linked_block
-            .map(|id| EditorAction::SetParent {
-                id,
-                parent: self.block.id(),
+        edit_block
+            .or_else(|| {
+                linked_block.map(|id| EditorAction::SetParent {
+                    id,
+                    parent: self.block.id(),
+                })
             })
             .or_else(|| {
                 create_block.map(|block_type| EditorAction::CreateBlock {
@@ -911,7 +990,18 @@ fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
         .position(|line| point.y < line.y + line.height)
         .unwrap_or_else(|| layout.lines.len().saturating_sub(1));
     let line_layout = &layout.lines[line];
+    let inline_embeds = layout
+        .embeds
+        .iter()
+        .filter(|embed| !embed.large && embed.rect.center().y >= line_layout.y)
+        .filter(|embed| embed.rect.center().y < line_layout.y + line_layout.height)
+        .collect::<Vec<_>>();
     (line_layout.start..=line_layout.end)
+        .filter(|byte| {
+            !inline_embeds
+                .iter()
+                .any(|embed| *byte > embed.range.start && *byte < embed.range.end)
+        })
         .filter_map(|byte| {
             layout.positions[byte]
                 .filter(|position| position.line == line)

@@ -28,6 +28,7 @@ unsafe extern "C" {
 
 const BODY_PIXEL_SIZE: u32 = 18;
 const CODE_PIXEL_SIZE: u32 = 17;
+const INLINE_EMBED_HEIGHT: f32 = 24.0;
 const LARGE_EMBED_HEIGHT: f32 = 180.0;
 
 pub(super) struct TextRenderer {
@@ -317,8 +318,11 @@ impl TextRenderer {
                     large: false,
                     available: embed.available,
                     rect: Rect::from_min_max(
-                        Pos2::new(left.x, y + 1.0),
-                        Pos2::new(right.x.max(left.x + 1.0), y + height - 1.0),
+                        Pos2::new(left.x, y + (height - INLINE_EMBED_HEIGHT) * 0.5),
+                        Pos2::new(
+                            right.x.max(left.x + 1.0),
+                            y + (height + INLINE_EMBED_HEIGHT) * 0.5,
+                        ),
                     ),
                 });
             }
