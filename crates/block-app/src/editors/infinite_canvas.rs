@@ -281,6 +281,28 @@ impl InfiniteCanvasEditor {
         self.selection.insert(id);
     }
 
+    fn duplicate_selection(&mut self, entities: &[CanvasEntity]) {
+        let duplicates = self
+            .selected_entities(entities)
+            .into_iter()
+            .map(|mut entity| {
+                entity.id = Uuid::new_v4();
+                entity.transform.center.x += IMPORT_CASCADE_OFFSET;
+                entity.transform.center.y += IMPORT_CASCADE_OFFSET;
+                entity
+            })
+            .collect::<Vec<_>>();
+        if duplicates.is_empty() {
+            return;
+        }
+        self.block.finish_history_group();
+        self.selection.clear();
+        for entity in duplicates {
+            self.selection.insert(entity.id);
+            self.block.operate(InfiniteCanvasOperation::Add { entity });
+        }
+    }
+
     fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
         self.add_direct_editor_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
     }
@@ -1059,7 +1081,12 @@ impl InfiniteCanvasEditor {
         editors: &mut EditorAccess<'_>,
         direct_editor_rects: &[Rect],
         viewport: &mut DirectEditorViewport,
-    ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<Uuid>) {
+    ) -> (
+        Option<CanvasLayerMove>,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<EditorAction>,
+    ) {
         let escape_pressed = response
             .ctx
             .input(|input| input.key_pressed(egui::Key::Escape));
@@ -1075,12 +1102,117 @@ impl InfiniteCanvasEditor {
             self.picker.close();
             self.tool = Tool::Select;
         }
+        let keyboard_available = !response.ctx.egui_wants_keyboard_input();
+        let mut layer_move = None;
+        let mut keyboard_action = None;
+        if self.focused_editor.is_none() && keyboard_available {
+            let modifiers = response.ctx.input(|input| input.modifiers);
+            if !modifiers.command && !modifiers.alt {
+                for (key, tool) in [
+                    (egui::Key::V, Tool::Select),
+                    (egui::Key::R, Tool::Rectangle),
+                    (egui::Key::L, Tool::Line),
+                    (egui::Key::T, Tool::Text),
+                    (egui::Key::P, Tool::Pen),
+                ] {
+                    if response.ctx.input(|input| input.key_pressed(key)) {
+                        self.tool = tool;
+                        self.gesture = None;
+                        self.armed_block = None;
+                        self.armed_block_needs_parent = false;
+                    }
+                }
+            }
+            if modifiers.command && response.ctx.input(|input| input.key_pressed(egui::Key::A)) {
+                if modifiers.shift {
+                    let selected = &self.selection;
+                    self.selection = entities
+                        .iter()
+                        .filter(|entity| !selected.contains(&entity.id))
+                        .map(|entity| entity.id)
+                        .collect();
+                } else {
+                    self.selection = entities.iter().map(|entity| entity.id).collect();
+                }
+                self.tool = Tool::Select;
+            }
+            if modifiers.command && response.ctx.input(|input| input.key_pressed(egui::Key::D)) {
+                self.duplicate_selection(entities);
+            }
+            if modifiers.command
+                && response
+                    .ctx
+                    .input(|input| input.key_pressed(egui::Key::OpenBracket))
+            {
+                layer_move = Some(CanvasLayerMove::BackOne);
+            }
+            if modifiers.command
+                && response
+                    .ctx
+                    .input(|input| input.key_pressed(egui::Key::CloseBracket))
+            {
+                layer_move = Some(CanvasLayerMove::ForwardOne);
+            }
+            let nudge = response.ctx.input(|input| {
+                let amount = if input.modifiers.shift { 10.0 } else { 1.0 };
+                if input.key_pressed(egui::Key::ArrowLeft) {
+                    Some(CanvasPoint::new(-amount, 0.0))
+                } else if input.key_pressed(egui::Key::ArrowRight) {
+                    Some(CanvasPoint::new(amount, 0.0))
+                } else if input.key_pressed(egui::Key::ArrowUp) {
+                    Some(CanvasPoint::new(0.0, -amount))
+                } else if input.key_pressed(egui::Key::ArrowDown) {
+                    Some(CanvasPoint::new(0.0, amount))
+                } else {
+                    None
+                }
+            });
+            if let Some(nudge) = nudge {
+                let before = self.selected_entities(entities);
+                let after = before
+                    .iter()
+                    .cloned()
+                    .map(|mut entity| {
+                        entity.transform.center.x += nudge.x;
+                        entity.transform.center.y += nudge.y;
+                        entity
+                    })
+                    .collect();
+                self.record_update(before, after, true);
+            }
+            if response
+                .ctx
+                .input(|input| input.key_pressed(egui::Key::Enter))
+                && self.selection.len() == 1
+            {
+                if let Some(entity) = entities
+                    .iter()
+                    .find(|entity| self.selection.contains(&entity.id))
+                {
+                    match entity.kind {
+                        CanvasEntityKind::DirectEditor { .. } => {
+                            self.focused_editor = Some(entity.id);
+                        }
+                        CanvasEntityKind::Block { block_id } => {
+                            if let Some(cached) = editors.client().cached_block(block_id) {
+                                keyboard_action = Some(EditorAction::OpenBlock {
+                                    id: cached.id,
+                                    block_type: cached.block_type,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         if self.focused_editor.is_none()
             && self.tool == Tool::Select
             && response.ctx.input(|input| {
                 input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
             })
             && !self.selection.is_empty()
+            && keyboard_available
         {
             let ids = self.selection.drain().collect::<Vec<_>>();
             self.record_action(InfiniteCanvasOperation::Remove { ids });
@@ -1096,11 +1228,11 @@ impl InfiniteCanvasEditor {
                     .any(|rect| rect.contains(pointer))
             })
         {
-            return (None, None, None);
+            return (None, None, None, keyboard_action);
         }
 
         if self.handle_zoom_and_pan(response, viewport) {
-            return (None, None, None);
+            return (None, None, None, keyboard_action);
         }
 
         let world = pointer.map(|point| self.screen_to_world(point, response.rect));
@@ -1141,7 +1273,6 @@ impl InfiniteCanvasEditor {
                 }
             }
         }
-        let mut layer_move = None;
         let mut create_block = None;
         let mut set_parent = None;
         response.context_menu(|ui| {
@@ -1222,7 +1353,7 @@ impl InfiniteCanvasEditor {
         });
 
         let Some(world) = world else {
-            return (layer_move, create_block, set_parent);
+            return (layer_move, create_block, set_parent, keyboard_action);
         };
         let primary_pressed = response
             .ctx
@@ -1300,7 +1431,7 @@ impl InfiniteCanvasEditor {
                                     originals: self.selected_entities(entities),
                                 });
                             }
-                            return (layer_move, create_block, set_parent);
+                            return (layer_move, create_block, set_parent, keyboard_action);
                         }
                         let additive = response.ctx.input(|input| input.modifiers.shift);
                         if additive {
@@ -1407,7 +1538,7 @@ impl InfiniteCanvasEditor {
                 self.finish_gesture(gesture, entities);
             }
         }
-        (layer_move, create_block, set_parent)
+        (layer_move, create_block, set_parent, keyboard_action)
     }
 
     fn finish_gesture(&mut self, gesture: Gesture, entities: &[CanvasEntity]) {
@@ -1916,13 +2047,14 @@ impl BlockEditor for InfiniteCanvasEditor {
             }
         }
 
-        let (context_layer_move, context_create_block, set_parent) = self.handle_canvas_input(
-            &response,
-            &entities,
-            editors,
-            &direct_editor_rects,
-            viewport,
-        );
+        let (context_layer_move, context_create_block, set_parent, keyboard_action) = self
+            .handle_canvas_input(
+                &response,
+                &entities,
+                editors,
+                &direct_editor_rects,
+                viewport,
+            );
         if let Some(movement) = context_layer_move {
             let operation = InfiniteCanvasOperation::Reorder {
                 ids: self.selection.iter().copied().collect(),
@@ -1940,6 +2072,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             ui.ctx().request_repaint();
         }
         action
+            .or(keyboard_action)
             .or_else(|| {
                 set_parent.map(|id| EditorAction::SetParent {
                     id,

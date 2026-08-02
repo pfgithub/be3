@@ -16,7 +16,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Add appropriate hand, resize, rotate, crosshair, text, and pen cursors.
 - [x] Add zoom presets, 100%, fit-all, and fit-selection controls.
 - [x] Add a shortcut/help popover and empty-canvas onboarding instructions.
-- [ ] Add tool shortcuts (`V`, `R`, `L`, `T`, `P`), Select All, Invert Selection, arrow-key nudging, Shift-arrow large nudging, duplicate, Enter-to-edit, Escape-to-select, and Ctrl/Cmd+`[` / `]` layer shortcuts.
+- [x] Add tool shortcuts (`V`, `R`, `L`, `T`, `P`), Select All, Invert Selection, arrow-key nudging, Shift-arrow large nudging, duplicate, Enter-to-edit, Escape-to-select, and Ctrl/Cmd+`[` / `]` layer shortcuts.
 
 ## Selection and transformation
 
