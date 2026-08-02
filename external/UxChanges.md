@@ -76,3 +76,16 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 - [x] Run `cargo fmt` and `cargo nextest run` after every additional change.
 - [x] Confirm every additional item has its own successful commit and the worktree is clean.
+
+## Direct editor interaction changes
+
+- [ ] Make the zoom percentage reset to 100% and move preset choices into a separate menu button.
+- [ ] Keep database, text, and presentation direct editors live; require selection and an Edit button for preview-based editors.
+- [ ] Move direct-editor scale into the inspector and make resize behavior capability-driven.
+- [ ] Render embedded presentations as resizable fullscreen playback with slide navigation; require opening the block to edit.
+- [ ] Allow embedded text direct editors to resize horizontally.
+
+## Direct editor verification
+
+- [ ] Run `cargo fmt` and `cargo nextest run` after every direct-editor change.
+- [ ] Confirm every direct-editor item has its own successful commit and the worktree is clean.
