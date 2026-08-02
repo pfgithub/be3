@@ -793,6 +793,29 @@ impl InfiniteCanvasEditor {
                 viewport.change_zoom(ZOOM_STEP, None);
             }
 
+            ui.menu_button("?", |ui| {
+                ui.strong("Canvas shortcuts");
+                egui::Grid::new("canvas-shortcuts").show(ui, |ui| {
+                    for (action, shortcut) in [
+                        ("Select / Rectangle / Line", "V / R / L"),
+                        ("Text / Pen", "T / P"),
+                        ("Pan", "Space-drag or middle-drag"),
+                        ("Zoom", "Ctrl/Cmd-scroll or pinch"),
+                        ("Select all", "Ctrl/Cmd+A"),
+                        ("Nudge", "Arrow keys; Shift for 10×"),
+                        ("Duplicate", "Ctrl/Cmd+D or Alt-drag"),
+                        ("Edit selected block", "Enter"),
+                        ("Exit tool or editor", "Escape"),
+                    ] {
+                        ui.label(action);
+                        ui.weak(shortcut);
+                        ui.end_row();
+                    }
+                });
+            })
+            .response
+            .on_hover_text("Canvas help and shortcuts");
+
             if let Some(block) = &self.armed_block {
                 ui.weak(format!(
                     "Place: {}",
@@ -1479,6 +1502,15 @@ impl InfiniteCanvasEditor {
             .into_iter()
             .map(|entity| (entity.id, entity))
             .collect();
+        if entities.is_empty() && self.gesture.is_none() {
+            painter.text(
+                painter.clip_rect().center(),
+                egui::Align2::CENTER_CENTER,
+                "Drag to draw  ·  Space-drag to pan  ·  Scroll to move\nDrop or paste images, or use Block to add content",
+                egui::FontId::proportional(16.0),
+                painter.ctx().global_style().visuals.weak_text_color(),
+            );
+        }
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
             paint_entity(
