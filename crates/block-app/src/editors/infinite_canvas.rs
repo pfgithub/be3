@@ -209,6 +209,22 @@ fn gesture_rect(start: CanvasPoint, current: CanvasPoint, from_center: bool) -> 
     WorldRect::from_points(opposite, current)
 }
 
+fn inspector_text_size(ui: &egui::Ui, text_style: &CanvasTextStyle, text: &str) -> CanvasPoint {
+    let font_size = text_style.font_size.clamp(4.0, 256.0);
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_owned(),
+        egui::FontId::proportional(font_size),
+        Color32::WHITE,
+        f32::INFINITY,
+    );
+    job.sections[0].format.line_height = Some(font_size * text_style.line_height.max(0.5));
+    let size = ui.painter().layout_job(job).size();
+    CanvasPoint::new(
+        (size.x + 8.0).max(16.0),
+        (size.y + 8.0).max(font_size * text_style.line_height),
+    )
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ResizeHandle {
     x: i8,
@@ -1375,6 +1391,59 @@ impl InfiniteCanvasEditor {
                     ui.separator();
                     ui.strong("Text");
 
+                    if let [entity] = selected.as_slice() {
+                        if let CanvasEntityKind::Text { text, text_style } = &entity.kind {
+                            let mut edited = text.clone();
+                            let response = ui.add_enabled(
+                                !entity.locked,
+                                egui::TextEdit::multiline(&mut edited)
+                                    .id_salt(("canvas-inspector-text", entity.id))
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(4),
+                            );
+                            let requested_focus = self.editing_text == Some(entity.id)
+                                && std::mem::take(&mut self.focus_text_requested);
+                            if requested_focus {
+                                response.request_focus();
+                            }
+                            if response.gained_focus() {
+                                self.editing_text = Some(entity.id);
+                            }
+                            if response.changed() {
+                                let mut updated = (*entity).clone();
+                                updated.kind = CanvasEntityKind::Text {
+                                    text: edited,
+                                    text_style: *text_style,
+                                };
+                                if !text_style.wrap {
+                                    updated.transform.size = inspector_text_size(
+                                        ui,
+                                        text_style,
+                                        match &updated.kind {
+                                            CanvasEntityKind::Text { text, .. } => text,
+                                            _ => unreachable!(),
+                                        },
+                                    );
+                                }
+                                self.record_update(vec![(*entity).clone()], vec![updated], true);
+                            }
+                            let exit = ui.ctx().input(|input| {
+                                input.key_pressed(egui::Key::Escape)
+                                    || (input.modifiers.command
+                                        && input.key_pressed(egui::Key::Enter))
+                            });
+                            if response.has_focus() && exit {
+                                response.surrender_focus();
+                            }
+                            if response.lost_focus() {
+                                if self.editing_text == Some(entity.id) {
+                                    self.editing_text = None;
+                                }
+                                self.block.finish_history_group();
+                            }
+                        }
+                    }
+
                     let font_size = common_value(texts.iter().map(|style| style.font_size));
                     let mut size = match font_size {
                         CommonValue::Uniform(size) => size,
@@ -1891,86 +1960,6 @@ impl InfiniteCanvasEditor {
             .unwrap_or_else(|| response.rect.center());
         let center = self.screen_to_world(screen_position, response.rect);
         self.add_imported_image(editors, image, center);
-    }
-
-    fn show_inline_text_editor(
-        &mut self,
-        ui: &mut egui::Ui,
-        canvas_rect: Rect,
-        entities: &[CanvasEntity],
-    ) {
-        let Some(id) = self.editing_text else {
-            return;
-        };
-        let Some(entity) = entities.iter().find(|entity| entity.id == id).cloned() else {
-            self.editing_text = None;
-            self.focus_text_requested = false;
-            return;
-        };
-        let CanvasEntityKind::Text { text, text_style } = &entity.kind else {
-            self.editing_text = None;
-            self.focus_text_requested = false;
-            return;
-        };
-        if entity.locked {
-            self.editing_text = None;
-            self.focus_text_requested = false;
-            return;
-        }
-
-        let bounds = screen_rect(self, entity_bounds(&entity), canvas_rect);
-        let edit_rect =
-            Rect::from_center_size(bounds.center(), bounds.size().max(Vec2::new(80.0, 36.0)));
-        let mut edited = text.clone();
-        let font_size = (text_style.font_size * self.render_scale).clamp(8.0, 256.0);
-        let output = ui
-            .new_child(
-                egui::UiBuilder::new()
-                    .id_salt(("canvas-inline-text", id))
-                    .max_rect(edit_rect)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            )
-            .scope(|ui| {
-                ui.set_min_size(edit_rect.size());
-                ui.set_max_size(edit_rect.size());
-                egui::TextEdit::multiline(&mut edited)
-                    .font(egui::FontId::proportional(font_size))
-                    .desired_width(edit_rect.width())
-                    .desired_rows(1)
-                    .show(ui)
-            })
-            .inner;
-        let response = &output.response.response;
-        let requested_focus = std::mem::take(&mut self.focus_text_requested);
-        if requested_focus {
-            response.request_focus();
-        }
-
-        if response.changed() {
-            let mut updated = entity.clone();
-            updated.kind = CanvasEntityKind::Text {
-                text: edited,
-                text_style: *text_style,
-            };
-            if !text_style.wrap {
-                updated.transform.size = CanvasPoint::new(
-                    (output.galley.size().x / self.render_scale + 8.0).max(16.0),
-                    (output.galley.size().y / self.render_scale + 8.0)
-                        .max(text_style.font_size * text_style.line_height),
-                );
-            }
-            self.record_update(vec![entity], vec![updated], true);
-        }
-
-        let exit = ui.ctx().input(|input| {
-            input.key_pressed(egui::Key::Escape)
-                || (input.modifiers.command && input.key_pressed(egui::Key::Enter))
-        });
-        if exit || (!requested_focus && response.lost_focus()) {
-            response.surrender_focus();
-            self.editing_text = None;
-            self.block.finish_history_group();
-        }
     }
 
     fn handle_zoom_and_pan(
@@ -2860,9 +2849,6 @@ impl InfiniteCanvasEditor {
         }
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
-            if self.editing_text == Some(entity.id) {
-                continue;
-            }
             paint_entity(
                 self,
                 painter,
@@ -3282,7 +3268,6 @@ impl BlockEditor for InfiniteCanvasEditor {
             &dependency_details,
             editors,
         );
-        self.show_inline_text_editor(ui, canvas_rect, &entities);
         let mut direct_editor_rects = Vec::new();
         if let Some((entity_id, block_id, scale)) =
             focused.filter(|_| self.focused_editor.is_some())
