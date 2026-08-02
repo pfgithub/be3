@@ -185,11 +185,11 @@ impl WorldRect {
         }
     }
 
-    fn intersects(self, other: Self) -> bool {
-        self.min.x <= other.max.x
-            && self.max.x >= other.min.x
-            && self.min.y <= other.max.y
-            && self.max.y >= other.min.y
+    fn contains_rect(self, other: Self) -> bool {
+        self.min.x <= other.min.x
+            && self.max.x >= other.max.x
+            && self.min.y <= other.min.y
+            && self.max.y >= other.max.y
     }
 
     fn contains(self, point: CanvasPoint) -> bool {
@@ -2746,7 +2746,7 @@ impl InfiniteCanvasEditor {
                 let selection = WorldRect::from_points(start, current);
                 let hits = entities
                     .iter()
-                    .filter(|entity| entity_bounds(entity).intersects(selection))
+                    .filter(|entity| selection.contains_rect(entity_bounds(entity)))
                     .map(|entity| entity.id)
                     .collect::<Vec<_>>();
                 for id in hits {
