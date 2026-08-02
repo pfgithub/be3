@@ -111,3 +111,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 - [x] Run `cargo fmt` and `cargo nextest run`.
 - [x] Confirm the follow-up has a successful implementation commit and the worktree is clean.
+
+## Presentation fullscreen controls
+
+- [x] Add an embedded fullscreen button and inset playback controls from the left edge in both embedded and fullscreen views.

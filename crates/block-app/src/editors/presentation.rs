@@ -323,7 +323,7 @@ impl PresentationEditor {
         slides: &[PresentationSlide],
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &mut EditorAccess<'_>,
-        show_exit: bool,
+        fullscreen: bool,
     ) -> bool {
         ui.allocate_rect(rect, Sense::hover());
         let painter = ui.painter().clone();
@@ -387,12 +387,16 @@ impl PresentationEditor {
             .iter()
             .position(|candidate| candidate.id == slide.id)
             .unwrap_or(0);
-        let mut exit_clicked = false;
+        let mut fullscreen_clicked = false;
         ui.scope_builder(egui::UiBuilder::new().max_rect(controls), |ui| {
             egui::Frame::new()
                 .fill(Color32::from_black_alpha(180))
+                .inner_margin(egui::Margin {
+                    left: 12,
+                    ..Default::default()
+                })
                 .show(ui, |ui| {
-                    ui.set_min_size(controls.size());
+                    ui.set_min_size(controls.size() - egui::vec2(12.0, 0.0));
                     ui.with_layout(
                         egui::Layout::left_to_right(egui::Align::Center)
                             .with_main_align(egui::Align::Center),
@@ -418,13 +422,17 @@ impl PresentationEditor {
                             {
                                 self.navigate_playback(slides, 1);
                             }
-                            if show_exit
-                                && ui
-                                    .button(ICON_FULLSCREEN_EXIT)
-                                    .on_hover_text("Exit presentation")
-                                    .clicked()
+                            let (fullscreen_icon, fullscreen_label) = if fullscreen {
+                                (ICON_FULLSCREEN_EXIT, "Exit fullscreen")
+                            } else {
+                                (ICON_FULLSCREEN, "Enter fullscreen")
+                            };
+                            if ui
+                                .button(fullscreen_icon)
+                                .on_hover_text(fullscreen_label)
+                                .clicked()
                             {
-                                exit_clicked = true;
+                                fullscreen_clicked = true;
                             }
                         },
                     );
@@ -432,7 +440,7 @@ impl PresentationEditor {
         });
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(100));
-        exit_clicked
+        fullscreen_clicked
     }
 
     fn show_playback(
@@ -731,7 +739,9 @@ impl BlockEditor for PresentationEditor {
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
         Self::ensure_slide_editors(&slides, &dependencies, editors);
-        self.show_playback_surface(ui, rect, &slides, &dependencies, editors, false);
+        if self.show_playback_surface(ui, rect, &slides, &dependencies, editors, false) {
+            self.enter_playback(ui.ctx());
+        }
         None
     }
 }
