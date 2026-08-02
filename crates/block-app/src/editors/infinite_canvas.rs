@@ -166,6 +166,7 @@ enum Gesture {
         start_angle: f32,
         current: CanvasPoint,
         originals: Vec<CanvasEntity>,
+        snap_angle: bool,
     },
 }
 
@@ -1389,6 +1390,7 @@ impl InfiniteCanvasEditor {
                             start_angle: (world.y - center.y).atan2(world.x - center.x),
                             current: world,
                             originals: self.selected_entities(entities),
+                            snap_angle: response.ctx.input(|input| input.modifiers.shift),
                         });
                     } else if let (Some(bounds), Some(handle)) = (selected_bounds, handle) {
                         let default_preserve_aspect_ratio =
@@ -1502,10 +1504,30 @@ impl InfiniteCanvasEditor {
         if primary_down {
             let pen_point_distance = 1.0 / self.render_scale;
             match self.gesture.as_mut() {
-                Some(Gesture::Create { current, .. })
-                | Some(Gesture::SelectBox { current, .. })
-                | Some(Gesture::Move { current, .. })
-                | Some(Gesture::Rotate { current, .. }) => *current = world,
+                Some(Gesture::Create {
+                    tool,
+                    start,
+                    current,
+                }) => {
+                    *current = if *tool == Tool::Line
+                        && response.ctx.input(|input| input.modifiers.shift)
+                    {
+                        constrain_point_angle(*start, world, std::f32::consts::FRAC_PI_4)
+                    } else {
+                        world
+                    };
+                }
+                Some(Gesture::SelectBox { current, .. }) | Some(Gesture::Move { current, .. }) => {
+                    *current = world
+                }
+                Some(Gesture::Rotate {
+                    current,
+                    snap_angle,
+                    ..
+                }) => {
+                    *current = world;
+                    *snap_angle = response.ctx.input(|input| input.modifiers.shift);
+                }
                 Some(Gesture::Resize {
                     current,
                     default_preserve_aspect_ratio,
@@ -2569,10 +2591,15 @@ fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
             start_angle,
             current,
             originals,
+            snap_angle,
         } => {
             let center = bounds.center();
             let current_angle = (current.y - center.y).atan2(current.x - center.x);
-            let delta = current_angle - start_angle;
+            let mut delta = current_angle - start_angle;
+            if *snap_angle {
+                let step = 15.0_f32.to_radians();
+                delta = (delta / step).round() * step;
+            }
             originals
                 .iter()
                 .cloned()
@@ -2591,6 +2618,16 @@ fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
         }
         _ => Vec::new(),
     }
+}
+
+fn constrain_point_angle(start: CanvasPoint, current: CanvasPoint, step: f32) -> CanvasPoint {
+    let delta = CanvasPoint::new(current.x - start.x, current.y - start.y);
+    let length = delta.x.hypot(delta.y);
+    let angle = (delta.y.atan2(delta.x) / step).round() * step;
+    CanvasPoint::new(
+        start.x + length * angle.cos(),
+        start.y + length * angle.sin(),
+    )
 }
 
 fn resize_entities(
