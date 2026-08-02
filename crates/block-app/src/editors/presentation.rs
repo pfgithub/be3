@@ -739,6 +739,12 @@ impl BlockEditor for PresentationEditor {
         };
 
         let mut action = None;
+        if dependencies
+            .get(&slide.block_id)
+            .is_some_and(|reference| reference.block_type == InfiniteCanvas::TYPE_ID)
+        {
+            viewport.auto_fit(slide.id);
+        }
         if editors.direct_editor_has_left_sidebar(slide.block_id) {
             egui::Panel::left(egui::Id::new((
                 "presentation-slide-left",

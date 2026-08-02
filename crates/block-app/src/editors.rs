@@ -90,6 +90,8 @@ pub enum DirectEditorViewportCommand {
         anchor: Option<egui::Pos2>,
     },
     Fit,
+    AutoFit(Uuid),
+    ResumeAutoFit,
 }
 
 pub struct DirectEditorViewport {
@@ -122,6 +124,16 @@ impl DirectEditorViewport {
 
     pub fn fit(&mut self) {
         self.commands.push(DirectEditorViewportCommand::Fit);
+    }
+
+    pub fn auto_fit(&mut self, target: Uuid) {
+        self.commands
+            .push(DirectEditorViewportCommand::AutoFit(target));
+    }
+
+    pub fn resume_auto_fit(&mut self) {
+        self.commands
+            .push(DirectEditorViewportCommand::ResumeAutoFit);
     }
 
     pub fn drain(&mut self) -> impl Iterator<Item = DirectEditorViewportCommand> + '_ {
@@ -601,16 +613,25 @@ pub fn direct_editor_tab_ui(
             action = next_action;
         }
 
-        handle_direct_editor_background_input(
+        if handle_direct_editor_background_input(
             ui.ctx(),
             viewport_rect,
             content_rect,
             &mut viewport_state,
-        );
+        ) {
+            if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                auto_fit.enabled = false;
+            }
+        }
 
         for command in viewport.drain() {
             match command {
-                DirectEditorViewportCommand::Pan(delta) => viewport_state.pan += delta,
+                DirectEditorViewportCommand::Pan(delta) => {
+                    viewport_state.pan += delta;
+                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                        auto_fit.enabled = false;
+                    }
+                }
                 DirectEditorViewportCommand::Zoom { factor, anchor } => {
                     let old_zoom = viewport_state.zoom;
                     let new_zoom =
@@ -622,13 +643,44 @@ pub fn direct_editor_tab_ui(
                                 * (new_zoom / old_zoom);
                         viewport_state.zoom = new_zoom;
                     }
+                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                        auto_fit.enabled = false;
+                    }
                 }
                 DirectEditorViewportCommand::Fit => {
-                    viewport_state.zoom = (viewport_size.x / content_size.x)
-                        .min(viewport_size.y / content_size.y)
-                        .min(1.0)
-                        .clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
-                    viewport_state.pan = egui::Vec2::ZERO;
+                    fit_direct_editor_viewport(&mut viewport_state, viewport_size, content_size);
+                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                        auto_fit.enabled = false;
+                    }
+                }
+                DirectEditorViewportCommand::AutoFit(target) => {
+                    let auto_fit = viewport_state.auto_fit.get_or_insert(AutoFitState {
+                        target,
+                        enabled: true,
+                    });
+                    if auto_fit.target != target {
+                        *auto_fit = AutoFitState {
+                            target,
+                            enabled: true,
+                        };
+                    }
+                    if auto_fit.enabled {
+                        fit_direct_editor_viewport(
+                            &mut viewport_state,
+                            viewport_size,
+                            content_size,
+                        );
+                    }
+                }
+                DirectEditorViewportCommand::ResumeAutoFit => {
+                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                        auto_fit.enabled = true;
+                        fit_direct_editor_viewport(
+                            &mut viewport_state,
+                            viewport_size,
+                            content_size,
+                        );
+                    }
                 }
             }
         }
@@ -654,12 +706,12 @@ fn handle_direct_editor_background_input(
     viewport_rect: egui::Rect,
     content_rect: egui::Rect,
     viewport: &mut DirectEditorTabViewport,
-) {
+) -> bool {
     let Some(pointer) = context
         .pointer_hover_pos()
         .filter(|pointer| viewport_rect.contains(*pointer) && !content_rect.contains(*pointer))
     else {
-        return;
+        return false;
     };
     let (scroll, zoom_delta, command, panning, delta) = context.input(|input| {
         (
@@ -694,6 +746,25 @@ fn handle_direct_editor_background_input(
     } else if scroll != egui::Vec2::ZERO {
         viewport.pan += scroll;
     }
+    panning || zoom_factor.is_some() || scroll != egui::Vec2::ZERO
+}
+
+fn fit_direct_editor_viewport(
+    viewport: &mut DirectEditorTabViewport,
+    viewport_size: egui::Vec2,
+    content_size: egui::Vec2,
+) {
+    viewport.zoom = (viewport_size.x / content_size.x)
+        .min(viewport_size.y / content_size.y)
+        .min(1.0)
+        .clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+    viewport.pan = egui::Vec2::ZERO;
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AutoFitState {
+    target: Uuid,
+    enabled: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -701,6 +772,7 @@ struct DirectEditorTabViewport {
     zoom: f32,
     pan: egui::Vec2,
     center: Option<egui::Pos2>,
+    auto_fit: Option<AutoFitState>,
 }
 
 impl Default for DirectEditorTabViewport {
@@ -709,6 +781,7 @@ impl Default for DirectEditorTabViewport {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             center: None,
+            auto_fit: None,
         }
     }
 }

@@ -3604,6 +3604,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .min(available.y / preview.height().max(1.0));
                 viewport.change_zoom(factor, Some(preview.center()));
                 viewport.pan(canvas_clip_rect.center() - preview.center());
+                viewport.resume_auto_fit();
             }
         }
         if self.focused_editor.is_none() {
