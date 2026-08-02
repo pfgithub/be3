@@ -7,7 +7,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Place toolbar-created blocks, linked blocks, and file-picker images at the visible viewport center.
 - [x] Hit-test unfilled rectangles by their outline instead of their interior.
 - [x] Enter a direct editor only from its content area; use its padding and title bar for canvas selection and movement without clearing an existing multi-selection unnecessarily.
-- [ ] Split canvas and selection context menus; choose the selection menu from the selected bounds and only object-hit-test when nothing is selected.
+- [x] Split canvas and selection context menus; choose the selection menu from the selected bounds and only object-hit-test when nothing is selected.
 - [ ] Stop unconditional idle repainting while retaining repaint requests for active/asynchronous interactions.
 
 ## Navigation and discoverability

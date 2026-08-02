@@ -180,6 +180,7 @@ pub(super) struct InfiniteCanvasEditor {
     armed_block_needs_parent: bool,
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
+    context_menu_for_selection: bool,
     dependencies: ReferenceList,
     focus_text: Option<Uuid>,
     image_import_error: Option<String>,
@@ -203,6 +204,7 @@ impl InfiniteCanvasEditor {
             armed_block_needs_parent: false,
             pending_block_center: None,
             context_menu_position: None,
+            context_menu_for_selection: false,
             dependencies,
             focus_text: None,
             image_import_error: None,
@@ -1024,11 +1026,16 @@ impl InfiniteCanvasEditor {
         if response.secondary_clicked() {
             if let Some(world) = world {
                 self.context_menu_position = Some(world);
-                if let Some(id) = self.entity_at(entities, world) {
-                    if !self.selection.contains(&id) {
-                        self.selection.clear();
+                self.context_menu_for_selection = self
+                    .selected_bounds(entities)
+                    .is_some_and(|bounds| bounds.contains(world));
+                if self.selection.is_empty() {
+                    if let Some(id) = self.entity_at(entities, world) {
                         self.selection.insert(id);
+                        self.context_menu_for_selection = true;
                     }
+                } else if !self.context_menu_for_selection {
+                    self.selection.clear();
                 }
             }
         }
@@ -1036,80 +1043,79 @@ impl InfiniteCanvasEditor {
         let mut create_block = None;
         let mut set_parent = None;
         response.context_menu(|ui| {
-            ui.menu_button("Add", |ui| {
-                if ui.button("Rectangle").clicked() {
-                    if let Some(center) = self.context_menu_position {
-                        self.add_entity(CanvasEntity {
-                            id: Uuid::new_v4(),
-                            transform: CanvasTransform::new(
-                                center,
-                                CanvasPoint::new(180.0, 100.0),
-                                0.0,
-                            ),
-                            kind: CanvasEntityKind::Rectangle,
-                            style: CanvasEntityStyle::default(),
-                        });
+            if self.context_menu_for_selection {
+                for (label, movement) in [
+                    ("Bring to front", CanvasLayerMove::BringToFront),
+                    ("Forward", CanvasLayerMove::ForwardOne),
+                    ("Backward", CanvasLayerMove::BackOne),
+                    ("Send to back", CanvasLayerMove::SendToBack),
+                ] {
+                    if ui.button(label).clicked() {
+                        layer_move = Some(movement);
+                        ui.close();
                     }
-                    self.tool = Tool::Select;
-                    ui.close();
                 }
-                if ui.button("Line").clicked() {
-                    if let Some(center) = self.context_menu_position {
-                        self.add_entity(CanvasEntity {
-                            id: Uuid::new_v4(),
-                            transform: CanvasTransform::new(
-                                center,
-                                CanvasPoint::new(180.0, MIN_SIZE),
-                                0.0,
-                            ),
-                            kind: CanvasEntityKind::Line,
-                            style: CanvasEntityStyle::default(),
-                        });
+            } else {
+                ui.menu_button("Add", |ui| {
+                    if ui.button("Rectangle").clicked() {
+                        if let Some(center) = self.context_menu_position {
+                            self.add_entity(CanvasEntity {
+                                id: Uuid::new_v4(),
+                                transform: CanvasTransform::new(
+                                    center,
+                                    CanvasPoint::new(180.0, 100.0),
+                                    0.0,
+                                ),
+                                kind: CanvasEntityKind::Rectangle,
+                                style: CanvasEntityStyle::default(),
+                            });
+                        }
+                        self.tool = Tool::Select;
+                        ui.close();
                     }
-                    self.tool = Tool::Select;
-                    ui.close();
-                }
-                ui.menu_button("Block", |ui| {
-                    if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
-                        self.tool = Tool::Block;
-                        self.armed_block = None;
-                        self.armed_block_needs_parent = false;
-                        self.pending_block_center = self.context_menu_position;
-                        match action {
-                            BlockPickerMenuAction::New(block_type) => {
-                                create_block = Some(block_type);
-                            }
-                            BlockPickerMenuAction::ImportImage => match pick_image_file() {
-                                Ok(Some(image)) => {
-                                    self.image_import_error = None;
-                                    let center = self.context_menu_position.unwrap_or_default();
-                                    self.add_imported_image(editors, image, center);
-                                    self.tool = Tool::Select;
+                    if ui.button("Line").clicked() {
+                        if let Some(center) = self.context_menu_position {
+                            self.add_entity(CanvasEntity {
+                                id: Uuid::new_v4(),
+                                transform: CanvasTransform::new(
+                                    center,
+                                    CanvasPoint::new(180.0, MIN_SIZE),
+                                    0.0,
+                                ),
+                                kind: CanvasEntityKind::Line,
+                                style: CanvasEntityStyle::default(),
+                            });
+                        }
+                        self.tool = Tool::Select;
+                        ui.close();
+                    }
+                    ui.menu_button("Block", |ui| {
+                        if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
+                            self.tool = Tool::Block;
+                            self.armed_block = None;
+                            self.armed_block_needs_parent = false;
+                            self.pending_block_center = self.context_menu_position;
+                            match action {
+                                BlockPickerMenuAction::New(block_type) => {
+                                    create_block = Some(block_type);
                                 }
-                                Ok(None) => {}
-                                Err(error) => self.image_import_error = Some(error),
-                            },
-                            BlockPickerMenuAction::LinkExisting => {
-                                self.picker.open([self.block.id()]);
+                                BlockPickerMenuAction::ImportImage => match pick_image_file() {
+                                    Ok(Some(image)) => {
+                                        self.image_import_error = None;
+                                        let center = self.context_menu_position.unwrap_or_default();
+                                        self.add_imported_image(editors, image, center);
+                                        self.tool = Tool::Select;
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => self.image_import_error = Some(error),
+                                },
+                                BlockPickerMenuAction::LinkExisting => {
+                                    self.picker.open([self.block.id()]);
+                                }
                             }
                         }
-                    }
+                    });
                 });
-            });
-            ui.separator();
-            for (label, movement) in [
-                ("Bring to front", CanvasLayerMove::BringToFront),
-                ("Forwards one", CanvasLayerMove::ForwardOne),
-                ("Back one", CanvasLayerMove::BackOne),
-                ("Send to back", CanvasLayerMove::SendToBack),
-            ] {
-                if ui
-                    .add_enabled(!self.selection.is_empty(), egui::Button::new(label))
-                    .clicked()
-                {
-                    layer_move = Some(movement);
-                    ui.close();
-                }
             }
         });
 
