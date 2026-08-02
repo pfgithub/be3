@@ -497,6 +497,88 @@ impl InfiniteCanvasEditor {
             count => format!("{count} objects selected"),
         });
 
+        ui.separator();
+        ui.strong("Transform");
+        if let [entity] = selected.as_slice() {
+            let mut updated = (*entity).clone();
+            let mut changed = false;
+            egui::Grid::new("canvas-transform-fields")
+                .num_columns(4)
+                .show(ui, |ui| {
+                    ui.label("X");
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut updated.transform.center.x).speed(1.0))
+                        .changed();
+                    ui.label("Y");
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut updated.transform.center.y).speed(1.0))
+                        .changed();
+                    ui.end_row();
+
+                    let original_size = updated.transform.size;
+                    let mut width = original_size.x;
+                    let mut height = original_size.y;
+                    ui.label("W");
+                    let width_changed = ui
+                        .add(
+                            egui::DragValue::new(&mut width)
+                                .speed(1.0)
+                                .range(MIN_SIZE..=f32::INFINITY),
+                        )
+                        .changed();
+                    ui.label("H");
+                    let height_changed = ui
+                        .add(
+                            egui::DragValue::new(&mut height)
+                                .speed(1.0)
+                                .range(MIN_SIZE..=f32::INFINITY),
+                        )
+                        .changed();
+                    ui.end_row();
+                    if let CanvasEntityKind::DirectEditor { scale, .. } = &mut updated.kind {
+                        let factor = if width_changed {
+                            width / original_size.x.max(MIN_SIZE)
+                        } else if height_changed {
+                            height / original_size.y.max(MIN_SIZE)
+                        } else {
+                            1.0
+                        };
+                        if width_changed || height_changed {
+                            updated.transform.size.x = original_size.x * factor;
+                            updated.transform.size.y = original_size.y * factor;
+                            *scale *= factor;
+                            changed = true;
+                        }
+                    } else {
+                        if width_changed {
+                            updated.transform.size.x = width;
+                            changed = true;
+                        }
+                        if height_changed {
+                            updated.transform.size.y = height;
+                            changed = true;
+                        }
+                    }
+
+                    let mut degrees = updated.transform.rotation.to_degrees();
+                    ui.label("Rotation");
+                    let rotation = ui.add_enabled(
+                        self.selection_allows_rotation(entities, editors),
+                        egui::DragValue::new(&mut degrees).speed(1.0).suffix("°"),
+                    );
+                    if rotation.changed() {
+                        updated.transform.rotation = degrees.to_radians();
+                        changed = true;
+                    }
+                    ui.end_row();
+                });
+            if changed {
+                self.record_update(vec![(*entity).clone()], vec![updated], true);
+            }
+        } else {
+            ui.weak("Select one object to edit exact transform values.");
+        }
+
         if let [entity] = selected.as_slice() {
             let block_mode = match entity.kind {
                 CanvasEntityKind::Block { block_id } => Some((block_id, false)),

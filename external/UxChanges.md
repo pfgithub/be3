@@ -21,7 +21,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 ## Selection and transformation
 
 - [x] Constrain line drawing and rotation while Shift is held, with 15-degree rotation snapping.
-- [ ] Add exact position, dimensions, and rotation fields to a reorganized inspector.
+- [x] Add exact position, dimensions, and rotation fields to a reorganized inspector.
 - [ ] Add group and ungroup operations and persistence.
 - [ ] Add lock and unlock operations and persistence; locked objects must not move, resize, rotate, or delete accidentally.
 - [ ] Add Alt-drag duplication.
