@@ -1815,7 +1815,9 @@ impl BlockEditor for InfiniteCanvasEditor {
                 self.selected_block_action(ui.ctx(), response.rect, &entities, editors)
             });
         }
-        ui.ctx().request_repaint();
+        if self.gesture.is_some() {
+            ui.ctx().request_repaint();
+        }
         action
             .or_else(|| {
                 set_parent.map(|id| EditorAction::SetParent {
