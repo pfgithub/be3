@@ -2022,7 +2022,12 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    fn import_dropped_images(&mut self, response: &egui::Response, editors: &mut EditorAccess<'_>) {
+    fn import_dropped_images(
+        &mut self,
+        response: &egui::Response,
+        canvas_rect: Rect,
+        editors: &mut EditorAccess<'_>,
+    ) {
         let (hovering_file, dropped) = response.ctx.input(|input| {
             (
                 !input.raw.hovered_files.is_empty(),
@@ -2035,8 +2040,7 @@ impl InfiniteCanvasEditor {
                 .pointer_hover_pos()
                 .filter(|position| response.rect.contains(*position))
             {
-                self.pending_file_drop_position =
-                    Some(self.screen_to_world(position, response.rect));
+                self.pending_file_drop_position = Some(self.screen_to_world(position, canvas_rect));
             }
         }
         if dropped.is_empty() {
@@ -2054,9 +2058,9 @@ impl InfiniteCanvasEditor {
                     .ctx
                     .pointer_hover_pos()
                     .filter(|position| response.rect.contains(*position))
-                    .map(|position| self.screen_to_world(position, response.rect))
+                    .map(|position| self.screen_to_world(position, canvas_rect))
             })
-            .unwrap_or_else(|| self.screen_to_world(response.rect.center(), response.rect));
+            .unwrap_or_else(|| self.screen_to_world(response.rect.center(), canvas_rect));
         for (index, file) in dropped.into_iter().enumerate() {
             let source_name = file
                 .path
@@ -2103,6 +2107,7 @@ impl InfiniteCanvasEditor {
     fn import_clipboard_image(
         &mut self,
         response: &egui::Response,
+        canvas_rect: Rect,
         editors: &mut EditorAccess<'_>,
     ) {
         let enabled = !response.ctx.egui_wants_keyboard_input();
@@ -2121,7 +2126,7 @@ impl InfiniteCanvasEditor {
             .pointer_hover_pos()
             .filter(|position| response.rect.contains(*position))
             .unwrap_or_else(|| response.rect.center());
-        let center = self.screen_to_world(screen_position, response.rect);
+        let center = self.screen_to_world(screen_position, canvas_rect);
         self.add_imported_image(editors, image, center);
     }
 
@@ -2168,6 +2173,7 @@ impl InfiniteCanvasEditor {
         &self,
         response: &egui::Response,
         world: CanvasPoint,
+        canvas_rect: Rect,
         entities: &[CanvasEntity],
         editors: &EditorAccess<'_>,
     ) {
@@ -2185,8 +2191,8 @@ impl InfiniteCanvasEditor {
                 if self.selection_has_unlocked(entities)
                     && self.selection_allows_rotation(entities, editors)
                     && frame.is_some_and(|frame| {
-                        rotate_handle_at(self, frame, response.rect)
-                            .distance(self.world_to_screen(world, response.rect))
+                        rotate_handle_at(self, frame, canvas_rect)
+                            .distance(self.world_to_screen(world, canvas_rect))
                             <= HANDLE_RADIUS + 3.0
                     })
                 {
@@ -2195,7 +2201,7 @@ impl InfiniteCanvasEditor {
                     .selection_has_unlocked(entities)
                     .then(|| frame)
                     .flatten()
-                    .and_then(|frame| resize_handle_at(self, frame, response.rect, world, resize))
+                    .and_then(|frame| resize_handle_at(self, frame, canvas_rect, world, resize))
                 {
                     match (handle.x, handle.y) {
                         (0, _) => egui::CursorIcon::ResizeVertical,
@@ -2214,6 +2220,7 @@ impl InfiniteCanvasEditor {
     fn handle_canvas_input(
         &mut self,
         response: &egui::Response,
+        canvas_rect: Rect,
         entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
         direct_editor_rects: &[Rect],
@@ -2358,11 +2365,11 @@ impl InfiniteCanvasEditor {
             return (None, None, None, keyboard_action);
         }
 
-        let world = pointer.map(|point| self.screen_to_world(point, response.rect));
+        let world = pointer.map(|point| self.screen_to_world(point, canvas_rect));
 
         if response.hovered() {
             if let Some(world) = world {
-                self.update_cursor(response, world, entities, editors);
+                self.update_cursor(response, world, canvas_rect, entities, editors);
             }
         }
 
@@ -2647,13 +2654,13 @@ impl InfiniteCanvasEditor {
                         .then(|| selected_frame)
                         .flatten()
                         .and_then(|frame| {
-                            resize_handle_at(self, frame, response.rect, world, resize)
+                            resize_handle_at(self, frame, canvas_rect, world, resize)
                         });
                     let rotate = has_unlocked
                         && self.selection_allows_rotation(entities, editors)
                         && selected_frame.is_some_and(|frame| {
-                            rotate_handle_at(self, frame, response.rect)
-                                .distance(self.world_to_screen(world, response.rect))
+                            rotate_handle_at(self, frame, canvas_rect)
+                                .distance(self.world_to_screen(world, canvas_rect))
                                 <= HANDLE_RADIUS + 3.0
                         });
                     if rotate {
@@ -3041,6 +3048,23 @@ impl InfiniteCanvasEditor {
             );
         }
 
+        if let Some(region) = self.block.read().and_then(|canvas| canvas.preview_region()) {
+            let preview_rect = screen_rect(self, preview_region_bounds(region), rect);
+            painter.rect_stroke(
+                preview_rect,
+                0.0,
+                Stroke::new(1.5, Color32::from_rgb(245, 180, 60)),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                preview_rect.left_top() + Vec2::new(5.0, 4.0),
+                egui::Align2::LEFT_TOP,
+                "Preview",
+                egui::FontId::proportional(12.0),
+                Color32::from_rgb(245, 180, 60),
+            );
+        }
+
         if let Some(Gesture::Create {
             tool,
             start,
@@ -3132,7 +3156,7 @@ impl InfiniteCanvasEditor {
             .ctx()
             .input(|input| input.key_down(egui::Key::Space));
         if let (Some(icon), Some(pointer)) = (tool_icon, pointer) {
-            if rect.contains(pointer) && !panning && self.focused_editor.is_none() {
+            if painter.clip_rect().contains(pointer) && !panning && self.focused_editor.is_none() {
                 let center = pointer + Vec2::new(0.0, 20.0);
                 let badge = Rect::from_center_size(center, Vec2::splat(22.0));
                 let visuals = &painter.ctx().global_style().visuals;
@@ -3258,9 +3282,12 @@ impl BlockEditor for InfiniteCanvasEditor {
             return false;
         };
         let entities = canvas.entities().to_vec();
+        let preview_region = canvas
+            .preview_region()
+            .unwrap_or_else(|| preview_region_for_entities(&entities));
         drop(canvas);
 
-        let intrinsic = canvas_intrinsic_size(&entities);
+        let intrinsic = Vec2::new(preview_region.size.x, preview_region.size.y);
         let width = context.corners[0].distance(context.corners[1]);
         let height = context.corners[0].distance(context.corners[3]);
         self.render_scale = (width / intrinsic.x)
@@ -3272,7 +3299,11 @@ impl BlockEditor for InfiniteCanvasEditor {
                 .iter()
                 .fold(Vec2::ZERO, |center, corner| center + corner.to_vec2())
                 / context.corners.len() as f32;
-        let rect = Rect::from_center_size(center, Vec2::new(width, height));
+        let rect = Rect::from_center_size(
+            center
+                - Vec2::new(preview_region.center.x, preview_region.center.y) * self.render_scale,
+            Vec2::new(width, height),
+        );
         let dependencies = self.dependencies.read();
         Self::ensure_dependency_editors(&entities, &dependencies, editors);
         let dependency_details = dependencies
@@ -3324,9 +3355,16 @@ impl BlockEditor for InfiniteCanvasEditor {
         }
     }
 
+    fn direct_editor_fills_viewport(&self) -> bool {
+        true
+    }
+
     fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
         let canvas = self.block.read()?;
-        Some(canvas_intrinsic_size(canvas.entities()))
+        let region = canvas
+            .preview_region()
+            .unwrap_or_else(|| preview_region_for_entities(canvas.entities()));
+        Some(Vec2::new(region.size.x, region.size.y))
     }
 
     fn direct_editor_top_bar(
@@ -3428,6 +3466,19 @@ impl BlockEditor for InfiniteCanvasEditor {
         None
     }
 
+    fn embedded_direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        scale: f32,
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        let previous = viewport.replace_content_rect(None);
+        let action = self.direct_editor_ui(ui, editors, scale, viewport);
+        viewport.replace_content_rect(previous);
+        action
+    }
+
     fn direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -3468,7 +3519,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         let mut action = None;
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        let canvas_rect = response.rect;
+        let canvas_rect = viewport.content_rect().unwrap_or(response.rect);
         let canvas_clip_rect = ui.clip_rect();
         self.viewport_center = self.screen_to_world(canvas_clip_rect.center(), canvas_rect);
         if std::mem::take(&mut self.fit_selection_requested) {
@@ -3482,8 +3533,8 @@ impl BlockEditor for InfiniteCanvasEditor {
             }
         }
         if self.focused_editor.is_none() {
-            self.import_dropped_images(&response, editors);
-            self.import_clipboard_image(&response, editors);
+            self.import_dropped_images(&response, canvas_rect, editors);
+            self.import_clipboard_image(&response, canvas_rect, editors);
         }
         self.paint(
             &painter,
@@ -3563,6 +3614,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         let (context_layer_move, context_create_block, set_parent, keyboard_action) = self
             .handle_canvas_input(
                 &response,
+                canvas_rect,
                 &entities,
                 editors,
                 &direct_editor_rects,
@@ -3587,9 +3639,8 @@ impl BlockEditor for InfiniteCanvasEditor {
         }
         self.show_picker(ui.ctx(), editors.client());
         if self.focused_editor.is_none() {
-            action = action.or_else(|| {
-                self.selected_block_action(ui.ctx(), response.rect, &entities, editors)
-            });
+            action = action
+                .or_else(|| self.selected_block_action(ui.ctx(), canvas_rect, &entities, editors));
         }
         if self.gesture.is_some() {
             ui.ctx().request_repaint();
@@ -3655,21 +3706,6 @@ fn entity_kind_label(kind: &CanvasEntityKind) -> &'static str {
     }
 }
 
-fn canvas_intrinsic_size(entities: &[CanvasEntity]) -> Vec2 {
-    let bounds = entities.iter().map(entity_bounds).reduce(WorldRect::union);
-    bounds
-        .map_or_else(
-            || Vec2::splat(100.0),
-            |bounds| {
-                Vec2::new(
-                    bounds.min.x.abs().max(bounds.max.x.abs()) * 2.0,
-                    bounds.min.y.abs().max(bounds.max.y.abs()) * 2.0,
-                )
-            },
-        )
-        .max(Vec2::splat(100.0))
-}
-
 fn preview_region_for_entities(entities: &[CanvasEntity]) -> CanvasPreviewRegion {
     let bounds = entities.iter().map(entity_bounds).reduce(WorldRect::union);
     bounds.map_or_else(
@@ -3681,6 +3717,14 @@ fn preview_region_for_entities(entities: &[CanvasEntity]) -> CanvasPreviewRegion
             )
         },
     )
+}
+
+fn preview_region_bounds(region: CanvasPreviewRegion) -> WorldRect {
+    let half = CanvasPoint::new(region.size.x * 0.5, region.size.y * 0.5);
+    WorldRect {
+        min: CanvasPoint::new(region.center.x - half.x, region.center.y - half.y),
+        max: CanvasPoint::new(region.center.x + half.x, region.center.y + half.y),
+    }
 }
 
 fn common_value<T: Copy + PartialEq>(values: impl IntoIterator<Item = T>) -> CommonValue<T> {

@@ -95,7 +95,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Do not paint previews beneath live editors, and move live editor surfaces with transform previews.
 - [x] Make embedded presentation slides fill the playback area with containing black bars and auto-hiding overlay controls.
 - [x] Persist a configurable infinite-canvas preview region and expose its position and size in the inspector.
-- [ ] Render the preview-region outline while editing and use it for preview/sub-editor sizing and clipping; keep root canvas interaction unbounded.
+- [x] Render the preview-region outline while editing and use it for preview/sub-editor sizing and clipping; keep root canvas interaction unbounded.
 - [ ] When an infinite canvas has a preview region, allow nested resizing and propagate the new size into that region.
 
 ## Embedded rendering verification

@@ -95,6 +95,7 @@ pub enum DirectEditorViewportCommand {
 pub struct DirectEditorViewport {
     zoom: f32,
     commands: Vec<DirectEditorViewportCommand>,
+    content_rect: Option<egui::Rect>,
 }
 
 impl DirectEditorViewport {
@@ -102,6 +103,7 @@ impl DirectEditorViewport {
         Self {
             zoom,
             commands: Vec::new(),
+            content_rect: None,
         }
     }
 
@@ -124,6 +126,14 @@ impl DirectEditorViewport {
 
     pub fn drain(&mut self) -> impl Iterator<Item = DirectEditorViewportCommand> + '_ {
         self.commands.drain(..)
+    }
+
+    pub fn content_rect(&self) -> Option<egui::Rect> {
+        self.content_rect
+    }
+
+    pub fn replace_content_rect(&mut self, rect: Option<egui::Rect>) -> Option<egui::Rect> {
+        std::mem::replace(&mut self.content_rect, rect)
     }
 }
 
@@ -389,6 +399,9 @@ pub trait BlockEditor {
     fn direct_editor_resize(&self) -> DirectEditorResize {
         DirectEditorResize::None
     }
+    fn direct_editor_fills_viewport(&self) -> bool {
+        false
+    }
     fn direct_editor_intrinsic_size(
         &mut self,
         _editors: &mut EditorAccess<'_>,
@@ -551,16 +564,22 @@ pub fn direct_editor_tab_ui(
             viewport_rect.center() + viewport_state.pan,
             transformed_size,
         );
+        viewport.replace_content_rect(Some(content_rect));
+        let editor_rect = if editor.direct_editor_fills_viewport() {
+            viewport_rect
+        } else {
+            content_rect
+        };
         let next_action = ui
             .new_child(
                 egui::UiBuilder::new()
                     .id_salt(("direct-editor-tab-content", id))
-                    .max_rect(content_rect)
+                    .max_rect(editor_rect)
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             )
             .scope(|ui| {
                 ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
-                ui.set_min_size(transformed_size);
+                ui.set_min_size(editor_rect.size());
                 editor.direct_editor_ui(ui, editors, viewport_state.zoom, &mut viewport)
             })
             .inner;
