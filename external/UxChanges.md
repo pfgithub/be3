@@ -87,5 +87,5 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Direct editor verification
 
-- [ ] Run `cargo fmt` and `cargo nextest run` after every direct-editor change.
-- [ ] Confirm every direct-editor item has its own successful commit and the worktree is clean.
+- [x] Run `cargo fmt` and `cargo nextest run` after every direct-editor change.
+- [x] Confirm every direct-editor item has its own successful commit and the worktree is clean.
