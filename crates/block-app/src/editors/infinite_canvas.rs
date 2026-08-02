@@ -1171,25 +1171,26 @@ impl InfiniteCanvasEditor {
                     } else if let Some(id) = self.entity_at(entities, world) {
                         let entity = entities.iter().find(|entity| entity.id == id).unwrap();
                         if matches!(entity.kind, CanvasEntityKind::DirectEditor { .. }) {
-                            let selected_border = self.selection.contains(&id)
-                                && point_near_bounds(
-                                    entity_bounds(entity),
-                                    world,
-                                    HIT_RADIUS / self.render_scale,
-                                );
-                            let title_bar = direct_editor_layout(entity)
-                                .is_some_and(|layout| layout.title_bar.contains(world));
-                            self.selection.clear();
-                            if selected_border || title_bar {
+                            let content = direct_editor_layout(entity)
+                                .is_some_and(|layout| layout.content.contains(world));
+                            if content {
+                                self.focused_editor = Some(id);
+                                self.gesture = None;
+                            } else if response.ctx.input(|input| input.modifiers.shift) {
+                                if !self.selection.insert(id) {
+                                    self.selection.remove(&id);
+                                }
+                                self.gesture = None;
+                            } else {
+                                if !self.selection.contains(&id) {
+                                    self.selection.clear();
+                                }
                                 self.selection.insert(id);
                                 self.gesture = Some(Gesture::Move {
                                     start: world,
                                     current: world,
                                     originals: self.selected_entities(entities),
                                 });
-                            } else {
-                                self.focused_editor = Some(id);
-                                self.gesture = None;
                             }
                             return (layer_move, create_block, set_parent);
                         }
@@ -2224,14 +2225,6 @@ fn resize_handle_at(
             (editor.world_to_screen(point, rect).distance(pointer) <= HANDLE_RADIUS + 3.0)
                 .then_some(handle)
         })
-}
-
-fn point_near_bounds(bounds: WorldRect, point: CanvasPoint, radius: f32) -> bool {
-    bounds.contains(point)
-        && ((point.x - bounds.min.x).abs() <= radius
-            || (point.x - bounds.max.x).abs() <= radius
-            || (point.y - bounds.min.y).abs() <= radius
-            || (point.y - bounds.max.y).abs() <= radius)
 }
 
 fn resize_handles(bounds: WorldRect) -> [(ResizeHandle, CanvasPoint); 8] {
