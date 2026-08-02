@@ -638,6 +638,35 @@ impl InfiniteCanvasEditor {
         }
     }
 
+    fn can_reorder(&self, entities: &[CanvasEntity], movement: CanvasLayerMove) -> bool {
+        let selected = entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+            .map(|entity| entity.id)
+            .collect::<HashSet<_>>();
+        if selected.is_empty() {
+            return false;
+        }
+        match movement {
+            CanvasLayerMove::BringToFront | CanvasLayerMove::ForwardOne => {
+                entities.iter().enumerate().any(|(index, entity)| {
+                    selected.contains(&entity.id)
+                        && entities[index + 1..]
+                            .iter()
+                            .any(|later| !selected.contains(&later.id))
+                })
+            }
+            CanvasLayerMove::BackOne | CanvasLayerMove::SendToBack => {
+                entities.iter().enumerate().any(|(index, entity)| {
+                    selected.contains(&entity.id)
+                        && entities[..index]
+                            .iter()
+                            .any(|earlier| !selected.contains(&earlier.id))
+                })
+            }
+        }
+    }
+
     #[cfg(not(target_os = "android"))]
     fn copy_selection_to_clipboard(&mut self, entities: &[CanvasEntity]) -> bool {
         let entities = self.selected_entities(entities);
@@ -1457,11 +1486,17 @@ impl InfiniteCanvasEditor {
                 ui.horizontal(|ui| {
                     for (label, layer_move) in [
                         ("Back", CanvasLayerMove::SendToBack),
-                        ("−1", CanvasLayerMove::BackOne),
+                        ("-1", CanvasLayerMove::BackOne),
                         ("+1", CanvasLayerMove::ForwardOne),
                         ("Front", CanvasLayerMove::BringToFront),
                     ] {
-                        if ui.small_button(label).clicked() {
+                        if ui
+                            .add_enabled(
+                                self.can_reorder(entities, layer_move),
+                                egui::Button::new(label).small(),
+                            )
+                            .clicked()
+                        {
                             movement = Some(layer_move);
                         }
                     }
@@ -2236,7 +2271,13 @@ impl InfiniteCanvasEditor {
                     ("Backward", CanvasLayerMove::BackOne),
                     ("Send to back", CanvasLayerMove::SendToBack),
                 ] {
-                    if ui.button(label).clicked() {
+                    if ui
+                        .add_enabled(
+                            self.can_reorder(entities, movement),
+                            egui::Button::new(label),
+                        )
+                        .clicked()
+                    {
                         layer_move = Some(movement);
                         ui.close();
                     }

@@ -43,7 +43,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Make the Add context menu match the toolbar, including text, pen/freehand, image, and blocks.
 - [x] Add a compact toolbar Actions menu for common selection and clipboard commands.
 - [x] Reorganize the inspector into collapsible Transform, Appearance/type-specific, Arrange, and Block sections with object-type labels and compact layer controls.
-- [ ] Disable layer actions that cannot change the current order and use consistent Forward/Backward wording.
+- [x] Disable layer actions that cannot change the current order and use consistent Forward/Backward wording.
 - [ ] Coalesce each inspector slider or drag into one undo history step.
 - [x] Support copying, cutting, and pasting canvas entities with fresh entity/group IDs and safe offsets.
 
