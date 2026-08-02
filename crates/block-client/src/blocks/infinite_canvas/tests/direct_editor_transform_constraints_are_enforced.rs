@@ -22,6 +22,7 @@ fn direct_editor_transform_constraints_are_enforced() {
         },
         style: CanvasEntityStyle::default(),
         group_id: None,
+        locked: false,
     };
 
     InfiniteCanvas::apply_operation(&mut canvas, &InfiniteCanvasOperation::Add { entity });

@@ -12,6 +12,7 @@ fn block_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
         kind: CanvasEntityKind::Block { block_id },
         style: CanvasEntityStyle::default(),
         group_id: None,
+        locked: false,
     }
 }
 
@@ -25,6 +26,7 @@ fn direct_editor_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
         },
         style: CanvasEntityStyle::default(),
         group_id: None,
+        locked: false,
     }
 }
 

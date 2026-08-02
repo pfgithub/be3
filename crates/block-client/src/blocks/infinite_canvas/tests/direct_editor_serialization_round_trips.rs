@@ -20,6 +20,7 @@ fn direct_editor_serialization_round_trips() {
             },
             style: CanvasEntityStyle::default(),
             group_id: None,
+            locked: false,
         },
     };
 

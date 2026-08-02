@@ -13,6 +13,7 @@ fn entity(id: Uuid) -> CanvasEntity {
         kind: CanvasEntityKind::Rectangle,
         style: CanvasEntityStyle::default(),
         group_id: None,
+        locked: false,
     }
 }
 

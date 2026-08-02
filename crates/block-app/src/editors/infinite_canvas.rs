@@ -256,6 +256,20 @@ impl InfiniteCanvasEditor {
             .collect()
     }
 
+    fn selected_unlocked_entities(&self, entities: &[CanvasEntity]) -> Vec<CanvasEntity> {
+        entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+            .cloned()
+            .collect()
+    }
+
+    fn selection_has_unlocked(&self, entities: &[CanvasEntity]) -> bool {
+        entities
+            .iter()
+            .any(|entity| self.selection.contains(&entity.id) && !entity.locked)
+    }
+
     fn entity_selection_ids(entities: &[CanvasEntity], id: Uuid) -> HashSet<Uuid> {
         let group_id = entities
             .iter()
@@ -382,6 +396,19 @@ impl InfiniteCanvasEditor {
         self.record_update(before, after, false);
     }
 
+    fn set_selection_locked(&mut self, entities: &[CanvasEntity], locked: bool) {
+        let before = self.selected_entities(entities);
+        let after = before
+            .iter()
+            .cloned()
+            .map(|mut entity| {
+                entity.locked = locked;
+                entity
+            })
+            .collect();
+        self.record_update(before, after, false);
+    }
+
     fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
         self.add_direct_editor_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
     }
@@ -402,6 +429,7 @@ impl InfiniteCanvasEditor {
             },
             style: CanvasEntityStyle::default(),
             group_id: None,
+            locked: false,
         });
     }
 
@@ -450,7 +478,7 @@ impl InfiniteCanvasEditor {
     ) -> bool {
         entities
             .iter()
-            .filter(|entity| self.selection.contains(&entity.id))
+            .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
             .any(|entity| match entity.kind {
                 CanvasEntityKind::Block { block_id } => {
                     editors.default_preserve_aspect_ratio(block_id)
@@ -469,7 +497,7 @@ impl InfiniteCanvasEditor {
     ) -> bool {
         entities
             .iter()
-            .filter(|entity| self.selection.contains(&entity.id))
+            .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
             .all(|entity| match entity.kind {
                 CanvasEntityKind::DirectEditor { block_id, .. } => editors
                     .direct_editor_capabilities(block_id)
@@ -485,7 +513,7 @@ impl InfiniteCanvasEditor {
     ) -> bool {
         entities
             .iter()
-            .filter(|entity| self.selection.contains(&entity.id))
+            .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
             .any(|entity| match entity.kind {
                 CanvasEntityKind::DirectEditor { block_id, .. } => editors
                     .direct_editor_capabilities(block_id)
@@ -579,6 +607,7 @@ impl InfiniteCanvasEditor {
         ui.separator();
         ui.strong("Transform");
         if let [entity] = selected.as_slice() {
+            let transform_enabled = !entity.locked;
             let mut updated = (*entity).clone();
             let mut changed = false;
             egui::Grid::new("canvas-transform-fields")
@@ -586,11 +615,17 @@ impl InfiniteCanvasEditor {
                 .show(ui, |ui| {
                     ui.label("X");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut updated.transform.center.x).speed(1.0))
+                        .add_enabled(
+                            transform_enabled,
+                            egui::DragValue::new(&mut updated.transform.center.x).speed(1.0),
+                        )
                         .changed();
                     ui.label("Y");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut updated.transform.center.y).speed(1.0))
+                        .add_enabled(
+                            transform_enabled,
+                            egui::DragValue::new(&mut updated.transform.center.y).speed(1.0),
+                        )
                         .changed();
                     ui.end_row();
 
@@ -599,7 +634,8 @@ impl InfiniteCanvasEditor {
                     let mut height = original_size.y;
                     ui.label("W");
                     let width_changed = ui
-                        .add(
+                        .add_enabled(
+                            transform_enabled,
                             egui::DragValue::new(&mut width)
                                 .speed(1.0)
                                 .range(MIN_SIZE..=f32::INFINITY),
@@ -607,7 +643,8 @@ impl InfiniteCanvasEditor {
                         .changed();
                     ui.label("H");
                     let height_changed = ui
-                        .add(
+                        .add_enabled(
+                            transform_enabled,
                             egui::DragValue::new(&mut height)
                                 .speed(1.0)
                                 .range(MIN_SIZE..=f32::INFINITY),
@@ -642,7 +679,7 @@ impl InfiniteCanvasEditor {
                     let mut degrees = updated.transform.rotation.to_degrees();
                     ui.label("Rotation");
                     let rotation = ui.add_enabled(
-                        self.selection_allows_rotation(entities, editors),
+                        transform_enabled && self.selection_allows_rotation(entities, editors),
                         egui::DragValue::new(&mut degrees).speed(1.0).suffix("°"),
                     );
                     if rotation.changed() {
@@ -893,6 +930,22 @@ impl InfiniteCanvasEditor {
                 .clicked()
             {
                 self.ungroup_selection(entities);
+            }
+        });
+        let can_lock = selected.iter().any(|entity| !entity.locked);
+        let can_unlock = selected.iter().any(|entity| entity.locked);
+        ui.columns(2, |columns| {
+            if columns[0]
+                .add_enabled(can_lock, egui::Button::new("Lock"))
+                .clicked()
+            {
+                self.set_selection_locked(entities, true);
+            }
+            if columns[1]
+                .add_enabled(can_unlock, egui::Button::new("Unlock"))
+                .clicked()
+            {
+                self.set_selection_locked(entities, false);
             }
         });
         movement
@@ -1227,7 +1280,8 @@ impl InfiniteCanvasEditor {
             Tool::Block => egui::CursorIcon::Copy,
             Tool::Select => {
                 let bounds = self.selected_bounds(entities);
-                if self.selection_allows_rotation(entities, editors)
+                if self.selection_has_unlocked(entities)
+                    && self.selection_allows_rotation(entities, editors)
                     && bounds.is_some_and(|bounds| {
                         rotate_handle_at(self, bounds, response.rect)
                             .distance(self.world_to_screen(world, response.rect))
@@ -1235,8 +1289,11 @@ impl InfiniteCanvasEditor {
                     })
                 {
                     egui::CursorIcon::Grab
-                } else if let Some(handle) =
-                    bounds.and_then(|bounds| resize_handle_at(self, bounds, response.rect, world))
+                } else if let Some(handle) = self
+                    .selection_has_unlocked(entities)
+                    .then(|| bounds)
+                    .flatten()
+                    .and_then(|bounds| resize_handle_at(self, bounds, response.rect, world))
                 {
                     match (handle.x, handle.y) {
                         (0, _) => egui::CursorIcon::ResizeVertical,
@@ -1346,7 +1403,7 @@ impl InfiniteCanvasEditor {
                 }
             });
             if let Some(nudge) = nudge {
-                let before = self.selected_entities(entities);
+                let before = self.selected_unlocked_entities(entities);
                 let after = before
                     .iter()
                     .cloned()
@@ -1392,8 +1449,16 @@ impl InfiniteCanvasEditor {
             && !self.selection.is_empty()
             && keyboard_available
         {
-            let ids = self.selection.drain().collect::<Vec<_>>();
-            self.record_action(InfiniteCanvasOperation::Remove { ids });
+            let ids = entities
+                .iter()
+                .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+                .map(|entity| entity.id)
+                .collect::<Vec<_>>();
+            if !ids.is_empty() {
+                let removed = ids.iter().copied().collect::<HashSet<_>>();
+                self.selection.retain(|id| !removed.contains(id));
+                self.record_action(InfiniteCanvasOperation::Remove { ids });
+            }
         }
 
         let pointer = response
@@ -1480,6 +1545,7 @@ impl InfiniteCanvasEditor {
                                 kind: CanvasEntityKind::Rectangle,
                                 style: CanvasEntityStyle::default(),
                                 group_id: None,
+                                locked: false,
                             });
                         }
                         self.tool = Tool::Select;
@@ -1497,6 +1563,7 @@ impl InfiniteCanvasEditor {
                                 kind: CanvasEntityKind::Line,
                                 style: CanvasEntityStyle::default(),
                                 group_id: None,
+                                locked: false,
                             });
                         }
                         self.tool = Tool::Select;
@@ -1553,9 +1620,13 @@ impl InfiniteCanvasEditor {
             match self.tool {
                 Tool::Select => {
                     let selected_bounds = self.selected_bounds(entities);
-                    let handle = selected_bounds
+                    let has_unlocked = self.selection_has_unlocked(entities);
+                    let handle = has_unlocked
+                        .then(|| selected_bounds)
+                        .flatten()
                         .and_then(|bounds| resize_handle_at(self, bounds, response.rect, world));
-                    let rotate = self.selection_allows_rotation(entities, editors)
+                    let rotate = has_unlocked
+                        && self.selection_allows_rotation(entities, editors)
                         && selected_bounds.is_some_and(|bounds| {
                             rotate_handle_at(self, bounds, response.rect)
                                 .distance(self.world_to_screen(world, response.rect))
@@ -1568,7 +1639,7 @@ impl InfiniteCanvasEditor {
                             bounds,
                             start_angle: (world.y - center.y).atan2(world.x - center.x),
                             current: world,
-                            originals: self.selected_entities(entities),
+                            originals: self.selected_unlocked_entities(entities),
                             snap_angle: response.ctx.input(|input| input.modifiers.shift),
                         });
                     } else if let (Some(bounds), Some(handle)) = (selected_bounds, handle) {
@@ -1583,7 +1654,7 @@ impl InfiniteCanvasEditor {
                             handle,
                             bounds,
                             current: world,
-                            originals: self.selected_entities(entities),
+                            originals: self.selected_unlocked_entities(entities),
                             default_preserve_aspect_ratio,
                             force_preserve_aspect_ratio,
                             preserve_aspect_ratio,
@@ -1604,7 +1675,7 @@ impl InfiniteCanvasEditor {
                                 self.gesture = Some(Gesture::Move {
                                     start: world,
                                     current: world,
-                                    originals: self.selected_entities(entities),
+                                    originals: self.selected_unlocked_entities(entities),
                                 });
                             }
                             return (layer_move, create_block, set_parent, keyboard_action);
@@ -1618,7 +1689,7 @@ impl InfiniteCanvasEditor {
                             self.gesture = Some(Gesture::Move {
                                 start: world,
                                 current: world,
-                                originals: self.selected_entities(entities),
+                                originals: self.selected_unlocked_entities(entities),
                             });
                         }
                     } else {
@@ -1646,6 +1717,7 @@ impl InfiniteCanvasEditor {
                         },
                         style: CanvasEntityStyle::default(),
                         group_id: None,
+                        locked: false,
                     });
                     self.tool = Tool::Select;
                 }
@@ -1753,6 +1825,7 @@ impl InfiniteCanvasEditor {
                             kind: CanvasEntityKind::Line,
                             style: CanvasEntityStyle::default(),
                             group_id: None,
+                            locked: false,
                         })
                     }
                     Tool::Rectangle => {
@@ -1770,6 +1843,7 @@ impl InfiniteCanvasEditor {
                             kind: CanvasEntityKind::Rectangle,
                             style: CanvasEntityStyle::default(),
                             group_id: None,
+                            locked: false,
                         })
                     }
                     _ => None,
@@ -1912,7 +1986,9 @@ impl InfiniteCanvasEditor {
                 painter,
                 rect,
                 bounds,
-                self.selection_allows_rotation(entities, editors),
+                self.selection_has_unlocked(entities),
+                self.selection_has_unlocked(entities)
+                    && self.selection_allows_rotation(entities, editors),
             );
         }
     }
@@ -2145,7 +2221,11 @@ impl BlockEditor for InfiniteCanvasEditor {
         }
         if let Some(movement) = self.show_inspector(ui, &entities, editors, true) {
             self.record_action(InfiniteCanvasOperation::Reorder {
-                ids: self.selection.iter().copied().collect(),
+                ids: entities
+                    .iter()
+                    .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+                    .map(|entity| entity.id)
+                    .collect(),
                 movement,
             });
         }
@@ -2254,7 +2334,11 @@ impl BlockEditor for InfiniteCanvasEditor {
             );
         if let Some(movement) = context_layer_move {
             let operation = InfiniteCanvasOperation::Reorder {
-                ids: self.selection.iter().copied().collect(),
+                ids: entities
+                    .iter()
+                    .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+                    .map(|entity| entity.id)
+                    .collect(),
                 movement,
             };
             self.record_action(operation);
@@ -2958,6 +3042,7 @@ fn pen_entity(points: Vec<CanvasPoint>) -> CanvasEntity {
         kind: CanvasEntityKind::Pen { points },
         style: CanvasEntityStyle::default(),
         group_id: None,
+        locked: false,
     }
 }
 
@@ -3259,6 +3344,7 @@ fn paint_selection(
     painter: &egui::Painter,
     rect: Rect,
     bounds: WorldRect,
+    allow_transform: bool,
     allow_rotation: bool,
 ) {
     let screen = screen_rect(editor, bounds, rect);
@@ -3268,12 +3354,14 @@ fn paint_selection(
         Stroke::new(1.0, Color32::LIGHT_BLUE),
         egui::StrokeKind::Outside,
     );
-    for (_, point) in resize_handles(bounds) {
-        painter.circle_filled(
-            editor.world_to_screen(point, rect),
-            HANDLE_RADIUS,
-            Color32::LIGHT_BLUE,
-        );
+    if allow_transform {
+        for (_, point) in resize_handles(bounds) {
+            painter.circle_filled(
+                editor.world_to_screen(point, rect),
+                HANDLE_RADIUS,
+                Color32::LIGHT_BLUE,
+            );
+        }
     }
     if allow_rotation {
         let rotate = rotate_handle_at(editor, bounds, rect);
