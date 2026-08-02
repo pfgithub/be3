@@ -22,19 +22,6 @@ pub struct BlockPickerResult {
     pub block_type: Uuid,
     pub author: Uuid,
     pub name: String,
-    imported_image: Option<ImportedImage>,
-}
-
-pub struct ImportedImage {
-    pub source_name: String,
-    pub width: u32,
-    pub height: u32,
-}
-
-impl BlockPickerResult {
-    pub fn imported_image(&self) -> Option<&ImportedImage> {
-        self.imported_image.as_ref()
-    }
 }
 
 pub struct BlockPicker {
@@ -201,7 +188,6 @@ impl BlockPicker {
                     block_type: block.block_type,
                     author: block.author,
                     name: block.name,
-                    imported_image: None,
                 });
             }
         }
@@ -229,7 +215,6 @@ impl BlockPicker {
             block_type,
             author,
             name,
-            imported_image: None,
         })
     }
 
@@ -246,11 +231,6 @@ impl BlockPicker {
                 return None;
             }
         };
-        let imported_image = ImportedImage {
-            source_name: image.source_name().to_owned(),
-            width: image.width(),
-            height: image.height(),
-        };
         let block = editors.client().create_block(image);
         block.set_parent(parent);
         let id = block.id();
@@ -262,7 +242,6 @@ impl BlockPicker {
             block_type: Image::TYPE_ID,
             author,
             name,
-            imported_image: Some(imported_image),
         })
     }
 

@@ -59,7 +59,6 @@ const HIT_RADIUS: f32 = 7.0;
 const HANDLE_RADIUS: f32 = 5.0;
 const ROTATE_OFFSET: f32 = 28.0;
 const ZOOM_STEP: f32 = 1.25;
-const MAX_IMPORTED_IMAGE_SIZE: f32 = 600.0;
 const IMPORT_CASCADE_OFFSET: f32 = 24.0;
 const DIRECT_EDITOR_PADDING: f32 = 12.0;
 const DIRECT_EDITOR_TITLE_HEIGHT: f32 = 28.0;
@@ -889,26 +888,14 @@ impl InfiniteCanvasEditor {
         });
     }
 
-    fn imported_image_size(image: &ImageBlock) -> CanvasPoint {
-        Self::imported_image_dimensions(image.width(), image.height())
-    }
-
-    fn imported_image_dimensions(width: u32, height: u32) -> CanvasPoint {
-        let width = width as f32;
-        let height = height as f32;
-        let scale = (MAX_IMPORTED_IMAGE_SIZE / width.max(height)).min(1.0);
-        CanvasPoint::new(width * scale, height * scale)
-    }
-
     fn add_imported_image(
         &mut self,
         editors: &mut EditorAccess<'_>,
         image: ImageBlock,
         center: CanvasPoint,
     ) {
-        let size = Self::imported_image_size(&image);
         let id = create_image_block(editors, image, self.block.id());
-        self.add_direct_editor_sized(id, center, size);
+        self.add_direct_editor(id, center);
     }
 
     fn ensure_dependency_editors(
@@ -2023,12 +2010,7 @@ impl InfiniteCanvasEditor {
                 .handle(context, editors, BlockParent::Uuid(self.block.id()))
         {
             if let Some(center) = self.pending_block_center.take() {
-                if let Some(image) = block.imported_image() {
-                    let size = Self::imported_image_dimensions(image.width, image.height);
-                    self.add_direct_editor_sized(block.id, center, size);
-                } else {
-                    self.add_direct_editor(block.id, center);
-                }
+                self.add_direct_editor(block.id, center);
                 self.tool = Tool::Select;
             } else {
                 self.armed_block = Some(CachedBlock {

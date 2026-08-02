@@ -30,7 +30,7 @@ use text_editor_core::{
 };
 use uuid::Uuid;
 
-use crate::block_picker::{BlockPicker, BlockPickerResult};
+use crate::block_picker::BlockPicker;
 
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
@@ -264,12 +264,6 @@ impl TextEditor {
         }
     }
 
-    fn insert_embed(&mut self, id: Uuid) {
-        let directive = block_url(id);
-        self.core
-            .execute_command(EditorCommand::InsertText(directive.as_bytes()));
-    }
-
     fn insert_image_embed(&mut self, id: Uuid, source_name: &str) {
         let directive = image_embed_directive(
             id,
@@ -314,16 +308,8 @@ impl TextEditor {
         let result = self
             .picker
             .handle(context, editors, BlockParent::Uuid(self.block.id()))?;
-        self.insert_picker_result(&result);
+        self.insert_image_embed(result.id, &result.name);
         Some(result.id)
-    }
-
-    fn insert_picker_result(&mut self, result: &BlockPickerResult) {
-        if let Some(image) = result.imported_image() {
-            self.insert_image_embed(result.id, &image.source_name);
-        } else {
-            self.insert_embed(result.id);
-        }
     }
 
     fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
@@ -1155,7 +1141,7 @@ impl BlockEditor for TextEditor {
                         .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
                     self.core
                         .execute_command(EditorCommand::SetCursorPosition(position));
-                    self.insert_embed(dragged.reference.id);
+                    self.insert_image_embed(dragged.reference.id, &dragged.reference.name);
                     reveal_cursor = true;
                 }
             }
