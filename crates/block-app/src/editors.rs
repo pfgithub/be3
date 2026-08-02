@@ -541,9 +541,11 @@ fn handle_direct_editor_background_input(
     else {
         return;
     };
-    let (scroll, panning, delta) = context.input(|input| {
+    let (scroll, zoom_delta, command, panning, delta) = context.input(|input| {
         (
-            input.smooth_scroll_delta.y,
+            input.smooth_scroll_delta,
+            input.zoom_delta(),
+            input.modifiers.command,
             input.pointer.button_down(egui::PointerButton::Middle)
                 || (input.key_down(egui::Key::Space)
                     && input.pointer.button_down(egui::PointerButton::Primary)),
@@ -553,15 +555,24 @@ fn handle_direct_editor_background_input(
     if panning {
         viewport.pan += delta;
     }
-    if scroll != 0.0 {
+    let zoom_factor = if (zoom_delta - 1.0).abs() > f32::EPSILON {
+        Some(zoom_delta)
+    } else if command && scroll.y != 0.0 {
+        Some((scroll.y * 0.002).exp())
+    } else {
+        None
+    };
+    if let Some(zoom_factor) = zoom_factor {
         let old_zoom = viewport.zoom;
-        let new_zoom = (old_zoom * (scroll * 0.002).exp())
-            .clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+        let new_zoom =
+            (old_zoom * zoom_factor).clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
         if new_zoom != old_zoom {
             viewport.pan = (pointer - viewport_rect.center())
                 - ((pointer - viewport_rect.center()) - viewport.pan) * (new_zoom / old_zoom);
             viewport.zoom = new_zoom;
         }
+    } else if scroll != egui::Vec2::ZERO {
+        viewport.pan += scroll;
     }
 }
 

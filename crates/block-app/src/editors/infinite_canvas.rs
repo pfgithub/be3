@@ -935,9 +935,19 @@ impl InfiniteCanvasEditor {
     ) -> bool {
         if response.hovered() {
             if let Some(pointer) = response.ctx.pointer_hover_pos() {
-                let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
-                if scroll != 0.0 {
-                    viewport.change_zoom((scroll * 0.002).exp(), Some(pointer));
+                let (scroll, zoom_delta, command) = response.ctx.input(|input| {
+                    (
+                        input.smooth_scroll_delta,
+                        input.zoom_delta(),
+                        input.modifiers.command,
+                    )
+                });
+                if (zoom_delta - 1.0).abs() > f32::EPSILON {
+                    viewport.change_zoom(zoom_delta, Some(pointer));
+                } else if command && scroll.y != 0.0 {
+                    viewport.change_zoom((scroll.y * 0.002).exp(), Some(pointer));
+                } else if scroll != Vec2::ZERO {
+                    viewport.pan(scroll);
                 }
             }
         }
