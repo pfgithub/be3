@@ -3042,6 +3042,7 @@ impl InfiniteCanvasEditor {
                 entity,
                 dependency_details,
                 editors,
+                true,
                 1.0,
             );
         }
@@ -3056,6 +3057,7 @@ impl InfiniteCanvasEditor {
                 entity,
                 dependency_details,
                 editors,
+                true,
                 1.0,
             );
         }
@@ -3335,6 +3337,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                 entity,
                 &dependency_details,
                 editors,
+                false,
                 context.opacity,
             );
         }
@@ -4490,6 +4493,7 @@ fn paint_entity(
     entity: &CanvasEntity,
     dependency_details: &HashMap<Uuid, (String, Uuid)>,
     editors: &mut EditorAccess<'_>,
+    live_editor_overlay: bool,
     parent_opacity: f32,
 ) {
     let auto = painter.ctx().global_style().visuals.text_color();
@@ -4659,9 +4663,10 @@ fn paint_entity(
                 content.right_bottom(),
                 content.left_bottom(),
             ];
-            let preview = editors.direct_editor_interaction(*block_id)
-                == Some(DirectEditorInteraction::Preview)
-                && editor.focused_editor != Some(entity.id);
+            let preview = !live_editor_overlay
+                || (editors.direct_editor_interaction(*block_id)
+                    == Some(DirectEditorInteraction::Preview)
+                    && editor.focused_editor != Some(entity.id));
             if preview
                 && !editors.render(
                     *block_id,
