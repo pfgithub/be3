@@ -2171,6 +2171,17 @@ fn hit_entity(entity: &CanvasEntity, point: CanvasPoint, radius: f32) -> bool {
                 local_to_world(entity.transform, segment[1]),
             ) <= radius
         }),
+        CanvasEntityKind::Rectangle if entity.style.fill.is_none() => {
+            let local = world_to_local(entity.transform, point);
+            let hit_radius = radius + entity.style.line_width * 0.5;
+            let x_radius = hit_radius / entity.transform.size.x.max(MIN_SIZE);
+            let y_radius = hit_radius / entity.transform.size.y.max(MIN_SIZE);
+            let near_vertical_edge =
+                (local.x.abs() - 0.5).abs() <= x_radius && local.y.abs() <= 0.5 + y_radius;
+            let near_horizontal_edge =
+                (local.y.abs() - 0.5).abs() <= y_radius && local.x.abs() <= 0.5 + x_radius;
+            near_vertical_edge || near_horizontal_edge
+        }
         _ => {
             let local = world_to_local(entity.transform, point);
             local.x.abs() <= 0.5 + radius / entity.transform.size.x.max(MIN_SIZE)
