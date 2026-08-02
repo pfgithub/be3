@@ -27,7 +27,8 @@ use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::{create_image_block, pick_image_file},
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
+    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
+    SidebarDragPayload,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -949,6 +950,38 @@ impl InfiniteCanvasEditor {
             })
     }
 
+    fn selection_resize(
+        &self,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) -> DirectEditorResize {
+        let selected = entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+            .collect::<Vec<_>>();
+        if selected.is_empty() {
+            return DirectEditorResize::None;
+        }
+        let mut horizontal = true;
+        let mut vertical = true;
+        for entity in selected {
+            let resize = match entity.kind {
+                CanvasEntityKind::DirectEditor { block_id, .. } => editors
+                    .direct_editor_resize(block_id)
+                    .unwrap_or(DirectEditorResize::None),
+                _ => DirectEditorResize::Both,
+            };
+            horizontal &= resize.horizontal();
+            vertical &= resize.vertical();
+        }
+        match (horizontal, vertical) {
+            (true, true) => DirectEditorResize::Both,
+            (true, false) => DirectEditorResize::Horizontal,
+            (false, true) => DirectEditorResize::Vertical,
+            (false, false) => DirectEditorResize::None,
+        }
+    }
+
     fn selection_forces_proportional(
         &self,
         entities: &[CanvasEntity],
@@ -979,7 +1012,22 @@ impl InfiniteCanvasEditor {
             let Some(intrinsic) = editors.direct_editor_intrinsic_size(block_id) else {
                 continue;
             };
-            let desired = direct_editor_entity_size(intrinsic, scale);
+            let intrinsic_size = direct_editor_entity_size(intrinsic, scale);
+            let resize = editors
+                .direct_editor_resize(block_id)
+                .unwrap_or(DirectEditorResize::None);
+            let desired = CanvasPoint::new(
+                if resize.horizontal() {
+                    entity.transform.size.x
+                } else {
+                    intrinsic_size.x
+                },
+                if resize.vertical() {
+                    entity.transform.size.y
+                } else {
+                    intrinsic_size.y
+                },
+            );
             if (entity.transform.size.x - desired.x).abs() < 0.01
                 && (entity.transform.size.y - desired.y).abs() < 0.01
                 && entity.transform.rotation == 0.0
@@ -1093,6 +1141,12 @@ impl InfiniteCanvasEditor {
             .show(ui, |ui| {
                 if let [entity] = selected.as_slice() {
                     let transform_enabled = !entity.locked;
+                    let resize = match entity.kind {
+                        CanvasEntityKind::DirectEditor { block_id, .. } => editors
+                            .direct_editor_resize(block_id)
+                            .unwrap_or(DirectEditorResize::None),
+                        _ => DirectEditorResize::Both,
+                    };
                     let mut updated = (*entity).clone();
                     let mut changed = false;
                     egui::Grid::new("canvas-transform-fields")
@@ -1122,7 +1176,7 @@ impl InfiniteCanvasEditor {
                             ui.label("W");
                             let width_changed = ui
                                 .add_enabled(
-                                    transform_enabled,
+                                    transform_enabled && resize.horizontal(),
                                     egui::DragValue::new(&mut width)
                                         .speed(1.0)
                                         .range(MIN_SIZE..=f32::INFINITY),
@@ -1131,37 +1185,20 @@ impl InfiniteCanvasEditor {
                             ui.label("H");
                             let height_changed = ui
                                 .add_enabled(
-                                    transform_enabled,
+                                    transform_enabled && resize.vertical(),
                                     egui::DragValue::new(&mut height)
                                         .speed(1.0)
                                         .range(MIN_SIZE..=f32::INFINITY),
                                 )
                                 .changed();
                             ui.end_row();
-                            if let CanvasEntityKind::DirectEditor { scale, .. } = &mut updated.kind
-                            {
-                                let factor = if width_changed {
-                                    width / original_size.x.max(MIN_SIZE)
-                                } else if height_changed {
-                                    height / original_size.y.max(MIN_SIZE)
-                                } else {
-                                    1.0
-                                };
-                                if width_changed || height_changed {
-                                    updated.transform.size.x = original_size.x * factor;
-                                    updated.transform.size.y = original_size.y * factor;
-                                    *scale *= factor;
-                                    changed = true;
-                                }
-                            } else {
-                                if width_changed {
-                                    updated.transform.size.x = width;
-                                    changed = true;
-                                }
-                                if height_changed {
-                                    updated.transform.size.y = height;
-                                    changed = true;
-                                }
+                            if width_changed {
+                                updated.transform.size.x = width;
+                                changed = true;
+                            }
+                            if height_changed {
+                                updated.transform.size.y = height;
+                                changed = true;
                             }
 
                             let mut degrees = updated.transform.rotation.to_degrees();
@@ -1222,6 +1259,45 @@ impl InfiniteCanvasEditor {
                             if let Some(updated) = updated {
                                 self.record_update(vec![(*entity).clone()], vec![updated], true);
                             }
+                        }
+                        if let CanvasEntityKind::DirectEditor { scale, .. } = entity.kind {
+                            let mut updated_scale = scale;
+                            ui.horizontal(|ui| {
+                                ui.label("Scale");
+                                if ui
+                                    .add_enabled(
+                                        !entity.locked,
+                                        egui::DragValue::new(&mut updated_scale)
+                                            .range(0.1..=8.0)
+                                            .speed(0.01)
+                                            .custom_formatter(|value, _| {
+                                                format!("{:.0}%", value * 100.0)
+                                            })
+                                            .custom_parser(|text| {
+                                                text.trim_end_matches('%')
+                                                    .parse::<f64>()
+                                                    .ok()
+                                                    .map(|value| value / 100.0)
+                                            }),
+                                    )
+                                    .changed()
+                                {
+                                    let factor = updated_scale / scale.max(f32::EPSILON);
+                                    let mut updated = (*entity).clone();
+                                    if let CanvasEntityKind::DirectEditor { scale, .. } =
+                                        &mut updated.kind
+                                    {
+                                        *scale = updated_scale;
+                                    }
+                                    updated.transform.size.x *= factor;
+                                    updated.transform.size.y *= factor;
+                                    self.record_update(
+                                        vec![(*entity).clone()],
+                                        vec![updated],
+                                        true,
+                                    );
+                                }
+                            });
                         }
                     });
             }
@@ -2025,6 +2101,7 @@ impl InfiniteCanvasEditor {
             Tool::Block => egui::CursorIcon::Copy,
             Tool::Select => {
                 let frame = self.selected_frame(entities);
+                let resize = self.selection_resize(entities, editors);
                 if self.selection_has_unlocked(entities)
                     && self.selection_allows_rotation(entities, editors)
                     && frame.is_some_and(|frame| {
@@ -2038,7 +2115,7 @@ impl InfiniteCanvasEditor {
                     .selection_has_unlocked(entities)
                     .then(|| frame)
                     .flatten()
-                    .and_then(|frame| resize_handle_at(self, frame, response.rect, world))
+                    .and_then(|frame| resize_handle_at(self, frame, response.rect, world, resize))
                 {
                     match (handle.x, handle.y) {
                         (0, _) => egui::CursorIcon::ResizeVertical,
@@ -2485,10 +2562,13 @@ impl InfiniteCanvasEditor {
                 Tool::Select => {
                     let selected_frame = self.selected_frame(entities);
                     let has_unlocked = self.selection_has_unlocked(entities);
+                    let resize = self.selection_resize(entities, editors);
                     let handle = has_unlocked
                         .then(|| selected_frame)
                         .flatten()
-                        .and_then(|frame| resize_handle_at(self, frame, response.rect, world));
+                        .and_then(|frame| {
+                            resize_handle_at(self, frame, response.rect, world, resize)
+                        });
                     let rotate = has_unlocked
                         && self.selection_allows_rotation(entities, editors)
                         && selected_frame.is_some_and(|frame| {
@@ -2953,7 +3033,7 @@ impl InfiniteCanvasEditor {
                 painter,
                 rect,
                 frame,
-                self.selection_has_unlocked(entities),
+                self.selection_resize(entities, editors),
                 self.selection_has_unlocked(entities)
                     && self.selection_allows_rotation(entities, editors),
             );
@@ -3848,14 +3928,20 @@ fn resize_handle_at(
     frame: SelectionFrame,
     rect: Rect,
     world: CanvasPoint,
+    resize: DirectEditorResize,
 ) -> Option<ResizeHandle> {
     let pointer = editor.world_to_screen(world, rect);
     resize_handles(frame)
         .into_iter()
+        .filter(|(handle, _)| resize_handle_allowed(*handle, resize))
         .find_map(|(handle, point)| {
             (editor.world_to_screen(point, rect).distance(pointer) <= HANDLE_RADIUS + 3.0)
                 .then_some(handle)
         })
+}
+
+fn resize_handle_allowed(handle: ResizeHandle, resize: DirectEditorResize) -> bool {
+    (handle.x == 0 || resize.horizontal()) && (handle.y == 0 || resize.vertical())
 }
 
 fn resize_handles(frame: SelectionFrame) -> [(ResizeHandle, CanvasPoint); 8] {
@@ -4116,9 +4202,6 @@ fn resize_entities_axis(
                 } else {
                     text_style.wrap = true;
                 }
-            }
-            if let CanvasEntityKind::DirectEditor { scale, .. } = &mut entity.kind {
-                *scale = (*scale * scale_x).max(f32::EPSILON);
             }
             entity
         })
@@ -4512,7 +4595,7 @@ fn paint_selection(
     painter: &egui::Painter,
     rect: Rect,
     frame: SelectionFrame,
-    allow_transform: bool,
+    resize: DirectEditorResize,
     allow_rotation: bool,
 ) {
     let corners = [
@@ -4526,8 +4609,11 @@ fn paint_selection(
         corners.to_vec(),
         Stroke::new(1.0, Color32::LIGHT_BLUE),
     ));
-    if allow_transform {
-        for (_, point) in resize_handles(frame) {
+    if resize != DirectEditorResize::None {
+        for (handle, point) in resize_handles(frame) {
+            if !resize_handle_allowed(handle, resize) {
+                continue;
+            }
             painter.circle_filled(
                 editor.world_to_screen(point, rect),
                 HANDLE_RADIUS,

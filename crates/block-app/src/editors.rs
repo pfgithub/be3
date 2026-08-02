@@ -63,6 +63,24 @@ pub enum DirectEditorInteraction {
     Live,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectEditorResize {
+    None,
+    Horizontal,
+    Vertical,
+    Both,
+}
+
+impl DirectEditorResize {
+    pub fn horizontal(self) -> bool {
+        matches!(self, Self::Horizontal | Self::Both)
+    }
+
+    pub fn vertical(self) -> bool {
+        matches!(self, Self::Vertical | Self::Both)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum DirectEditorViewportCommand {
     Pan(egui::Vec2),
@@ -203,6 +221,12 @@ impl<'a> EditorAccess<'a> {
         self.editors
             .get(&id)
             .map(|editor| editor.direct_editor_interaction())
+    }
+
+    pub fn direct_editor_resize(&self, id: Uuid) -> Option<DirectEditorResize> {
+        self.editors
+            .get(&id)
+            .map(|editor| editor.direct_editor_resize())
     }
 
     pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
@@ -350,6 +374,9 @@ pub trait BlockEditor {
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities;
     fn direct_editor_interaction(&self) -> DirectEditorInteraction {
         DirectEditorInteraction::Preview
+    }
+    fn direct_editor_resize(&self) -> DirectEditorResize {
+        DirectEditorResize::None
     }
     fn direct_editor_intrinsic_size(
         &mut self,
