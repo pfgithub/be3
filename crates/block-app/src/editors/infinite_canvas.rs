@@ -1883,26 +1883,12 @@ impl InfiniteCanvasEditor {
                         });
                     }
                 }
-                Tool::Line | Tool::Rectangle => {
+                Tool::Line | Tool::Rectangle | Tool::Text => {
                     self.gesture = Some(Gesture::Create {
                         tool: self.tool,
                         start: world,
                         current: world,
                     });
-                }
-                Tool::Text => {
-                    self.add_entity(CanvasEntity {
-                        id: Uuid::new_v4(),
-                        transform: CanvasTransform::new(world, CanvasPoint::new(180.0, 60.0), 0.0),
-                        kind: CanvasEntityKind::Text {
-                            text: "Text".into(),
-                            text_style: CanvasTextStyle::default(),
-                        },
-                        style: CanvasEntityStyle::default(),
-                        group_id: None,
-                        locked: false,
-                    });
-                    self.tool = Tool::Select;
                 }
                 Tool::Pen => {
                     self.gesture = Some(Gesture::Pen {
@@ -2029,10 +2015,41 @@ impl InfiniteCanvasEditor {
                             locked: false,
                         })
                     }
+                    Tool::Text => {
+                        let bounds = WorldRect::from_points(start, current);
+                        let dragged = distance(start, current) >= MIN_SIZE;
+                        let size = if dragged {
+                            CanvasPoint::new(bounds.size().x.max(60.0), bounds.size().y.max(32.0))
+                        } else {
+                            CanvasPoint::new(180.0, 36.0)
+                        };
+                        Some(CanvasEntity {
+                            id: Uuid::new_v4(),
+                            transform: CanvasTransform::new(
+                                if dragged { bounds.center() } else { start },
+                                size,
+                                0.0,
+                            ),
+                            kind: CanvasEntityKind::Text {
+                                text: String::new(),
+                                text_style: CanvasTextStyle {
+                                    wrap: dragged,
+                                    ..CanvasTextStyle::default()
+                                },
+                            },
+                            style: CanvasEntityStyle::default(),
+                            group_id: None,
+                            locked: false,
+                        })
+                    }
                     _ => None,
                 };
                 if let Some(entity) = entity {
+                    let text = matches!(entity.kind, CanvasEntityKind::Text { .. });
                     self.add_entity(entity);
+                    if text {
+                        self.tool = Tool::Select;
+                    }
                 }
             }
             Gesture::Pen { points } => {
@@ -2154,7 +2171,7 @@ impl InfiniteCanvasEditor {
                         preview_stroke,
                     );
                 }
-                Tool::Rectangle => {
+                Tool::Rectangle | Tool::Text => {
                     let selection = WorldRect::from_points(*start, *current);
                     painter.rect_stroke(
                         screen_rect(self, selection, rect),
