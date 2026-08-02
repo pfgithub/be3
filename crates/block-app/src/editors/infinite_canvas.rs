@@ -2951,6 +2951,43 @@ impl InfiniteCanvasEditor {
                     && self.selection_allows_rotation(entities, editors),
             );
         }
+
+        let tool_icon = match self.tool {
+            Tool::Select => None,
+            Tool::Line => Some(ICON_DIAGONAL_LINE),
+            Tool::Rectangle => Some(ICON_RECTANGLE),
+            Tool::Text => Some(ICON_TEXT_FIELDS),
+            Tool::Pen => Some(ICON_DRAW),
+            Tool::Block => Some(ICON_DATA_OBJECT),
+        };
+        let pointer = painter.ctx().pointer_hover_pos();
+        let panning = painter
+            .ctx()
+            .input(|input| input.key_down(egui::Key::Space));
+        if let (Some(icon), Some(pointer)) = (tool_icon, pointer) {
+            if rect.contains(pointer) && !panning && self.focused_editor.is_none() {
+                let center = pointer + Vec2::new(0.0, 20.0);
+                let badge = Rect::from_center_size(center, Vec2::splat(22.0));
+                let visuals = &painter.ctx().global_style().visuals;
+                painter.rect(
+                    badge,
+                    5.0,
+                    visuals.panel_fill,
+                    visuals.widgets.noninteractive.bg_stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    icon.codepoint,
+                    egui::FontId::new(
+                        16.0,
+                        egui::FontFamily::Name(egui_material_icons::FONT_FAMILY.into()),
+                    ),
+                    visuals.text_color(),
+                );
+            }
+        }
     }
 
     fn selected_frame_with_preview(

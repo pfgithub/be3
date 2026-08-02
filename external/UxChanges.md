@@ -70,7 +70,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Require a marquee selection to contain an entire object before selecting it.
 - [x] Let Ctrl move the starting point and Alt use it as the center while box-selecting or drawing rectangles.
 - [x] Edit canvas text in the inspector, focusing it after placement or a double-click.
-- [ ] Show the active non-selection tool icon beside the pointer.
+- [x] Show the active non-selection tool icon beside the pointer.
 
 ## Additional verification
 
