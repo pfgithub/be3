@@ -26,7 +26,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Add lock and unlock operations and persistence; locked objects must not move, resize, rotate, or delete accidentally.
 - [x] Add Alt-drag duplication.
 - [x] Use rotation-aligned selection bounds and handles for a single rotated selection.
-- [ ] Add multi-selection alignment and distribution controls.
+- [x] Add multi-selection alignment and distribution controls.
 
 ## Text editing
 

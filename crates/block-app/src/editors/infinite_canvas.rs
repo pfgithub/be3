@@ -79,6 +79,16 @@ enum Tool {
     Block,
 }
 
+#[derive(Clone, Copy)]
+enum Alignment {
+    Left,
+    HorizontalCenter,
+    Right,
+    Top,
+    VerticalCenter,
+    Bottom,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct WorldRect {
     min: CanvasPoint,
@@ -472,6 +482,77 @@ impl InfiniteCanvasEditor {
             })
             .collect();
         self.record_update(before, after, false);
+    }
+
+    fn align_selection(&mut self, entities: &[CanvasEntity], alignment: Alignment) {
+        let before = self.selected_unlocked_entities(entities);
+        let Some(bounds) = before.iter().map(entity_bounds).reduce(WorldRect::union) else {
+            return;
+        };
+        let after = before
+            .iter()
+            .cloned()
+            .map(|mut entity| {
+                let entity_bounds = entity_bounds(&entity);
+                let delta = match alignment {
+                    Alignment::Left => CanvasPoint::new(bounds.min.x - entity_bounds.min.x, 0.0),
+                    Alignment::HorizontalCenter => {
+                        CanvasPoint::new(bounds.center().x - entity_bounds.center().x, 0.0)
+                    }
+                    Alignment::Right => CanvasPoint::new(bounds.max.x - entity_bounds.max.x, 0.0),
+                    Alignment::Top => CanvasPoint::new(0.0, bounds.min.y - entity_bounds.min.y),
+                    Alignment::VerticalCenter => {
+                        CanvasPoint::new(0.0, bounds.center().y - entity_bounds.center().y)
+                    }
+                    Alignment::Bottom => CanvasPoint::new(0.0, bounds.max.y - entity_bounds.max.y),
+                };
+                entity.transform.center.x += delta.x;
+                entity.transform.center.y += delta.y;
+                entity
+            })
+            .collect();
+        self.record_update(before, after, false);
+    }
+
+    fn distribute_selection(&mut self, entities: &[CanvasEntity], horizontal: bool) {
+        let before = self.selected_unlocked_entities(entities);
+        if before.len() < 3 {
+            return;
+        }
+        let mut ordered = before.clone();
+        ordered.sort_by(|a, b| {
+            let a = if horizontal {
+                entity_bounds(a).center().x
+            } else {
+                entity_bounds(a).center().y
+            };
+            let b = if horizontal {
+                entity_bounds(b).center().x
+            } else {
+                entity_bounds(b).center().y
+            };
+            a.total_cmp(&b)
+        });
+        let coordinate = |entity: &CanvasEntity| {
+            let center = entity_bounds(entity).center();
+            if horizontal {
+                center.x
+            } else {
+                center.y
+            }
+        };
+        let start = coordinate(&ordered[0]);
+        let end = coordinate(ordered.last().unwrap());
+        let step = (end - start) / (ordered.len() - 1) as f32;
+        for (index, entity) in ordered.iter_mut().enumerate() {
+            let delta = start + step * index as f32 - coordinate(entity);
+            if horizontal {
+                entity.transform.center.x += delta;
+            } else {
+                entity.transform.center.y += delta;
+            }
+        }
+        self.record_update(before, ordered, false);
     }
 
     fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
@@ -966,6 +1047,44 @@ impl InfiniteCanvasEditor {
 
         ui.separator();
         ui.strong("Arrange");
+        let movable_count = selected.iter().filter(|entity| !entity.locked).count();
+        ui.horizontal_wrapped(|ui| {
+            for (label, alignment) in [
+                ("Left", Alignment::Left),
+                ("Center", Alignment::HorizontalCenter),
+                ("Right", Alignment::Right),
+                ("Top", Alignment::Top),
+                ("Middle", Alignment::VerticalCenter),
+                ("Bottom", Alignment::Bottom),
+            ] {
+                if ui
+                    .add_enabled(movable_count >= 2, egui::Button::new(label).small())
+                    .clicked()
+                {
+                    self.align_selection(entities, alignment);
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    movable_count >= 3,
+                    egui::Button::new("Distribute horizontally").small(),
+                )
+                .clicked()
+            {
+                self.distribute_selection(entities, true);
+            }
+            if ui
+                .add_enabled(
+                    movable_count >= 3,
+                    egui::Button::new("Distribute vertically").small(),
+                )
+                .clicked()
+            {
+                self.distribute_selection(entities, false);
+            }
+        });
         let mut movement = None;
         ui.columns(2, |columns| {
             if columns[0].button("To front").clicked() {
