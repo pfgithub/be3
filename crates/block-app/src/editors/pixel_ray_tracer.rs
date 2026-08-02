@@ -1032,6 +1032,9 @@ impl BlockEditor for PixelRayTracerEditor {
     fn note_backref(&self, id: Uuid) {
         self.block.note_backref(id);
     }
+    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
+        Some(&self.block)
+    }
     fn render(
         &mut self,
         context: BlockRenderContext<'_>,
