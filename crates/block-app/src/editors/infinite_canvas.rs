@@ -474,10 +474,10 @@ impl InfiniteCanvasEditor {
     }
 
     fn group_selection(&mut self, entities: &[CanvasEntity]) {
-        let before = self.selected_entities(entities);
-        if before.len() < 2 {
+        if !self.selection_can_group(entities) {
             return;
         }
+        let before = self.selected_entities(entities);
         let group_id = Uuid::new_v4();
         let after = before
             .iter()
@@ -488,6 +488,22 @@ impl InfiniteCanvasEditor {
             })
             .collect();
         self.record_update(before, after, false);
+    }
+
+    fn selection_can_group(&self, entities: &[CanvasEntity]) -> bool {
+        let selected = entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id))
+            .collect::<Vec<_>>();
+        if selected.len() < 2 {
+            return false;
+        }
+        let Some(group_id) = selected[0].group_id else {
+            return true;
+        };
+        selected
+            .iter()
+            .any(|entity| entity.group_id != Some(group_id))
     }
 
     fn ungroup_selection(&mut self, entities: &[CanvasEntity]) {
@@ -1513,7 +1529,7 @@ impl InfiniteCanvasEditor {
                         }
                     }
                 });
-                let can_group = selected.len() >= 2;
+                let can_group = self.selection_can_group(entities);
                 let can_ungroup = selected.iter().any(|entity| entity.group_id.is_some());
                 ui.columns(2, |columns| {
                     if columns[0]
@@ -1623,7 +1639,11 @@ impl InfiniteCanvasEditor {
                     .filter(|entity| self.selection.contains(&entity.id))
                     .collect::<Vec<_>>();
                 for (label, enabled, command) in [
-                    ("Group", selected.len() >= 2, CanvasCommand::Group),
+                    (
+                        "Group",
+                        self.selection_can_group(entities),
+                        CanvasCommand::Group,
+                    ),
                     (
                         "Ungroup",
                         selected.iter().any(|entity| entity.group_id.is_some()),
@@ -2261,7 +2281,7 @@ impl InfiniteCanvasEditor {
                     .iter()
                     .filter(|entity| self.selection.contains(&entity.id))
                     .collect::<Vec<_>>();
-                let can_group = selected.len() >= 2;
+                let can_group = self.selection_can_group(entities);
                 let can_ungroup = selected.iter().any(|entity| entity.group_id.is_some());
                 let can_lock = selected.iter().any(|entity| !entity.locked);
                 let can_unlock = selected.iter().any(|entity| entity.locked);
