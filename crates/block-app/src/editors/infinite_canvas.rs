@@ -188,6 +188,7 @@ pub(super) struct InfiniteCanvasEditor {
     clipboard_image_paste: ClipboardImagePaste,
     focused_editor: Option<Uuid>,
     viewport_center: CanvasPoint,
+    fit_selection_requested: bool,
 }
 
 impl InfiniteCanvasEditor {
@@ -212,6 +213,7 @@ impl InfiniteCanvasEditor {
             clipboard_image_paste: ClipboardImagePaste::default(),
             focused_editor: None,
             viewport_center: CanvasPoint::default(),
+            fit_selection_requested: false,
         }
     }
 
@@ -758,13 +760,31 @@ impl InfiniteCanvasEditor {
             {
                 viewport.change_zoom(1.0 / ZOOM_STEP, None);
             }
-            if ui
-                .button(format!("{:.0}%", viewport.zoom() * 100.0))
-                .on_hover_text("Reset zoom to 100%")
-                .clicked()
-            {
-                viewport.change_zoom(1.0 / viewport.zoom(), None);
-            }
+            ui.menu_button(format!("{:.0}%", viewport.zoom() * 100.0), |ui| {
+                for percent in [25.0, 50.0, 100.0, 200.0] {
+                    if ui.button(format!("{percent:.0}%")).clicked() {
+                        viewport.change_zoom(percent / 100.0 / viewport.zoom(), None);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button("Fit all").clicked() {
+                    viewport.fit();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        !self.selection.is_empty(),
+                        egui::Button::new("Fit selection"),
+                    )
+                    .clicked()
+                {
+                    self.fit_selection_requested = true;
+                    ui.close();
+                }
+            })
+            .response
+            .on_hover_text("Zoom presets and fit controls");
             if ui
                 .small_button(ICON_ZOOM_IN)
                 .on_hover_text("Zoom in")
@@ -1815,6 +1835,16 @@ impl BlockEditor for InfiniteCanvasEditor {
         let canvas_rect = response.rect;
         let canvas_clip_rect = ui.clip_rect();
         self.viewport_center = self.screen_to_world(canvas_clip_rect.center(), canvas_rect);
+        if std::mem::take(&mut self.fit_selection_requested) {
+            if let Some(bounds) = self.selected_bounds(&entities) {
+                let selection = screen_rect(self, bounds, canvas_rect);
+                let available = (canvas_clip_rect.size() - Vec2::splat(40.0)).max(Vec2::splat(1.0));
+                let factor = (available.x / selection.width().max(1.0))
+                    .min(available.y / selection.height().max(1.0));
+                viewport.change_zoom(factor, Some(selection.center()));
+                viewport.pan(canvas_clip_rect.center() - selection.center());
+            }
+        }
         if self.focused_editor.is_none() {
             self.import_dropped_images(&response, editors);
             self.import_clipboard_image(&response, editors);

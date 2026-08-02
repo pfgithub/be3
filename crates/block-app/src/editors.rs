@@ -508,7 +508,11 @@ pub fn direct_editor_tab_ui(
                     }
                 }
                 DirectEditorViewportCommand::Fit => {
-                    viewport_state = DirectEditorTabViewport::default();
+                    viewport_state.zoom = (viewport_size.x / content_size.x)
+                        .min(viewport_size.y / content_size.y)
+                        .min(1.0)
+                        .clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+                    viewport_state.pan = egui::Vec2::ZERO;
                 }
             }
         }
