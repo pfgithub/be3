@@ -2190,6 +2190,46 @@ impl InfiniteCanvasEditor {
                         self.tool = Tool::Select;
                         ui.close();
                     }
+                    if ui.button("Text").clicked() {
+                        if let Some(center) = self.context_menu_position {
+                            self.add_entity(CanvasEntity {
+                                id: Uuid::new_v4(),
+                                transform: CanvasTransform::new(
+                                    center,
+                                    CanvasPoint::new(180.0, 36.0),
+                                    0.0,
+                                ),
+                                kind: CanvasEntityKind::Text {
+                                    text: String::new(),
+                                    text_style: CanvasTextStyle::default(),
+                                },
+                                style: CanvasEntityStyle::default(),
+                                group_id: None,
+                                locked: false,
+                            });
+                        }
+                        self.tool = Tool::Select;
+                        ui.close();
+                    }
+                    if ui.button("Freehand").clicked() {
+                        self.tool = Tool::Pen;
+                        self.armed_block = None;
+                        self.armed_block_needs_parent = false;
+                        ui.close();
+                    }
+                    if ui.button("Image…").clicked() {
+                        match pick_image_file() {
+                            Ok(Some(image)) => {
+                                self.image_import_error = None;
+                                let center = self.context_menu_position.unwrap_or_default();
+                                self.add_imported_image(editors, image, center);
+                                self.tool = Tool::Select;
+                            }
+                            Ok(None) => {}
+                            Err(error) => self.image_import_error = Some(error),
+                        }
+                        ui.close();
+                    }
                     ui.menu_button("Block", |ui| {
                         if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
                             self.tool = Tool::Block;
