@@ -267,6 +267,7 @@ pub(super) struct InfiniteCanvasEditor {
     focused_editor: Option<Uuid>,
     viewport_center: CanvasPoint,
     fit_selection_requested: bool,
+    grouped_inspector_edit_active: bool,
 }
 
 impl InfiniteCanvasEditor {
@@ -293,6 +294,7 @@ impl InfiniteCanvasEditor {
             focused_editor: None,
             viewport_center: CanvasPoint::default(),
             fit_selection_requested: false,
+            grouped_inspector_edit_active: false,
         }
     }
 
@@ -302,14 +304,17 @@ impl InfiniteCanvasEditor {
         }
         let operation = InfiniteCanvasOperation::Update { entities: after };
         if group {
+            self.grouped_inspector_edit_active = true;
             self.block.operate_grouped([operation]);
         } else {
+            self.grouped_inspector_edit_active = false;
             self.block.finish_history_group();
             self.block.operate(operation);
         }
     }
 
     fn record_action(&mut self, operation: InfiniteCanvasOperation) {
+        self.grouped_inspector_edit_active = false;
         self.block.finish_history_group();
         self.block.operate(operation);
     }
@@ -3216,6 +3221,12 @@ impl BlockEditor for InfiniteCanvasEditor {
                 &direct_editor_rects,
                 viewport,
             );
+        if self.grouped_inspector_edit_active
+            && ui.ctx().input(|input| input.pointer.any_released())
+        {
+            self.block.finish_history_group();
+            self.grouped_inspector_edit_active = false;
+        }
         if let Some(movement) = context_layer_move {
             let operation = InfiniteCanvasOperation::Reorder {
                 ids: entities

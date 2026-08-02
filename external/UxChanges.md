@@ -44,7 +44,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Add a compact toolbar Actions menu for common selection and clipboard commands.
 - [x] Reorganize the inspector into collapsible Transform, Appearance/type-specific, Arrange, and Block sections with object-type labels and compact layer controls.
 - [x] Disable layer actions that cannot change the current order and use consistent Forward/Backward wording.
-- [ ] Coalesce each inspector slider or drag into one undo history step.
+- [x] Coalesce each inspector slider or numeric drag into one undo history step and close the group on pointer release.
 - [x] Support copying, cutting, and pasting canvas entities with fresh entity/group IDs and safe offsets.
 
 ## Final verification
