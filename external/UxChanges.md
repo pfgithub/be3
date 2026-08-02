@@ -100,5 +100,5 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Embedded rendering verification
 
-- [ ] Run `cargo fmt` and `cargo nextest run` after every embedded-rendering change.
-- [ ] Confirm every embedded-rendering item has its own successful commit and the worktree is clean.
+- [x] Run `cargo fmt` and `cargo nextest run` after every embedded-rendering change.
+- [x] Confirm every embedded-rendering item has its own successful commit and the worktree is clean.
