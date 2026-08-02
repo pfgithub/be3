@@ -109,5 +109,5 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Shared presentation playback verification
 
-- [ ] Run `cargo fmt` and `cargo nextest run`.
-- [ ] Confirm the follow-up has a successful implementation commit and the worktree is clean.
+- [x] Run `cargo fmt` and `cargo nextest run`.
+- [x] Confirm the follow-up has a successful implementation commit and the worktree is clean.
