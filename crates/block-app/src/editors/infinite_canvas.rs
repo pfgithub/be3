@@ -2711,6 +2711,9 @@ impl InfiniteCanvasEditor {
                 if !additive {
                     self.selection.clear();
                 }
+                if distance(start, current) < HIT_RADIUS / self.render_scale {
+                    return;
+                }
                 let selection = WorldRect::from_points(start, current);
                 let hits = entities
                     .iter()

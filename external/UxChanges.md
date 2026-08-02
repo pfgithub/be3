@@ -55,7 +55,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Follow-up fixes
 
-- [ ] Do not select an outlined rectangle when an empty click lands inside its bounds.
+- [x] Do not select an outlined rectangle when an empty click lands inside its bounds.
 - [ ] Leave lines, rectangles, and freehand strokes unselected after creating them.
 - [ ] Restore double-click inline editing for canvas text.
 - [ ] Disable Group when every selected object is already in the same group.
