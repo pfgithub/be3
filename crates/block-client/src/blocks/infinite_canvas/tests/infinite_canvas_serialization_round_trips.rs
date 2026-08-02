@@ -1,6 +1,6 @@
 use super::{
-    CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
-    InfiniteCanvas, InfiniteCanvasOperation,
+    CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTextAlign,
+    CanvasTextStyle, CanvasTextWeight, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
 };
 use uuid::Uuid;
 
@@ -13,8 +13,15 @@ fn infinite_canvas_serialization_round_trips() {
             CanvasPoint::new(120.0, 80.0),
             0.25,
         ),
-        kind: CanvasEntityKind::Pen {
-            points: vec![CanvasPoint::new(-0.5, 0.0), CanvasPoint::new(0.5, 1.0)],
+        kind: CanvasEntityKind::Text {
+            text: "Two\nlines".into(),
+            text_style: CanvasTextStyle {
+                font_size: 24.0,
+                weight: CanvasTextWeight::Bold,
+                alignment: CanvasTextAlign::Right,
+                line_height: 1.5,
+                wrap: true,
+            },
         },
         style: CanvasEntityStyle {
             foreground: CanvasColor::Rgba {

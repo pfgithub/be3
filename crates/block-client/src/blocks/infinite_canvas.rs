@@ -43,10 +43,58 @@ impl CanvasTransform {
 pub enum CanvasEntityKind {
     Line,
     Rectangle,
-    Text { text: String },
-    Pen { points: Vec<CanvasPoint> },
-    Block { block_id: Uuid },
-    DirectEditor { block_id: Uuid, scale: f32 },
+    Text {
+        text: String,
+        text_style: CanvasTextStyle,
+    },
+    Pen {
+        points: Vec<CanvasPoint>,
+    },
+    Block {
+        block_id: Uuid,
+    },
+    DirectEditor {
+        block_id: Uuid,
+        scale: f32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanvasTextWeight {
+    #[default]
+    Regular,
+    Bold,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanvasTextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CanvasTextStyle {
+    pub font_size: f32,
+    pub weight: CanvasTextWeight,
+    pub alignment: CanvasTextAlign,
+    pub line_height: f32,
+    pub wrap: bool,
+}
+
+impl Default for CanvasTextStyle {
+    fn default() -> Self {
+        Self {
+            font_size: 18.0,
+            weight: CanvasTextWeight::Regular,
+            alignment: CanvasTextAlign::Left,
+            line_height: 1.2,
+            wrap: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]

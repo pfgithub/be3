@@ -6,7 +6,8 @@ use block_client::{
         image::Image as ImageBlock,
         infinite_canvas::{
             CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasLayerMove,
-            CanvasPoint, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
+            CanvasPoint, CanvasTextAlign, CanvasTextStyle, CanvasTextWeight, CanvasTransform,
+            InfiniteCanvas, InfiniteCanvasOperation,
         },
     },
     BlockClient, BlockHandle, CachedBlock, ReferenceList,
@@ -1270,7 +1271,7 @@ impl InfiniteCanvasEditor {
                     && matches!(entity.kind, CanvasEntityKind::Text { .. })
             });
             if let Some(entity) = selected_text {
-                let CanvasEntityKind::Text { text } = &entity.kind else {
+                let CanvasEntityKind::Text { text, text_style } = &entity.kind else {
                     unreachable!();
                 };
                 ui.separator();
@@ -1283,7 +1284,10 @@ impl InfiniteCanvasEditor {
                 }
                 if response.changed() {
                     let mut updated = entity.clone();
-                    updated.kind = CanvasEntityKind::Text { text: edited };
+                    updated.kind = CanvasEntityKind::Text {
+                        text: edited,
+                        text_style: *text_style,
+                    };
                     self.record_update(vec![entity.clone()], vec![updated], true);
                 }
             }
@@ -1892,6 +1896,7 @@ impl InfiniteCanvasEditor {
                         transform: CanvasTransform::new(world, CanvasPoint::new(180.0, 60.0), 0.0),
                         kind: CanvasEntityKind::Text {
                             text: "Text".into(),
+                            text_style: CanvasTextStyle::default(),
                         },
                         style: CanvasEntityStyle::default(),
                         group_id: None,
@@ -3366,11 +3371,34 @@ fn paint_entity(
                 .unwrap_or(Color32::TRANSPARENT);
             painter.add(egui::Shape::convex_polygon(points, fill, stroke));
         }
-        CanvasEntityKind::Text { text } => {
+        CanvasEntityKind::Text { text, text_style } => {
             let center = editor.world_to_screen(entity.transform.center, rect);
-            let font = egui::FontId::proportional((18.0 * editor.render_scale).clamp(8.0, 48.0));
-            let galley = painter.layout_no_wrap(text.clone(), font, color);
+            let font_size = (text_style.font_size * editor.render_scale).clamp(4.0, 256.0);
+            let font = egui::FontId::proportional(font_size);
+            let wrap_width = if text_style.wrap {
+                (entity.transform.size.x * editor.render_scale).max(1.0)
+            } else {
+                f32::INFINITY
+            };
+            let mut job = egui::text::LayoutJob::simple(text.clone(), font, color, wrap_width);
+            job.halign = match text_style.alignment {
+                CanvasTextAlign::Left => egui::Align::LEFT,
+                CanvasTextAlign::Center => egui::Align::Center,
+                CanvasTextAlign::Right => egui::Align::RIGHT,
+            };
+            job.sections[0].format.line_height = Some(font_size * text_style.line_height.max(0.5));
+            let galley = painter.layout_job(job);
             let position = center - galley.size() * 0.5;
+            if text_style.weight == CanvasTextWeight::Bold {
+                painter.add(
+                    egui::epaint::TextShape::new(
+                        position + Vec2::new(0.6 * editor.render_scale, 0.0),
+                        galley.clone(),
+                        color,
+                    )
+                    .with_angle_and_anchor(entity.transform.rotation, egui::Align2::CENTER_CENTER),
+                );
+            }
             painter.add(
                 egui::epaint::TextShape::new(position, galley, color)
                     .with_angle_and_anchor(entity.transform.rotation, egui::Align2::CENTER_CENTER),
