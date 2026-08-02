@@ -1,11 +1,12 @@
 BE3 project
 
-Do not run git commands unless asked, except read-only commands. Don't stage changes, commit changes, or push unless asked.
-
 When calling the `request_user_input` tool, never set autoResolutionMs. Setting autoResolutionMs to any value causes the question to be immediately resolved with no answer.
 
 Functionality:
 - When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
+
+UI style:
+- Never use unicode characters for icons. Always prefer icon libraries / plain text.
 
 Code style:
 - Prefer a.rs over a/mod.rs.
@@ -17,5 +18,6 @@ Tests:
 - Do not add irrelevant or useless tests. If a change needs manual testing, note what needs testing in your final output.
 
 Verification:
-- After making changes, always run: `cargo fmt` and `cargo nextest run`. This will take ~10 seconds excluding compilation time.
+- After making changes, always run: `cargo fmt` and `cargo nextest run`. This should take less than 2 minutes including compilation time. Then, commit changes to git. Do not push.
+- If working on multiple changes, commit to git after each one.
 - Do not perform any manual verification besides those commands.
