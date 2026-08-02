@@ -49,6 +49,6 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Final verification
 
-- [ ] Run final `cargo fmt`.
-- [ ] Run final `cargo nextest run`.
-- [ ] Confirm every implementation item has its own successful commit and the worktree is clean.
+- [x] Run final `cargo fmt`.
+- [x] Run final `cargo nextest run`.
+- [x] Confirm every implementation item has its own successful commit and the worktree is clean.
