@@ -186,6 +186,7 @@ pub(super) struct InfiniteCanvasEditor {
     pending_file_drop_position: Option<CanvasPoint>,
     clipboard_image_paste: ClipboardImagePaste,
     focused_editor: Option<Uuid>,
+    viewport_center: CanvasPoint,
 }
 
 impl InfiniteCanvasEditor {
@@ -208,6 +209,7 @@ impl InfiniteCanvasEditor {
             pending_file_drop_position: None,
             clipboard_image_paste: ClipboardImagePaste::default(),
             focused_editor: None,
+            viewport_center: CanvasPoint::default(),
         }
     }
 
@@ -723,7 +725,7 @@ impl InfiniteCanvasEditor {
                     self.tool = Tool::Block;
                     self.armed_block = None;
                     self.armed_block_needs_parent = false;
-                    self.pending_block_center = Some(CanvasPoint::default());
+                    self.pending_block_center = Some(self.viewport_center);
                     match action {
                         BlockPickerMenuAction::New(block_type) => {
                             create_block = Some(block_type);
@@ -731,7 +733,7 @@ impl InfiniteCanvasEditor {
                         BlockPickerMenuAction::ImportImage => match pick_image_file() {
                             Ok(Some(image)) => {
                                 self.image_import_error = None;
-                                self.add_imported_image(editors, image, CanvasPoint::default());
+                                self.add_imported_image(editors, image, self.viewport_center);
                                 self.tool = Tool::Select;
                             }
                             Ok(None) => {}
@@ -1746,6 +1748,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let canvas_rect = response.rect;
         let canvas_clip_rect = ui.clip_rect();
+        self.viewport_center = self.screen_to_world(canvas_clip_rect.center(), canvas_rect);
         if self.focused_editor.is_none() {
             self.import_dropped_images(&response, editors);
             self.import_clipboard_image(&response, editors);

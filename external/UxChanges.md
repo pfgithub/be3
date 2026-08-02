@@ -4,7 +4,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Placement and interaction fixes
 
-- [ ] Place toolbar-created blocks, linked blocks, and file-picker images at the visible viewport center.
+- [x] Place toolbar-created blocks, linked blocks, and file-picker images at the visible viewport center.
 - [ ] Hit-test unfilled rectangles by their outline instead of their interior.
 - [ ] Enter a direct editor only from its content area; use its padding and title bar for canvas selection and movement without clearing an existing multi-selection unnecessarily.
 - [ ] Split canvas and selection context menus; choose the selection menu from the selected bounds and only object-hit-test when nothing is selected.
