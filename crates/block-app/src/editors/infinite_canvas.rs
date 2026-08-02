@@ -1469,7 +1469,7 @@ impl InfiniteCanvasEditor {
     fn show_toolbar(
         &mut self,
         ui: &mut egui::Ui,
-        _entities: &[CanvasEntity],
+        entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) -> Option<Uuid> {
@@ -1519,6 +1519,68 @@ impl InfiniteCanvasEditor {
             })
             .response
             .on_hover_text("Block");
+
+            ui.menu_button("Actions", |ui| {
+                let has_selection = !self.selection.is_empty();
+                for (label, enabled, command) in [
+                    ("Cut", has_selection, CanvasCommand::Cut),
+                    ("Copy", has_selection, CanvasCommand::Copy),
+                    ("Paste", true, CanvasCommand::Paste),
+                    ("Duplicate", has_selection, CanvasCommand::Duplicate),
+                    ("Delete", has_selection, CanvasCommand::Delete),
+                ] {
+                    if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                        self.execute_command(command, entities);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                let selected = entities
+                    .iter()
+                    .filter(|entity| self.selection.contains(&entity.id))
+                    .collect::<Vec<_>>();
+                for (label, enabled, command) in [
+                    ("Group", selected.len() >= 2, CanvasCommand::Group),
+                    (
+                        "Ungroup",
+                        selected.iter().any(|entity| entity.group_id.is_some()),
+                        CanvasCommand::Ungroup,
+                    ),
+                    (
+                        "Lock",
+                        selected.iter().any(|entity| !entity.locked),
+                        CanvasCommand::Lock,
+                    ),
+                    (
+                        "Unlock",
+                        selected.iter().any(|entity| entity.locked),
+                        CanvasCommand::Unlock,
+                    ),
+                ] {
+                    if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                        self.execute_command(command, entities);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button("Select all").clicked() {
+                    self.execute_command(CanvasCommand::SelectAll, entities);
+                    ui.close();
+                }
+                if ui.button("Invert selection").clicked() {
+                    self.execute_command(CanvasCommand::InvertSelection, entities);
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(has_selection, egui::Button::new("Fit selection"))
+                    .clicked()
+                {
+                    self.fit_selection_requested = true;
+                    ui.close();
+                }
+            })
+            .response
+            .on_hover_text("Selection and clipboard actions");
 
             ui.separator();
             if ui
