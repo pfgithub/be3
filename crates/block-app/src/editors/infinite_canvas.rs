@@ -85,6 +85,45 @@ struct WorldRect {
     max: CanvasPoint,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SelectionFrame {
+    center: CanvasPoint,
+    size: CanvasPoint,
+    rotation: f32,
+}
+
+impl SelectionFrame {
+    fn from_world_rect(bounds: WorldRect) -> Self {
+        Self {
+            center: bounds.center(),
+            size: bounds.size(),
+            rotation: 0.0,
+        }
+    }
+
+    fn point(self, local: CanvasPoint) -> CanvasPoint {
+        local_to_world(
+            CanvasTransform::new(self.center, self.size, self.rotation),
+            local,
+        )
+    }
+
+    fn contains(self, point: CanvasPoint) -> bool {
+        let local = world_to_local(
+            CanvasTransform::new(self.center, self.size, self.rotation),
+            point,
+        );
+        local.x.abs() <= 0.5 && local.y.abs() <= 0.5
+    }
+
+    fn local_bounds(self) -> WorldRect {
+        WorldRect {
+            min: CanvasPoint::new(-self.size.x * 0.5, -self.size.y * 0.5),
+            max: CanvasPoint::new(self.size.x * 0.5, self.size.y * 0.5),
+        }
+    }
+}
+
 impl WorldRect {
     fn from_points(a: CanvasPoint, b: CanvasPoint) -> Self {
         Self {
@@ -155,7 +194,7 @@ enum Gesture {
     },
     Resize {
         handle: ResizeHandle,
-        bounds: WorldRect,
+        frame: SelectionFrame,
         current: CanvasPoint,
         originals: Vec<CanvasEntity>,
         default_preserve_aspect_ratio: bool,
@@ -163,7 +202,7 @@ enum Gesture {
         preserve_aspect_ratio: bool,
     },
     Rotate {
-        bounds: WorldRect,
+        frame: SelectionFrame,
         start_angle: f32,
         current: CanvasPoint,
         originals: Vec<CanvasEntity>,
@@ -308,6 +347,26 @@ impl InfiniteCanvasEditor {
             .filter(|entity| self.selection.contains(&entity.id))
             .map(entity_bounds)
             .reduce(WorldRect::union)
+    }
+
+    fn selected_frame(&self, entities: &[CanvasEntity]) -> Option<SelectionFrame> {
+        let selected = entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id))
+            .collect::<Vec<_>>();
+        match selected.as_slice() {
+            [] => None,
+            [entity] => Some(SelectionFrame {
+                center: entity.transform.center,
+                size: entity.transform.size,
+                rotation: entity.transform.rotation,
+            }),
+            _ => selected
+                .into_iter()
+                .map(entity_bounds)
+                .reduce(WorldRect::union)
+                .map(SelectionFrame::from_world_rect),
+        }
     }
 
     fn entity_at(&self, entities: &[CanvasEntity], point: CanvasPoint) -> Option<Uuid> {
@@ -1285,11 +1344,11 @@ impl InfiniteCanvasEditor {
             Tool::Text => egui::CursorIcon::Text,
             Tool::Block => egui::CursorIcon::Copy,
             Tool::Select => {
-                let bounds = self.selected_bounds(entities);
+                let frame = self.selected_frame(entities);
                 if self.selection_has_unlocked(entities)
                     && self.selection_allows_rotation(entities, editors)
-                    && bounds.is_some_and(|bounds| {
-                        rotate_handle_at(self, bounds, response.rect)
+                    && frame.is_some_and(|frame| {
+                        rotate_handle_at(self, frame, response.rect)
                             .distance(self.world_to_screen(world, response.rect))
                             <= HANDLE_RADIUS + 3.0
                     })
@@ -1297,9 +1356,9 @@ impl InfiniteCanvasEditor {
                     egui::CursorIcon::Grab
                 } else if let Some(handle) = self
                     .selection_has_unlocked(entities)
-                    .then(|| bounds)
+                    .then(|| frame)
                     .flatten()
-                    .and_then(|bounds| resize_handle_at(self, bounds, response.rect, world))
+                    .and_then(|frame| resize_handle_at(self, frame, response.rect, world))
                 {
                     match (handle.x, handle.y) {
                         (0, _) => egui::CursorIcon::ResizeVertical,
@@ -1510,8 +1569,8 @@ impl InfiniteCanvasEditor {
             if let Some(world) = world {
                 self.context_menu_position = Some(world);
                 self.context_menu_for_selection = self
-                    .selected_bounds(entities)
-                    .is_some_and(|bounds| bounds.contains(world));
+                    .selected_frame(entities)
+                    .is_some_and(|frame| frame.contains(world));
                 if self.selection.is_empty() {
                     if let Some(id) = self.entity_at(entities, world) {
                         self.select_entity(entities, id, false);
@@ -1625,30 +1684,30 @@ impl InfiniteCanvasEditor {
         if primary_pressed && response.hovered() {
             match self.tool {
                 Tool::Select => {
-                    let selected_bounds = self.selected_bounds(entities);
+                    let selected_frame = self.selected_frame(entities);
                     let has_unlocked = self.selection_has_unlocked(entities);
                     let handle = has_unlocked
-                        .then(|| selected_bounds)
+                        .then(|| selected_frame)
                         .flatten()
-                        .and_then(|bounds| resize_handle_at(self, bounds, response.rect, world));
+                        .and_then(|frame| resize_handle_at(self, frame, response.rect, world));
                     let rotate = has_unlocked
                         && self.selection_allows_rotation(entities, editors)
-                        && selected_bounds.is_some_and(|bounds| {
-                            rotate_handle_at(self, bounds, response.rect)
+                        && selected_frame.is_some_and(|frame| {
+                            rotate_handle_at(self, frame, response.rect)
                                 .distance(self.world_to_screen(world, response.rect))
                                 <= HANDLE_RADIUS + 3.0
                         });
                     if rotate {
-                        let bounds = selected_bounds.unwrap();
-                        let center = bounds.center();
+                        let frame = selected_frame.unwrap();
+                        let center = frame.center;
                         self.gesture = Some(Gesture::Rotate {
-                            bounds,
+                            frame,
                             start_angle: (world.y - center.y).atan2(world.x - center.x),
                             current: world,
                             originals: self.selected_unlocked_entities(entities),
                             snap_angle: response.ctx.input(|input| input.modifiers.shift),
                         });
-                    } else if let (Some(bounds), Some(handle)) = (selected_bounds, handle) {
+                    } else if let (Some(frame), Some(handle)) = (selected_frame, handle) {
                         let default_preserve_aspect_ratio =
                             self.selection_defaults_to_proportional(entities, editors);
                         let force_preserve_aspect_ratio =
@@ -1658,7 +1717,7 @@ impl InfiniteCanvasEditor {
                                 != response.ctx.input(|input| input.modifiers.shift);
                         self.gesture = Some(Gesture::Resize {
                             handle,
-                            bounds,
+                            frame,
                             current: world,
                             originals: self.selected_unlocked_entities(entities),
                             default_preserve_aspect_ratio,
@@ -2007,12 +2066,12 @@ impl InfiniteCanvasEditor {
             );
         }
 
-        if let Some(bounds) = self.selected_bounds_with_preview(entities, &preview) {
+        if let Some(frame) = self.selected_frame_with_preview(entities, &preview) {
             paint_selection(
                 self,
                 painter,
                 rect,
-                bounds,
+                frame,
                 self.selection_has_unlocked(entities),
                 self.selection_has_unlocked(entities)
                     && self.selection_allows_rotation(entities, editors),
@@ -2020,17 +2079,29 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    fn selected_bounds_with_preview(
+    fn selected_frame_with_preview(
         &self,
         entities: &[CanvasEntity],
         preview: &HashMap<Uuid, CanvasEntity>,
-    ) -> Option<WorldRect> {
-        entities
+    ) -> Option<SelectionFrame> {
+        let selected = entities
             .iter()
             .filter(|entity| self.selection.contains(&entity.id))
             .map(|entity| preview.get(&entity.id).unwrap_or(entity))
-            .map(entity_bounds)
-            .reduce(WorldRect::union)
+            .collect::<Vec<_>>();
+        match selected.as_slice() {
+            [] => None,
+            [entity] => Some(SelectionFrame {
+                center: entity.transform.center,
+                size: entity.transform.size,
+                rotation: entity.transform.rotation,
+            }),
+            _ => selected
+                .into_iter()
+                .map(entity_bounds)
+                .reduce(WorldRect::union)
+                .map(SelectionFrame::from_world_rect),
+        }
     }
 
     fn selected_block_action(
@@ -2804,12 +2875,12 @@ fn screen_rect(editor: &InfiniteCanvasEditor, bounds: WorldRect, rect: Rect) -> 
 
 fn resize_handle_at(
     editor: &InfiniteCanvasEditor,
-    bounds: WorldRect,
+    frame: SelectionFrame,
     rect: Rect,
     world: CanvasPoint,
 ) -> Option<ResizeHandle> {
     let pointer = editor.world_to_screen(world, rect);
-    resize_handles(bounds)
+    resize_handles(frame)
         .into_iter()
         .find_map(|(handle, point)| {
             (editor.world_to_screen(point, rect).distance(pointer) <= HANDLE_RADIUS + 3.0)
@@ -2817,47 +2888,46 @@ fn resize_handle_at(
         })
 }
 
-fn resize_handles(bounds: WorldRect) -> [(ResizeHandle, CanvasPoint); 8] {
-    let center = bounds.center();
+fn resize_handles(frame: SelectionFrame) -> [(ResizeHandle, CanvasPoint); 8] {
     [
         (
             ResizeHandle { x: -1, y: -1 },
-            CanvasPoint::new(bounds.min.x, bounds.min.y),
+            frame.point(CanvasPoint::new(-0.5, -0.5)),
         ),
         (
             ResizeHandle { x: 0, y: -1 },
-            CanvasPoint::new(center.x, bounds.min.y),
+            frame.point(CanvasPoint::new(0.0, -0.5)),
         ),
         (
             ResizeHandle { x: 1, y: -1 },
-            CanvasPoint::new(bounds.max.x, bounds.min.y),
+            frame.point(CanvasPoint::new(0.5, -0.5)),
         ),
         (
             ResizeHandle { x: 1, y: 0 },
-            CanvasPoint::new(bounds.max.x, center.y),
+            frame.point(CanvasPoint::new(0.5, 0.0)),
         ),
         (
             ResizeHandle { x: 1, y: 1 },
-            CanvasPoint::new(bounds.max.x, bounds.max.y),
+            frame.point(CanvasPoint::new(0.5, 0.5)),
         ),
         (
             ResizeHandle { x: 0, y: 1 },
-            CanvasPoint::new(center.x, bounds.max.y),
+            frame.point(CanvasPoint::new(0.0, 0.5)),
         ),
         (
             ResizeHandle { x: -1, y: 1 },
-            CanvasPoint::new(bounds.min.x, bounds.max.y),
+            frame.point(CanvasPoint::new(-0.5, 0.5)),
         ),
         (
             ResizeHandle { x: -1, y: 0 },
-            CanvasPoint::new(bounds.min.x, center.y),
+            frame.point(CanvasPoint::new(-0.5, 0.0)),
         ),
     ]
 }
 
-fn rotate_handle_at(editor: &InfiniteCanvasEditor, bounds: WorldRect, rect: Rect) -> Pos2 {
-    let top = editor.world_to_screen(CanvasPoint::new(bounds.center().x, bounds.min.y), rect);
-    top - Vec2::new(0.0, ROTATE_OFFSET)
+fn rotate_handle_at(editor: &InfiniteCanvasEditor, frame: SelectionFrame, rect: Rect) -> Pos2 {
+    let top = editor.world_to_screen(frame.point(CanvasPoint::new(0.0, -0.5)), rect);
+    top + Vec2::angled(frame.rotation - std::f32::consts::FRAC_PI_2) * ROTATE_OFFSET
 }
 
 fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
@@ -2881,26 +2951,20 @@ fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
         }
         Gesture::Resize {
             handle,
-            bounds,
+            frame,
             current,
             originals,
             preserve_aspect_ratio,
             ..
-        } => resize_entities(
-            *handle,
-            *bounds,
-            *current,
-            originals,
-            *preserve_aspect_ratio,
-        ),
+        } => resize_entities(*handle, *frame, *current, originals, *preserve_aspect_ratio),
         Gesture::Rotate {
-            bounds,
+            frame,
             start_angle,
             current,
             originals,
             snap_angle,
         } => {
-            let center = bounds.center();
+            let center = frame.center;
             let current_angle = (current.y - center.y).atan2(current.x - center.x);
             let mut delta = current_angle - start_angle;
             if *snap_angle {
@@ -2938,6 +3002,50 @@ fn constrain_point_angle(start: CanvasPoint, current: CanvasPoint, step: f32) ->
 }
 
 fn resize_entities(
+    handle: ResizeHandle,
+    frame: SelectionFrame,
+    current: CanvasPoint,
+    originals: &[CanvasEntity],
+    preserve_aspect_ratio: bool,
+) -> Vec<CanvasEntity> {
+    let current = rotate(
+        CanvasPoint::new(current.x - frame.center.x, current.y - frame.center.y),
+        -frame.rotation,
+    );
+    let local_originals = originals
+        .iter()
+        .cloned()
+        .map(|mut entity| {
+            entity.transform.center = rotate(
+                CanvasPoint::new(
+                    entity.transform.center.x - frame.center.x,
+                    entity.transform.center.y - frame.center.y,
+                ),
+                -frame.rotation,
+            );
+            entity.transform.rotation -= frame.rotation;
+            entity
+        })
+        .collect::<Vec<_>>();
+    resize_entities_axis(
+        handle,
+        frame.local_bounds(),
+        current,
+        &local_originals,
+        preserve_aspect_ratio,
+    )
+    .into_iter()
+    .map(|mut entity| {
+        let center = rotate(entity.transform.center, frame.rotation);
+        entity.transform.center =
+            CanvasPoint::new(frame.center.x + center.x, frame.center.y + center.y);
+        entity.transform.rotation += frame.rotation;
+        entity
+    })
+    .collect()
+}
+
+fn resize_entities_axis(
     handle: ResizeHandle,
     bounds: WorldRect,
     current: CanvasPoint,
@@ -3391,19 +3499,23 @@ fn paint_selection(
     editor: &InfiniteCanvasEditor,
     painter: &egui::Painter,
     rect: Rect,
-    bounds: WorldRect,
+    frame: SelectionFrame,
     allow_transform: bool,
     allow_rotation: bool,
 ) {
-    let screen = screen_rect(editor, bounds, rect);
-    painter.rect_stroke(
-        screen,
-        0.0,
+    let corners = [
+        CanvasPoint::new(-0.5, -0.5),
+        CanvasPoint::new(0.5, -0.5),
+        CanvasPoint::new(0.5, 0.5),
+        CanvasPoint::new(-0.5, 0.5),
+    ]
+    .map(|point| editor.world_to_screen(frame.point(point), rect));
+    painter.add(egui::Shape::closed_line(
+        corners.to_vec(),
         Stroke::new(1.0, Color32::LIGHT_BLUE),
-        egui::StrokeKind::Outside,
-    );
+    ));
     if allow_transform {
-        for (_, point) in resize_handles(bounds) {
+        for (_, point) in resize_handles(frame) {
             painter.circle_filled(
                 editor.world_to_screen(point, rect),
                 HANDLE_RADIUS,
@@ -3412,11 +3524,9 @@ fn paint_selection(
         }
     }
     if allow_rotation {
-        let rotate = rotate_handle_at(editor, bounds, rect);
-        painter.line_segment(
-            [Pos2::new(screen.center().x, screen.top()), rotate],
-            Stroke::new(1.0, Color32::LIGHT_BLUE),
-        );
+        let rotate = rotate_handle_at(editor, frame, rect);
+        let top = editor.world_to_screen(frame.point(CanvasPoint::new(0.0, -0.5)), rect);
+        painter.line_segment([top, rotate], Stroke::new(1.0, Color32::LIGHT_BLUE));
         painter.circle_filled(rotate, HANDLE_RADIUS, Color32::LIGHT_BLUE);
     }
 }
