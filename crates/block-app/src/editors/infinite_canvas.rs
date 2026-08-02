@@ -15,8 +15,8 @@ use block_client::{
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW,
-    ICON_FORMAT_COLOR_RESET, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_ZOOM_IN,
-    ICON_ZOOM_OUT,
+    ICON_FORMAT_COLOR_RESET, ICON_KEYBOARD_ARROW_DOWN, ICON_RECTANGLE, ICON_SELECT,
+    ICON_TEXT_FIELDS, ICON_ZOOM_IN, ICON_ZOOM_OUT,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -297,6 +297,7 @@ pub(super) struct InfiniteCanvasEditor {
     focused_editor: Option<Uuid>,
     viewport_center: CanvasPoint,
     fit_selection_requested: bool,
+    fit_preview_region_requested: bool,
     grouped_inspector_edit_active: bool,
 }
 
@@ -324,6 +325,7 @@ impl InfiniteCanvasEditor {
             focused_editor: None,
             viewport_center: CanvasPoint::default(),
             fit_selection_requested: false,
+            fit_preview_region_requested: false,
             grouped_inspector_edit_active: false,
         }
     }
@@ -1950,7 +1952,7 @@ impl InfiniteCanvasEditor {
             {
                 viewport.change_zoom(1.0 / viewport.zoom(), None);
             }
-            ui.menu_button("▾", |ui| {
+            ui.menu_button(ICON_KEYBOARD_ARROW_DOWN, |ui| {
                 for percent in [25.0, 50.0, 100.0, 200.0] {
                     if ui.button(format!("{percent:.0}%")).clicked() {
                         viewport.change_zoom(percent / 100.0 / viewport.zoom(), None);
@@ -1960,6 +1962,18 @@ impl InfiniteCanvasEditor {
                 ui.separator();
                 if ui.button("Fit all").clicked() {
                     viewport.fit();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        self.block
+                            .read()
+                            .is_some_and(|canvas| canvas.preview_region().is_some()),
+                        egui::Button::new("Fit preview region"),
+                    )
+                    .clicked()
+                {
+                    self.fit_preview_region_requested = true;
                     ui.close();
                 }
                 if ui
@@ -3580,6 +3594,16 @@ impl BlockEditor for InfiniteCanvasEditor {
                     .min(available.y / selection.height().max(1.0));
                 viewport.change_zoom(factor, Some(selection.center()));
                 viewport.pan(canvas_clip_rect.center() - selection.center());
+            }
+        }
+        if std::mem::take(&mut self.fit_preview_region_requested) {
+            if let Some(region) = self.block.read().and_then(|canvas| canvas.preview_region()) {
+                let preview = screen_rect(self, preview_region_bounds(region), canvas_rect);
+                let available = (canvas_clip_rect.size() - Vec2::splat(40.0)).max(Vec2::splat(1.0));
+                let factor = (available.x / preview.width().max(1.0))
+                    .min(available.y / preview.height().max(1.0));
+                viewport.change_zoom(factor, Some(preview.center()));
+                viewport.pan(canvas_clip_rect.center() - preview.center());
             }
         }
         if self.focused_editor.is_none() {

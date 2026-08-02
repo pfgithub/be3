@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
-use block::{Block, BlockReference, BlockReferenceList};
+use block::{Block, BlockParent, BlockReference, BlockReferenceList};
 use block_client::{
     blocks::{
+        infinite_canvas::{
+            CanvasPoint, CanvasPreviewRegion, InfiniteCanvas, InfiniteCanvasOperation,
+        },
         presentation::{Presentation, PresentationOperation, PresentationSlide},
         workspace_index::BlockEntry,
     },
@@ -11,7 +14,7 @@ use block_client::{
 use eframe::egui::{self, Color32, Key, Modifiers, Rect, Sense, Stroke, Vec2};
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_DELETE, ICON_FULLSCREEN,
-    ICON_FULLSCREEN_EXIT, ICON_SLIDESHOW,
+    ICON_FULLSCREEN_EXIT, ICON_KEYBOARD_ARROW_DOWN, ICON_SLIDESHOW,
 };
 use uuid::Uuid;
 
@@ -19,6 +22,7 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use super::{
     image::{create_image_block, pick_image_file},
+    infinite_canvas::InfiniteCanvasEditor,
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
     DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
 };
@@ -137,6 +141,25 @@ impl PresentationEditor {
         slide.id
     }
 
+    fn insert_canvas_slide(&mut self, editors: &mut EditorAccess<'_>, index: usize) {
+        let mut canvas = InfiniteCanvas::new();
+        InfiniteCanvas::apply_operation(
+            &mut canvas,
+            &InfiniteCanvasOperation::SetPreviewRegion {
+                region: Some(CanvasPreviewRegion::new(
+                    CanvasPoint::default(),
+                    CanvasPoint::new(DEFAULT_SLIDE_SIZE.x, DEFAULT_SLIDE_SIZE.y),
+                )),
+            },
+        );
+        let block = editors.client().create_block(canvas);
+        let id = block.id();
+        block.set_parent(BlockParent::Uuid(self.block.id()));
+        let editor = Box::new(InfiniteCanvasEditor::new(block, editors.client()));
+        editors.insert(editor);
+        self.insert_slide(id, index);
+    }
+
     fn remove_slide(&mut self, slide_id: Uuid) {
         let Some(slides) = self.slides() else {
             return;
@@ -160,31 +183,42 @@ impl PresentationEditor {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let mut action = None;
-        ui.menu_button(format!("{} Add slide", ICON_ADD.codepoint), |ui| {
-            if let Some(picker_action) = BlockPicker::show_menu(ui, editors.registry()) {
+        ui.horizontal(|ui| {
+            if ui
+                .button(format!("{} Add slide", ICON_ADD.codepoint))
+                .clicked()
+            {
                 let index = self.slides().map_or(0, |slides| slides.len());
-                match picker_action {
-                    BlockPickerMenuAction::New(block_type) => {
-                        self.pending_create_index = Some(index);
-                        action = Some(EditorAction::CreateBlock {
-                            block_type,
-                            parent: Some(self.block.id()),
-                        });
-                    }
-                    BlockPickerMenuAction::ImportImage => match pick_image_file() {
-                        Ok(Some(image)) => {
-                            self.image_import_error = None;
-                            let id = create_image_block(editors, image, self.block.id());
-                            self.insert_slide(id, index);
+                self.insert_canvas_slide(editors, index);
+            }
+            ui.menu_button(ICON_KEYBOARD_ARROW_DOWN, |ui| {
+                if let Some(picker_action) = BlockPicker::show_menu(ui, editors.registry()) {
+                    let index = self.slides().map_or(0, |slides| slides.len());
+                    match picker_action {
+                        BlockPickerMenuAction::New(block_type) => {
+                            self.pending_create_index = Some(index);
+                            action = Some(EditorAction::CreateBlock {
+                                block_type,
+                                parent: Some(self.block.id()),
+                            });
                         }
-                        Ok(None) => {}
-                        Err(error) => self.image_import_error = Some(error),
-                    },
-                    BlockPickerMenuAction::LinkExisting => {
-                        self.picker.open([self.block.id()]);
+                        BlockPickerMenuAction::ImportImage => match pick_image_file() {
+                            Ok(Some(image)) => {
+                                self.image_import_error = None;
+                                let id = create_image_block(editors, image, self.block.id());
+                                self.insert_slide(id, index);
+                            }
+                            Ok(None) => {}
+                            Err(error) => self.image_import_error = Some(error),
+                        },
+                        BlockPickerMenuAction::LinkExisting => {
+                            self.picker.open([self.block.id()]);
+                        }
                     }
                 }
-            }
+            })
+            .response
+            .on_hover_text("More slide options");
         });
         action
     }
@@ -584,6 +618,10 @@ impl BlockEditor for PresentationEditor {
 
     fn direct_editor_resize(&self) -> DirectEditorResize {
         DirectEditorResize::Both
+    }
+
+    fn direct_editor_fills_viewport(&self) -> bool {
+        true
     }
 
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {
