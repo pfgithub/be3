@@ -983,10 +983,6 @@ impl BlockEditor for TextEditor {
         self.block.set_parent(parent);
     }
 
-    fn note_backref(&self, id: Uuid) {
-        self.block.note_backref(id);
-    }
-
     fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
         Some(&self.block)
     }

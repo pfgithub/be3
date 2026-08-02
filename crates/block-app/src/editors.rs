@@ -274,7 +274,6 @@ pub trait BlockEditor {
     fn name(&self) -> String;
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
-    fn note_backref(&self, id: Uuid);
     fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }

@@ -696,6 +696,12 @@ impl<B: Block> BlockHandle<B> {
     }
 
     pub fn set_parent(&self, parent: BlockParent) {
+        if let BlockParent::Uuid(id) = parent {
+            let mut relationships = self.block.relationships.write();
+            if !relationships.backrefs.contains(&id) {
+                relationships.backrefs.push(id);
+            }
+        }
         self.commands
             .send(WorkerCommand::SetBlockParent {
                 id: self.id,
@@ -719,13 +725,6 @@ impl<B: Block> BlockHandle<B> {
 
     pub fn relationships(&self) -> BlockRelationships {
         self.block.relationships.read().clone()
-    }
-
-    pub fn note_backref(&self, id: Uuid) {
-        let mut relationships = self.block.relationships.write();
-        if !relationships.backrefs.contains(&id) {
-            relationships.backrefs.push(id);
-        }
     }
 
     pub async fn loaded(&self) {

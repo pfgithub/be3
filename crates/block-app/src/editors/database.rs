@@ -36,7 +36,6 @@ pub(super) fn registration() -> EditorRegistration {
                 },
             });
             let database = client.create_block(Database::new(schema.id()));
-            schema.note_backref(database.id());
             schema.set_parent(BlockParent::Uuid(database.id()));
             Box::new(DatabaseEditor::new(database, Some(schema)))
         }),
@@ -499,10 +498,6 @@ impl BlockEditor for DatabaseEditor {
 
     fn set_parent(&self, parent: BlockParent) {
         self.block.set_parent(parent);
-    }
-
-    fn note_backref(&self, id: Uuid) {
-        self.block.note_backref(id);
     }
 
     fn render(

@@ -69,7 +69,7 @@ fn references(&self) -> Vec<Uuid> {
 
 Return each referenced block once unless reference multiplicity has meaning to the server. Preserve a deterministic order. Do not include ordinary UUIDs that are not block references.
 
-When an editor creates a referenced child, it must update the parent block and then call `note_backref` and `set_parent` on the child. The client orders those network changes safely.
+When an editor creates a referenced child, it must update the parent block and then call `set_parent` on the child.
 
 ## 3. Choose synchronization and history behavior
 

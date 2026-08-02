@@ -740,12 +740,11 @@ impl BlockApp {
             }
 
             if let Some(parent) = transfer.parent_after {
-                if let BlockParent::Uuid(destination) = parent {
-                    if let Some(child) = self.editors.get(&transfer.child.id) {
-                        child.note_backref(destination);
-                    }
+                if let Some(child) = self.editors.get(&transfer.child.id) {
+                    child.set_parent(parent);
+                } else {
+                    self.client.set_block_parent(transfer.child.id, parent);
                 }
-                self.client.set_block_parent(transfer.child.id, parent);
             }
         }
     }
@@ -1558,7 +1557,6 @@ impl BlockApp {
                     match (parent, referenced) {
                         (Some(parent), true) => {
                             if let Some(created) = self.editors.get(&id) {
-                                created.note_backref(parent);
                                 created.set_parent(BlockParent::Uuid(parent));
                             }
                         }
@@ -1573,7 +1571,6 @@ impl BlockApp {
             }
             EditorAction::SetParent { id, parent } => {
                 if let Some(child) = self.editors.get(&id) {
-                    child.note_backref(parent);
                     child.set_parent(BlockParent::Uuid(parent));
                 }
             }

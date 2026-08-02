@@ -39,8 +39,6 @@ impl BlockEditor for UnsupportedEditor {
 
     fn set_parent(&self, _parent: BlockParent) {}
 
-    fn note_backref(&self, _id: Uuid) {}
-
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,

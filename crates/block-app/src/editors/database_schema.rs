@@ -69,10 +69,6 @@ impl BlockEditor for DatabaseSchemaEditor {
         self.block.set_parent(parent);
     }
 
-    fn note_backref(&self, id: Uuid) {
-        self.block.note_backref(id);
-    }
-
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,

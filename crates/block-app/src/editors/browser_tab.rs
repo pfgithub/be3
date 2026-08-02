@@ -389,10 +389,6 @@ impl BlockEditor for WebBrowserTabEditor {
         self.block.set_parent(parent);
     }
 
-    fn note_backref(&self, id: Uuid) {
-        self.block.note_backref(id);
-    }
-
     fn update(&mut self, frame: &eframe::Frame) {
         if std::mem::take(&mut self.displayed_last_frame) {
             self.ensure_webview(frame);

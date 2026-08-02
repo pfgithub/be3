@@ -419,10 +419,6 @@ impl BlockEditor for WorkspaceIndexEditor {
         self.block.set_parent(parent);
     }
 
-    fn note_backref(&self, id: Uuid) {
-        self.block.note_backref(id);
-    }
-
     fn add_child(&self, entry: BlockEntry) -> Option<bool> {
         let index = self.block.read()?;
         let already_present = index
