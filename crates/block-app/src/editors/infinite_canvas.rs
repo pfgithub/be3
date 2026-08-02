@@ -801,9 +801,19 @@ impl InfiniteCanvasEditor {
             .iter()
             .find(|entity| self.selection.contains(&entity.id))?;
         match entity.kind {
-            CanvasEntityKind::DirectEditor { .. } => {
-                self.focused_editor = Some(entity.id);
-                None
+            CanvasEntityKind::DirectEditor { block_id, .. } => {
+                if editors.direct_editor_interaction(block_id)
+                    == Some(DirectEditorInteraction::Playback)
+                {
+                    let cached = editors.client().cached_block(block_id)?;
+                    Some(EditorAction::OpenBlock {
+                        id: cached.id,
+                        block_type: cached.block_type,
+                    })
+                } else {
+                    self.focused_editor = Some(entity.id);
+                    None
+                }
             }
             CanvasEntityKind::Text { .. } if !entity.locked => {
                 self.editing_text = Some(entity.id);
@@ -3129,6 +3139,13 @@ impl InfiniteCanvasEditor {
             }
             CanvasEntityKind::DirectEditor { block_id, .. }
                 if editors.direct_editor_interaction(block_id)
+                    == Some(DirectEditorInteraction::Playback) =>
+            {
+                let cached = editors.client().cached_block(block_id);
+                ("Open presentation".to_owned(), cached, false)
+            }
+            CanvasEntityKind::DirectEditor { block_id, .. }
+                if editors.direct_editor_interaction(block_id)
                     == Some(DirectEditorInteraction::Preview) =>
             {
                 ("Edit".to_owned(), None, true)
@@ -3414,7 +3431,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                 .direct_editor_interaction(block_id)
                 .unwrap_or(DirectEditorInteraction::Preview);
             let is_focused = self.focused_editor == Some(entity.id);
-            if interaction != DirectEditorInteraction::Live && !is_focused {
+            if interaction == DirectEditorInteraction::Preview && !is_focused {
                 continue;
             }
             let screen = direct_editor_layout(entity)

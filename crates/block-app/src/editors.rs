@@ -61,6 +61,7 @@ pub struct DirectEditorCapabilities {
 pub enum DirectEditorInteraction {
     Preview,
     Live,
+    Playback,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

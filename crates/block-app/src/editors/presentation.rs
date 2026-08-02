@@ -20,7 +20,7 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 use super::{
     image::{create_image_block, pick_image_file},
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
+    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
@@ -526,7 +526,11 @@ impl BlockEditor for PresentationEditor {
     }
 
     fn direct_editor_interaction(&self) -> DirectEditorInteraction {
-        DirectEditorInteraction::Live
+        DirectEditorInteraction::Playback
+    }
+
+    fn direct_editor_resize(&self) -> DirectEditorResize {
+        DirectEditorResize::Both
     }
 
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {
@@ -656,6 +660,112 @@ impl BlockEditor for PresentationEditor {
             });
         }
         action.or_else(|| editors.direct_editor_ui(slide.block_id, ui, scale, viewport))
+    }
+
+    fn embedded_direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        _scale: f32,
+        _viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        self.active_this_frame = true;
+        self.last_context = Some(ui.ctx().clone());
+        let rect = ui.available_rect_before_wrap();
+        ui.allocate_rect(rect, Sense::hover());
+        let painter = ui.painter().clone();
+        painter.rect_filled(rect, 0.0, Color32::BLACK);
+
+        let Some(slides) = self.slides() else {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Loading presentation…",
+                egui::FontId::proportional(18.0),
+                Color32::WHITE,
+            );
+            return None;
+        };
+        self.synchronize_selection(&slides);
+        let dependencies = self.dependency_map();
+        Self::ensure_slide_editors(&slides, &dependencies, editors);
+        let Some(slide) = self.selected_slide(&slides) else {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "This presentation has no slides",
+                egui::FontId::proportional(18.0),
+                Color32::WHITE,
+            );
+            return None;
+        };
+
+        let controls_height = PLAYBACK_CONTROLS_HEIGHT.min(rect.height() * 0.3);
+        let controls = Rect::from_min_max(
+            egui::pos2(rect.left(), rect.bottom() - controls_height),
+            rect.max,
+        );
+        let available = Rect::from_min_max(rect.min, egui::pos2(rect.right(), controls.top()));
+        let ratio = editors
+            .preview_aspect_ratio(slide.block_id)
+            .or_else(|| {
+                editors
+                    .direct_editor_intrinsic_size(slide.block_id)
+                    .filter(|size| size.x > 0.0 && size.y > 0.0)
+                    .map(|size| size.x / size.y)
+            })
+            .unwrap_or(DEFAULT_SLIDE_SIZE.x / DEFAULT_SLIDE_SIZE.y);
+        let preview = fit_rect(available.shrink(8.0), ratio);
+        if !editors.render(
+            slide.block_id,
+            BlockRenderContext {
+                painter: &painter,
+                corners: rect_corners(preview),
+                opacity: 1.0,
+            },
+        ) {
+            paint_fallback(
+                &painter,
+                preview,
+                dependencies.get(&slide.block_id),
+                editors,
+            );
+        }
+
+        let current = slides
+            .iter()
+            .position(|candidate| candidate.id == slide.id)
+            .unwrap_or(0);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(controls), |ui| {
+            ui.with_layout(
+                egui::Layout::left_to_right(egui::Align::Center)
+                    .with_main_align(egui::Align::Center),
+                |ui| {
+                    if ui
+                        .add_enabled(current > 0, egui::Button::new(ICON_ARROW_BACK))
+                        .on_hover_text("Previous slide")
+                        .clicked()
+                    {
+                        self.navigate_playback(&slides, -1);
+                    }
+                    ui.colored_label(
+                        Color32::WHITE,
+                        format!("{} / {}", current + 1, slides.len()),
+                    );
+                    if ui
+                        .add_enabled(
+                            current + 1 < slides.len(),
+                            egui::Button::new(ICON_ARROW_FORWARD),
+                        )
+                        .on_hover_text("Next slide")
+                        .clicked()
+                    {
+                        self.navigate_playback(&slides, 1);
+                    }
+                },
+            );
+        });
+        None
     }
 }
 
