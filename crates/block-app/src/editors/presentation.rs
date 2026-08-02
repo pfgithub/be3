@@ -63,6 +63,7 @@ pub(super) struct PresentationEditor {
     active_this_frame: bool,
     last_context: Option<egui::Context>,
     image_import_error: Option<String>,
+    embedded_controls_visible_until: f64,
 }
 
 impl PresentationEditor {
@@ -79,6 +80,7 @@ impl PresentationEditor {
             active_this_frame: false,
             last_context: None,
             image_import_error: None,
+            embedded_controls_visible_until: 0.0,
         }
     }
 
@@ -705,7 +707,16 @@ impl BlockEditor for PresentationEditor {
             egui::pos2(rect.left(), rect.bottom() - controls_height),
             rect.max,
         );
-        let available = Rect::from_min_max(rect.min, egui::pos2(rect.right(), controls.top()));
+        let (now, pointer, pointer_delta) = ui
+            .ctx()
+            .input(|input| (input.time, input.pointer.hover_pos(), input.pointer.delta()));
+        let pointer_moved =
+            pointer.is_some_and(|pointer| rect.contains(pointer)) && pointer_delta != Vec2::ZERO;
+        let controls_hovered = pointer.is_some_and(|pointer| controls.contains(pointer));
+        if pointer_moved || controls_hovered {
+            self.embedded_controls_visible_until = now + 2.5;
+        }
+        let show_controls = now <= self.embedded_controls_visible_until;
         let ratio = editors
             .preview_aspect_ratio(slide.block_id)
             .or_else(|| {
@@ -715,7 +726,7 @@ impl BlockEditor for PresentationEditor {
                     .map(|size| size.x / size.y)
             })
             .unwrap_or(DEFAULT_SLIDE_SIZE.x / DEFAULT_SLIDE_SIZE.y);
-        let preview = fit_rect(available.shrink(8.0), ratio);
+        let preview = fit_rect(rect, ratio);
         if !editors.render(
             slide.block_id,
             BlockRenderContext {
@@ -736,35 +747,44 @@ impl BlockEditor for PresentationEditor {
             .iter()
             .position(|candidate| candidate.id == slide.id)
             .unwrap_or(0);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(controls), |ui| {
-            ui.with_layout(
-                egui::Layout::left_to_right(egui::Align::Center)
-                    .with_main_align(egui::Align::Center),
-                |ui| {
-                    if ui
-                        .add_enabled(current > 0, egui::Button::new(ICON_ARROW_BACK))
-                        .on_hover_text("Previous slide")
-                        .clicked()
-                    {
-                        self.navigate_playback(&slides, -1);
-                    }
-                    ui.colored_label(
-                        Color32::WHITE,
-                        format!("{} / {}", current + 1, slides.len()),
-                    );
-                    if ui
-                        .add_enabled(
-                            current + 1 < slides.len(),
-                            egui::Button::new(ICON_ARROW_FORWARD),
-                        )
-                        .on_hover_text("Next slide")
-                        .clicked()
-                    {
-                        self.navigate_playback(&slides, 1);
-                    }
-                },
-            );
-        });
+        if show_controls {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(controls), |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_black_alpha(180))
+                    .show(ui, |ui| {
+                        ui.set_min_size(controls.size());
+                        ui.with_layout(
+                            egui::Layout::left_to_right(egui::Align::Center)
+                                .with_main_align(egui::Align::Center),
+                            |ui| {
+                                if ui
+                                    .add_enabled(current > 0, egui::Button::new(ICON_ARROW_BACK))
+                                    .on_hover_text("Previous slide")
+                                    .clicked()
+                                {
+                                    self.navigate_playback(&slides, -1);
+                                }
+                                ui.colored_label(
+                                    Color32::WHITE,
+                                    format!("{} / {}", current + 1, slides.len()),
+                                );
+                                if ui
+                                    .add_enabled(
+                                        current + 1 < slides.len(),
+                                        egui::Button::new(ICON_ARROW_FORWARD),
+                                    )
+                                    .on_hover_text("Next slide")
+                                    .clicked()
+                                {
+                                    self.navigate_playback(&slides, 1);
+                                }
+                            },
+                        );
+                    });
+            });
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
         None
     }
 }
