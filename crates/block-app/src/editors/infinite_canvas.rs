@@ -151,6 +151,7 @@ enum Gesture {
         start: CanvasPoint,
         current: CanvasPoint,
         originals: Vec<CanvasEntity>,
+        duplicate: bool,
     },
     Resize {
         handle: ResizeHandle,
@@ -328,24 +329,10 @@ impl InfiniteCanvasEditor {
     }
 
     fn duplicate_selection(&mut self, entities: &[CanvasEntity]) {
-        let mut duplicate_groups = HashMap::new();
-        let duplicates = self
-            .selected_entities(entities)
-            .into_iter()
-            .map(|mut entity| {
-                entity.id = Uuid::new_v4();
-                if let Some(group_id) = entity.group_id {
-                    entity.group_id = Some(
-                        *duplicate_groups
-                            .entry(group_id)
-                            .or_insert_with(Uuid::new_v4),
-                    );
-                }
-                entity.transform.center.x += IMPORT_CASCADE_OFFSET;
-                entity.transform.center.y += IMPORT_CASCADE_OFFSET;
-                entity
-            })
-            .collect::<Vec<_>>();
+        let duplicates = duplicate_entities(
+            self.selected_entities(entities),
+            CanvasPoint::new(IMPORT_CASCADE_OFFSET, IMPORT_CASCADE_OFFSET),
+        );
         if duplicates.is_empty() {
             return;
         }
@@ -355,6 +342,25 @@ impl InfiniteCanvasEditor {
             self.selection.insert(entity.id);
             self.block.operate(InfiniteCanvasOperation::Add { entity });
         }
+    }
+
+    fn begin_move_gesture(
+        &mut self,
+        entities: &[CanvasEntity],
+        world: CanvasPoint,
+        duplicate: bool,
+    ) {
+        let mut originals = self.selected_unlocked_entities(entities);
+        if duplicate {
+            originals = duplicate_entities(originals, CanvasPoint::default());
+            self.selection = originals.iter().map(|entity| entity.id).collect();
+        }
+        self.gesture = (!originals.is_empty()).then_some(Gesture::Move {
+            start: world,
+            current: world,
+            originals,
+            duplicate,
+        });
     }
 
     fn group_selection(&mut self, entities: &[CanvasEntity]) {
@@ -1672,11 +1678,8 @@ impl InfiniteCanvasEditor {
                                 self.gesture = None;
                             } else {
                                 self.select_entity(entities, id, false);
-                                self.gesture = Some(Gesture::Move {
-                                    start: world,
-                                    current: world,
-                                    originals: self.selected_unlocked_entities(entities),
-                                });
+                                let duplicate = response.ctx.input(|input| input.modifiers.alt);
+                                self.begin_move_gesture(entities, world, duplicate);
                             }
                             return (layer_move, create_block, set_parent, keyboard_action);
                         }
@@ -1686,11 +1689,8 @@ impl InfiniteCanvasEditor {
                             self.gesture = None;
                         } else {
                             self.select_entity(entities, id, false);
-                            self.gesture = Some(Gesture::Move {
-                                start: world,
-                                current: world,
-                                originals: self.selected_unlocked_entities(entities),
-                            });
+                            let duplicate = response.ctx.input(|input| input.modifiers.alt);
+                            self.begin_move_gesture(entities, world, duplicate);
                         }
                     } else {
                         let additive = response.ctx.input(|input| input.modifiers.shift);
@@ -1876,7 +1876,20 @@ impl InfiniteCanvasEditor {
                         .extend(Self::entity_selection_ids(entities, id));
                 }
             }
-            Gesture::Move { ref originals, .. }
+            Gesture::Move {
+                duplicate: true, ..
+            } => {
+                let additions = preview_entities(&gesture);
+                self.block.finish_history_group();
+                for entity in additions {
+                    self.block.operate(InfiniteCanvasOperation::Add { entity });
+                }
+            }
+            Gesture::Move {
+                ref originals,
+                duplicate: false,
+                ..
+            }
             | Gesture::Resize { ref originals, .. }
             | Gesture::Rotate { ref originals, .. } => {
                 let updates = preview_entities(&gesture);
@@ -1915,6 +1928,20 @@ impl InfiniteCanvasEditor {
         }
         for stored in entities {
             let entity = preview.get(&stored.id).unwrap_or(stored);
+            paint_entity(
+                self,
+                painter,
+                rect,
+                entity,
+                dependency_details,
+                editors,
+                1.0,
+            );
+        }
+        for entity in preview
+            .values()
+            .filter(|preview| !entities.iter().any(|stored| stored.id == preview.id))
+        {
             paint_entity(
                 self,
                 painter,
@@ -2369,6 +2396,26 @@ impl BlockEditor for InfiniteCanvasEditor {
     }
 }
 
+fn duplicate_entities(entities: Vec<CanvasEntity>, offset: CanvasPoint) -> Vec<CanvasEntity> {
+    let mut duplicate_groups = HashMap::new();
+    entities
+        .into_iter()
+        .map(|mut entity| {
+            entity.id = Uuid::new_v4();
+            if let Some(group_id) = entity.group_id {
+                entity.group_id = Some(
+                    *duplicate_groups
+                        .entry(group_id)
+                        .or_insert_with(Uuid::new_v4),
+                );
+            }
+            entity.transform.center.x += offset.x;
+            entity.transform.center.y += offset.y;
+            entity
+        })
+        .collect()
+}
+
 fn focused_direct_editor(
     focused: Option<Uuid>,
     entities: &[CanvasEntity],
@@ -2819,6 +2866,7 @@ fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
             start,
             current,
             originals,
+            ..
         } => {
             let delta = CanvasPoint::new(current.x - start.x, current.y - start.y);
             originals
