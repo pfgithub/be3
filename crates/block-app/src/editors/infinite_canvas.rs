@@ -6,8 +6,8 @@ use block_client::{
         image::Image as ImageBlock,
         infinite_canvas::{
             CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasLayerMove,
-            CanvasPoint, CanvasTextAlign, CanvasTextStyle, CanvasTextWeight, CanvasTransform,
-            InfiniteCanvas, InfiniteCanvasOperation,
+            CanvasPoint, CanvasPreviewRegion, CanvasTextAlign, CanvasTextStyle, CanvasTextWeight,
+            CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
         },
     },
     BlockClient, BlockHandle, CachedBlock, ReferenceList,
@@ -1115,6 +1115,66 @@ impl InfiniteCanvasEditor {
         self.record_update(before, after, true);
     }
 
+    fn show_preview_region_inspector(&mut self, ui: &mut egui::Ui, entities: &[CanvasEntity]) {
+        let preview_region = self.block.read().and_then(|canvas| canvas.preview_region());
+        egui::CollapsingHeader::new("Canvas preview")
+            .default_open(preview_region.is_some())
+            .show(ui, |ui| {
+                let mut enabled = preview_region.is_some();
+                if ui.checkbox(&mut enabled, "Use preview region").changed() {
+                    let region = enabled.then(|| preview_region_for_entities(entities));
+                    self.record_action(InfiniteCanvasOperation::SetPreviewRegion { region });
+                }
+                let Some(mut region) = preview_region else {
+                    ui.weak("Without a region, previews use the canvas content extents.");
+                    return;
+                };
+                let mut changed = false;
+                egui::Grid::new("canvas-preview-region-fields")
+                    .num_columns(4)
+                    .show(ui, |ui| {
+                        ui.label("X");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut region.center.x).speed(1.0))
+                            .changed();
+                        ui.label("Y");
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut region.center.y).speed(1.0))
+                            .changed();
+                        ui.end_row();
+                        ui.label("W");
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut region.size.x)
+                                    .speed(1.0)
+                                    .range(MIN_SIZE..=f32::INFINITY),
+                            )
+                            .changed();
+                        ui.label("H");
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut region.size.y)
+                                    .speed(1.0)
+                                    .range(MIN_SIZE..=f32::INFINITY),
+                            )
+                            .changed();
+                        ui.end_row();
+                    });
+                if changed {
+                    self.grouped_inspector_edit_active = true;
+                    self.block
+                        .operate_grouped([InfiniteCanvasOperation::SetPreviewRegion {
+                            region: Some(region),
+                        }]);
+                }
+                if ui.button("Fit region to content").clicked() {
+                    self.record_action(InfiniteCanvasOperation::SetPreviewRegion {
+                        region: Some(preview_region_for_entities(entities)),
+                    });
+                }
+            });
+    }
+
     fn show_inspector(
         &mut self,
         ui: &mut egui::Ui,
@@ -1130,6 +1190,8 @@ impl InfiniteCanvasEditor {
             .iter()
             .filter(|entity| self.selection.contains(&entity.id))
             .collect::<Vec<_>>();
+        self.show_preview_region_inspector(ui, entities);
+        ui.separator();
         if selected.is_empty() {
             ui.weak("Select an object to edit its appearance.");
             return None;
@@ -3606,6 +3668,19 @@ fn canvas_intrinsic_size(entities: &[CanvasEntity]) -> Vec2 {
             },
         )
         .max(Vec2::splat(100.0))
+}
+
+fn preview_region_for_entities(entities: &[CanvasEntity]) -> CanvasPreviewRegion {
+    let bounds = entities.iter().map(entity_bounds).reduce(WorldRect::union);
+    bounds.map_or_else(
+        || CanvasPreviewRegion::new(CanvasPoint::default(), CanvasPoint::new(100.0, 100.0)),
+        |bounds| {
+            CanvasPreviewRegion::new(
+                bounds.center(),
+                CanvasPoint::new(bounds.size().x.max(100.0), bounds.size().y.max(100.0)),
+            )
+        },
+    )
 }
 
 fn common_value<T: Copy + PartialEq>(values: impl IntoIterator<Item = T>) -> CommonValue<T> {

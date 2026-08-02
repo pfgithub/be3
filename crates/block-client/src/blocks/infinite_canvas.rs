@@ -38,6 +38,18 @@ impl CanvasTransform {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CanvasPreviewRegion {
+    pub center: CanvasPoint,
+    pub size: CanvasPoint,
+}
+
+impl CanvasPreviewRegion {
+    pub const fn new(center: CanvasPoint, size: CanvasPoint) -> Self {
+        Self { center, size }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanvasEntityKind {
@@ -175,11 +187,15 @@ pub enum InfiniteCanvasOperation {
     ExactOrder {
         ids: Vec<Uuid>,
     },
+    SetPreviewRegion {
+        region: Option<CanvasPreviewRegion>,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct InfiniteCanvas {
     entities: Vec<CanvasEntity>,
+    preview_region: Option<CanvasPreviewRegion>,
 }
 
 pub struct InfiniteCanvasHistory;
@@ -203,6 +219,10 @@ enum InfiniteCanvasHistoryActionKind {
         before: Vec<Uuid>,
         after: Vec<Uuid>,
     },
+    PreviewRegion {
+        before: Option<CanvasPreviewRegion>,
+        after: Option<CanvasPreviewRegion>,
+    },
 }
 
 impl InfiniteCanvas {
@@ -212,6 +232,10 @@ impl InfiniteCanvas {
 
     pub fn entities(&self) -> &[CanvasEntity] {
         &self.entities
+    }
+
+    pub fn preview_region(&self) -> Option<CanvasPreviewRegion> {
+        self.preview_region
     }
 
     fn reorder(&mut self, ids: &[Uuid], movement: CanvasLayerMove) {
@@ -312,6 +336,9 @@ impl Block for InfiniteCanvas {
                 }
                 canvas.entities = ordered;
             }
+            InfiniteCanvasOperation::SetPreviewRegion { region } => {
+                canvas.preview_region = region.map(normalized_preview_region);
+            }
         }
     }
 
@@ -343,6 +370,24 @@ fn normalized_entity(mut entity: CanvasEntity) -> CanvasEntity {
         }
     }
     entity
+}
+
+fn normalized_preview_region(mut region: CanvasPreviewRegion) -> CanvasPreviewRegion {
+    if !region.center.x.is_finite() {
+        region.center.x = 0.0;
+    }
+    if !region.center.y.is_finite() {
+        region.center.y = 0.0;
+    }
+    if !region.size.x.is_finite() {
+        region.size.x = 100.0;
+    }
+    if !region.size.y.is_finite() {
+        region.size.y = 100.0;
+    }
+    region.size.x = region.size.x.abs().max(1.0);
+    region.size.y = region.size.y.abs().max(1.0);
+    region
 }
 
 impl BlockHistory<InfiniteCanvas> for InfiniteCanvasHistory {
@@ -424,6 +469,15 @@ impl BlockHistory<InfiniteCanvas> for InfiniteCanvasHistory {
                 }
                 InfiniteCanvasHistoryActionKind::Order { before, after }
             }
+            InfiniteCanvasOperation::SetPreviewRegion { .. } => {
+                if before.preview_region == after.preview_region {
+                    return None;
+                }
+                InfiniteCanvasHistoryActionKind::PreviewRegion {
+                    before: before.preview_region,
+                    after: after.preview_region,
+                }
+            }
         };
         Some(InfiniteCanvasHistoryAction {
             kind,
@@ -441,6 +495,9 @@ impl BlockHistory<InfiniteCanvas> for InfiniteCanvasHistory {
             InfiniteCanvasHistoryActionKind::Order { before, .. } => {
                 before.len() * size_of::<Uuid>() * 2
             }
+            InfiniteCanvasHistoryActionKind::PreviewRegion { .. } => {
+                size_of::<CanvasPreviewRegion>() * 2
+            }
         }
     }
 
@@ -449,34 +506,44 @@ impl BlockHistory<InfiniteCanvas> for InfiniteCanvasHistory {
             return Err(next);
         }
         let next_recorded_at = next.recorded_at;
-        let (
-            InfiniteCanvasHistoryActionKind::Update {
-                before: previous_before,
-                after: previous_after,
-            },
-            InfiniteCanvasHistoryActionKind::Update {
-                before: next_before,
-                after: next_after,
-            },
-        ) = (&mut previous.kind, &next.kind)
-        else {
-            return Err(next);
-        };
-        let previous_ids = previous_after
-            .iter()
-            .map(|entity| entity.id)
-            .collect::<Vec<_>>();
-        let next_ids = next_after
-            .iter()
-            .map(|entity| entity.id)
-            .collect::<Vec<_>>();
-        if previous_ids != next_ids {
-            return Err(next);
+        match (&mut previous.kind, &next.kind) {
+            (
+                InfiniteCanvasHistoryActionKind::Update {
+                    before: previous_before,
+                    after: previous_after,
+                },
+                InfiniteCanvasHistoryActionKind::Update {
+                    before: next_before,
+                    after: next_after,
+                },
+            ) => {
+                let previous_ids = previous_after
+                    .iter()
+                    .map(|entity| entity.id)
+                    .collect::<Vec<_>>();
+                let next_ids = next_after
+                    .iter()
+                    .map(|entity| entity.id)
+                    .collect::<Vec<_>>();
+                if previous_ids != next_ids {
+                    return Err(next);
+                }
+                if previous_before.is_empty() {
+                    previous_before.clone_from(next_before);
+                }
+                previous_after.clone_from(next_after);
+            }
+            (
+                InfiniteCanvasHistoryActionKind::PreviewRegion {
+                    after: previous_after,
+                    ..
+                },
+                InfiniteCanvasHistoryActionKind::PreviewRegion {
+                    after: next_after, ..
+                },
+            ) => previous_after.clone_from(next_after),
+            _ => return Err(next),
         }
-        if previous_before.is_empty() {
-            previous_before.clone_from(next_before);
-        }
-        previous_after.clone_from(next_after);
         previous.recorded_at = next_recorded_at;
         Ok(())
     }
@@ -543,6 +610,11 @@ impl BlockHistory<InfiniteCanvas> for InfiniteCanvasHistory {
                     } else {
                         before.clone()
                     },
+                }]
+            }
+            InfiniteCanvasHistoryActionKind::PreviewRegion { before, after } => {
+                vec![InfiniteCanvasOperation::SetPreviewRegion {
+                    region: if to_after { *after } else { *before },
                 }]
             }
         }
