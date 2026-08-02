@@ -30,13 +30,13 @@ use text_editor_core::{
 };
 use uuid::Uuid;
 
-use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
+use crate::block_picker::{BlockPicker, BlockPickerCreation};
 
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    image::{create_image_block, pick_image_file},
+    image::create_image_block,
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
     DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
     SidebarDragPayload,
@@ -256,26 +256,22 @@ impl TextEditor {
             }
             ui.menu_button("Insert", |ui| {
                 ui.menu_button("Block", |ui| {
-                    if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
-                        match action {
-                            BlockPickerMenuAction::New(block_type) => {
-                                self.pending_create = true;
-                                create_block = Some(block_type);
-                            }
-                            BlockPickerMenuAction::ImportImage => match pick_image_file() {
-                                Ok(Some(image)) => {
-                                    let source_name = image.source_name().to_owned();
-                                    let id = create_image_block(editors, image, self.block.id());
-                                    self.insert_image_embed(id, &source_name);
-                                    self.image_import_error = None;
-                                }
-                                Ok(None) => {}
-                                Err(error) => self.image_import_error = Some(error),
-                            },
-                            BlockPickerMenuAction::LinkExisting => {
-                                self.picker.open([self.block.id()]);
-                            }
+                    match self
+                        .picker
+                        .show_menu(ui, editors.registry(), [self.block.id()])
+                    {
+                        Ok(Some(BlockPickerCreation::New(block_type))) => {
+                            self.pending_create = true;
+                            create_block = Some(block_type);
                         }
+                        Ok(Some(BlockPickerCreation::Image(image))) => {
+                            let source_name = image.source_name().to_owned();
+                            let id = create_image_block(editors, image, self.block.id());
+                            self.insert_image_embed(id, &source_name);
+                            self.image_import_error = None;
+                        }
+                        Ok(None) => {}
+                        Err(error) => self.image_import_error = Some(error),
                     }
                 });
             });

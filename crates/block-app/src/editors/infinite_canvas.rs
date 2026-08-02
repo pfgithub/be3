@@ -21,7 +21,7 @@ use egui_material_icons::icons::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
+use crate::block_picker::{BlockPicker, BlockPickerCreation};
 
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
@@ -1844,28 +1844,31 @@ impl InfiniteCanvasEditor {
                 }
             }
             ui.menu_button(ICON_DATA_OBJECT, |ui| {
-                if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
+                let picker_was_open = self.picker.is_open();
+                match self
+                    .picker
+                    .show_menu(ui, editors.registry(), [self.block.id()])
+                {
+                    Ok(Some(BlockPickerCreation::New(block_type))) => {
+                        self.tool = Tool::Block;
+                        self.armed_block = None;
+                        self.armed_block_needs_parent = false;
+                        self.pending_block_center = Some(self.viewport_center);
+                        create_block = Some(block_type);
+                    }
+                    Ok(Some(BlockPickerCreation::Image(image))) => {
+                        self.image_import_error = None;
+                        self.add_imported_image(editors, image, self.viewport_center);
+                        self.tool = Tool::Select;
+                    }
+                    Ok(None) => {}
+                    Err(error) => self.image_import_error = Some(error),
+                }
+                if !picker_was_open && self.picker.is_open() {
                     self.tool = Tool::Block;
                     self.armed_block = None;
                     self.armed_block_needs_parent = false;
                     self.pending_block_center = Some(self.viewport_center);
-                    match action {
-                        BlockPickerMenuAction::New(block_type) => {
-                            create_block = Some(block_type);
-                        }
-                        BlockPickerMenuAction::ImportImage => match pick_image_file() {
-                            Ok(Some(image)) => {
-                                self.image_import_error = None;
-                                self.add_imported_image(editors, image, self.viewport_center);
-                                self.tool = Tool::Select;
-                            }
-                            Ok(None) => {}
-                            Err(error) => self.image_import_error = Some(error),
-                        },
-                        BlockPickerMenuAction::LinkExisting => {
-                            self.picker.open([self.block.id()]);
-                        }
-                    }
                 }
             })
             .response
@@ -2599,29 +2602,32 @@ impl InfiniteCanvasEditor {
                         ui.close();
                     }
                     ui.menu_button("Block", |ui| {
-                        if let Some(action) = BlockPicker::show_menu(ui, editors.registry()) {
+                        let picker_was_open = self.picker.is_open();
+                        match self
+                            .picker
+                            .show_menu(ui, editors.registry(), [self.block.id()])
+                        {
+                            Ok(Some(BlockPickerCreation::New(block_type))) => {
+                                self.tool = Tool::Block;
+                                self.armed_block = None;
+                                self.armed_block_needs_parent = false;
+                                self.pending_block_center = self.context_menu_position;
+                                create_block = Some(block_type);
+                            }
+                            Ok(Some(BlockPickerCreation::Image(image))) => {
+                                self.image_import_error = None;
+                                let center = self.context_menu_position.unwrap_or_default();
+                                self.add_imported_image(editors, image, center);
+                                self.tool = Tool::Select;
+                            }
+                            Ok(None) => {}
+                            Err(error) => self.image_import_error = Some(error),
+                        }
+                        if !picker_was_open && self.picker.is_open() {
                             self.tool = Tool::Block;
                             self.armed_block = None;
                             self.armed_block_needs_parent = false;
                             self.pending_block_center = self.context_menu_position;
-                            match action {
-                                BlockPickerMenuAction::New(block_type) => {
-                                    create_block = Some(block_type);
-                                }
-                                BlockPickerMenuAction::ImportImage => match pick_image_file() {
-                                    Ok(Some(image)) => {
-                                        self.image_import_error = None;
-                                        let center = self.context_menu_position.unwrap_or_default();
-                                        self.add_imported_image(editors, image, center);
-                                        self.tool = Tool::Select;
-                                    }
-                                    Ok(None) => {}
-                                    Err(error) => self.image_import_error = Some(error),
-                                },
-                                BlockPickerMenuAction::LinkExisting => {
-                                    self.picker.open([self.block.id()]);
-                                }
-                            }
                         }
                     });
                 });

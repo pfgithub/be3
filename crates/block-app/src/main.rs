@@ -17,12 +17,10 @@ use block_client::{
     blocks::{image::Image, workspace_index::BlockEntry},
     BlockClient, ReferenceList,
 };
-use block_picker::{BlockPicker, BlockPickerMenuAction};
+use block_picker::{BlockPicker, BlockPickerCreation};
 use editors::{
-    direct_editor_tab_ui,
-    image::{pick_image_file, ImageEditor},
-    BlockEditor, DynamicArtifactRegeneration, EditorAccess, EditorAction, EditorRegistry,
-    SidebarDragPayload, SidebarDragSource,
+    direct_editor_tab_ui, image::ImageEditor, BlockEditor, DynamicArtifactRegeneration,
+    EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
@@ -534,31 +532,18 @@ impl BlockApp {
         }
     }
 
-    fn handle_picker_menu_action(
-        &mut self,
-        action: BlockPickerMenuAction,
-        target: BlockPickerTarget,
-        excluded: impl IntoIterator<Item = Uuid>,
-    ) {
-        match action {
-            BlockPickerMenuAction::New(block_type) => {
+    fn handle_picker_creation(&mut self, creation: BlockPickerCreation, target: BlockPickerTarget) {
+        match creation {
+            BlockPickerCreation::New(block_type) => {
                 let parent = match target {
                     BlockPickerTarget::Root => None,
                     BlockPickerTarget::Block(parent) => Some(parent),
                 };
                 self.create_block(block_type, parent);
             }
-            BlockPickerMenuAction::ImportImage => match pick_image_file() {
-                Ok(Some(image)) => {
-                    self.image_import_error = None;
-                    self.create_imported_image(image, target);
-                }
-                Ok(None) => {}
-                Err(error) => self.image_import_error = Some(error),
-            },
-            BlockPickerMenuAction::LinkExisting => {
-                self.block_picker.open(excluded);
-                self.block_picker_target = Some(target);
+            BlockPickerCreation::Image(image) => {
+                self.image_import_error = None;
+                self.create_imported_image(image, target);
             }
         }
     }
@@ -961,7 +946,10 @@ impl BlockApp {
         let mut toggle = false;
         let mut open = false;
         let mut delete = false;
-        let mut picker_action = None;
+        let mut picker_result = None;
+        let picker_was_open = self.block_picker.is_open();
+        let mut picker_excluded = path.clone();
+        picker_excluded.insert(reference.id);
         let mut row_response = None;
         ui.horizontal(|ui| {
             ui.add_space(depth as f32 * 14.0);
@@ -1042,8 +1030,15 @@ impl BlockApp {
                 });
             }
             response.context_menu(|ui| {
-                match block_context_menu(ui, &self.registry, can_add_child, can_delete_child) {
-                    Some(BlockContextMenuAction::Picker(action)) => picker_action = Some(action),
+                match block_context_menu(
+                    ui,
+                    &self.registry,
+                    &mut self.block_picker,
+                    picker_excluded.clone(),
+                    can_add_child,
+                    can_delete_child,
+                ) {
+                    Some(BlockContextMenuAction::Picker(result)) => picker_result = Some(result),
                     Some(BlockContextMenuAction::Rename) => {
                         self.rename = Some(RenameState {
                             id: reference.id,
@@ -1057,21 +1052,27 @@ impl BlockApp {
             row_response = Some(response);
             if can_add_child {
                 ui.menu_button(ICON_ADD, |ui| {
-                    picker_action = BlockPicker::show_menu(ui, &self.registry);
+                    picker_result = Some(self.block_picker.show_menu(
+                        ui,
+                        &self.registry,
+                        picker_excluded.clone(),
+                    ));
                 })
                 .response
                 .on_hover_text("Add a child");
             }
         });
 
-        if let Some(action) = picker_action {
-            let mut excluded = path.clone();
-            excluded.insert(reference.id);
-            self.handle_picker_menu_action(
-                action,
-                BlockPickerTarget::Block(reference.id),
-                excluded,
-            );
+        let picker_target = BlockPickerTarget::Block(reference.id);
+        if !picker_was_open && self.block_picker.is_open() {
+            self.block_picker_target = Some(picker_target);
+        }
+        if let Some(result) = picker_result {
+            match result {
+                Ok(Some(creation)) => self.handle_picker_creation(creation, picker_target),
+                Ok(None) => {}
+                Err(error) => self.image_import_error = Some(error),
+            }
         }
         if delete {
             self.queue_delete(reference.clone(), source, is_reference);
@@ -1152,18 +1153,28 @@ impl BlockApp {
             self.sidebar_reveal = None;
         }
         let active = self.sidebar_active_location();
-        let mut picker_action = None;
+        let mut picker_result = None;
+        let picker_was_open = self.block_picker.is_open();
         ui.horizontal(|ui| {
             ui.heading("Blocks");
             ui.add_space(ui.available_width() - 28.0);
             ui.menu_button(ICON_ADD, |ui| {
-                picker_action = BlockPicker::show_menu(ui, &self.registry);
+                picker_result = Some(self.block_picker.show_menu(ui, &self.registry, []));
             })
             .response
             .on_hover_text("Create block");
         });
-        if let Some(action) = picker_action {
-            self.handle_picker_menu_action(action, BlockPickerTarget::Root, []);
+        if !picker_was_open && self.block_picker.is_open() {
+            self.block_picker_target = Some(BlockPickerTarget::Root);
+        }
+        if let Some(result) = picker_result {
+            match result {
+                Ok(Some(creation)) => {
+                    self.handle_picker_creation(creation, BlockPickerTarget::Root)
+                }
+                Ok(None) => {}
+                Err(error) => self.image_import_error = Some(error),
+            }
         }
         ui.separator();
 
@@ -1770,12 +1781,16 @@ impl BlockApp {
 
         if let Some((reference, source, is_reference, action)) = context_action {
             match action {
-                BlockContextMenuAction::Picker(action) => {
-                    self.handle_picker_menu_action(
-                        action,
-                        BlockPickerTarget::Block(reference.id),
-                        [reference.id],
-                    );
+                BlockContextMenuAction::Picker(result) => {
+                    let target = BlockPickerTarget::Block(reference.id);
+                    if self.block_picker.is_open() {
+                        self.block_picker_target = Some(target);
+                    }
+                    match result {
+                        Ok(Some(creation)) => self.handle_picker_creation(creation, target),
+                        Ok(None) => {}
+                        Err(error) => self.image_import_error = Some(error),
+                    }
                 }
                 BlockContextMenuAction::Rename => {
                     self.rename = Some(RenameState {
@@ -1840,7 +1855,14 @@ impl BlockApp {
             let can_add = self.registry.can_add_child(reference.block_type);
             let can_delete = source != SidebarDragSource::Orphaned && self.can_delete_from(source);
             response.context_menu(|ui| {
-                if let Some(action) = block_context_menu(ui, &self.registry, can_add, can_delete) {
+                if let Some(action) = block_context_menu(
+                    ui,
+                    &self.registry,
+                    &mut self.block_picker,
+                    [reference.id],
+                    can_add,
+                    can_delete,
+                ) {
                     *context_action = Some((reference.clone(), source, is_reference, action));
                 }
             });
@@ -1982,7 +2004,7 @@ impl TabViewer for BlockTabViewer<'_> {
 }
 
 enum BlockContextMenuAction {
-    Picker(BlockPickerMenuAction),
+    Picker(Result<Option<BlockPickerCreation>, String>),
     Rename,
     Delete,
 }
@@ -1990,15 +2012,17 @@ enum BlockContextMenuAction {
 fn block_context_menu(
     ui: &mut egui::Ui,
     registry: &EditorRegistry,
+    picker: &mut BlockPicker,
+    excluded: impl IntoIterator<Item = Uuid>,
     can_add: bool,
     can_delete: bool,
 ) -> Option<BlockContextMenuAction> {
     let mut action = None;
     ui.add_enabled_ui(can_add, |ui| {
         ui.menu_button("Add", |ui| {
-            if let Some(picker_action) = BlockPicker::show_menu(ui, registry) {
-                action = Some(BlockContextMenuAction::Picker(picker_action));
-            }
+            action = Some(BlockContextMenuAction::Picker(
+                picker.show_menu(ui, registry, excluded),
+            ));
         });
     });
     if ui.button("Rename").clicked() {

@@ -1,15 +1,21 @@
 use std::collections::HashSet;
 
+use block_client::blocks::image::Image;
 use block_client::{BlockClient, CachedBlock};
 use eframe::egui;
 use uuid::Uuid;
 
-use crate::editors::EditorRegistry;
+use crate::editors::{image::pick_image_file, EditorRegistry};
 
-pub enum BlockPickerMenuAction {
+enum BlockPickerMenuAction {
     New(Uuid),
     ImportImage,
     LinkExisting,
+}
+
+pub enum BlockPickerCreation {
+    New(Uuid),
+    Image(Image),
 }
 
 #[derive(Default)]
@@ -21,9 +27,11 @@ pub struct BlockPicker {
 
 impl BlockPicker {
     pub fn show_menu(
+        &mut self,
         ui: &mut egui::Ui,
         registry: &EditorRegistry,
-    ) -> Option<BlockPickerMenuAction> {
+        excluded: impl IntoIterator<Item = Uuid>,
+    ) -> Result<Option<BlockPickerCreation>, String> {
         let mut action = None;
         ui.menu_button("New block", |ui| {
             if ui.button("Image").clicked() {
@@ -41,7 +49,19 @@ impl BlockPicker {
             action = Some(BlockPickerMenuAction::LinkExisting);
             ui.close();
         }
-        action
+        match action {
+            Some(BlockPickerMenuAction::New(block_type)) => {
+                Ok(Some(BlockPickerCreation::New(block_type)))
+            }
+            Some(BlockPickerMenuAction::ImportImage) => {
+                pick_image_file().map(|image| image.map(BlockPickerCreation::Image))
+            }
+            Some(BlockPickerMenuAction::LinkExisting) => {
+                self.open(excluded);
+                Ok(None)
+            }
+            None => Ok(None),
+        }
     }
 
     pub fn open(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
@@ -52,6 +72,10 @@ impl BlockPicker {
 
     pub fn close(&mut self) {
         self.open = false;
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
     }
 
     pub fn show(&mut self, context: &egui::Context, client: &BlockClient) -> Option<CachedBlock> {

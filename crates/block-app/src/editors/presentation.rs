@@ -18,13 +18,12 @@ use egui_material_icons::icons::{
 };
 use uuid::Uuid;
 
-use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
+use crate::block_picker::{BlockPicker, BlockPickerCreation};
 
 use super::{
-    image::{create_image_block, pick_image_file},
-    infinite_canvas::InfiniteCanvasEditor,
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
+    image::create_image_block, infinite_canvas::InfiniteCanvasEditor, BlockEditor,
+    BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
@@ -192,29 +191,25 @@ impl PresentationEditor {
                 self.insert_canvas_slide(editors, index);
             }
             ui.menu_button(ICON_KEYBOARD_ARROW_DOWN, |ui| {
-                if let Some(picker_action) = BlockPicker::show_menu(ui, editors.registry()) {
-                    let index = self.slides().map_or(0, |slides| slides.len());
-                    match picker_action {
-                        BlockPickerMenuAction::New(block_type) => {
-                            self.pending_create_index = Some(index);
-                            action = Some(EditorAction::CreateBlock {
-                                block_type,
-                                parent: Some(self.block.id()),
-                            });
-                        }
-                        BlockPickerMenuAction::ImportImage => match pick_image_file() {
-                            Ok(Some(image)) => {
-                                self.image_import_error = None;
-                                let id = create_image_block(editors, image, self.block.id());
-                                self.insert_slide(id, index);
-                            }
-                            Ok(None) => {}
-                            Err(error) => self.image_import_error = Some(error),
-                        },
-                        BlockPickerMenuAction::LinkExisting => {
-                            self.picker.open([self.block.id()]);
-                        }
+                let index = self.slides().map_or(0, |slides| slides.len());
+                match self
+                    .picker
+                    .show_menu(ui, editors.registry(), [self.block.id()])
+                {
+                    Ok(Some(BlockPickerCreation::New(block_type))) => {
+                        self.pending_create_index = Some(index);
+                        action = Some(EditorAction::CreateBlock {
+                            block_type,
+                            parent: Some(self.block.id()),
+                        });
                     }
+                    Ok(Some(BlockPickerCreation::Image(image))) => {
+                        self.image_import_error = None;
+                        let id = create_image_block(editors, image, self.block.id());
+                        self.insert_slide(id, index);
+                    }
+                    Ok(None) => {}
+                    Err(error) => self.image_import_error = Some(error),
                 }
             })
             .response
