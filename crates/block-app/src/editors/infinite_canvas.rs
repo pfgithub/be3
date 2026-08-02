@@ -200,6 +200,15 @@ impl WorldRect {
     }
 }
 
+fn gesture_rect(start: CanvasPoint, current: CanvasPoint, from_center: bool) -> WorldRect {
+    let opposite = if from_center {
+        CanvasPoint::new(start.x * 2.0 - current.x, start.y * 2.0 - current.y)
+    } else {
+        start
+    };
+    WorldRect::from_points(opposite, current)
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ResizeHandle {
     x: i8,
@@ -212,6 +221,8 @@ enum Gesture {
         tool: Tool,
         start: CanvasPoint,
         current: CanvasPoint,
+        pointer: CanvasPoint,
+        from_center: bool,
     },
     Pen {
         points: Vec<CanvasPoint>,
@@ -219,6 +230,8 @@ enum Gesture {
     SelectBox {
         start: CanvasPoint,
         current: CanvasPoint,
+        pointer: CanvasPoint,
+        from_center: bool,
         additive: bool,
     },
     Move {
@@ -2551,6 +2564,8 @@ impl InfiniteCanvasEditor {
                         self.gesture = Some(Gesture::SelectBox {
                             start: world,
                             current: world,
+                            pointer: world,
+                            from_center: response.ctx.input(|input| input.modifiers.alt),
                             additive,
                         });
                     }
@@ -2560,6 +2575,8 @@ impl InfiniteCanvasEditor {
                         tool: self.tool,
                         start: world,
                         current: world,
+                        pointer: world,
+                        from_center: response.ctx.input(|input| input.modifiers.alt),
                     });
                 }
                 Tool::Pen => {
@@ -2591,17 +2608,50 @@ impl InfiniteCanvasEditor {
                     tool,
                     start,
                     current,
+                    pointer,
+                    from_center,
                 }) => {
-                    *current = if *tool == Tool::Line
-                        && response.ctx.input(|input| input.modifiers.shift)
-                    {
-                        constrain_point_angle(*start, world, std::f32::consts::FRAC_PI_4)
+                    let modifiers = response.ctx.input(|input| input.modifiers);
+                    if *tool == Tool::Rectangle {
+                        let delta = CanvasPoint::new(world.x - pointer.x, world.y - pointer.y);
+                        if modifiers.ctrl {
+                            start.x += delta.x;
+                            start.y += delta.y;
+                        } else {
+                            current.x += delta.x;
+                            current.y += delta.y;
+                        }
+                        *pointer = world;
+                        *from_center = modifiers.alt;
                     } else {
-                        world
-                    };
+                        *current = if *tool == Tool::Line && modifiers.shift {
+                            constrain_point_angle(*start, world, std::f32::consts::FRAC_PI_4)
+                        } else {
+                            world
+                        };
+                    }
                 }
-                Some(Gesture::SelectBox { current, .. }) | Some(Gesture::Move { current, .. }) => {
-                    *current = world
+                Some(Gesture::SelectBox {
+                    start,
+                    current,
+                    pointer,
+                    from_center,
+                    ..
+                }) => {
+                    let modifiers = response.ctx.input(|input| input.modifiers);
+                    let delta = CanvasPoint::new(world.x - pointer.x, world.y - pointer.y);
+                    if modifiers.ctrl {
+                        start.x += delta.x;
+                        start.y += delta.y;
+                    } else {
+                        current.x += delta.x;
+                        current.y += delta.y;
+                    }
+                    *pointer = world;
+                    *from_center = modifiers.alt;
+                }
+                Some(Gesture::Move { current, .. }) => {
+                    *current = world;
                 }
                 Some(Gesture::Rotate {
                     current,
@@ -2655,6 +2705,8 @@ impl InfiniteCanvasEditor {
                 tool,
                 start,
                 current,
+                from_center,
+                ..
             } => {
                 let entity = match tool {
                     Tool::Line if distance(start, current) >= MIN_SIZE => {
@@ -2673,7 +2725,7 @@ impl InfiniteCanvasEditor {
                         })
                     }
                     Tool::Rectangle => {
-                        let bounds = WorldRect::from_points(start, current);
+                        let bounds = gesture_rect(start, current, from_center);
                         Some(CanvasEntity {
                             id: Uuid::new_v4(),
                             transform: CanvasTransform::new(
@@ -2735,7 +2787,9 @@ impl InfiniteCanvasEditor {
             Gesture::SelectBox {
                 start,
                 current,
+                from_center,
                 additive,
+                ..
             } => {
                 if !additive {
                     self.selection.clear();
@@ -2743,7 +2797,7 @@ impl InfiniteCanvasEditor {
                 if distance(start, current) < HIT_RADIUS / self.render_scale {
                     return;
                 }
-                let selection = WorldRect::from_points(start, current);
+                let selection = gesture_rect(start, current, from_center);
                 let hits = entities
                     .iter()
                     .filter(|entity| selection.contains_rect(entity_bounds(entity)))
@@ -2838,6 +2892,8 @@ impl InfiniteCanvasEditor {
             tool,
             start,
             current,
+            from_center,
+            ..
         }) = &self.gesture
         {
             let preview_stroke =
@@ -2853,7 +2909,11 @@ impl InfiniteCanvasEditor {
                     );
                 }
                 Tool::Rectangle | Tool::Text => {
-                    let selection = WorldRect::from_points(*start, *current);
+                    let selection = if *tool == Tool::Rectangle {
+                        gesture_rect(*start, *current, *from_center)
+                    } else {
+                        WorldRect::from_points(*start, *current)
+                    };
                     painter.rect_stroke(
                         screen_rect(self, selection, rect),
                         0.0,
@@ -2873,8 +2933,14 @@ impl InfiniteCanvasEditor {
                 Stroke::new(2.0, painter.ctx().global_style().visuals.text_color()),
             ));
         }
-        if let Some(Gesture::SelectBox { start, current, .. }) = &self.gesture {
-            let selection = screen_rect(self, WorldRect::from_points(*start, *current), rect);
+        if let Some(Gesture::SelectBox {
+            start,
+            current,
+            from_center,
+            ..
+        }) = &self.gesture
+        {
+            let selection = screen_rect(self, gesture_rect(*start, *current, *from_center), rect);
             painter.rect_filled(
                 selection,
                 0.0,
