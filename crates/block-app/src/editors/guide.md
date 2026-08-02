@@ -108,7 +108,7 @@ fn direct_editor_ui(
 }
 ```
 
-Use `direct_editor_top_bar`, `direct_editor_left_sidebar`, and `direct_editor_right_sidebar` for controls that belong outside the main content. The corresponding `direct_editor_has_*_sidebar` method must return `true` before a sidebar is shown. Return `EditorAction` for app-level creation, navigation, or parenting requests.
+Use `direct_editor_top_bar`, `direct_editor_left_sidebar`, and `direct_editor_right_sidebar` for controls that belong outside the main content. The corresponding `direct_editor_has_*_sidebar` method must return `true` before a sidebar is shown. Return `EditorAction` for app-level navigation or parenting requests.
 
 Do not retain a `BlockReadGuard` while operating on the same block or calling into another editor. Copy the required data and drop the guard first.
 
@@ -129,16 +129,26 @@ When the block references other blocks:
 
 Set `can_add_child` or `can_delete_child` in the registration only when the editor implements the matching `add_child` or `delete_child` method. These methods update the parent block's references and return `Some(true)` when the Files sidebar may complete the parent transfer.
 
-For child creation from inside an editor, return:
+Use a `BlockPicker` for child creation and existing-block links. Show its menu where appropriate:
 
 ```rust
-EditorAction::CreateBlock {
-    block_type,
-    parent: Some(self.block.id()),
+self.picker
+    .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
+```
+
+Then handle it from the editor UI and add the returned ID to the parent model:
+
+```rust
+if let Some(result) = self.picker.handle(
+    ui.ctx(),
+    editors,
+    BlockParent::Uuid(self.block.id()),
+) {
+    self.insert_child(result.id);
 }
 ```
 
-Store enough pending local state for `block_created` to insert the newly created block reference, then return `true`. The app will record the child's backreference and parent. For existing linked blocks that should keep their current parent, update only the model reference and do not return `SetParent`.
+`BlockPicker::handle` creates and registers new editors, runs image import, shows errors, and displays the existing-block picker. It sets the requested parent only for newly created blocks, so linked blocks keep their current parent.
 
 ## 6. Register the editor
 

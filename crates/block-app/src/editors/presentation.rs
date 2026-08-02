@@ -18,12 +18,12 @@ use egui_material_icons::icons::{
 };
 use uuid::Uuid;
 
-use crate::block_picker::{BlockPicker, BlockPickerCreation};
+use crate::block_picker::BlockPicker;
 
 use super::{
-    image::create_image_block, infinite_canvas::InfiniteCanvasEditor, BlockEditor,
-    BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
+    infinite_canvas::InfiniteCanvasEditor, BlockEditor, BlockRenderContext,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorRegistration,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
@@ -58,13 +58,12 @@ pub(super) struct PresentationEditor {
     block: BlockHandle<Presentation>,
     dependencies: ReferenceList,
     selected: Option<Uuid>,
-    pending_create_index: Option<usize>,
+    picker_insert_index: Option<usize>,
     picker: BlockPicker,
     dragging: Option<Uuid>,
     presenting: bool,
     active_this_frame: bool,
     last_context: Option<egui::Context>,
-    image_import_error: Option<String>,
     playback_controls_visible_until: f64,
 }
 
@@ -75,13 +74,12 @@ impl PresentationEditor {
             block,
             dependencies,
             selected: None,
-            pending_create_index: None,
+            picker_insert_index: None,
             picker: BlockPicker::default(),
             dragging: None,
             presenting: false,
             active_this_frame: false,
             last_context: None,
-            image_import_error: None,
             playback_controls_visible_until: 0.0,
         }
     }
@@ -176,12 +174,7 @@ impl PresentationEditor {
         }
     }
 
-    fn open_add_menu(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        let mut action = None;
+    fn open_add_menu(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
         ui.horizontal(|ui| {
             if ui
                 .button(format!("{} Add slide", ICON_ADD.codepoint))
@@ -191,31 +184,13 @@ impl PresentationEditor {
                 self.insert_canvas_slide(editors, index);
             }
             ui.menu_button(ICON_KEYBOARD_ARROW_DOWN, |ui| {
-                let index = self.slides().map_or(0, |slides| slides.len());
-                match self
-                    .picker
-                    .show_menu(ui, editors.registry(), [self.block.id()])
-                {
-                    Ok(Some(BlockPickerCreation::New(block_type))) => {
-                        self.pending_create_index = Some(index);
-                        action = Some(EditorAction::CreateBlock {
-                            block_type,
-                            parent: Some(self.block.id()),
-                        });
-                    }
-                    Ok(Some(BlockPickerCreation::Image(image))) => {
-                        self.image_import_error = None;
-                        let id = create_image_block(editors, image, self.block.id());
-                        self.insert_slide(id, index);
-                    }
-                    Ok(None) => {}
-                    Err(error) => self.image_import_error = Some(error),
-                }
+                self.picker_insert_index = Some(self.slides().map_or(0, |slides| slides.len()));
+                self.picker
+                    .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
             })
             .response
             .on_hover_text("More slide options");
         });
-        action
     }
 
     fn show_filmstrip(
@@ -225,11 +200,11 @@ impl PresentationEditor {
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
-        let action = self.open_add_menu(ui, editors);
+        self.open_add_menu(ui, editors);
         ui.separator();
         if slides.is_empty() {
             ui.weak("Add a block to create the first slide.");
-            return action;
+            return None;
         }
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -314,7 +289,7 @@ impl PresentationEditor {
         if ui.input(|input| input.pointer.any_released()) {
             self.dragging = None;
         }
-        action
+        None
     }
 
     fn enter_playback(&mut self, context: &egui::Context) {
@@ -553,14 +528,6 @@ impl BlockEditor for PresentationEditor {
         Some(true)
     }
 
-    fn block_created(&mut self, id: Uuid, _block_type: Uuid, _author: Uuid, _name: String) -> bool {
-        let Some(index) = self.pending_create_index.take() else {
-            return false;
-        };
-        self.insert_slide(id, index);
-        true
-    }
-
     fn set_tab_active(&mut self, active: bool) {
         if active {
             self.active_this_frame = true;
@@ -639,7 +606,7 @@ impl BlockEditor for PresentationEditor {
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
         Self::ensure_slide_editors(&slides, &dependencies, editors);
-        let mut action = self.open_add_menu(ui, editors);
+        self.open_add_menu(ui, editors);
         if ui
             .add_enabled(!slides.is_empty(), egui::Button::new(ICON_FULLSCREEN))
             .on_hover_text("Present")
@@ -647,12 +614,7 @@ impl BlockEditor for PresentationEditor {
         {
             self.enter_playback(ui.ctx());
         }
-        if let Some(error) = self.image_import_error.clone() {
-            ui.colored_label(ui.visuals().error_fg_color, error);
-            if ui.small_button("Dismiss").clicked() {
-                self.image_import_error = None;
-            }
-        }
+        let mut action = None;
         if let Some(slide) = self.selected_slide(&slides) {
             ui.separator();
             action = action.or_else(|| editors.direct_editor_top_bar(slide.block_id, ui, viewport));
@@ -717,8 +679,12 @@ impl BlockEditor for PresentationEditor {
         let dependencies = self.dependency_map();
         Self::ensure_slide_editors(&slides, &dependencies, editors);
 
-        if let Some(block) = self.picker.show(ui.ctx(), editors.client()) {
-            self.insert_slide(block.id, slides.len());
+        if let Some(result) =
+            self.picker
+                .handle(ui.ctx(), editors, BlockParent::Uuid(self.block.id()))
+        {
+            let index = self.picker_insert_index.take().unwrap_or(slides.len());
+            self.insert_slide(result.id, index);
         }
         if self.presenting {
             self.show_playback(ui.ctx(), &slides, &dependencies, editors);

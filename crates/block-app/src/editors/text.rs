@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{Block, BlockReferenceList};
+use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
     block_url, blocks::text::TextDocument, parse_block_urls, BlockClient, BlockHandle,
     ReferenceList,
@@ -30,7 +30,7 @@ use text_editor_core::{
 };
 use uuid::Uuid;
 
-use crate::block_picker::{BlockPicker, BlockPickerCreation};
+use crate::block_picker::{BlockPicker, BlockPickerResult};
 
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
@@ -120,7 +120,6 @@ struct TextEditor {
     layout_cache: Option<CachedLayout>,
     picker: BlockPicker,
     dependencies: ReferenceList,
-    pending_create: bool,
     clipboard_image_paste: ClipboardImagePaste,
     image_import_error: Option<String>,
 }
@@ -152,15 +151,13 @@ impl TextEditor {
             layout_cache: None,
             picker: BlockPicker::default(),
             dependencies,
-            pending_create: false,
             clipboard_image_paste: ClipboardImagePaste::default(),
             image_import_error: None,
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> Option<Uuid> {
+    fn toolbar(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
         let previous = self.highlight_language;
-        let mut create_block = None;
         ui.horizontal(|ui| {
             ui.label("Language:");
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
@@ -256,23 +253,8 @@ impl TextEditor {
             }
             ui.menu_button("Insert", |ui| {
                 ui.menu_button("Block", |ui| {
-                    match self
-                        .picker
-                        .show_menu(ui, editors.registry(), [self.block.id()])
-                    {
-                        Ok(Some(BlockPickerCreation::New(block_type))) => {
-                            self.pending_create = true;
-                            create_block = Some(block_type);
-                        }
-                        Ok(Some(BlockPickerCreation::Image(image))) => {
-                            let source_name = image.source_name().to_owned();
-                            let id = create_image_block(editors, image, self.block.id());
-                            self.insert_image_embed(id, &source_name);
-                            self.image_import_error = None;
-                        }
-                        Ok(None) => {}
-                        Err(error) => self.image_import_error = Some(error),
-                    }
+                    self.picker
+                        .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
                 });
             });
         });
@@ -280,7 +262,6 @@ impl TextEditor {
             self.core
                 .set_syntax_highlighter(self.highlight_language.core_language());
         }
-        create_block
     }
 
     fn insert_embed(&mut self, id: Uuid) {
@@ -325,10 +306,24 @@ impl TextEditor {
         }
     }
 
-    fn show_picker(&mut self, context: &egui::Context, client: &BlockClient) -> Option<Uuid> {
-        let block = self.picker.show(context, client)?;
-        self.insert_embed(block.id);
-        Some(block.id)
+    fn handle_picker(
+        &mut self,
+        context: &egui::Context,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<Uuid> {
+        let result = self
+            .picker
+            .handle(context, editors, BlockParent::Uuid(self.block.id()))?;
+        self.insert_picker_result(&result);
+        Some(result.id)
+    }
+
+    fn insert_picker_result(&mut self, result: &BlockPickerResult) {
+        if let Some(image) = result.imported_image() {
+            self.insert_image_embed(result.id, &image.source_name);
+        } else {
+            self.insert_embed(result.id);
+        }
     }
 
     fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
@@ -986,14 +981,6 @@ impl BlockEditor for TextEditor {
         &self.block
     }
 
-    fn block_created(&mut self, id: Uuid, _block_type: Uuid, _author: Uuid, _name: String) -> bool {
-        if !std::mem::take(&mut self.pending_create) {
-            return false;
-        }
-        self.insert_embed(id);
-        true
-    }
-
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,
@@ -1030,7 +1017,7 @@ impl BlockEditor for TextEditor {
     ) -> Option<EditorAction> {
         self.profiler.show(ui.ctx());
         let toolbar_start = Instant::now();
-        let create_block = self.toolbar(ui, editors);
+        self.toolbar(ui, editors);
         if let Some(error) = self.image_import_error.clone() {
             ui.horizontal(|ui| {
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -1040,10 +1027,7 @@ impl BlockEditor for TextEditor {
             });
         }
         self.toolbar_profile = toolbar_start.elapsed();
-        create_block.map(|block_type| EditorAction::CreateBlock {
-            block_type,
-            parent: Some(self.block.id()),
-        })
+        None
     }
 
     fn direct_editor_ui(
@@ -1061,7 +1045,7 @@ impl BlockEditor for TextEditor {
         let pasted_image = self.paste_clipboard_image(ui, id, editors);
         let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
         profile.keyboard = keyboard_start.elapsed();
-        let linked_block = self.show_picker(ui.ctx(), editors.client());
+        let linked_block = self.handle_picker(ui.ctx(), editors);
         let document_start = Instant::now();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {

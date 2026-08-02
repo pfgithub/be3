@@ -30,18 +30,8 @@ const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
 const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
 
 pub enum EditorAction {
-    OpenBlock {
-        id: Uuid,
-        block_type: Uuid,
-    },
-    CreateBlock {
-        block_type: Uuid,
-        parent: Option<Uuid>,
-    },
-    SetParent {
-        id: Uuid,
-        parent: Uuid,
-    },
+    OpenBlock { id: Uuid, block_type: Uuid },
+    SetParent { id: Uuid, parent: Uuid },
 }
 
 pub struct BlockRenderContext<'a> {
@@ -381,15 +371,6 @@ pub trait BlockEditor {
     }
     fn delete_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
-    }
-    fn block_created(
-        &mut self,
-        _id: Uuid,
-        _block_type: Uuid,
-        _author: Uuid,
-        _name: String,
-    ) -> bool {
-        false
     }
     fn update(&mut self, _frame: &eframe::Frame) {}
     fn finish_frame(&mut self) {}
