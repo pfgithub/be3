@@ -1386,25 +1386,32 @@ impl BlockApp {
             {
                 navigation = Some(TabNavigation::Forward);
             }
-            if let Some(history) = editor
-                .history()
-                .filter(|history| history.supports_history())
+            ui.separator();
+            let history = editor.history();
+            if ui
+                .add_enabled(
+                    history.map_or_else(|| false, |history| history.can_undo()),
+                    egui::Button::new(ICON_UNDO),
+                )
+                .on_hover_text("Undo (Ctrl/Cmd+Z)")
+                .clicked()
+                || undo_requested
             {
-                if ui
-                    .add_enabled(history.can_undo(), egui::Button::new(ICON_UNDO))
-                    .on_hover_text("Undo (Ctrl/Cmd+Z)")
-                    .clicked()
-                    || undo_requested
-                {
+                if let Some(history) = history {
                     history.undo();
                 }
-                if ui
-                    .add_enabled(history.can_redo(), egui::Button::new(ICON_REDO))
-                    .on_hover_text("Redo")
-                    .on_hover_text("Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)")
-                    .clicked()
-                    || redo_requested
-                {
+            }
+            if ui
+                .add_enabled(
+                    history.map_or_else(|| false, |history| history.can_redo()),
+                    egui::Button::new(ICON_REDO),
+                )
+                .on_hover_text("Redo")
+                .on_hover_text("Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)")
+                .clicked()
+                || redo_requested
+            {
+                if let Some(history) = history {
                     history.redo();
                 }
             }
