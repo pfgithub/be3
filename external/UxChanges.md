@@ -13,7 +13,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 ## Navigation and discoverability
 
 - [x] Make ordinary wheel/trackpad scrolling pan, Ctrl/Cmd-wheel and pinch zoom, and retain middle-drag and Space-drag panning.
-- [ ] Add appropriate hand, resize, rotate, crosshair, text, and pen cursors.
+- [x] Add appropriate hand, resize, rotate, crosshair, text, and pen cursors.
 - [ ] Add zoom presets, 100%, fit-all, and fit-selection controls.
 - [ ] Add a shortcut/help popover and empty-canvas onboarding instructions.
 - [ ] Add tool shortcuts (`V`, `R`, `L`, `T`, `P`), Select All, Invert Selection, arrow-key nudging, Shift-arrow large nudging, duplicate, Enter-to-edit, Escape-to-select, and Ctrl/Cmd+`[` / `]` layer shortcuts.

@@ -958,12 +958,55 @@ impl InfiniteCanvasEditor {
                     && input.pointer.button_down(PointerButton::Primary))
         });
         if panning && response.hovered() {
+            response.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
             let delta = response.ctx.input(|input| input.pointer.delta());
             viewport.pan(delta);
             self.gesture = None;
             return true;
         }
         false
+    }
+
+    fn update_cursor(
+        &self,
+        response: &egui::Response,
+        world: CanvasPoint,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) {
+        if response.ctx.input(|input| input.key_down(egui::Key::Space)) {
+            response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
+            return;
+        }
+        let cursor = match self.tool {
+            Tool::Line | Tool::Rectangle | Tool::Pen => egui::CursorIcon::Crosshair,
+            Tool::Text => egui::CursorIcon::Text,
+            Tool::Block => egui::CursorIcon::Copy,
+            Tool::Select => {
+                let bounds = self.selected_bounds(entities);
+                if self.selection_allows_rotation(entities, editors)
+                    && bounds.is_some_and(|bounds| {
+                        rotate_handle_at(self, bounds, response.rect)
+                            .distance(self.world_to_screen(world, response.rect))
+                            <= HANDLE_RADIUS + 3.0
+                    })
+                {
+                    egui::CursorIcon::Grab
+                } else if let Some(handle) =
+                    bounds.and_then(|bounds| resize_handle_at(self, bounds, response.rect, world))
+                {
+                    match (handle.x, handle.y) {
+                        (0, _) => egui::CursorIcon::ResizeVertical,
+                        (_, 0) => egui::CursorIcon::ResizeHorizontal,
+                        (x, y) if x == y => egui::CursorIcon::ResizeNwSe,
+                        _ => egui::CursorIcon::ResizeNeSw,
+                    }
+                } else {
+                    egui::CursorIcon::Default
+                }
+            }
+        };
+        response.ctx.set_cursor_icon(cursor);
     }
 
     fn handle_canvas_input(
@@ -1018,6 +1061,12 @@ impl InfiniteCanvasEditor {
         }
 
         let world = pointer.map(|point| self.screen_to_world(point, response.rect));
+
+        if response.hovered() {
+            if let Some(world) = world {
+                self.update_cursor(response, world, entities, editors);
+            }
+        }
 
         if let Some(dragged) = response.dnd_hover_payload::<SidebarDragPayload>() {
             if dragged.reference.id != self.block.id() {
