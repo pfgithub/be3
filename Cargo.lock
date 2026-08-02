@@ -465,6 +465,7 @@ dependencies = [
  "image",
  "rfd",
  "serde",
+ "serde_json",
  "text-editor-core",
  "tokio",
  "unicode-script",

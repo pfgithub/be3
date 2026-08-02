@@ -18,6 +18,7 @@ use egui_material_icons::icons::{
     ICON_FORMAT_COLOR_RESET, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_ZOOM_IN,
     ICON_ZOOM_OUT,
 };
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
@@ -101,6 +102,16 @@ enum CanvasCommand {
     Group,
     Ungroup,
     Reorder(CanvasLayerMove),
+    Copy,
+    Cut,
+    Paste,
+}
+
+const CANVAS_CLIPBOARD_PREFIX: &str = "be3-infinite-canvas:";
+
+#[derive(Deserialize, Serialize)]
+struct CanvasClipboardPayload {
+    entities: Vec<CanvasEntity>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -615,8 +626,81 @@ impl InfiniteCanvasEditor {
                     self.record_action(InfiniteCanvasOperation::Reorder { ids, movement });
                 }
             }
+            CanvasCommand::Copy => {
+                self.copy_selection_to_clipboard(entities);
+            }
+            CanvasCommand::Cut => {
+                if self.copy_selection_to_clipboard(entities) {
+                    self.execute_command(CanvasCommand::Delete, entities);
+                }
+            }
+            CanvasCommand::Paste => self.paste_entities_from_clipboard(),
         }
     }
+
+    #[cfg(not(target_os = "android"))]
+    fn copy_selection_to_clipboard(&mut self, entities: &[CanvasEntity]) -> bool {
+        let entities = self.selected_entities(entities);
+        if entities.is_empty() {
+            return false;
+        }
+        let payload = CanvasClipboardPayload { entities };
+        let result = serde_json::to_string(&payload)
+            .map(|json| format!("{CANVAS_CLIPBOARD_PREFIX}{json}"))
+            .map_err(|error| error.to_string())
+            .and_then(|text| {
+                let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+                clipboard.set_text(text).map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(()) => true,
+            Err(error) => {
+                self.image_import_error = Some(format!("Could not copy canvas objects: {error}"));
+                false
+            }
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn copy_selection_to_clipboard(&mut self, _entities: &[CanvasEntity]) -> bool {
+        false
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn paste_entities_from_clipboard(&mut self) {
+        let result = (|| {
+            let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+            let text = clipboard.get_text().map_err(|error| error.to_string())?;
+            let json = text
+                .strip_prefix(CANVAS_CLIPBOARD_PREFIX)
+                .ok_or_else(|| "Clipboard does not contain canvas objects".to_owned())?;
+            serde_json::from_str::<CanvasClipboardPayload>(json).map_err(|error| error.to_string())
+        })();
+        let payload = match result {
+            Ok(payload) => payload,
+            Err(error) => {
+                if error != "Clipboard does not contain canvas objects" {
+                    self.image_import_error =
+                        Some(format!("Could not paste canvas objects: {error}"));
+                }
+                return;
+            }
+        };
+        let duplicates = duplicate_entities(
+            payload.entities,
+            CanvasPoint::new(IMPORT_CASCADE_OFFSET, IMPORT_CASCADE_OFFSET),
+        );
+        self.block.finish_history_group();
+        self.selection.clear();
+        for entity in duplicates {
+            self.selection.insert(entity.id);
+            self.block.operate(InfiniteCanvasOperation::Add { entity });
+        }
+        self.tool = Tool::Select;
+    }
+
+    #[cfg(target_os = "android")]
+    fn paste_entities_from_clipboard(&mut self) {}
 
     fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
         self.add_direct_editor_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
@@ -1791,6 +1875,15 @@ impl InfiniteCanvasEditor {
             }
             if modifiers.command && response.ctx.input(|input| input.key_pressed(egui::Key::D)) {
                 self.execute_command(CanvasCommand::Duplicate, entities);
+            }
+            for (key, command) in [
+                (egui::Key::C, CanvasCommand::Copy),
+                (egui::Key::X, CanvasCommand::Cut),
+                (egui::Key::V, CanvasCommand::Paste),
+            ] {
+                if modifiers.command && response.ctx.input(|input| input.key_pressed(key)) {
+                    self.execute_command(command, entities);
+                }
             }
             if modifiers.command
                 && response

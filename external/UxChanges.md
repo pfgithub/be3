@@ -45,7 +45,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [ ] Reorganize the inspector into Transform, Appearance, type-specific, Arrange, and Block sections with object-type labels and compact layer controls.
 - [ ] Disable layer actions that cannot change the current order and use consistent Forward/Backward wording.
 - [ ] Coalesce each inspector slider or drag into one undo history step.
-- [ ] Support copying and pasting canvas entities, including fresh IDs and safe offsets for duplicates.
+- [x] Support copying, cutting, and pasting canvas entities with fresh entity/group IDs and safe offsets.
 
 ## Final verification
 
