@@ -17,5 +17,5 @@ Tests:
 
 Verification:
 - After making changes, always run: `cargo fmt` and `cargo nextest run`. This should take less than 2 minutes including compilation time. Then, commit changes to git. Do not push.
-- When there are multiple changes, split them up into tasks and test & commit to git after each one.
+- When there are multiple or large changes, split them up into tasks and test & commit to git after each one.
 - Do not perform any manual verification besides those commands.
