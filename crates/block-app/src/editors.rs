@@ -6,6 +6,7 @@ mod database_schema;
 pub(crate) mod image;
 mod infinite_canvas;
 mod pixel_art;
+mod pixel_ray_tracer;
 mod text;
 mod unsupported;
 mod workspace_index;
@@ -615,6 +616,7 @@ impl EditorRegistry {
         registry.register(image::registration());
         registry.register(infinite_canvas::registration());
         registry.register(pixel_art::registration());
+        registry.register(pixel_ray_tracer::registration());
         registry.register(text::registration());
         #[cfg(not(target_os = "android"))]
         registry.register(browser_tab::registration());
