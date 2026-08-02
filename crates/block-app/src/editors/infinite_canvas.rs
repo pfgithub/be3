@@ -256,6 +256,37 @@ impl InfiniteCanvasEditor {
             .collect()
     }
 
+    fn entity_selection_ids(entities: &[CanvasEntity], id: Uuid) -> HashSet<Uuid> {
+        let group_id = entities
+            .iter()
+            .find(|entity| entity.id == id)
+            .and_then(|entity| entity.group_id);
+        entities
+            .iter()
+            .filter(|entity| match group_id {
+                Some(group_id) => entity.group_id == Some(group_id),
+                None => entity.id == id,
+            })
+            .map(|entity| entity.id)
+            .collect()
+    }
+
+    fn select_entity(&mut self, entities: &[CanvasEntity], id: Uuid, additive: bool) {
+        let ids = Self::entity_selection_ids(entities, id);
+        if additive {
+            if ids.iter().all(|id| self.selection.contains(id)) {
+                self.selection.retain(|id| !ids.contains(id));
+            } else {
+                self.selection.extend(ids);
+            }
+        } else {
+            if !ids.iter().all(|id| self.selection.contains(id)) {
+                self.selection.clear();
+            }
+            self.selection.extend(ids);
+        }
+    }
+
     fn selected_bounds(&self, entities: &[CanvasEntity]) -> Option<WorldRect> {
         entities
             .iter()
@@ -283,11 +314,19 @@ impl InfiniteCanvasEditor {
     }
 
     fn duplicate_selection(&mut self, entities: &[CanvasEntity]) {
+        let mut duplicate_groups = HashMap::new();
         let duplicates = self
             .selected_entities(entities)
             .into_iter()
             .map(|mut entity| {
                 entity.id = Uuid::new_v4();
+                if let Some(group_id) = entity.group_id {
+                    entity.group_id = Some(
+                        *duplicate_groups
+                            .entry(group_id)
+                            .or_insert_with(Uuid::new_v4),
+                    );
+                }
                 entity.transform.center.x += IMPORT_CASCADE_OFFSET;
                 entity.transform.center.y += IMPORT_CASCADE_OFFSET;
                 entity
@@ -302,6 +341,45 @@ impl InfiniteCanvasEditor {
             self.selection.insert(entity.id);
             self.block.operate(InfiniteCanvasOperation::Add { entity });
         }
+    }
+
+    fn group_selection(&mut self, entities: &[CanvasEntity]) {
+        let before = self.selected_entities(entities);
+        if before.len() < 2 {
+            return;
+        }
+        let group_id = Uuid::new_v4();
+        let after = before
+            .iter()
+            .cloned()
+            .map(|mut entity| {
+                entity.group_id = Some(group_id);
+                entity
+            })
+            .collect();
+        self.record_update(before, after, false);
+    }
+
+    fn ungroup_selection(&mut self, entities: &[CanvasEntity]) {
+        let groups = entities
+            .iter()
+            .filter(|entity| self.selection.contains(&entity.id))
+            .filter_map(|entity| entity.group_id)
+            .collect::<HashSet<_>>();
+        let before = entities
+            .iter()
+            .filter(|entity| entity.group_id.is_some_and(|group| groups.contains(&group)))
+            .cloned()
+            .collect::<Vec<_>>();
+        let after = before
+            .iter()
+            .cloned()
+            .map(|mut entity| {
+                entity.group_id = None;
+                entity
+            })
+            .collect();
+        self.record_update(before, after, false);
     }
 
     fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
@@ -323,6 +401,7 @@ impl InfiniteCanvasEditor {
                 scale: 1.0,
             },
             style: CanvasEntityStyle::default(),
+            group_id: None,
         });
     }
 
@@ -798,6 +877,22 @@ impl InfiniteCanvasEditor {
             }
             if columns[1].button("To back").clicked() {
                 movement = Some(CanvasLayerMove::SendToBack);
+            }
+        });
+        let can_group = selected.len() >= 2;
+        let can_ungroup = selected.iter().any(|entity| entity.group_id.is_some());
+        ui.columns(2, |columns| {
+            if columns[0]
+                .add_enabled(can_group, egui::Button::new("Group"))
+                .clicked()
+            {
+                self.group_selection(entities);
+            }
+            if columns[1]
+                .add_enabled(can_ungroup, egui::Button::new("Ungroup"))
+                .clicked()
+            {
+                self.ungroup_selection(entities);
             }
         });
         movement
@@ -1348,7 +1443,7 @@ impl InfiniteCanvasEditor {
                     .is_some_and(|bounds| bounds.contains(world));
                 if self.selection.is_empty() {
                     if let Some(id) = self.entity_at(entities, world) {
-                        self.selection.insert(id);
+                        self.select_entity(entities, id, false);
                         self.context_menu_for_selection = true;
                     }
                 } else if !self.context_menu_for_selection {
@@ -1384,6 +1479,7 @@ impl InfiniteCanvasEditor {
                                 ),
                                 kind: CanvasEntityKind::Rectangle,
                                 style: CanvasEntityStyle::default(),
+                                group_id: None,
                             });
                         }
                         self.tool = Tool::Select;
@@ -1400,6 +1496,7 @@ impl InfiniteCanvasEditor {
                                 ),
                                 kind: CanvasEntityKind::Line,
                                 style: CanvasEntityStyle::default(),
+                                group_id: None,
                             });
                         }
                         self.tool = Tool::Select;
@@ -1500,15 +1597,10 @@ impl InfiniteCanvasEditor {
                                 self.focused_editor = Some(id);
                                 self.gesture = None;
                             } else if response.ctx.input(|input| input.modifiers.shift) {
-                                if !self.selection.insert(id) {
-                                    self.selection.remove(&id);
-                                }
+                                self.select_entity(entities, id, true);
                                 self.gesture = None;
                             } else {
-                                if !self.selection.contains(&id) {
-                                    self.selection.clear();
-                                }
-                                self.selection.insert(id);
+                                self.select_entity(entities, id, false);
                                 self.gesture = Some(Gesture::Move {
                                     start: world,
                                     current: world,
@@ -1519,15 +1611,10 @@ impl InfiniteCanvasEditor {
                         }
                         let additive = response.ctx.input(|input| input.modifiers.shift);
                         if additive {
-                            if !self.selection.insert(id) {
-                                self.selection.remove(&id);
-                            }
+                            self.select_entity(entities, id, true);
                             self.gesture = None;
                         } else {
-                            if !self.selection.contains(&id) {
-                                self.selection.clear();
-                                self.selection.insert(id);
-                            }
+                            self.select_entity(entities, id, false);
                             self.gesture = Some(Gesture::Move {
                                 start: world,
                                 current: world,
@@ -1558,6 +1645,7 @@ impl InfiniteCanvasEditor {
                             text: "Text".into(),
                         },
                         style: CanvasEntityStyle::default(),
+                        group_id: None,
                     });
                     self.tool = Tool::Select;
                 }
@@ -1664,6 +1752,7 @@ impl InfiniteCanvasEditor {
                             ),
                             kind: CanvasEntityKind::Line,
                             style: CanvasEntityStyle::default(),
+                            group_id: None,
                         })
                     }
                     Tool::Rectangle => {
@@ -1680,6 +1769,7 @@ impl InfiniteCanvasEditor {
                             ),
                             kind: CanvasEntityKind::Rectangle,
                             style: CanvasEntityStyle::default(),
+                            group_id: None,
                         })
                     }
                     _ => None,
@@ -1702,12 +1792,15 @@ impl InfiniteCanvasEditor {
                     self.selection.clear();
                 }
                 let selection = WorldRect::from_points(start, current);
-                self.selection.extend(
-                    entities
-                        .iter()
-                        .filter(|entity| entity_bounds(entity).intersects(selection))
-                        .map(|entity| entity.id),
-                );
+                let hits = entities
+                    .iter()
+                    .filter(|entity| entity_bounds(entity).intersects(selection))
+                    .map(|entity| entity.id)
+                    .collect::<Vec<_>>();
+                for id in hits {
+                    self.selection
+                        .extend(Self::entity_selection_ids(entities, id));
+                }
             }
             Gesture::Move { ref originals, .. }
             | Gesture::Resize { ref originals, .. }
@@ -2864,6 +2957,7 @@ fn pen_entity(points: Vec<CanvasPoint>) -> CanvasEntity {
         transform: CanvasTransform::new(center, size, 0.0),
         kind: CanvasEntityKind::Pen { points },
         style: CanvasEntityStyle::default(),
+        group_id: None,
     }
 }
 

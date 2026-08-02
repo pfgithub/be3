@@ -15,6 +15,7 @@ fn entity(id: Uuid, x: f32) -> CanvasEntity {
         ),
         kind: CanvasEntityKind::Rectangle,
         style: CanvasEntityStyle::default(),
+        group_id: None,
     }
 }
 

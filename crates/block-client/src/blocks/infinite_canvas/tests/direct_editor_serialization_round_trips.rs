@@ -19,6 +19,7 @@ fn direct_editor_serialization_round_trips() {
                 scale: 2.0,
             },
             style: CanvasEntityStyle::default(),
+            group_id: None,
         },
     };
 

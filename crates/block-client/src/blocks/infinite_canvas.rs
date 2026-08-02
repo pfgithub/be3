@@ -95,6 +95,7 @@ pub struct CanvasEntity {
     pub transform: CanvasTransform,
     pub kind: CanvasEntityKind,
     pub style: CanvasEntityStyle,
+    pub group_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -535,6 +536,7 @@ fn rebase_entity(
         expected.kind.clone(),
         desired.kind.clone(),
     );
+    replace_if_unchanged(&mut result.group_id, expected.group_id, desired.group_id);
     replace_if_unchanged(
         &mut result.style.foreground,
         expected.style.foreground,

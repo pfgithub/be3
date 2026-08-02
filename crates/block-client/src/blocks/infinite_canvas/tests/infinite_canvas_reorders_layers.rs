@@ -11,6 +11,7 @@ fn entity(id: Uuid) -> CanvasEntity {
         transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
         kind: CanvasEntityKind::Rectangle,
         style: CanvasEntityStyle::default(),
+        group_id: None,
     }
 }
 

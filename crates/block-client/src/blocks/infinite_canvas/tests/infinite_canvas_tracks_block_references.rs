@@ -11,6 +11,7 @@ fn block_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
         transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
         kind: CanvasEntityKind::Block { block_id },
         style: CanvasEntityStyle::default(),
+        group_id: None,
     }
 }
 
@@ -23,6 +24,7 @@ fn direct_editor_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
             scale: 1.0,
         },
         style: CanvasEntityStyle::default(),
+        group_id: None,
     }
 }
 

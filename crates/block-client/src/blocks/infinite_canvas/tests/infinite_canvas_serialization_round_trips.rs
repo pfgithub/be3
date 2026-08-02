@@ -36,6 +36,7 @@ fn infinite_canvas_serialization_round_trips() {
             corner_radius: 14.0,
             opacity: 0.35,
         },
+        group_id: Some(Uuid::new_v4()),
     };
     let canvas = InfiniteCanvas::new();
     let operation = InfiniteCanvasOperation::Add { entity };

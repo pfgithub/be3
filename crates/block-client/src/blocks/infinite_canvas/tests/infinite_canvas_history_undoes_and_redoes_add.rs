@@ -19,6 +19,7 @@ fn infinite_canvas_history_undoes_and_redoes_add() {
         ),
         kind: CanvasEntityKind::Rectangle,
         style: CanvasEntityStyle::default(),
+        group_id: None,
     };
     block.operate(InfiniteCanvasOperation::Add {
         entity: entity.clone(),
