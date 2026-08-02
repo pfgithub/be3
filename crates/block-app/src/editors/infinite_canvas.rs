@@ -90,6 +90,19 @@ enum Alignment {
     Bottom,
 }
 
+#[derive(Clone, Copy)]
+enum CanvasCommand {
+    SelectAll,
+    InvertSelection,
+    Duplicate,
+    Delete,
+    Lock,
+    Unlock,
+    Group,
+    Ungroup,
+    Reorder(CanvasLayerMove),
+}
+
 #[derive(Clone, Copy, Debug)]
 struct WorldRect {
     min: CanvasPoint,
@@ -558,6 +571,51 @@ impl InfiniteCanvasEditor {
             }
         }
         self.record_update(before, ordered, false);
+    }
+
+    fn execute_command(&mut self, command: CanvasCommand, entities: &[CanvasEntity]) {
+        match command {
+            CanvasCommand::SelectAll => {
+                self.selection = entities.iter().map(|entity| entity.id).collect();
+                self.tool = Tool::Select;
+            }
+            CanvasCommand::InvertSelection => {
+                let selected = &self.selection;
+                self.selection = entities
+                    .iter()
+                    .filter(|entity| !selected.contains(&entity.id))
+                    .map(|entity| entity.id)
+                    .collect();
+                self.tool = Tool::Select;
+            }
+            CanvasCommand::Duplicate => self.duplicate_selection(entities),
+            CanvasCommand::Delete => {
+                let ids = entities
+                    .iter()
+                    .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+                    .map(|entity| entity.id)
+                    .collect::<Vec<_>>();
+                if !ids.is_empty() {
+                    let removed = ids.iter().copied().collect::<HashSet<_>>();
+                    self.selection.retain(|id| !removed.contains(id));
+                    self.record_action(InfiniteCanvasOperation::Remove { ids });
+                }
+            }
+            CanvasCommand::Lock => self.set_selection_locked(entities, true),
+            CanvasCommand::Unlock => self.set_selection_locked(entities, false),
+            CanvasCommand::Group => self.group_selection(entities),
+            CanvasCommand::Ungroup => self.ungroup_selection(entities),
+            CanvasCommand::Reorder(movement) => {
+                let ids = entities
+                    .iter()
+                    .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
+                    .map(|entity| entity.id)
+                    .collect::<Vec<_>>();
+                if !ids.is_empty() {
+                    self.record_action(InfiniteCanvasOperation::Reorder { ids, movement });
+                }
+            }
+        }
     }
 
     fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
@@ -1232,13 +1290,13 @@ impl InfiniteCanvasEditor {
                 .add_enabled(can_group, egui::Button::new("Group"))
                 .clicked()
             {
-                self.group_selection(entities);
+                self.execute_command(CanvasCommand::Group, entities);
             }
             if columns[1]
                 .add_enabled(can_ungroup, egui::Button::new("Ungroup"))
                 .clicked()
             {
-                self.ungroup_selection(entities);
+                self.execute_command(CanvasCommand::Ungroup, entities);
             }
         });
         let can_lock = selected.iter().any(|entity| !entity.locked);
@@ -1248,13 +1306,13 @@ impl InfiniteCanvasEditor {
                 .add_enabled(can_lock, egui::Button::new("Lock"))
                 .clicked()
             {
-                self.set_selection_locked(entities, true);
+                self.execute_command(CanvasCommand::Lock, entities);
             }
             if columns[1]
                 .add_enabled(can_unlock, egui::Button::new("Unlock"))
                 .clicked()
             {
-                self.set_selection_locked(entities, false);
+                self.execute_command(CanvasCommand::Unlock, entities);
             }
         });
         movement
@@ -1724,34 +1782,32 @@ impl InfiniteCanvasEditor {
                 }
             }
             if modifiers.command && response.ctx.input(|input| input.key_pressed(egui::Key::A)) {
-                if modifiers.shift {
-                    let selected = &self.selection;
-                    self.selection = entities
-                        .iter()
-                        .filter(|entity| !selected.contains(&entity.id))
-                        .map(|entity| entity.id)
-                        .collect();
+                let command = if modifiers.shift {
+                    CanvasCommand::InvertSelection
                 } else {
-                    self.selection = entities.iter().map(|entity| entity.id).collect();
-                }
-                self.tool = Tool::Select;
+                    CanvasCommand::SelectAll
+                };
+                self.execute_command(command, entities);
             }
             if modifiers.command && response.ctx.input(|input| input.key_pressed(egui::Key::D)) {
-                self.duplicate_selection(entities);
+                self.execute_command(CanvasCommand::Duplicate, entities);
             }
             if modifiers.command
                 && response
                     .ctx
                     .input(|input| input.key_pressed(egui::Key::OpenBracket))
             {
-                layer_move = Some(CanvasLayerMove::BackOne);
+                self.execute_command(CanvasCommand::Reorder(CanvasLayerMove::BackOne), entities);
             }
             if modifiers.command
                 && response
                     .ctx
                     .input(|input| input.key_pressed(egui::Key::CloseBracket))
             {
-                layer_move = Some(CanvasLayerMove::ForwardOne);
+                self.execute_command(
+                    CanvasCommand::Reorder(CanvasLayerMove::ForwardOne),
+                    entities,
+                );
             }
             let nudge = response.ctx.input(|input| {
                 let amount = if input.modifiers.shift { 10.0 } else { 1.0 };
@@ -1818,16 +1874,7 @@ impl InfiniteCanvasEditor {
             && !self.selection.is_empty()
             && keyboard_available
         {
-            let ids = entities
-                .iter()
-                .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
-                .map(|entity| entity.id)
-                .collect::<Vec<_>>();
-            if !ids.is_empty() {
-                let removed = ids.iter().copied().collect::<HashSet<_>>();
-                self.selection.retain(|id| !removed.contains(id));
-                self.record_action(InfiniteCanvasOperation::Remove { ids });
-            }
+            self.execute_command(CanvasCommand::Delete, entities);
         }
 
         let pointer = response
