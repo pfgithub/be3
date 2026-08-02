@@ -57,6 +57,12 @@ pub struct DirectEditorCapabilities {
     pub supports_pan_and_zoom: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectEditorInteraction {
+    Preview,
+    Live,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum DirectEditorViewportCommand {
     Pan(egui::Vec2),
@@ -193,6 +199,12 @@ impl<'a> EditorAccess<'a> {
             .map(|editor| editor.direct_editor_capabilities())
     }
 
+    pub fn direct_editor_interaction(&self, id: Uuid) -> Option<DirectEditorInteraction> {
+        self.editors
+            .get(&id)
+            .map(|editor| editor.direct_editor_interaction())
+    }
+
     pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
         self.with_editor(id, |editor, editors| {
             editor.direct_editor_intrinsic_size(editors)
@@ -253,6 +265,18 @@ impl<'a> EditorAccess<'a> {
     ) -> Option<EditorAction> {
         self.with_editor(id, |editor, editors| {
             editor.direct_editor_ui(ui, editors, scale, viewport)
+        })?
+    }
+
+    pub fn embedded_direct_editor_ui(
+        &mut self,
+        id: Uuid,
+        ui: &mut egui::Ui,
+        scale: f32,
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        self.with_editor(id, |editor, editors| {
+            editor.embedded_direct_editor_ui(ui, editors, scale, viewport)
         })?
     }
 }
@@ -324,6 +348,9 @@ pub trait BlockEditor {
         false
     }
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities;
+    fn direct_editor_interaction(&self) -> DirectEditorInteraction {
+        DirectEditorInteraction::Preview
+    }
     fn direct_editor_intrinsic_size(
         &mut self,
         _editors: &mut EditorAccess<'_>,
@@ -366,6 +393,15 @@ pub trait BlockEditor {
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         None
+    }
+    fn embedded_direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        scale: f32,
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        self.direct_editor_ui(ui, editors, scale, viewport)
     }
 }
 

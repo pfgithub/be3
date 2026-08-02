@@ -19,8 +19,8 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 
 use super::{
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorRegistration,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
@@ -523,6 +523,10 @@ impl BlockEditor for PresentationEditor {
             preserve_aspect_ratio: false,
             supports_pan_and_zoom: true,
         }
+    }
+
+    fn direct_editor_interaction(&self) -> DirectEditorInteraction {
+        DirectEditorInteraction::Live
     }
 
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {

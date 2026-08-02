@@ -37,8 +37,8 @@ use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorRegistration, SidebarDragPayload,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
 };
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -981,6 +981,10 @@ impl BlockEditor for TextEditor {
             preserve_aspect_ratio: false,
             supports_pan_and_zoom: false,
         }
+    }
+
+    fn direct_editor_interaction(&self) -> DirectEditorInteraction {
+        DirectEditorInteraction::Live
     }
 
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {

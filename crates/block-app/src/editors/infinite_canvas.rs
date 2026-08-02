@@ -26,8 +26,8 @@ use crate::block_picker::{BlockPicker, BlockPickerMenuAction};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorRegistration, SidebarDragPayload,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -2189,13 +2189,11 @@ impl InfiniteCanvasEditor {
         let pointer = response
             .interact_pointer_pos()
             .or_else(|| response.ctx.pointer_hover_pos());
-        if self.focused_editor.is_some()
-            && pointer.is_some_and(|pointer| {
-                direct_editor_rects
-                    .iter()
-                    .any(|rect| rect.contains(pointer))
-            })
-        {
+        if pointer.is_some_and(|pointer| {
+            direct_editor_rects
+                .iter()
+                .any(|rect| rect.contains(pointer))
+        }) {
             return (None, None, None, keyboard_action);
         }
 
@@ -2530,10 +2528,12 @@ impl InfiniteCanvasEditor {
                         });
                     } else if let Some(id) = self.entity_at(entities, world) {
                         let entity = entities.iter().find(|entity| entity.id == id).unwrap();
-                        if matches!(entity.kind, CanvasEntityKind::DirectEditor { .. }) {
+                        if let CanvasEntityKind::DirectEditor { block_id, .. } = entity.kind {
                             let content = direct_editor_layout(entity)
                                 .is_some_and(|layout| layout.content.contains(world));
-                            if content {
+                            let live = editors.direct_editor_interaction(block_id)
+                                == Some(DirectEditorInteraction::Live);
+                            if content && live {
                                 self.focused_editor = Some(id);
                                 self.gesture = None;
                             } else if response.ctx.input(|input| input.modifiers.shift) {
@@ -3035,17 +3035,26 @@ impl InfiniteCanvasEditor {
         let entity = entities
             .iter()
             .find(|entity| self.selection.contains(&entity.id))?;
-        let CanvasEntityKind::Block { block_id } = entity.kind else {
-            return None;
-        };
         let bounds = entity_bounds(entity);
         let position =
             self.world_to_screen(CanvasPoint::new(bounds.center().x, bounds.max.y), rect);
-        let cached = editors.client().cached_block(block_id);
-        let label = cached.as_ref().map_or_else(
-            || "Loading…".to_owned(),
-            |block| editors.registry().icon_label(block.block_type, &block.name),
-        );
+        let (label, cached, enters_editor) = match entity.kind {
+            CanvasEntityKind::Block { block_id } => {
+                let cached = editors.client().cached_block(block_id);
+                let label = cached.as_ref().map_or_else(
+                    || "Loading…".to_owned(),
+                    |block| editors.registry().icon_label(block.block_type, &block.name),
+                );
+                (label, cached, false)
+            }
+            CanvasEntityKind::DirectEditor { block_id, .. }
+                if editors.direct_editor_interaction(block_id)
+                    == Some(DirectEditorInteraction::Preview) =>
+            {
+                ("Edit".to_owned(), None, true)
+            }
+            _ => return None,
+        };
         let mut action = None;
         egui::Area::new(egui::Id::new(("open-canvas-block", entity.id)))
             .order(egui::Order::Foreground)
@@ -3053,15 +3062,19 @@ impl InfiniteCanvasEditor {
             .fixed_pos(position + Vec2::new(0.0, 6.0))
             .show(context, |ui| {
                 if ui
-                    .add_enabled(cached.is_some(), egui::Button::new(label))
+                    .add_enabled(enters_editor || cached.is_some(), egui::Button::new(label))
                     .on_disabled_hover_text("Waiting for cached block metadata")
                     .clicked()
                 {
-                    let cached = cached.as_ref().unwrap();
-                    action = Some(EditorAction::OpenBlock {
-                        id: cached.id,
-                        block_type: cached.block_type,
-                    });
+                    if enters_editor {
+                        self.focused_editor = Some(entity.id);
+                    } else {
+                        let cached = cached.as_ref().unwrap();
+                        action = Some(EditorAction::OpenBlock {
+                            id: cached.id,
+                            block_type: cached.block_type,
+                        });
+                    }
                 }
             });
         action
@@ -3313,31 +3326,53 @@ impl BlockEditor for InfiniteCanvasEditor {
             editors,
         );
         let mut direct_editor_rects = Vec::new();
-        if let Some((entity_id, block_id, scale)) =
-            focused.filter(|_| self.focused_editor.is_some())
-        {
-            if let Some(entity) = entities.iter().find(|entity| entity.id == entity_id) {
-                let screen = direct_editor_layout(entity)
-                    .map(|layout| screen_rect(self, layout.content, canvas_rect))
-                    .unwrap_or_else(|| screen_rect(self, entity_bounds(entity), canvas_rect));
-                let visible_screen = screen.intersect(canvas_clip_rect);
-                direct_editor_rects.push(visible_screen);
-                let embedded = ui
-                    .new_child(
-                        egui::UiBuilder::new()
-                            .id_salt(("canvas-direct-editor", entity_id))
-                            .max_rect(screen)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                    )
-                    .scope(|ui| {
-                        ui.set_clip_rect(visible_screen.intersect(ui.clip_rect()));
-                        ui.set_max_size(screen.size());
-                        ui.set_min_size(screen.size());
-                        editors.direct_editor_ui(block_id, ui, scale * self.render_scale, viewport)
-                    })
-                    .inner;
-                action = action.or(embedded);
+        for entity in &entities {
+            let CanvasEntityKind::DirectEditor { block_id, scale } = entity.kind else {
+                continue;
+            };
+            let interaction = editors
+                .direct_editor_interaction(block_id)
+                .unwrap_or(DirectEditorInteraction::Preview);
+            let is_focused = self.focused_editor == Some(entity.id);
+            if interaction != DirectEditorInteraction::Live && !is_focused {
+                continue;
             }
+            let screen = direct_editor_layout(entity)
+                .map(|layout| screen_rect(self, layout.content, canvas_rect))
+                .unwrap_or_else(|| screen_rect(self, entity_bounds(entity), canvas_rect));
+            let visible_screen = screen.intersect(canvas_clip_rect);
+            direct_editor_rects.push(visible_screen);
+            if interaction == DirectEditorInteraction::Live
+                && ui.ctx().input(|input| {
+                    input.pointer.button_pressed(PointerButton::Primary)
+                        && input
+                            .pointer
+                            .interact_pos()
+                            .is_some_and(|pointer| visible_screen.contains(pointer))
+                })
+            {
+                self.focused_editor = Some(entity.id);
+            }
+            let embedded = ui
+                .new_child(
+                    egui::UiBuilder::new()
+                        .id_salt(("canvas-direct-editor", entity.id))
+                        .max_rect(screen)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                )
+                .scope(|ui| {
+                    ui.set_clip_rect(visible_screen.intersect(ui.clip_rect()));
+                    ui.set_max_size(screen.size());
+                    ui.set_min_size(screen.size());
+                    editors.embedded_direct_editor_ui(
+                        block_id,
+                        ui,
+                        scale * self.render_scale,
+                        viewport,
+                    )
+                })
+                .inner;
+            action = action.or(embedded);
         }
 
         let (context_layer_move, context_create_block, set_parent, keyboard_action) = self

@@ -13,7 +13,8 @@ use egui_material_icons::icons::{ICON_ADD, ICON_DATABASE, ICON_DELETE, ICON_SCHE
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, EditorAction, EditorRegistration,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
+    EditorAction, EditorRegistration,
 };
 
 const ROW_HEADER_WIDTH: f32 = 44.0;
@@ -512,6 +513,10 @@ impl BlockEditor for DatabaseEditor {
             preserve_aspect_ratio: true,
             supports_pan_and_zoom: false,
         }
+    }
+
+    fn direct_editor_interaction(&self) -> DirectEditorInteraction {
+        DirectEditorInteraction::Live
     }
 
     fn direct_editor_intrinsic_size(
