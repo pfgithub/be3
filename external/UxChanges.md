@@ -52,3 +52,15 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Run final `cargo fmt`.
 - [x] Run final `cargo nextest run`.
 - [x] Confirm every implementation item has its own successful commit and the worktree is clean.
+
+## Follow-up fixes
+
+- [ ] Do not select an outlined rectangle when an empty click lands inside its bounds.
+- [ ] Leave lines, rectangles, and freehand strokes unselected after creating them.
+- [ ] Restore double-click inline editing for canvas text.
+- [ ] Disable Group when every selected object is already in the same group.
+
+## Follow-up verification
+
+- [ ] Run `cargo fmt` and `cargo nextest run` after every follow-up fix.
+- [ ] Confirm every follow-up item has its own successful commit and the worktree is clean.
