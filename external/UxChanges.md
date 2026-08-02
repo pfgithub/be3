@@ -105,7 +105,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Shared presentation playback follow-up
 
-- [ ] Share the contained slide surface and auto-hiding overlay controls between embedded and regular fullscreen playback.
+- [x] Share the contained slide surface and auto-hiding overlay controls between embedded and regular fullscreen playback.
 
 ## Shared presentation playback verification
 
