@@ -3430,8 +3430,26 @@ impl BlockEditor for InfiniteCanvasEditor {
             &dependency_details,
             editors,
         );
+        let gesture_preview = self
+            .gesture
+            .as_ref()
+            .map(preview_entities)
+            .unwrap_or_default();
+        let gesture_preview = gesture_preview
+            .iter()
+            .map(|entity| (entity.id, entity))
+            .collect::<HashMap<_, _>>();
         let mut direct_editor_rects = Vec::new();
-        for entity in &entities {
+        let displayed_entities = entities
+            .iter()
+            .map(|entity| gesture_preview.get(&entity.id).copied().unwrap_or(entity))
+            .chain(
+                gesture_preview
+                    .values()
+                    .copied()
+                    .filter(|preview| !entities.iter().any(|entity| entity.id == preview.id)),
+            );
+        for entity in displayed_entities {
             let CanvasEntityKind::DirectEditor { block_id, scale } = entity.kind else {
                 continue;
             };
@@ -4475,14 +4493,19 @@ fn paint_entity(
                 content.right_bottom(),
                 content.left_bottom(),
             ];
-            if !editors.render(
-                *block_id,
-                BlockRenderContext {
-                    painter,
-                    corners: content_corners,
-                    opacity,
-                },
-            ) {
+            let preview = editors.direct_editor_interaction(*block_id)
+                == Some(DirectEditorInteraction::Preview)
+                && editor.focused_editor != Some(entity.id);
+            if preview
+                && !editors.render(
+                    *block_id,
+                    BlockRenderContext {
+                        painter,
+                        corners: content_corners,
+                        opacity,
+                    },
+                )
+            {
                 painter.rect_filled(content, 0.0, with_opacity(Color32::from_gray(35), opacity));
             }
 
