@@ -79,7 +79,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 ## Direct editor interaction changes
 
-- [ ] Make the zoom percentage reset to 100% and move preset choices into a separate menu button.
+- [x] Make the zoom percentage reset to 100% and move preset choices into a separate menu button.
 - [ ] Keep database, text, and presentation direct editors live; require selection and an Edit button for preview-based editors.
 - [ ] Move direct-editor scale into the inspector and make resize behavior capability-driven.
 - [ ] Render embedded presentations as resizable fullscreen playback with slide navigation; require opening the block to edit.

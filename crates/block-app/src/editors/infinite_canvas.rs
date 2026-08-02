@@ -1775,7 +1775,14 @@ impl InfiniteCanvasEditor {
             {
                 viewport.change_zoom(1.0 / ZOOM_STEP, None);
             }
-            ui.menu_button(format!("{:.0}%", viewport.zoom() * 100.0), |ui| {
+            if ui
+                .small_button(format!("{:.0}%", viewport.zoom() * 100.0))
+                .on_hover_text("Reset zoom to 100%")
+                .clicked()
+            {
+                viewport.change_zoom(1.0 / viewport.zoom(), None);
+            }
+            ui.menu_button("▾", |ui| {
                 for percent in [25.0, 50.0, 100.0, 200.0] {
                     if ui.button(format!("{percent:.0}%")).clicked() {
                         viewport.change_zoom(percent / 100.0 / viewport.zoom(), None);
