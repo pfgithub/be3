@@ -1022,6 +1022,18 @@ impl InfiniteCanvasEditor {
             let resize = editors
                 .direct_editor_resize(block_id)
                 .unwrap_or(DirectEditorResize::None);
+            if resize == DirectEditorResize::Both {
+                if let Some(layout) = direct_editor_layout(entity) {
+                    let content_size = layout.content.size();
+                    editors.set_direct_editor_intrinsic_size(
+                        block_id,
+                        Vec2::new(
+                            content_size.x / scale.max(f32::EPSILON),
+                            content_size.y / scale.max(f32::EPSILON),
+                        ),
+                    );
+                }
+            }
             let intrinsic = if resize == DirectEditorResize::Horizontal {
                 let width = direct_editor_layout(entity)
                     .map(|layout| layout.content.size().x / scale.max(f32::EPSILON))
@@ -3350,8 +3362,20 @@ impl BlockEditor for InfiniteCanvasEditor {
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,
-            preserve_aspect_ratio: true,
+            preserve_aspect_ratio: false,
             supports_pan_and_zoom: true,
+        }
+    }
+
+    fn direct_editor_resize(&self) -> DirectEditorResize {
+        if self
+            .block
+            .read()
+            .is_some_and(|canvas| canvas.preview_region().is_some())
+        {
+            DirectEditorResize::Both
+        } else {
+            DirectEditorResize::None
         }
     }
 
@@ -3365,6 +3389,29 @@ impl BlockEditor for InfiniteCanvasEditor {
             .preview_region()
             .unwrap_or_else(|| preview_region_for_entities(canvas.entities()));
         Some(Vec2::new(region.size.x, region.size.y))
+    }
+
+    fn set_direct_editor_intrinsic_size(
+        &mut self,
+        size: Vec2,
+        _editors: &mut EditorAccess<'_>,
+    ) -> bool {
+        let Some(region) = self.block.read().and_then(|canvas| canvas.preview_region()) else {
+            return false;
+        };
+        let updated = CanvasPreviewRegion::new(
+            region.center,
+            CanvasPoint::new(size.x.max(MIN_SIZE), size.y.max(MIN_SIZE)),
+        );
+        if (updated.size.x - region.size.x).abs() < 0.01
+            && (updated.size.y - region.size.y).abs() < 0.01
+        {
+            return false;
+        }
+        self.record_action(InfiniteCanvasOperation::SetPreviewRegion {
+            region: Some(updated),
+        });
+        true
     }
 
     fn direct_editor_top_bar(

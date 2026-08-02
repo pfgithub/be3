@@ -256,6 +256,13 @@ impl<'a> EditorAccess<'a> {
         })?
     }
 
+    pub fn set_direct_editor_intrinsic_size(&mut self, id: Uuid, size: egui::Vec2) -> bool {
+        self.with_editor(id, |editor, editors| {
+            editor.set_direct_editor_intrinsic_size(size, editors)
+        })
+        .unwrap_or(false)
+    }
+
     pub fn direct_editor_top_bar(
         &mut self,
         id: Uuid,
@@ -416,6 +423,13 @@ pub trait BlockEditor {
         let mut size = self.direct_editor_intrinsic_size(editors)?;
         size.x = width;
         Some(size)
+    }
+    fn set_direct_editor_intrinsic_size(
+        &mut self,
+        _size: egui::Vec2,
+        _editors: &mut EditorAccess<'_>,
+    ) -> bool {
+        false
     }
     fn direct_editor_top_bar(
         &mut self,
