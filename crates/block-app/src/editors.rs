@@ -7,6 +7,7 @@ pub(crate) mod image;
 mod infinite_canvas;
 mod pixel_art;
 mod pixel_ray_tracer;
+mod presentation;
 mod text;
 mod unsupported;
 mod workspace_index;
@@ -167,6 +168,12 @@ impl<'a> EditorAccess<'a> {
     }
 
     pub fn render_aspect_ratio(&self, id: Uuid) -> Option<f32> {
+        self.editors
+            .get(&id)
+            .and_then(|editor| editor.render_aspect_ratio())
+    }
+
+    pub fn preview_aspect_ratio(&self, id: Uuid) -> Option<f32> {
         self.editors
             .get(&id)
             .and_then(|editor| editor.render_aspect_ratio())
@@ -617,6 +624,7 @@ impl EditorRegistry {
         registry.register(infinite_canvas::registration());
         registry.register(pixel_art::registration());
         registry.register(pixel_ray_tracer::registration());
+        registry.register(presentation::registration());
         registry.register(text::registration());
         #[cfg(not(target_os = "android"))]
         registry.register(browser_tab::registration());

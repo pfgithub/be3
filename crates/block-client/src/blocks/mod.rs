@@ -4,6 +4,7 @@ pub mod image;
 pub mod infinite_canvas;
 pub mod pixel_art;
 pub mod pixel_ray_tracer;
+pub mod presentation;
 pub mod text;
 pub mod web_browser_tab;
 pub mod workspace_index;
