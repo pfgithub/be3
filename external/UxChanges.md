@@ -64,3 +64,15 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 
 - [x] Run `cargo fmt` and `cargo nextest run` after every follow-up fix.
 - [x] Confirm every follow-up item has its own successful commit and the worktree is clean.
+
+## Additional interaction changes
+
+- [ ] Require a marquee selection to contain an entire object before selecting it.
+- [ ] Let Ctrl move the starting point and Alt use it as the center while box-selecting or drawing rectangles.
+- [ ] Edit canvas text in the inspector, focusing it after placement or a double-click.
+- [ ] Show the active non-selection tool icon beside the pointer.
+
+## Additional verification
+
+- [ ] Run `cargo fmt` and `cargo nextest run` after every additional change.
+- [ ] Confirm every additional item has its own successful commit and the worktree is clean.
