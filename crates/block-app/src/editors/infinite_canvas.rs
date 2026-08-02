@@ -723,7 +723,7 @@ impl InfiniteCanvasEditor {
                     self.tool = Tool::Block;
                     self.armed_block = None;
                     self.armed_block_needs_parent = false;
-                    self.pending_block_center = None;
+                    self.pending_block_center = Some(CanvasPoint::default());
                     match action {
                         BlockPickerMenuAction::New(block_type) => {
                             create_block = Some(block_type);
