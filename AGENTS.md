@@ -1,7 +1,5 @@
 BE3 project
 
-When calling the `request_user_input` tool, never set autoResolutionMs. Setting autoResolutionMs to any value causes the question to be immediately resolved with no answer.
-
 Functionality:
 - When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
 
