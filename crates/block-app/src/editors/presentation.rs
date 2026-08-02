@@ -777,6 +777,9 @@ impl BlockEditor for PresentationEditor {
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
         Self::ensure_slide_editors(&slides, &dependencies, editors);
+        if self.presenting {
+            self.show_playback(ui.ctx(), &slides, &dependencies, editors);
+        }
         if self.show_playback_surface(ui, rect, &slides, &dependencies, editors, false) {
             self.enter_playback(ui.ctx());
         }
