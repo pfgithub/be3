@@ -1,7 +1,7 @@
 use block::{Block, BlockParent};
 use block_client::{
     blocks::image::{Image, ImageOperation},
-    BlockClient, BlockHandle, BlockRelationships,
+    BlockClient, BlockHandle,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, TextureHandle, Vec2};
 use egui_material_icons::icons::ICON_IMAGE;
@@ -169,24 +169,8 @@ pub(super) fn create_image_block(
 }
 
 impl BlockEditor for ImageEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        Image::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     fn render(

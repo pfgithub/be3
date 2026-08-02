@@ -1,15 +1,14 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use block::{Block, BlockParent};
+use block::Block;
 use block_client::{
     blocks::web_browser_tab::{HistoryItem, WebBrowserTab, WebBrowserTabOperation},
-    BlockHandle, BlockRelationships,
+    BlockHandle,
 };
 use eframe::egui;
 use egui_material_icons::icons::{
     ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_LANGUAGE, ICON_REFRESH,
 };
-use uuid::Uuid;
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
     NewWindowResponse, PageLoadEvent, Rect as WebViewRect, WebView, WebViewBuilder,
@@ -369,24 +368,8 @@ impl WebBrowserTabEditor {
 }
 
 impl BlockEditor for WebBrowserTabEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        WebBrowserTab::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     fn update(&mut self, frame: &eframe::Frame) {

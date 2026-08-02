@@ -2,14 +2,18 @@ use std::collections::BTreeSet;
 
 pub(super) mod dynamic_artifact;
 
-use block::{Block, BlockParent};
+use super::{
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
+    EditorRegistration,
+};
+use block::Block;
 use block_client::{
     blocks::image::Image,
     blocks::pixel_art::{
         PixelArt, PixelArtAnchor, PixelArtOperation, PixelColor, PixelUpdate,
         MAX_PIXEL_ART_PALETTE_COLORS, MAX_PIXEL_ART_SIZE,
     },
-    BlockClient, BlockHandle, BlockRelationships,
+    BlockClient, BlockHandle,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use egui_material_icons::icons::{
@@ -20,12 +24,6 @@ use egui_material_icons::icons::{
     ICON_SOUTH_WEST, ICON_SQUARE, ICON_ZOOM_IN, ICON_ZOOM_OUT,
 };
 use egui_material_icons::MaterialIcon;
-use uuid::Uuid;
-
-use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
-    EditorRegistration,
-};
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -1143,28 +1141,8 @@ impl PixelArtEditor {
 }
 
 impl BlockEditor for PixelArtEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        PixelArt::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
-    }
-
-    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
-        Some(&self.block)
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     fn render(

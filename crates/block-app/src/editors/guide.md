@@ -57,35 +57,16 @@ Every editor supplies identity, naming, relationships, and parent updates:
 
 ```rust
 impl BlockEditor for MyBlockEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        MyBlock::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
-    }
-
-    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
-        Some(&self.block)
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     // Continue with the direct-editor methods below.
 }
 ```
 
-Only return a history handle when the block model has enabled history.
+The shared `BlockEditor` methods, including history when the block model enables it, are
+provided by this accessor.
 
 ## 3. Implement the direct editor
 

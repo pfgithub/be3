@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use block::{Block, BlockParent, BlockReference, BlockReferenceList};
+use block::{Block, BlockReference, BlockReferenceList};
 use block_client::{
     blocks::{
         presentation::{Presentation, PresentationOperation, PresentationSlide},
         workspace_index::BlockEntry,
     },
-    BlockClient, BlockHandle, BlockRelationships, ReferenceList,
+    BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{self, Color32, Key, Modifiers, Rect, Sense, Stroke, Vec2};
 use egui_material_icons::icons::{
@@ -442,24 +442,8 @@ impl PresentationEditor {
 }
 
 impl BlockEditor for PresentationEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        Presentation::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     fn add_child(&self, entry: BlockEntry) -> Option<bool> {
@@ -509,10 +493,6 @@ impl BlockEditor for PresentationEditor {
 
     fn tab_closed(&mut self) {
         self.exit_playback();
-    }
-
-    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
-        Some(&self.block)
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {

@@ -15,7 +15,10 @@ mod workspace_index;
 use std::collections::HashMap;
 
 use block::BlockParent;
-use block_client::{blocks::workspace_index::BlockEntry, BlockClient, BlockRelationships};
+use block_client::{
+    blocks::workspace_index::BlockEntry, BlockClient, BlockHandleAccess, BlockHistoryHandle,
+    BlockRelationships,
+};
 use eframe::egui;
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
@@ -269,11 +272,22 @@ pub enum SidebarDragSource {
 }
 
 pub trait BlockEditor {
-    fn id(&self) -> Uuid;
-    fn block_type(&self) -> Uuid;
-    fn name(&self) -> String;
-    fn relationships(&self) -> Option<BlockRelationships>;
-    fn set_parent(&self, parent: BlockParent);
+    fn block(&self) -> &dyn BlockHandleAccess;
+    fn id(&self) -> Uuid {
+        self.block().id()
+    }
+    fn block_type(&self) -> Uuid {
+        self.block().block_type()
+    }
+    fn name(&self) -> String {
+        self.block().name()
+    }
+    fn relationships(&self) -> Option<BlockRelationships> {
+        self.block().relationships()
+    }
+    fn set_parent(&self, parent: BlockParent) {
+        self.block().set_parent(parent);
+    }
     fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }
@@ -293,8 +307,8 @@ pub trait BlockEditor {
     fn finish_frame(&mut self) {}
     fn set_tab_active(&mut self, _active: bool) {}
     fn tab_closed(&mut self) {}
-    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
-        None
+    fn history(&self) -> Option<&dyn BlockHistoryHandle> {
+        self.block().history()
     }
     fn render(
         &mut self,

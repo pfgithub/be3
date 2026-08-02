@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use block::{Block, BlockParent, BlockReferenceList};
+use block::{Block, BlockReferenceList};
 use block_client::{
     blocks::{
         image::Image as ImageBlock,
@@ -9,7 +9,7 @@ use block_client::{
             CanvasPoint, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
         },
     },
-    BlockClient, BlockHandle, BlockRelationships, CachedBlock, ReferenceList,
+    BlockClient, BlockHandle, CachedBlock, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::icons::{
@@ -1529,28 +1529,8 @@ impl InfiniteCanvasEditor {
 }
 
 impl BlockEditor for InfiniteCanvasEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        InfiniteCanvas::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
-    }
-
-    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
-        Some(&self.block)
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {

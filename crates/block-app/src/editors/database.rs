@@ -6,7 +6,7 @@ use block_client::{
             DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
         },
     },
-    BlockClient, BlockHandle, BlockRelationships,
+    BlockClient, BlockHandle,
 };
 use eframe::egui;
 use egui_material_icons::icons::{ICON_ADD, ICON_DATABASE, ICON_DELETE, ICON_SCHEMA};
@@ -480,24 +480,8 @@ impl DatabaseEditor {
 }
 
 impl BlockEditor for DatabaseEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        Database::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     fn render(

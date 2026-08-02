@@ -759,6 +759,41 @@ pub trait BlockHistoryHandle {
     fn redo(&self);
 }
 
+pub trait BlockHandleAccess {
+    fn id(&self) -> Uuid;
+    fn block_type(&self) -> Uuid;
+    fn name(&self) -> String;
+    fn relationships(&self) -> Option<BlockRelationships>;
+    fn set_parent(&self, parent: BlockParent);
+    fn history(&self) -> Option<&dyn BlockHistoryHandle>;
+}
+
+impl<B: Block> BlockHandleAccess for BlockHandle<B> {
+    fn id(&self) -> Uuid {
+        BlockHandle::id(self)
+    }
+
+    fn block_type(&self) -> Uuid {
+        B::TYPE_ID
+    }
+
+    fn name(&self) -> String {
+        BlockHandle::name(self)
+    }
+
+    fn relationships(&self) -> Option<BlockRelationships> {
+        self.read().map(|_| BlockHandle::relationships(self))
+    }
+
+    fn set_parent(&self, parent: BlockParent) {
+        BlockHandle::set_parent(self, parent);
+    }
+
+    fn history(&self) -> Option<&dyn BlockHistoryHandle> {
+        self.supports_history().then_some(self)
+    }
+}
+
 impl<B: Block> BlockHistoryHandle for BlockHandle<B> {
     fn supports_history(&self) -> bool {
         BlockHandle::supports_history(self)

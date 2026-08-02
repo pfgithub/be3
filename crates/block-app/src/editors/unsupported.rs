@@ -1,5 +1,5 @@
 use block::BlockParent;
-use block_client::BlockRelationships;
+use block_client::{BlockHandleAccess, BlockHistoryHandle, BlockRelationships};
 use eframe::egui;
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ impl UnsupportedEditor {
     }
 }
 
-impl BlockEditor for UnsupportedEditor {
+impl BlockHandleAccess for UnsupportedEditor {
     fn id(&self) -> Uuid {
         self.id
     }
@@ -38,6 +38,16 @@ impl BlockEditor for UnsupportedEditor {
     }
 
     fn set_parent(&self, _parent: BlockParent) {}
+
+    fn history(&self) -> Option<&dyn BlockHistoryHandle> {
+        None
+    }
+}
+
+impl BlockEditor for UnsupportedEditor {
+    fn block(&self) -> &dyn BlockHandleAccess {
+        self
+    }
 
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {

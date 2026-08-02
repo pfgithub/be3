@@ -9,10 +9,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{Block, BlockParent, BlockReferenceList};
+use block::{Block, BlockReferenceList};
 use block_client::{
     block_url, blocks::text::TextDocument, parse_block_urls, BlockClient, BlockHandle,
-    BlockRelationships, ReferenceList,
+    ReferenceList,
 };
 use eframe::egui::{
     self, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton, Pos2, Rect, Sense,
@@ -963,28 +963,8 @@ impl TextEditor {
 }
 
 impl BlockEditor for TextEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-
-    fn block_type(&self) -> Uuid {
-        TextDocument::TYPE_ID
-    }
-
-    fn name(&self) -> String {
-        self.block.name()
-    }
-
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
-    }
-
-    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
-        Some(&self.block)
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
 
     fn block_created(&mut self, id: Uuid, _block_type: Uuid, _author: Uuid, _name: String) -> bool {

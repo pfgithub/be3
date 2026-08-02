@@ -7,23 +7,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{Block, BlockParent};
-use block_client::{
-    blocks::pixel_ray_tracer::{
-        PixelRayTracer, PixelRayTracerOperation, PixelUpdate, Point, RayEntity, RaySettings,
-        PIXEL_RAY_TRACER_PALETTE, PIXEL_RAY_TRACER_SIZE,
-    },
-    BlockHandle, BlockRelationships,
-};
-use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
-use egui_material_icons::icons::ICON_FLARE;
-use uuid::Uuid;
-
 use self::profiling::RayTracerProfiler;
 use super::{
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
     EditorRegistration,
 };
+use block::Block;
+use block_client::{
+    blocks::pixel_ray_tracer::{
+        PixelRayTracer, PixelRayTracerOperation, PixelUpdate, Point, RayEntity, RaySettings,
+        PIXEL_RAY_TRACER_PALETTE, PIXEL_RAY_TRACER_SIZE,
+    },
+    BlockHandle,
+};
+use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
+use egui_material_icons::icons::ICON_FLARE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LightingCacheKey {
@@ -1014,23 +1012,8 @@ impl PixelRayTracerEditor {
 }
 
 impl BlockEditor for PixelRayTracerEditor {
-    fn id(&self) -> Uuid {
-        self.block.id()
-    }
-    fn block_type(&self) -> Uuid {
-        PixelRayTracer::TYPE_ID
-    }
-    fn name(&self) -> String {
-        self.block.name()
-    }
-    fn relationships(&self) -> Option<BlockRelationships> {
-        self.block.read().map(|_| self.block.relationships())
-    }
-    fn set_parent(&self, parent: BlockParent) {
-        self.block.set_parent(parent);
-    }
-    fn history(&self) -> Option<&dyn block_client::BlockHistoryHandle> {
-        Some(&self.block)
+    fn block(&self) -> &dyn block_client::BlockHandleAccess {
+        &self.block
     }
     fn render(
         &mut self,
