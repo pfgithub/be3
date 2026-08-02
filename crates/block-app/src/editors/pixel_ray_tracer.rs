@@ -1,4 +1,11 @@
+mod profiling;
 mod raytracer;
+
+use std::{
+    sync::mpsc::{self, Receiver, TryRecvError},
+    thread,
+    time::{Duration, Instant},
+};
 
 use block::{Block, BlockParent};
 use block_client::{
@@ -12,10 +19,28 @@ use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, Text
 use egui_material_icons::icons::ICON_FLARE;
 use uuid::Uuid;
 
+use self::profiling::RayTracerProfiler;
 use super::{
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
     EditorRegistration,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LightingCacheKey {
+    block_revision: u64,
+    preview_revision: u64,
+}
+
+type LightingJobResult = (LightingCacheKey, Vec<[u8; 4]>, Duration);
+type RayJobResult = (
+    Point,
+    Vec<[u8; 4]>,
+    Vec<Point>,
+    u64,
+    RaySettings,
+    bool,
+    Duration,
+);
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -86,9 +111,11 @@ enum ActiveInteraction {
     Endpoint {
         id: u64,
         start: bool,
+        current: Point,
     },
     Light {
         id: u64,
+        current: Point,
     },
 }
 
@@ -98,6 +125,7 @@ pub(super) struct PixelRayTracerEditor {
     color_index: u8,
     selected_entity: Option<u64>,
     interaction: Option<ActiveInteraction>,
+    interaction_revision: u64,
     new_light_intensity: f32,
     new_surface_roughness: f32,
     new_surface_metalness: f32,
@@ -105,10 +133,13 @@ pub(super) struct PixelRayTracerEditor {
     new_surface_ior: f32,
     debug_overlay: bool,
     texture: Option<TextureHandle>,
-    texture_revision: Option<u64>,
+    texture_revision: Option<LightingCacheKey>,
+    lighting_job: Option<Receiver<LightingJobResult>>,
     rendered: Vec<[u8; 4]>,
     ray_overlay: Option<(Point, Vec<[u8; 4]>, Vec<Point>, u64, RaySettings, bool)>,
     ray_texture: Option<TextureHandle>,
+    ray_job: Option<Receiver<RayJobResult>>,
+    profiler: RayTracerProfiler,
 }
 
 impl PixelRayTracerEditor {
@@ -119,6 +150,7 @@ impl PixelRayTracerEditor {
             color_index: 0,
             selected_entity: None,
             interaction: None,
+            interaction_revision: 0,
             new_light_intensity: 2.0,
             new_surface_roughness: 0.0,
             new_surface_metalness: 0.0,
@@ -127,9 +159,12 @@ impl PixelRayTracerEditor {
             debug_overlay: false,
             texture: None,
             texture_revision: None,
+            lighting_job: None,
             rendered: Vec::new(),
             ray_overlay: None,
             ray_texture: None,
+            ray_job: None,
+            profiler: RayTracerProfiler::default(),
         }
     }
 
@@ -137,30 +172,75 @@ impl PixelRayTracerEditor {
         let Some(scene) = self.block.read() else {
             return false;
         };
-        let revision = scene.revision();
+        let revision = LightingCacheKey {
+            block_revision: scene.lighting_revision(),
+            preview_revision: self
+                .dragged_entity(scene.entities())
+                .map_or(0, |_| self.interaction_revision),
+        };
+        let completed = self
+            .lighting_job
+            .as_ref()
+            .and_then(|receiver| match receiver.try_recv() {
+                Ok(result) => Some(Ok(result)),
+                Err(TryRecvError::Disconnected) => Some(Err(())),
+                Err(TryRecvError::Empty) => None,
+            });
+        if let Some(completed) = completed {
+            self.lighting_job = None;
+            if let Ok((completed_revision, pixels, duration)) = completed {
+                self.profiler.lighting_completed(duration);
+                self.rendered = pixels;
+                self.ray_overlay = None;
+                self.ray_texture = None;
+                let image = color_image(&self.rendered);
+                if let Some(texture) = &mut self.texture {
+                    texture.set(image, egui::TextureOptions::NEAREST);
+                } else {
+                    self.texture = Some(context.load_texture(
+                        format!("pixel-ray-tracer-{}", self.block.id()),
+                        image,
+                        egui::TextureOptions::NEAREST,
+                    ));
+                }
+                self.texture_revision = Some(completed_revision);
+            }
+        }
         if self.texture_revision == Some(revision) {
+            self.profiler.lighting_hit();
             return true;
         }
-        self.rendered = raytracer::trace_lighting(
-            scene.pixels(),
-            scene.entities(),
-            scene.lighting_ray_settings(),
-        );
-        drop(scene);
-        self.ray_overlay = None;
-        self.ray_texture = None;
-        let image = color_image(&self.rendered);
-        if let Some(texture) = &mut self.texture {
-            texture.set(image, egui::TextureOptions::NEAREST);
-        } else {
-            self.texture = Some(context.load_texture(
-                format!("pixel-ray-tracer-{}", self.block.id()),
-                image,
-                egui::TextureOptions::NEAREST,
-            ));
+        if self.lighting_job.is_none() {
+            let pixels = scene.pixels().to_vec();
+            let draft = self.dragged_entity(scene.entities());
+            let entities = scene
+                .entities()
+                .iter()
+                .map(|entity| {
+                    draft
+                        .as_ref()
+                        .filter(|draft| draft.id() == entity.id())
+                        .unwrap_or(entity)
+                        .clone()
+                })
+                .collect::<Vec<_>>();
+            let settings = scene.lighting_ray_settings();
+            let repaint = context.clone();
+            let (sender, receiver) = mpsc::channel();
+            thread::Builder::new()
+                .name("pixel-ray-tracer-lighting".into())
+                .spawn(move || {
+                    let start = Instant::now();
+                    let result = raytracer::trace_lighting(&pixels, &entities, settings);
+                    let _ = sender.send((revision, result, start.elapsed()));
+                    repaint.request_repaint();
+                })
+                .expect("failed to start pixel ray tracer lighting job");
+            self.lighting_job = Some(receiver);
+            self.profiler.lighting_miss();
         }
-        self.texture_revision = Some(revision);
-        true
+        drop(scene);
+        self.texture.is_some()
     }
 
     fn paint_block_texture(&self, context: BlockRenderContext<'_>) {
@@ -430,13 +510,6 @@ impl PixelRayTracerEditor {
             .pointer_hover_pos()
             .filter(|position| canvas.contains(*position));
         let world = pointer.map(|position| screen_to_world(position, canvas));
-        self.draw_entities(&painter, canvas);
-        self.draw_interaction(&painter, canvas);
-        if self.tool == Tool::RayTrace {
-            if let Some(origin) = world {
-                self.draw_ray_trace(&painter, canvas, origin);
-            }
-        }
         if response.hovered() && !panning {
             response.ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
         }
@@ -458,8 +531,7 @@ impl PixelRayTracerEditor {
             }
         }
         if down {
-            let movement = if let (Some(point), Some(interaction)) = (world, &mut self.interaction)
-            {
+            if let (Some(point), Some(interaction)) = (world, &mut self.interaction) {
                 match interaction {
                     ActiveInteraction::Pixels { current, path, .. } => {
                         let next = pixel_at(point, true).unwrap_or(*current);
@@ -467,26 +539,30 @@ impl PixelRayTracerEditor {
                             path.extend(raster_line(*current, next).into_iter().skip(1));
                         }
                         *current = next;
-                        None
                     }
                     ActiveInteraction::Entity { current, .. } => {
                         *current = snap(point);
-                        None
                     }
-                    ActiveInteraction::Endpoint { id, start } => {
-                        Some((*id, Some(*start), snap(point)))
+                    ActiveInteraction::Endpoint { current, .. }
+                    | ActiveInteraction::Light { current, .. } => {
+                        let next = snap(point);
+                        if *current != next {
+                            *current = next;
+                            self.interaction_revision = self.interaction_revision.wrapping_add(1);
+                        }
                     }
-                    ActiveInteraction::Light { id } => Some((*id, None, snap(point))),
                 }
-            } else {
-                None
-            };
-            if let Some((id, endpoint, point)) = movement {
-                self.preview_move_entity(id, endpoint, point);
             }
         }
         if released {
             self.finish_interaction();
+        }
+        self.draw_entities(&painter, canvas);
+        self.draw_interaction(&painter, canvas);
+        if self.tool == Tool::RayTrace {
+            if let Some(origin) = world {
+                self.draw_ray_trace(&painter, canvas, origin);
+            }
         }
     }
 
@@ -539,19 +615,30 @@ impl PixelRayTracerEditor {
                 let tolerance = 3.0;
                 match entity {
                     RayEntity::Light { position, .. } if distance(point, position) <= tolerance => {
-                        self.interaction = Some(ActiveInteraction::Light { id });
+                        self.interaction = Some(ActiveInteraction::Light {
+                            id,
+                            current: position,
+                        });
                         return;
                     }
                     RayEntity::Surface { start, .. } | RayEntity::Water { start, .. }
                         if distance(point, start) <= tolerance =>
                     {
-                        self.interaction = Some(ActiveInteraction::Endpoint { id, start: true });
+                        self.interaction = Some(ActiveInteraction::Endpoint {
+                            id,
+                            start: true,
+                            current: start,
+                        });
                         return;
                     }
                     RayEntity::Surface { end, .. } | RayEntity::Water { end, .. }
                         if distance(point, end) <= tolerance =>
                     {
-                        self.interaction = Some(ActiveInteraction::Endpoint { id, start: false });
+                        self.interaction = Some(ActiveInteraction::Endpoint {
+                            id,
+                            start: false,
+                            current: end,
+                        });
                         return;
                     }
                     _ => {}
@@ -561,15 +648,16 @@ impl PixelRayTracerEditor {
         self.selected_entity = self.find_entity(point).map(|entity| entity.id());
     }
 
-    fn preview_move_entity(&self, id: u64, endpoint: Option<bool>, point: Point) {
-        let entity = self.block.read().and_then(|scene| {
-            scene
-                .entities()
-                .iter()
-                .find(|entity| entity.id() == id)
-                .cloned()
-        });
-        let Some(mut entity) = entity else { return };
+    fn moved_entity(
+        entities: &[RayEntity],
+        id: u64,
+        endpoint: Option<bool>,
+        point: Point,
+    ) -> Option<RayEntity> {
+        let entity = entities.iter().find(|entity| entity.id() == id).cloned();
+        let Some(mut entity) = entity else {
+            return None;
+        };
         match (&mut entity, endpoint) {
             (RayEntity::Light { position, .. }, None) => *position = point,
             (RayEntity::Surface { start, .. } | RayEntity::Water { start, .. }, Some(true)) => {
@@ -578,10 +666,21 @@ impl PixelRayTracerEditor {
             (RayEntity::Surface { end, .. } | RayEntity::Water { end, .. }, Some(false)) => {
                 *end = point
             }
-            _ => return,
+            _ => return None,
         }
-        self.block
-            .operate(PixelRayTracerOperation::UpdateEntity { entity });
+        Some(entity)
+    }
+
+    fn dragged_entity(&self, entities: &[RayEntity]) -> Option<RayEntity> {
+        match self.interaction.as_ref()? {
+            ActiveInteraction::Endpoint { id, start, current } => {
+                Self::moved_entity(entities, *id, Some(*start), *current)
+            }
+            ActiveInteraction::Light { id, current } => {
+                Self::moved_entity(entities, *id, None, *current)
+            }
+            _ => None,
+        }
     }
 
     fn finish_interaction(&mut self) {
@@ -634,6 +733,25 @@ impl PixelRayTracerEditor {
                     .operate(PixelRayTracerOperation::AddEntity { entity });
                 self.selected_entity = Some(id);
             }
+            ActiveInteraction::Endpoint { id, start, current } => {
+                let entity = self.block.read().and_then(|scene| {
+                    Self::moved_entity(scene.entities(), id, Some(start), current)
+                });
+                if let Some(entity) = entity {
+                    self.block
+                        .operate(PixelRayTracerOperation::UpdateEntity { entity });
+                }
+            }
+            ActiveInteraction::Light { id, current } => {
+                let entity = self
+                    .block
+                    .read()
+                    .and_then(|scene| Self::moved_entity(scene.entities(), id, None, current));
+                if let Some(entity) = entity {
+                    self.block
+                        .operate(PixelRayTracerOperation::UpdateEntity { entity });
+                }
+            }
             _ => {}
         }
     }
@@ -669,7 +787,12 @@ impl PixelRayTracerEditor {
             return;
         };
         let scale = canvas.width() / f32::from(PIXEL_RAY_TRACER_SIZE);
-        for entity in scene.entities() {
+        let draft = self.dragged_entity(scene.entities());
+        for stored_entity in scene.entities() {
+            let entity = draft
+                .as_ref()
+                .filter(|draft| draft.id() == stored_entity.id())
+                .unwrap_or(stored_entity);
             let selected = self.selected_entity == Some(entity.id());
             match entity {
                 RayEntity::Surface {
@@ -794,45 +917,80 @@ impl PixelRayTracerEditor {
     }
 
     fn draw_ray_trace(&mut self, painter: &egui::Painter, canvas: Rect, origin: Point) {
+        let completed = self
+            .ray_job
+            .as_ref()
+            .and_then(|receiver| match receiver.try_recv() {
+                Ok(result) => Some(Ok(result)),
+                Err(TryRecvError::Disconnected) => Some(Err(())),
+                Err(TryRecvError::Empty) => None,
+            });
+        if let Some(completed) = completed {
+            self.ray_job = None;
+            if let Ok((origin, pixels, debug, revision, settings, include_debug, duration)) =
+                completed
+            {
+                self.profiler.ray_completed(duration);
+                let image = color_image(&pixels);
+                if let Some(texture) = &mut self.ray_texture {
+                    texture.set(image, egui::TextureOptions::NEAREST);
+                } else {
+                    self.ray_texture = Some(painter.ctx().load_texture(
+                        format!("pixel-rays-{}", self.block.id()),
+                        image,
+                        egui::TextureOptions::NEAREST,
+                    ));
+                }
+                self.ray_overlay = Some((origin, pixels, debug, revision, settings, include_debug));
+            }
+        }
         let Some(scene) = self.block.read() else {
             return;
         };
         let settings = scene.view_ray_settings();
         let revision = scene.revision();
-        let needs_trace = self.ray_overlay.as_ref().is_none_or(
-            |(old, _, _, old_revision, old_settings, old_debug)| {
-                distance(*old, origin) > 0.25
-                    || *old_revision != revision
-                    || *old_settings != settings
-                    || *old_debug != self.debug_overlay
-            },
-        );
-        if needs_trace {
-            let result = raytracer::trace_rays(
-                &self.rendered,
-                scene.entities(),
-                origin,
-                settings,
-                self.debug_overlay,
+        let lighting_ready = self.texture_revision
+            == Some(LightingCacheKey {
+                block_revision: scene.lighting_revision(),
+                preview_revision: 0,
+            });
+        let cache_hit = lighting_ready
+            && self.ray_overlay.as_ref().is_some_and(
+                |(old, _, _, old_revision, old_settings, old_debug)| {
+                    distance(*old, origin) <= 0.25
+                        && *old_revision == revision
+                        && *old_settings == settings
+                        && *old_debug == self.debug_overlay
+                },
             );
-            self.ray_overlay = Some((
-                origin,
-                result.pixels,
-                result.debug_positions,
-                revision,
-                settings,
-                self.debug_overlay,
-            ));
-            let image = color_image(&self.ray_overlay.as_ref().expect("ray overlay was set").1);
-            if let Some(texture) = &mut self.ray_texture {
-                texture.set(image, egui::TextureOptions::NEAREST);
-            } else {
-                self.ray_texture = Some(painter.ctx().load_texture(
-                    format!("pixel-rays-{}", self.block.id()),
-                    image,
-                    egui::TextureOptions::NEAREST,
-                ));
-            }
+        if cache_hit {
+            self.profiler.ray_hit();
+        } else if lighting_ready && self.ray_job.is_none() {
+            let source = self.rendered.clone();
+            let entities = scene.entities().to_vec();
+            let include_debug = self.debug_overlay;
+            let repaint = painter.ctx().clone();
+            let (sender, receiver) = mpsc::channel();
+            thread::Builder::new()
+                .name("pixel-ray-tracer-view-rays".into())
+                .spawn(move || {
+                    let start = Instant::now();
+                    let result =
+                        raytracer::trace_rays(&source, &entities, origin, settings, include_debug);
+                    let _ = sender.send((
+                        origin,
+                        result.pixels,
+                        result.debug_positions,
+                        revision,
+                        settings,
+                        include_debug,
+                        start.elapsed(),
+                    ));
+                    repaint.request_repaint();
+                })
+                .expect("failed to start pixel ray tracer view-ray job");
+            self.ray_job = Some(receiver);
+            self.profiler.ray_miss();
         }
         drop(scene);
         if let (Some((_, _, debug, ..)), Some(texture)) = (&self.ray_overlay, &self.ray_texture) {
@@ -910,6 +1068,7 @@ impl BlockEditor for PixelRayTracerEditor {
         _editors: &mut super::EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        self.profiler.show(ui.ctx());
         ui.horizontal_wrapped(|ui| {
             ui.strong("Pixel Ray Tracer");
             ui.weak("128 × 128");
@@ -917,6 +1076,7 @@ impl BlockEditor for PixelRayTracerEditor {
             if ui.button("Fit view").clicked() {
                 viewport.fit();
             }
+            self.profiler.toggle(ui);
             if ui.button("Reset artwork").clicked() {
                 self.block.operate(PixelRayTracerOperation::Reset);
                 self.selected_entity = None;
@@ -953,7 +1113,9 @@ impl BlockEditor for PixelRayTracerEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        let start = Instant::now();
         self.canvas(ui, viewport);
+        self.profiler.record_frame(start.elapsed());
         None
     }
 }
@@ -1008,8 +1170,8 @@ fn pixel_at(point: Point, clamp: bool) -> Option<(u16, u16)> {
 }
 fn snap(point: Point) -> Point {
     Point::new(
-        point.x.round().clamp(0.0, f32::from(PIXEL_RAY_TRACER_SIZE)),
-        point.y.round().clamp(0.0, f32::from(PIXEL_RAY_TRACER_SIZE)),
+        ((point.x * 2.0).round() / 2.0).clamp(0.0, f32::from(PIXEL_RAY_TRACER_SIZE)),
+        ((point.y * 2.0).round() / 2.0).clamp(0.0, f32::from(PIXEL_RAY_TRACER_SIZE)),
     )
 }
 fn inside(point: Point) -> bool {

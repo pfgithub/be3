@@ -49,19 +49,29 @@ pub(super) fn trace_lighting(
         let color = PIXEL_RAY_TRACER_PALETTE[usize::from(*color_index)];
         let mut accumulated = vec![[0.0_f32; 3]; size * size];
         let mut counts = vec![0_u32; size * size];
+        let mut branches = Vec::with_capacity(MAXIMUM_BRANCHES);
+        let mut pending = Vec::with_capacity(MAXIMUM_BRANCHES * 2);
+        let mut moved = Vec::with_capacity(MAXIMUM_BRANCHES);
         for ray in 0..settings.ray_count {
             let angle = f32::from(ray) / f32::from(settings.ray_count) * std::f32::consts::TAU;
-            let mut branches = vec![create_branch(
+            branches.clear();
+            branches.push(create_branch(
                 *position,
                 angle,
                 entities,
                 u32::from(ray) + 1,
-            )];
+            ));
             for _ in 0..settings.maximum_steps {
                 if branches.is_empty() {
                     break;
                 }
-                branches = move_branches(branches, settings.step_distance, entities);
+                move_branches(
+                    &mut branches,
+                    settings.step_distance,
+                    entities,
+                    &mut pending,
+                    &mut moved,
+                );
                 for branch in &branches {
                     let x = branch
                         .position
@@ -124,11 +134,15 @@ pub(super) fn trace_rays(
     let mut accumulated = vec![[0.0_f32; 3]; size * size];
     let mut counts = vec![0_u32; size * size];
     let mut debug_positions = Vec::new();
+    let mut branches = Vec::with_capacity(MAXIMUM_BRANCHES);
+    let mut pending = Vec::with_capacity(MAXIMUM_BRANCHES * 2);
+    let mut moved = Vec::with_capacity(MAXIMUM_BRANCHES);
     for ray in 0..settings.ray_count {
         let angle = f32::from(ray) / f32::from(settings.ray_count) * std::f32::consts::TAU;
         let direction = Point::new(angle.cos(), angle.sin());
         let mut render = origin;
-        let mut branches = vec![create_branch(origin, angle, entities, u32::from(ray) + 1)];
+        branches.clear();
+        branches.push(create_branch(origin, angle, entities, u32::from(ray) + 1));
         for _ in 0..settings.maximum_steps {
             render.x += direction.x * settings.step_distance;
             render.y += direction.y * settings.step_distance;
@@ -138,7 +152,13 @@ pub(super) fn trace_rays(
             if include_debug {
                 debug_positions.push(render);
             }
-            branches = move_branches(branches, settings.step_distance, entities);
+            move_branches(
+                &mut branches,
+                settings.step_distance,
+                entities,
+                &mut pending,
+                &mut moved,
+            );
             if branches.is_empty() {
                 break;
             }
@@ -201,12 +221,16 @@ fn create_branch(position: Point, angle: f32, entities: &[RayEntity], random: u3
     }
 }
 
-fn move_branches(branches: Vec<Branch>, distance: f32, entities: &[RayEntity]) -> Vec<Branch> {
-    let mut pending: Vec<(Branch, f32, u8)> = branches
-        .into_iter()
-        .map(|branch| (branch, distance, 0))
-        .collect();
-    let mut moved = Vec::new();
+fn move_branches(
+    branches: &mut Vec<Branch>,
+    distance: f32,
+    entities: &[RayEntity],
+    pending: &mut Vec<(Branch, f32, u8)>,
+    moved: &mut Vec<Branch>,
+) {
+    pending.clear();
+    pending.extend(branches.drain(..).map(|branch| (branch, distance, 0)));
+    moved.clear();
     while let Some((mut branch, remaining, collisions)) = pending.pop() {
         if branch.power.into_iter().fold(0.0, f32::max) < MINIMUM_POWER || collisions > 32 {
             continue;
@@ -317,7 +341,7 @@ fn move_branches(branches: Vec<Branch>, distance: f32, entities: &[RayEntity]) -
             .total_cmp(&left.power.into_iter().fold(0.0, f32::max))
     });
     moved.truncate(MAXIMUM_BRANCHES);
-    moved
+    std::mem::swap(branches, moved);
 }
 
 fn separate(branch: &mut Branch) {

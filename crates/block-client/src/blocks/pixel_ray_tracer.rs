@@ -117,6 +117,8 @@ pub struct PixelRayTracer {
     view_ray_settings: RaySettings,
     lighting_ray_settings: RaySettings,
     revision: u64,
+    #[serde(default)]
+    lighting_revision: u64,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +129,8 @@ struct PixelRayTracerData {
     view_ray_settings: RaySettings,
     lighting_ray_settings: RaySettings,
     revision: u64,
+    #[serde(default)]
+    lighting_revision: u64,
 }
 
 impl<'de> Deserialize<'de> for PixelRayTracer {
@@ -158,6 +162,7 @@ impl<'de> Deserialize<'de> for PixelRayTracer {
             view_ray_settings: data.view_ray_settings,
             lighting_ray_settings: data.lighting_ray_settings,
             revision: data.revision,
+            lighting_revision: data.lighting_revision,
         })
     }
 }
@@ -170,6 +175,7 @@ impl PixelRayTracer {
             view_ray_settings: RaySettings::default(),
             lighting_ray_settings: RaySettings::default(),
             revision: 0,
+            lighting_revision: 0,
         }
     }
     pub fn pixels(&self) -> &[u8] {
@@ -187,12 +193,16 @@ impl PixelRayTracer {
     pub const fn revision(&self) -> u64 {
         self.revision
     }
+    pub const fn lighting_revision(&self) -> u64 {
+        self.lighting_revision
+    }
     pub fn next_entity_id(&self) -> u64 {
         self.entities.iter().map(RayEntity::id).max().unwrap_or(0) + 1
     }
 
     fn apply(&mut self, operation: &PixelRayTracerOperation) {
         let mut changed = false;
+        let mut lighting_changed = false;
         match operation {
             PixelRayTracerOperation::Paint { pixels } => {
                 for update in pixels {
@@ -205,6 +215,7 @@ impl PixelRayTracer {
                         if self.pixels[index] != update.color_index {
                             self.pixels[index] = update.color_index;
                             changed = true;
+                            lighting_changed = true;
                         }
                     }
                 }
@@ -215,6 +226,7 @@ impl PixelRayTracer {
                 {
                     self.entities.push(entity.clone());
                     changed = true;
+                    lighting_changed = true;
                 }
             }
             PixelRayTracerOperation::UpdateEntity { entity } => {
@@ -227,6 +239,7 @@ impl PixelRayTracer {
                         if current != entity {
                             current.clone_from(entity);
                             changed = true;
+                            lighting_changed = true;
                         }
                     }
                 }
@@ -235,6 +248,7 @@ impl PixelRayTracer {
                 let old = self.entities.len();
                 self.entities.retain(|entity| entity.id() != *id);
                 changed = old != self.entities.len();
+                lighting_changed = changed;
             }
             PixelRayTracerOperation::SetViewRaySettings { settings } => {
                 if valid_settings(*settings) && self.view_ray_settings != *settings {
@@ -246,16 +260,21 @@ impl PixelRayTracer {
                 if valid_settings(*settings) && self.lighting_ray_settings != *settings {
                     self.lighting_ray_settings = *settings;
                     changed = true;
+                    lighting_changed = true;
                 }
             }
             PixelRayTracerOperation::Reset => {
                 self.pixels.fill(PIXEL_RAY_TRACER_BACKGROUND);
                 self.entities.clear();
                 changed = true;
+                lighting_changed = true;
             }
         }
         if changed {
             self.revision = self.revision.wrapping_add(1);
+        }
+        if lighting_changed {
+            self.lighting_revision = self.lighting_revision.wrapping_add(1);
         }
     }
 }
