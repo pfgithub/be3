@@ -730,6 +730,33 @@ impl InfiniteCanvasEditor {
         self.record_update(before, after, true);
     }
 
+    fn update_selected_text(
+        &mut self,
+        entities: &[CanvasEntity],
+        mut update: impl FnMut(&mut CanvasTextStyle),
+    ) {
+        let before = entities
+            .iter()
+            .filter(|entity| {
+                self.selection.contains(&entity.id)
+                    && matches!(entity.kind, CanvasEntityKind::Text { .. })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let after = before
+            .iter()
+            .cloned()
+            .map(|mut entity| {
+                let CanvasEntityKind::Text { text_style, .. } = &mut entity.kind else {
+                    unreachable!();
+                };
+                update(text_style);
+                entity
+            })
+            .collect();
+        self.record_update(before, after, true);
+    }
+
     fn show_inspector(
         &mut self,
         ui: &mut egui::Ui,
@@ -1025,6 +1052,99 @@ impl InfiniteCanvasEditor {
                     |style| style.corner_radius = value,
                 );
             }
+        }
+
+        let texts = selected
+            .iter()
+            .copied()
+            .filter_map(|entity| match &entity.kind {
+                CanvasEntityKind::Text { text_style, .. } => Some(*text_style),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if !texts.is_empty() {
+            ui.separator();
+            ui.strong("Text");
+
+            let font_size = common_value(texts.iter().map(|style| style.font_size));
+            let mut size = match font_size {
+                CommonValue::Uniform(size) => size,
+                CommonValue::Mixed | CommonValue::None => 18.0,
+            };
+            ui.horizontal(|ui| {
+                ui.label("Font size");
+                if matches!(font_size, CommonValue::Mixed) {
+                    ui.weak("Mixed");
+                }
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut size)
+                            .range(4.0..=256.0)
+                            .speed(1.0)
+                            .suffix(" px"),
+                    )
+                    .changed()
+                {
+                    self.update_selected_text(entities, |style| style.font_size = size);
+                }
+            });
+
+            let line_height = common_value(texts.iter().map(|style| style.line_height));
+            let mut height = match line_height {
+                CommonValue::Uniform(height) => height,
+                CommonValue::Mixed | CommonValue::None => 1.2,
+            };
+            ui.horizontal(|ui| {
+                ui.label("Line height");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut height)
+                            .range(0.5..=4.0)
+                            .speed(0.05),
+                    )
+                    .changed()
+                {
+                    self.update_selected_text(entities, |style| style.line_height = height);
+                }
+            });
+
+            let bold = common_value(
+                texts
+                    .iter()
+                    .map(|style| style.weight == CanvasTextWeight::Bold),
+            );
+            if let Some(bold) = mixed_checkbox(ui, "Bold", bold) {
+                self.update_selected_text(entities, |style| {
+                    style.weight = if bold {
+                        CanvasTextWeight::Bold
+                    } else {
+                        CanvasTextWeight::Regular
+                    };
+                });
+            }
+
+            let alignment = common_value(texts.iter().map(|style| style.alignment));
+            ui.horizontal(|ui| {
+                ui.label("Alignment");
+                for (label, value) in [
+                    ("Left", CanvasTextAlign::Left),
+                    ("Center", CanvasTextAlign::Center),
+                    ("Right", CanvasTextAlign::Right),
+                ] {
+                    if ui
+                        .selectable_label(alignment == CommonValue::Uniform(value), label)
+                        .clicked()
+                    {
+                        self.update_selected_text(entities, |style| style.alignment = value);
+                    }
+                }
+            });
+
+            let wrap = common_value(texts.iter().map(|style| style.wrap));
+            if let Some(wrap) = mixed_checkbox(ui, "Wrap text", wrap) {
+                self.update_selected_text(entities, |style| style.wrap = wrap);
+            }
+            ui.weak("Resize to wrap; hold Alt while resizing to scale text.");
         }
 
         ui.separator();

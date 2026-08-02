@@ -34,7 +34,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Create auto-width text by clicking and wrapped text boxes by dragging, starting empty with inline focus.
 - [x] Add multiline inline canvas editing; double-click or Enter edits, Escape commits, and Ctrl/Cmd+Enter exits.
 - [x] Make text resize wrap by default and scale when Alt is held.
-- [ ] Add text typography and layout controls to the inspector and remove the toolbar text field.
+- [x] Add text typography and layout controls to the inspector and remove the toolbar text field.
 
 ## Commands, menus, and inspector polish
 
