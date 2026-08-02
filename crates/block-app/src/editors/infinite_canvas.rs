@@ -2427,6 +2427,18 @@ impl InfiniteCanvasEditor {
         let Some(world) = world else {
             return (layer_move, create_block, set_parent, keyboard_action);
         };
+        if self.tool == Tool::Select && response.hovered() && response.double_clicked() {
+            if let Some(id) = self.entity_at(entities, world) {
+                let entity = entities.iter().find(|entity| entity.id == id).unwrap();
+                if matches!(entity.kind, CanvasEntityKind::Text { .. }) && !entity.locked {
+                    self.select_entity(entities, id, false);
+                    self.editing_text = Some(id);
+                    self.focus_text_requested = true;
+                    self.gesture = None;
+                    return (layer_move, create_block, set_parent, keyboard_action);
+                }
+            }
+        }
         let primary_pressed = response
             .ctx
             .input(|input| input.pointer.button_pressed(PointerButton::Primary));
@@ -2489,16 +2501,6 @@ impl InfiniteCanvasEditor {
                         });
                     } else if let Some(id) = self.entity_at(entities, world) {
                         let entity = entities.iter().find(|entity| entity.id == id).unwrap();
-                        if matches!(entity.kind, CanvasEntityKind::Text { .. })
-                            && !entity.locked
-                            && response.double_clicked()
-                        {
-                            self.select_entity(entities, id, false);
-                            self.editing_text = Some(id);
-                            self.focus_text_requested = true;
-                            self.gesture = None;
-                            return (layer_move, create_block, set_parent, keyboard_action);
-                        }
                         if matches!(entity.kind, CanvasEntityKind::DirectEditor { .. }) {
                             let content = direct_editor_layout(entity)
                                 .is_some_and(|layout| layout.content.contains(world));
