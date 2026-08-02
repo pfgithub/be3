@@ -422,13 +422,20 @@ impl InfiniteCanvasEditor {
 
     fn add_entity(&mut self, entity: CanvasEntity) {
         let id = entity.id;
-        if matches!(entity.kind, CanvasEntityKind::Text { .. }) {
+        let text = matches!(&entity.kind, CanvasEntityKind::Text { .. });
+        let select_after_add = !matches!(
+            &entity.kind,
+            CanvasEntityKind::Line | CanvasEntityKind::Rectangle | CanvasEntityKind::Pen { .. }
+        );
+        if text {
             self.editing_text = Some(id);
             self.focus_text_requested = true;
         }
         self.record_action(InfiniteCanvasOperation::Add { entity });
         self.selection.clear();
-        self.selection.insert(id);
+        if select_after_add {
+            self.selection.insert(id);
+        }
     }
 
     fn duplicate_selection(&mut self, entities: &[CanvasEntity]) {
