@@ -211,6 +211,7 @@ enum Gesture {
         default_preserve_aspect_ratio: bool,
         force_preserve_aspect_ratio: bool,
         preserve_aspect_ratio: bool,
+        scale_text: bool,
     },
     Rotate {
         frame: SelectionFrame,
@@ -1895,7 +1896,9 @@ impl InfiniteCanvasEditor {
                             self.selection_defaults_to_proportional(entities, editors);
                         let force_preserve_aspect_ratio =
                             self.selection_forces_proportional(entities, editors);
-                        let preserve_aspect_ratio = force_preserve_aspect_ratio
+                        let scale_text = response.ctx.input(|input| input.modifiers.alt);
+                        let preserve_aspect_ratio = scale_text
+                            || force_preserve_aspect_ratio
                             || default_preserve_aspect_ratio
                                 != response.ctx.input(|input| input.modifiers.shift);
                         self.gesture = Some(Gesture::Resize {
@@ -1906,6 +1909,7 @@ impl InfiniteCanvasEditor {
                             default_preserve_aspect_ratio,
                             force_preserve_aspect_ratio,
                             preserve_aspect_ratio,
+                            scale_text,
                         });
                     } else if let Some(id) = self.entity_at(entities, world) {
                         let entity = entities.iter().find(|entity| entity.id == id).unwrap();
@@ -2014,10 +2018,13 @@ impl InfiniteCanvasEditor {
                     default_preserve_aspect_ratio,
                     force_preserve_aspect_ratio,
                     preserve_aspect_ratio,
+                    scale_text,
                     ..
                 }) => {
                     *current = world;
-                    *preserve_aspect_ratio = *force_preserve_aspect_ratio
+                    *scale_text = response.ctx.input(|input| input.modifiers.alt);
+                    *preserve_aspect_ratio = *scale_text
+                        || *force_preserve_aspect_ratio
                         || *default_preserve_aspect_ratio
                             != response.ctx.input(|input| input.modifiers.shift);
                 }
@@ -3170,8 +3177,16 @@ fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
             current,
             originals,
             preserve_aspect_ratio,
+            scale_text,
             ..
-        } => resize_entities(*handle, *frame, *current, originals, *preserve_aspect_ratio),
+        } => resize_entities(
+            *handle,
+            *frame,
+            *current,
+            originals,
+            *preserve_aspect_ratio,
+            *scale_text,
+        ),
         Gesture::Rotate {
             frame,
             start_angle,
@@ -3222,6 +3237,7 @@ fn resize_entities(
     current: CanvasPoint,
     originals: &[CanvasEntity],
     preserve_aspect_ratio: bool,
+    scale_text: bool,
 ) -> Vec<CanvasEntity> {
     let current = rotate(
         CanvasPoint::new(current.x - frame.center.x, current.y - frame.center.y),
@@ -3248,6 +3264,7 @@ fn resize_entities(
         current,
         &local_originals,
         preserve_aspect_ratio,
+        scale_text,
     )
     .into_iter()
     .map(|mut entity| {
@@ -3266,6 +3283,7 @@ fn resize_entities_axis(
     current: CanvasPoint,
     originals: &[CanvasEntity],
     preserve_aspect_ratio: bool,
+    scale_text: bool,
 ) -> Vec<CanvasEntity> {
     let original_size = bounds.size();
     let mut resized = bounds;
@@ -3343,6 +3361,14 @@ fn resize_entities_axis(
             );
             entity.transform.size.x = (entity.transform.size.x * scale_x).max(MIN_SIZE);
             entity.transform.size.y = (entity.transform.size.y * scale_y).max(MIN_SIZE);
+            if let CanvasEntityKind::Text { text_style, .. } = &mut entity.kind {
+                if scale_text {
+                    let factor = if handle.x == 0 { scale_y } else { scale_x };
+                    text_style.font_size = (text_style.font_size * factor).max(4.0);
+                } else {
+                    text_style.wrap = true;
+                }
+            }
             if let CanvasEntityKind::DirectEditor { scale, .. } = &mut entity.kind {
                 *scale = (*scale * scale_x).max(f32::EPSILON);
             }
