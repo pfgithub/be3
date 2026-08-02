@@ -83,7 +83,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 - [x] Keep database, text, and presentation direct editors live; require selection and an Edit button for preview-based editors.
 - [x] Move direct-editor scale into the inspector and make resize behavior capability-driven.
 - [x] Render embedded presentations as resizable fullscreen playback with slide navigation; require opening the block to edit.
-- [ ] Allow embedded text direct editors to resize horizontally.
+- [x] Allow embedded text direct editors to resize horizontally.
 
 ## Direct editor verification
 

@@ -1019,13 +1019,21 @@ impl InfiniteCanvasEditor {
             let CanvasEntityKind::DirectEditor { block_id, scale } = entity.kind else {
                 continue;
             };
-            let Some(intrinsic) = editors.direct_editor_intrinsic_size(block_id) else {
-                continue;
-            };
-            let intrinsic_size = direct_editor_entity_size(intrinsic, scale);
             let resize = editors
                 .direct_editor_resize(block_id)
                 .unwrap_or(DirectEditorResize::None);
+            let intrinsic = if resize == DirectEditorResize::Horizontal {
+                let width = direct_editor_layout(entity)
+                    .map(|layout| layout.content.size().x / scale.max(f32::EPSILON))
+                    .unwrap_or(MIN_SIZE);
+                editors.direct_editor_intrinsic_size_for_width(block_id, width)
+            } else {
+                editors.direct_editor_intrinsic_size(block_id)
+            };
+            let Some(intrinsic) = intrinsic else {
+                continue;
+            };
+            let intrinsic_size = direct_editor_entity_size(intrinsic, scale);
             let desired = CanvasPoint::new(
                 if resize.horizontal() {
                     entity.transform.size.x

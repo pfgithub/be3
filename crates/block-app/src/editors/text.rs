@@ -38,7 +38,8 @@ use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::{create_image_block, pick_image_file},
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
+    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
+    SidebarDragPayload,
 };
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -960,6 +961,28 @@ impl TextEditor {
         });
         action
     }
+
+    fn direct_editor_size(&mut self, editors: &mut EditorAccess<'_>, width: f32) -> Option<Vec2> {
+        let bytes = self.block.read()?.bytes().to_vec();
+        let highlight = self.core.highlight();
+        let embeds = self.resolve_embeds(&bytes, editors);
+        let height = match &self.renderer {
+            Ok(renderer) => {
+                renderer
+                    .layout_profiled(
+                        &bytes,
+                        &highlight,
+                        &embeds,
+                        (width - PADDING.x * 2.0).max(1.0),
+                    )
+                    .0
+                    .size
+                    .y
+            }
+            Err(_) => PADDING.y * 2.0,
+        };
+        Some(Vec2::new(width, height))
+    }
 }
 
 impl BlockEditor for TextEditor {
@@ -987,26 +1010,20 @@ impl BlockEditor for TextEditor {
         DirectEditorInteraction::Live
     }
 
+    fn direct_editor_resize(&self) -> DirectEditorResize {
+        DirectEditorResize::Horizontal
+    }
+
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {
-        let bytes = self.block.read()?.bytes().to_vec();
-        let highlight = self.core.highlight();
-        let embeds = self.resolve_embeds(&bytes, editors);
-        let height = match &self.renderer {
-            Ok(renderer) => {
-                renderer
-                    .layout_profiled(
-                        &bytes,
-                        &highlight,
-                        &embeds,
-                        DIRECT_EDITOR_WIDTH - PADDING.x * 2.0,
-                    )
-                    .0
-                    .size
-                    .y
-            }
-            Err(_) => PADDING.y * 2.0,
-        };
-        Some(Vec2::new(DIRECT_EDITOR_WIDTH, height))
+        self.direct_editor_size(editors, DIRECT_EDITOR_WIDTH)
+    }
+
+    fn direct_editor_intrinsic_size_for_width(
+        &mut self,
+        width: f32,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<Vec2> {
+        self.direct_editor_size(editors, width)
     }
 
     fn direct_editor_top_bar(
