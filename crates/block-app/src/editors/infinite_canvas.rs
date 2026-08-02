@@ -702,6 +702,70 @@ impl InfiniteCanvasEditor {
     #[cfg(target_os = "android")]
     fn paste_entities_from_clipboard(&mut self) {}
 
+    fn edit_selected(
+        &mut self,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        if self.selection.len() != 1 {
+            return None;
+        }
+        let entity = entities
+            .iter()
+            .find(|entity| self.selection.contains(&entity.id))?;
+        match entity.kind {
+            CanvasEntityKind::DirectEditor { .. } => {
+                self.focused_editor = Some(entity.id);
+                None
+            }
+            CanvasEntityKind::Text { .. } if !entity.locked => {
+                self.editing_text = Some(entity.id);
+                self.focus_text_requested = true;
+                None
+            }
+            CanvasEntityKind::Block { block_id } => {
+                let cached = editors.client().cached_block(block_id)?;
+                Some(EditorAction::OpenBlock {
+                    id: cached.id,
+                    block_type: cached.block_type,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn toggle_selected_block_mode(
+        &mut self,
+        entities: &[CanvasEntity],
+        editors: &mut EditorAccess<'_>,
+    ) {
+        if self.selection.len() != 1 {
+            return;
+        }
+        let Some(entity) = entities
+            .iter()
+            .find(|entity| self.selection.contains(&entity.id))
+            .cloned()
+        else {
+            return;
+        };
+        let updated = match entity.kind {
+            CanvasEntityKind::DirectEditor { block_id, .. } => {
+                if self.focused_editor == Some(entity.id) {
+                    self.focused_editor = None;
+                }
+                direct_editor_to_preview(&entity, block_id)
+            }
+            CanvasEntityKind::Block { block_id } => editors
+                .direct_editor_intrinsic_size(block_id)
+                .map(|intrinsic| preview_to_direct_editor(&entity, block_id, intrinsic)),
+            _ => None,
+        };
+        if let Some(updated) = updated {
+            self.record_update(vec![entity], vec![updated], false);
+        }
+    }
+
     fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
         self.add_direct_editor_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
     }
@@ -1934,29 +1998,7 @@ impl InfiniteCanvasEditor {
                 .input(|input| input.key_pressed(egui::Key::Enter))
                 && self.selection.len() == 1
             {
-                if let Some(entity) = entities
-                    .iter()
-                    .find(|entity| self.selection.contains(&entity.id))
-                {
-                    match entity.kind {
-                        CanvasEntityKind::DirectEditor { .. } => {
-                            self.focused_editor = Some(entity.id);
-                        }
-                        CanvasEntityKind::Text { .. } if !entity.locked => {
-                            self.editing_text = Some(entity.id);
-                            self.focus_text_requested = true;
-                        }
-                        CanvasEntityKind::Block { block_id } => {
-                            if let Some(cached) = editors.client().cached_block(block_id) {
-                                keyboard_action = Some(EditorAction::OpenBlock {
-                                    id: cached.id,
-                                    block_type: cached.block_type,
-                                });
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                keyboard_action = self.edit_selected(entities, editors);
             }
         }
         if self.focused_editor.is_none()
@@ -2029,6 +2071,67 @@ impl InfiniteCanvasEditor {
         let mut set_parent = None;
         response.context_menu(|ui| {
             if self.context_menu_for_selection {
+                if ui.button("Open / edit").clicked() {
+                    keyboard_action = self.edit_selected(entities, editors);
+                    ui.close();
+                }
+                let block_mode = self.selection.len() == 1
+                    && entities.iter().any(|entity| {
+                        self.selection.contains(&entity.id)
+                            && matches!(
+                                entity.kind,
+                                CanvasEntityKind::Block { .. }
+                                    | CanvasEntityKind::DirectEditor { .. }
+                            )
+                    });
+                if ui
+                    .add_enabled(
+                        block_mode,
+                        egui::Button::new("Toggle preview / direct editor"),
+                    )
+                    .clicked()
+                {
+                    self.toggle_selected_block_mode(entities, editors);
+                    ui.close();
+                }
+                if ui.button("Fit selection").clicked() {
+                    self.fit_selection_requested = true;
+                    ui.close();
+                }
+                ui.separator();
+                for (label, command) in [
+                    ("Cut", CanvasCommand::Cut),
+                    ("Copy", CanvasCommand::Copy),
+                    ("Paste", CanvasCommand::Paste),
+                    ("Duplicate", CanvasCommand::Duplicate),
+                    ("Delete", CanvasCommand::Delete),
+                ] {
+                    if ui.button(label).clicked() {
+                        self.execute_command(command, entities);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                let selected = entities
+                    .iter()
+                    .filter(|entity| self.selection.contains(&entity.id))
+                    .collect::<Vec<_>>();
+                let can_group = selected.len() >= 2;
+                let can_ungroup = selected.iter().any(|entity| entity.group_id.is_some());
+                let can_lock = selected.iter().any(|entity| !entity.locked);
+                let can_unlock = selected.iter().any(|entity| entity.locked);
+                for (label, enabled, command) in [
+                    ("Group", can_group, CanvasCommand::Group),
+                    ("Ungroup", can_ungroup, CanvasCommand::Ungroup),
+                    ("Lock", can_lock, CanvasCommand::Lock),
+                    ("Unlock", can_unlock, CanvasCommand::Unlock),
+                ] {
+                    if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                        self.execute_command(command, entities);
+                        ui.close();
+                    }
+                }
+                ui.separator();
                 for (label, movement) in [
                     ("Bring to front", CanvasLayerMove::BringToFront),
                     ("Forward", CanvasLayerMove::ForwardOne),
@@ -2039,6 +2142,15 @@ impl InfiniteCanvasEditor {
                         layer_move = Some(movement);
                         ui.close();
                     }
+                }
+                ui.separator();
+                if ui.button("Select all").clicked() {
+                    self.execute_command(CanvasCommand::SelectAll, entities);
+                    ui.close();
+                }
+                if ui.button("Invert selection").clicked() {
+                    self.execute_command(CanvasCommand::InvertSelection, entities);
+                    ui.close();
                 }
             } else {
                 ui.menu_button("Add", |ui| {
@@ -2105,6 +2217,19 @@ impl InfiniteCanvasEditor {
                         }
                     });
                 });
+                ui.separator();
+                if ui.button("Paste").clicked() {
+                    self.execute_command(CanvasCommand::Paste, entities);
+                    ui.close();
+                }
+                if ui.button("Select all").clicked() {
+                    self.execute_command(CanvasCommand::SelectAll, entities);
+                    ui.close();
+                }
+                if ui.button("Invert selection").clicked() {
+                    self.execute_command(CanvasCommand::InvertSelection, entities);
+                    ui.close();
+                }
             }
         });
 

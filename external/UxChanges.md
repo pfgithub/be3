@@ -39,7 +39,7 @@ Each implementation item is checked only after `cargo fmt`, `cargo nextest run`,
 ## Commands, menus, and inspector polish
 
 - [x] Centralize canvas selection commands for reuse by keyboard, toolbar, and context menus.
-- [ ] Add duplicate, delete, cut, copy, paste, lock, group, open/edit block, preview/direct conversion, fit selection, select all, and invert selection to the appropriate context menus.
+- [x] Add duplicate, delete, cut, copy, paste, lock, group, open/edit, preview/direct conversion, fit selection, select all, and invert selection to the appropriate context menus.
 - [ ] Make the Add context menu match the toolbar, including text, pen/freehand, image, and blocks.
 - [ ] Add visible toolbar actions for common selection commands without crowding the drawing tools.
 - [ ] Reorganize the inspector into Transform, Appearance, type-specific, Arrange, and Block sections with object-type labels and compact layer controls.
