@@ -111,6 +111,7 @@ pub(super) fn registration() -> EditorRegistration {
 
 struct TextEditor {
     block: BlockHandle<TextDocument>,
+    workspace_id: Uuid,
     core: Core,
     renderer: Result<TextRenderer, String>,
     selecting: bool,
@@ -147,6 +148,7 @@ impl TextEditor {
         let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
         Self {
             block,
+            workspace_id: client.workspace_id(),
             core,
             renderer: TextRenderer::new(),
             selecting: false,
@@ -275,6 +277,7 @@ impl TextEditor {
 
     fn insert_image_embed(&mut self, id: Uuid, source_name: &str) {
         let directive = image_embed_directive(
+            self.workspace_id,
             id,
             source_name,
             self.highlight_language == HighlightLanguage::Markdown,
@@ -323,6 +326,7 @@ impl TextEditor {
     fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
         let parsed = parse_embeds(
             bytes,
+            self.workspace_id,
             self.highlight_language == HighlightLanguage::Markdown,
         );
         let references = self.dependencies.read();
@@ -1330,8 +1334,13 @@ fn record_profile(profile: FrameProfile) {
     performance::record_count("Glyph cache misses", profile.paint.cache_misses as u64);
 }
 
-fn image_embed_directive(id: Uuid, source_name: &str, markdown: bool) -> String {
-    let url = block_url(id);
+fn image_embed_directive(
+    workspace_id: Uuid,
+    id: Uuid,
+    source_name: &str,
+    markdown: bool,
+) -> String {
+    let url = block_url(workspace_id, id);
     if markdown {
         format!("![{source_name}]({url})")
     } else {
@@ -1339,9 +1348,10 @@ fn image_embed_directive(id: Uuid, source_name: &str, markdown: bool) -> String 
     }
 }
 
-fn parse_embeds(bytes: &[u8], markdown: bool) -> Vec<ParsedEmbed> {
+fn parse_embeds(bytes: &[u8], workspace_id: Uuid, markdown: bool) -> Vec<ParsedEmbed> {
     parse_block_urls(bytes)
         .into_iter()
+        .filter(|url| url.workspace_id == workspace_id)
         .map(|url| {
             let image_range = markdown
                 .then(|| markdown_image_range(bytes, &url.range))

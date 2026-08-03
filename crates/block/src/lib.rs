@@ -155,6 +155,10 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
     fn references(&self) -> Vec<Uuid> {
         Vec::new()
     }
+
+    fn references_for_workspace(&self, _workspace_id: Uuid) -> Vec<Uuid> {
+        self.references()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

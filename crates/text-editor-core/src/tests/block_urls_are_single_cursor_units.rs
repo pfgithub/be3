@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 #[test]
 fn block_urls_are_single_cursor_units() {
-    let url = block_url(Uuid::from_u128(1));
+    let url = block_url(Uuid::from_u128(1), Uuid::from_u128(2));
     let mut tester = EditorTester::new(format!("a {url} b"));
     tester.execute(EditorCommand::SetCursorPosition(tester.pos(2)));
 

@@ -190,14 +190,19 @@ impl Block for TextDocument {
     }
 
     fn references(&self) -> Vec<Uuid> {
-        embedded_block_references(&self.bytes)
+        embedded_block_references(&self.bytes, None)
+    }
+
+    fn references_for_workspace(&self, workspace_id: Uuid) -> Vec<Uuid> {
+        embedded_block_references(&self.bytes, Some(workspace_id))
     }
 }
 
-fn embedded_block_references(bytes: &[u8]) -> Vec<Uuid> {
+fn embedded_block_references(bytes: &[u8], workspace_id: Option<Uuid>) -> Vec<Uuid> {
     let mut seen = HashSet::new();
     parse_block_urls(bytes)
         .into_iter()
+        .filter(|url| workspace_id.is_none_or(|workspace_id| url.workspace_id == workspace_id))
         .map(|url| url.id)
         .filter(|id| seen.insert(*id))
         .collect()

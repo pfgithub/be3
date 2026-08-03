@@ -1,12 +1,12 @@
-use super::{block_url, parse_embeds, BLOCK_ID};
+use super::{block_url, parse_embeds, BLOCK_ID, WORKSPACE_ID};
 
 #[test]
 fn classifies_markdown_image() {
-    let url = block_url(BLOCK_ID);
+    let url = block_url(WORKSPACE_ID, BLOCK_ID);
     let markdown_image = format!("![link]({url})");
 
-    let image = parse_embeds(markdown_image.as_bytes(), true);
-    let plain = parse_embeds(url.as_bytes(), true);
+    let image = parse_embeds(markdown_image.as_bytes(), WORKSPACE_ID, true);
+    let plain = parse_embeds(url.as_bytes(), WORKSPACE_ID, true);
 
     assert_eq!(image.len(), 1);
     assert_eq!(image[0].range, 8..8 + url.len());

@@ -5,6 +5,7 @@ use super::*;
 
 mod a_read_guard_blocks_background_updates;
 mod block_handle_history_is_shared_by_clones;
+mod block_urls_include_workspace_and_reject_malformed_paths;
 mod cached_blocks_are_populated_from_confirmed_metadata;
 mod client_debug_snapshot_reports_active_worker_state;
 mod created_blocks_are_immediately_readable_and_operate_optimistically;

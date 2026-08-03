@@ -69,6 +69,7 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
     let read_id = Uuid::new_v4();
     let read: Arc<dyn ErasedBlock> = Arc::new(TypedBlock::<MetadataBlock>::unresolved(
         read_id,
+        Uuid::nil(),
         Arc::new(BlockShared {
             value: RwLock::new(None),
         }),

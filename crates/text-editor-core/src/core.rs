@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, mem::size_of};
 
 use block_client::{
-    blocks::text::TextDocument, parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_PREFIX,
+    blocks::text::TextDocument, parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_BYTES,
 };
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 use unicode_segmentation::UnicodeSegmentation;
@@ -1763,7 +1763,7 @@ fn has_stop(
     if index == 0 || index >= bytes.len() {
         return Some(BetweenCharsStop::Both);
     }
-    let url_length = BLOCK_URL_PREFIX.len() + 36;
+    let url_length = BLOCK_URL_BYTES;
     let search_start = index.saturating_sub(url_length);
     let search_end = (index + url_length).min(bytes.len());
     if parse_block_urls(&bytes[search_start..search_end])

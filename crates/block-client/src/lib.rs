@@ -34,8 +34,9 @@ pub mod blocks;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
 const WORKSPACE_HEADER: &str = "x-block-workspace-id";
-pub const BLOCK_URL_PREFIX: &str = "https://blocks.pfg.pw/0/";
+const BLOCK_URL_BASE: &str = "https://blocks.pfg.pw/";
 const UUID_TEXT_BYTES: usize = 36;
+pub const BLOCK_URL_BYTES: usize = BLOCK_URL_BASE.len() + UUID_TEXT_BYTES * 2 + 1;
 const MAX_HISTORY_ACTIONS: usize = 100;
 const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
@@ -316,29 +317,48 @@ pub struct CachedBlock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockUrl {
     pub range: Range<usize>,
+    pub workspace_id: Uuid,
     pub id: Uuid,
 }
 
-pub fn block_url(id: Uuid) -> String {
-    format!("{BLOCK_URL_PREFIX}{id}")
+pub fn block_url_prefix(workspace_id: Uuid) -> String {
+    format!("{BLOCK_URL_BASE}{workspace_id}/")
+}
+
+pub fn block_url(workspace_id: Uuid, id: Uuid) -> String {
+    format!("{}{id}", block_url_prefix(workspace_id))
 }
 
 pub fn parse_block_urls(bytes: &[u8]) -> Vec<BlockUrl> {
-    let prefix = BLOCK_URL_PREFIX.as_bytes();
+    let prefix = BLOCK_URL_BASE.as_bytes();
     let mut urls = Vec::new();
     let mut index = 0;
-    while index + prefix.len() + UUID_TEXT_BYTES <= bytes.len() {
+    while index + BLOCK_URL_BYTES <= bytes.len() {
         if !bytes[index..].starts_with(prefix) {
             index += 1;
             continue;
         }
-        let uuid_start = index + prefix.len();
-        let end = uuid_start + UUID_TEXT_BYTES;
-        let Ok(uuid) = std::str::from_utf8(&bytes[uuid_start..end]) else {
+        let workspace_start = index + prefix.len();
+        let workspace_end = workspace_start + UUID_TEXT_BYTES;
+        let Ok(workspace) = std::str::from_utf8(&bytes[workspace_start..workspace_end]) else {
             index += 1;
             continue;
         };
-        let Ok(id) = Uuid::parse_str(uuid) else {
+        let Ok(workspace_id) = Uuid::parse_str(workspace) else {
+            index += 1;
+            continue;
+        };
+        if bytes.get(workspace_end) != Some(&b'/') {
+            index += 1;
+            continue;
+        }
+        let id_start = workspace_end + 1;
+        let end = id_start + UUID_TEXT_BYTES;
+        let Ok(id) = std::str::from_utf8(&bytes[id_start..end])
+            .ok()
+            .and_then(|id| Uuid::parse_str(id).ok())
+            .ok_or(())
+        else {
             index += 1;
             continue;
         };
@@ -351,6 +371,7 @@ pub fn parse_block_urls(bytes: &[u8]) -> Vec<BlockUrl> {
         }
         urls.push(BlockUrl {
             range: index..end,
+            workspace_id,
             id,
         });
         index = end;
@@ -548,6 +569,7 @@ impl BlockClient {
         let block = Arc::new(TypedBlock::<B>::created_by(
             id,
             self.account_id,
+            self.workspace_id,
             Arc::clone(&shared),
             initial,
             dynamic_artifact,
@@ -575,7 +597,11 @@ impl BlockClient {
         let shared = Arc::new(BlockShared {
             value: RwLock::new(None),
         });
-        let block = Arc::new(TypedBlock::<B>::unresolved(id, Arc::clone(&shared)));
+        let block = Arc::new(TypedBlock::<B>::unresolved(
+            id,
+            self.workspace_id,
+            Arc::clone(&shared),
+        ));
         self.register_block(id, &block);
         self.send(WorkerCommand::AddBlock(block.clone()));
         self.block_handle(id, block)
@@ -739,6 +765,7 @@ struct AppliedCrdtOperation<O> {
 
 pub struct CrdtOperationTransaction<'a, B: Block> {
     current: &'a mut B,
+    workspace_id: Uuid,
     applied: Vec<AppliedCrdtOperation<B::Operation>>,
 }
 
@@ -748,10 +775,11 @@ impl<B: Block> CrdtOperationTransaction<'_, B> {
     }
 
     pub fn apply(&mut self, operation: B::Operation) {
-        let before = normalized_references(self.current.references());
+        let before =
+            normalized_references(self.current.references_for_workspace(self.workspace_id));
         B::apply_operation(self.current, &operation);
         let implicit_name = self.current.implicit_name();
-        let after = normalized_references(self.current.references());
+        let after = normalized_references(self.current.references_for_workspace(self.workspace_id));
         self.applied.push(AppliedCrdtOperation {
             operation,
             implicit_name,
@@ -2267,6 +2295,7 @@ trait ErasedBlock: Send + Sync {
 
 struct TypedBlock<B: Block> {
     id: Uuid,
+    workspace_id: Uuid,
     author: RwLock<Option<Uuid>>,
     shared: Arc<BlockShared<B>>,
     state: RwLock<TypedState<B>>,
@@ -2435,20 +2464,22 @@ impl<B: Block> TypedBlock<B> {
 
     #[cfg(test)]
     fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
-        Self::created_by(id, Uuid::nil(), shared, initial, None)
+        Self::created_by(id, Uuid::nil(), Uuid::nil(), shared, initial, None)
     }
 
     fn created_by(
         id: Uuid,
         author: Uuid,
+        workspace_id: Uuid,
         shared: Arc<BlockShared<B>>,
         initial: B,
         dynamic_artifact: Option<DynamicArtifactDescriptor>,
     ) -> Self {
-        let references = normalized_references(initial.references());
+        let references = normalized_references(initial.references_for_workspace(workspace_id));
         let name = initial.implicit_name();
         Self {
             id,
+            workspace_id,
             author: RwLock::new(Some(author)),
             shared,
             state: RwLock::new(TypedState {
@@ -2475,9 +2506,10 @@ impl<B: Block> TypedBlock<B> {
         }
     }
 
-    fn unresolved(id: Uuid, shared: Arc<BlockShared<B>>) -> Self {
+    fn unresolved(id: Uuid, workspace_id: Uuid, shared: Arc<BlockShared<B>>) -> Self {
         Self {
             id,
+            workspace_id,
             author: RwLock::new(None),
             shared,
             state: RwLock::new(TypedState {
@@ -2530,10 +2562,12 @@ impl<B: Block> TypedBlock<B> {
                 .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
             let history_before = record_history.then(|| B::History::snapshot(value));
             for operation in &operations {
-                let before = normalized_references(value.references());
+                let before =
+                    normalized_references(value.references_for_workspace(self.workspace_id));
                 B::apply_operation(value, operation);
                 let implicit_name = value.implicit_name();
-                let after = normalized_references(value.references());
+                let after =
+                    normalized_references(value.references_for_workspace(self.workspace_id));
                 self.relationships.write().references.clone_from(&after);
                 state.pending.push_back(PendingOperation {
                     id: Uuid::new_v4(),
@@ -2573,11 +2607,13 @@ impl<B: Block> TypedBlock<B> {
             let history_before = record_history.then(|| B::History::snapshot(value));
             let mut transaction = CrdtOperationTransaction {
                 current: value,
+                workspace_id: self.workspace_id,
                 applied: Vec::new(),
             };
             let result = edit(&mut transaction);
             let CrdtOperationTransaction {
                 current: _,
+                workspace_id: _,
                 applied,
             } = transaction;
             let operations = applied
@@ -2597,7 +2633,9 @@ impl<B: Block> TypedBlock<B> {
                     .value
                     .read()
                     .as_ref()
-                    .map_or_else(Vec::new, |value| value.references()),
+                    .map_or_else(Vec::new, |value| {
+                        value.references_for_workspace(self.workspace_id)
+                    }),
             );
             self.relationships.write().references = after;
             state.pending.push_back(PendingOperation {
@@ -2624,9 +2662,9 @@ impl<B: Block> TypedBlock<B> {
         let value = visible
             .as_mut()
             .unwrap_or_else(|| fatal("cannot replace an unresolved block"));
-        let before = normalized_references(value.references());
+        let before = normalized_references(value.references_for_workspace(self.workspace_id));
         value.clone_from(&replacement);
-        let after = normalized_references(value.references());
+        let after = normalized_references(value.references_for_workspace(self.workspace_id));
         self.relationships.write().references.clone_from(&after);
         state.pending.push_back(PendingOperation {
             id: Uuid::new_v4(),
@@ -2675,6 +2713,7 @@ impl<B: Block> TypedBlock<B> {
                 .unwrap_or_else(|| fatal("cannot operate on an unresolved block"));
             let mut transaction = CrdtOperationTransaction {
                 current: value,
+                workspace_id: self.workspace_id,
                 applied: Vec::new(),
             };
             let Some(((), metadata)) = self.history.write().apply(direction, |action| {
@@ -2693,7 +2732,9 @@ impl<B: Block> TypedBlock<B> {
                     .value
                     .read()
                     .as_ref()
-                    .map_or_else(Vec::new, |value| value.references()),
+                    .map_or_else(Vec::new, |value| {
+                        value.references_for_workspace(self.workspace_id)
+                    }),
             );
             state.pending.push_back(PendingOperation {
                 id: Uuid::new_v4(),
@@ -2802,7 +2843,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             .initial
             .as_ref()
             .map_or_else(Vec::new, |initial| {
-                normalized_references(initial.references())
+                normalized_references(initial.references_for_workspace(self.workspace_id))
             })
     }
 
@@ -2844,7 +2885,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             seq = record.seq;
         }
         self.revision.store(seq, Ordering::Relaxed);
-        let references = normalized_references(value.references());
+        let references = normalized_references(value.references_for_workspace(self.workspace_id));
         let mut state = self.state.write();
         {
             let mut relationships = self.relationships.write();
@@ -2861,7 +2902,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             state.confirmed = None;
         } else {
             state.confirmed = Some(value);
-            Self::recompute_pending_references(&mut state);
+            self.recompute_pending_references(&mut state);
             self.rebuild_visible(&state);
         }
         state.confirmed_seq = seq;
@@ -2980,14 +3021,14 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 }
 
 impl<B: Block> TypedBlock<B> {
-    fn recompute_pending_references(state: &mut TypedState<B>) {
+    fn recompute_pending_references(&self, state: &mut TypedState<B>) {
         let Some(mut value) = state.confirmed.clone() else {
             return;
         };
         for pending in &mut state.pending {
-            let before = normalized_references(value.references());
+            let before = normalized_references(value.references_for_workspace(self.workspace_id));
             Self::apply_stored_operation(&mut value, &pending.operation);
-            let after = normalized_references(value.references());
+            let after = normalized_references(value.references_for_workspace(self.workspace_id));
             pending.references = reference_delta(&before, &after);
         }
     }
@@ -3043,7 +3084,7 @@ impl<B: Block> TypedBlock<B> {
             }
         }
         self.revision.fetch_add(1, Ordering::Relaxed);
-        Self::recompute_pending_references(state);
+        self.recompute_pending_references(state);
         self.rebuild_visible(&state);
     }
 }
