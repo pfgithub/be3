@@ -1,16 +1,22 @@
-use block::{BlockAccess, BlockAccessEntry, WorkspaceRole};
+use block::{Account, BlockAccess, BlockAccessEntry, WorkspaceRole};
 use block_client::{BlockAccessRequest, BlockClient};
 use eframe::egui;
-use egui_material_icons::icons::{ICON_LOCK, ICON_PERSON, ICON_REFRESH};
+use egui_material_icons::icons::{
+    ICON_CLOSE, ICON_LOCK, ICON_PERSON, ICON_PERSON_ADD, ICON_PERSON_REMOVE, ICON_REFRESH,
+    ICON_SEARCH,
+};
 use uuid::Uuid;
 
-/// The permissions a block can be shared with, in the order they are offered.
-const SHAREABLE: [BlockAccess; 4] = [
+/// The permissions a block can be granted with, in the order they are offered.
+const GRANTABLE: [BlockAccess; 3] = [
     BlockAccess::Edit,
     BlockAccess::View,
     BlockAccess::KnowExists,
-    BlockAccess::None,
 ];
+
+/// How many matches the picker offers at once before the query has to be
+/// narrowed down.
+const MAX_SUGGESTIONS: usize = 6;
 
 #[derive(Default)]
 pub struct ShareDialog {
@@ -24,6 +30,12 @@ struct ShareState {
     entries: Vec<BlockAccessEntry>,
     loaded: bool,
     error: Option<String>,
+    /// What has been typed into the people picker.
+    query: String,
+    /// Accounts that have been picked but not granted access yet.
+    pending: Vec<Account>,
+    /// The permission the picked accounts are about to be given.
+    pending_access: BlockAccess,
 }
 
 impl ShareDialog {
@@ -36,6 +48,9 @@ impl ShareDialog {
             entries: Vec::new(),
             loaded: false,
             error: None,
+            query: String::new(),
+            pending: Vec::new(),
+            pending_access: BlockAccess::Edit,
         });
     }
 
@@ -47,7 +62,7 @@ impl ShareDialog {
 
         let mut close = false;
         let mut reload = false;
-        let mut change = None;
+        let mut grants = Vec::new();
         let mut open = true;
         egui::Window::new(format!("Share \u{201c}{}\u{201d}", state.name))
             .id(egui::Id::new("share-block"))
@@ -56,9 +71,7 @@ impl ShareDialog {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.set_width(420.0);
-                ui.weak("Workspace members you give access to can open this block.");
-                ui.add_space(8.0);
+                ui.set_width(460.0);
 
                 if let Some(error) = &state.error {
                     ui.colored_label(ui.visuals().error_fg_color, error);
@@ -71,20 +84,29 @@ impl ShareDialog {
                     });
                 }
 
+                state.show_picker(ui, client.account_id(), &mut grants);
+
+                ui.add_space(12.0);
+                ui.strong("People with access");
+                ui.add_space(4.0);
+                let mut shown = 0;
                 egui::ScrollArea::vertical()
-                    .max_height(320.0)
+                    .max_height(280.0)
                     .show(ui, |ui| {
                         for entry in &state.entries {
+                            if !has_access(entry, client.account_id()) {
+                                continue;
+                            }
+                            shown += 1;
                             if let Some(access) =
                                 show_member(ui, entry, client.account_id(), state.id)
                             {
-                                change = Some((entry.account.id, access));
+                                grants.push((entry.account.id, access));
                             }
                         }
                     });
-
-                if state.loaded && state.entries.is_empty() {
-                    ui.weak("This workspace has no other members.");
+                if state.loaded && shown == 0 {
+                    ui.weak("Nobody can open this block yet.");
                 }
 
                 ui.add_space(12.0);
@@ -102,7 +124,7 @@ impl ShareDialog {
                 );
             });
 
-        if let Some((account_id, access)) = change {
+        for (account_id, access) in grants {
             client.set_block_access(state.id, account_id, access);
             reload = true;
         }
@@ -130,6 +152,147 @@ impl ShareState {
             Err(error) => self.error = Some(error),
         }
     }
+
+    /// Draws the picker that queues people up and hands them their permission,
+    /// pushing every confirmed grant onto `grants`.
+    fn show_picker(
+        &mut self,
+        ui: &mut egui::Ui,
+        account_id: Uuid,
+        grants: &mut Vec<(Uuid, BlockAccess)>,
+    ) {
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut self.query)
+                .desired_width(f32::INFINITY)
+                .hint_text(format!(
+                    "{} Add people by name or email",
+                    ICON_SEARCH.codepoint
+                )),
+        );
+        let submitted =
+            response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+
+        let candidates = self.candidates(account_id);
+        let mut picked = None;
+        if submitted {
+            picked = candidates.first().cloned();
+            response.request_focus();
+        } else if !self.query.is_empty() {
+            ui.add_space(4.0);
+            egui::Frame::group(ui.style())
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    if candidates.is_empty() {
+                        ui.weak("No matching workspace members.");
+                        return;
+                    }
+                    for account in candidates.iter().take(MAX_SUGGESTIONS) {
+                        if ui
+                            .add(
+                                egui::Button::new(format!(
+                                    "{} {} ({})",
+                                    ICON_PERSON.codepoint, account.display_name, account.email
+                                ))
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
+                            picked = Some(account.clone());
+                        }
+                    }
+                });
+        }
+        if let Some(account) = picked {
+            self.pending.push(account);
+            self.query.clear();
+        }
+
+        if self.pending.is_empty() {
+            return;
+        }
+        ui.add_space(6.0);
+        let mut removed = None;
+        ui.horizontal_wrapped(|ui| {
+            for (index, account) in self.pending.iter().enumerate() {
+                egui::Frame::group(ui.style())
+                    .inner_margin(egui::Margin::symmetric(6, 2))
+                    .show(ui, |ui| {
+                        ui.label(format!(
+                            "{} {}",
+                            ICON_PERSON.codepoint, account.display_name
+                        ));
+                        if ui
+                            .small_button(ICON_CLOSE.codepoint.to_string())
+                            .on_hover_text("Do not add")
+                            .clicked()
+                        {
+                            removed = Some(index);
+                        }
+                    });
+            }
+        });
+        if let Some(index) = removed {
+            self.pending.remove(index);
+        }
+
+        ui.add_space(6.0);
+        let mut access = self.pending_access;
+        let mut add = false;
+        egui::Sides::new().show(
+            ui,
+            |ui| {
+                egui::ComboBox::from_id_salt("share-pending-access")
+                    .selected_text(access.label())
+                    .show_ui(ui, |ui| {
+                        for option in GRANTABLE {
+                            ui.selectable_value(&mut access, option, option.label());
+                        }
+                    });
+            },
+            |ui| {
+                add = ui
+                    .button(format!("{} Add", ICON_PERSON_ADD.codepoint))
+                    .clicked();
+            },
+        );
+        self.pending_access = access;
+        if add {
+            grants.extend(self.pending.drain(..).map(|account| (account.id, access)));
+            self.query.clear();
+        }
+    }
+
+    /// The workspace members the query matches that are not already queued up
+    /// or able to reach the block.
+    fn candidates(&self, account_id: Uuid) -> Vec<Account> {
+        let query = self.query.trim().to_lowercase();
+        self.entries
+            .iter()
+            .filter(|entry| !has_access(entry, account_id))
+            .filter(|entry| {
+                !self
+                    .pending
+                    .iter()
+                    .any(|pending| pending.id == entry.account.id)
+            })
+            .filter(|entry| {
+                query.is_empty()
+                    || entry.account.display_name.to_lowercase().contains(&query)
+                    || entry.account.email.to_lowercase().contains(&query)
+            })
+            .map(|entry| entry.account.clone())
+            .collect()
+    }
+}
+
+/// Whether the member already reaches the block, and so belongs in the list of
+/// people with access rather than the picker.
+fn has_access(entry: &BlockAccessEntry, account_id: Uuid) -> bool {
+    matches!(entry.role, WorkspaceRole::Administrator)
+        || entry.account.id == account_id
+        || entry.granted.is_some()
+        || entry.effective > BlockAccess::None
 }
 
 /// Draws one member's row, returning the access they were just given.
@@ -206,13 +369,27 @@ fn show_member(
                     egui::ComboBox::from_id_salt(("share-access", block_id, entry.account.id))
                         .selected_text(current.label())
                         .show_ui(ui, |ui| {
-                            for access in SHAREABLE {
+                            for access in GRANTABLE {
                                 if ui
                                     .selectable_label(access == current, access.label())
                                     .clicked()
                                     && access != current
                                 {
                                     chosen = Some(access);
+                                }
+                            }
+                            // Revoking is recorded as an explicit grant of no
+                            // access, so it also blocks inherited permissions.
+                            if entry.granted != Some(BlockAccess::None) {
+                                ui.separator();
+                                if ui
+                                    .selectable_label(
+                                        false,
+                                        format!("{} Remove access", ICON_PERSON_REMOVE.codepoint),
+                                    )
+                                    .clicked()
+                                {
+                                    chosen = Some(BlockAccess::None);
                                 }
                             }
                         });

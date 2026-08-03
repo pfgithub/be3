@@ -2097,69 +2097,79 @@ impl BlockApp {
         let current_name = editor.name();
         let relationships = editor.relationships();
         let mut navigation = None;
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(can_go_back, egui::Button::new(ICON_ARROW_BACK))
-                .on_hover_text("Back")
-                .clicked()
-            {
-                navigation = Some(TabNavigation::Back);
-            }
-            if ui
-                .add_enabled(can_go_forward, egui::Button::new(ICON_ARROW_FORWARD))
-                .on_hover_text("Forward")
-                .clicked()
-            {
-                navigation = Some(TabNavigation::Forward);
-            }
-            ui.separator();
-            let history = editor.history();
-            if ui
-                .add_enabled(
-                    history.map_or_else(|| false, |history| history.can_undo()),
-                    egui::Button::new(ICON_UNDO),
-                )
-                .on_hover_text("Undo (Ctrl/Cmd+Z)")
-                .clicked()
-                || undo_requested
-            {
-                if let Some(history) = history {
-                    history.undo();
-                }
-            }
-            if ui
-                .add_enabled(
-                    history.map_or_else(|| false, |history| history.can_redo()),
-                    egui::Button::new(ICON_REDO),
-                )
-                .on_hover_text("Redo")
-                .on_hover_text("Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)")
-                .clicked()
-                || redo_requested
-            {
-                if let Some(history) = history {
-                    history.redo();
-                }
-            }
-            ui.separator();
-            if ui
-                .add_enabled(!denied, egui::Button::new(ICON_SHARE))
-                .on_hover_text("Share this block")
-                .clicked()
-            {
-                self.share.open(&self.client, active, current_name.clone());
-            }
-            ui.separator();
-            if let Some(item) = self.show_breadcrumbs(
-                ui,
-                active,
-                block_type,
-                &current_name,
-                relationships.as_ref(),
-            ) {
-                navigation = Some(TabNavigation::Open(item));
-            }
-        });
+        let mut share = false;
+        egui::Sides::new().shrink_left().show(
+            ui,
+            |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(can_go_back, egui::Button::new(ICON_ARROW_BACK))
+                        .on_hover_text("Back")
+                        .clicked()
+                    {
+                        navigation = Some(TabNavigation::Back);
+                    }
+                    if ui
+                        .add_enabled(can_go_forward, egui::Button::new(ICON_ARROW_FORWARD))
+                        .on_hover_text("Forward")
+                        .clicked()
+                    {
+                        navigation = Some(TabNavigation::Forward);
+                    }
+                    ui.separator();
+                    let history = editor.history();
+                    if ui
+                        .add_enabled(
+                            history.map_or_else(|| false, |history| history.can_undo()),
+                            egui::Button::new(ICON_UNDO),
+                        )
+                        .on_hover_text("Undo (Ctrl/Cmd+Z)")
+                        .clicked()
+                        || undo_requested
+                    {
+                        if let Some(history) = history {
+                            history.undo();
+                        }
+                    }
+                    if ui
+                        .add_enabled(
+                            history.map_or_else(|| false, |history| history.can_redo()),
+                            egui::Button::new(ICON_REDO),
+                        )
+                        .on_hover_text("Redo")
+                        .on_hover_text("Redo (Ctrl+Y or Ctrl/Cmd+Shift+Z)")
+                        .clicked()
+                        || redo_requested
+                    {
+                        if let Some(history) = history {
+                            history.redo();
+                        }
+                    }
+                    ui.separator();
+                    if let Some(item) = self.show_breadcrumbs(
+                        ui,
+                        active,
+                        block_type,
+                        &current_name,
+                        relationships.as_ref(),
+                    ) {
+                        navigation = Some(TabNavigation::Open(item));
+                    }
+                });
+            },
+            |ui| {
+                share = ui
+                    .add_enabled(
+                        !denied,
+                        egui::Button::new(format!("{} Share", ICON_SHARE.codepoint)),
+                    )
+                    .on_hover_text("Share this block")
+                    .clicked();
+            },
+        );
+        if share {
+            self.share.open(&self.client, active, current_name.clone());
+        }
         ui.separator();
         if denied {
             self.editors.insert(active, editor);
