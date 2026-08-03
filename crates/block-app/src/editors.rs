@@ -610,7 +610,8 @@ pub fn direct_editor_tab_ui(
             transformed_size,
         );
         viewport.replace_content_rect(Some(content_rect));
-        let editor_rect = if editor.direct_editor_fills_viewport() {
+        let fills_viewport = editor.direct_editor_fills_viewport();
+        let editor_rect = if fills_viewport {
             viewport_rect
         } else {
             content_rect
@@ -632,12 +633,14 @@ pub fn direct_editor_tab_ui(
             action = next_action;
         }
 
-        if handle_direct_editor_background_input(
-            ui.ctx(),
-            viewport_rect,
-            content_rect,
-            &mut viewport_state,
-        ) {
+        if !fills_viewport
+            && handle_direct_editor_background_input(
+                ui.ctx(),
+                viewport_rect,
+                content_rect,
+                &mut viewport_state,
+            )
+        {
             if let Some(auto_fit) = &mut viewport_state.auto_fit {
                 auto_fit.enabled = false;
             }
