@@ -998,7 +998,7 @@ fn style_pixel_size(style: SynHlStyle) -> u32 {
 }
 
 fn font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
-    FONT_CANDIDATES
+    let candidates = FONT_CANDIDATES
         .iter()
         .map(|path| (*path, SynHlFontFamily::Proportional, false, false))
         .chain(
@@ -1039,8 +1039,73 @@ fn font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
         .map(|(path, family, bold, italic)| (Path::new(path), family, bold, italic))
         .filter(|(path, _, _, _)| path.exists())
         .map(|(path, family, bold, italic)| (path.to_owned(), family, bold, italic))
-        .collect()
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return scanned_font_paths();
+    }
+    candidates
 }
+
+/// Fallback for systems whose font files are not at any known path, such as Android builds that
+/// ship an OEM font set: take whatever the system font directories happen to contain.
+fn scanned_font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
+    let mut found = Vec::new();
+    for directory in SYSTEM_FONT_DIRECTORIES {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = font_file_name(&path) else {
+                continue;
+            };
+            let (family, bold, italic) = scanned_font_style(&name);
+            found.push((path, family, bold, italic));
+        }
+    }
+    found.sort_by_key(|(path, _, _, _)| {
+        let name = font_file_name(path).unwrap_or_default();
+        (scanned_font_preference(&name), name)
+    });
+    found
+}
+
+/// Lowercased file name of a font file, or `None` when the path is not one.
+fn font_file_name(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    [".ttf", ".otf", ".ttc"]
+        .iter()
+        .any(|extension| name.ends_with(extension))
+        .then_some(name)
+}
+
+fn scanned_font_style(name: &str) -> (SynHlFontFamily, bool, bool) {
+    let family = if name.contains("mono") || name.contains("courier") {
+        SynHlFontFamily::Monospace
+    } else {
+        SynHlFontFamily::Proportional
+    };
+    (
+        family,
+        name.contains("bold"),
+        name.contains("italic") || name.contains("oblique"),
+    )
+}
+
+/// Sort order for scanned fonts so body text lands on a general-purpose family rather than on
+/// whichever decorative or single-purpose font sorts first alphabetically.
+fn scanned_font_preference(name: &str) -> u8 {
+    if name.starts_with("roboto") {
+        0
+    } else if name.starts_with("notosans") || name.starts_with("droidsans") {
+        1
+    } else {
+        2
+    }
+}
+
+const SYSTEM_FONT_DIRECTORIES: &[&str] =
+    &["/system/fonts", "/product/fonts", "/system/product/fonts"];
 
 const FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\verdana.ttf",
@@ -1066,6 +1131,14 @@ const FONT_CANDIDATES: &[&str] = &[
     "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/system/fonts/Roboto-Regular.ttf",
+    "/system/fonts/RobotoFlex-Regular.ttf",
+    "/system/fonts/NotoSans-Regular.ttf",
+    "/system/fonts/DroidSans.ttf",
+    "/system/fonts/NotoSansCJK-Regular.ttc",
+    "/system/fonts/NotoNaskhArabic-Regular.ttf",
+    "/system/fonts/NotoSansDevanagari-Regular.ttf",
+    "/system/fonts/NotoSansSymbols-Regular-Subsetted.ttf",
 ];
 
 const BOLD_FONT_CANDIDATES: &[&str] = &[
@@ -1075,6 +1148,9 @@ const BOLD_FONT_CANDIDATES: &[&str] = &[
     "/System/Library/Fonts/Supplemental/Verdana Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/system/fonts/Roboto-Bold.ttf",
+    "/system/fonts/NotoSans-Bold.ttf",
+    "/system/fonts/DroidSans-Bold.ttf",
 ];
 
 const ITALIC_FONT_CANDIDATES: &[&str] = &[
@@ -1084,6 +1160,8 @@ const ITALIC_FONT_CANDIDATES: &[&str] = &[
     "/System/Library/Fonts/Supplemental/Verdana Italic.ttf",
     "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+    "/system/fonts/Roboto-Italic.ttf",
+    "/system/fonts/NotoSans-Italic.ttf",
 ];
 
 const BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
@@ -1093,6 +1171,8 @@ const BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "/System/Library/Fonts/Supplemental/Verdana Bold Italic.ttf",
     "/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf",
+    "/system/fonts/Roboto-BoldItalic.ttf",
+    "/system/fonts/NotoSans-BoldItalic.ttf",
 ];
 
 const MONOSPACE_FONT_CANDIDATES: &[&str] = &[
@@ -1103,22 +1183,30 @@ const MONOSPACE_FONT_CANDIDATES: &[&str] = &[
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    "/system/fonts/RobotoMono-Regular.ttf",
+    "/system/fonts/NotoSansMono-Regular.ttf",
+    "/system/fonts/DroidSansMono.ttf",
+    "/system/fonts/CutiveMono.ttf",
 ];
 
 const MONOSPACE_BOLD_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\consolab.ttf",
     "C:\\Windows\\Fonts\\courbd.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+    "/system/fonts/RobotoMono-Bold.ttf",
+    "/system/fonts/NotoSansMono-Bold.ttf",
 ];
 
 const MONOSPACE_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\consolai.ttf",
     "C:\\Windows\\Fonts\\couri.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf",
+    "/system/fonts/RobotoMono-Italic.ttf",
 ];
 
 const MONOSPACE_BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\consolaz.ttf",
     "C:\\Windows\\Fonts\\courbi.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-BoldOblique.ttf",
+    "/system/fonts/RobotoMono-BoldItalic.ttf",
 ];
