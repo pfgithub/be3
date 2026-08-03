@@ -7,14 +7,14 @@ use uuid::Uuid;
 #[tokio::test]
 async fn sharing_requires_edit_access_to_the_block() {
     let server = TestServer::start().await;
-    let mut management = server.connect_management().await;
-    let owner = register(&mut management, "owner@example.com").await;
-    let viewer = register(&mut management, "viewer@example.com").await;
-    let stranger = register(&mut management, "stranger@example.com").await;
-    let workspace = create_workspace(&mut management, owner.id, "Shared").await;
+    let management = server.management();
+    let owner = register(&management, "owner@example.com").await;
+    let viewer = register(&management, "viewer@example.com").await;
+    let stranger = register(&management, "stranger@example.com").await;
+    let workspace = create_workspace(&management, owner.id, "Shared").await;
     for account in [&viewer, &stranger] {
         add_member(
-            &mut management,
+            &management,
             owner.id,
             workspace.id,
             account,

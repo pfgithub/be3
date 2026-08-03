@@ -10,7 +10,7 @@ use std::{
         mpsc, Arc, OnceLock, Weak,
     },
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use block::{
@@ -35,21 +35,27 @@ pub mod blocks;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
 const WORKSPACE_HEADER: &str = "x-block-workspace-id";
+/// Where the server answers management commands, relative to the server URL.
+const MANAGEMENT_PATH: &str = "/management";
+const MANAGEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const BLOCK_URL_BASE: &str = "https://blocks.pfg.pw/";
 const UUID_TEXT_BYTES: usize = 36;
 pub const BLOCK_URL_BYTES: usize = BLOCK_URL_BASE.len() + UUID_TEXT_BYTES * 2 + 1;
 const MAX_HISTORY_ACTIONS: usize = 100;
 const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
+/// Account and workspace management, which the server answers over HTTP. Block
+/// traffic uses the websocket [`BlockClient`] opens instead.
 #[derive(Clone, Debug)]
 pub struct ManagementClient {
     url: String,
+    agent: ureq::Agent,
 }
 
 #[derive(Debug)]
 pub enum ManagementClientError {
     InvalidUrl(String),
-    Transport(tokio_tungstenite::tungstenite::Error),
+    Transport(String),
     InvalidResponse(String),
     Server {
         code: ManagementErrorCode,
@@ -63,7 +69,7 @@ impl fmt::Display for ManagementClientError {
             Self::InvalidUrl(message) | Self::InvalidResponse(message) => {
                 formatter.write_str(message)
             }
-            Self::Transport(error) => write!(formatter, "management connection failed: {error}"),
+            Self::Transport(message) => write!(formatter, "management request failed: {message}"),
             Self::Server { message, .. } => formatter.write_str(message),
         }
     }
@@ -71,24 +77,23 @@ impl fmt::Display for ManagementClientError {
 
 impl std::error::Error for ManagementClientError {}
 
-impl From<tokio_tungstenite::tungstenite::Error> for ManagementClientError {
-    fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
-        Self::Transport(error)
-    }
-}
-
 impl ManagementClient {
     pub fn new(url: impl Into<String>) -> Result<Self, ManagementClientError> {
         let url = url.into().trim().trim_end_matches('/').to_owned();
-        if url.is_empty() || !(url.starts_with("ws://") || url.starts_with("wss://")) {
+        let host = ["http://", "https://"]
+            .iter()
+            .find_map(|scheme| url.strip_prefix(scheme));
+        if host.is_none_or(str::is_empty) {
             return Err(ManagementClientError::InvalidUrl(
-                "server URL must start with ws:// or wss://".into(),
+                "server URL must start with http:// or https://".into(),
             ));
         }
-        url.as_str()
-            .into_client_request()
-            .map_err(|error| ManagementClientError::InvalidUrl(error.to_string()))?;
-        Ok(Self { url })
+        Ok(Self {
+            url,
+            agent: ureq::AgentBuilder::new()
+                .timeout(MANAGEMENT_TIMEOUT)
+                .build(),
+        })
     }
 
     pub fn url(&self) -> &str {
@@ -223,19 +228,33 @@ impl ManagementClient {
         request: ManagementClientMessage,
     ) -> Result<ManagementServerMessage, ManagementClientError> {
         let request_id = request.request_id();
-        let (mut socket, _) = connect_async(&self.url).await?;
-        socket
-            .send(Message::Text(serde_json::to_string(&request).map_err(
-                |error| ManagementClientError::InvalidResponse(error.to_string()),
-            )?))
-            .await?;
-        let message = socket.next().await.ok_or_else(|| {
-            ManagementClientError::InvalidResponse(
-                "management server closed without a response".into(),
-            )
-        })??;
-        let response: ManagementServerMessage = serde_json::from_str(&message.into_text()?)
+        let body = serde_json::to_vec(&request)
             .map_err(|error| ManagementClientError::InvalidResponse(error.to_string()))?;
+        let url = format!("{}{MANAGEMENT_PATH}", self.url);
+        let agent = self.agent.clone();
+        // ureq is blocking, so the request runs off the runtime's worker threads.
+        let (status, text) = tokio::task::spawn_blocking(move || {
+            let response = match agent
+                .post(&url)
+                .set("content-type", "application/json")
+                .send_bytes(&body)
+            {
+                Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+                Err(error) => return Err(ManagementClientError::Transport(error.to_string())),
+            };
+            let status = response.status();
+            response
+                .into_string()
+                .map(|text| (status, text))
+                .map_err(|error| ManagementClientError::Transport(error.to_string()))
+        })
+        .await
+        .map_err(|error| ManagementClientError::Transport(error.to_string()))??;
+        let response: ManagementServerMessage = serde_json::from_str(&text).map_err(|error| {
+            ManagementClientError::InvalidResponse(format!(
+                "management server returned an unreadable HTTP {status} response: {error}"
+            ))
+        })?;
         match response {
             ManagementServerMessage::Error { code, message, .. } => {
                 Err(ManagementClientError::Server { code, message })
@@ -556,6 +575,8 @@ impl BlockClient {
         }
     }
 
+    /// Connects to the block websocket of the server at `url`, which is the same
+    /// `http://` or `https://` URL [`ManagementClient`] is given.
     pub fn connect(&self, url: impl Into<String>) {
         if self.connected.set(()).is_err() {
             fatal("BlockClient::connect may only be called once");
@@ -1325,6 +1346,16 @@ fn worker_main(
     });
 }
 
+/// The websocket endpoint for a server URL. The blocks websocket shares the
+/// server's host and scheme with the management endpoint.
+fn websocket_url(url: &str) -> String {
+    match url.split_once("://") {
+        Some(("http", host)) => format!("ws://{host}"),
+        Some(("https", host)) => format!("wss://{host}"),
+        _ => url.to_owned(),
+    }
+}
+
 async fn run_connected(
     url: String,
     account_id: Uuid,
@@ -1332,6 +1363,7 @@ async fn run_connected(
     state: &mut WorkerState,
     commands: &mut tokio_mpsc::UnboundedReceiver<WorkerCommand>,
 ) -> bool {
+    let url = websocket_url(&url);
     let mut request = url
         .as_str()
         .into_client_request()

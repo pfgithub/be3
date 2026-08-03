@@ -17,7 +17,7 @@ async fn main() -> Result<(), block_server::ServerError> {
     let database_path = data_dir.join("blocks.sqlite3");
 
     println!(
-        "block server listening on ws://{} storing blocks in {}",
+        "block server listening on http://{} storing blocks in {}",
         address,
         database_path.display()
     );

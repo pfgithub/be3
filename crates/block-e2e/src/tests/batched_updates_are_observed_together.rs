@@ -11,7 +11,7 @@ async fn batched_updates_are_observed_together() {
             .await
             .unwrap();
     });
-    let url = format!("ws://{address}");
+    let url = format!("http://{address}");
     let (account_id, workspace_id) = test_identity(&url).await;
 
     let client_a = BlockClient::new(account_id, workspace_id);

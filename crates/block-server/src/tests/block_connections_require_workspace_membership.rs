@@ -6,19 +6,19 @@ use uuid::Uuid;
 #[tokio::test]
 async fn block_connections_require_workspace_membership() {
     let server = TestServer::start().await;
-    let mut socket = server.connect_as(Uuid::new_v4()).await;
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(1), socket.next())
-            .await
-            .is_ok()
-    );
+    // Someone who is not a member is refused before the websocket handshake
+    // completes.
+    assert!(server
+        .try_connect_to(Uuid::new_v4(), server.workspace_id)
+        .await
+        .is_err());
 
-    let mut management = server.connect_management().await;
-    let owner = register(&mut management, "owner@example.com").await;
-    let editor = register(&mut management, "editor@example.com").await;
-    let workspace = create_workspace(&mut management, owner.id, "Shared").await;
+    let management = server.management();
+    let owner = register(&management, "owner@example.com").await;
+    let editor = register(&management, "editor@example.com").await;
+    let workspace = create_workspace(&management, owner.id, "Shared").await;
     add_member(
-        &mut management,
+        &management,
         owner.id,
         workspace.id,
         &editor,

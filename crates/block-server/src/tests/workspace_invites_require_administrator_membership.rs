@@ -5,12 +5,12 @@ use uuid::Uuid;
 #[tokio::test]
 async fn workspace_invites_require_administrator_membership() {
     let server = TestServer::start().await;
-    let mut socket = server.connect_management().await;
-    let owner = register(&mut socket, "owner@example.com").await;
-    let stranger = register(&mut socket, "stranger@example.com").await;
-    let workspace = create_workspace(&mut socket, owner.id, "Private").await;
+    let management = server.management();
+    let owner = register(&management, "owner@example.com").await;
+    let stranger = register(&management, "stranger@example.com").await;
+    let workspace = create_workspace(&management, owner.id, "Private").await;
     let response = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::Invite {
             request_id: Uuid::new_v4(),
             account_id: stranger.id,

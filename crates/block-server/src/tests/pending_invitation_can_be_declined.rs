@@ -5,12 +5,12 @@ use uuid::Uuid;
 #[tokio::test]
 async fn pending_invitation_can_be_declined() {
     let server = TestServer::start().await;
-    let mut socket = server.connect_management().await;
-    let owner = register(&mut socket, "owner@example.com").await;
-    let recipient = register(&mut socket, "recipient@example.com").await;
-    let workspace = create_workspace(&mut socket, owner.id, "Decline").await;
+    let management = server.management();
+    let owner = register(&management, "owner@example.com").await;
+    let recipient = register(&management, "recipient@example.com").await;
+    let workspace = create_workspace(&management, owner.id, "Decline").await;
     let response = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::Invite {
             request_id: Uuid::new_v4(),
             account_id: owner.id,
@@ -24,7 +24,7 @@ async fn pending_invitation_can_be_declined() {
         panic!("invite failed: {response:?}");
     };
     management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::RespondInvitation {
             request_id: Uuid::new_v4(),
             account_id: recipient.id,
@@ -34,7 +34,7 @@ async fn pending_invitation_can_be_declined() {
     )
     .await;
     let response = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::ListInvitations {
             request_id: Uuid::new_v4(),
             account_id: recipient.id,

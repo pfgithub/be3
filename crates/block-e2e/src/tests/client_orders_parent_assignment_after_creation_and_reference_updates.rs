@@ -4,7 +4,7 @@ use super::*;
 async fn client_orders_parent_assignment_after_creation_and_reference_updates() {
     let root = std::env::temp_dir().join(format!("block-client-parent-test-{}", Uuid::new_v4()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let url = format!("http://{}", listener.local_addr().unwrap());
     let server_root = root.clone();
     let server = tokio::spawn(async move {
         block_server::serve(listener, server_root).await.unwrap();

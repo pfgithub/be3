@@ -5,7 +5,7 @@ fn saved_accounts_and_last_workspace_survive_reopen() {
     let path = std::env::temp_dir().join(format!("block-app-state-{}.sqlite3", Uuid::new_v4()));
     let mut local = account(ServerLocation::Local, "local@example.com");
     let remote = account(
-        ServerLocation::Remote("wss://blocks.example.com".into()),
+        ServerLocation::Remote("https://blocks.example.com".into()),
         "remote@example.com",
     );
     let workspace_id = Uuid::new_v4();

@@ -5,16 +5,15 @@ use uuid::Uuid;
 #[tokio::test]
 async fn workspace_state_survives_a_server_restart() {
     let server = TestServer::start().await;
-    let mut socket = server.connect_management().await;
-    let owner = register(&mut socket, "restart-owner@example.com").await;
-    let workspace = create_workspace(&mut socket, owner.id, "Persistent").await;
-    drop(socket);
+    let management = server.management();
+    let owner = register(&management, "restart-owner@example.com").await;
+    let workspace = create_workspace(&management, owner.id, "Persistent").await;
     let root = server.stop().await;
 
     let restarted = TestServer::start_at(root).await;
-    let mut socket = restarted.connect_management().await;
+    let management = restarted.management();
     let response = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::ListWorkspaces {
             request_id: Uuid::new_v4(),
             account_id: owner.id,

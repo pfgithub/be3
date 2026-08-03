@@ -5,10 +5,10 @@ use uuid::Uuid;
 #[tokio::test]
 async fn account_registration_rejects_duplicates() {
     let server = TestServer::start().await;
-    let mut socket = server.connect_management().await;
+    let management = server.management();
     for email in ["duplicate@example.com", " DUPLICATE@example.com "] {
         let response = management_request(
-            &mut socket,
+            &management,
             ManagementClientMessage::Register {
                 request_id: Uuid::new_v4(),
                 email: email.into(),

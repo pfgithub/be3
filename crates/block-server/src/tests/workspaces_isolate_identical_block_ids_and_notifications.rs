@@ -6,8 +6,8 @@ use uuid::Uuid;
 #[tokio::test]
 async fn workspaces_isolate_identical_block_ids_and_notifications() {
     let server = TestServer::start().await;
-    let mut management = server.connect_management().await;
-    let second = create_workspace(&mut management, server.account_id, "Second").await;
+    let management = server.management();
+    let second = create_workspace(&management, server.account_id, "Second").await;
     let mut first_socket = server.connect().await;
     let mut second_socket = server.connect_to(server.account_id, second.id).await;
     let shared_id = Uuid::new_v4();

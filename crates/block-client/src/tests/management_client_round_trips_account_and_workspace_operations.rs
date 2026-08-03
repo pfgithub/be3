@@ -7,7 +7,7 @@ use uuid::Uuid;
 async fn management_client_round_trips_account_and_workspace_operations() {
     let root = std::env::temp_dir().join(format!("block-client-management-{}", Uuid::new_v4()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let url = format!("http://{}", listener.local_addr().unwrap());
     let server_root = root.clone();
     let server = tokio::spawn(async move {
         block_server::serve(listener, server_root).await.unwrap();

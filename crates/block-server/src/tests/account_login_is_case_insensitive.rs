@@ -5,9 +5,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn account_login_is_case_insensitive() {
     let server = TestServer::start().await;
-    let mut socket = server.connect_management().await;
+    let management = server.management();
     let registered = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::Register {
             request_id: Uuid::new_v4(),
             email: "  Person@Example.COM ".into(),
@@ -22,7 +22,7 @@ async fn account_login_is_case_insensitive() {
     assert_eq!(account.display_name, "Person");
 
     let logged_in = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::Login {
             request_id: Uuid::new_v4(),
             email: "PERSON@example.com".into(),

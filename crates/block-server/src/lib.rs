@@ -23,17 +23,18 @@ use tokio::{
     sync::{mpsc, Mutex},
     task::JoinSet,
 };
-use tokio_tungstenite::{
-    accept_hdr_async,
-    tungstenite::{
-        handshake::server::{ErrorResponse, Request, Response},
-        Message,
-    },
-};
+use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
+
+mod http;
+
+use self::http::{PrefixedStream, Status};
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
 const WORKSPACE_HEADER: &str = "x-block-workspace-id";
+/// Management commands are POSTed here as JSON; the websocket carries block
+/// traffic only.
+const MANAGEMENT_PATH: &str = "/management";
 const DATABASE_FILE: &str = "server.sqlite3";
 
 pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
@@ -65,42 +66,64 @@ pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Resul
 }
 
 async fn handle_connection(
-    stream: TcpStream,
+    mut stream: TcpStream,
     store: Arc<BlockStore>,
     watch_hub: Arc<WatchHub>,
 ) -> Result<(), ServerError> {
-    let mut account_id = None;
-    let mut workspace_id = None;
-    let socket = accept_hdr_async(
-        stream,
-        |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
-            account_id = request
-                .headers()
-                .get(ACCOUNT_HEADER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| Uuid::parse_str(value).ok());
-            workspace_id = request
-                .headers()
-                .get(WORKSPACE_HEADER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| Uuid::parse_str(value).ok());
-            Ok(response)
-        },
-    )
-    .await?;
-    let (account_id, workspace_id) = match (account_id, workspace_id) {
-        (None, None) => return handle_management_connection(socket, store).await,
-        (Some(account_id), Some(workspace_id)) => (account_id, workspace_id),
-        _ => return Err(ServerError::InvalidHandshake),
+    let request = http::read_head(&mut stream).await?;
+    if !request.head.is_websocket_upgrade() {
+        return handle_management_request(stream, request, store).await;
+    }
+    let identity = match connection_identity(&request.head, &store).await {
+        Some(identity) => identity,
+        None => {
+            // The upgrade is refused outright rather than accepted and then
+            // dropped, so the client sees why it was turned away.
+            reject_handshake(&mut stream).await?;
+            return Err(ServerError::InvalidHandshake);
+        }
     };
-    let Ok(role) = store.workspace_role(account_id, workspace_id).await else {
-        return Err(ServerError::InvalidHandshake);
+    let socket = accept_async(PrefixedStream::new(request.buffered, stream)).await?;
+    handle_block_connection(socket, store, watch_hub, identity).await
+}
+
+/// Reads the account and workspace a block connection claims and confirms the
+/// account is a member of that workspace.
+async fn connection_identity(head: &http::RequestHead, store: &BlockStore) -> Option<Identity> {
+    let header_id = |header| {
+        head.header(header)
+            .and_then(|value| Uuid::parse_str(value).ok())
     };
-    let identity = Identity {
+    let account_id = header_id(ACCOUNT_HEADER)?;
+    let workspace_id = header_id(WORKSPACE_HEADER)?;
+    let role = store.workspace_role(account_id, workspace_id).await.ok()?;
+    Some(Identity {
         account_id,
         workspace_id,
         role,
+    })
+}
+
+async fn reject_handshake(stream: &mut TcpStream) -> Result<(), ServerError> {
+    let response = ServerMessage::Error {
+        request_id: None,
+        command: None,
+        id: None,
+        code: ErrorCode::PermissionDenied,
+        message: "the account is not a member of this workspace".into(),
+        expected_seq: None,
     };
+    http::write_json_response(stream, Status::Forbidden, &serde_json::to_vec(&response)?).await?;
+    Ok(())
+}
+
+async fn handle_block_connection(
+    socket: WebSocketStream<PrefixedStream<TcpStream>>,
+    store: Arc<BlockStore>,
+    watch_hub: Arc<WatchHub>,
+    identity: Identity,
+) -> Result<(), ServerError> {
+    let workspace_id = identity.workspace_id;
     let (mut sink, mut source) = socket.split();
     let (outbound, mut outbound_rx) = mpsc::unbounded_channel();
     let client_id = watch_hub.next_client_id();
@@ -158,35 +181,55 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn handle_management_connection(
-    mut socket: tokio_tungstenite::WebSocketStream<TcpStream>,
+/// Answers one management command over HTTP. The connection carries a single
+/// request and is closed afterwards.
+async fn handle_management_request(
+    mut stream: TcpStream,
+    request: http::BufferedRequest,
     store: Arc<BlockStore>,
 ) -> Result<(), ServerError> {
-    while let Some(message) = socket.next().await {
-        let response = match message? {
-            Message::Text(text) => handle_management_message(&store, &text).await,
-            Message::Close(_) => break,
-            Message::Ping(payload) => {
-                socket.send(Message::Pong(payload)).await?;
-                continue;
-            }
-            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
-                ManagementServerMessage::Error {
-                    request_id: None,
-                    code: ManagementErrorCode::UnsupportedMessage,
-                    message: "only JSON text websocket messages are supported".into(),
-                }
-            }
-        };
-        socket
-            .send(Message::Text(serde_json::to_string(&response)?))
-            .await?;
-    }
+    let (status, response) = if request.head.method != "POST" {
+        (
+            Status::MethodNotAllowed,
+            management_error(
+                ManagementErrorCode::UnsupportedMessage,
+                format!(
+                    "management commands are sent as POST {MANAGEMENT_PATH}, not {} {}",
+                    request.head.method, request.head.path
+                ),
+            ),
+        )
+    } else if request.head.path != MANAGEMENT_PATH {
+        (
+            Status::NotFound,
+            management_error(
+                ManagementErrorCode::UnsupportedMessage,
+                format!("{} is not a management endpoint", request.head.path),
+            ),
+        )
+    } else {
+        match http::read_body(&mut stream, &request).await {
+            Ok(body) => (Status::Ok, handle_management_message(&store, &body).await),
+            Err(error) => (
+                Status::BadRequest,
+                management_error(ManagementErrorCode::InvalidMessage, error.to_string()),
+            ),
+        }
+    };
+    http::write_json_response(&mut stream, status, &serde_json::to_vec(&response)?).await?;
     Ok(())
 }
 
-async fn handle_management_message(store: &BlockStore, text: &str) -> ManagementServerMessage {
-    let message = match serde_json::from_str::<ManagementClientMessage>(text) {
+fn management_error(code: ManagementErrorCode, message: String) -> ManagementServerMessage {
+    ManagementServerMessage::Error {
+        request_id: None,
+        code,
+        message,
+    }
+}
+
+async fn handle_management_message(store: &BlockStore, body: &[u8]) -> ManagementServerMessage {
+    let message = match serde_json::from_slice::<ManagementClientMessage>(body) {
         Ok(message) => message,
         Err(error) => {
             return ManagementServerMessage::Error {
@@ -2648,6 +2691,7 @@ impl From<serde_json::Error> for StoreError {
 #[derive(Debug)]
 pub enum ServerError {
     InvalidHandshake,
+    InvalidRequest(String),
     Io(std::io::Error),
     Json(serde_json::Error),
     Sqlite(rusqlite::Error),
@@ -2659,6 +2703,7 @@ impl fmt::Display for ServerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidHandshake => write!(formatter, "invalid block connection identity"),
+            Self::InvalidRequest(message) => write!(formatter, "invalid request: {message}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::Json(error) => write!(formatter, "JSON error: {error}"),
             Self::Sqlite(error) => write!(formatter, "SQLite error: {error}"),

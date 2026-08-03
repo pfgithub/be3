@@ -105,6 +105,20 @@ mod support {
 
     pub type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
+    /// The HTTP endpoint management commands are sent to, kept separate from the
+    /// websocket the block protocol runs on.
+    pub struct Management {
+        url: String,
+    }
+
+    impl Management {
+        pub fn new(url: &str) -> Self {
+            Self {
+                url: format!("{url}/management"),
+            }
+        }
+    }
+
     pub struct TestServer {
         pub root: PathBuf,
         pub url: String,
@@ -121,15 +135,10 @@ mod support {
         }
 
         pub async fn start_at(root: PathBuf) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url = format!("ws://{}", listener.local_addr().unwrap());
-            let server_root = root.clone();
-            let task = tokio::spawn(async move {
-                crate::serve(listener, server_root).await.unwrap();
-            });
-            let mut socket = connect_async(&url).await.unwrap().0;
-            let account = register(&mut socket, &format!("{}@example.com", Uuid::new_v4())).await;
-            let workspace = create_workspace(&mut socket, account.id, "Test").await;
+            let (url, task) = serve(&root).await;
+            let management = Management::new(&url);
+            let account = register(&management, &format!("{}@example.com", Uuid::new_v4())).await;
+            let workspace = create_workspace(&management, account.id, "Test").await;
             Self {
                 root,
                 url,
@@ -140,12 +149,7 @@ mod support {
         }
 
         pub async fn start_at_as(root: PathBuf, account_id: Uuid, workspace_id: Uuid) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url = format!("ws://{}", listener.local_addr().unwrap());
-            let server_root = root.clone();
-            let task = tokio::spawn(async move {
-                crate::serve(listener, server_root).await.unwrap();
-            });
+            let (url, task) = serve(&root).await;
             Self {
                 root,
                 url,
@@ -155,12 +159,12 @@ mod support {
             }
         }
 
-        pub async fn connect(&self) -> Socket {
-            self.connect_as(self.account_id).await
+        pub fn management(&self) -> Management {
+            Management::new(&self.url)
         }
 
-        pub async fn connect_management(&self) -> Socket {
-            connect_async(&self.url).await.unwrap().0
+        pub async fn connect(&self) -> Socket {
+            self.connect_as(self.account_id).await
         }
 
         pub async fn connect_as(&self, account_id: Uuid) -> Socket {
@@ -168,7 +172,17 @@ mod support {
         }
 
         pub async fn connect_to(&self, account_id: Uuid, workspace_id: Uuid) -> Socket {
-            let mut request = self.url.as_str().into_client_request().unwrap();
+            self.try_connect_to(account_id, workspace_id).await.unwrap()
+        }
+
+        /// Opens a block connection without asserting that the server accepted
+        /// the handshake.
+        pub async fn try_connect_to(
+            &self,
+            account_id: Uuid,
+            workspace_id: Uuid,
+        ) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
+            let mut request = websocket_url(&self.url).into_client_request().unwrap();
             request.headers_mut().insert(
                 "x-block-account-id",
                 HeaderValue::from_str(&account_id.to_string()).unwrap(),
@@ -177,7 +191,7 @@ mod support {
                 "x-block-workspace-id",
                 HeaderValue::from_str(&workspace_id.to_string()).unwrap(),
             );
-            connect_async(request).await.unwrap().0
+            connect_async(request).await.map(|(socket, _)| socket)
         }
 
         pub async fn stop(self) -> PathBuf {
@@ -192,6 +206,20 @@ mod support {
         }
     }
 
+    async fn serve(root: &PathBuf) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let root = root.clone();
+        let task = tokio::spawn(async move {
+            crate::serve(listener, root).await.unwrap();
+        });
+        (url, task)
+    }
+
+    fn websocket_url(url: &str) -> String {
+        url.replacen("http://", "ws://", 1)
+    }
+
     pub async fn request(socket: &mut Socket, message: ClientMessage) -> ServerMessage {
         socket
             .send(Message::Text(serde_json::to_string(&message).unwrap()))
@@ -202,20 +230,28 @@ mod support {
     }
 
     pub async fn management_request(
-        socket: &mut Socket,
+        management: &Management,
         message: ManagementClientMessage,
     ) -> ManagementServerMessage {
-        socket
-            .send(Message::Text(serde_json::to_string(&message).unwrap()))
-            .await
-            .unwrap();
-        let message = socket.next().await.unwrap().unwrap();
-        serde_json::from_str(&message.into_text().unwrap()).unwrap()
+        let url = management.url.clone();
+        let body = serde_json::to_vec(&message).unwrap();
+        tokio::task::spawn_blocking(move || {
+            let response = match ureq::post(&url)
+                .set("content-type", "application/json")
+                .send_bytes(&body)
+            {
+                Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+                Err(error) => panic!("management request failed: {error}"),
+            };
+            serde_json::from_str(&response.into_string().unwrap()).unwrap()
+        })
+        .await
+        .unwrap()
     }
 
-    pub async fn register(socket: &mut Socket, email: &str) -> Account {
+    pub async fn register(management: &Management, email: &str) -> Account {
         let response = management_request(
-            socket,
+            management,
             ManagementClientMessage::Register {
                 request_id: Uuid::new_v4(),
                 email: email.into(),
@@ -229,9 +265,13 @@ mod support {
         account
     }
 
-    pub async fn create_workspace(socket: &mut Socket, account_id: Uuid, name: &str) -> Workspace {
+    pub async fn create_workspace(
+        management: &Management,
+        account_id: Uuid,
+        name: &str,
+    ) -> Workspace {
         let response = management_request(
-            socket,
+            management,
             ManagementClientMessage::CreateWorkspace {
                 request_id: Uuid::new_v4(),
                 account_id,
@@ -248,14 +288,14 @@ mod support {
     /// Invites `account` into the workspace with `role` and accepts on its
     /// behalf, leaving it a full member.
     pub async fn add_member(
-        socket: &mut Socket,
+        management: &Management,
         inviter_id: Uuid,
         workspace_id: Uuid,
         account: &Account,
         role: WorkspaceRole,
     ) {
         let response = management_request(
-            socket,
+            management,
             ManagementClientMessage::Invite {
                 request_id: Uuid::new_v4(),
                 account_id: inviter_id,
@@ -269,7 +309,7 @@ mod support {
             panic!("invitation failed: {response:?}");
         };
         let response = management_request(
-            socket,
+            management,
             ManagementClientMessage::RespondInvitation {
                 request_id: Uuid::new_v4(),
                 account_id: account.id,

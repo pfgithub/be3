@@ -624,7 +624,7 @@ impl BlockApp {
                 ui.add_space(4.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.account_form.remote_url)
-                        .hint_text("ws://example.com")
+                        .hint_text("https://example.com")
                         .desired_width(f32::INFINITY),
                 );
             }
@@ -2883,5 +2883,5 @@ fn start_embedded_server(data_dir: PathBuf) -> Result<String, Box<dyn Error + Se
                 }
             });
         })?;
-    Ok(format!("ws://{address}"))
+    Ok(format!("http://{address}"))
 }

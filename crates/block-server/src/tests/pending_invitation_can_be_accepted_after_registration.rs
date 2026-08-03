@@ -5,11 +5,11 @@ use uuid::Uuid;
 #[tokio::test]
 async fn pending_invitation_can_be_accepted_after_registration() {
     let server = TestServer::start().await;
-    let mut socket = server.connect_management().await;
-    let owner = register(&mut socket, "owner@example.com").await;
-    let workspace = create_workspace(&mut socket, owner.id, "Shared").await;
+    let management = server.management();
+    let owner = register(&management, "owner@example.com").await;
+    let workspace = create_workspace(&management, owner.id, "Shared").await;
     let response = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::Invite {
             request_id: Uuid::new_v4(),
             account_id: owner.id,
@@ -24,9 +24,9 @@ async fn pending_invitation_can_be_accepted_after_registration() {
     };
     assert_eq!(invitation.email, "future@example.com");
 
-    let recipient = register(&mut socket, "future@example.com").await;
+    let recipient = register(&management, "future@example.com").await;
     let response = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::ListInvitations {
             request_id: Uuid::new_v4(),
             account_id: recipient.id,
@@ -39,7 +39,7 @@ async fn pending_invitation_can_be_accepted_after_registration() {
     ));
     assert!(matches!(
         management_request(
-            &mut socket,
+            &management,
             ManagementClientMessage::RespondInvitation {
                 request_id: Uuid::new_v4(),
                 account_id: recipient.id,
@@ -51,7 +51,7 @@ async fn pending_invitation_can_be_accepted_after_registration() {
         ManagementServerMessage::Ok { .. }
     ));
     let response = management_request(
-        &mut socket,
+        &management,
         ManagementClientMessage::ListWorkspaces {
             request_id: Uuid::new_v4(),
             account_id: recipient.id,

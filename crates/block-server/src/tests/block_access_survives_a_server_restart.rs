@@ -7,12 +7,12 @@ use uuid::Uuid;
 #[tokio::test]
 async fn block_access_survives_a_server_restart() {
     let server = TestServer::start().await;
-    let mut management = server.connect_management().await;
-    let owner = register(&mut management, "owner@example.com").await;
-    let editor = register(&mut management, "editor@example.com").await;
-    let workspace = create_workspace(&mut management, owner.id, "Shared").await;
+    let management = server.management();
+    let owner = register(&management, "owner@example.com").await;
+    let editor = register(&management, "editor@example.com").await;
+    let workspace = create_workspace(&management, owner.id, "Shared").await;
     add_member(
-        &mut management,
+        &management,
         owner.id,
         workspace.id,
         &editor,
