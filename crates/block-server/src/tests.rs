@@ -1,6 +1,6 @@
 use super::*;
 use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 mod access_flows_down_to_owned_children_and_up_to_parents;
 mod account_login_is_case_insensitive;
@@ -60,15 +60,9 @@ async fn test_connect(
     account_id: Uuid,
     workspace_id: Uuid,
 ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
-    let mut request = url.into_client_request().unwrap();
-    request.headers_mut().insert(
-        ACCOUNT_HEADER,
-        HeaderValue::from_str(&account_id.to_string()).unwrap(),
-    );
-    request.headers_mut().insert(
-        "x-block-workspace-id",
-        HeaderValue::from_str(&workspace_id.to_string()).unwrap(),
-    );
+    let request = format!("{url}/?account={account_id}&workspace={workspace_id}")
+        .into_client_request()
+        .unwrap();
     connect_async(request).await.unwrap().0
 }
 
@@ -98,7 +92,7 @@ mod support {
     use tokio::{fs, net::TcpListener, task::JoinHandle};
     use tokio_tungstenite::{
         connect_async,
-        tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
+        tungstenite::{client::IntoClientRequest, Message},
         MaybeTlsStream, WebSocketStream,
     };
     use uuid::Uuid;
@@ -182,15 +176,12 @@ mod support {
             account_id: Uuid,
             workspace_id: Uuid,
         ) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
-            let mut request = websocket_url(&self.url).into_client_request().unwrap();
-            request.headers_mut().insert(
-                "x-block-account-id",
-                HeaderValue::from_str(&account_id.to_string()).unwrap(),
-            );
-            request.headers_mut().insert(
-                "x-block-workspace-id",
-                HeaderValue::from_str(&workspace_id.to_string()).unwrap(),
-            );
+            let request = format!(
+                "{}/?account={account_id}&workspace={workspace_id}",
+                websocket_url(&self.url)
+            )
+            .into_client_request()
+            .unwrap();
             connect_async(request).await.map(|(socket, _)| socket)
         }
 

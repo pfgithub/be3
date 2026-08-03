@@ -7,11 +7,13 @@ use std::{
     process,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        mpsc, Arc, OnceLock, Weak,
+        Arc, OnceLock, Weak,
     },
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+// `std::time::SystemTime` panics on wasm32-unknown-unknown, which has no clock
+// of its own; `web-time` reads the browser's and is `std` everywhere else.
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use block::{
     Account, Block, BlockAccess, BlockAccessEntry, BlockHistory, BlockHistoryTransaction,
@@ -20,24 +22,37 @@ use block::{
     ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage, Workspace,
     WorkspaceInvitation, WorkspaceRole,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_channel::mpsc;
+use futures_util::{FutureExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::{oneshot, watch};
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
-};
 use uuid::Uuid;
 
 pub mod blocks;
+mod transport;
 
-const ACCOUNT_HEADER: &str = "x-block-account-id";
-const WORKSPACE_HEADER: &str = "x-block-workspace-id";
+use transport::{Socket, SocketMessage};
+
+/// Sends commands to the worker. Sending never blocks, so the UI thread can
+/// queue work from inside a frame, and the same channel drives the worker
+/// whether it runs on a thread or on the browser's event loop.
+#[derive(Clone)]
+struct CommandSender(mpsc::UnboundedSender<WorkerCommand>);
+
+impl CommandSender {
+    fn send(&self, command: WorkerCommand) -> Result<(), mpsc::TrySendError<WorkerCommand>> {
+        self.0.unbounded_send(command)
+    }
+}
+
+/// Block connections identify themselves in the websocket URL's query string.
+/// Browsers cannot set request headers on a websocket handshake, so the query
+/// string is the only place a web client can put this.
+const ACCOUNT_PARAMETER: &str = "account";
+const WORKSPACE_PARAMETER: &str = "workspace";
 /// Where the server answers management commands, relative to the server URL.
 const MANAGEMENT_PATH: &str = "/management";
-const MANAGEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const BLOCK_URL_BASE: &str = "https://blocks.pfg.pw/";
 const UUID_TEXT_BYTES: usize = 36;
 pub const BLOCK_URL_BYTES: usize = BLOCK_URL_BASE.len() + UUID_TEXT_BYTES * 2 + 1;
@@ -49,7 +64,6 @@ const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct ManagementClient {
     url: String,
-    agent: ureq::Agent,
 }
 
 #[derive(Debug)]
@@ -88,12 +102,7 @@ impl ManagementClient {
                 "server URL must start with http:// or https://".into(),
             ));
         }
-        Ok(Self {
-            url,
-            agent: ureq::AgentBuilder::new()
-                .timeout(MANAGEMENT_TIMEOUT)
-                .build(),
-        })
+        Ok(Self { url })
     }
 
     pub fn url(&self) -> &str {
@@ -231,25 +240,9 @@ impl ManagementClient {
         let body = serde_json::to_vec(&request)
             .map_err(|error| ManagementClientError::InvalidResponse(error.to_string()))?;
         let url = format!("{}{MANAGEMENT_PATH}", self.url);
-        let agent = self.agent.clone();
-        // ureq is blocking, so the request runs off the runtime's worker threads.
-        let (status, text) = tokio::task::spawn_blocking(move || {
-            let response = match agent
-                .post(&url)
-                .set("content-type", "application/json")
-                .send_bytes(&body)
-            {
-                Ok(response) | Err(ureq::Error::Status(_, response)) => response,
-                Err(error) => return Err(ManagementClientError::Transport(error.to_string())),
-            };
-            let status = response.status();
-            response
-                .into_string()
-                .map(|text| (status, text))
-                .map_err(|error| ManagementClientError::Transport(error.to_string()))
-        })
-        .await
-        .map_err(|error| ManagementClientError::Transport(error.to_string()))??;
+        let (status, text) = transport::post_json(url, body)
+            .await
+            .map_err(ManagementClientError::Transport)?;
         let response: ManagementServerMessage = serde_json::from_str(&text).map_err(|error| {
             ManagementClientError::InvalidResponse(format!(
                 "management server returned an unreadable HTTP {status} response: {error}"
@@ -310,7 +303,7 @@ pub struct BlockClient {
     id: Uuid,
     account_id: Uuid,
     workspace_id: Uuid,
-    commands: mpsc::Sender<WorkerCommand>,
+    commands: CommandSender,
     connected: Arc<OnceLock<()>>,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
@@ -524,7 +517,8 @@ impl ClientDebugSnapshot {
 
 impl BlockClient {
     pub fn new(account_id: Uuid, workspace_id: Uuid) -> Self {
-        let (commands, command_rx) = mpsc::channel();
+        let (commands, command_rx) = mpsc::unbounded();
+        let commands = CommandSender(commands);
         let id = Uuid::new_v4();
         let connected = Arc::new(OnceLock::new());
         let access = Arc::new(RwLock::new(()));
@@ -546,19 +540,14 @@ impl BlockClient {
         let worker_client_debug = Arc::clone(&client_debug);
         let worker_cached_blocks = Arc::clone(&cached_blocks);
         let worker_denied_blocks = Arc::clone(&denied_blocks);
-        thread::Builder::new()
-            .name("block-client".into())
-            .spawn(move || {
-                worker_main(
-                    command_rx,
-                    worker_access,
-                    worker_debug,
-                    worker_client_debug,
-                    worker_cached_blocks,
-                    worker_denied_blocks,
-                )
-            })
-            .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));
+        transport::spawn_worker(worker_main(
+            command_rx,
+            worker_access,
+            worker_debug,
+            worker_client_debug,
+            worker_cached_blocks,
+            worker_denied_blocks,
+        ));
         Self {
             id,
             account_id,
@@ -831,7 +820,7 @@ pub struct BlockHandle<B: Block> {
     client_id: Uuid,
     id: Uuid,
     block: Arc<TypedBlock<B>>,
-    commands: mpsc::Sender<WorkerCommand>,
+    commands: CommandSender,
     access: Arc<RwLock<()>>,
 }
 
@@ -1166,7 +1155,7 @@ impl<B: Block> BlockHistoryHandle for BlockHandle<B> {
 pub struct ReferenceList {
     list: BlockReferenceList,
     shared: Arc<ReferenceListShared>,
-    commands: mpsc::Sender<WorkerCommand>,
+    commands: CommandSender,
     watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
 }
 
@@ -1220,7 +1209,7 @@ impl<B: Block> Deref for BlockReadGuard<'_, B> {
 
 pub struct BlockBatch<'a> {
     client_id: Uuid,
-    commands: mpsc::Sender<WorkerCommand>,
+    commands: CommandSender,
     _access: RwLockWriteGuard<'a, ()>,
     ids: Vec<Uuid>,
 }
@@ -1303,57 +1292,42 @@ enum WorkerCommand {
     ResumeSending,
 }
 
-fn worker_main(
-    commands: mpsc::Receiver<WorkerCommand>,
+async fn worker_main(
+    mut commands: mpsc::UnboundedReceiver<WorkerCommand>,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
     denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
 ) {
-    let runtime = tokio::runtime::Runtime::new()
-        .unwrap_or_else(|error| fatal(format!("failed to create block client runtime: {error}")));
-    runtime.block_on(async move {
-        let (async_tx, mut async_rx) = tokio_mpsc::unbounded_channel();
-        thread::Builder::new()
-            .name("block-client-command-forwarder".into())
-            .spawn(move || {
-                while let Ok(command) = commands.recv() {
-                    if async_tx.send(command).is_err() {
-                        return;
-                    }
+    let mut state = WorkerState::new(access, debug, client_debug, cached_blocks, denied_blocks);
+    while let Some(command) = commands.next().await {
+        match command {
+            WorkerCommand::Connect {
+                url,
+                account_id,
+                workspace_id,
+            } => {
+                if run_connected(url, account_id, workspace_id, &mut state, &mut commands).await {
+                    return;
                 }
-            })
-            .unwrap_or_else(|error| fatal(format!("failed to spawn command forwarder: {error}")));
-
-        let mut state = WorkerState::new(access, debug, client_debug, cached_blocks, denied_blocks);
-        while let Some(command) = async_rx.recv().await {
-            match command {
-                WorkerCommand::Connect {
-                    url,
-                    account_id,
-                    workspace_id,
-                } => {
-                    if run_connected(url, account_id, workspace_id, &mut state, &mut async_rx).await
-                    {
-                        return;
-                    }
-                    fatal("block server connection closed");
-                }
-                command => state.handle_command(command),
+                fatal("block server connection closed");
             }
+            command => state.handle_command(command),
         }
-    });
+    }
 }
 
 /// The websocket endpoint for a server URL. The blocks websocket shares the
-/// server's host and scheme with the management endpoint.
-fn websocket_url(url: &str) -> String {
-    match url.split_once("://") {
+/// server's host and scheme with the management endpoint, and carries the
+/// connection's identity in its query string.
+fn websocket_url(url: &str, account_id: Uuid, workspace_id: Uuid) -> String {
+    let base = match url.split_once("://") {
         Some(("http", host)) => format!("ws://{host}"),
         Some(("https", host)) => format!("wss://{host}"),
         _ => url.to_owned(),
-    }
+    };
+    format!("{base}/?{ACCOUNT_PARAMETER}={account_id}&{WORKSPACE_PARAMETER}={workspace_id}")
 }
 
 async fn run_connected(
@@ -1361,27 +1335,12 @@ async fn run_connected(
     account_id: Uuid,
     workspace_id: Uuid,
     state: &mut WorkerState,
-    commands: &mut tokio_mpsc::UnboundedReceiver<WorkerCommand>,
+    commands: &mut mpsc::UnboundedReceiver<WorkerCommand>,
 ) -> bool {
-    let url = websocket_url(&url);
-    let mut request = url
-        .as_str()
-        .into_client_request()
-        .unwrap_or_else(|error| fatal(format!("invalid block server URL {url}: {error}")));
-    request.headers_mut().insert(
-        ACCOUNT_HEADER,
-        HeaderValue::from_str(&account_id.to_string())
-            .expect("UUID is always a valid HTTP header value"),
-    );
-    request.headers_mut().insert(
-        WORKSPACE_HEADER,
-        HeaderValue::from_str(&workspace_id.to_string())
-            .expect("UUID is always a valid HTTP header value"),
-    );
-    let (socket, _) = connect_async(request)
+    let url = websocket_url(&url, account_id, workspace_id);
+    let mut socket = Socket::connect(&url)
         .await
-        .unwrap_or_else(|error| fatal(format!("failed to connect to {url}: {error}")));
-    let (mut sink, mut source) = socket.split();
+        .unwrap_or_else(|error| fatal(error));
     state.connected = true;
     state.queue_initial_requests();
 
@@ -1393,15 +1352,16 @@ async fn run_connected(
             let text = serde_json::to_string(&message).unwrap_or_else(|error| {
                 fatal(format!("failed to serialize client message: {error}"))
             });
-            sink.send(Message::Text(text.clone()))
+            socket
+                .send_text(text.clone())
                 .await
-                .unwrap_or_else(|error| fatal(format!("failed to send block message: {error}")));
+                .unwrap_or_else(|error| fatal(error));
             state.message_sent(text);
         }
         state.refresh_debug();
 
-        tokio::select! {
-            command = commands.recv() => {
+        futures_util::select! {
+            command = commands.next() => {
                 let Some(command) = command else {
                     return true;
                 };
@@ -1411,33 +1371,28 @@ async fn run_connected(
                 state.handle_command(command);
                 state.finish_synchronization();
             }
-            message = source.next() => {
+            message = socket.next().fuse() => {
                 let message = match message {
                     Some(Ok(message)) => message,
-                    Some(Err(error)) => fatal(format!("block server connection failed: {error}")),
+                    Some(Err(error)) => fatal(error),
                     None => fatal("block server connection closed"),
                 };
                 match message {
-                    Message::Text(text) => {
-                        state.record_traffic(NetworkDirection::Received, text.to_string());
+                    SocketMessage::Text(text) => {
+                        state.record_traffic(NetworkDirection::Received, text.clone());
                         let message: ServerMessage = serde_json::from_str(&text)
                             .unwrap_or_else(|error| fatal(format!("invalid server message: {error}: {text}")));
                         state.handle_server_message(message);
                         state.finish_synchronization();
                     }
-                    Message::Ping(payload) => {
+                    SocketMessage::Ping(length) => {
                         state.record_traffic(
                             NetworkDirection::Received,
-                            format!("<websocket ping: {} bytes>", payload.len()),
+                            format!("<websocket ping: {length} bytes>"),
                         );
-                        sink.send(Message::Pong(payload)).await
-                            .unwrap_or_else(|error| fatal(format!("failed to send pong: {error}")));
                         state.record_traffic(NetworkDirection::Sent, "<websocket pong>".into());
                     }
-                    Message::Close(_) => return false,
-                    Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
-                        fatal("server sent an unsupported websocket message");
-                    }
+                    SocketMessage::Close => return false,
                 }
             }
         }
@@ -3325,6 +3280,10 @@ fn reference_delta(before: &[Uuid], after: &[Uuid]) -> ReferenceDelta {
 }
 
 fn fatal(message: impl AsRef<str>) -> ! {
-    eprintln!("fatal block client error: {}", message.as_ref());
+    let message = message.as_ref();
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::error_1(&format!("fatal block client error: {message}").into());
+    #[cfg(not(target_arch = "wasm32"))]
+    eprintln!("fatal block client error: {message}");
     process::abort()
 }

@@ -495,8 +495,10 @@ dependencies = [
  "block 0.1.0",
  "block-server",
  "eips",
+ "futures-channel",
  "futures-util",
  "image",
+ "js-sys",
  "parking_lot",
  "serde",
  "serde_json",
@@ -504,6 +506,10 @@ dependencies = [
  "tokio-tungstenite",
  "ureq",
  "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
 ]
 
 [[package]]

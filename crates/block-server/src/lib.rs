@@ -30,8 +30,11 @@ mod http;
 
 use self::http::{PrefixedStream, Status};
 
-const ACCOUNT_HEADER: &str = "x-block-account-id";
-const WORKSPACE_HEADER: &str = "x-block-workspace-id";
+/// Block connections identify themselves in the websocket URL's query string.
+/// Browsers cannot set request headers on a websocket handshake, so the query
+/// string is the only place a web client can put this.
+const ACCOUNT_PARAMETER: &str = "account";
+const WORKSPACE_PARAMETER: &str = "workspace";
 /// Management commands are POSTed here as JSON; the websocket carries block
 /// traffic only.
 const MANAGEMENT_PATH: &str = "/management";
@@ -90,12 +93,12 @@ async fn handle_connection(
 /// Reads the account and workspace a block connection claims and confirms the
 /// account is a member of that workspace.
 async fn connection_identity(head: &http::RequestHead, store: &BlockStore) -> Option<Identity> {
-    let header_id = |header| {
-        head.header(header)
+    let parameter_id = |parameter| {
+        head.query_parameter(parameter)
             .and_then(|value| Uuid::parse_str(value).ok())
     };
-    let account_id = header_id(ACCOUNT_HEADER)?;
-    let workspace_id = header_id(WORKSPACE_HEADER)?;
+    let account_id = parameter_id(ACCOUNT_PARAMETER)?;
+    let workspace_id = parameter_id(WORKSPACE_PARAMETER)?;
     let role = store.workspace_role(account_id, workspace_id).await.ok()?;
     Some(Identity {
         account_id,

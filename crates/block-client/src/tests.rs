@@ -27,6 +27,7 @@ mod replace_preserves_dynamic_artifact_descriptor;
 mod set_parent_optimistically_notes_backref;
 mod wait_until_observes_current_and_future_values;
 mod watched_operations_are_buffered_until_their_sequence_is_contiguous;
+mod websocket_url_carries_the_connection_identity;
 mod websocket_url_matches_the_server_scheme;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -59,6 +59,17 @@ impl RequestHead {
             .map(|(_, value)| value.as_str())
     }
 
+    /// The value of a query-string parameter of the request target. Block
+    /// connections carry their identity here rather than in headers because
+    /// browsers cannot set headers on a websocket handshake.
+    pub fn query_parameter(&self, name: &str) -> Option<&str> {
+        let (_, query) = self.path.split_once('?')?;
+        query.split('&').find_map(|parameter| {
+            let (key, value) = parameter.split_once('=')?;
+            (key == name).then_some(value)
+        })
+    }
+
     /// Whether this is the opening request of a websocket handshake, which the
     /// server hands to the websocket implementation instead of answering itself.
     pub fn is_websocket_upgrade(&self) -> bool {
