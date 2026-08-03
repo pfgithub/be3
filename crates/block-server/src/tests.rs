@@ -2,13 +2,17 @@ use super::*;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue};
 
+mod access_flows_down_to_owned_children_and_up_to_parents;
 mod account_login_is_case_insensitive;
 mod account_registration_rejects_duplicates;
 mod account_state_survives_a_server_restart;
+mod administrators_reach_every_block_without_grants;
 mod batch_is_acknowledged_before_watch_notifications;
 mod batch_updates_apply_reference_deltas_in_request_order;
-mod block_connections_require_administrator_membership;
+mod block_access_survives_a_server_restart;
+mod block_connections_require_workspace_membership;
 mod dependency_state_survives_a_server_restart;
+mod editors_only_reach_blocks_they_authored_or_were_granted;
 mod explicit_name_overrides_implicit_names_and_updates_both_kinds_of_watch;
 mod explicit_sequences_cannot_be_applied_out_of_order;
 mod lists_backrefs_with_relationship_metadata;
@@ -33,6 +37,7 @@ mod removing_a_parent_reference_orphans_the_child_without_restoring_it_on_readd;
 mod reparents_without_changing_either_parents_references;
 mod sequence_errors_include_the_expected_sequence;
 mod shared_protocol_round_trips_over_websocket;
+mod sharing_requires_edit_access_to_the_block;
 mod watches_reference_changes_until_unwatched;
 mod workspace_invites_require_administrator_membership;
 mod workspace_state_survives_a_server_restart;
@@ -85,8 +90,9 @@ mod support {
     use std::path::PathBuf;
 
     use block::{
-        Account, BlockParent, BlockReference, BlockReferenceList, ClientMessage,
-        ManagementClientMessage, ManagementServerMessage, ReferenceDelta, ServerMessage, Workspace,
+        Account, BlockAccess, BlockAccessEntry, BlockParent, BlockReference, BlockReferenceList,
+        ClientMessage, ManagementClientMessage, ManagementServerMessage, ReferenceDelta,
+        ServerMessage, Workspace, WorkspaceRole,
     };
     use futures_util::{SinkExt, StreamExt};
     use tokio::{fs, net::TcpListener, task::JoinHandle};
@@ -237,6 +243,86 @@ mod support {
             panic!("workspace creation failed: {response:?}");
         };
         workspace
+    }
+
+    /// Invites `account` into the workspace with `role` and accepts on its
+    /// behalf, leaving it a full member.
+    pub async fn add_member(
+        socket: &mut Socket,
+        inviter_id: Uuid,
+        workspace_id: Uuid,
+        account: &Account,
+        role: WorkspaceRole,
+    ) {
+        let response = management_request(
+            socket,
+            ManagementClientMessage::Invite {
+                request_id: Uuid::new_v4(),
+                account_id: inviter_id,
+                workspace_id,
+                email: account.email.clone(),
+                role,
+            },
+        )
+        .await;
+        let ManagementServerMessage::Invitation { invitation, .. } = response else {
+            panic!("invitation failed: {response:?}");
+        };
+        let response = management_request(
+            socket,
+            ManagementClientMessage::RespondInvitation {
+                request_id: Uuid::new_v4(),
+                account_id: account.id,
+                invitation_id: invitation.id,
+                accept: true,
+            },
+        )
+        .await;
+        assert!(
+            matches!(response, ManagementServerMessage::Ok { .. }),
+            "accepting the invitation failed: {response:?}"
+        );
+    }
+
+    pub async fn list_access(socket: &mut Socket, id: Uuid) -> Vec<BlockAccessEntry> {
+        match request(
+            socket,
+            ClientMessage::ListBlockAccess {
+                request_id: Uuid::new_v4(),
+                id,
+            },
+        )
+        .await
+        {
+            ServerMessage::BlockAccessList { entries, .. } => entries,
+            message => panic!("expected a block access list, got {message:?}"),
+        }
+    }
+
+    pub async fn set_access(
+        socket: &mut Socket,
+        id: Uuid,
+        account_id: Uuid,
+        access: BlockAccess,
+    ) -> ServerMessage {
+        request(
+            socket,
+            ClientMessage::SetBlockAccess {
+                request_id: Uuid::new_v4(),
+                id,
+                account_id,
+                access,
+            },
+        )
+        .await
+    }
+
+    pub fn access_for(entries: &[BlockAccessEntry], account_id: Uuid) -> BlockAccess {
+        entries
+            .iter()
+            .find(|entry| entry.account.id == account_id)
+            .unwrap_or_else(|| panic!("account {account_id} is not a workspace member"))
+            .effective
     }
 
     pub async fn create(socket: &mut Socket, id: Uuid, references: Vec<Uuid>) -> ServerMessage {

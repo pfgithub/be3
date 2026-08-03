@@ -792,7 +792,9 @@ impl eframe::App for LogicGame {
 
         match self.active_file.clone() {
             Some(ActiveFile::SpecialChallenge { challenge }) => {
-                if challenge == challenges::ChallengeId::BinaryAddition { self.binary_addition.ui(ui) }
+                if challenge == challenges::ChallengeId::BinaryAddition {
+                    self.binary_addition.ui(ui)
+                }
                 if self.binary_addition.take_passed() {
                     self.mark_special_challenge_passed(challenge);
                 }

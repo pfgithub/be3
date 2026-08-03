@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{atomic::AtomicUsize, Arc},
 };
 
@@ -58,6 +58,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
         Arc::new(RwLock::new(NetworkDebugSnapshot::default())),
         Arc::clone(&debug),
         Arc::clone(&cache),
+        Arc::new(RwLock::new(HashSet::new())),
     );
     state.connected = true;
     state.sending_paused = true;

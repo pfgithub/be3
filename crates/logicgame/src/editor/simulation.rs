@@ -173,10 +173,9 @@ impl LogicEditor {
                             format!("Current: {}", simulation_component_name(&vm.pc.component)),
                         )
                         .clicked()
-                    {
-                        self.simulation.instruction_selection =
-                            SimulationInstructionSelection::Active;
-                    }
+                {
+                    self.simulation.instruction_selection = SimulationInstructionSelection::Active;
+                }
 
                 ui.separator();
                 ui.strong("Instructions");

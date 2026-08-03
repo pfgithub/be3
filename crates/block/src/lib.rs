@@ -8,12 +8,73 @@ pub struct Account {
     pub display_name: String,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceRole {
+    /// Has full access to every block in the workspace, regardless of the
+    /// per-block permissions recorded for it.
     Administrator,
+    /// Only reaches the blocks it authored or was explicitly granted access to.
     Editor,
-    Viewer,
+}
+
+impl WorkspaceRole {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Administrator => "Administrator",
+            Self::Editor => "Editor",
+        }
+    }
+}
+
+/// How much of a block an account may reach. The variants are ordered from
+/// least to most access so effective permissions can be combined with `max`.
+#[derive(Clone, Copy, Debug, Deserialize, Ord, PartialOrd, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockAccess {
+    /// The block is inaccessible and is filtered out of listings.
+    None,
+    /// The block appears in listings but cannot be opened.
+    KnowExists,
+    /// The block can be read but not changed.
+    View,
+    /// The block can be read and changed.
+    Edit,
+}
+
+impl BlockAccess {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "No access",
+            Self::KnowExists => "Knows it exists",
+            Self::View => "Can view",
+            Self::Edit => "Can edit",
+        }
+    }
+
+    pub fn can_know_exists(self) -> bool {
+        self >= Self::KnowExists
+    }
+
+    pub fn can_view(self) -> bool {
+        self >= Self::View
+    }
+
+    pub fn can_edit(self) -> bool {
+        self == Self::Edit
+    }
+}
+
+/// One workspace member's access to a single block, as reported to a client
+/// that is managing sharing for that block.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct BlockAccessEntry {
+    pub account: Account,
+    pub role: WorkspaceRole,
+    /// The permission recorded directly against this block, if any.
+    pub granted: Option<BlockAccess>,
+    /// The permission the account actually has, after inheritance.
+    pub effective: BlockAccess,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -47,7 +108,6 @@ pub enum ManagementErrorCode {
     InvitationNotFound,
     PermissionDenied,
     StorageError,
-    UnsupportedRole,
     UnsupportedMessage,
     WorkspaceNotFound,
 }
@@ -310,11 +370,14 @@ pub enum CommandKind {
     SetBlockName,
     ListReferences,
     UnwatchReferences,
+    ListBlockAccess,
+    SetBlockAccess,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
+    AccountNotFound,
     BlockAlreadyExists,
     BlockNotFound,
     ConflictingOperationId,
@@ -322,6 +385,7 @@ pub enum ErrorCode {
     InvalidSeq,
     ParentCycle,
     ParentMissingReference,
+    PermissionDenied,
     ReferencedBlockNotFound,
     StorageError,
     UnsupportedMessage,
@@ -387,6 +451,16 @@ pub enum ClientMessage {
         request_id: Uuid,
         list: BlockReferenceList,
     },
+    ListBlockAccess {
+        request_id: Uuid,
+        id: Uuid,
+    },
+    SetBlockAccess {
+        request_id: Uuid,
+        id: Uuid,
+        account_id: Uuid,
+        access: BlockAccess,
+    },
 }
 
 impl ClientMessage {
@@ -401,7 +475,9 @@ impl ClientMessage {
             | Self::SetBlockParent { request_id, .. }
             | Self::SetBlockName { request_id, .. }
             | Self::ListReferences { request_id, .. }
-            | Self::UnwatchReferences { request_id, .. } => *request_id,
+            | Self::UnwatchReferences { request_id, .. }
+            | Self::ListBlockAccess { request_id, .. }
+            | Self::SetBlockAccess { request_id, .. } => *request_id,
         }
     }
 }
@@ -474,6 +550,12 @@ pub enum ServerMessage {
         list: BlockReferenceList,
         blocks: Vec<BlockReference>,
     },
+    BlockAccessList {
+        request_id: Uuid,
+        command: CommandKind,
+        id: Uuid,
+        entries: Vec<BlockAccessEntry>,
+    },
 }
 
 impl ServerMessage {
@@ -483,6 +565,7 @@ impl ServerMessage {
             | Self::ReadBlock { id, .. }
             | Self::BlockUpdated { id, .. }
             | Self::BlockNameUpdated { id, .. }
+            | Self::BlockAccessList { id, .. }
             | Self::Presence { id, .. } => Some(*id),
             Self::BatchOk { .. }
             | Self::BatchUpdated { .. }

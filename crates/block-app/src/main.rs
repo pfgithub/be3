@@ -3,6 +3,7 @@ mod block_picker;
 mod debug;
 mod editors;
 mod performance;
+mod share;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -32,9 +33,10 @@ use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabVi
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK,
     ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_CLOUD, ICON_COMPUTER, ICON_GROUP_ADD,
-    ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_LOGOUT, ICON_MORE_HORIZ, ICON_REDO,
-    ICON_REFRESH, ICON_SWITCH_ACCOUNT, ICON_UNDO, ICON_WORKSPACES,
+    ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ,
+    ICON_REDO, ICON_REFRESH, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO, ICON_WORKSPACES,
 };
+use share::ShareDialog;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -108,6 +110,7 @@ struct BlockApp {
     workspace_error: Option<String>,
     invite_open: bool,
     invite_email: String,
+    invite_role: WorkspaceRole,
     scheduled_workspace_list: bool,
     server_url: String,
     account: Account,
@@ -130,6 +133,7 @@ struct BlockApp {
     sidebar_reveal: Option<Uuid>,
     pending_transfers: Vec<PendingTransfer>,
     rename: Option<RenameState>,
+    share: ShareDialog,
     client_debug_open: bool,
     network_debug_open: bool,
     block_picker: BlockPicker,
@@ -284,7 +288,7 @@ enum WorkspaceOperation {
     Load,
     Create(String),
     Respond(Uuid, bool),
-    Invite(Uuid, String),
+    Invite(Uuid, String, WorkspaceRole),
 }
 
 enum WorkspaceResult {
@@ -395,6 +399,7 @@ impl BlockApp {
             workspace_error: None,
             invite_open: false,
             invite_email: String::new(),
+            invite_role: WorkspaceRole::Editor,
             scheduled_workspace_list: false,
             server_url,
             account,
@@ -417,6 +422,7 @@ impl BlockApp {
             sidebar_reveal: None,
             pending_transfers: Vec::new(),
             rename: None,
+            share: ShareDialog::default(),
             client_debug_open: false,
             network_debug_open: false,
             block_picker: BlockPicker::default(),
@@ -721,13 +727,8 @@ impl BlockApp {
                                     .await
                                     .map(|()| WorkspaceResult::Responded)
                                     .map_err(|error| error.to_string()),
-                                WorkspaceOperation::Invite(workspace_id, email) => client
-                                    .invite(
-                                        account_id,
-                                        workspace_id,
-                                        email,
-                                        WorkspaceRole::Administrator,
-                                    )
+                                WorkspaceOperation::Invite(workspace_id, email, role) => client
+                                    .invite(account_id, workspace_id, email, role)
                                     .await
                                     .map(|_| WorkspaceResult::Invited)
                                     .map_err(|error| error.to_string()),
@@ -800,6 +801,7 @@ impl BlockApp {
         self.dynamic_artifact_errors.clear();
         self.dock_state = default_dock_state();
         self.active_tab = None;
+        self.share = ShareDialog::default();
         self.roots = roots;
         self.client = client;
         self.workspace = Some(workspace.clone());
@@ -929,7 +931,10 @@ impl BlockApp {
                                             )
                                             .truncate(),
                                         );
-                                        ui.small("Invited as administrator");
+                                        ui.small(format!(
+                                            "Invited as {}",
+                                            invitation.role.label().to_lowercase()
+                                        ));
                                     });
                                 },
                                 |ui| {
@@ -1031,10 +1036,27 @@ impl BlockApp {
                 ui.label(format!("Workspace: {}", workspace.name));
                 ui.label("Email address");
                 ui.text_edit_singleline(&mut self.invite_email);
+                ui.add_space(8.0);
                 ui.label("Role");
-                let _ = ui.selectable_label(true, "Administrator");
-                ui.add_enabled(false, egui::Button::new("Editor"));
-                ui.add_enabled(false, egui::Button::new("Viewer"));
+                ui.horizontal(|ui| {
+                    ui.selectable_value(
+                        &mut self.invite_role,
+                        WorkspaceRole::Editor,
+                        WorkspaceRole::Editor.label(),
+                    );
+                    ui.selectable_value(
+                        &mut self.invite_role,
+                        WorkspaceRole::Administrator,
+                        WorkspaceRole::Administrator.label(),
+                    );
+                });
+                ui.small(match self.invite_role {
+                    WorkspaceRole::Administrator => "Can open every block in the workspace.",
+                    WorkspaceRole::Editor => {
+                        "Can only open blocks they create or are given access to."
+                    }
+                });
+                ui.add_space(8.0);
                 if ui
                     .add_enabled(
                         !self.invite_email.trim().is_empty()
@@ -1046,6 +1068,7 @@ impl BlockApp {
                     self.begin_workspace_request(WorkspaceOperation::Invite(
                         workspace.id,
                         self.invite_email.clone(),
+                        self.invite_role,
                     ));
                 }
                 if let Some(error) = &self.workspace_error {
@@ -1091,6 +1114,7 @@ impl BlockApp {
         self.sidebar_reveal = None;
         self.pending_transfers.clear();
         self.rename = None;
+        self.share = ShareDialog::default();
         self.client_debug_open = false;
         self.network_debug_open = false;
         self.block_picker = BlockPicker::default();
@@ -1671,6 +1695,10 @@ impl BlockApp {
                             name: reference.name.clone(),
                         });
                     }
+                    Some(BlockContextMenuAction::Share) => {
+                        self.share
+                            .open(&self.client, reference.id, reference.name.clone());
+                    }
                     Some(BlockContextMenuAction::Delete) => delete = true,
                     None => {}
                 }
@@ -1997,7 +2025,10 @@ impl BlockApp {
         let Some(mut editor) = self.editors.remove(&active) else {
             return (None, None);
         };
-        self.show_dynamic_artifact_bar(ui, active, editor.block_type());
+        let denied = self.client.access_denied(active);
+        if !denied {
+            self.show_dynamic_artifact_bar(ui, active, editor.block_type());
+        }
         let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
         let redo_shortcut = egui::KeyboardShortcut::new(
             egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -2062,6 +2093,14 @@ impl BlockApp {
                 }
             }
             ui.separator();
+            if ui
+                .add_enabled(!denied, egui::Button::new(ICON_SHARE))
+                .on_hover_text("Share this block")
+                .clicked()
+            {
+                self.share.open(&self.client, active, current_name.clone());
+            }
+            ui.separator();
             if let Some(item) = self.show_breadcrumbs(
                 ui,
                 active,
@@ -2073,11 +2112,28 @@ impl BlockApp {
             }
         });
         ui.separator();
+        if denied {
+            self.editors.insert(active, editor);
+            self.show_access_denied(ui);
+            return (None, navigation);
+        }
         let mut editors =
             EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
         let action = direct_editor_tab_ui(editor.as_mut(), ui, &mut editors);
         self.editors.insert(active, editor);
         (action, navigation)
+    }
+
+    /// Replaces an editor whose block the server refused to hand over. The
+    /// block can still be listed, so the tab has to explain why it is empty.
+    fn show_access_denied(&self, ui: &mut egui::Ui) {
+        ui.centered_and_justified(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.heading(format!("{} No access", ICON_LOCK.codepoint));
+                ui.weak("You do not have permission to open this block.");
+                ui.weak("Ask someone who can edit it to share it with you.");
+            });
+        });
     }
 
     fn show_breadcrumbs(
@@ -2396,6 +2452,9 @@ impl BlockApp {
                         name: reference.name,
                     });
                 }
+                BlockContextMenuAction::Share => {
+                    self.share.open(&self.client, reference.id, reference.name);
+                }
                 BlockContextMenuAction::Delete => {
                     self.queue_delete(reference, source, is_reference);
                 }
@@ -2604,6 +2663,7 @@ impl TabViewer for BlockTabViewer<'_> {
 enum BlockContextMenuAction {
     Picker,
     Rename,
+    Share,
     Delete,
 }
 
@@ -2624,6 +2684,13 @@ fn block_context_menu(
     });
     if ui.button("Rename").clicked() {
         action = Some(BlockContextMenuAction::Rename);
+        ui.close();
+    }
+    if ui
+        .button(format!("{} Share", ICON_SHARE.codepoint))
+        .clicked()
+    {
+        action = Some(BlockContextMenuAction::Share);
         ui.close();
     }
     let delete_text = egui::RichText::new("Delete");
@@ -2784,6 +2851,7 @@ impl eframe::App for BlockApp {
         self.process_pending_transfers();
         self.show_block_picker(ui.ctx());
         self.show_rename(ui);
+        self.share.show(ui.ctx(), &self.client);
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
         self.show_invite(ui.ctx());

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList, CommandKind, ServerMessage};
 use parking_lot::RwLock;
@@ -36,6 +39,7 @@ fn state(cache: Arc<RwLock<HashMap<Uuid, CachedBlock>>>) -> WorkerState {
             Uuid::nil(),
         ))),
         cache,
+        Arc::new(RwLock::new(HashSet::new())),
     )
 }
 

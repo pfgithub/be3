@@ -818,7 +818,6 @@ pub struct LogicGridSnapshot {
     pub wires: Vec<Wire>,
 }
 
-
 impl LogicGrid {
     pub fn new() -> Self {
         Self::default()

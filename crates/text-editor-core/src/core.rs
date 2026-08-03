@@ -1783,7 +1783,8 @@ fn has_stop(
             if soft_tab_width >= 2 && left == b' ' && right == b' ' {
                 let start = line_start(bytes, index);
                 if bytes[start..index].iter().all(|byte| *byte == b' ') {
-                    return (index - start).is_multiple_of(soft_tab_width)
+                    return (index - start)
+                        .is_multiple_of(soft_tab_width)
                         .then_some(BetweenCharsStop::Both);
                 }
             }

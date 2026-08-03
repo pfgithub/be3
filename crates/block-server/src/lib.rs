@@ -9,10 +9,10 @@ use std::{
 };
 
 use block::{
-    Account, BlockOperation, BlockParent, BlockReference, BlockReferenceList, ClientMessage,
-    CommandKind, ErrorCode, ManagementClientMessage, ManagementErrorCode, ManagementServerMessage,
-    OperationRecord, ReferenceDelta, ServerMessage, Workspace, WorkspaceInvitation, WorkspaceRole,
-    MAX_NAME_BYTES,
+    Account, BlockAccess, BlockAccessEntry, BlockOperation, BlockParent, BlockReference,
+    BlockReferenceList, ClientMessage, CommandKind, ErrorCode, ManagementClientMessage,
+    ManagementErrorCode, ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage,
+    Workspace, WorkspaceInvitation, WorkspaceRole, MAX_NAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
@@ -93,13 +93,14 @@ async fn handle_connection(
         (Some(account_id), Some(workspace_id)) => (account_id, workspace_id),
         _ => return Err(ServerError::InvalidHandshake),
     };
-    if store
-        .authorize_workspace(account_id, workspace_id)
-        .await
-        .is_err()
-    {
+    let Ok(role) = store.workspace_role(account_id, workspace_id).await else {
         return Err(ServerError::InvalidHandshake);
-    }
+    };
+    let identity = Identity {
+        account_id,
+        workspace_id,
+        role,
+    };
     let (mut sink, mut source) = socket.split();
     let (outbound, mut outbound_rx) = mpsc::unbounded_channel();
     let client_id = watch_hub.next_client_id();
@@ -117,8 +118,7 @@ async fn handle_connection(
                                 &store,
                                 &watch_hub,
                                 client_id,
-                                account_id,
-                                workspace_id,
+                                identity,
                                 outbound.clone(),
                                 &text,
                             ).await;
@@ -126,9 +126,11 @@ async fn handle_connection(
                         if let Some(notification) = notification {
                             match notification {
                                 ServerMessage::BatchUpdated { operations } => {
-                                    watch_hub.broadcast_batch(workspace_id, operations).await;
+                                    watch_hub.broadcast_batch(&store, workspace_id, operations).await;
                                 }
-                                notification => watch_hub.broadcast(workspace_id, notification).await,
+                                notification => {
+                                    watch_hub.broadcast(&store, workspace_id, notification).await;
+                                }
                             }
                         }
                         watch_hub.broadcast_reference_lists(&store).await;
@@ -269,15 +271,40 @@ async fn handle_management_message(store: &BlockStore, text: &str) -> Management
     }
 }
 
+/// Everything a block connection is allowed to act as: who is connected, the
+/// workspace they opened, and the role that decides whether per-block
+/// permissions apply to them at all.
+#[derive(Clone, Copy)]
+struct Identity {
+    account_id: Uuid,
+    workspace_id: Uuid,
+    role: WorkspaceRole,
+}
+
+fn permission_denied(request_id: Uuid, command: CommandKind, id: Uuid) -> ServerMessage {
+    ServerMessage::Error {
+        request_id: Some(request_id),
+        command: Some(command),
+        id: Some(id),
+        code: ErrorCode::PermissionDenied,
+        message: "you do not have permission to access this block".into(),
+        expected_seq: None,
+    }
+}
+
 async fn handle_text_message(
     store: &BlockStore,
     watch_hub: &WatchHub,
     client_id: ClientId,
-    account_id: Uuid,
-    workspace_id: Uuid,
+    identity: Identity,
     outbound: OutboundMessages,
     text: &str,
 ) -> (ServerMessage, Option<ServerMessage>) {
+    let Identity {
+        account_id,
+        workspace_id,
+        ..
+    } = identity;
     let command = match serde_json::from_str::<ClientMessage>(text) {
         Ok(command) => command,
         Err(error) => {
@@ -305,6 +332,18 @@ async fn handle_text_message(
             references,
             watch,
         } => {
+            // A new block belongs to its author, but it may only point at blocks
+            // the author is at least allowed to know about.
+            let access = store.access(identity).await;
+            if references
+                .iter()
+                .any(|reference| *reference != id && !access.get(*reference).can_know_exists())
+            {
+                return (
+                    permission_denied(request_id, CommandKind::CreateBlock, id),
+                    None,
+                );
+            }
             let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
             let response = match store
@@ -321,7 +360,7 @@ async fn handle_text_message(
             {
                 Ok(()) => {
                     if watch {
-                        watch_hub.watch(workspace_id, id, client_id, outbound).await;
+                        watch_hub.watch(identity, id, client_id, outbound).await;
                     }
                     ServerMessage::Ok {
                         request_id,
@@ -344,6 +383,18 @@ async fn handle_text_message(
             implicit_name,
             references,
         } => {
+            let access = store.access(identity).await;
+            if !access.get(id).can_edit()
+                || references
+                    .after
+                    .iter()
+                    .any(|reference| !access.get(*reference).can_know_exists())
+            {
+                return (
+                    permission_denied(request_id, CommandKind::UpdateBlock, id),
+                    None,
+                );
+            }
             let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
             match store
@@ -420,6 +471,21 @@ async fn handle_text_message(
                     None,
                 );
             }
+            let access = store.access(identity).await;
+            let denied = updates.iter().find(|update| {
+                !access.get(update.id).can_edit()
+                    || update
+                        .references
+                        .after
+                        .iter()
+                        .any(|reference| !access.get(*reference).can_know_exists())
+            });
+            if let Some(denied) = denied {
+                return (
+                    permission_denied(request_id, CommandKind::UpdateBatch, denied.id),
+                    None,
+                );
+            }
             let mut locks = Vec::with_capacity(ids.len());
             for id in ids {
                 locks.push(store.lock_for(workspace_id, id).await);
@@ -485,12 +551,18 @@ async fn handle_text_message(
             id,
             watch,
         } => {
+            if !store.access(identity).await.get(id).can_view() {
+                return (
+                    permission_denied(request_id, CommandKind::ReadBlock, id),
+                    None,
+                );
+            }
             let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
             let response = match store.read_block_unlocked(workspace_id, id).await {
                 Ok(read) => {
                     if watch {
-                        watch_hub.watch(workspace_id, id, client_id, outbound).await;
+                        watch_hub.watch(identity, id, client_id, outbound).await;
                     }
                     ServerMessage::ReadBlock {
                         request_id,
@@ -526,21 +598,40 @@ async fn handle_text_message(
             request_id,
             id,
             data,
-        } => (
-            ServerMessage::Ok {
-                request_id,
-                command: CommandKind::PostPresence,
-                id,
-                seq: None,
-                operation_id: None,
-            },
-            Some(ServerMessage::Presence { id, data }),
-        ),
+        } => {
+            if !store.access(identity).await.get(id).can_view() {
+                return (
+                    permission_denied(request_id, CommandKind::PostPresence, id),
+                    None,
+                );
+            }
+            (
+                ServerMessage::Ok {
+                    request_id,
+                    command: CommandKind::PostPresence,
+                    id,
+                    seq: None,
+                    operation_id: None,
+                },
+                Some(ServerMessage::Presence { id, data }),
+            )
+        }
         ClientMessage::SetBlockParent {
             request_id,
             id,
             parent,
         } => {
+            let access = store.access(identity).await;
+            let parent_allowed = match parent {
+                BlockParent::Orphaned | BlockParent::Root => true,
+                BlockParent::Uuid(parent) => access.get(parent).can_edit(),
+            };
+            if !access.get(id).can_edit() || !parent_allowed {
+                return (
+                    permission_denied(request_id, CommandKind::SetBlockParent, id),
+                    None,
+                );
+            }
             let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
             let response = match store.set_parent_unlocked(workspace_id, id, parent).await {
@@ -560,6 +651,12 @@ async fn handle_text_message(
             id,
             name,
         } => {
+            if !store.access(identity).await.get(id).can_edit() {
+                return (
+                    permission_denied(request_id, CommandKind::SetBlockName, id),
+                    None,
+                );
+            }
             let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
             match store.set_name_unlocked(workspace_id, id, name).await {
@@ -584,10 +681,10 @@ async fn handle_text_message(
             list,
             watch,
         } => {
-            let blocks = store.references(workspace_id, list).await;
+            let blocks = store.references(identity, list).await;
             if watch {
                 watch_hub
-                    .watch_references(workspace_id, list, client_id, outbound, blocks.clone())
+                    .watch_references(identity, list, client_id, outbound, blocks.clone())
                     .await;
             }
             (
@@ -601,7 +698,7 @@ async fn handle_text_message(
         }
         ClientMessage::UnwatchReferences { request_id, list } => {
             watch_hub
-                .unwatch_references(workspace_id, list, client_id)
+                .unwatch_references(identity, list, client_id)
                 .await;
             (
                 ServerMessage::Ok {
@@ -614,17 +711,98 @@ async fn handle_text_message(
                 None,
             )
         }
+        ClientMessage::ListBlockAccess { request_id, id } => {
+            if !store.access(identity).await.get(id).can_edit() {
+                return (
+                    permission_denied(request_id, CommandKind::ListBlockAccess, id),
+                    None,
+                );
+            }
+            let response = match store.block_access_entries(workspace_id, id).await {
+                Ok(entries) => ServerMessage::BlockAccessList {
+                    request_id,
+                    command: CommandKind::ListBlockAccess,
+                    id,
+                    entries,
+                },
+                Err(error) => error.to_response(request_id, CommandKind::ListBlockAccess, id),
+            };
+            (response, None)
+        }
+        ClientMessage::SetBlockAccess {
+            request_id,
+            id,
+            account_id: target_id,
+            access,
+        } => {
+            if !store.access(identity).await.get(id).can_edit() {
+                return (
+                    permission_denied(request_id, CommandKind::SetBlockAccess, id),
+                    None,
+                );
+            }
+            let lock = store.lock_for(workspace_id, id).await;
+            let _guard = lock.lock().await;
+            let response = match store
+                .set_block_access_unlocked(workspace_id, id, target_id, access)
+                .await
+            {
+                Ok(()) => ServerMessage::Ok {
+                    request_id,
+                    command: CommandKind::SetBlockAccess,
+                    id,
+                    seq: None,
+                    operation_id: None,
+                },
+                Err(error) => error.to_response(request_id, CommandKind::SetBlockAccess, id),
+            };
+            (response, None)
+        }
     }
 }
 
 type ClientId = u64;
 type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
 
+/// Identifies a watcher's view of the workspace. Two accounts watching the same
+/// list can see different blocks, so their subscriptions are tracked apart.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct WatchIdentity {
+    account_id: Uuid,
+    workspace_id: Uuid,
+    role: WorkspaceRole,
+}
+
+impl From<Identity> for WatchIdentity {
+    fn from(identity: Identity) -> Self {
+        Self {
+            account_id: identity.account_id,
+            workspace_id: identity.workspace_id,
+            role: identity.role,
+        }
+    }
+}
+
+impl From<WatchIdentity> for Identity {
+    fn from(identity: WatchIdentity) -> Self {
+        Self {
+            account_id: identity.account_id,
+            workspace_id: identity.workspace_id,
+            role: identity.role,
+        }
+    }
+}
+
 struct WatchHub {
     next_client_id: AtomicU64,
-    watchers: Mutex<HashMap<(Uuid, Uuid), HashMap<ClientId, OutboundMessages>>>,
+    watchers: Mutex<HashMap<(Uuid, Uuid), HashMap<ClientId, BlockWatch>>>,
     reference_watchers:
-        Mutex<HashMap<(Uuid, BlockReferenceList), HashMap<ClientId, ReferenceWatch>>>,
+        Mutex<HashMap<(WatchIdentity, BlockReferenceList), HashMap<ClientId, ReferenceWatch>>>,
+}
+
+struct BlockWatch {
+    identity: WatchIdentity,
+    outbound: OutboundMessages,
 }
 
 struct ReferenceWatch {
@@ -647,7 +825,7 @@ impl WatchHub {
 
     async fn watch(
         &self,
-        workspace_id: Uuid,
+        identity: Identity,
         id: Uuid,
         client_id: ClientId,
         outbound: OutboundMessages,
@@ -655,9 +833,15 @@ impl WatchHub {
         self.watchers
             .lock()
             .await
-            .entry((workspace_id, id))
+            .entry((identity.workspace_id, id))
             .or_default()
-            .insert(client_id, outbound);
+            .insert(
+                client_id,
+                BlockWatch {
+                    identity: identity.into(),
+                    outbound,
+                },
+            );
     }
 
     async fn unwatch(&self, workspace_id: Uuid, id: Uuid, client_id: ClientId) {
@@ -686,7 +870,7 @@ impl WatchHub {
 
     async fn watch_references(
         &self,
-        workspace_id: Uuid,
+        identity: Identity,
         list: BlockReferenceList,
         client_id: ClientId,
         outbound: OutboundMessages,
@@ -695,19 +879,19 @@ impl WatchHub {
         self.reference_watchers
             .lock()
             .await
-            .entry((workspace_id, list))
+            .entry((identity.into(), list))
             .or_default()
             .insert(client_id, ReferenceWatch { outbound, last });
     }
 
     async fn unwatch_references(
         &self,
-        workspace_id: Uuid,
+        identity: Identity,
         list: BlockReferenceList,
         client_id: ClientId,
     ) {
         let mut watchers = self.reference_watchers.lock().await;
-        let key = (workspace_id, list);
+        let key = (WatchIdentity::from(identity), list);
         if let Some(entries) = watchers.get_mut(&key) {
             entries.remove(&client_id);
             if entries.is_empty() {
@@ -724,10 +908,10 @@ impl WatchHub {
             .keys()
             .copied()
             .collect();
-        for (workspace_id, list) in lists {
-            let blocks = store.references(workspace_id, list).await;
+        for (identity, list) in lists {
+            let blocks = store.references(identity.into(), list).await;
             let mut watchers = self.reference_watchers.lock().await;
-            let Some(entries) = watchers.get_mut(&(workspace_id, list)) else {
+            let Some(entries) = watchers.get_mut(&(identity, list)) else {
                 continue;
             };
             for watch in entries.values_mut() {
@@ -742,34 +926,61 @@ impl WatchHub {
         }
     }
 
-    async fn broadcast(&self, workspace_id: Uuid, message: ServerMessage) {
+    async fn broadcast(&self, store: &BlockStore, workspace_id: Uuid, message: ServerMessage) {
         let Some(id) = message.id() else {
             return;
         };
-        let watchers = self.watchers.lock().await;
-        if let Some(entries) = watchers.get(&(workspace_id, id)) {
-            for outbound in entries.values() {
+        let deliveries: Vec<_> = {
+            let watchers = self.watchers.lock().await;
+            watchers
+                .get(&(workspace_id, id))
+                .map(|entries| {
+                    entries
+                        .values()
+                        .map(|watch| (watch.identity, watch.outbound.clone()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        for (identity, outbound) in deliveries {
+            if store.access(identity.into()).await.get(id).can_view() {
                 let _ = outbound.send(message.clone());
             }
         }
     }
 
-    async fn broadcast_batch(&self, workspace_id: Uuid, operations: Vec<BlockOperation>) {
-        let watchers = self.watchers.lock().await;
-        let mut deliveries: HashMap<ClientId, (OutboundMessages, Vec<BlockOperation>)> =
-            HashMap::new();
-        for operation in operations {
-            if let Some(entries) = watchers.get(&(workspace_id, operation.id)) {
-                for (&client_id, outbound) in entries {
-                    let delivery = deliveries
-                        .entry(client_id)
-                        .or_insert_with(|| (outbound.clone(), Vec::new()));
-                    delivery.1.push(operation.clone());
+    async fn broadcast_batch(
+        &self,
+        store: &BlockStore,
+        workspace_id: Uuid,
+        operations: Vec<BlockOperation>,
+    ) {
+        let mut deliveries: HashMap<
+            ClientId,
+            (WatchIdentity, OutboundMessages, Vec<BlockOperation>),
+        > = HashMap::new();
+        {
+            let watchers = self.watchers.lock().await;
+            for operation in operations {
+                if let Some(entries) = watchers.get(&(workspace_id, operation.id)) {
+                    for (&client_id, watch) in entries {
+                        let delivery = deliveries.entry(client_id).or_insert_with(|| {
+                            (watch.identity, watch.outbound.clone(), Vec::new())
+                        });
+                        delivery.2.push(operation.clone());
+                    }
                 }
             }
         }
-        for (_, (outbound, operations)) in deliveries {
-            let _ = outbound.send(ServerMessage::BatchUpdated { operations });
+        for (_, (identity, outbound, operations)) in deliveries {
+            let access = store.access(identity.into()).await;
+            let operations: Vec<_> = operations
+                .into_iter()
+                .filter(|operation| access.get(operation.id).can_view())
+                .collect();
+            if !operations.is_empty() {
+                let _ = outbound.send(ServerMessage::BatchUpdated { operations });
+            }
         }
     }
 }
@@ -813,13 +1024,26 @@ impl BlockStore {
         )
     }
 
-    async fn authorize_workspace(
+    async fn workspace_role(
         &self,
         account_id: Uuid,
         workspace_id: Uuid,
-    ) -> Result<(), ManagementStoreError> {
+    ) -> Result<WorkspaceRole, ManagementStoreError> {
         let database = self.database.lock().await;
-        require_administrator(&database, account_id, workspace_id)
+        require_membership(&database, account_id, workspace_id)
+    }
+
+    /// The permissions `identity` currently has across the whole workspace.
+    async fn access(&self, identity: Identity) -> WorkspaceAccess {
+        if identity.role == WorkspaceRole::Administrator {
+            return WorkspaceAccess::Unrestricted;
+        }
+        let dependencies = self.dependencies.lock().await;
+        let blocks = dependencies
+            .get(&identity.workspace_id)
+            .map(|workspace| workspace.access(identity.account_id))
+            .unwrap_or_default();
+        WorkspaceAccess::Blocks(blocks)
     }
 
     async fn register_account(
@@ -988,9 +1212,6 @@ impl BlockStore {
         email: String,
         role: WorkspaceRole,
     ) -> Result<WorkspaceInvitation, ManagementStoreError> {
-        if role != WorkspaceRole::Administrator {
-            return Err(ManagementStoreError::UnsupportedRole);
-        }
         let email = normalize_email(&email)?;
         let database = self.database.lock().await;
         require_administrator(&database, account_id, workspace_id)?;
@@ -1033,11 +1254,12 @@ impl BlockStore {
         let result = database.execute(
             "INSERT INTO workspace_invitations
              (id, workspace_id, email, role, invited_by)
-             VALUES (?1, ?2, ?3, 'administrator', ?4)",
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 invitation.id.to_string(),
                 invitation.workspace_id.to_string(),
                 &invitation.email,
+                encode_workspace_role(invitation.role),
                 invitation.invited_by.to_string()
             ],
         );
@@ -1127,6 +1349,7 @@ impl BlockStore {
                 parent: BlockParent::Orphaned,
                 references,
                 backrefs: Vec::new(),
+                grants: HashMap::new(),
             },
         );
         let references = updated.blocks[&id].references.clone();
@@ -1349,13 +1572,25 @@ impl BlockStore {
 
     async fn references(
         &self,
-        workspace_id: Uuid,
+        identity: Identity,
         list: BlockReferenceList,
     ) -> Vec<BlockReference> {
+        let access = self.access(identity).await;
         let dependencies = self.dependencies.lock().await;
-        let Some(dependencies) = dependencies.get(&workspace_id) else {
+        let Some(dependencies) = dependencies.get(&identity.workspace_id) else {
             return Vec::new();
         };
+        // Listing the neighbours of a block the account cannot see would leak
+        // its shape, so the whole listing collapses to nothing.
+        let subject = match list {
+            BlockReferenceList::Roots | BlockReferenceList::Orphans => None,
+            BlockReferenceList::Parents(id)
+            | BlockReferenceList::References(id)
+            | BlockReferenceList::Backrefs(id) => Some(id),
+        };
+        if subject.is_some_and(|id| !access.get(id).can_know_exists()) {
+            return Vec::new();
+        }
         let ids: Vec<_> = match list {
             BlockReferenceList::Orphans | BlockReferenceList::Roots => dependencies
                 .blocks
@@ -1389,6 +1624,7 @@ impl BlockStore {
             }
         };
         ids.into_iter()
+            .filter(|id| access.get(*id).can_know_exists())
             .filter_map(|id| {
                 dependencies.blocks.get(&id).map(|block| BlockReference {
                     id,
@@ -1396,10 +1632,160 @@ impl BlockStore {
                     author: block.author,
                     name: block.name.clone(),
                     parent: block.parent,
-                    references: block.references.len(),
+                    references: block
+                        .references
+                        .iter()
+                        .filter(|reference| access.get(**reference).can_know_exists())
+                        .count(),
                 })
             })
             .collect()
+    }
+
+    /// Every workspace member alongside the access they have to `id`, so a
+    /// client managing sharing can show the full picture in one round trip.
+    async fn block_access_entries(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> Result<Vec<BlockAccessEntry>, StoreError> {
+        let members = {
+            let database = self.database.lock().await;
+            let mut statement = database.prepare(
+                "SELECT a.id, a.email, a.display_name, m.role
+                 FROM workspace_memberships m
+                 JOIN accounts a ON a.id = m.account_id
+                 WHERE m.workspace_id = ?1
+                 ORDER BY a.display_name COLLATE NOCASE, a.id",
+            )?;
+            let rows = statement.query_map([workspace_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        let dependencies = self.dependencies.lock().await;
+        let workspace = dependencies
+            .get(&workspace_id)
+            .ok_or(StoreError::BlockNotFound)?;
+        if !workspace.blocks.contains_key(&id) {
+            return Err(StoreError::BlockNotFound);
+        }
+        members
+            .into_iter()
+            .map(|(account_id, email, display_name, role)| {
+                let account_id = parse_uuid(&account_id)?;
+                let role = decode_workspace_role(&role)
+                    .map_err(|error| StoreError::InvalidStorage(format!("{error:?}")))?;
+                let effective = if role == WorkspaceRole::Administrator {
+                    BlockAccess::Edit
+                } else {
+                    workspace
+                        .access(account_id)
+                        .get(&id)
+                        .copied()
+                        .unwrap_or(BlockAccess::None)
+                };
+                Ok(BlockAccessEntry {
+                    account: Account {
+                        id: account_id,
+                        email,
+                        display_name,
+                    },
+                    role,
+                    granted: workspace.blocks[&id].grants.get(&account_id).copied(),
+                    effective,
+                })
+            })
+            .collect()
+    }
+
+    async fn set_block_access_unlocked(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        account_id: Uuid,
+        access: BlockAccess,
+    ) -> Result<(), StoreError> {
+        let mut dependencies = self.dependencies.lock().await;
+        let workspace = dependencies.entry(workspace_id).or_default();
+        if !workspace.blocks.contains_key(&id) {
+            return Err(StoreError::BlockNotFound);
+        }
+        let mut database = self.database.lock().await;
+        let is_member = database
+            .query_row(
+                "SELECT role FROM workspace_memberships
+                 WHERE workspace_id = ?1 AND account_id = ?2",
+                params![workspace_id.to_string(), account_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or(StoreError::AccountNotFound)?;
+        // Administrators already reach every block, so recording a grant for one
+        // would be a permission the workspace role silently overrides.
+        if decode_workspace_role(&is_member)
+            .map_err(|error| StoreError::InvalidStorage(format!("{error:?}")))?
+            == WorkspaceRole::Administrator
+        {
+            return Err(StoreError::AdministratorAccessIsImplicit);
+        }
+
+        let transaction = database.transaction()?;
+        if access == BlockAccess::None {
+            transaction.execute(
+                "DELETE FROM block_access
+                 WHERE workspace_id = ?1 AND block_id = ?2 AND account_id = ?3",
+                params![
+                    workspace_id.to_string(),
+                    id.to_string(),
+                    account_id.to_string()
+                ],
+            )?;
+        } else {
+            transaction.execute(
+                "INSERT INTO block_access (workspace_id, block_id, account_id, access)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(workspace_id, block_id, account_id) DO UPDATE SET
+                    access = excluded.access",
+                params![
+                    workspace_id.to_string(),
+                    id.to_string(),
+                    account_id.to_string(),
+                    encode_block_access(access),
+                ],
+            )?;
+        }
+        transaction.commit()?;
+
+        let grants = &mut workspace.blocks.get_mut(&id).unwrap().grants;
+        if access == BlockAccess::None {
+            grants.remove(&account_id);
+        } else {
+            grants.insert(account_id, access);
+        }
+        Ok(())
+    }
+}
+
+/// A resolved view of what one account may do in a workspace.
+enum WorkspaceAccess {
+    /// Administrators bypass per-block permissions entirely.
+    Unrestricted,
+    Blocks(HashMap<Uuid, BlockAccess>),
+}
+
+impl WorkspaceAccess {
+    fn get(&self, id: Uuid) -> BlockAccess {
+        match self {
+            Self::Unrestricted => BlockAccess::Edit,
+            Self::Blocks(blocks) => blocks.get(&id).copied().unwrap_or(BlockAccess::None),
+        }
     }
 }
 
@@ -1509,6 +1895,96 @@ impl DependencyState {
             .get(&id)
             .map_or_else(Vec::new, |block| block.backrefs.clone())
     }
+
+    /// Resolves what `account_id` may do with every block in the workspace.
+    ///
+    /// Access starts from the blocks the account authored or was granted
+    /// directly, then spreads along three rules: view and edit flow down into
+    /// owned children, a viewable block reveals the existence of the blocks it
+    /// references, and knowing a block exists reveals its ancestors.
+    fn access(&self, account_id: Uuid) -> HashMap<Uuid, BlockAccess> {
+        let direct: HashMap<Uuid, BlockAccess> = self
+            .blocks
+            .iter()
+            .map(|(&id, block)| {
+                let granted = block.grants.get(&account_id).copied();
+                let authored = (block.author == account_id).then_some(BlockAccess::Edit);
+                (id, granted.max(authored).unwrap_or(BlockAccess::None))
+            })
+            .collect();
+
+        let mut access: HashMap<Uuid, BlockAccess> = self
+            .blocks
+            .keys()
+            .map(|&id| (id, self.inherited_access(&direct, id)))
+            .collect();
+
+        // A block you can open reveals that the blocks it points at exist, but
+        // only for plain references: owned children already inherited above.
+        let referenced: Vec<Uuid> = self
+            .blocks
+            .iter()
+            .filter(|(id, _)| access[*id].can_view())
+            .flat_map(|(&id, block)| {
+                block
+                    .references
+                    .iter()
+                    .copied()
+                    .filter(move |reference| !self.is_owned_child(id, *reference))
+            })
+            .collect();
+        for id in referenced {
+            let entry = access.entry(id).or_insert(BlockAccess::None);
+            *entry = (*entry).max(BlockAccess::KnowExists);
+        }
+
+        // Anything known to exist makes its whole ancestor chain known too,
+        // otherwise it could never be located in a listing.
+        let known: Vec<Uuid> = access
+            .iter()
+            .filter(|(_, level)| level.can_know_exists())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in known {
+            let mut seen = HashSet::from([id]);
+            let mut current = self.blocks.get(&id).map(|block| block.parent);
+            while let Some(BlockParent::Uuid(parent)) = current {
+                if !seen.insert(parent) {
+                    break;
+                }
+                let entry = access.entry(parent).or_insert(BlockAccess::None);
+                *entry = (*entry).max(BlockAccess::KnowExists);
+                current = self.blocks.get(&parent).map(|block| block.parent);
+            }
+        }
+
+        access
+    }
+
+    /// The strongest view or edit permission reaching `id` from itself or any
+    /// block that owns it, combined with any weaker direct grant on `id`.
+    fn inherited_access(&self, direct: &HashMap<Uuid, BlockAccess>, id: Uuid) -> BlockAccess {
+        let mut access = direct.get(&id).copied().unwrap_or(BlockAccess::None);
+        let mut seen = HashSet::from([id]);
+        let mut current = self.blocks.get(&id).map(|block| block.parent);
+        while let Some(BlockParent::Uuid(parent)) = current {
+            if !seen.insert(parent) {
+                break;
+            }
+            let inherited = direct.get(&parent).copied().unwrap_or(BlockAccess::None);
+            if inherited.can_view() {
+                access = access.max(inherited);
+            }
+            current = self.blocks.get(&parent).map(|block| block.parent);
+        }
+        access
+    }
+
+    fn is_owned_child(&self, parent: Uuid, child: Uuid) -> bool {
+        self.blocks
+            .get(&child)
+            .is_some_and(|block| block.parent == BlockParent::Uuid(parent))
+    }
 }
 
 #[derive(Clone)]
@@ -1520,6 +1996,8 @@ struct DependencyBlock {
     parent: BlockParent,
     references: Vec<Uuid>,
     backrefs: Vec<Uuid>,
+    /// Permissions recorded directly against this block, by account.
+    grants: HashMap<Uuid, BlockAccess>,
 }
 
 fn validate_name(name: &str) -> Result<(), StoreError> {
@@ -1572,11 +2050,11 @@ fn account_email(database: &Connection, account_id: Uuid) -> Result<String, Mana
         .ok_or(ManagementStoreError::AccountNotFound)
 }
 
-fn require_administrator(
+fn require_membership(
     database: &Connection,
     account_id: Uuid,
     workspace_id: Uuid,
-) -> Result<(), ManagementStoreError> {
+) -> Result<WorkspaceRole, ManagementStoreError> {
     require_account(database, account_id)?;
     let workspace_exists = database
         .query_row(
@@ -1589,15 +2067,27 @@ fn require_administrator(
     if !workspace_exists {
         return Err(ManagementStoreError::WorkspaceNotFound);
     }
-    database
+    let role = database
         .query_row(
-            "SELECT 1 FROM workspace_memberships
-             WHERE workspace_id = ?1 AND account_id = ?2 AND role = 'administrator'",
+            "SELECT role FROM workspace_memberships
+             WHERE workspace_id = ?1 AND account_id = ?2",
             params![workspace_id.to_string(), account_id.to_string()],
-            |_| Ok(()),
+            |row| row.get::<_, String>(0),
         )
         .optional()?
-        .ok_or(ManagementStoreError::PermissionDenied)
+        .ok_or(ManagementStoreError::PermissionDenied)?;
+    decode_workspace_role(&role)
+}
+
+fn require_administrator(
+    database: &Connection,
+    account_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<(), ManagementStoreError> {
+    match require_membership(database, account_id, workspace_id)? {
+        WorkspaceRole::Administrator => Ok(()),
+        WorkspaceRole::Editor => Err(ManagementStoreError::PermissionDenied),
+    }
 }
 
 fn parse_management_uuid(value: &str) -> Result<Uuid, ManagementStoreError> {
@@ -1608,9 +2098,35 @@ fn decode_workspace_role(value: &str) -> Result<WorkspaceRole, ManagementStoreEr
     match value {
         "administrator" => Ok(WorkspaceRole::Administrator),
         "editor" => Ok(WorkspaceRole::Editor),
-        "viewer" => Ok(WorkspaceRole::Viewer),
         _ => Err(ManagementStoreError::InvalidStorage(format!(
             "invalid workspace role {value}"
+        ))),
+    }
+}
+
+fn encode_workspace_role(role: WorkspaceRole) -> &'static str {
+    match role {
+        WorkspaceRole::Administrator => "administrator",
+        WorkspaceRole::Editor => "editor",
+    }
+}
+
+fn encode_block_access(access: BlockAccess) -> &'static str {
+    match access {
+        BlockAccess::None => "none",
+        BlockAccess::KnowExists => "know_exists",
+        BlockAccess::View => "view",
+        BlockAccess::Edit => "edit",
+    }
+}
+
+fn decode_block_access(value: &str) -> Result<BlockAccess, StoreError> {
+    match value {
+        "know_exists" => Ok(BlockAccess::KnowExists),
+        "view" => Ok(BlockAccess::View),
+        "edit" => Ok(BlockAccess::Edit),
+        _ => Err(StoreError::InvalidStorage(format!(
+            "invalid block access {value}"
         ))),
     }
 }
@@ -1633,6 +2149,7 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
         connection.execute_batch(
             "DROP TABLE IF EXISTS operations;
              DROP TABLE IF EXISTS block_references;
+             DROP TABLE IF EXISTS block_access;
              DROP TABLE IF EXISTS blocks;",
         )?;
     }
@@ -1698,7 +2215,7 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
         CREATE TABLE IF NOT EXISTS workspace_memberships (
             workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
             account_id      TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-            role            TEXT NOT NULL CHECK (role IN ('administrator', 'editor', 'viewer')),
+            role            TEXT NOT NULL CHECK (role IN ('administrator', 'editor')),
             PRIMARY KEY (workspace_id, account_id)
         );
 
@@ -1706,9 +2223,19 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
             id              TEXT PRIMARY KEY,
             workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
             email           TEXT NOT NULL,
-            role            TEXT NOT NULL CHECK (role IN ('administrator', 'editor', 'viewer')),
+            role            TEXT NOT NULL CHECK (role IN ('administrator', 'editor')),
             invited_by      TEXT NOT NULL REFERENCES accounts(id),
             UNIQUE (workspace_id, email)
+        );
+
+        CREATE TABLE IF NOT EXISTS block_access (
+            workspace_id    TEXT NOT NULL,
+            block_id        TEXT NOT NULL,
+            account_id      TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            access          TEXT NOT NULL CHECK (access IN ('know_exists', 'view', 'edit')),
+            PRIMARY KEY (workspace_id, block_id, account_id),
+            FOREIGN KEY (workspace_id, block_id)
+                REFERENCES blocks(workspace_id, id) ON DELETE CASCADE
         );
         ",
     )
@@ -1726,7 +2253,6 @@ enum ManagementStoreError {
     InvalidStorage(String),
     PermissionDenied,
     Sqlite(rusqlite::Error),
-    UnsupportedRole,
     WorkspaceNotFound,
 }
 
@@ -1767,10 +2293,6 @@ impl ManagementStoreError {
                 "permission denied".into(),
             ),
             Self::Sqlite(error) => (ManagementErrorCode::StorageError, error.to_string()),
-            Self::UnsupportedRole => (
-                ManagementErrorCode::UnsupportedRole,
-                "only Administrator is available".into(),
-            ),
             Self::WorkspaceNotFound => (
                 ManagementErrorCode::WorkspaceNotFound,
                 "workspace not found".into(),
@@ -1829,8 +2351,32 @@ fn load_dependencies(
                         parent,
                         references: Vec::new(),
                         backrefs: Vec::new(),
+                        grants: HashMap::new(),
                     },
                 );
+        }
+    }
+
+    {
+        let mut statement = connection
+            .prepare("SELECT workspace_id, block_id, account_id, access FROM block_access")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (workspace_id, block_id, account_id, access) = row?;
+            let block_id = parse_uuid(&block_id)?;
+            states
+                .get_mut(&parse_uuid(&workspace_id)?)
+                .and_then(|state| state.blocks.get_mut(&block_id))
+                .ok_or_else(|| StoreError::InvalidStorage("grant block is missing".into()))?
+                .grants
+                .insert(parse_uuid(&account_id)?, decode_block_access(&access)?);
         }
     }
 
@@ -2004,6 +2550,8 @@ fn i64_to_u64(value: i64) -> Result<u64, StoreError> {
 
 #[derive(Debug)]
 enum StoreError {
+    AccountNotFound,
+    AdministratorAccessIsImplicit,
     BlockAlreadyExists,
     BlockNotFound,
     ConflictingOperationId,
@@ -2035,6 +2583,8 @@ impl StoreError {
 
     fn code(&self) -> ErrorCode {
         match self {
+            Self::AccountNotFound => ErrorCode::AccountNotFound,
+            Self::AdministratorAccessIsImplicit => ErrorCode::PermissionDenied,
             Self::BlockAlreadyExists => ErrorCode::BlockAlreadyExists,
             Self::BlockNotFound => ErrorCode::BlockNotFound,
             Self::ConflictingOperationId => ErrorCode::ConflictingOperationId,
@@ -2054,6 +2604,13 @@ impl StoreError {
 impl fmt::Display for StoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AccountNotFound => write!(formatter, "account is not a workspace member"),
+            Self::AdministratorAccessIsImplicit => {
+                write!(
+                    formatter,
+                    "administrators already have access to every block"
+                )
+            }
             Self::BlockAlreadyExists => write!(formatter, "block already exists"),
             Self::BlockNotFound => write!(formatter, "block does not exist"),
             Self::ConflictingOperationId => {

@@ -14,10 +14,11 @@ use std::{
 };
 
 use block::{
-    Account, Block, BlockHistory, BlockHistoryTransaction, BlockOperation, BlockParent,
-    BlockReference, BlockReferenceList, BlockUpdate, ClientMessage, CommandKind, ErrorCode,
-    HistoryDirection, ManagementClientMessage, ManagementErrorCode, ManagementServerMessage,
-    OperationRecord, ReferenceDelta, ServerMessage, Workspace, WorkspaceInvitation, WorkspaceRole,
+    Account, Block, BlockAccess, BlockAccessEntry, BlockHistory, BlockHistoryTransaction,
+    BlockOperation, BlockParent, BlockReference, BlockReferenceList, BlockUpdate, ClientMessage,
+    CommandKind, ErrorCode, HistoryDirection, ManagementClientMessage, ManagementErrorCode,
+    ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage, Workspace,
+    WorkspaceInvitation, WorkspaceRole,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -298,6 +299,31 @@ pub struct BlockClient {
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
     registered_blocks: Arc<RwLock<HashMap<Uuid, RegisteredBlock>>>,
     watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
+    denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
+}
+
+/// A sharing request that is still in flight. The UI polls it each frame rather
+/// than blocking, so it never has to wait on the server to draw.
+pub struct BlockAccessRequest {
+    id: Uuid,
+    completed: oneshot::Receiver<Result<Vec<BlockAccessEntry>, String>>,
+}
+
+impl BlockAccessRequest {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    /// Returns the outcome once the server has answered, and `None` until then.
+    pub fn poll(&mut self) -> Option<Result<Vec<BlockAccessEntry>, String>> {
+        match self.completed.try_recv() {
+            Ok(result) => Some(result),
+            Err(oneshot::error::TryRecvError::Empty) => None,
+            Err(oneshot::error::TryRecvError::Closed) => {
+                Some(Err("the block client stopped before answering".into()))
+            }
+        }
+    }
 }
 
 struct RegisteredBlock {
@@ -495,10 +521,12 @@ impl BlockClient {
         let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
         let registered_blocks = Arc::new(RwLock::new(HashMap::new()));
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
+        let denied_blocks = Arc::new(RwLock::new(HashSet::new()));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
         let worker_client_debug = Arc::clone(&client_debug);
         let worker_cached_blocks = Arc::clone(&cached_blocks);
+        let worker_denied_blocks = Arc::clone(&denied_blocks);
         thread::Builder::new()
             .name("block-client".into())
             .spawn(move || {
@@ -508,6 +536,7 @@ impl BlockClient {
                     worker_debug,
                     worker_client_debug,
                     worker_cached_blocks,
+                    worker_denied_blocks,
                 )
             })
             .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));
@@ -523,6 +552,7 @@ impl BlockClient {
             cached_blocks,
             registered_blocks,
             watched_reference_lists,
+            denied_blocks,
         }
     }
 
@@ -708,6 +738,33 @@ impl BlockClient {
 
     pub fn set_block_parent(&self, id: Uuid, parent: BlockParent) {
         self.send(WorkerCommand::SetBlockParent { id, parent });
+    }
+
+    /// Asks the server who can reach `id`, for the sharing UI. The caller polls
+    /// the returned request rather than awaiting it.
+    pub fn request_block_access(&self, id: Uuid) -> BlockAccessRequest {
+        let (completed, receiver) = oneshot::channel();
+        self.send(WorkerCommand::ListBlockAccess { id, completed });
+        BlockAccessRequest {
+            id,
+            completed: receiver,
+        }
+    }
+
+    /// Grants `account_id` the given access to `id`; [`BlockAccess::None`]
+    /// withdraws whatever was granted before.
+    pub fn set_block_access(&self, id: Uuid, account_id: Uuid, access: BlockAccess) {
+        self.send(WorkerCommand::SetBlockAccess {
+            id,
+            account_id,
+            access,
+        });
+    }
+
+    /// Whether the server has refused this client access to `id`. Blocks in
+    /// this state never load, so editors show an explanation instead.
+    pub fn access_denied(&self, id: Uuid) -> bool {
+        self.denied_blocks.read().contains(&id)
     }
 
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
@@ -1210,6 +1267,15 @@ enum WorkerCommand {
     },
     CacheReferences(BlockReferenceList),
     UnwatchReferences(BlockReferenceList),
+    ListBlockAccess {
+        id: Uuid,
+        completed: oneshot::Sender<Result<Vec<BlockAccessEntry>, String>>,
+    },
+    SetBlockAccess {
+        id: Uuid,
+        account_id: Uuid,
+        access: BlockAccess,
+    },
     Synchronize(oneshot::Sender<()>),
     PauseSending,
     StepSending,
@@ -1222,6 +1288,7 @@ fn worker_main(
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+    denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
 ) {
     let runtime = tokio::runtime::Runtime::new()
         .unwrap_or_else(|error| fatal(format!("failed to create block client runtime: {error}")));
@@ -1238,7 +1305,7 @@ fn worker_main(
             })
             .unwrap_or_else(|error| fatal(format!("failed to spawn command forwarder: {error}")));
 
-        let mut state = WorkerState::new(access, debug, client_debug, cached_blocks);
+        let mut state = WorkerState::new(access, debug, client_debug, cached_blocks, denied_blocks);
         while let Some(command) = async_rx.recv().await {
             match command {
                 WorkerCommand::Connect {
@@ -1359,6 +1426,7 @@ struct WorkerState {
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+    denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
 }
 
 impl WorkerState {
@@ -1367,6 +1435,7 @@ impl WorkerState {
         debug: Arc<RwLock<NetworkDebugSnapshot>>,
         client_debug: Arc<RwLock<ClientDebugSnapshot>>,
         cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+        denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
     ) -> Self {
         Self {
             connected: false,
@@ -1382,6 +1451,7 @@ impl WorkerState {
             debug,
             client_debug,
             cached_blocks,
+            denied_blocks,
         }
     }
 
@@ -1465,6 +1535,21 @@ impl WorkerState {
                 self.reference_lists.remove(&list);
                 self.deferred
                     .push_back(DeferredRequest::UnwatchReferences { list });
+            }
+            WorkerCommand::ListBlockAccess { id, completed } => {
+                self.deferred
+                    .push_back(DeferredRequest::ListBlockAccess { id, completed });
+            }
+            WorkerCommand::SetBlockAccess {
+                id,
+                account_id,
+                access,
+            } => {
+                self.deferred.push_back(DeferredRequest::SetBlockAccess {
+                    id,
+                    account_id,
+                    access,
+                });
             }
             WorkerCommand::Synchronize(completed) => {
                 self.synchronization_waiters.push(completed);
@@ -1725,6 +1810,10 @@ impl WorkerState {
                     }
                     (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
                         if id.is_nil() => {}
+                    (
+                        PendingRequest::SetBlockAccess { id: expected },
+                        CommandKind::SetBlockAccess,
+                    ) if expected == id => {}
                     _ => fatal("server response did not match its request"),
                 }
             }
@@ -1831,6 +1920,12 @@ impl WorkerState {
                     }
                     return;
                 }
+                if code == ErrorCode::PermissionDenied {
+                    // Permissions can be withdrawn while a block is open, so a
+                    // refusal is an expected answer rather than a protocol fault.
+                    self.deny_access(request_id, response_id, message);
+                    return;
+                }
                 fatal(format!(
                     "server rejected request {:?} for {:?}: {:?}: {}",
                     request_id, response_id, code, message
@@ -1923,6 +2018,37 @@ impl WorkerState {
                     *shared.blocks.write() = blocks;
                 }
             }
+            ServerMessage::BlockAccessList {
+                request_id,
+                command,
+                id,
+                entries,
+            } => {
+                match (self.requests.remove(&request_id), command) {
+                    (
+                        Some(PendingRequest::ListBlockAccess {
+                            id: expected,
+                            completed,
+                        }),
+                        CommandKind::ListBlockAccess,
+                    ) if expected == id => {
+                        let _ = completed.send(Ok(entries));
+                    }
+                    _ => fatal("block access response did not match its request"),
+                };
+            }
+        }
+    }
+
+    /// Records that the server refused a request, dropping it so the client
+    /// keeps running with the block marked inaccessible.
+    fn deny_access(&mut self, request_id: Option<Uuid>, id: Option<Uuid>, message: String) {
+        let pending = request_id.and_then(|request_id| self.requests.remove(&request_id));
+        if let Some(PendingRequest::ListBlockAccess { completed, .. }) = pending {
+            let _ = completed.send(Err(message));
+        }
+        if let Some(id) = id {
+            self.denied_blocks.write().insert(id);
         }
     }
 
@@ -2013,6 +2139,28 @@ impl WorkerState {
                 self.outbound
                     .push_back(ClientMessage::UnwatchReferences { request_id, list });
             }
+            DeferredRequest::ListBlockAccess { id, completed } => {
+                self.requests.insert(
+                    request_id,
+                    PendingRequest::ListBlockAccess { id, completed },
+                );
+                self.outbound
+                    .push_back(ClientMessage::ListBlockAccess { request_id, id });
+            }
+            DeferredRequest::SetBlockAccess {
+                id,
+                account_id,
+                access,
+            } => {
+                self.requests
+                    .insert(request_id, PendingRequest::SetBlockAccess { id });
+                self.outbound.push_back(ClientMessage::SetBlockAccess {
+                    request_id,
+                    id,
+                    account_id,
+                    access,
+                });
+            }
         }
     }
 }
@@ -2050,6 +2198,13 @@ enum PendingRequest {
         list: BlockReferenceList,
     },
     UnwatchReferences,
+    ListBlockAccess {
+        id: Uuid,
+        completed: oneshot::Sender<Result<Vec<BlockAccessEntry>, String>>,
+    },
+    SetBlockAccess {
+        id: Uuid,
+    },
 }
 
 impl PendingRequest {
@@ -2075,6 +2230,8 @@ impl PendingRequest {
             Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
             Self::CacheReferences { list } => ("Cache references", format!("list {list:?}")),
             Self::UnwatchReferences => ("Unwatch references", String::new()),
+            Self::ListBlockAccess { id, .. } => ("List block access", format!("block {id}")),
+            Self::SetBlockAccess { id } => ("Set block access", format!("block {id}")),
         };
         PendingRequestDebugSnapshot {
             request_id,
@@ -2091,6 +2248,7 @@ impl PendingRequest {
                 | Self::Batch { .. }
                 | Self::SetBlockParent { .. }
                 | Self::SetBlockName { .. }
+                | Self::SetBlockAccess { .. }
         )
     }
 }
@@ -2117,6 +2275,15 @@ enum DeferredRequest {
     UnwatchReferences {
         list: BlockReferenceList,
     },
+    ListBlockAccess {
+        id: Uuid,
+        completed: oneshot::Sender<Result<Vec<BlockAccessEntry>, String>>,
+    },
+    SetBlockAccess {
+        id: Uuid,
+        account_id: Uuid,
+        access: BlockAccess,
+    },
 }
 
 impl DeferredRequest {
@@ -2132,6 +2299,15 @@ impl DeferredRequest {
             Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
             Self::CacheReferences { list } => ("Cache references", format!("list {list:?}")),
             Self::UnwatchReferences { list } => ("Unwatch references", format!("list {list:?}")),
+            Self::ListBlockAccess { id, .. } => ("List block access", format!("block {id}")),
+            Self::SetBlockAccess {
+                id,
+                account_id,
+                access,
+            } => (
+                "Set block access",
+                format!("block {id}, account {account_id}, access {access:?}"),
+            ),
         };
         ClientDebugEntry {
             kind: kind.into(),
@@ -2142,7 +2318,7 @@ impl DeferredRequest {
     fn changes_data(&self) -> bool {
         matches!(
             self,
-            Self::SetBlockParent { .. } | Self::SetBlockName { .. }
+            Self::SetBlockParent { .. } | Self::SetBlockName { .. } | Self::SetBlockAccess { .. }
         )
     }
 }
@@ -2155,6 +2331,7 @@ fn client_message_changes_data(message: &ClientMessage) -> bool {
             | ClientMessage::UpdateBatch { .. }
             | ClientMessage::SetBlockParent { .. }
             | ClientMessage::SetBlockName { .. }
+            | ClientMessage::SetBlockAccess { .. }
     )
 }
 
@@ -2235,6 +2412,19 @@ fn client_message_debug_entry(message: &ClientMessage) -> ClientDebugEntry {
         ClientMessage::UnwatchReferences { request_id, list } => (
             "Unwatch references",
             format!("request {request_id}, list {list:?}"),
+        ),
+        ClientMessage::ListBlockAccess { request_id, id } => (
+            "List block access",
+            format!("request {request_id}, block {id}"),
+        ),
+        ClientMessage::SetBlockAccess {
+            request_id,
+            id,
+            account_id,
+            access,
+        } => (
+            "Set block access",
+            format!("request {request_id}, block {id}, account {account_id}, access {access:?}"),
         ),
     };
     ClientDebugEntry {

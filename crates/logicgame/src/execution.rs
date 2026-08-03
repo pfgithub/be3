@@ -57,8 +57,7 @@ pub enum Instruction {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct UnlinkedComponent {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
@@ -77,8 +76,7 @@ pub struct UnlinkedSubgraph {
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Component {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
@@ -114,8 +112,6 @@ pub struct Vm {
     pub storage: Vec<u64>,
     pub returns: Vec<Pc>,
 }
-
-
 
 impl Default for Vm {
     fn default() -> Self {
