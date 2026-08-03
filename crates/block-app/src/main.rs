@@ -31,14 +31,16 @@ use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK,
-    ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT,
-    ICON_REDO, ICON_REFRESH, ICON_UNDO,
+    ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_CLOUD, ICON_COMPUTER, ICON_GROUP_ADD,
+    ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_LOGOUT, ICON_MORE_HORIZ, ICON_REDO,
+    ICON_REFRESH, ICON_SWITCH_ACCOUNT, ICON_UNDO, ICON_WORKSPACES,
 };
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
 const APP_ID: &str = "Block";
 const COMPACT_FILES_WIDTH: f32 = 700.0;
+const ONBOARDING_WIDTH: f32 = 460.0;
 fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -94,6 +96,7 @@ struct BlockApp {
     accounts: Vec<Account>,
     signed_in: bool,
     account_form: AccountForm,
+    add_account_open: bool,
     pending_account_request: Option<PendingAccountRequest>,
     account_error: Option<String>,
     workspace: Option<Workspace>,
@@ -380,6 +383,7 @@ impl BlockApp {
             accounts,
             signed_in,
             account_form: AccountForm::default(),
+            add_account_open: false,
             pending_account_request: None,
             account_error: None,
             workspace: None,
@@ -501,6 +505,7 @@ impl BlockApp {
                 });
                 self.server_url = pending.url;
                 self.account_form = AccountForm::default();
+                self.add_account_open = false;
                 self.switch_account(ctx, saved);
             }
             Err(error) => self.account_error = Some(error),
@@ -509,86 +514,169 @@ impl BlockApp {
 
     fn show_account_onboarding(&mut self, ui: &mut egui::Ui) {
         self.poll_account_request(ui.ctx());
+        let mut action = None;
+        let mut add_account = false;
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
+            onboarding_column(ui, |ui| {
+                ui.add_space(36.0);
                 ui.heading("Block Editor");
-                ui.label("Choose an account or add one to get started.");
-                ui.add_space(16.0);
-            });
+                ui.weak("Choose an account to continue.");
+                ui.add_space(20.0);
 
-            let accounts = self.accounts.clone();
-            for account in accounts {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.strong(&account.name);
-                            ui.small(&account.email);
-                            ui.weak(match &account.server {
-                                ServerLocation::Local => "Local server",
-                                ServerLocation::Remote(url) => url,
-                            });
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Open").clicked() {
-                                self.switch_account(ui.ctx(), account.clone());
-                            }
-                            if ui.button("Forget").clicked() {
-                                if let Err(error) = self.app_state.remove_account(&account) {
-                                    self.account_error = Some(error.to_string());
-                                } else {
-                                    self.accounts.retain(|saved| saved != &account);
-                                }
-                            }
-                        });
+                for account in &self.accounts {
+                    if let Some(chosen) = show_account_card(ui, account) {
+                        action = Some(chosen);
+                    }
+                    ui.add_space(8.0);
+                }
+                if self.accounts.is_empty() {
+                    onboarding_card(ui, |ui| {
+                        ui.weak("No accounts yet. Add one to get started.");
                     });
-                });
-            }
+                    ui.add_space(8.0);
+                }
 
-            ui.add_space(16.0);
-            ui.heading("Add account");
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.account_form.remote, false, "Local server");
-                ui.selectable_value(&mut self.account_form.remote, true, "Remote server");
+                add_account = ui
+                    .add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::Button::new(format!("{} Add account", ICON_ADD.codepoint)),
+                    )
+                    .clicked();
+
+                if !self.add_account_open {
+                    if let Some(error) = &self.account_error {
+                        ui.add_space(12.0);
+                        ui.colored_label(ui.visuals().error_fg_color, error);
+                    }
+                }
+                ui.add_space(24.0);
             });
-            if self.account_form.remote {
-                ui.label("Server URL");
-                ui.text_edit_singleline(&mut self.account_form.remote_url);
+        });
+
+        if add_account {
+            self.account_form = AccountForm::default();
+            self.account_error = None;
+            self.add_account_open = true;
+        }
+        match action {
+            Some(AccountAction::Open(account)) => self.open_account(ui.ctx(), account, false),
+            Some(AccountAction::ChooseWorkspace(account)) => {
+                self.open_account(ui.ctx(), account, true);
             }
+            Some(AccountAction::LogOut(account)) => self.log_out_account(&account),
+            None => {}
+        }
+        self.show_add_account(ui.ctx());
+    }
+
+    fn open_account(&mut self, ctx: &egui::Context, mut account: Account, choose_workspace: bool) {
+        if choose_workspace {
+            account.last_workspace_id = None;
+            if let Err(error) = self.app_state.set_last_workspace(&account, None) {
+                self.account_error = Some(error.to_string());
+            }
+        }
+        self.switch_account(ctx, account);
+    }
+
+    fn log_out_account(&mut self, account: &Account) {
+        if let Err(error) = self.app_state.remove_account(account) {
+            self.account_error = Some(error.to_string());
+            return;
+        }
+        self.accounts
+            .retain(|saved| saved.server != account.server || saved.id != account.id);
+        if self.account.server == account.server && self.account.id == account.id {
+            self.signed_in = false;
+        }
+    }
+
+    fn show_add_account(&mut self, ctx: &egui::Context) {
+        if !self.add_account_open {
+            return;
+        }
+        let mut close = false;
+        let pending = self.pending_account_request.is_some();
+        let ready = !pending
+            && !self.account_form.email.trim().is_empty()
+            && (!self.account_form.register || !self.account_form.display_name.trim().is_empty());
+        let response = egui::Modal::new(egui::Id::new("add-account")).show(ctx, |ui| {
+            ui.set_width(320.0);
+            ui.heading("Add account");
+            ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.account_form.register, false, "Log in");
                 ui.selectable_value(&mut self.account_form.register, true, "Register");
             });
+            ui.add_space(12.0);
+            ui.label("Server");
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.account_form.remote, false, "Local");
+                ui.selectable_value(&mut self.account_form.remote, true, "Remote");
+            });
+            if self.account_form.remote {
+                ui.add_space(4.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.account_form.remote_url)
+                        .hint_text("ws://example.com")
+                        .desired_width(f32::INFINITY),
+                );
+            }
+            ui.add_space(12.0);
             ui.label("Email address");
-            ui.text_edit_singleline(&mut self.account_form.email);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.account_form.email)
+                    .hint_text("you@example.com")
+                    .desired_width(f32::INFINITY),
+            );
             if self.account_form.register {
+                ui.add_space(12.0);
                 ui.label("Display name");
-                ui.text_edit_singleline(&mut self.account_form.display_name);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.account_form.display_name)
+                        .desired_width(f32::INFINITY),
+                );
             }
             if let Some(error) = &self.account_error {
+                ui.add_space(8.0);
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
-            if self.pending_account_request.is_some() {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Contacting server...");
-                });
-            } else if ui
-                .add_enabled(
-                    !self.account_form.email.trim().is_empty()
-                        && (!self.account_form.register
-                            || !self.account_form.display_name.trim().is_empty()),
-                    egui::Button::new(if self.account_form.register {
-                        "Register"
-                    } else {
-                        "Log in"
-                    }),
-                )
-                .clicked()
-            {
-                self.begin_account_request();
-            }
+            ui.add_space(16.0);
+            let mut submit = false;
+            egui::Sides::new().show(
+                ui,
+                |ui| {
+                    if pending {
+                        ui.spinner();
+                        ui.weak("Contacting server\u{2026}");
+                    }
+                },
+                |ui| {
+                    submit = ui
+                        .add_enabled(
+                            ready,
+                            egui::Button::new(if self.account_form.register {
+                                "Register"
+                            } else {
+                                "Log in"
+                            })
+                            .selected(ready),
+                        )
+                        .clicked();
+                    close |= ui.button("Cancel").clicked();
+                },
+            );
+            submit
         });
+        if response.inner {
+            self.begin_account_request();
+            return;
+        }
+        if close || response.should_close() {
+            self.add_account_open = false;
+            self.pending_account_request = None;
+            self.account_error = None;
+        }
     }
 
     fn begin_workspace_request(&mut self, operation: WorkspaceOperation) {
@@ -736,86 +824,195 @@ impl BlockApp {
             self.begin_workspace_request(WorkspaceOperation::Load);
         }
         self.poll_workspace_request();
+        let busy = self.pending_workspace_request.is_some();
+        let can_create = !busy && !self.workspace_name.trim().is_empty();
+        let mut open_workspace = None;
+        let mut respond = None;
+        let mut create = false;
+        let mut refresh = false;
+        let mut switch_account = false;
+        let mut log_out = false;
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Workspaces");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Accounts").clicked() {
-                        self.signed_in = false;
-                        let _ = self.app_state.clear_active_account();
-                    }
+            onboarding_column(ui, |ui| {
+                ui.add_space(36.0);
+                egui::Sides::new().shrink_left().show(
+                    ui,
+                    |ui| {
+                        ui.heading("Workspaces");
+                    },
+                    |ui| {
+                        ui.menu_button(ICON_MORE_HORIZ, |ui| {
+                            if ui
+                                .button(format!("{} Log out", ICON_LOGOUT.codepoint))
+                                .clicked()
+                            {
+                                log_out = true;
+                                ui.close();
+                            }
+                        })
+                        .response
+                        .on_hover_text("Account options");
+                        refresh = ui
+                            .add_enabled(!busy, egui::Button::new(ICON_REFRESH))
+                            .on_hover_text("Reload workspaces")
+                            .clicked();
+                    },
+                );
+                ui.add_space(12.0);
+
+                onboarding_card(ui, |ui| {
+                    egui::Sides::new().shrink_left().show(
+                        ui,
+                        |ui| {
+                            ui.vertical(|ui| {
+                                account_name(ui, &self.account);
+                                account_details(ui, &self.account);
+                            });
+                        },
+                        |ui| {
+                            switch_account = ui
+                                .button(format!("{} Switch account", ICON_SWITCH_ACCOUNT.codepoint))
+                                .clicked();
+                        },
+                    );
                 });
-            });
-            ui.label(format!("Signed in as {}", self.account.name));
-            ui.add_space(12.0);
-            for workspace in self.workspaces.clone() {
-                if ui.button(&workspace.name).clicked() {
-                    self.open_workspace(workspace);
-                }
-            }
-            if self.workspaces_loaded && self.workspaces.is_empty() {
-                ui.weak("You do not have any workspaces yet.");
-            }
 
-            ui.add_space(16.0);
-            ui.heading("Create workspace");
-            ui.text_edit_singleline(&mut self.workspace_name);
-            if ui
-                .add_enabled(
-                    !self.workspace_name.trim().is_empty()
-                        && self.pending_workspace_request.is_none(),
-                    egui::Button::new("Create"),
-                )
-                .clicked()
-            {
-                self.begin_workspace_request(WorkspaceOperation::Create(
-                    self.workspace_name.clone(),
-                ));
-            }
-
-            if !self.invitations.is_empty() {
                 ui.add_space(20.0);
-                ui.heading("Invitations");
-            }
-            for invitation in self.invitations.clone() {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.strong(&invitation.workspace_name);
-                        ui.label("Administrator");
-                        if ui
-                            .add_enabled(
-                                self.pending_workspace_request.is_none(),
-                                egui::Button::new("Accept"),
-                            )
-                            .clicked()
-                        {
-                            self.begin_workspace_request(WorkspaceOperation::Respond(
-                                invitation.id,
-                                true,
-                            ));
-                        }
-                        if ui
-                            .add_enabled(
-                                self.pending_workspace_request.is_none(),
-                                egui::Button::new("Decline"),
-                            )
-                            .clicked()
-                        {
-                            self.begin_workspace_request(WorkspaceOperation::Respond(
-                                invitation.id,
-                                false,
-                            ));
+                ui.strong("Open a workspace");
+                ui.add_space(6.0);
+                for workspace in &self.workspaces {
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 32.0],
+                            egui::Button::new(format!(
+                                "{} {}",
+                                ICON_WORKSPACES.codepoint, workspace.name
+                            ))
+                            .right_text(ICON_CHEVRON_RIGHT)
+                            .truncate(),
+                        )
+                        .clicked()
+                    {
+                        open_workspace = Some(workspace.clone());
+                    }
+                    ui.add_space(4.0);
+                }
+                if self.workspaces.is_empty() {
+                    onboarding_card(ui, |ui| {
+                        if self.workspaces_loaded {
+                            ui.weak("You do not have any workspaces yet. Create one below.");
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.weak("Loading workspaces\u{2026}");
+                            });
                         }
                     });
+                }
+
+                if !self.invitations.is_empty() {
+                    ui.add_space(20.0);
+                    ui.strong(format!("{} Invitations", ICON_GROUP_ADD.codepoint));
+                    ui.add_space(6.0);
+                    for invitation in &self.invitations {
+                        onboarding_card(ui, |ui| {
+                            egui::Sides::new().shrink_left().show(
+                                ui,
+                                |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(
+                                                    invitation.workspace_name.as_str(),
+                                                )
+                                                .strong(),
+                                            )
+                                            .truncate(),
+                                        );
+                                        ui.small("Invited as administrator");
+                                    });
+                                },
+                                |ui| {
+                                    if ui
+                                        .add_enabled(
+                                            !busy,
+                                            egui::Button::new("Accept").selected(!busy),
+                                        )
+                                        .clicked()
+                                    {
+                                        respond = Some((invitation.id, true));
+                                    }
+                                    if ui
+                                        .add_enabled(!busy, egui::Button::new("Decline"))
+                                        .clicked()
+                                    {
+                                        respond = Some((invitation.id, false));
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(4.0);
+                    }
+                }
+
+                ui.add_space(20.0);
+                ui.strong("Create a workspace");
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let button_width = 76.0;
+                    let field_width =
+                        (ui.available_width() - button_width - ui.spacing().item_spacing.x)
+                            .max(80.0);
+                    let response = ui.add_sized(
+                        [field_width, 26.0],
+                        egui::TextEdit::singleline(&mut self.workspace_name)
+                            .hint_text("Workspace name"),
+                    );
+                    let submitted = response.lost_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    let clicked = ui
+                        .add_enabled_ui(can_create, |ui| {
+                            ui.add_sized(
+                                [button_width, 26.0],
+                                egui::Button::new("Create").selected(can_create),
+                            )
+                            .clicked()
+                        })
+                        .inner;
+                    create = can_create && (clicked || submitted);
                 });
-            }
-            if self.pending_workspace_request.is_some() {
-                ui.spinner();
-            }
-            if let Some(error) = &self.workspace_error {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-            }
+
+                if let Some(error) = &self.workspace_error {
+                    ui.add_space(12.0);
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+                ui.add_space(24.0);
+            });
         });
+
+        if let Some(workspace) = open_workspace {
+            self.open_workspace(workspace);
+        }
+        if let Some((invitation, accept)) = respond {
+            self.begin_workspace_request(WorkspaceOperation::Respond(invitation, accept));
+        }
+        if create {
+            self.begin_workspace_request(WorkspaceOperation::Create(self.workspace_name.clone()));
+        }
+        if refresh {
+            self.workspaces_loaded = false;
+            self.begin_workspace_request(WorkspaceOperation::Load);
+        }
+        if switch_account {
+            self.signed_in = false;
+            if let Err(error) = self.app_state.clear_active_account() {
+                self.account_error = Some(error.to_string());
+            }
+        }
+        if log_out {
+            let account = self.account.clone();
+            self.log_out_account(&account);
+        }
     }
 
     fn show_invite(&mut self, ctx: &egui::Context) {
@@ -2443,6 +2640,110 @@ fn block_context_menu(
         ui.close();
     }
     action
+}
+
+enum AccountAction {
+    Open(Account),
+    ChooseWorkspace(Account),
+    LogOut(Account),
+}
+
+/// Lays out onboarding content in a scrollable, horizontally centred column.
+fn onboarding_column<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let width = ONBOARDING_WIDTH.min(ui.available_width());
+            let margin = ((ui.available_width() - width) / 2.0).max(0.0);
+            ui.horizontal_top(|ui| {
+                ui.add_space(margin);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(width);
+                        add_contents(ui)
+                    },
+                )
+                .inner
+            })
+            .inner
+        })
+        .inner
+}
+
+fn onboarding_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::group(ui.style())
+        .fill(ui.visuals().faint_bg_color)
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add_contents(ui)
+        })
+        .inner
+}
+
+fn account_name(ui: &mut egui::Ui, account: &Account) {
+    ui.add(egui::Label::new(egui::RichText::new(account.name.as_str()).strong()).truncate());
+}
+
+fn account_details(ui: &mut egui::Ui, account: &Account) {
+    ui.add(egui::Label::new(egui::RichText::new(account.email.as_str()).small()).truncate());
+    let server = match &account.server {
+        ServerLocation::Local => format!("{} Local server", ICON_COMPUTER.codepoint),
+        ServerLocation::Remote(url) => format!("{} {url}", ICON_CLOUD.codepoint),
+    };
+    ui.add(egui::Label::new(egui::RichText::new(server).small().weak()).truncate());
+}
+
+fn show_account_card(ui: &mut egui::Ui, account: &Account) -> Option<AccountAction> {
+    let mut log_out = false;
+    let mut open = false;
+    let mut choose_workspace = false;
+    onboarding_card(ui, |ui| {
+        egui::Sides::new().shrink_left().show(
+            ui,
+            |ui| account_name(ui, account),
+            |ui| {
+                ui.menu_button(ICON_MORE_HORIZ, |ui| {
+                    if ui
+                        .button(format!("{} Log out", ICON_LOGOUT.codepoint))
+                        .clicked()
+                    {
+                        log_out = true;
+                        ui.close();
+                    }
+                })
+                .response
+                .on_hover_text("Account options");
+            },
+        );
+        account_details(ui, account);
+        ui.add_space(8.0);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            choose_workspace = ui
+                .add(egui::Button::new(ICON_KEYBOARD_ARROW_DOWN).selected(true))
+                .on_hover_text("Open a different workspace")
+                .clicked();
+            open = ui
+                .add(egui::Button::new("Open").selected(true))
+                .on_hover_text(match account.last_workspace_id {
+                    Some(_) => "Open the last workspace used",
+                    None => "Choose a workspace",
+                })
+                .clicked();
+        });
+    });
+    if log_out {
+        Some(AccountAction::LogOut(account.clone()))
+    } else if choose_workspace {
+        Some(AccountAction::ChooseWorkspace(account.clone()))
+    } else if open {
+        Some(AccountAction::Open(account.clone()))
+    } else {
+        None
+    }
 }
 
 fn sidebar_source(parent: BlockParent) -> SidebarDragSource {
