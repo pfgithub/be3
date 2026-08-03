@@ -1,34 +1,5 @@
 # BE3
 
-## Continuous integration
-
-`.github/workflows/ci.yml` runs on every push to `main` and on every pull
-request. It checks formatting with `cargo fmt --all --check`, runs the test
-suite with `cargo nextest run --workspace --profile ci`, and builds the web
-bundle, the Android APK, and native client and server binaries. Every build
-uploads its output as a workflow artifact:
-
-| Artifact | Contents |
-| --- | --- |
-| `block-web` | the `target/web` WebAssembly bundle |
-| `block-app-android-aarch64` | the signed development APK |
-| `block-linux-x86_64` | `block-app` and `block-server` |
-| `block-linux-aarch64` | `block-server` |
-| `block-windows-x86_64` | `block-app.exe` and `block-server.exe` |
-| `block-windows-aarch64` | `block-app.exe` and `block-server.exe` |
-| `block-macos-aarch64` | `block-app` and `block-server` |
-| `block-macos-x86_64` | `block-app` and `block-server` |
-
-Each operating system builds on its own runner, because the client links that
-platform's window system, webview, and clipboard libraries. Within a runner the
-second architecture is cross-compiled: macOS builds x86\_64 from the ARM64
-runner and Windows builds ARM64 from the x86\_64 runner, since both toolchains
-ship every architecture's headers and libraries. Linux is the exception. Only
-`block-server` is cross-compiled to ARM64 there, with `gcc-aarch64-linux-gnu`
-for the SQLite that `rusqlite` bundles; the client would additionally need GTK
-and WebKitGTK built for ARM64, which Ubuntu only supplies through a multiarch
-sysroot.
-
 ## Building Block for the web
 
 `block-app` builds as a WebAssembly bundle that runs in a browser. The embedded
