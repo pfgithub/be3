@@ -6,7 +6,7 @@ use std::{
     ops::Range,
     process,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, OnceLock, Weak,
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -40,6 +40,24 @@ struct CommandSender(mpsc::UnboundedSender<WorkerCommand>);
 impl CommandSender {
     fn send(&self, command: WorkerCommand) -> Result<(), mpsc::TrySendError<WorkerCommand>> {
         self.0.unbounded_send(command)
+    }
+}
+
+/// Set when the [`BlockClient`] is dropped, so the worker can tell a connection
+/// it still needs from one nobody is waiting on any more. The worker outlives
+/// its client by however long it takes to notice the command channel closed,
+/// and whatever shut the client down usually takes the connection with it, so a
+/// socket that fails inside that window is a shutdown rather than a fault.
+#[derive(Clone, Default)]
+struct Shutdown(Arc<AtomicBool>);
+
+impl Shutdown {
+    fn request(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    fn requested(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
     }
 }
 
@@ -302,6 +320,7 @@ pub struct BlockClient {
     workspace_id: Uuid,
     commands: CommandSender,
     connected: Arc<OnceLock<()>>,
+    shutdown: Shutdown,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
@@ -518,6 +537,7 @@ impl BlockClient {
         let commands = CommandSender(commands);
         let id = Uuid::new_v4();
         let connected = Arc::new(OnceLock::new());
+        let shutdown = Shutdown::default();
         let access = Arc::new(RwLock::new(()));
         let debug = Arc::new(RwLock::new(NetworkDebugSnapshot {
             changes_saved: true,
@@ -539,6 +559,7 @@ impl BlockClient {
         let worker_denied_blocks = Arc::clone(&denied_blocks);
         transport::spawn_worker(worker_main(
             command_rx,
+            shutdown.clone(),
             worker_access,
             worker_debug,
             worker_client_debug,
@@ -551,6 +572,7 @@ impl BlockClient {
             workspace_id,
             commands,
             connected,
+            shutdown,
             access,
             debug,
             client_debug,
@@ -810,6 +832,12 @@ impl BlockClient {
         self.commands
             .send(command)
             .unwrap_or_else(|_| fatal("block client worker stopped"));
+    }
+}
+
+impl Drop for BlockClient {
+    fn drop(&mut self) {
+        self.shutdown.request();
     }
 }
 
@@ -1291,6 +1319,7 @@ enum WorkerCommand {
 
 async fn worker_main(
     mut commands: mpsc::UnboundedReceiver<WorkerCommand>,
+    shutdown: Shutdown,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
@@ -1305,10 +1334,16 @@ async fn worker_main(
                 account_id,
                 workspace_id,
             } => {
-                if run_connected(url, account_id, workspace_id, &mut state, &mut commands).await {
-                    return;
-                }
-                fatal("block server connection closed");
+                run_connected(
+                    url,
+                    account_id,
+                    workspace_id,
+                    &shutdown,
+                    &mut state,
+                    &mut commands,
+                )
+                .await;
+                return;
             }
             command => state.handle_command(command),
         }
@@ -1327,17 +1362,21 @@ fn websocket_url(url: &str, account_id: Uuid, workspace_id: Uuid) -> String {
     format!("{base}/?{ACCOUNT_PARAMETER}={account_id}&{WORKSPACE_PARAMETER}={workspace_id}")
 }
 
+/// Runs the connection until it ends. There is no reconnecting, so every way
+/// out of here stops the worker for good.
 async fn run_connected(
     url: String,
     account_id: Uuid,
     workspace_id: Uuid,
+    shutdown: &Shutdown,
     state: &mut WorkerState,
     commands: &mut mpsc::UnboundedReceiver<WorkerCommand>,
-) -> bool {
+) {
     let url = websocket_url(&url, account_id, workspace_id);
-    let mut socket = Socket::connect(&url)
-        .await
-        .unwrap_or_else(|error| fatal(error));
+    let mut socket = match Socket::connect(&url).await {
+        Ok(socket) => socket,
+        Err(error) => return stop_or_fatal(shutdown, error),
+    };
     state.connected = true;
     state.queue_initial_requests();
 
@@ -1349,10 +1388,9 @@ async fn run_connected(
             let text = serde_json::to_string(&message).unwrap_or_else(|error| {
                 fatal(format!("failed to serialize client message: {error}"))
             });
-            socket
-                .send_text(text.clone())
-                .await
-                .unwrap_or_else(|error| fatal(error));
+            if let Err(error) = socket.send_text(text.clone()).await {
+                return stop_or_fatal(shutdown, error);
+            }
             state.message_sent(text);
         }
         state.refresh_debug();
@@ -1360,7 +1398,7 @@ async fn run_connected(
         futures_util::select! {
             command = commands.next() => {
                 let Some(command) = command else {
-                    return true;
+                    return;
                 };
                 if matches!(command, WorkerCommand::Connect { .. }) {
                     fatal("BlockClient::connect may only be called once");
@@ -1371,8 +1409,8 @@ async fn run_connected(
             message = socket.next().fuse() => {
                 let message = match message {
                     Some(Ok(message)) => message,
-                    Some(Err(error)) => fatal(error),
-                    None => fatal("block server connection closed"),
+                    Some(Err(error)) => return stop_or_fatal(shutdown, error),
+                    None => return stop_or_fatal(shutdown, "block server connection closed"),
                 };
                 match message {
                     SocketMessage::Text(text) => {
@@ -1389,11 +1427,23 @@ async fn run_connected(
                         );
                         state.record_traffic(NetworkDirection::Sent, "<websocket pong>".into());
                     }
-                    SocketMessage::Close => return false,
+                    SocketMessage::Close => {
+                        return stop_or_fatal(shutdown, "block server connection closed")
+                    }
                 }
             }
         }
     }
+}
+
+/// Ends the connection. A client that is still running cannot carry on without
+/// one, so losing it is fatal; once the client is gone there is nobody left for
+/// the failure to matter to.
+fn stop_or_fatal(shutdown: &Shutdown, error: impl AsRef<str>) {
+    if shutdown.requested() {
+        return;
+    }
+    fatal(error)
 }
 
 struct WorkerState {
