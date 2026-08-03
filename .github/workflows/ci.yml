@@ -16,7 +16,7 @@ env:
 
 jobs:
   check:
-    name: fmt and tests
+    name: clippy, fmt and tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
 
@@ -39,9 +39,7 @@ jobs:
         with:
           tool: cargo-nextest
 
-      - run: cargo fmt --all --check
-
-      - run: cargo nextest run --workspace --profile ci
+      - run: pwsh -File ./scripts/verify.ps1 -Check
 
   web:
     name: web bundle
