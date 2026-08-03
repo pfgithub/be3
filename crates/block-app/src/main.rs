@@ -372,10 +372,7 @@ impl BlockApp {
             ServerLocation::Local => url.clone(),
             ServerLocation::Remote(remote) => remote.clone(),
         };
-        let client = BlockClient::new(account.id);
-        if signed_in {
-            client.connect(server_url.clone());
-        }
+        let client = BlockClient::new(account.id, Uuid::nil());
         let roots = client.watch_references(BlockReferenceList::Roots);
         Ok(Self {
             app_state,
@@ -699,6 +696,24 @@ impl BlockApp {
     }
 
     fn open_workspace(&mut self, workspace: Workspace) {
+        let client = BlockClient::new(self.account.id, workspace.id);
+        client.connect(self.server_url.clone());
+        let roots = client.watch_references(BlockReferenceList::Roots);
+        self.orphaned = None;
+        self.orphaned_expanded = false;
+        self.expanded.clear();
+        self.parents.clear();
+        self.references.clear();
+        self.backrefs.clear();
+        self.block_types.clear();
+        self.registry = EditorRegistry::new();
+        self.editors.clear();
+        self.dynamic_artifact_regenerations.clear();
+        self.dynamic_artifact_errors.clear();
+        self.dock_state = default_dock_state();
+        self.active_tab = None;
+        self.roots = roots;
+        self.client = client;
         self.workspace = Some(workspace.clone());
         self.account.last_workspace_id = Some(workspace.id);
         if let Some(saved) = self
@@ -859,8 +874,7 @@ impl BlockApp {
             ServerLocation::Local => self.local_server_url.clone(),
             ServerLocation::Remote(url) => url.clone(),
         };
-        let client = BlockClient::new(account.id);
-        client.connect(server_url.clone());
+        let client = BlockClient::new(account.id, Uuid::nil());
         let roots = client.watch_references(BlockReferenceList::Roots);
 
         self.orphaned = None;

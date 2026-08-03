@@ -33,6 +33,7 @@ use tokio_tungstenite::{
 use uuid::Uuid;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
+const WORKSPACE_HEADER: &str = "x-block-workspace-id";
 const DATABASE_FILE: &str = "server.sqlite3";
 
 pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
@@ -69,6 +70,7 @@ async fn handle_connection(
     watch_hub: Arc<WatchHub>,
 ) -> Result<(), ServerError> {
     let mut account_id = None;
+    let mut workspace_id = None;
     let socket = accept_hdr_async(
         stream,
         |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
@@ -77,13 +79,27 @@ async fn handle_connection(
                 .get(ACCOUNT_HEADER)
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| Uuid::parse_str(value).ok());
+            workspace_id = request
+                .headers()
+                .get(WORKSPACE_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| Uuid::parse_str(value).ok());
             Ok(response)
         },
     )
     .await?;
-    let Some(account_id) = account_id else {
-        return handle_management_connection(socket, store).await;
+    let (account_id, workspace_id) = match (account_id, workspace_id) {
+        (None, None) => return handle_management_connection(socket, store).await,
+        (Some(account_id), Some(workspace_id)) => (account_id, workspace_id),
+        _ => return Err(ServerError::InvalidHandshake),
     };
+    if store
+        .authorize_workspace(account_id, workspace_id)
+        .await
+        .is_err()
+    {
+        return Err(ServerError::InvalidHandshake);
+    }
     let (mut sink, mut source) = socket.split();
     let (outbound, mut outbound_rx) = mpsc::unbounded_channel();
     let client_id = watch_hub.next_client_id();
@@ -102,6 +118,7 @@ async fn handle_connection(
                                 &watch_hub,
                                 client_id,
                                 account_id,
+                                workspace_id,
                                 outbound.clone(),
                                 &text,
                             ).await;
@@ -109,9 +126,9 @@ async fn handle_connection(
                         if let Some(notification) = notification {
                             match notification {
                                 ServerMessage::BatchUpdated { operations } => {
-                                    watch_hub.broadcast_batch(operations).await;
+                                    watch_hub.broadcast_batch(workspace_id, operations).await;
                                 }
-                                notification => watch_hub.broadcast(notification).await,
+                                notification => watch_hub.broadcast(workspace_id, notification).await,
                             }
                         }
                         watch_hub.broadcast_reference_lists(&store).await;
@@ -257,6 +274,7 @@ async fn handle_text_message(
     watch_hub: &WatchHub,
     client_id: ClientId,
     account_id: Uuid,
+    workspace_id: Uuid,
     outbound: OutboundMessages,
     text: &str,
 ) -> (ServerMessage, Option<ServerMessage>) {
@@ -287,15 +305,23 @@ async fn handle_text_message(
             references,
             watch,
         } => {
-            let lock = store.lock_for(id).await;
+            let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
             let response = match store
-                .create_block_unlocked(id, block_type, account_id, data, implicit_name, references)
+                .create_block_unlocked(
+                    workspace_id,
+                    id,
+                    block_type,
+                    account_id,
+                    data,
+                    implicit_name,
+                    references,
+                )
                 .await
             {
                 Ok(()) => {
                     if watch {
-                        watch_hub.watch(id, client_id, outbound).await;
+                        watch_hub.watch(workspace_id, id, client_id, outbound).await;
                     }
                     ServerMessage::Ok {
                         request_id,
@@ -318,10 +344,11 @@ async fn handle_text_message(
             implicit_name,
             references,
         } => {
-            let lock = store.lock_for(id).await;
+            let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
             match store
                 .update_block_unlocked(
+                    workspace_id,
                     id,
                     seq,
                     operation_id,
@@ -395,7 +422,7 @@ async fn handle_text_message(
             }
             let mut locks = Vec::with_capacity(ids.len());
             for id in ids {
-                locks.push(store.lock_for(id).await);
+                locks.push(store.lock_for(workspace_id, id).await);
             }
             let mut guards = Vec::with_capacity(locks.len());
             for lock in &locks {
@@ -407,6 +434,7 @@ async fn handle_text_message(
             for update in updates {
                 match store
                     .update_block_unlocked(
+                        workspace_id,
                         update.id,
                         update.seq,
                         update.operation_id,
@@ -457,12 +485,12 @@ async fn handle_text_message(
             id,
             watch,
         } => {
-            let lock = store.lock_for(id).await;
+            let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
-            let response = match store.read_block_unlocked(id).await {
+            let response = match store.read_block_unlocked(workspace_id, id).await {
                 Ok(read) => {
                     if watch {
-                        watch_hub.watch(id, client_id, outbound).await;
+                        watch_hub.watch(workspace_id, id, client_id, outbound).await;
                     }
                     ServerMessage::ReadBlock {
                         request_id,
@@ -482,7 +510,7 @@ async fn handle_text_message(
             (response, None)
         }
         ClientMessage::UnwatchBlock { request_id, id } => {
-            watch_hub.unwatch(id, client_id).await;
+            watch_hub.unwatch(workspace_id, id, client_id).await;
             (
                 ServerMessage::Ok {
                     request_id,
@@ -513,9 +541,9 @@ async fn handle_text_message(
             id,
             parent,
         } => {
-            let lock = store.lock_for(id).await;
+            let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
-            let response = match store.set_parent_unlocked(id, parent).await {
+            let response = match store.set_parent_unlocked(workspace_id, id, parent).await {
                 Ok(()) => ServerMessage::Ok {
                     request_id,
                     command: CommandKind::SetBlockParent,
@@ -532,9 +560,9 @@ async fn handle_text_message(
             id,
             name,
         } => {
-            let lock = store.lock_for(id).await;
+            let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
-            match store.set_name_unlocked(id, name).await {
+            match store.set_name_unlocked(workspace_id, id, name).await {
                 Ok(name) => (
                     ServerMessage::Ok {
                         request_id,
@@ -556,10 +584,10 @@ async fn handle_text_message(
             list,
             watch,
         } => {
-            let blocks = store.references(list).await;
+            let blocks = store.references(workspace_id, list).await;
             if watch {
                 watch_hub
-                    .watch_references(list, client_id, outbound, blocks.clone())
+                    .watch_references(workspace_id, list, client_id, outbound, blocks.clone())
                     .await;
             }
             (
@@ -572,7 +600,9 @@ async fn handle_text_message(
             )
         }
         ClientMessage::UnwatchReferences { request_id, list } => {
-            watch_hub.unwatch_references(list, client_id).await;
+            watch_hub
+                .unwatch_references(workspace_id, list, client_id)
+                .await;
             (
                 ServerMessage::Ok {
                     request_id,
@@ -592,8 +622,9 @@ type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
 
 struct WatchHub {
     next_client_id: AtomicU64,
-    watchers: Mutex<HashMap<Uuid, HashMap<ClientId, OutboundMessages>>>,
-    reference_watchers: Mutex<HashMap<BlockReferenceList, HashMap<ClientId, ReferenceWatch>>>,
+    watchers: Mutex<HashMap<(Uuid, Uuid), HashMap<ClientId, OutboundMessages>>>,
+    reference_watchers:
+        Mutex<HashMap<(Uuid, BlockReferenceList), HashMap<ClientId, ReferenceWatch>>>,
 }
 
 struct ReferenceWatch {
@@ -614,21 +645,28 @@ impl WatchHub {
         self.next_client_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    async fn watch(&self, id: Uuid, client_id: ClientId, outbound: OutboundMessages) {
+    async fn watch(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        client_id: ClientId,
+        outbound: OutboundMessages,
+    ) {
         self.watchers
             .lock()
             .await
-            .entry(id)
+            .entry((workspace_id, id))
             .or_default()
             .insert(client_id, outbound);
     }
 
-    async fn unwatch(&self, id: Uuid, client_id: ClientId) {
+    async fn unwatch(&self, workspace_id: Uuid, id: Uuid, client_id: ClientId) {
         let mut watchers = self.watchers.lock().await;
-        if let Some(entries) = watchers.get_mut(&id) {
+        let key = (workspace_id, id);
+        if let Some(entries) = watchers.get_mut(&key) {
             entries.remove(&client_id);
             if entries.is_empty() {
-                watchers.remove(&id);
+                watchers.remove(&key);
             }
         }
     }
@@ -648,6 +686,7 @@ impl WatchHub {
 
     async fn watch_references(
         &self,
+        workspace_id: Uuid,
         list: BlockReferenceList,
         client_id: ClientId,
         outbound: OutboundMessages,
@@ -656,17 +695,23 @@ impl WatchHub {
         self.reference_watchers
             .lock()
             .await
-            .entry(list)
+            .entry((workspace_id, list))
             .or_default()
             .insert(client_id, ReferenceWatch { outbound, last });
     }
 
-    async fn unwatch_references(&self, list: BlockReferenceList, client_id: ClientId) {
+    async fn unwatch_references(
+        &self,
+        workspace_id: Uuid,
+        list: BlockReferenceList,
+        client_id: ClientId,
+    ) {
         let mut watchers = self.reference_watchers.lock().await;
-        if let Some(entries) = watchers.get_mut(&list) {
+        let key = (workspace_id, list);
+        if let Some(entries) = watchers.get_mut(&key) {
             entries.remove(&client_id);
             if entries.is_empty() {
-                watchers.remove(&list);
+                watchers.remove(&key);
             }
         }
     }
@@ -679,10 +724,10 @@ impl WatchHub {
             .keys()
             .copied()
             .collect();
-        for list in lists {
-            let blocks = store.references(list).await;
+        for (workspace_id, list) in lists {
+            let blocks = store.references(workspace_id, list).await;
             let mut watchers = self.reference_watchers.lock().await;
-            let Some(entries) = watchers.get_mut(&list) else {
+            let Some(entries) = watchers.get_mut(&(workspace_id, list)) else {
                 continue;
             };
             for watch in entries.values_mut() {
@@ -697,24 +742,24 @@ impl WatchHub {
         }
     }
 
-    async fn broadcast(&self, message: ServerMessage) {
+    async fn broadcast(&self, workspace_id: Uuid, message: ServerMessage) {
         let Some(id) = message.id() else {
             return;
         };
         let watchers = self.watchers.lock().await;
-        if let Some(entries) = watchers.get(&id) {
+        if let Some(entries) = watchers.get(&(workspace_id, id)) {
             for outbound in entries.values() {
                 let _ = outbound.send(message.clone());
             }
         }
     }
 
-    async fn broadcast_batch(&self, operations: Vec<BlockOperation>) {
+    async fn broadcast_batch(&self, workspace_id: Uuid, operations: Vec<BlockOperation>) {
         let watchers = self.watchers.lock().await;
         let mut deliveries: HashMap<ClientId, (OutboundMessages, Vec<BlockOperation>)> =
             HashMap::new();
         for operation in operations {
-            if let Some(entries) = watchers.get(&operation.id) {
+            if let Some(entries) = watchers.get(&(workspace_id, operation.id)) {
                 for (&client_id, outbound) in entries {
                     let delivery = deliveries
                         .entry(client_id)
@@ -731,8 +776,8 @@ impl WatchHub {
 
 struct BlockStore {
     database: Mutex<Connection>,
-    locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
-    dependencies: Mutex<DependencyState>,
+    locks: Mutex<HashMap<(Uuid, Uuid), Arc<Mutex<()>>>>,
+    dependencies: Mutex<HashMap<Uuid, DependencyState>>,
 }
 
 impl BlockStore {
@@ -759,9 +804,22 @@ impl BlockStore {
         })
     }
 
-    async fn lock_for(&self, id: Uuid) -> Arc<Mutex<()>> {
+    async fn lock_for(&self, workspace_id: Uuid, id: Uuid) -> Arc<Mutex<()>> {
         let mut locks = self.locks.lock().await;
-        Arc::clone(locks.entry(id).or_insert_with(|| Arc::new(Mutex::new(()))))
+        Arc::clone(
+            locks
+                .entry((workspace_id, id))
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    }
+
+    async fn authorize_workspace(
+        &self,
+        account_id: Uuid,
+        workspace_id: Uuid,
+    ) -> Result<(), ManagementStoreError> {
+        let database = self.database.lock().await;
+        require_administrator(&database, account_id, workspace_id)
     }
 
     async fn register_account(
@@ -1037,6 +1095,7 @@ impl BlockStore {
 
     async fn create_block_unlocked(
         &self,
+        workspace_id: Uuid,
         id: Uuid,
         block_type: Uuid,
         author: Uuid,
@@ -1047,16 +1106,17 @@ impl BlockStore {
         validate_name(&implicit_name)?;
         let references = normalize_ids(references);
         let mut dependencies = self.dependencies.lock().await;
-        if dependencies.blocks.contains_key(&id) {
+        let workspace = dependencies.entry(workspace_id).or_default();
+        if workspace.blocks.contains_key(&id) {
             return Err(StoreError::BlockAlreadyExists);
         }
         if references
             .iter()
-            .any(|reference| *reference != id && !dependencies.blocks.contains_key(reference))
+            .any(|reference| *reference != id && !workspace.blocks.contains_key(reference))
         {
             return Err(StoreError::ReferencedBlockNotFound);
         }
-        let mut updated = dependencies.clone();
+        let mut updated = workspace.clone();
         updated.blocks.insert(
             id,
             DependencyBlock {
@@ -1080,10 +1140,11 @@ impl BlockStore {
         let transaction = database.transaction()?;
         transaction.execute(
             "INSERT INTO blocks (
-                id, block_type, author, snapshot, snapshot_seq, name, explicit_name,
+                workspace_id, id, block_type, author, snapshot, snapshot_seq, name, explicit_name,
                 parent_kind, parent_id
-            ) VALUES (?1, ?2, ?3, ?4, 0, ?5, NULL, 0, NULL)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, 0, NULL)",
             params![
+                workspace_id.to_string(),
                 id.to_string(),
                 block_type.to_string(),
                 author.to_string(),
@@ -1091,14 +1152,15 @@ impl BlockStore {
                 implicit_name,
             ],
         )?;
-        persist_dependencies(&transaction, &updated)?;
+        persist_dependencies(&transaction, workspace_id, &updated)?;
         transaction.commit()?;
-        *dependencies = updated;
+        *workspace = updated;
         Ok(())
     }
 
     async fn update_block_unlocked(
         &self,
+        workspace_id: Uuid,
         id: Uuid,
         seq: Option<u64>,
         operation_id: Uuid,
@@ -1112,14 +1174,14 @@ impl BlockStore {
             let database = self.database.lock().await;
             let exists = database
                 .query_row(
-                    "SELECT 1 FROM blocks WHERE id = ?1",
-                    [id.to_string()],
+                    "SELECT 1 FROM blocks WHERE workspace_id = ?1 AND id = ?2",
+                    params![workspace_id.to_string(), id.to_string()],
                     |_| Ok(()),
                 )
                 .optional()?
                 .is_some();
             let records = exists
-                .then(|| read_operations(&database, id))
+                .then(|| read_operations(&database, workspace_id, id))
                 .transpose()?
                 .unwrap_or_default();
             (exists, records)
@@ -1135,6 +1197,8 @@ impl BlockStore {
             if existing.operation == operation && existing.references == references {
                 let dependencies = self.dependencies.lock().await;
                 let name = dependencies
+                    .get(&workspace_id)
+                    .ok_or(StoreError::BlockNotFound)?
                     .blocks
                     .get(&id)
                     .ok_or(StoreError::BlockNotFound)?
@@ -1161,7 +1225,8 @@ impl BlockStore {
             references,
         };
         let mut dependencies = self.dependencies.lock().await;
-        let mut updated = dependencies.clone();
+        let workspace = dependencies.entry(workspace_id).or_default();
+        let mut updated = workspace.clone();
         updated.apply_references(id, &record.references)?;
         let block = updated
             .blocks
@@ -1175,9 +1240,10 @@ impl BlockStore {
         let transaction = database.transaction()?;
         transaction.execute(
             "INSERT INTO operations (
-                block_id, seq, operation_id, author, operation, reference_delta
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                workspace_id, block_id, seq, operation_id, author, operation, reference_delta
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
+                workspace_id.to_string(),
                 id.to_string(),
                 u64_to_i64(record.seq)?,
                 record.operation_id.to_string(),
@@ -1186,18 +1252,23 @@ impl BlockStore {
                 serde_json::to_string(&record.references)?,
             ],
         )?;
-        persist_dependencies(&transaction, &updated)?;
+        persist_dependencies(&transaction, workspace_id, &updated)?;
         transaction.commit()?;
-        *dependencies = updated;
+        *workspace = updated;
         Ok(UpdateOutcome::Inserted(record, name))
     }
 
-    async fn read_block_unlocked(&self, id: Uuid) -> Result<BlockRead, StoreError> {
+    async fn read_block_unlocked(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> Result<BlockRead, StoreError> {
         let database = self.database.lock().await;
         let block = database
             .query_row(
-                "SELECT block_type, snapshot, snapshot_seq FROM blocks WHERE id = ?1",
-                [id.to_string()],
+                "SELECT block_type, snapshot, snapshot_seq FROM blocks
+                 WHERE workspace_id = ?1 AND id = ?2",
+                params![workspace_id.to_string(), id.to_string()],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -1211,13 +1282,15 @@ impl BlockStore {
         let block_type = parse_uuid(&block.0)?;
         let snapshot = block.1;
         let snapshot_seq = i64_to_u64(block.2)?;
-        let operations = read_operations(&database, id)?
+        let operations = read_operations(&database, workspace_id, id)?
             .into_iter()
             .filter(|record| record.seq > snapshot_seq)
             .collect();
         drop(database);
         let dependencies = self.dependencies.lock().await;
         let dependency = dependencies
+            .get(&workspace_id)
+            .ok_or(StoreError::BlockNotFound)?
             .blocks
             .get(&id)
             .ok_or(StoreError::BlockNotFound)?;
@@ -1232,22 +1305,34 @@ impl BlockStore {
         })
     }
 
-    async fn set_parent_unlocked(&self, id: Uuid, parent: BlockParent) -> Result<(), StoreError> {
+    async fn set_parent_unlocked(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        parent: BlockParent,
+    ) -> Result<(), StoreError> {
         let mut dependencies = self.dependencies.lock().await;
-        let mut updated = dependencies.clone();
+        let workspace = dependencies.entry(workspace_id).or_default();
+        let mut updated = workspace.clone();
         updated.set_parent(id, parent)?;
         let mut database = self.database.lock().await;
         let transaction = database.transaction()?;
-        persist_dependencies(&transaction, &updated)?;
+        persist_dependencies(&transaction, workspace_id, &updated)?;
         transaction.commit()?;
-        *dependencies = updated;
+        *workspace = updated;
         Ok(())
     }
 
-    async fn set_name_unlocked(&self, id: Uuid, name: String) -> Result<String, StoreError> {
+    async fn set_name_unlocked(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        name: String,
+    ) -> Result<String, StoreError> {
         validate_name(&name)?;
         let mut dependencies = self.dependencies.lock().await;
-        let mut updated = dependencies.clone();
+        let workspace = dependencies.entry(workspace_id).or_default();
+        let mut updated = workspace.clone();
         let block = updated
             .blocks
             .get_mut(&id)
@@ -1256,14 +1341,21 @@ impl BlockStore {
         block.explicit_name = Some(name.clone());
         let mut database = self.database.lock().await;
         let transaction = database.transaction()?;
-        persist_dependencies(&transaction, &updated)?;
+        persist_dependencies(&transaction, workspace_id, &updated)?;
         transaction.commit()?;
-        *dependencies = updated;
+        *workspace = updated;
         Ok(name)
     }
 
-    async fn references(&self, list: BlockReferenceList) -> Vec<BlockReference> {
+    async fn references(
+        &self,
+        workspace_id: Uuid,
+        list: BlockReferenceList,
+    ) -> Vec<BlockReference> {
         let dependencies = self.dependencies.lock().await;
+        let Some(dependencies) = dependencies.get(&workspace_id) else {
+            return Vec::new();
+        };
         let ids: Vec<_> = match list {
             BlockReferenceList::Orphans | BlockReferenceList::Roots => dependencies
                 .blocks
@@ -1532,10 +1624,23 @@ fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
 fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Error> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
+    let has_legacy_blocks = connection
+        .prepare("PRAGMA table_info(blocks)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .all(|column| column != "workspace_id");
+    if has_legacy_blocks {
+        connection.execute_batch(
+            "DROP TABLE IF EXISTS operations;
+             DROP TABLE IF EXISTS block_references;
+             DROP TABLE IF EXISTS blocks;",
+        )?;
+    }
     connection.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS blocks (
-            id              TEXT PRIMARY KEY,
+            workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            id              TEXT NOT NULL,
             block_type      TEXT NOT NULL,
             author          TEXT NOT NULL,
             snapshot        BLOB NOT NULL,
@@ -1547,26 +1652,35 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
             CHECK (
                 (parent_kind = 2 AND parent_id IS NOT NULL)
                 OR (parent_kind != 2 AND parent_id IS NULL)
-            )
+            ),
+            PRIMARY KEY (workspace_id, id)
         );
 
         CREATE TABLE IF NOT EXISTS block_references (
-            block_id        TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            workspace_id    TEXT NOT NULL,
+            block_id        TEXT NOT NULL,
             position        INTEGER NOT NULL CHECK (position >= 0),
-            reference_id    TEXT NOT NULL REFERENCES blocks(id),
-            PRIMARY KEY (block_id, position),
-            UNIQUE (block_id, reference_id)
+            reference_id    TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, block_id, position),
+            UNIQUE (workspace_id, block_id, reference_id),
+            FOREIGN KEY (workspace_id, block_id)
+                REFERENCES blocks(workspace_id, id) ON DELETE CASCADE,
+            FOREIGN KEY (workspace_id, reference_id)
+                REFERENCES blocks(workspace_id, id)
         );
 
         CREATE TABLE IF NOT EXISTS operations (
-            block_id        TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            workspace_id    TEXT NOT NULL,
+            block_id        TEXT NOT NULL,
             seq             INTEGER NOT NULL CHECK (seq > 0),
             operation_id    TEXT NOT NULL,
             author          TEXT NOT NULL,
             operation       BLOB NOT NULL,
             reference_delta TEXT NOT NULL,
-            PRIMARY KEY (block_id, seq),
-            UNIQUE (block_id, operation_id)
+            PRIMARY KEY (workspace_id, block_id, seq),
+            UNIQUE (workspace_id, block_id, operation_id),
+            FOREIGN KEY (workspace_id, block_id)
+                REFERENCES blocks(workspace_id, id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS accounts (
@@ -1600,6 +1714,7 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
     )
 }
 
+#[derive(Debug)]
 enum ManagementStoreError {
     AccountAlreadyMember,
     AccountNotFound,
@@ -1675,12 +1790,14 @@ impl From<rusqlite::Error> for ManagementStoreError {
     }
 }
 
-fn load_dependencies(connection: &Connection) -> Result<DependencyState, StoreError> {
-    let mut state = DependencyState::default();
+fn load_dependencies(
+    connection: &Connection,
+) -> Result<HashMap<Uuid, DependencyState>, StoreError> {
+    let mut states: HashMap<Uuid, DependencyState> = HashMap::new();
     {
         let mut statement = connection.prepare(
-            "SELECT id, block_type, author, name, explicit_name, parent_kind, parent_id
-             FROM blocks ORDER BY rowid",
+            "SELECT workspace_id, id, block_type, author, name, explicit_name, parent_kind, parent_id
+             FROM blocks ORDER BY workspace_id, rowid",
         )?;
         let rows = statement.query_map([], |row| {
             Ok((
@@ -1688,41 +1805,54 @@ fn load_dependencies(connection: &Connection) -> Result<DependencyState, StoreEr
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?;
         for row in rows {
-            let (id, block_type, author, name, explicit_name, parent_kind, parent_id) = row?;
+            let (workspace_id, id, block_type, author, name, explicit_name, parent_kind, parent_id) =
+                row?;
             let parent = decode_parent(parent_kind, parent_id)?;
-            state.blocks.insert(
-                parse_uuid(&id)?,
-                DependencyBlock {
-                    block_type: parse_uuid(&block_type)?,
-                    author: parse_uuid(&author)?,
-                    name,
-                    explicit_name,
-                    parent,
-                    references: Vec::new(),
-                    backrefs: Vec::new(),
-                },
-            );
+            states
+                .entry(parse_uuid(&workspace_id)?)
+                .or_default()
+                .blocks
+                .insert(
+                    parse_uuid(&id)?,
+                    DependencyBlock {
+                        block_type: parse_uuid(&block_type)?,
+                        author: parse_uuid(&author)?,
+                        name,
+                        explicit_name,
+                        parent,
+                        references: Vec::new(),
+                        backrefs: Vec::new(),
+                    },
+                );
         }
     }
 
     let mut statement = connection.prepare(
-        "SELECT block_id, reference_id
-         FROM block_references ORDER BY block_id, position",
+        "SELECT workspace_id, block_id, reference_id
+         FROM block_references ORDER BY workspace_id, block_id, position",
     )?;
     let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     for row in rows {
-        let (block_id, reference_id) = row?;
+        let (workspace_id, block_id, reference_id) = row?;
+        let workspace_id = parse_uuid(&workspace_id)?;
         let block_id = parse_uuid(&block_id)?;
         let reference_id = parse_uuid(&reference_id)?;
-        state
+        states
+            .get_mut(&workspace_id)
+            .ok_or_else(|| StoreError::InvalidStorage("reference workspace is missing".into()))?
             .blocks
             .get_mut(&block_id)
             .ok_or_else(|| StoreError::InvalidStorage("reference source is missing".into()))?
@@ -1730,40 +1860,47 @@ fn load_dependencies(connection: &Connection) -> Result<DependencyState, StoreEr
             .push(reference_id);
     }
 
-    let references: Vec<_> = state
-        .blocks
-        .iter()
-        .flat_map(|(&id, block)| {
-            block
-                .references
-                .iter()
-                .copied()
-                .map(move |reference| (id, reference))
-        })
-        .collect();
-    for (id, reference) in references {
-        state
+    for state in states.values_mut() {
+        let references: Vec<_> = state
             .blocks
-            .get_mut(&reference)
-            .ok_or_else(|| StoreError::InvalidStorage("referenced block is missing".into()))?
-            .backrefs
-            .push(id);
+            .iter()
+            .flat_map(|(&id, block)| {
+                block
+                    .references
+                    .iter()
+                    .copied()
+                    .map(move |reference| (id, reference))
+            })
+            .collect();
+        for (id, reference) in references {
+            state
+                .blocks
+                .get_mut(&reference)
+                .ok_or_else(|| StoreError::InvalidStorage("referenced block is missing".into()))?
+                .backrefs
+                .push(id);
+        }
     }
-    Ok(state)
+    Ok(states)
 }
 
 fn persist_dependencies(
     transaction: &Transaction<'_>,
+    workspace_id: Uuid,
     dependencies: &DependencyState,
 ) -> Result<(), StoreError> {
-    transaction.execute("DELETE FROM block_references", [])?;
+    transaction.execute(
+        "DELETE FROM block_references WHERE workspace_id = ?1",
+        [workspace_id.to_string()],
+    )?;
     for (&id, block) in &dependencies.blocks {
         let (parent_kind, parent_id) = encode_parent(block.parent);
         let updated = transaction.execute(
             "UPDATE blocks
-             SET name = ?2, explicit_name = ?3, parent_kind = ?4, parent_id = ?5
-             WHERE id = ?1",
+             SET name = ?3, explicit_name = ?4, parent_kind = ?5, parent_id = ?6
+             WHERE workspace_id = ?1 AND id = ?2",
             params![
+                workspace_id.to_string(),
                 id.to_string(),
                 block.name,
                 block.explicit_name,
@@ -1778,9 +1915,10 @@ fn persist_dependencies(
         }
         for (position, reference) in block.references.iter().enumerate() {
             transaction.execute(
-                "INSERT INTO block_references (block_id, position, reference_id)
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO block_references (workspace_id, block_id, position, reference_id)
+                 VALUES (?1, ?2, ?3, ?4)",
                 params![
+                    workspace_id.to_string(),
                     id.to_string(),
                     i64::try_from(position).map_err(|_| {
                         StoreError::InvalidStorage("reference position exceeds SQLite range".into())
@@ -1793,12 +1931,16 @@ fn persist_dependencies(
     Ok(())
 }
 
-fn read_operations(connection: &Connection, id: Uuid) -> Result<Vec<OperationRecord>, StoreError> {
+fn read_operations(
+    connection: &Connection,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<Vec<OperationRecord>, StoreError> {
     let mut statement = connection.prepare(
         "SELECT seq, operation_id, author, operation, reference_delta
-         FROM operations WHERE block_id = ?1 ORDER BY seq",
+         FROM operations WHERE workspace_id = ?1 AND block_id = ?2 ORDER BY seq",
     )?;
-    let rows = statement.query_map([id.to_string()], |row| {
+    let rows = statement.query_map(params![workspace_id.to_string(), id.to_string()], |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
@@ -1948,6 +2090,7 @@ impl From<serde_json::Error> for StoreError {
 
 #[derive(Debug)]
 pub enum ServerError {
+    InvalidHandshake,
     Io(std::io::Error),
     Json(serde_json::Error),
     Sqlite(rusqlite::Error),
@@ -1958,6 +2101,7 @@ pub enum ServerError {
 impl fmt::Display for ServerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidHandshake => write!(formatter, "invalid block connection identity"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::Json(error) => write!(formatter, "JSON error: {error}"),
             Self::Sqlite(error) => write!(formatter, "SQLite error: {error}"),

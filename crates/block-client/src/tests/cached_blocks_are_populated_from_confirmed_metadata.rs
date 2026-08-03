@@ -33,6 +33,7 @@ fn state(cache: Arc<RwLock<HashMap<Uuid, CachedBlock>>>) -> WorkerState {
         Arc::new(RwLock::new(ClientDebugSnapshot::empty(
             Uuid::nil(),
             Uuid::nil(),
+            Uuid::nil(),
         ))),
         cache,
     )

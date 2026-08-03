@@ -4,9 +4,18 @@ use super::*;
 async fn omitted_sequences_are_assigned_by_the_server() {
     let root = test_root();
     let store = BlockStore::new(root.clone());
+    let account = store
+        .register_account("omitted@example.com".into(), "Omitted".into())
+        .await
+        .unwrap();
+    let workspace = store
+        .create_workspace(account.id, "Omitted".into())
+        .await
+        .unwrap();
     let id = Uuid::new_v4();
     store
         .create_block_unlocked(
+            workspace.id,
             id,
             Uuid::new_v4(),
             Uuid::new_v4(),
@@ -19,6 +28,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
 
     let first = store
         .update_block_unlocked(
+            workspace.id,
             id,
             None,
             Uuid::new_v4(),
@@ -31,6 +41,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
         .unwrap();
     let second = store
         .update_block_unlocked(
+            workspace.id,
             id,
             None,
             Uuid::new_v4(),

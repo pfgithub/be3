@@ -7,6 +7,7 @@ mod account_registration_rejects_duplicates;
 mod account_state_survives_a_server_restart;
 mod batch_is_acknowledged_before_watch_notifications;
 mod batch_updates_apply_reference_deltas_in_request_order;
+mod block_connections_require_administrator_membership;
 mod dependency_state_survives_a_server_restart;
 mod explicit_name_overrides_implicit_names_and_updates_both_kinds_of_watch;
 mod explicit_sequences_cannot_be_applied_out_of_order;
@@ -35,6 +36,7 @@ mod shared_protocol_round_trips_over_websocket;
 mod watches_reference_changes_until_unwatched;
 mod workspace_invites_require_administrator_membership;
 mod workspace_state_survives_a_server_restart;
+mod workspaces_isolate_identical_block_ids_and_notifications;
 mod workspaces_start_empty_and_creation_adds_the_owner;
 
 async fn send_message<S>(socket: &mut S, message: ClientMessage)
@@ -50,11 +52,17 @@ where
 
 async fn test_connect(
     url: String,
+    account_id: Uuid,
+    workspace_id: Uuid,
 ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
     let mut request = url.into_client_request().unwrap();
     request.headers_mut().insert(
         ACCOUNT_HEADER,
-        HeaderValue::from_str(&Uuid::new_v4().to_string()).unwrap(),
+        HeaderValue::from_str(&account_id.to_string()).unwrap(),
+    );
+    request.headers_mut().insert(
+        "x-block-workspace-id",
+        HeaderValue::from_str(&workspace_id.to_string()).unwrap(),
     );
     connect_async(request).await.unwrap().0
 }
@@ -94,6 +102,8 @@ mod support {
     pub struct TestServer {
         pub root: PathBuf,
         pub url: String,
+        pub account_id: Uuid,
+        pub workspace_id: Uuid,
         task: JoinHandle<()>,
     }
 
@@ -111,11 +121,36 @@ mod support {
             let task = tokio::spawn(async move {
                 crate::serve(listener, server_root).await.unwrap();
             });
-            Self { root, url, task }
+            let mut socket = connect_async(&url).await.unwrap().0;
+            let account = register(&mut socket, &format!("{}@example.com", Uuid::new_v4())).await;
+            let workspace = create_workspace(&mut socket, account.id, "Test").await;
+            Self {
+                root,
+                url,
+                account_id: account.id,
+                workspace_id: workspace.id,
+                task,
+            }
+        }
+
+        pub async fn start_at_as(root: PathBuf, account_id: Uuid, workspace_id: Uuid) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("ws://{}", listener.local_addr().unwrap());
+            let server_root = root.clone();
+            let task = tokio::spawn(async move {
+                crate::serve(listener, server_root).await.unwrap();
+            });
+            Self {
+                root,
+                url,
+                account_id,
+                workspace_id,
+                task,
+            }
         }
 
         pub async fn connect(&self) -> Socket {
-            self.connect_as(Uuid::new_v4()).await
+            self.connect_as(self.account_id).await
         }
 
         pub async fn connect_management(&self) -> Socket {
@@ -123,10 +158,18 @@ mod support {
         }
 
         pub async fn connect_as(&self, account_id: Uuid) -> Socket {
+            self.connect_to(account_id, self.workspace_id).await
+        }
+
+        pub async fn connect_to(&self, account_id: Uuid, workspace_id: Uuid) -> Socket {
             let mut request = self.url.as_str().into_client_request().unwrap();
             request.headers_mut().insert(
                 "x-block-account-id",
                 HeaderValue::from_str(&account_id.to_string()).unwrap(),
+            );
+            request.headers_mut().insert(
+                "x-block-workspace-id",
+                HeaderValue::from_str(&workspace_id.to_string()).unwrap(),
             );
             connect_async(request).await.unwrap().0
         }

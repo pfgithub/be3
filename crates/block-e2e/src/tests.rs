@@ -1,7 +1,7 @@
 use std::{future::Future, time::Duration};
 
 use block::{Block, BlockParent, BlockReferenceList};
-use block_client::{blocks::text::TextDocument, BlockClient};
+use block_client::{blocks::text::TextDocument, BlockClient, ManagementClient};
 use serde::{Deserialize, Serialize};
 use tokio::{fs, net::TcpListener};
 use uuid::Uuid;
@@ -75,4 +75,17 @@ async fn timeout(future: impl Future<Output = ()>) {
     tokio::time::timeout(Duration::from_secs(2), future)
         .await
         .unwrap();
+}
+
+async fn test_identity(url: &str) -> (Uuid, Uuid) {
+    let management = ManagementClient::new(url).unwrap();
+    let account = management
+        .register(format!("{}@example.com", Uuid::new_v4()), "Test")
+        .await
+        .unwrap();
+    let workspace = management
+        .create_workspace(account.id, "Test")
+        .await
+        .unwrap();
+    (account.id, workspace.id)
 }

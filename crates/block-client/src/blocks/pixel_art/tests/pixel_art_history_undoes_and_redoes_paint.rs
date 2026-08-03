@@ -5,7 +5,7 @@ use crate::BlockClient;
 
 #[test]
 fn pixel_art_history_undoes_and_redoes_paint() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(PixelArt::new());
     let color = PixelColor::new(1, 2, 3, 255);
     block.operate(PixelArtOperation::Paint {

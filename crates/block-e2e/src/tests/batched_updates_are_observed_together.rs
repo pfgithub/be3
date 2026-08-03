@@ -12,15 +12,16 @@ async fn batched_updates_are_observed_together() {
             .unwrap();
     });
     let url = format!("ws://{address}");
+    let (account_id, workspace_id) = test_identity(&url).await;
 
-    let client_a = BlockClient::new(Uuid::new_v4());
+    let client_a = BlockClient::new(account_id, workspace_id);
     client_a.connect(url.clone());
     let first_a = client_a.create_block(Counter { count: 0 });
     let second_a = client_a.create_block(Counter { count: 0 });
     timeout(first_a.loaded()).await;
     timeout(second_a.loaded()).await;
 
-    let client_b = BlockClient::new(Uuid::new_v4());
+    let client_b = BlockClient::new(account_id, workspace_id);
     client_b.connect(url);
     let first_b = client_b.get_block::<Counter>(first_a.id());
     let second_b = client_b.get_block::<Counter>(second_a.id());

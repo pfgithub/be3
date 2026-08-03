@@ -50,6 +50,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
     let debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(
         client_id,
         Uuid::from_u128(2),
+        Uuid::from_u128(3),
     )));
     let cache = Arc::new(RwLock::new(HashMap::new()));
     let mut state = WorkerState::new(

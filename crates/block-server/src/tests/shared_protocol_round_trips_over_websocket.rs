@@ -4,6 +4,14 @@ use super::*;
 async fn shared_protocol_round_trips_over_websocket() {
     let root = test_root();
     let store = Arc::new(BlockStore::new(root.clone()));
+    let account = store
+        .register_account("protocol@example.com".into(), "Protocol".into())
+        .await
+        .unwrap();
+    let workspace = store
+        .create_workspace(account.id, "Protocol".into())
+        .await
+        .unwrap();
     let watch_hub = Arc::new(WatchHub::new());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -15,7 +23,7 @@ async fn shared_protocol_round_trips_over_websocket() {
             handle_connection(stream, store, watch_hub).await.unwrap();
         }
     });
-    let mut client = test_connect(format!("ws://{addr}")).await;
+    let mut client = test_connect(format!("ws://{addr}"), account.id, workspace.id).await;
     let id = Uuid::new_v4();
     let block_type = Uuid::new_v4();
 

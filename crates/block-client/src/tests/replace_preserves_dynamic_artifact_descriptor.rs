@@ -27,7 +27,7 @@ impl Block for ReplaceTestBlock {
 
 #[test]
 fn replace_preserves_dynamic_artifact_descriptor() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let descriptor = DynamicArtifactDescriptor {
         source_type: Uuid::new_v4(),
         data: vec![5, 6, 7, 8],

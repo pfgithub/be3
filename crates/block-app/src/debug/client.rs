@@ -31,6 +31,7 @@ fn show_snapshot(ui: &mut egui::Ui, snapshot: &ClientDebugSnapshot) {
         .show(ui, |ui| {
             field(ui, "Client", snapshot.client_id);
             field(ui, "Account", snapshot.account_id);
+            field(ui, "Workspace", snapshot.workspace_id);
             field(
                 ui,
                 "Connection",

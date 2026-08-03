@@ -8,7 +8,7 @@ use crate::BlockClient;
 
 #[test]
 fn infinite_canvas_history_undoes_and_redoes_add() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(InfiniteCanvas::new());
     let entity = CanvasEntity {
         id: Uuid::new_v4(),

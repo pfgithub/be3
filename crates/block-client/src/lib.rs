@@ -33,6 +33,7 @@ use uuid::Uuid;
 pub mod blocks;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
+const WORKSPACE_HEADER: &str = "x-block-workspace-id";
 pub const BLOCK_URL_PREFIX: &str = "https://blocks.pfg.pw/0/";
 const UUID_TEXT_BYTES: usize = 36;
 const MAX_HISTORY_ACTIONS: usize = 100;
@@ -287,6 +288,7 @@ mod tests;
 pub struct BlockClient {
     id: Uuid,
     account_id: Uuid,
+    workspace_id: Uuid,
     commands: mpsc::Sender<WorkerCommand>,
     connected: Arc<OnceLock<()>>,
     access: Arc<RwLock<()>>,
@@ -381,6 +383,7 @@ pub struct NetworkDebugSnapshot {
 pub struct ClientDebugSnapshot {
     pub client_id: Uuid,
     pub account_id: Uuid,
+    pub workspace_id: Uuid,
     pub connected: bool,
     pub sending_paused: bool,
     pub queued_messages: usize,
@@ -432,10 +435,11 @@ pub struct ClientDebugEntry {
 }
 
 impl ClientDebugSnapshot {
-    fn empty(client_id: Uuid, account_id: Uuid) -> Self {
+    fn empty(client_id: Uuid, account_id: Uuid, workspace_id: Uuid) -> Self {
         Self {
             client_id,
             account_id,
+            workspace_id,
             connected: false,
             sending_paused: false,
             queued_messages: 0,
@@ -453,7 +457,7 @@ impl ClientDebugSnapshot {
 }
 
 impl BlockClient {
-    pub fn new(account_id: Uuid) -> Self {
+    pub fn new(account_id: Uuid, workspace_id: Uuid) -> Self {
         let (commands, command_rx) = mpsc::channel();
         let id = Uuid::new_v4();
         let connected = Arc::new(OnceLock::new());
@@ -462,7 +466,11 @@ impl BlockClient {
             changes_saved: true,
             ..Default::default()
         }));
-        let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(id, account_id)));
+        let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(
+            id,
+            account_id,
+            workspace_id,
+        )));
         let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
         let registered_blocks = Arc::new(RwLock::new(HashMap::new()));
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
@@ -485,6 +493,7 @@ impl BlockClient {
         Self {
             id,
             account_id,
+            workspace_id,
             commands,
             connected,
             access,
@@ -503,11 +512,16 @@ impl BlockClient {
         self.send(WorkerCommand::Connect {
             url: url.into(),
             account_id: self.account_id,
+            workspace_id: self.workspace_id,
         });
     }
 
     pub fn account_id(&self) -> Uuid {
         self.account_id
+    }
+
+    pub fn workspace_id(&self) -> Uuid {
+        self.workspace_id
     }
 
     pub fn create_block<B: Block>(&self, initial: B) -> BlockHandle<B> {
@@ -1141,6 +1155,7 @@ enum WorkerCommand {
     Connect {
         url: String,
         account_id: Uuid,
+        workspace_id: Uuid,
     },
     AddBlock(Arc<dyn ErasedBlock>),
     Operate {
@@ -1198,8 +1213,13 @@ fn worker_main(
         let mut state = WorkerState::new(access, debug, client_debug, cached_blocks);
         while let Some(command) = async_rx.recv().await {
             match command {
-                WorkerCommand::Connect { url, account_id } => {
-                    if run_connected(url, account_id, &mut state, &mut async_rx).await {
+                WorkerCommand::Connect {
+                    url,
+                    account_id,
+                    workspace_id,
+                } => {
+                    if run_connected(url, account_id, workspace_id, &mut state, &mut async_rx).await
+                    {
                         return;
                     }
                     fatal("block server connection closed");
@@ -1213,6 +1233,7 @@ fn worker_main(
 async fn run_connected(
     url: String,
     account_id: Uuid,
+    workspace_id: Uuid,
     state: &mut WorkerState,
     commands: &mut tokio_mpsc::UnboundedReceiver<WorkerCommand>,
 ) -> bool {
@@ -1223,6 +1244,11 @@ async fn run_connected(
     request.headers_mut().insert(
         ACCOUNT_HEADER,
         HeaderValue::from_str(&account_id.to_string())
+            .expect("UUID is always a valid HTTP header value"),
+    );
+    request.headers_mut().insert(
+        WORKSPACE_HEADER,
+        HeaderValue::from_str(&workspace_id.to_string())
             .expect("UUID is always a valid HTTP header value"),
     );
     let (socket, _) = connect_async(request)

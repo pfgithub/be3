@@ -5,7 +5,7 @@ use crate::BlockClient;
 
 #[test]
 fn presentation_history_undoes_grouped_removal() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(Presentation::new());
     let repeated = Uuid::new_v4();
     let slides = [repeated, Uuid::new_v4(), repeated]

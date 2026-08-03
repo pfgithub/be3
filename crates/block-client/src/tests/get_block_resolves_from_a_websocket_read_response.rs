@@ -66,7 +66,7 @@ async fn get_block_resolves_from_a_websocket_read_response() {
     });
 
     let address = address_rx.recv().unwrap();
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.get_block::<Counter>(id);
     assert!(block.read().is_none());
     client.connect(format!("ws://{address}"));

@@ -12,13 +12,14 @@ async fn crdt_text_clients_converge_after_concurrent_insertions() {
             .unwrap();
     });
     let url = format!("ws://{address}");
+    let (account_id, workspace_id) = test_identity(&url).await;
 
-    let client_a = BlockClient::new(Uuid::new_v4());
+    let client_a = BlockClient::new(account_id, workspace_id);
     client_a.connect(url.clone());
     let block_a = client_a.create_block(TextDocument::new());
     timeout(block_a.loaded()).await;
 
-    let client_b = BlockClient::new(Uuid::new_v4());
+    let client_b = BlockClient::new(account_id, workspace_id);
     client_b.connect(url);
     let block_b = client_b.get_block::<TextDocument>(block_a.id());
     timeout(block_b.loaded()).await;

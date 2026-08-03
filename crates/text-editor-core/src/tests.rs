@@ -30,7 +30,7 @@ impl EditorTester {
     }
 
     fn with_language(initial: impl AsRef<[u8]>, language: Language) -> Self {
-        let client = BlockClient::new(Uuid::new_v4());
+        let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
         let block = client.create_block(TextDocument::from_bytes(initial));
         let mut editor = Core::new(block);
         editor.set_syntax_highlighter(Some(language));

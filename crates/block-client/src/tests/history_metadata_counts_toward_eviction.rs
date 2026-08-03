@@ -5,7 +5,7 @@ use crate::{BlockClient, HistoryMetadata};
 
 #[test]
 fn history_metadata_counts_toward_eviction() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(HistoryBlock { value: 0 });
     for value in 1..=2 {
         block.finish_history_group();

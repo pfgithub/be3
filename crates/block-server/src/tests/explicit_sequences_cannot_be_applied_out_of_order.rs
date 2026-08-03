@@ -4,9 +4,18 @@ use super::*;
 async fn explicit_sequences_cannot_be_applied_out_of_order() {
     let root = test_root();
     let store = BlockStore::new(root.clone());
+    let account = store
+        .register_account("sequence@example.com".into(), "Sequence".into())
+        .await
+        .unwrap();
+    let workspace = store
+        .create_workspace(account.id, "Sequence".into())
+        .await
+        .unwrap();
     let id = Uuid::new_v4();
     store
         .create_block_unlocked(
+            workspace.id,
             id,
             Uuid::new_v4(),
             Uuid::new_v4(),
@@ -20,6 +29,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
     assert!(matches!(
         store
             .update_block_unlocked(
+                workspace.id,
                 id,
                 Some(2),
                 Uuid::new_v4(),
@@ -36,6 +46,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
     ));
     store
         .update_block_unlocked(
+            workspace.id,
             id,
             Some(1),
             Uuid::new_v4(),
@@ -48,6 +59,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
         .unwrap();
     store
         .update_block_unlocked(
+            workspace.id,
             id,
             Some(2),
             Uuid::new_v4(),
@@ -59,7 +71,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
         .await
         .unwrap();
 
-    let read = store.read_block_unlocked(id).await.unwrap();
+    let read = store.read_block_unlocked(workspace.id, id).await.unwrap();
     assert_eq!(
         read.operations
             .iter()

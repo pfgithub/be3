@@ -7,7 +7,7 @@ use super::{
 
 #[test]
 fn new_history_action_clears_redo() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(HistoryBlock { value: 0 });
     block.operate(HistoryOperation::Set(1));
     block.undo();

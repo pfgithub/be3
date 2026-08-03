@@ -5,7 +5,7 @@ use crate::BlockClient;
 
 #[test]
 fn presentation_history_undoes_and_redoes_changes() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(Presentation::new());
     let first = PresentationSlide {
         id: Uuid::new_v4(),

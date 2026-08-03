@@ -5,7 +5,7 @@ use crate::BlockClient;
 
 #[test]
 fn pixel_ray_tracer_history_undoes_and_redoes_entity_changes() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(PixelRayTracer::new());
     let original = RayEntity::Light {
         id: 1,

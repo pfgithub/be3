@@ -27,7 +27,7 @@ impl Block for ArtifactTestBlock {
 
 #[test]
 fn dynamic_artifact_descriptor_survives_creation() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let descriptor = DynamicArtifactDescriptor {
         source_type: Uuid::new_v4(),
         data: vec![1, 2, 3, 4],

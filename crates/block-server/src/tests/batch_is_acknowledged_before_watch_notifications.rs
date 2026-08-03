@@ -4,6 +4,14 @@ use super::*;
 async fn batch_is_acknowledged_before_watch_notifications() {
     let root = test_root();
     let store = Arc::new(BlockStore::new(root.clone()));
+    let account = store
+        .register_account("batch@example.com".into(), "Batch".into())
+        .await
+        .unwrap();
+    let workspace = store
+        .create_workspace(account.id, "Batch".into())
+        .await
+        .unwrap();
     let watch_hub = Arc::new(WatchHub::new());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -15,7 +23,7 @@ async fn batch_is_acknowledged_before_watch_notifications() {
             handle_connection(stream, store, watch_hub).await.unwrap();
         }
     });
-    let mut client = test_connect(format!("ws://{addr}")).await;
+    let mut client = test_connect(format!("ws://{addr}"), account.id, workspace.id).await;
     let first = Uuid::new_v4();
     let second = Uuid::new_v4();
 

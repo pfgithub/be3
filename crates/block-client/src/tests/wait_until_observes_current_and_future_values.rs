@@ -8,7 +8,7 @@ use super::{
 
 #[tokio::test]
 async fn wait_until_observes_current_and_future_values() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(Counter { count: 1 });
     block.wait_until(|counter| counter.count == 1).await;
 

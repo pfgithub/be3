@@ -4,7 +4,7 @@ use super::{lib_test_support::Counter, BlockClient, BlockParent};
 
 #[test]
 fn set_parent_optimistically_notes_backref() {
-    let client = BlockClient::new(Uuid::new_v4());
+    let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let child = client.create_block(Counter { count: 0 });
     let parent = Uuid::new_v4();
 
