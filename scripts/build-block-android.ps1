@@ -4,17 +4,32 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ndkVersion = "29.0.14206865"
+$buildToolsVersion = "35.0.0"
+$onWindows = $env:OS -eq "Windows_NT"
 
 if (-not $AndroidSdk) {
-    $AndroidSdk = Join-Path $env:LOCALAPPDATA "Android\Sdk"
+    $AndroidSdk = if ($onWindows) {
+        Join-Path $env:LOCALAPPDATA "Android/Sdk"
+    } else {
+        $env:ANDROID_SDK_ROOT
+    }
 }
 
-$ndk = Join-Path $AndroidSdk "ndk\$ndkVersion"
-$zipalign = Join-Path $AndroidSdk "build-tools\35.0.0\zipalign.exe"
-$apksigner = Join-Path $AndroidSdk "build-tools\35.0.0\apksigner.bat"
-$keystore = Join-Path $PSScriptRoot "..\target\android-debug.keystore"
-$apk = Join-Path $PSScriptRoot "..\target\debug\apk\block-app.apk"
-$alignedApk = Join-Path $PSScriptRoot "..\target\debug\apk\block-app-aligned.apk"
+if (-not $AndroidSdk) {
+    throw "No Android SDK was found. Pass -AndroidSdk or set ANDROID_HOME."
+}
+
+# The build tools ship Windows wrappers alongside the Unix executables.
+$zipalignName = if ($onWindows) { "zipalign.exe" } else { "zipalign" }
+$apksignerName = if ($onWindows) { "apksigner.bat" } else { "apksigner" }
+
+$repository = Split-Path -Parent $PSScriptRoot
+$ndk = Join-Path $AndroidSdk "ndk/$ndkVersion"
+$zipalign = Join-Path $AndroidSdk "build-tools/$buildToolsVersion/$zipalignName"
+$apksigner = Join-Path $AndroidSdk "build-tools/$buildToolsVersion/$apksignerName"
+$keystore = Join-Path $repository "target/android-debug.keystore"
+$apk = Join-Path $repository "target/debug/apk/block-app.apk"
+$alignedApk = Join-Path $repository "target/debug/apk/block-app-aligned.apk"
 
 foreach ($requiredPath in @($ndk, $zipalign, $apksigner, $keystore)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -23,9 +38,11 @@ foreach ($requiredPath in @($ndk, $zipalign, $apksigner, $keystore)) {
 }
 
 $env:ANDROID_HOME = $AndroidSdk
+$env:ANDROID_SDK_ROOT = $AndroidSdk
 $env:ANDROID_NDK_HOME = $ndk
+$env:ANDROID_NDK_ROOT = $ndk
 
-Push-Location (Join-Path $PSScriptRoot "..\crates\block-app")
+Push-Location (Join-Path $repository "crates/block-app")
 try {
     cargo apk build --lib --target aarch64-linux-android
     if ($LASTEXITCODE -ne 0) {
