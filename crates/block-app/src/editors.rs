@@ -31,7 +31,6 @@ const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
 
 pub enum EditorAction {
     OpenBlock { id: Uuid, block_type: Uuid },
-    SetParent { id: Uuid, parent: Uuid },
 }
 
 pub struct BlockRenderContext<'a> {
@@ -332,6 +331,11 @@ impl<'a> EditorAccess<'a> {
         self.with_editor(id, |editor, editors| {
             editor.embedded_direct_editor_ui(ui, editors, scale, viewport)
         })?
+    }
+
+    pub fn set_parent(&mut self, id: Uuid, parent: BlockParent) -> bool {
+        self.with_editor(id, |editor, _| editor.set_parent(parent))
+            .is_some()
     }
 }
 

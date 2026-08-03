@@ -300,16 +300,15 @@ impl TextEditor {
         }
     }
 
-    fn handle_picker(
-        &mut self,
-        context: &egui::Context,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<Uuid> {
-        let result = self
+    fn handle_picker(&mut self, context: &egui::Context, editors: &mut EditorAccess<'_>) {
+        let Some(result) = self
             .picker
-            .handle(context, editors, BlockParent::Uuid(self.block.id()))?;
+            .handle(context, editors, BlockParent::Uuid(self.block.id()))
+        else {
+            return;
+        };
+        editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
         self.insert_image_embed(result.id, &result.name);
-        Some(result.id)
     }
 
     fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
@@ -1031,7 +1030,7 @@ impl BlockEditor for TextEditor {
         let pasted_image = self.paste_clipboard_image(ui, id, editors);
         let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
         profile.keyboard = keyboard_start.elapsed();
-        let linked_block = self.handle_picker(ui.ctx(), editors);
+        self.handle_picker(ui.ctx(), editors);
         let document_start = Instant::now();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
@@ -1156,12 +1155,7 @@ impl BlockEditor for TextEditor {
         }
         profile.total = frame_start.elapsed() + profile.toolbar;
         self.profiler.record(profile);
-        edit_block.or_else(|| {
-            linked_block.map(|id| EditorAction::SetParent {
-                id,
-                parent: self.block.id(),
-            })
-        })
+        edit_block
     }
 }
 

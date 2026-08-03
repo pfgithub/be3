@@ -293,7 +293,6 @@ pub(super) struct InfiniteCanvasEditor {
     gesture: Option<Gesture>,
     picker: BlockPicker,
     armed_block: Option<CachedBlock>,
-    armed_block_needs_parent: bool,
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
     context_menu_for_selection: bool,

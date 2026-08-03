@@ -715,7 +715,6 @@ impl InfiniteCanvasEditor {
                 {
                     self.tool = tool;
                     self.armed_block = None;
-                    self.armed_block_needs_parent = false;
                 }
             }
             ui.menu_button(ICON_DATA_OBJECT, |ui| {

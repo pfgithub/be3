@@ -10,6 +10,7 @@ impl InfiniteCanvasEditor {
             self.picker
                 .handle(context, editors, BlockParent::Uuid(self.block.id()))
         {
+            editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
             if let Some(center) = self.pending_block_center.take() {
                 self.add_direct_editor(block.id, center);
                 self.tool = Tool::Select;
@@ -20,7 +21,6 @@ impl InfiniteCanvasEditor {
                     author: block.author,
                     name: block.name,
                 });
-                self.armed_block_needs_parent = false;
                 self.tool = Tool::Block;
             }
         }
@@ -229,7 +229,7 @@ impl InfiniteCanvasEditor {
         editors: &mut EditorAccess<'_>,
         direct_editor_rects: &[Rect],
         viewport: &mut DirectEditorViewport,
-    ) -> (Option<CanvasLayerMove>, Option<Uuid>, Option<EditorAction>) {
+    ) -> (Option<CanvasLayerMove>, Option<EditorAction>) {
         let escape_pressed = response
             .ctx
             .input(|input| input.key_pressed(egui::Key::Escape));
@@ -241,7 +241,6 @@ impl InfiniteCanvasEditor {
         } else if escape_pressed {
             self.gesture = None;
             self.armed_block = None;
-            self.armed_block_needs_parent = false;
             self.picker.close();
             self.tool = Tool::Select;
         }
@@ -262,7 +261,6 @@ impl InfiniteCanvasEditor {
                         self.tool = tool;
                         self.gesture = None;
                         self.armed_block = None;
-                        self.armed_block_needs_parent = false;
                     }
                 }
             }
@@ -357,11 +355,11 @@ impl InfiniteCanvasEditor {
                 .iter()
                 .any(|rect| rect.contains(pointer))
         }) {
-            return (None, None, keyboard_action);
+            return (None, keyboard_action);
         }
 
         if self.handle_zoom_and_pan(response, viewport) {
-            return (None, None, keyboard_action);
+            return (None, keyboard_action);
         }
 
         let world = pointer.map(|point| self.screen_to_world(point, canvas_rect));
@@ -382,6 +380,7 @@ impl InfiniteCanvasEditor {
             if dragged.reference.id != self.block.id() {
                 if let Some(world) = world {
                     self.add_direct_editor(dragged.reference.id, world);
+                    editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
                 }
             }
         }
@@ -402,7 +401,6 @@ impl InfiniteCanvasEditor {
                 }
             }
         }
-        let mut set_parent = None;
         response.context_menu(|ui| {
             if self.context_menu_for_selection {
                 if ui.button("Open / edit").clicked() {
@@ -554,7 +552,6 @@ impl InfiniteCanvasEditor {
                     if ui.button("Freehand").clicked() {
                         self.tool = Tool::Pen;
                         self.armed_block = None;
-                        self.armed_block_needs_parent = false;
                         ui.close();
                     }
                     if ui.button("Image…").clicked() {
@@ -593,7 +590,7 @@ impl InfiniteCanvasEditor {
         });
 
         let Some(world) = world else {
-            return (layer_move, set_parent, keyboard_action);
+            return (layer_move, keyboard_action);
         };
         if self.tool == Tool::Select && response.hovered() && response.double_clicked() {
             if let Some(id) = self.entity_at(entities, world) {
@@ -603,7 +600,7 @@ impl InfiniteCanvasEditor {
                     self.editing_text = Some(id);
                     self.focus_text_requested = true;
                     self.gesture = None;
-                    return (layer_move, set_parent, keyboard_action);
+                    return (layer_move, keyboard_action);
                 }
             }
         }
@@ -688,7 +685,7 @@ impl InfiniteCanvasEditor {
                                 let duplicate = response.ctx.input(|input| input.modifiers.alt);
                                 self.begin_move_gesture(entities, world, duplicate);
                             }
-                            return (layer_move, set_parent, keyboard_action);
+                            return (layer_move, keyboard_action);
                         }
                         let additive = response.ctx.input(|input| input.modifiers.shift);
                         if additive {
@@ -727,9 +724,7 @@ impl InfiniteCanvasEditor {
                 Tool::Block => {
                     if let Some(block) = self.armed_block.take() {
                         self.add_direct_editor(block.id, world);
-                        if std::mem::take(&mut self.armed_block_needs_parent) {
-                            set_parent = Some(block.id);
-                        }
+                        editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
                         self.tool = Tool::Select;
                     } else {
                         self.picker.open([self.block.id()]);
@@ -836,7 +831,7 @@ impl InfiniteCanvasEditor {
                 self.finish_gesture(gesture, entities);
             }
         }
-        (layer_move, set_parent, keyboard_action)
+        (layer_move, keyboard_action)
     }
 
     pub(super) fn finish_gesture(&mut self, gesture: Gesture, entities: &[CanvasEntity]) {

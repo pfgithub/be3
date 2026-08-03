@@ -1437,11 +1437,6 @@ impl BlockApp {
                 tab_id,
                 TabNavigation::Open(BlockTabHistoryItem { id, block_type }),
             ),
-            EditorAction::SetParent { id, parent } => {
-                if let Some(child) = self.editors.get(&id) {
-                    child.set_parent(BlockParent::Uuid(parent));
-                }
-            }
         }
     }
 

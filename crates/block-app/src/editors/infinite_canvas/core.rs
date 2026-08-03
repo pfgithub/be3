@@ -14,7 +14,6 @@ impl InfiniteCanvasEditor {
             gesture: None,
             picker: BlockPicker::default(),
             armed_block: None,
-            armed_block_needs_parent: false,
             pending_block_center: None,
             context_menu_position: None,
             context_menu_for_selection: false,

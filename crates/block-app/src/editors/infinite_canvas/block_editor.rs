@@ -362,7 +362,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             action = action.or(embedded);
         }
 
-        let (context_layer_move, set_parent, keyboard_action) = self.handle_canvas_input(
+        let (context_layer_move, keyboard_action) = self.handle_canvas_input(
             &response,
             canvas_rect,
             &entities,
@@ -395,11 +395,6 @@ impl BlockEditor for InfiniteCanvasEditor {
         if self.gesture.is_some() {
             ui.ctx().request_repaint();
         }
-        action.or(keyboard_action).or_else(|| {
-            set_parent.map(|id| EditorAction::SetParent {
-                id,
-                parent: self.block.id(),
-            })
-        })
+        action.or(keyboard_action)
     }
 }
