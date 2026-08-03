@@ -41,7 +41,6 @@ exported = true
 [dependencies]
 block = { path = "../block" }
 block-client = { path = "../block-client" }
-block-server = { path = "../block-server" }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "persistence", "wgpu"] }
 egui_dock = "0.19.1"
 egui_material_icons = "0.6.0"
@@ -49,16 +48,23 @@ flate2 = "1"
 freetype = "0.7"
 harfbuzz_rs = "2"
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "pnm", "tga", "tiff", "webp"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 text-editor-core = { path = "../text-editor-core" }
-tokio = { version = "1", features = ["net", "rt-multi-thread"] }
 unicode-script = "0.5"
-ureq = { version = "2", features = ["gzip"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Desktop and Android. The web build has no embedded server, no SQLite file to
+# put app state in, and no blocking HTTP client.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+block-server = { path = "../block-server" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1", features = ["net", "rt-multi-thread"] }
+ureq = { version = "2", features = ["gzip"] }
+
+# Desktop only: Android has neither an embedded browser nor an image clipboard,
+# and the browser sandbox has neither.
+[target.'cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
 arboard = "3.6"
 eframe = { version = "0.34.3", default-features = false, features = ["wayland", "x11"] }
 rfd = "0.15"
@@ -66,6 +72,19 @@ wry = "0.55.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { version = "0.30.13", features = ["android-native-activity"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Storage",
+    "Window",
+    "console",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse"] }

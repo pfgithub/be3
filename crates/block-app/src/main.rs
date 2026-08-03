@@ -3,17 +3,17 @@ mod block_picker;
 mod debug;
 mod editors;
 mod performance;
+mod platform;
 mod share;
 
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
-    io,
-    net::TcpListener as StdTcpListener,
-    path::PathBuf,
-    thread,
     time::Duration,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::{io, path::PathBuf};
 
 use app_state::{AppStateStore, SavedAccount, ServerLocation};
 use block::{
@@ -37,12 +37,13 @@ use egui_material_icons::icons::{
     ICON_REDO, ICON_REFRESH, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO, ICON_WORKSPACES,
 };
 use share::ShareDialog;
-use tokio::net::TcpListener;
 use uuid::Uuid;
 
+#[cfg(not(target_arch = "wasm32"))]
 const APP_ID: &str = "Block";
 const COMPACT_FILES_WIDTH: f32 = 700.0;
 const ONBOARDING_WIDTH: f32 = 460.0;
+#[cfg(not(target_arch = "wasm32"))]
 fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -53,6 +54,7 @@ fn native_options() -> eframe::NativeOptions {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> eframe::Result {
     eframe::run_native(
         APP_ID,
@@ -66,9 +68,44 @@ fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> 
     )
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn run() -> eframe::Result {
     run_native(native_options(), None)
+}
+
+/// Starts the app on the canvas with the given element id. The page calls this
+/// once the module is ready; it returns as soon as eframe owns the canvas, and
+/// the app then runs from the browser's animation callbacks.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsCast;
+
+    // Panics otherwise reach only the WASI stderr shim, which is easy to miss.
+    std::panic::set_hook(Box::new(|info| {
+        web_sys::console::error_1(&format!("Block panicked: {info}").into());
+    }));
+
+    let document = web_sys::window()
+        .and_then(|window| window.document())
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("no browser document is available"))?;
+    let canvas = document
+        .get_element_by_id(&canvas_id)
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str(&format!("no element id {canvas_id}")))?
+        .dyn_into::<web_sys::HtmlCanvasElement>()?;
+
+    eframe::WebRunner::new()
+        .start(
+            canvas,
+            eframe::WebOptions::default(),
+            Box::new(|creation_context| {
+                egui_material_icons::initialize(&creation_context.egui_ctx);
+                BlockApp::new()
+                    .map(|app| Box::new(app) as Box<dyn eframe::App>)
+                    .map_err(Into::into)
+            }),
+        )
+        .await
 }
 
 #[cfg(target_os = "android")]
@@ -105,7 +142,7 @@ struct BlockApp {
     workspaces: Vec<Workspace>,
     invitations: Vec<WorkspaceInvitation>,
     workspaces_loaded: bool,
-    pending_workspace_request: Option<std::sync::mpsc::Receiver<Result<WorkspaceResult, String>>>,
+    pending_workspace_request: Option<platform::RequestResult<Result<WorkspaceResult, String>>>,
     workspace_name: String,
     workspace_error: Option<String>,
     invite_open: bool,
@@ -269,7 +306,6 @@ fn set_files_compact(dock_state: &mut DockState<DockTab>, compact: bool) {
 
 type Account = SavedAccount;
 
-#[derive(Default)]
 struct AccountForm {
     remote: bool,
     remote_url: String,
@@ -278,8 +314,21 @@ struct AccountForm {
     display_name: String,
 }
 
+impl Default for AccountForm {
+    fn default() -> Self {
+        Self {
+            // A build with no embedded server can only reach a remote one.
+            remote: !platform::HAS_EMBEDDED_SERVER,
+            remote_url: String::new(),
+            register: false,
+            email: String::new(),
+            display_name: String::new(),
+        }
+    }
+}
+
 struct PendingAccountRequest {
-    receiver: std::sync::mpsc::Receiver<Result<block::Account, String>>,
+    receiver: platform::RequestResult<Result<block::Account, String>>,
     server: ServerLocation,
     url: String,
 }
@@ -351,13 +400,33 @@ enum BlockPickerTarget {
 }
 
 impl BlockApp {
+    /// Opens the app state beside the app and starts the block server that
+    /// backs local accounts.
+    #[cfg(not(target_arch = "wasm32"))]
     fn new(storage_root: Option<PathBuf>) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let data_dir = storage_root
             .or_else(|| eframe::storage_dir(APP_ID))
             .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?;
         std::fs::create_dir_all(&data_dir)?;
-        let url = start_embedded_server(data_dir.join("server"))?;
+        let url = platform::start_embedded_server(data_dir.join("server"))?;
         let app_state = AppStateStore::open(data_dir.join("app.sqlite3"))?;
+        Self::with_state(app_state, url)
+    }
+
+    /// Opens the app state in browser storage. There is no local server to
+    /// start, so every account is a remote one.
+    #[cfg(target_arch = "wasm32")]
+    fn new() -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let app_state = AppStateStore::open()?;
+        Self::with_state(app_state, String::new())
+    }
+
+    /// Restores the last session from `app_state`. `local_server_url` is where
+    /// local accounts are served, and is empty where there are none.
+    fn with_state(
+        app_state: AppStateStore,
+        url: String,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let accounts = app_state.accounts()?;
         let active = app_state.active_account()?;
         let account = active
@@ -455,26 +524,14 @@ impl BlockApp {
         let register = self.account_form.register;
         let email = self.account_form.email.clone();
         let display_name = self.account_form.display_name.clone();
-        let (sender, receiver) = std::sync::mpsc::channel();
-        thread::Builder::new()
-            .name("block-account-request".into())
-            .spawn(move || {
-                let result = tokio::runtime::Runtime::new()
-                    .map_err(|error| error.to_string())
-                    .and_then(|runtime| {
-                        runtime
-                            .block_on(async move {
-                                if register {
-                                    client.register(email, display_name).await
-                                } else {
-                                    client.login(email).await
-                                }
-                            })
-                            .map_err(|error| error.to_string())
-                    });
-                let _ = sender.send(result);
-            })
-            .unwrap_or_else(|error| panic!("failed to start account request: {error}"));
+        let receiver = platform::spawn_request(async move {
+            if register {
+                client.register(email, display_name).await
+            } else {
+                client.login(email).await
+            }
+            .map_err(|error| error.to_string())
+        });
         self.account_error = None;
         self.pending_account_request = Some(PendingAccountRequest {
             receiver,
@@ -616,10 +673,14 @@ impl BlockApp {
             });
             ui.add_space(12.0);
             ui.label("Server");
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.account_form.remote, false, "Local");
-                ui.selectable_value(&mut self.account_form.remote, true, "Remote");
-            });
+            // Without an embedded server there is nothing for a local account to
+            // talk to, so the choice is not offered and the URL is required.
+            if platform::HAS_EMBEDDED_SERVER {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.account_form.remote, false, "Local");
+                    ui.selectable_value(&mut self.account_form.remote, true, "Remote");
+                });
+            }
             if self.account_form.remote {
                 ui.add_space(4.0);
                 ui.add(
@@ -697,47 +758,36 @@ impl BlockApp {
             }
         };
         let account_id = self.account.id;
-        let (sender, receiver) = std::sync::mpsc::channel();
-        thread::Builder::new()
-            .name("block-workspace-request".into())
-            .spawn(move || {
-                let result = tokio::runtime::Runtime::new()
-                    .map_err(|error| error.to_string())
-                    .and_then(|runtime| {
-                        runtime.block_on(async move {
-                            match operation {
-                                WorkspaceOperation::Load => {
-                                    let workspaces = client
-                                        .list_workspaces(account_id)
-                                        .await
-                                        .map_err(|error| error.to_string())?;
-                                    let invitations = client
-                                        .list_invitations(account_id)
-                                        .await
-                                        .map_err(|error| error.to_string())?;
-                                    Ok(WorkspaceResult::Loaded(workspaces, invitations))
-                                }
-                                WorkspaceOperation::Create(name) => client
-                                    .create_workspace(account_id, name)
-                                    .await
-                                    .map(WorkspaceResult::Created)
-                                    .map_err(|error| error.to_string()),
-                                WorkspaceOperation::Respond(invitation_id, accept) => client
-                                    .respond_invitation(account_id, invitation_id, accept)
-                                    .await
-                                    .map(|()| WorkspaceResult::Responded)
-                                    .map_err(|error| error.to_string()),
-                                WorkspaceOperation::Invite(workspace_id, email, role) => client
-                                    .invite(account_id, workspace_id, email, role)
-                                    .await
-                                    .map(|_| WorkspaceResult::Invited)
-                                    .map_err(|error| error.to_string()),
-                            }
-                        })
-                    });
-                let _ = sender.send(result);
-            })
-            .unwrap_or_else(|error| panic!("failed to start workspace request: {error}"));
+        let receiver = platform::spawn_request(async move {
+            match operation {
+                WorkspaceOperation::Load => {
+                    let workspaces = client
+                        .list_workspaces(account_id)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let invitations = client
+                        .list_invitations(account_id)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(WorkspaceResult::Loaded(workspaces, invitations))
+                }
+                WorkspaceOperation::Create(name) => client
+                    .create_workspace(account_id, name)
+                    .await
+                    .map(WorkspaceResult::Created)
+                    .map_err(|error| error.to_string()),
+                WorkspaceOperation::Respond(invitation_id, accept) => client
+                    .respond_invitation(account_id, invitation_id, accept)
+                    .await
+                    .map(|()| WorkspaceResult::Responded)
+                    .map_err(|error| error.to_string()),
+                WorkspaceOperation::Invite(workspace_id, email, role) => client
+                    .invite(account_id, workspace_id, email, role)
+                    .await
+                    .map(|_| WorkspaceResult::Invited)
+                    .map_err(|error| error.to_string()),
+            }
+        });
         self.workspace_error = None;
         self.pending_workspace_request = Some(receiver);
     }
@@ -2862,26 +2912,4 @@ impl eframe::App for BlockApp {
         performance::end_frame();
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
-}
-
-fn start_embedded_server(data_dir: PathBuf) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let listener = StdTcpListener::bind("127.0.0.1:0")?;
-    listener.set_nonblocking(true)?;
-    let address = listener.local_addr()?;
-    thread::Builder::new()
-        .name("block-app-server".into())
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("failed to create embedded block server runtime");
-            runtime.block_on(async move {
-                let listener = TcpListener::from_std(listener)
-                    .expect("failed to initialize embedded block server listener");
-                if let Err(error) = block_server::serve(listener, data_dir).await {
-                    eprintln!("embedded block server stopped: {error}");
-                }
-            });
-        })?;
-    Ok(format!("http://{address}"))
 }

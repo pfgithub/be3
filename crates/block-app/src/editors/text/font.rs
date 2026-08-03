@@ -1,10 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    ffi::CString,
     ops::Range,
-    path::{Path, PathBuf},
     ptr,
     time::{Duration, Instant},
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::{
+    ffi::CString,
+    path::{Path, PathBuf},
 };
 
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, TextureHandle, Vec2};
@@ -167,25 +171,37 @@ impl TextRenderer {
         }
 
         let mut fonts = Vec::new();
-        for (path, family, bold, italic) in font_paths() {
-            let Some(path_text) = path.to_str() else {
-                continue;
-            };
-            let Ok(path_c) = CString::new(path_text) else {
-                continue;
-            };
+        for (source, family, bold, italic) in font_sources() {
             let mut face = ptr::null_mut();
-            if unsafe { ft::FT_New_Face(library, path_c.as_ptr(), 0, &mut face) } != 0 {
+            let Some(hb_face) = (match &source {
+                #[cfg(not(target_arch = "wasm32"))]
+                FontSource::File(path) => path
+                    .to_str()
+                    .and_then(|path_text| CString::new(path_text).ok())
+                    .filter(|path_c| unsafe {
+                        ft::FT_New_Face(library, path_c.as_ptr(), 0, &mut face) == 0
+                    })
+                    .and_then(|_| HbFace::from_file(path, 0).ok()),
+                FontSource::Memory(bytes) => unsafe {
+                    ft::FT_New_Memory_Face(
+                        library,
+                        bytes.as_ptr(),
+                        bytes.len() as ft::FT_Long,
+                        0,
+                        &mut face,
+                    ) == 0
+                }
+                .then(|| HbFace::from_bytes(bytes, 0)),
+            }) else {
+                if !face.is_null() {
+                    unsafe { ft::FT_Done_Face(face) };
+                }
                 continue;
-            }
+            };
             if unsafe { ft::FT_Set_Pixel_Sizes(face, 0, BODY_PIXEL_SIZE) } != 0 {
                 unsafe { ft::FT_Done_Face(face) };
                 continue;
             }
-            let Ok(hb_face) = HbFace::from_file(&path, 0) else {
-                unsafe { ft::FT_Done_Face(face) };
-                continue;
-            };
             let hb_face = hb_face.to_shared();
             let hb_fonts = [17, 18, 19, 21, 24, 28, 32]
                 .into_iter()
@@ -997,6 +1013,56 @@ fn style_pixel_size(style: SynHlStyle) -> u32 {
     }
 }
 
+/// A font file to load into FreeType and HarfBuzz.
+enum FontSource {
+    /// A font file in one of the system font directories.
+    #[cfg(not(target_arch = "wasm32"))]
+    File(PathBuf),
+    /// Font bytes held in the binary. FreeType and HarfBuzz both borrow the
+    /// buffer rather than copying it, so it has to outlive every face built
+    /// from it, which is why this is `'static`.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Memory(&'static [u8]),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn font_sources() -> Vec<(FontSource, SynHlFontFamily, bool, bool)> {
+    font_paths()
+        .into_iter()
+        .map(|(path, family, bold, italic)| (FontSource::File(path), family, bold, italic))
+        .collect()
+}
+
+/// The browser has no font directory to read, so the editor draws with the
+/// fonts egui already carries to render its own widgets: Ubuntu-Light for body
+/// text, Hack for code, and the two emoji faces as fallbacks for characters
+/// neither covers. None of them ship bold or italic variants, so FreeType
+/// synthesises those, exactly as it does for a system font that ships none.
+#[cfg(target_arch = "wasm32")]
+fn font_sources() -> Vec<(FontSource, SynHlFontFamily, bool, bool)> {
+    const BUNDLED: &[(&str, SynHlFontFamily)] = &[
+        ("Ubuntu-Light", SynHlFontFamily::Proportional),
+        ("Hack", SynHlFontFamily::Monospace),
+        ("NotoEmoji-Regular", SynHlFontFamily::Proportional),
+        ("emoji-icon-font", SynHlFontFamily::Proportional),
+    ];
+    let definitions = egui::FontDefinitions::default();
+    BUNDLED
+        .iter()
+        .filter_map(|(name, family)| {
+            let data = definitions.font_data.get(*name)?;
+            let bytes: &'static [u8] = match &data.font {
+                std::borrow::Cow::Borrowed(bytes) => bytes,
+                // egui's bundled fonts are all `'static` already; anything else
+                // is leaked so the faces built from it stay valid.
+                std::borrow::Cow::Owned(bytes) => Box::leak(bytes.clone().into_boxed_slice()),
+            };
+            Some((FontSource::Memory(bytes), *family, false, false))
+        })
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
     let candidates = FONT_CANDIDATES
         .iter()
@@ -1046,6 +1112,7 @@ fn font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
     candidates
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fallback for systems whose font files are not at any known path, such as Android builds that
 /// ship an OEM font set: take whatever the system font directories happen to contain.
 fn scanned_font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
@@ -1070,6 +1137,7 @@ fn scanned_font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
     found
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Lowercased file name of a font file, or `None` when the path is not one.
 fn font_file_name(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
@@ -1079,6 +1147,7 @@ fn font_file_name(path: &Path) -> Option<String> {
         .then_some(name)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn scanned_font_style(name: &str) -> (SynHlFontFamily, bool, bool) {
     let family = if name.contains("mono") || name.contains("courier") {
         SynHlFontFamily::Monospace
@@ -1092,6 +1161,7 @@ fn scanned_font_style(name: &str) -> (SynHlFontFamily, bool, bool) {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sort order for scanned fonts so body text lands on a general-purpose family rather than on
 /// whichever decorative or single-purpose font sorts first alphabetically.
 fn scanned_font_preference(name: &str) -> u8 {
@@ -1104,9 +1174,11 @@ fn scanned_font_preference(name: &str) -> u8 {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const SYSTEM_FONT_DIRECTORIES: &[&str] =
     &["/system/fonts", "/product/fonts", "/system/product/fonts"];
 
+#[cfg(not(target_arch = "wasm32"))]
 const FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\verdana.ttf",
     "/System/Library/Fonts/Supplemental/Verdana.ttf",
@@ -1141,6 +1213,7 @@ const FONT_CANDIDATES: &[&str] = &[
     "/system/fonts/NotoSansSymbols-Regular-Subsetted.ttf",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 const BOLD_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\verdanab.ttf",
     "C:\\Windows\\Fonts\\segoeuib.ttf",
@@ -1153,6 +1226,7 @@ const BOLD_FONT_CANDIDATES: &[&str] = &[
     "/system/fonts/DroidSans-Bold.ttf",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 const ITALIC_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\verdanai.ttf",
     "C:\\Windows\\Fonts\\segoeuii.ttf",
@@ -1164,6 +1238,7 @@ const ITALIC_FONT_CANDIDATES: &[&str] = &[
     "/system/fonts/NotoSans-Italic.ttf",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 const BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\verdanaz.ttf",
     "C:\\Windows\\Fonts\\segoeuiz.ttf",
@@ -1175,6 +1250,7 @@ const BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "/system/fonts/NotoSans-BoldItalic.ttf",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 const MONOSPACE_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\consola.ttf",
     "C:\\Windows\\Fonts\\cour.ttf",
@@ -1189,6 +1265,7 @@ const MONOSPACE_FONT_CANDIDATES: &[&str] = &[
     "/system/fonts/CutiveMono.ttf",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 const MONOSPACE_BOLD_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\consolab.ttf",
     "C:\\Windows\\Fonts\\courbd.ttf",
@@ -1197,6 +1274,7 @@ const MONOSPACE_BOLD_FONT_CANDIDATES: &[&str] = &[
     "/system/fonts/NotoSansMono-Bold.ttf",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 const MONOSPACE_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\consolai.ttf",
     "C:\\Windows\\Fonts\\couri.ttf",
@@ -1204,6 +1282,7 @@ const MONOSPACE_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "/system/fonts/RobotoMono-Italic.ttf",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 const MONOSPACE_BOLD_ITALIC_FONT_CANDIDATES: &[&str] = &[
     "C:\\Windows\\Fonts\\consolaz.ttf",
     "C:\\Windows\\Fonts\\courbi.ttf",

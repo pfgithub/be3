@@ -24,6 +24,7 @@ const MAX_HEADERS: usize = 64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
     Ok,
+    NoContent,
     BadRequest,
     Forbidden,
     NotFound,
@@ -34,6 +35,7 @@ impl Status {
     fn line(self) -> &'static str {
         match self {
             Self::Ok => "200 OK",
+            Self::NoContent => "204 No Content",
             Self::BadRequest => "400 Bad Request",
             Self::Forbidden => "403 Forbidden",
             Self::NotFound => "404 Not Found",
@@ -41,6 +43,22 @@ impl Status {
         }
     }
 }
+
+/// Lets a page served from anywhere send management commands here.
+///
+/// The web build is a static bundle that can be served from a different origin
+/// than the server it talks to, so without these a browser refuses to hand the
+/// response back to the app. Management commands carry no ambient credentials —
+/// no cookies, no HTTP authentication, and the account is named in the body — so
+/// allowing any origin does not let a page act as someone who is already signed
+/// in. `content-type: application/json` is never a simple request, so browsers
+/// always ask permission with an `OPTIONS` preflight first.
+const CORS_HEADERS: &str = concat!(
+    "access-control-allow-origin: *\r\n",
+    "access-control-allow-methods: POST, OPTIONS\r\n",
+    "access-control-allow-headers: content-type\r\n",
+    "access-control-max-age: 86400\r\n",
+);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RequestHead {
@@ -203,12 +221,25 @@ pub(crate) async fn write_json_response<S: AsyncWrite + Unpin>(
     body: &[u8],
 ) -> io::Result<()> {
     let head = format!(
-        "HTTP/1.1 {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        "HTTP/1.1 {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n{CORS_HEADERS}connection: close\r\n\r\n",
         status.line(),
         body.len()
     );
     stream.write_all(head.as_bytes()).await?;
     stream.write_all(body).await?;
+    stream.flush().await
+}
+
+/// Answers a CORS preflight, which a browser sends before any management
+/// command because those carry a JSON content type.
+pub(crate) async fn write_preflight_response<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+) -> io::Result<()> {
+    let head = format!(
+        "HTTP/1.1 {}\r\ncontent-length: 0\r\n{CORS_HEADERS}connection: close\r\n\r\n",
+        Status::NoContent.line()
+    );
+    stream.write_all(head.as_bytes()).await?;
     stream.flush().await
 }
 

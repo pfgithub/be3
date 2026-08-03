@@ -436,7 +436,7 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
     pub(super) fn copy_selection_to_clipboard(&mut self, entities: &[CanvasEntity]) -> bool {
         let entities = self.selected_entities(entities);
         if entities.is_empty() {
@@ -459,12 +459,14 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    #[cfg(target_os = "android")]
+    /// Neither Android nor the browser offers a clipboard this can read and
+    /// write synchronously while drawing a frame.
+    #[cfg(any(target_os = "android", target_arch = "wasm32"))]
     pub(super) fn copy_selection_to_clipboard(&mut self, _entities: &[CanvasEntity]) -> bool {
         false
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
     pub(super) fn paste_entities_from_clipboard(&mut self) {
         let result = (|| {
             let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
@@ -497,7 +499,7 @@ impl InfiniteCanvasEditor {
         self.tool = Tool::Select;
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_arch = "wasm32"))]
     pub(super) fn paste_entities_from_clipboard(&mut self) {}
 
     pub(super) fn edit_selected(

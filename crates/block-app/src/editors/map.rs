@@ -1,8 +1,13 @@
 mod geo;
+// Tiles are downloaded, decoded, and rasterised on a worker thread that the
+// browser build does not start yet, so this pipeline is unreachable there.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod mvt;
 mod points;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod raster;
 mod sidebar;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod tiles;
 
 use std::cell::Cell;

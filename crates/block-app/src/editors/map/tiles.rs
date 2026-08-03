@@ -3,14 +3,16 @@
 //! Tiles come from the OSMF vector tile service (Shortbread schema); see
 //! <https://operations.osmfoundation.org/policies/vector/>.
 
-use std::collections::HashSet;
-use std::io::Read;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::time::Duration;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::{collections::HashSet, io::Read, time::Duration};
 
 use eframe::egui;
 
-use super::{mvt, raster};
+#[cfg(not(target_arch = "wasm32"))]
+use super::mvt;
+use super::raster;
 
 /// The OSMF vector tile service serves tiles up to this zoom level.
 pub(super) const SOURCE_MAX_ZOOM: u8 = 14;
@@ -49,9 +51,19 @@ impl TileWorker {
     pub(super) fn spawn(context: egui::Context) -> Self {
         let (requests, request_receiver) = channel();
         let (result_sender, results) = channel();
-        let _ = std::thread::Builder::new()
-            .name("map-tile-worker".into())
-            .spawn(move || worker(request_receiver, result_sender, context));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = std::thread::Builder::new()
+                .name("map-tile-worker".into())
+                .spawn(move || worker(request_receiver, result_sender, context));
+        }
+        // Tiles are downloaded and rasterised on a worker thread, which the
+        // browser build has no equivalent for yet, so no tile ever arrives and
+        // the map draws without them.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (request_receiver, result_sender, context);
+        }
         Self { requests, results }
     }
 
@@ -68,11 +80,13 @@ impl TileWorker {
 /// view take priority over any backlog from earlier views. Each tile is
 /// served at most once; re-requesting a pending tile moves it back to the
 /// top.
+#[cfg(not(target_arch = "wasm32"))]
 struct RequestQueue {
     pending: Vec<TileId>,
     served: HashSet<TileId>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RequestQueue {
     fn new() -> Self {
         Self {
@@ -100,6 +114,7 @@ impl RequestQueue {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn worker(requests: Receiver<TileId>, results: Sender<TileResult>, context: egui::Context) {
     let agent = ureq::AgentBuilder::new()
         .user_agent(USER_AGENT)
@@ -135,12 +150,14 @@ fn worker(requests: Receiver<TileId>, results: Sender<TileResult>, context: egui
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_tile(agent: &ureq::Agent, id: TileId) -> Result<raster::TileRaster, String> {
     let data = fetch(agent, id)?;
     let tile = mvt::decode(&data)?;
     Ok(raster::rasterize(&tile, id.zoom))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn fetch(agent: &ureq::Agent, id: TileId) -> Result<Vec<u8>, String> {
     let url = format!("{TILE_URL_BASE}/{}/{}/{}.mvt", id.zoom, id.x, id.y);
     let response = agent

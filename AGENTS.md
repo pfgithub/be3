@@ -21,3 +21,4 @@ Verification:
 - When there are multiple or large changes, split them up into tasks and test & commit to git after each one.
 - Use commit message format `type: message` where type is fix/feat/docs/...
 - Do not perform any manual verification besides those commands.
+- Do not use the browser tool.

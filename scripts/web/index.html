@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+        <title>Block</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #1b1b1b;
+                color: #d0d0d0;
+                font-family: system-ui, sans-serif;
+            }
+
+            canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+            }
+
+            #status {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 0.75rem;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                padding: 1rem;
+            }
+
+            #status[hidden] {
+                display: none;
+            }
+
+            #status .detail {
+                max-width: 40rem;
+                font-size: 0.875rem;
+                color: #9a9a9a;
+                white-space: pre-wrap;
+            }
+        </style>
+
+        <!--
+            The module is built for wasm32-wasip1, so wasm-bindgen emits its
+            WASI calls as imports from this bare specifier. The import map is
+            what points them at the shim.
+        -->
+        <script type="importmap">
+            {
+                "imports": {
+                    "wasi_snapshot_preview1": "./wasi.js"
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <canvas id="block"></canvas>
+        <div id="status"><div class="detail">Loading Block…</div></div>
+
+        <script type="module">
+            import { bindMemory } from "./wasi.js";
+            import init, { run_web } from "./block_app_lib.js";
+
+            const status = document.getElementById("status");
+
+            function fail(heading, detail) {
+                status.hidden = false;
+                status.innerHTML = "";
+                const title = document.createElement("div");
+                title.textContent = heading;
+                const body = document.createElement("div");
+                body.className = "detail";
+                body.textContent = detail;
+                status.append(title, body);
+            }
+
+            try {
+                const wasm = await init();
+                // The glue runs the module's start function before returning,
+                // so this is the earliest the shim can be given memory.
+                bindMemory(wasm.memory);
+
+                status.hidden = true;
+                await run_web("block");
+            } catch (error) {
+                console.error(error);
+                fail(
+                    "Block could not start.",
+                    `${error}\n\nBlock draws with WebGPU or WebGL through a canvas. ` +
+                        "Check the browser console for details.",
+                );
+            }
+        </script>
+    </body>
+</html>

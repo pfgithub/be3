@@ -191,6 +191,12 @@ async fn handle_management_request(
     request: http::BufferedRequest,
     store: Arc<BlockStore>,
 ) -> Result<(), ServerError> {
+    // A browser asks permission before sending a management command, and will
+    // not send the command at all unless the preflight is answered.
+    if request.head.method == "OPTIONS" {
+        http::write_preflight_response(&mut stream).await?;
+        return Ok(());
+    }
     let (status, response) = if request.head.method != "POST" {
         (
             Status::MethodNotAllowed,

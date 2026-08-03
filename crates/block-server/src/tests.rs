@@ -19,6 +19,7 @@ mod lists_backrefs_with_relationship_metadata;
 mod lists_every_root_block_in_uuid_order;
 mod lists_parents;
 mod login_rejects_unknown_accounts;
+mod management_answers_a_cors_preflight;
 mod merges_reference_deltas_from_concurrent_clients;
 mod missing_references_reject_creates_and_do_not_commit_updates;
 mod names_longer_than_128_utf8_bytes_are_rejected;

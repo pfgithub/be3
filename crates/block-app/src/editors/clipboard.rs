@@ -1,9 +1,9 @@
 use block_client::blocks::image::Image;
 use eframe::egui;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
-#[cfg_attr(target_os = "android", allow(dead_code))]
+#[cfg_attr(any(target_os = "android", target_arch = "wasm32"), allow(dead_code))]
 pub(super) enum ClipboardImagePasteResult {
     NoImage,
     Image(Image),
@@ -39,7 +39,7 @@ impl ClipboardImagePaste {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 fn read_clipboard_image() -> ClipboardImagePasteResult {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(clipboard) => clipboard,
@@ -67,7 +67,9 @@ fn read_clipboard_image() -> ClipboardImagePasteResult {
     }
 }
 
-#[cfg(target_os = "android")]
+/// Android has no image clipboard, and the browser only exposes one through an
+/// asynchronous API that cannot answer a synchronous paste.
+#[cfg(any(target_os = "android", target_arch = "wasm32"))]
 fn read_clipboard_image() -> ClipboardImagePasteResult {
     ClipboardImagePasteResult::NoImage
 }

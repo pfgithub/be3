@@ -125,7 +125,7 @@ impl ImageEditor {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
     let Some(path) = rfd::FileDialog::new()
         .add_filter(
@@ -154,6 +154,11 @@ pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
 #[cfg(target_os = "android")]
 pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
     Err("Choosing an image file is not available on Android".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
+    Err("Choosing an image file is not available in the browser yet".into())
 }
 
 pub(super) fn create_image_block(

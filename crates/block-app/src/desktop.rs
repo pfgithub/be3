@@ -1,7 +1,9 @@
-#[cfg(not(target_os = "android"))]
+#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 fn main() -> eframe::Result {
     block_app_lib::run()
 }
 
-#[cfg(target_os = "android")]
+// Android starts at `android_main` and the browser at `run_web`, both in the
+// library; neither has a binary to run.
+#[cfg(any(target_os = "android", target_arch = "wasm32"))]
 fn main() {}

@@ -116,9 +116,13 @@ enum CanvasCommand {
     Paste,
 }
 
+// Copy and paste need a synchronous system clipboard, which Android and the
+// browser do not have.
+#[cfg_attr(any(target_os = "android", target_arch = "wasm32"), allow(dead_code))]
 const CANVAS_CLIPBOARD_PREFIX: &str = "be3-infinite-canvas:";
 
 #[derive(Deserialize, Serialize)]
+#[cfg_attr(any(target_os = "android", target_arch = "wasm32"), allow(dead_code))]
 struct CanvasClipboardPayload {
     entities: Vec<CanvasEntity>,
 }

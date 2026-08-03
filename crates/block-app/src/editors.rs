@@ -1,4 +1,6 @@
-#[cfg(not(target_os = "android"))]
+// The embedded browser is a native webview. Android and the browser sandbox
+// have no equivalent, so those builds fall back to UnsupportedEditor.
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 mod browser_tab;
 mod clipboard;
 mod database;
@@ -883,7 +885,7 @@ impl EditorRegistry {
         registry.register(pixel_ray_tracer::registration());
         registry.register(presentation::registration());
         registry.register(text::registration());
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
         registry.register(browser_tab::registration());
         registry.register(workspace_index::registration());
         registry

@@ -1,5 +1,49 @@
 # BE3
 
+## Building Block for the web
+
+`block-app` builds as a WebAssembly bundle that runs in a browser. The embedded
+browser, the image clipboard, the canvas clipboard, and the native file picker
+are unavailable there, map tiles are not downloaded, and there is no embedded
+server, so the web build signs in to a remote server only.
+
+The build targets `wasm32-wasip1` rather than `wasm32-unknown-unknown`. FreeType
+and HarfBuzz are C and C++, so the text editor's glyph pipeline needs a libc and
+a libc++ to compile against, and `wasm32-unknown-unknown` has neither.
+wasm-bindgen understands WASI: it emits the `wasi_snapshot_preview1` imports and
+wires them into the module's import object, which `index.html` resolves to
+`wasi.js` with an import map.
+
+### Prerequisites
+
+- Rust and Cargo
+- LLVM 17 or newer, with `clang` and `llvm-ar` on `PATH`
+
+The build script installs the `wasm32-wasip1` Rust target and `wasm-bindgen-cli`
+if they are missing, and downloads the WASI sysroot into `target/tools` on first
+use. Pass `-WasiSysroot` to build against one that is already installed.
+
+### Build
+
+```powershell
+.\scripts\build-block-web.ps1 -Release
+```
+
+The bundle is written to `target\web`. Serve it over HTTP — opening
+`index.html` from disk will not work, because the browser refuses to load
+WebAssembly modules over `file://`:
+
+```powershell
+python -m http.server --directory target/web 8080
+```
+
+### Signing in
+
+The web build has no embedded server, so the account dialog asks for a remote
+server URL. That server must be reachable from the page: `block-server` answers
+the CORS preflight that a browser sends before every management command, but a
+page served over HTTPS cannot talk to a server over plain HTTP.
+
 ## Building Block for Android
 
 `block-app` builds as an ARM64 Android APK. The embedded browser and image
