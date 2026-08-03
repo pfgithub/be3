@@ -68,7 +68,7 @@ jobs:
           tool: wasm-bindgen-cli@0.2.122
 
       - name: Cache the WASI sysroot
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/tools
           key: wasi-sysroot-33
@@ -171,7 +171,7 @@ jobs:
             target: x86_64-apple-darwin
             client: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         if: matrix.client && runner.os == 'Linux'
@@ -223,7 +223,7 @@ jobs:
           done
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: block-${{ matrix.name }}
           path: dist
