@@ -3280,12 +3280,10 @@ impl<B: Block> TypedBlock<B> {
             return;
         }
 
-        if state
+        if let Some(pending) = state
             .pending
-            .front()
-            .is_some_and(|pending| pending.id == record.operation_id)
+            .pop_front_if(|pending| pending.id == record.operation_id)
         {
-            let pending = state.pending.pop_front().unwrap();
             Self::apply_stored_operation(state.confirmed.as_mut().unwrap(), &pending.operation);
             state.confirmed_seq = record.seq;
             state.in_flight.remove(&record.operation_id);

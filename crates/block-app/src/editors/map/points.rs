@@ -74,7 +74,10 @@ fn draw_marker(painter: &Painter, tip: Pos2, color: Color32, selected: bool, opa
         painter.circle_stroke(
             head,
             HEAD_RADIUS + 3.5,
-            Stroke::new(2.0_f32, Color32::from_rgb(66, 153, 225).gamma_multiply(opacity)),
+            Stroke::new(
+                2.0_f32,
+                Color32::from_rgb(66, 153, 225).gamma_multiply(opacity),
+            ),
         );
     }
 }

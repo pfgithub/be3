@@ -477,19 +477,17 @@ impl LogicEditor {
                     anchor: snapped,
                     drag_start: world,
                 }),
-                ToolKind::Input => Some(Gesture::Input {
+                ToolKind::Input => (self.challenge.is_none()
+                    || self.next_missing_challenge_input().is_some())
+                .then_some(Gesture::Input {
                     anchor: snapped,
                     drag_start: world,
-                })
-                .filter(|_| {
-                    self.challenge.is_none() || self.next_missing_challenge_input().is_some()
                 }),
-                ToolKind::Output => Some(Gesture::Output {
+                ToolKind::Output => (self.challenge.is_none()
+                    || self.next_missing_challenge_output().is_some())
+                .then_some(Gesture::Output {
                     anchor: snapped,
                     drag_start: world,
-                })
-                .filter(|_| {
-                    self.challenge.is_none() || self.next_missing_challenge_output().is_some()
                 }),
                 ToolKind::ConfigureStorage => {
                     if let Some(DebugEntity::Component(id)) = self.entity_at(world) {
