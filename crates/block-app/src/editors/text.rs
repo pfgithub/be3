@@ -19,9 +19,9 @@ use eframe::egui::{
     Vec2,
 };
 use egui_material_icons::icons::{
-    ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_DESCRIPTION, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC,
-    ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE,
-    ICON_LINK, ICON_TITLE,
+    ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_DESCRIPTION, ICON_FORMAT_BOLD,
+    ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED,
+    ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_LINK, ICON_TITLE,
 };
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
@@ -36,10 +36,12 @@ use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::timings::{FrameProfile, PaintTimings};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    embedded_editor_ui,
+    embedded_editor_frame_size, embedded_editor_ui,
     image::create_image_block,
-    BlockEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
+    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
+    SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+    EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -121,13 +123,19 @@ struct TextEditor {
     dependencies: ReferenceList,
     clipboard_image_paste: ClipboardImagePaste,
     image_import_error: Option<String>,
+    focused_embed: Option<FocusedEmbed>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FocusedEmbed {
+    id: Uuid,
+    source_start: usize,
 }
 
 struct CachedLayout {
     bytes: Vec<u8>,
     language: HighlightLanguage,
     embeds: Vec<ResolvedEmbed>,
-    width: f32,
     layout: Arc<DocumentLayout>,
 }
 
@@ -151,6 +159,7 @@ impl TextEditor {
             dependencies,
             clipboard_image_paste: ClipboardImagePaste::default(),
             image_import_error: None,
+            focused_embed: None,
         }
     }
 
@@ -336,10 +345,11 @@ impl TextEditor {
                         editors.ensure(embed.id, *block_type);
                     }
                 }
-                let preview_aspect_ratio = embed
+                let frame_size = embed
                     .large
-                    .then(|| editors.render_aspect_ratio(embed.id))
-                    .flatten();
+                    .then(|| editors.direct_editor_intrinsic_size(embed.id))
+                    .flatten()
+                    .map(|intrinsic| embedded_editor_frame_size(intrinsic, 1.0));
                 let label = metadata
                     .as_ref()
                     .map(|(_, name)| name)
@@ -356,7 +366,7 @@ impl TextEditor {
                         .map(|icon| icon.codepoint),
                     large: embed.large,
                     available: metadata.is_some(),
-                    preview_aspect_ratio,
+                    frame_size,
                 }
             })
             .collect()
@@ -769,48 +779,125 @@ impl TextEditor {
         editors: &mut EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        if self.focused_embed.is_some_and(|focused| {
+            !layout.embeds.iter().any(|embed| {
+                embed.large && embed.id == focused.id && embed.range.start == focused.source_start
+            })
+        }) {
+            self.focused_embed = None;
+        }
         let mut action = None;
         for embed in &layout.embeds {
             let rect = embed.rect.translate(origin.to_vec2());
             if embed.large {
-                painter.rect_filled(rect, 6.0, Color32::from_rgb(35, 46, 56));
-                if embed.available {
+                let inner = rect.shrink(EMBEDDED_EDITOR_PADDING);
+                let title_bar = Rect::from_min_size(
+                    inner.min,
+                    Vec2::new(inner.width(), EMBEDDED_EDITOR_TITLE_HEIGHT),
+                );
+                let content = Rect::from_min_max(
+                    Pos2::new(inner.left(), title_bar.bottom() + EMBEDDED_EDITOR_TITLE_GAP),
+                    inner.max,
+                );
+                painter.rect(
+                    rect,
+                    6.0,
+                    ui.visuals().panel_fill,
+                    egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                    egui::StrokeKind::Inside,
+                );
+                painter.rect_filled(title_bar, 4.0, ui.visuals().widgets.inactive.bg_fill);
+
+                let mut title_x = title_bar.left() + 6.0;
+                if let Some(icon) = embed.icon {
+                    painter.text(
+                        Pos2::new(title_x, title_bar.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        icon,
+                        egui::FontId::new(
+                            16.0,
+                            egui::FontFamily::Name(egui_material_icons::FONT_FAMILY.into()),
+                        ),
+                        ui.visuals().text_color(),
+                    );
+                    title_x += 22.0;
+                }
+                painter.with_clip_rect(title_bar).text(
+                    Pos2::new(title_x, title_bar.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &embed.label,
+                    egui::FontId::proportional(16.0),
+                    ui.visuals().text_color(),
+                );
+
+                let key = FocusedEmbed {
+                    id: embed.id,
+                    source_start: embed.range.start,
+                };
+                let focused = self.focused_embed == Some(key);
+                let interaction = editors
+                    .direct_editor_interaction(embed.id)
+                    .unwrap_or(DirectEditorInteraction::Preview);
+                let show_editor = interaction != DirectEditorInteraction::Preview || focused;
+                if interaction == DirectEditorInteraction::Preview && !focused && embed.available {
+                    let button_rect = Rect::from_min_size(
+                        Pos2::new(title_bar.right() - 54.0, title_bar.top() + 2.0),
+                        Vec2::new(52.0, title_bar.height() - 4.0),
+                    );
+                    if ui.put(button_rect, egui::Button::new("Edit")).clicked() {
+                        self.focused_embed = Some(key);
+                    }
+                }
+                if interaction == DirectEditorInteraction::Live
+                    && ui.ctx().input(|input| {
+                        input.pointer.button_pressed(PointerButton::Primary)
+                            && input
+                                .pointer
+                                .interact_pos()
+                                .is_some_and(|pointer| content.contains(pointer))
+                    })
+                {
+                    self.focused_embed = Some(key);
+                }
+
+                if embed.available && show_editor {
                     let embedded = embedded_editor_ui(
                         ui,
                         editors,
                         embed.id,
                         ("text-direct-editor", self.block.id(), embed.range.start),
-                        rect,
-                        rect.intersect(ui.clip_rect()),
+                        content,
+                        content.intersect(ui.clip_rect()),
                         1.0,
                         viewport,
                     );
                     action = action.or(embedded);
+                } else if embed.available {
+                    let rendered = editors.render(
+                        embed.id,
+                        BlockRenderContext {
+                            painter,
+                            corners: [
+                                content.left_top(),
+                                content.right_top(),
+                                content.right_bottom(),
+                                content.left_bottom(),
+                            ],
+                            opacity: 1.0,
+                        },
+                    );
+                    if !rendered {
+                        painter.rect_filled(content, 0.0, Color32::from_gray(35));
+                    }
                 } else {
                     let title = painter.layout_no_wrap(
-                        embed.label.clone(),
-                        egui::FontId::proportional(18.0),
-                        ui.visuals().text_color(),
-                    );
-                    let status = painter.layout_no_wrap(
                         "Block unavailable".to_owned(),
                         egui::FontId::proportional(13.0),
                         ui.visuals().weak_text_color(),
                     );
-                    let gap = 6.0;
-                    let total_height = title.size().y + gap + status.size().y;
-                    let top = rect.center().y - total_height * 0.5;
                     painter.galley(
-                        Pos2::new(rect.center().x - title.size().x * 0.5, top),
+                        content.center() - title.size() * 0.5,
                         title,
-                        ui.visuals().text_color(),
-                    );
-                    painter.galley(
-                        Pos2::new(
-                            rect.center().x - status.size().x * 0.5,
-                            top + total_height - status.size().y,
-                        ),
-                        status,
                         ui.visuals().weak_text_color(),
                     );
                 }
@@ -955,12 +1042,7 @@ impl TextEditor {
         let height = match &self.renderer {
             Ok(renderer) => {
                 renderer
-                    .layout_profiled(
-                        &bytes,
-                        &highlight,
-                        &embeds,
-                        (width - PADDING.x * 2.0).max(1.0),
-                    )
+                    .layout_profiled(&bytes, &highlight, &embeds)
                     .0
                     .size
                     .y
@@ -1008,8 +1090,21 @@ impl BlockEditor for TextEditor {
         &mut self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        _viewport: &mut DirectEditorViewport,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        if let Some(focused) = self.focused_embed {
+            ui.horizontal(|ui| {
+                if ui
+                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
+                    .clicked()
+                {
+                    self.focused_embed = None;
+                }
+            });
+            return self
+                .focused_embed
+                .and_then(|_| editors.direct_editor_top_bar(focused.id, ui, viewport));
+        }
         let toolbar_start = Instant::now();
         self.toolbar(ui, editors);
         if let Some(error) = self.image_import_error.clone() {
@@ -1022,6 +1117,34 @@ impl BlockEditor for TextEditor {
         }
         self.toolbar_profile = toolbar_start.elapsed();
         None
+    }
+
+    fn direct_editor_has_left_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
+        self.focused_embed
+            .is_some_and(|focused| editors.direct_editor_has_left_sidebar(focused.id))
+    }
+
+    fn direct_editor_left_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        self.focused_embed
+            .and_then(|focused| editors.direct_editor_left_sidebar(focused.id, ui))
+    }
+
+    fn direct_editor_has_right_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
+        self.focused_embed
+            .is_some_and(|focused| editors.direct_editor_has_right_sidebar(focused.id))
+    }
+
+    fn direct_editor_right_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        self.focused_embed
+            .and_then(|focused| editors.direct_editor_right_sidebar(focused.id, ui))
     }
 
     fn direct_editor_ui(
@@ -1064,19 +1187,16 @@ impl BlockEditor for TextEditor {
         profile.highlight = highlight_start.elapsed();
         let layout_start = Instant::now();
         let embeds = self.resolve_embeds(&bytes, editors);
-        let full_width = (ui.available_width() - PADDING.x * 2.0).max(1.0);
         let layout = if let Some(cached) = self.layout_cache.as_ref().filter(|cached| {
             cached.language == self.highlight_language
                 && cached.bytes == bytes
                 && cached.embeds == embeds
-                && cached.width == full_width
         }) {
             Arc::clone(&cached.layout)
         } else {
             let layout = match &self.renderer {
                 Ok(renderer) => {
-                    let (layout, detail) =
-                        renderer.layout_profiled(&bytes, &highlight, &embeds, full_width);
+                    let (layout, detail) = renderer.layout_profiled(&bytes, &highlight, &embeds);
                     profile.layout_detail = Some(detail);
                     Arc::new(layout)
                 }
@@ -1094,7 +1214,6 @@ impl BlockEditor for TextEditor {
                 bytes,
                 language: self.highlight_language,
                 embeds,
-                width: full_width,
                 layout: Arc::clone(&layout),
             });
             layout

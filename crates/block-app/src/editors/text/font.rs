@@ -29,7 +29,7 @@ unsafe extern "C" {
 const BODY_PIXEL_SIZE: u32 = 18;
 const CODE_PIXEL_SIZE: u32 = 17;
 const INLINE_EMBED_HEIGHT: f32 = 24.0;
-const LARGE_EMBED_HEIGHT: f32 = 180.0;
+const UNAVAILABLE_EMBED_SIZE: Vec2 = Vec2::new(320.0, 120.0);
 
 pub(super) struct TextRenderer {
     library: ft::FT_Library,
@@ -52,7 +52,7 @@ pub(super) struct ResolvedEmbed {
     pub icon: Option<&'static str>,
     pub large: bool,
     pub available: bool,
-    pub preview_aspect_ratio: Option<f32>,
+    pub frame_size: Option<Vec2>,
 }
 
 pub(super) struct EmbedLayout {
@@ -217,7 +217,6 @@ impl TextRenderer {
         bytes: &[u8],
         highlight: &SyntaxHighlight,
         embeds: &[ResolvedEmbed],
-        full_width: f32,
     ) -> (DocumentLayout, LayoutTimings) {
         let mut timings = LayoutTimings::default();
         let mut lines = Vec::new();
@@ -295,7 +294,7 @@ impl TextRenderer {
             }
             y += height;
             if let Some(embed) = line_embeds.iter().find(|embed| embed.large) {
-                let preview_size = preview_size(full_width, embed.preview_aspect_ratio);
+                let frame_size = embed.frame_size.unwrap_or(UNAVAILABLE_EMBED_SIZE);
                 embed_layouts.push(EmbedLayout {
                     range: embed.range.clone(),
                     id: embed.id,
@@ -303,9 +302,9 @@ impl TextRenderer {
                     icon: embed.icon,
                     large: true,
                     available: embed.available,
-                    rect: Rect::from_min_size(Pos2::new(0.0, y), preview_size),
+                    rect: Rect::from_min_size(Pos2::new(0.0, y), frame_size),
                 });
-                y += preview_size.y;
+                y += frame_size.y;
             }
 
             let Some(newline) = newline else {
@@ -318,7 +317,11 @@ impl TextRenderer {
         let tables_start = Instant::now();
         align_markdown_tables(&mut lines, &mut positions, highlight.markdown_tables());
         timings.tables = tables_start.elapsed();
-        let width = lines.iter().map(|line| line.width).fold(0.0_f32, f32::max);
+        let width = lines
+            .iter()
+            .map(|line| line.width)
+            .chain(embed_layouts.iter().map(|embed| embed.rect.right()))
+            .fold(0.0_f32, f32::max);
         (
             DocumentLayout {
                 size: Vec2::new(width + 24.0, y + 16.0),
@@ -634,19 +637,6 @@ impl TextRenderer {
             }
         }
         self.glyphs.insert(key, result);
-    }
-}
-
-fn preview_size(full_width: f32, aspect_ratio: Option<f32>) -> Vec2 {
-    let bounds = Vec2::new(full_width.max(1.0), LARGE_EMBED_HEIGHT);
-    let Some(aspect_ratio) = aspect_ratio.filter(|aspect| aspect.is_finite() && *aspect > 0.0)
-    else {
-        return bounds;
-    };
-    if bounds.x / bounds.y > aspect_ratio {
-        Vec2::new(bounds.y * aspect_ratio, bounds.y)
-    } else {
-        Vec2::new(bounds.x, bounds.x / aspect_ratio)
     }
 }
 

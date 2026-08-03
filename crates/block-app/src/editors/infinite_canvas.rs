@@ -39,7 +39,8 @@ use super::{
     image::{create_image_block, pick_image_file},
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
     DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
-    SidebarDragPayload,
+    SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+    EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 pub(super) fn registration() -> EditorRegistration {
@@ -71,9 +72,6 @@ const HANDLE_RADIUS: f32 = 5.0;
 const ROTATE_OFFSET: f32 = 28.0;
 const ZOOM_STEP: f32 = 1.25;
 const IMPORT_CASCADE_OFFSET: f32 = 24.0;
-const DIRECT_EDITOR_PADDING: f32 = 12.0;
-const DIRECT_EDITOR_TITLE_HEIGHT: f32 = 28.0;
-const DIRECT_EDITOR_TITLE_GAP: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum CommonValue<T> {

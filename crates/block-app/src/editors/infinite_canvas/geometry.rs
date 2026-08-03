@@ -308,11 +308,11 @@ pub(super) struct DirectEditorLayout {
 
 pub(super) fn direct_editor_entity_size(intrinsic: Vec2, scale: f32) -> CanvasPoint {
     CanvasPoint::new(
-        ((intrinsic.x + DIRECT_EDITOR_PADDING * 2.0) * scale).max(MIN_SIZE),
+        ((intrinsic.x + EMBEDDED_EDITOR_PADDING * 2.0) * scale).max(MIN_SIZE),
         ((intrinsic.y
-            + DIRECT_EDITOR_PADDING * 2.0
-            + DIRECT_EDITOR_TITLE_HEIGHT
-            + DIRECT_EDITOR_TITLE_GAP)
+            + EMBEDDED_EDITOR_PADDING * 2.0
+            + EMBEDDED_EDITOR_TITLE_HEIGHT
+            + EMBEDDED_EDITOR_TITLE_GAP)
             * scale)
             .max(MIN_SIZE),
     )
@@ -347,7 +347,8 @@ pub(super) fn preview_to_direct_editor(
     direct.kind = CanvasEntityKind::DirectEditor { block_id, scale };
     direct.transform.center = CanvasPoint::new(
         content.center().x,
-        content.center().y - (DIRECT_EDITOR_TITLE_HEIGHT + DIRECT_EDITOR_TITLE_GAP) * scale * 0.5,
+        content.center().y
+            - (EMBEDDED_EDITOR_TITLE_HEIGHT + EMBEDDED_EDITOR_TITLE_GAP) * scale * 0.5,
     );
     direct.transform.size =
         direct_editor_entity_size(Vec2::new(content_size.x, content_size.y), scale);
@@ -360,9 +361,9 @@ pub(super) fn direct_editor_layout(entity: &CanvasEntity) -> Option<DirectEditor
         return None;
     };
     let bounds = entity_bounds(entity);
-    let padding = DIRECT_EDITOR_PADDING * scale;
-    let title_height = DIRECT_EDITOR_TITLE_HEIGHT * scale;
-    let title_gap = DIRECT_EDITOR_TITLE_GAP * scale;
+    let padding = EMBEDDED_EDITOR_PADDING * scale;
+    let title_height = EMBEDDED_EDITOR_TITLE_HEIGHT * scale;
+    let title_gap = EMBEDDED_EDITOR_TITLE_GAP * scale;
     Some(DirectEditorLayout {
         title_bar: WorldRect {
             min: CanvasPoint::new(bounds.min.x + padding, bounds.min.y + padding),
