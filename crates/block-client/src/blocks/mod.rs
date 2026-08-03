@@ -2,6 +2,7 @@ pub mod database;
 pub mod database_schema;
 pub mod image;
 pub mod infinite_canvas;
+pub mod map;
 pub mod pixel_art;
 pub mod pixel_ray_tracer;
 pub mod presentation;
