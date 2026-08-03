@@ -36,10 +36,10 @@ use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
+    embedded_editor_ui,
     image::create_image_block,
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
-    SidebarDragPayload,
+    BlockEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration, SidebarDragPayload,
 };
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -562,6 +562,12 @@ impl TextEditor {
             return false;
         };
         let local_pointer = pointer - origin;
+        if layout.embeds.iter().any(|embed| {
+            embed.large && embed.available && embed.rect.contains(local_pointer.to_pos2())
+        }) {
+            self.selecting = false;
+            return false;
+        }
         let target = hit_test(layout, local_pointer);
         if pressed && response.contains_pointer() {
             response.request_focus();
@@ -578,7 +584,7 @@ impl TextEditor {
             if let Some(embed) = layout
                 .embeds
                 .iter()
-                .find(|embed| embed.rect.contains(local_pointer.to_pos2()))
+                .find(|embed| !embed.large && embed.rect.contains(local_pointer.to_pos2()))
             {
                 self.core.execute_command(EditorCommand::Click {
                     position: self.core.position(embed.range.start),
@@ -756,41 +762,38 @@ impl TextEditor {
 
     fn paint_embeds(
         &mut self,
-        ui: &egui::Ui,
+        ui: &mut egui::Ui,
         painter: &egui::Painter,
         origin: Pos2,
         layout: &DocumentLayout,
         editors: &mut EditorAccess<'_>,
-    ) {
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        let mut action = None;
         for embed in &layout.embeds {
             let rect = embed.rect.translate(origin.to_vec2());
             if embed.large {
                 painter.rect_filled(rect, 6.0, Color32::from_rgb(35, 46, 56));
-                let rendered = editors.render(
-                    embed.id,
-                    BlockRenderContext {
-                        painter,
-                        corners: [
-                            rect.left_top(),
-                            rect.right_top(),
-                            rect.right_bottom(),
-                            rect.left_bottom(),
-                        ],
-                        opacity: 1.0,
-                    },
-                );
-                if !rendered {
+                if embed.available {
+                    let embedded = embedded_editor_ui(
+                        ui,
+                        editors,
+                        embed.id,
+                        ("text-direct-editor", self.block.id(), embed.range.start),
+                        rect,
+                        rect.intersect(ui.clip_rect()),
+                        1.0,
+                        viewport,
+                    );
+                    action = action.or(embedded);
+                } else {
                     let title = painter.layout_no_wrap(
                         embed.label.clone(),
                         egui::FontId::proportional(18.0),
                         ui.visuals().text_color(),
                     );
                     let status = painter.layout_no_wrap(
-                        if embed.available {
-                            "Preview unavailable".to_owned()
-                        } else {
-                            "Block unavailable".to_owned()
-                        },
+                        "Block unavailable".to_owned(),
                         egui::FontId::proportional(13.0),
                         ui.visuals().weak_text_color(),
                     );
@@ -851,6 +854,7 @@ impl TextEditor {
                 );
             }
         }
+        action
     }
 
     fn paint_checkboxes(
@@ -1026,7 +1030,7 @@ impl BlockEditor for TextEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
         _scale: f32,
-        _viewport: &mut DirectEditorViewport,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let frame_start = Instant::now();
         let mut profile = FrameProfile::default();
@@ -1109,7 +1113,7 @@ impl BlockEditor for TextEditor {
         let pointer_start = Instant::now();
         reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
         profile.pointer = pointer_start.elapsed();
-        self.paint_embeds(ui, &painter, origin, &layout, editors);
+        let embedded_action = self.paint_embeds(ui, &painter, origin, &layout, editors, viewport);
         let pointer = response
             .interact_pointer_pos()
             .or_else(|| response.ctx.pointer_hover_pos());
@@ -1168,7 +1172,7 @@ impl BlockEditor for TextEditor {
         }
         profile.total = frame_start.elapsed() + profile.toolbar;
         self.profiler.record(profile);
-        edit_block
+        edit_block.or(embedded_action)
     }
 }
 

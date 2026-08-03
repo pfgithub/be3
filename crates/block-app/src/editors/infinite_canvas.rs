@@ -35,6 +35,7 @@ use crate::block_picker::BlockPicker;
 
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
+    embedded_editor_ui,
     image::{create_image_block, pick_image_file},
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
     DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,

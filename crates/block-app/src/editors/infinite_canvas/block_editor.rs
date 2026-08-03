@@ -340,25 +340,16 @@ impl BlockEditor for InfiniteCanvasEditor {
             {
                 self.focused_editor = Some(entity.id);
             }
-            let embedded = ui
-                .new_child(
-                    egui::UiBuilder::new()
-                        .id_salt(("canvas-direct-editor", entity.id))
-                        .max_rect(screen)
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                )
-                .scope(|ui| {
-                    ui.set_clip_rect(visible_screen.intersect(ui.clip_rect()));
-                    ui.set_max_size(screen.size());
-                    ui.set_min_size(screen.size());
-                    editors.embedded_direct_editor_ui(
-                        block_id,
-                        ui,
-                        scale * self.render_scale,
-                        viewport,
-                    )
-                })
-                .inner;
+            let embedded = embedded_editor_ui(
+                ui,
+                editors,
+                block_id,
+                ("canvas-direct-editor", entity.id),
+                screen,
+                visible_screen,
+                scale * self.render_scale,
+                viewport,
+            );
             action = action.or(embedded);
         }
 

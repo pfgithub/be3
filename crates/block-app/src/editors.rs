@@ -13,6 +13,7 @@ mod unsupported;
 mod workspace_index;
 
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use block::BlockParent;
 use block_client::{
@@ -143,6 +144,31 @@ pub struct EditorAccess<'a> {
     client: &'a BlockClient,
     registry: &'a EditorRegistry,
     editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
+}
+
+pub fn embedded_editor_ui(
+    ui: &mut egui::Ui,
+    editors: &mut EditorAccess<'_>,
+    block_id: Uuid,
+    id_salt: impl Hash,
+    rect: egui::Rect,
+    clip_rect: egui::Rect,
+    scale: f32,
+    viewport: &mut DirectEditorViewport,
+) -> Option<EditorAction> {
+    ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(id_salt)
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    )
+    .scope(|ui| {
+        ui.set_clip_rect(clip_rect.intersect(ui.clip_rect()));
+        ui.set_max_size(rect.size());
+        ui.set_min_size(rect.size());
+        editors.embedded_direct_editor_ui(block_id, ui, scale, viewport)
+    })
+    .inner
 }
 
 impl<'a> EditorAccess<'a> {
