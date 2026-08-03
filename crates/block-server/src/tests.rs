@@ -20,6 +20,8 @@ mod names_longer_than_128_utf8_bytes_are_rejected;
 mod omitted_sequences_are_assigned_by_the_server;
 mod operation_ids_are_idempotent_and_conflicts_are_rejected;
 mod parent_watch_updates;
+mod pending_invitation_can_be_accepted_after_registration;
+mod pending_invitation_can_be_declined;
 mod preserves_reference_order;
 mod read_returns_parent;
 mod reads_replay_contiguous_operation_records;
@@ -31,6 +33,9 @@ mod reparents_without_changing_either_parents_references;
 mod sequence_errors_include_the_expected_sequence;
 mod shared_protocol_round_trips_over_websocket;
 mod watches_reference_changes_until_unwatched;
+mod workspace_invites_require_administrator_membership;
+mod workspace_state_survives_a_server_restart;
+mod workspaces_start_empty_and_creation_adds_the_owner;
 
 async fn send_message<S>(socket: &mut S, message: ClientMessage)
 where
@@ -72,8 +77,8 @@ mod support {
     use std::path::PathBuf;
 
     use block::{
-        BlockParent, BlockReference, BlockReferenceList, ClientMessage, ManagementClientMessage,
-        ManagementServerMessage, ReferenceDelta, ServerMessage,
+        Account, BlockParent, BlockReference, BlockReferenceList, ClientMessage,
+        ManagementClientMessage, ManagementServerMessage, ReferenceDelta, ServerMessage, Workspace,
     };
     use futures_util::{SinkExt, StreamExt};
     use tokio::{fs, net::TcpListener, task::JoinHandle};
@@ -157,6 +162,38 @@ mod support {
             .unwrap();
         let message = socket.next().await.unwrap().unwrap();
         serde_json::from_str(&message.into_text().unwrap()).unwrap()
+    }
+
+    pub async fn register(socket: &mut Socket, email: &str) -> Account {
+        let response = management_request(
+            socket,
+            ManagementClientMessage::Register {
+                request_id: Uuid::new_v4(),
+                email: email.into(),
+                display_name: email.split('@').next().unwrap().into(),
+            },
+        )
+        .await;
+        let ManagementServerMessage::Account { account, .. } = response else {
+            panic!("registration failed: {response:?}");
+        };
+        account
+    }
+
+    pub async fn create_workspace(socket: &mut Socket, account_id: Uuid, name: &str) -> Workspace {
+        let response = management_request(
+            socket,
+            ManagementClientMessage::CreateWorkspace {
+                request_id: Uuid::new_v4(),
+                account_id,
+                name: name.into(),
+            },
+        )
+        .await;
+        let ManagementServerMessage::Workspace { workspace, .. } = response else {
+            panic!("workspace creation failed: {response:?}");
+        };
+        workspace
     }
 
     pub async fn create(socket: &mut Socket, id: Uuid, references: Vec<Uuid>) -> ServerMessage {

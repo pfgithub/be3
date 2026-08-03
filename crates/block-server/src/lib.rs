@@ -11,7 +11,8 @@ use std::{
 use block::{
     Account, BlockOperation, BlockParent, BlockReference, BlockReferenceList, ClientMessage,
     CommandKind, ErrorCode, ManagementClientMessage, ManagementErrorCode, ManagementServerMessage,
-    OperationRecord, ReferenceDelta, ServerMessage, MAX_NAME_BYTES,
+    OperationRecord, ReferenceDelta, ServerMessage, Workspace, WorkspaceInvitation, WorkspaceRole,
+    MAX_NAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
@@ -177,20 +178,77 @@ async fn handle_management_message(store: &BlockStore, text: &str) -> Management
         }
     };
     let request_id = message.request_id();
-    let result = match message {
+    match message {
         ManagementClientMessage::Register {
             email,
             display_name,
             ..
-        } => store.register_account(email, display_name).await,
-        ManagementClientMessage::Login { email, .. } => store.login_account(email).await,
-    };
-    match result {
-        Ok(account) => ManagementServerMessage::Account {
-            request_id,
-            account,
+        } => match store.register_account(email, display_name).await {
+            Ok(account) => ManagementServerMessage::Account {
+                request_id,
+                account,
+            },
+            Err(error) => error.to_response(request_id),
         },
-        Err(error) => error.to_response(request_id),
+        ManagementClientMessage::Login { email, .. } => match store.login_account(email).await {
+            Ok(account) => ManagementServerMessage::Account {
+                request_id,
+                account,
+            },
+            Err(error) => error.to_response(request_id),
+        },
+        ManagementClientMessage::ListWorkspaces { account_id, .. } => {
+            match store.list_workspaces(account_id).await {
+                Ok(workspaces) => ManagementServerMessage::Workspaces {
+                    request_id,
+                    workspaces,
+                },
+                Err(error) => error.to_response(request_id),
+            }
+        }
+        ManagementClientMessage::CreateWorkspace {
+            account_id, name, ..
+        } => match store.create_workspace(account_id, name).await {
+            Ok(workspace) => ManagementServerMessage::Workspace {
+                request_id,
+                workspace,
+            },
+            Err(error) => error.to_response(request_id),
+        },
+        ManagementClientMessage::ListInvitations { account_id, .. } => {
+            match store.list_invitations(account_id).await {
+                Ok(invitations) => ManagementServerMessage::Invitations {
+                    request_id,
+                    invitations,
+                },
+                Err(error) => error.to_response(request_id),
+            }
+        }
+        ManagementClientMessage::Invite {
+            account_id,
+            workspace_id,
+            email,
+            role,
+            ..
+        } => match store.invite(account_id, workspace_id, email, role).await {
+            Ok(invitation) => ManagementServerMessage::Invitation {
+                request_id,
+                invitation,
+            },
+            Err(error) => error.to_response(request_id),
+        },
+        ManagementClientMessage::RespondInvitation {
+            account_id,
+            invitation_id,
+            accept,
+            ..
+        } => match store
+            .respond_invitation(account_id, invitation_id, accept)
+            .await
+        {
+            Ok(()) => ManagementServerMessage::Ok { request_id },
+            Err(error) => error.to_response(request_id),
+        },
     }
 }
 
@@ -763,6 +821,220 @@ impl BlockStore {
         })
     }
 
+    async fn list_workspaces(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<Workspace>, ManagementStoreError> {
+        let database = self.database.lock().await;
+        require_account(&database, account_id)?;
+        let mut statement = database.prepare(
+            "SELECT w.id, w.name, w.owner_id, m.role
+             FROM workspace_memberships m
+             JOIN workspaces w ON w.id = m.workspace_id
+             WHERE m.account_id = ?1
+             ORDER BY w.name COLLATE NOCASE, w.id",
+        )?;
+        let rows = statement.query_map([account_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, name, owner_id, role) = row?;
+            Ok(Workspace {
+                id: parse_management_uuid(&id)?,
+                name,
+                owner_id: parse_management_uuid(&owner_id)?,
+                role: decode_workspace_role(&role)?,
+            })
+        })
+        .collect()
+    }
+
+    async fn create_workspace(
+        &self,
+        account_id: Uuid,
+        name: String,
+    ) -> Result<Workspace, ManagementStoreError> {
+        let name = normalize_display_name(&name)?;
+        let workspace = Workspace {
+            id: Uuid::new_v4(),
+            name,
+            owner_id: account_id,
+            role: WorkspaceRole::Administrator,
+        };
+        let mut database = self.database.lock().await;
+        require_account(&database, account_id)?;
+        let transaction = database.transaction()?;
+        transaction.execute(
+            "INSERT INTO workspaces (id, name, owner_id) VALUES (?1, ?2, ?3)",
+            params![
+                workspace.id.to_string(),
+                &workspace.name,
+                workspace.owner_id.to_string()
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO workspace_memberships (workspace_id, account_id, role)
+             VALUES (?1, ?2, 'administrator')",
+            params![workspace.id.to_string(), account_id.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok(workspace)
+    }
+
+    async fn list_invitations(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<WorkspaceInvitation>, ManagementStoreError> {
+        let database = self.database.lock().await;
+        let email = account_email(&database, account_id)?;
+        let mut statement = database.prepare(
+            "SELECT i.id, i.workspace_id, w.name, i.email, i.role, i.invited_by
+             FROM workspace_invitations i
+             JOIN workspaces w ON w.id = i.workspace_id
+             WHERE i.email = ?1
+             ORDER BY w.name COLLATE NOCASE, i.id",
+        )?;
+        let rows = statement.query_map([email], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, workspace_id, workspace_name, email, role, invited_by) = row?;
+            Ok(WorkspaceInvitation {
+                id: parse_management_uuid(&id)?,
+                workspace_id: parse_management_uuid(&workspace_id)?,
+                workspace_name,
+                email,
+                role: decode_workspace_role(&role)?,
+                invited_by: parse_management_uuid(&invited_by)?,
+            })
+        })
+        .collect()
+    }
+
+    async fn invite(
+        &self,
+        account_id: Uuid,
+        workspace_id: Uuid,
+        email: String,
+        role: WorkspaceRole,
+    ) -> Result<WorkspaceInvitation, ManagementStoreError> {
+        if role != WorkspaceRole::Administrator {
+            return Err(ManagementStoreError::UnsupportedRole);
+        }
+        let email = normalize_email(&email)?;
+        let database = self.database.lock().await;
+        require_administrator(&database, account_id, workspace_id)?;
+        let workspace_name = database
+            .query_row(
+                "SELECT name FROM workspaces WHERE id = ?1",
+                [workspace_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or(ManagementStoreError::WorkspaceNotFound)?;
+        let existing_account = database
+            .query_row(
+                "SELECT id FROM accounts WHERE email = ?1",
+                [&email],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(existing_account) = existing_account {
+            let membership = database
+                .query_row(
+                    "SELECT 1 FROM workspace_memberships
+                     WHERE workspace_id = ?1 AND account_id = ?2",
+                    params![workspace_id.to_string(), existing_account],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if membership.is_some() {
+                return Err(ManagementStoreError::AccountAlreadyMember);
+            }
+        }
+        let invitation = WorkspaceInvitation {
+            id: Uuid::new_v4(),
+            workspace_id,
+            workspace_name,
+            email,
+            role,
+            invited_by: account_id,
+        };
+        let result = database.execute(
+            "INSERT INTO workspace_invitations
+             (id, workspace_id, email, role, invited_by)
+             VALUES (?1, ?2, ?3, 'administrator', ?4)",
+            params![
+                invitation.id.to_string(),
+                invitation.workspace_id.to_string(),
+                &invitation.email,
+                invitation.invited_by.to_string()
+            ],
+        );
+        match result {
+            Ok(_) => Ok(invitation),
+            Err(error)
+                if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) =>
+            {
+                Err(ManagementStoreError::InvitationAlreadyExists)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn respond_invitation(
+        &self,
+        account_id: Uuid,
+        invitation_id: Uuid,
+        accept: bool,
+    ) -> Result<(), ManagementStoreError> {
+        let mut database = self.database.lock().await;
+        let email = account_email(&database, account_id)?;
+        let invitation = database
+            .query_row(
+                "SELECT workspace_id, email, role FROM workspace_invitations WHERE id = ?1",
+                [invitation_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(ManagementStoreError::InvitationNotFound)?;
+        if invitation.1 != email {
+            return Err(ManagementStoreError::PermissionDenied);
+        }
+        let transaction = database.transaction()?;
+        if accept {
+            transaction.execute(
+                "INSERT INTO workspace_memberships (workspace_id, account_id, role)
+                 VALUES (?1, ?2, ?3)",
+                params![invitation.0, account_id.to_string(), invitation.2],
+            )?;
+        }
+        transaction.execute(
+            "DELETE FROM workspace_invitations WHERE id = ?1",
+            [invitation_id.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     async fn create_block_unlocked(
         &self,
         id: Uuid,
@@ -1186,6 +1458,71 @@ fn normalize_display_name(name: &str) -> Result<String, ManagementStoreError> {
     Ok(name.to_owned())
 }
 
+fn require_account(database: &Connection, account_id: Uuid) -> Result<(), ManagementStoreError> {
+    database
+        .query_row(
+            "SELECT 1 FROM accounts WHERE id = ?1",
+            [account_id.to_string()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .ok_or(ManagementStoreError::AccountNotFound)
+}
+
+fn account_email(database: &Connection, account_id: Uuid) -> Result<String, ManagementStoreError> {
+    database
+        .query_row(
+            "SELECT email FROM accounts WHERE id = ?1",
+            [account_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(ManagementStoreError::AccountNotFound)
+}
+
+fn require_administrator(
+    database: &Connection,
+    account_id: Uuid,
+    workspace_id: Uuid,
+) -> Result<(), ManagementStoreError> {
+    require_account(database, account_id)?;
+    let workspace_exists = database
+        .query_row(
+            "SELECT 1 FROM workspaces WHERE id = ?1",
+            [workspace_id.to_string()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !workspace_exists {
+        return Err(ManagementStoreError::WorkspaceNotFound);
+    }
+    database
+        .query_row(
+            "SELECT 1 FROM workspace_memberships
+             WHERE workspace_id = ?1 AND account_id = ?2 AND role = 'administrator'",
+            params![workspace_id.to_string(), account_id.to_string()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .ok_or(ManagementStoreError::PermissionDenied)
+}
+
+fn parse_management_uuid(value: &str) -> Result<Uuid, ManagementStoreError> {
+    Uuid::parse_str(value).map_err(|error| ManagementStoreError::InvalidStorage(error.to_string()))
+}
+
+fn decode_workspace_role(value: &str) -> Result<WorkspaceRole, ManagementStoreError> {
+    match value {
+        "administrator" => Ok(WorkspaceRole::Administrator),
+        "editor" => Ok(WorkspaceRole::Editor),
+        "viewer" => Ok(WorkspaceRole::Viewer),
+        _ => Err(ManagementStoreError::InvalidStorage(format!(
+            "invalid workspace role {value}"
+        ))),
+    }
+}
+
 fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
     let mut seen = HashSet::new();
     ids.retain(|id| seen.insert(*id));
@@ -1237,22 +1574,54 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
             email           TEXT NOT NULL UNIQUE,
             display_name    TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS workspaces (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            owner_id        TEXT NOT NULL REFERENCES accounts(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS workspace_memberships (
+            workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            account_id      TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            role            TEXT NOT NULL CHECK (role IN ('administrator', 'editor', 'viewer')),
+            PRIMARY KEY (workspace_id, account_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS workspace_invitations (
+            id              TEXT PRIMARY KEY,
+            workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            email           TEXT NOT NULL,
+            role            TEXT NOT NULL CHECK (role IN ('administrator', 'editor', 'viewer')),
+            invited_by      TEXT NOT NULL REFERENCES accounts(id),
+            UNIQUE (workspace_id, email)
+        );
         ",
     )
 }
 
 enum ManagementStoreError {
+    AccountAlreadyMember,
     AccountNotFound,
     EmailAlreadyRegistered,
     InvalidEmail,
     InvalidName,
+    InvitationAlreadyExists,
+    InvitationNotFound,
     InvalidStorage(String),
+    PermissionDenied,
     Sqlite(rusqlite::Error),
+    UnsupportedRole,
+    WorkspaceNotFound,
 }
 
 impl ManagementStoreError {
     fn to_response(&self, request_id: Uuid) -> ManagementServerMessage {
         let (code, message) = match self {
+            Self::AccountAlreadyMember => (
+                ManagementErrorCode::AccountAlreadyMember,
+                "account is already a workspace member".into(),
+            ),
             Self::AccountNotFound => (
                 ManagementErrorCode::AccountNotFound,
                 "account not found".into(),
@@ -1269,8 +1638,28 @@ impl ManagementStoreError {
                 ManagementErrorCode::InvalidName,
                 "invalid display name".into(),
             ),
+            Self::InvitationAlreadyExists => (
+                ManagementErrorCode::InvitationAlreadyExists,
+                "an invitation already exists for this email".into(),
+            ),
+            Self::InvitationNotFound => (
+                ManagementErrorCode::InvitationNotFound,
+                "invitation not found".into(),
+            ),
             Self::InvalidStorage(message) => (ManagementErrorCode::StorageError, message.clone()),
+            Self::PermissionDenied => (
+                ManagementErrorCode::PermissionDenied,
+                "permission denied".into(),
+            ),
             Self::Sqlite(error) => (ManagementErrorCode::StorageError, error.to_string()),
+            Self::UnsupportedRole => (
+                ManagementErrorCode::UnsupportedRole,
+                "only Administrator is available".into(),
+            ),
+            Self::WorkspaceNotFound => (
+                ManagementErrorCode::WorkspaceNotFound,
+                "workspace not found".into(),
+            ),
         };
         ManagementServerMessage::Error {
             request_id: Some(request_id),

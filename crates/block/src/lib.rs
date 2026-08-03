@@ -10,14 +10,46 @@ pub struct Account {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum WorkspaceRole {
+    Administrator,
+    Editor,
+    Viewer,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct Workspace {
+    pub id: Uuid,
+    pub name: String,
+    pub owner_id: Uuid,
+    pub role: WorkspaceRole,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct WorkspaceInvitation {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub workspace_name: String,
+    pub email: String,
+    pub role: WorkspaceRole,
+    pub invited_by: Uuid,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ManagementErrorCode {
+    AccountAlreadyMember,
     AccountNotFound,
     EmailAlreadyRegistered,
     InvalidEmail,
     InvalidMessage,
     InvalidName,
+    InvitationAlreadyExists,
+    InvitationNotFound,
+    PermissionDenied,
     StorageError,
+    UnsupportedRole,
     UnsupportedMessage,
+    WorkspaceNotFound,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -32,12 +64,44 @@ pub enum ManagementClientMessage {
         request_id: Uuid,
         email: String,
     },
+    ListWorkspaces {
+        request_id: Uuid,
+        account_id: Uuid,
+    },
+    CreateWorkspace {
+        request_id: Uuid,
+        account_id: Uuid,
+        name: String,
+    },
+    ListInvitations {
+        request_id: Uuid,
+        account_id: Uuid,
+    },
+    Invite {
+        request_id: Uuid,
+        account_id: Uuid,
+        workspace_id: Uuid,
+        email: String,
+        role: WorkspaceRole,
+    },
+    RespondInvitation {
+        request_id: Uuid,
+        account_id: Uuid,
+        invitation_id: Uuid,
+        accept: bool,
+    },
 }
 
 impl ManagementClientMessage {
     pub fn request_id(&self) -> Uuid {
         match self {
-            Self::Register { request_id, .. } | Self::Login { request_id, .. } => *request_id,
+            Self::Register { request_id, .. }
+            | Self::Login { request_id, .. }
+            | Self::ListWorkspaces { request_id, .. }
+            | Self::CreateWorkspace { request_id, .. }
+            | Self::ListInvitations { request_id, .. }
+            | Self::Invite { request_id, .. }
+            | Self::RespondInvitation { request_id, .. } => *request_id,
         }
     }
 }
@@ -48,6 +112,25 @@ pub enum ManagementServerMessage {
     Account {
         request_id: Uuid,
         account: Account,
+    },
+    Workspace {
+        request_id: Uuid,
+        workspace: Workspace,
+    },
+    Workspaces {
+        request_id: Uuid,
+        workspaces: Vec<Workspace>,
+    },
+    Invitation {
+        request_id: Uuid,
+        invitation: WorkspaceInvitation,
+    },
+    Invitations {
+        request_id: Uuid,
+        invitations: Vec<WorkspaceInvitation>,
+    },
+    Ok {
+        request_id: Uuid,
     },
     Error {
         request_id: Option<Uuid>,
