@@ -5,6 +5,7 @@ mod database;
 mod database_schema;
 pub(crate) mod image;
 mod infinite_canvas;
+mod map;
 mod pixel_art;
 mod pixel_ray_tracer;
 mod presentation;
@@ -871,6 +872,7 @@ impl EditorRegistry {
         registry.register(database_schema::registration());
         registry.register(image::registration());
         registry.register(infinite_canvas::registration());
+        registry.register(map::registration());
         registry.register(pixel_art::registration());
         registry.register(pixel_ray_tracer::registration());
         registry.register(presentation::registration());
