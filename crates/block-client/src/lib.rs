@@ -9,11 +9,8 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, OnceLock, Weak,
     },
+    time::{SystemTime, UNIX_EPOCH},
 };
-
-// `std::time::SystemTime` panics on wasm32-unknown-unknown, which has no clock
-// of its own; `web-time` reads the browser's and is `std` everywhere else.
-use web_time::{SystemTime, UNIX_EPOCH};
 
 use block::{
     Account, Block, BlockAccess, BlockAccessEntry, BlockHistory, BlockHistoryTransaction,
