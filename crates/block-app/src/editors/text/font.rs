@@ -107,6 +107,17 @@ fn configured_hb_font(face: Shared<HbFace<'static>>, pixel_size: u32) -> Owned<H
     font
 }
 
+/// One laid out display line: its glyphs, its width, the x position of each
+/// document byte on it, its baseline and height, and how long laying it out took.
+type LaidOutLine = (
+    Vec<PositionedGlyph>,
+    f32,
+    Vec<(usize, f32)>,
+    f32,
+    f32,
+    LayoutTimings,
+);
+
 #[derive(Clone, Copy)]
 struct PositionedGlyph {
     font_index: usize,
@@ -349,19 +360,13 @@ impl TextRenderer {
         )
     }
 
+    /// See [`LaidOutLine`].
     fn layout_line(
         &self,
         document: &[u8],
         display: &DisplayLine,
         highlight: &SyntaxHighlight,
-    ) -> (
-        Vec<PositionedGlyph>,
-        f32,
-        Vec<(usize, f32)>,
-        f32,
-        f32,
-        LayoutTimings,
-    ) {
+    ) -> LaidOutLine {
         let mut timings = LayoutTimings::default();
         let mut glyphs = Vec::new();
         let mut positions = Vec::new();
@@ -506,6 +511,7 @@ impl TextRenderer {
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn paint_line(
         &mut self,
         context: &egui::Context,
@@ -619,8 +625,8 @@ impl TextRenderer {
                 }
                 if ft::FT_Render_Glyph(slot, ft::FT_Render_Mode::FT_RENDER_MODE_NORMAL) == 0 {
                     let bitmap = &(*slot).bitmap;
-                    let width = bitmap.width.max(0) as usize;
-                    let rows = bitmap.rows.max(0) as usize;
+                    let width = bitmap.width as usize;
+                    let rows = bitmap.rows as usize;
                     let pitch = bitmap.pitch.unsigned_abs() as usize;
                     if !bitmap.buffer.is_null() && width > 0 && rows > 0 {
                         let source = std::slice::from_raw_parts(bitmap.buffer, pitch * rows);

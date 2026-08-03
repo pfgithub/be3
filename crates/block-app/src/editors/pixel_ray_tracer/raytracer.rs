@@ -88,8 +88,8 @@ pub(super) fn trace_lighting(
                     let index = y * size + x;
                     let attenuation = *intensity * LIGHT_FALLOFF_SOFTENING_SQUARED
                         / (branch.traveled * branch.traveled + LIGHT_FALLOFF_SOFTENING_SQUARED);
-                    for channel in 0..3 {
-                        accumulated[index][channel] += attenuation * branch.power[channel];
+                    for (total, power) in accumulated[index].iter_mut().zip(branch.power) {
+                        *total += attenuation * power;
                     }
                     counts[index] += 1;
                 }
@@ -280,9 +280,9 @@ fn move_branches(
                 let mut reflected = branch;
                 reflected.direction =
                     rough_direction(reflected_direction, *roughness, &mut reflected.random);
-                for channel in 0..3 {
-                    let reflectance = dielectric + (base[channel] - dielectric) * *metalness;
-                    reflected.power[channel] *= reflectance + (1.0 - reflectance) * grazing;
+                for (power, base) in reflected.power.iter_mut().zip(base) {
+                    let reflectance = dielectric + (base - dielectric) * *metalness;
+                    *power *= reflectance + (1.0 - reflectance) * grazing;
                 }
                 separate(&mut reflected);
                 pending.push((reflected, remaining, collisions + 1));
@@ -290,9 +290,8 @@ fn move_branches(
                     let mut transmitted = branch;
                     transmitted.direction =
                         rough_direction(branch.direction, *roughness, &mut transmitted.random);
-                    for channel in 0..3 {
-                        transmitted.power[channel] *=
-                            *transmission * (1.0 - *metalness) * base[channel] * (1.0 - grazing);
+                    for (power, base) in transmitted.power.iter_mut().zip(base) {
+                        *power *= *transmission * (1.0 - *metalness) * base * (1.0 - grazing);
                     }
                     separate(&mut transmitted);
                     pending.push((transmitted, remaining, collisions + 1));

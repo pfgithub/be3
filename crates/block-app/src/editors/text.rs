@@ -1161,8 +1161,10 @@ impl BlockEditor for TextEditor {
         let _performance_group =
             performance::GroupGuard::new(format!("Text editor ({})", self.block.id()));
         let frame_start = Instant::now();
-        let mut profile = FrameProfile::default();
-        profile.toolbar = std::mem::take(&mut self.toolbar_profile);
+        let mut profile = FrameProfile {
+            toolbar: std::mem::take(&mut self.toolbar_profile),
+            ..FrameProfile::default()
+        };
         let id = egui::Id::new(("text-editor", self.block.id()));
         let keyboard_start = Instant::now();
         let pasted_image = self.paste_clipboard_image(ui, id, editors);
@@ -1244,7 +1246,7 @@ impl BlockEditor for TextEditor {
         let drop_index = response
             .dnd_hover_payload::<SidebarDragPayload>()
             .filter(|dragged| dragged.reference.id != self.block.id())
-            .and_then(|_| pointer)
+            .and(pointer)
             .map(|pointer| hit_test(&layout, pointer - origin))
             .and_then(|byte| {
                 self.core.position_index(

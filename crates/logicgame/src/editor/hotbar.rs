@@ -864,6 +864,7 @@ pub(super) fn step_scale(scale: &mut Scale, direction: ScaleDirection) {
 
 /// A square hotbar slot: a framed button with a glyph preview painted in its top
 /// portion and a label across the bottom. Returns the click response.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn hotbar_button(
     ui: &mut egui::Ui,
     selected: bool,

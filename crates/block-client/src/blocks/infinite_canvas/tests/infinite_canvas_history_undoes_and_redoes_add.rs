@@ -25,7 +25,10 @@ fn infinite_canvas_history_undoes_and_redoes_add() {
     block.operate(InfiniteCanvasOperation::Add {
         entity: entity.clone(),
     });
-    assert_eq!(block.read().unwrap().entities(), &[entity.clone()]);
+    assert_eq!(
+        block.read().unwrap().entities(),
+        std::slice::from_ref(&entity)
+    );
     block.undo();
     assert!(block.read().unwrap().entities().is_empty());
     block.redo();

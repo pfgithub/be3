@@ -860,9 +860,7 @@ impl Core {
             let end = end.resolve(&document).saturating_sub(after.len());
             let start = end.saturating_sub(contents_len);
             let original_range = resolve_selection(&document, original.pos);
-            cursor.pos = if original_range.left == original_range.right {
-                Selection::range(Position::at(&document, start), Position::at(&document, end))
-            } else if original_range.is_right {
+            cursor.pos = if original_range.left == original_range.right || original_range.is_right {
                 Selection::range(Position::at(&document, start), Position::at(&document, end))
             } else {
                 Selection::range(Position::at(&document, end), Position::at(&document, start))

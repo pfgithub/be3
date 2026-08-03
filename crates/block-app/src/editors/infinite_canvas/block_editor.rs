@@ -181,9 +181,8 @@ impl BlockEditor for InfiniteCanvasEditor {
         let Some(canvas) = self.block.read() else {
             return false;
         };
-        focused_direct_editor(self.focused_editor, canvas.entities()).map_or(true, |focused| {
-            editors.direct_editor_has_right_sidebar(focused.1)
-        })
+        focused_direct_editor(self.focused_editor, canvas.entities())
+            .is_none_or(|focused| editors.direct_editor_has_right_sidebar(focused.1))
     }
 
     fn direct_editor_right_sidebar(

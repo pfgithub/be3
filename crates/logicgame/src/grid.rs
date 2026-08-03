@@ -643,10 +643,10 @@ impl Component {
     }
 
     fn include_in_bounds(&self) -> bool {
-        match self.kind {
-            ComponentKind::Input { .. } | ComponentKind::Output { .. } => false,
-            _ => true,
-        }
+        !matches!(
+            self.kind,
+            ComponentKind::Input { .. } | ComponentKind::Output { .. }
+        )
     }
 
     fn rect(&self) -> Option<Rect> {

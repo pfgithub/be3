@@ -62,24 +62,22 @@ impl Socket {
     }
 
     pub(crate) async fn next(&mut self) -> Option<Result<SocketMessage, String>> {
-        loop {
-            let message = match self.source.next().await? {
-                Ok(message) => message,
-                Err(error) => return Some(Err(format!("block server connection failed: {error}"))),
-            };
-            match message {
-                Message::Text(text) => return Some(Ok(SocketMessage::Text(text))),
-                Message::Ping(payload) => {
-                    let length = payload.len();
-                    if let Err(error) = self.sink.send(Message::Pong(payload)).await {
-                        return Some(Err(format!("failed to send pong: {error}")));
-                    }
-                    return Some(Ok(SocketMessage::Ping(length)));
+        let message = match self.source.next().await? {
+            Ok(message) => message,
+            Err(error) => return Some(Err(format!("block server connection failed: {error}"))),
+        };
+        match message {
+            Message::Text(text) => Some(Ok(SocketMessage::Text(text))),
+            Message::Ping(payload) => {
+                let length = payload.len();
+                if let Err(error) = self.sink.send(Message::Pong(payload)).await {
+                    return Some(Err(format!("failed to send pong: {error}")));
                 }
-                Message::Close(_) => return Some(Ok(SocketMessage::Close)),
-                Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
-                    return Some(Err("server sent an unsupported websocket message".into()))
-                }
+                Some(Ok(SocketMessage::Ping(length)))
+            }
+            Message::Close(_) => Some(Ok(SocketMessage::Close)),
+            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
+                Some(Err("server sent an unsupported websocket message".into()))
             }
         }
     }

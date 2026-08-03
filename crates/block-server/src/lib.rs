@@ -1037,9 +1037,12 @@ impl WatchHub {
     }
 }
 
+/// Per-block write locks, keyed by workspace and block id.
+type BlockLocks = HashMap<(Uuid, Uuid), Arc<Mutex<()>>>;
+
 struct BlockStore {
     database: Mutex<Connection>,
-    locks: Mutex<HashMap<(Uuid, Uuid), Arc<Mutex<()>>>>,
+    locks: Mutex<BlockLocks>,
     dependencies: Mutex<HashMap<Uuid, DependencyState>>,
 }
 
@@ -1367,6 +1370,7 @@ impl BlockStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_block_unlocked(
         &self,
         workspace_id: Uuid,
@@ -1433,6 +1437,7 @@ impl BlockStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn update_block_unlocked(
         &self,
         workspace_id: Uuid,

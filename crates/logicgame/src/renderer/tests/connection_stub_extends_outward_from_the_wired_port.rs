@@ -79,8 +79,8 @@ fn connection_stub_extends_outward_from_the_wired_port() {
 
             // bit_coord runs across the stub's width, from 0 to scale.
             let bits: Vec<f32> = vertices.iter().map(|v| v.bit_coord).collect();
-            assert!(bits.iter().any(|&b| b == 0.0));
-            assert!(bits.iter().any(|&b| b == scale));
+            assert!(bits.contains(&0.0));
+            assert!(bits.contains(&scale));
         }
     }
 }

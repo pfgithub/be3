@@ -55,9 +55,7 @@ struct PixelArtRegeneration {
 impl DynamicArtifactRegeneration for PixelArtRegeneration {
     fn poll(&mut self) -> Option<Result<(), String>> {
         let source = self.source.read()?;
-        if self.target.read().is_none() {
-            return None;
-        }
+        self.target.read()?;
         let generated = generate(&source, &self.source.name());
         drop(source);
         Some(generated.map(|image| self.target.replace(image)))

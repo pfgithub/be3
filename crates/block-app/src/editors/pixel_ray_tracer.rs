@@ -95,6 +95,10 @@ impl Tool {
     }
 }
 
+/// A rendered single-ray debug overlay: the ray's origin, its pixels, the debug
+/// points along it, and the revision and settings it was rendered for.
+type RayOverlay = (Point, Vec<[u8; 4]>, Vec<Point>, u64, RaySettings, bool);
+
 #[derive(Clone)]
 enum ActiveInteraction {
     Pixels {
@@ -134,7 +138,7 @@ pub(super) struct PixelRayTracerEditor {
     texture_revision: Option<LightingCacheKey>,
     lighting_job: Option<Receiver<LightingJobResult>>,
     rendered: Vec<[u8; 4]>,
-    ray_overlay: Option<(Point, Vec<[u8; 4]>, Vec<Point>, u64, RaySettings, bool)>,
+    ray_overlay: Option<RayOverlay>,
     ray_texture: Option<TextureHandle>,
     ray_job: Option<Receiver<RayJobResult>>,
 }
@@ -655,10 +659,7 @@ impl PixelRayTracerEditor {
         endpoint: Option<bool>,
         point: Point,
     ) -> Option<RayEntity> {
-        let entity = entities.iter().find(|entity| entity.id() == id).cloned();
-        let Some(mut entity) = entity else {
-            return None;
-        };
+        let mut entity = entities.iter().find(|entity| entity.id() == id).cloned()?;
         match (&mut entity, endpoint) {
             (RayEntity::Light { position, .. }, None) => *position = point,
             (RayEntity::Surface { start, .. } | RayEntity::Water { start, .. }, Some(true)) => {

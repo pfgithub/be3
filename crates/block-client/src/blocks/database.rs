@@ -80,7 +80,7 @@ impl Block for Database {
     type Operation = DatabaseOperation;
     type History = block::NoHistory;
 
-    const TYPE_ID: Uuid = Uuid::from_u128(0x6461_7461_6261_7365_2d62_6c6f_636b_01);
+    const TYPE_ID: Uuid = Uuid::from_u128(0x0064_6174_6162_6173_652d_626c_6f63_6b01);
     const CRDT: bool = true;
 
     fn apply_operation(database: &mut Self, operation: &Self::Operation) {

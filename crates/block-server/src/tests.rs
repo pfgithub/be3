@@ -82,7 +82,7 @@ fn test_root() -> PathBuf {
 mod support {
     #![allow(dead_code)]
 
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use block::{
         Account, BlockAccess, BlockAccessEntry, BlockParent, BlockReference, BlockReferenceList,
@@ -198,10 +198,10 @@ mod support {
         }
     }
 
-    async fn serve(root: &PathBuf) -> (String, JoinHandle<()>) {
+    async fn serve(root: &Path) -> (String, JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let root = root.clone();
+        let root = root.to_path_buf();
         let task = tokio::spawn(async move {
             crate::serve(listener, root).await.unwrap();
         });

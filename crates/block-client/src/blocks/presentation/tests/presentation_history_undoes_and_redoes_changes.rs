@@ -37,7 +37,7 @@ fn presentation_history_undoes_and_redoes_changes() {
         &[first.clone(), second.clone()]
     );
     block.undo();
-    assert_eq!(block.read().unwrap().slides(), &[first.clone()]);
+    assert_eq!(block.read().unwrap().slides(), std::slice::from_ref(&first));
     block.redo();
     block.redo();
     assert_eq!(block.read().unwrap().slides(), &[second, first]);

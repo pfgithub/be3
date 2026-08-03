@@ -517,11 +517,7 @@ impl Renderer {
             } else {
                 vk::ImageLayout::PREINITIALIZED
             };
-            let source_stage = if self.atlas_initialized {
-                vk::PipelineStageFlags::HOST
-            } else {
-                vk::PipelineStageFlags::HOST
-            };
+            let source_stage = vk::PipelineStageFlags::HOST;
             let to_shader = [vk::ImageMemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::HOST_WRITE)
                 .dst_access_mask(vk::AccessFlags::SHADER_READ)

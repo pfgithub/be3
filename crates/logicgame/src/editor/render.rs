@@ -1,5 +1,15 @@
 use super::*;
 
+/// Indices into a frame's wire value table, grouped by what they describe:
+/// wires, component connections, components and storage components.
+type WireValueIndices = (
+    BTreeMap<Wire, u32>,
+    BTreeMap<(ComponentId, ConnectionSlot), u32>,
+    BTreeMap<ComponentId, u32>,
+    BTreeMap<ComponentId, u32>,
+    Vec<WireValue>,
+);
+
 impl LogicEditor {
     /// Draws text labels over the grid: the label on each input/output, the
     /// centre name of every subcomponent, and each subcomponent port's label
@@ -77,16 +87,7 @@ impl LogicEditor {
         }
     }
 
-    pub(super) fn wire_value_indices(
-        &self,
-        snapshot: &SimulationSnapshot,
-    ) -> (
-        BTreeMap<Wire, u32>,
-        BTreeMap<(ComponentId, ConnectionSlot), u32>,
-        BTreeMap<ComponentId, u32>,
-        BTreeMap<ComponentId, u32>,
-        Vec<WireValue>,
-    ) {
+    pub(super) fn wire_value_indices(&self, snapshot: &SimulationSnapshot) -> WireValueIndices {
         let simulation_vm = self
             .simulation
             .snapshot

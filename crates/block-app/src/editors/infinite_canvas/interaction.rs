@@ -203,7 +203,7 @@ impl InfiniteCanvasEditor {
                     egui::CursorIcon::Grab
                 } else if let Some(handle) = self
                     .selection_has_unlocked(entities)
-                    .then(|| frame)
+                    .then_some(frame)
                     .flatten()
                     .and_then(|frame| resize_handle_at(self, frame, canvas_rect, world, resize))
                 {
@@ -624,12 +624,13 @@ impl InfiniteCanvasEditor {
                     let selected_frame = self.selected_frame(entities);
                     let has_unlocked = self.selection_has_unlocked(entities);
                     let resize = self.selection_resize(entities, editors);
-                    let handle = has_unlocked
-                        .then(|| selected_frame)
-                        .flatten()
-                        .and_then(|frame| {
-                            resize_handle_at(self, frame, canvas_rect, world, resize)
-                        });
+                    let handle =
+                        has_unlocked
+                            .then_some(selected_frame)
+                            .flatten()
+                            .and_then(|frame| {
+                                resize_handle_at(self, frame, canvas_rect, world, resize)
+                            });
                     let rotate = has_unlocked
                         && self.selection_allows_rotation(entities, editors)
                         && selected_frame.is_some_and(|frame| {
@@ -811,15 +812,14 @@ impl InfiniteCanvasEditor {
                         || *default_preserve_aspect_ratio
                             != response.ctx.input(|input| input.modifiers.shift);
                 }
-                Some(Gesture::Pen { points }) => {
+                Some(Gesture::Pen { points })
                     if points
                         .last()
-                        .is_none_or(|last| distance(*last, world) > pen_point_distance)
-                    {
-                        points.push(world);
-                    }
+                        .is_none_or(|last| distance(*last, world) > pen_point_distance) =>
+                {
+                    points.push(world);
                 }
-                None => {}
+                Some(Gesture::Pen { .. }) | None => {}
             }
         }
 

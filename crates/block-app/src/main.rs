@@ -61,9 +61,7 @@ fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> 
         options,
         Box::new(move |creation_context| {
             egui_material_icons::initialize(&creation_context.egui_ctx);
-            BlockApp::new(storage_root)
-                .map(|app| Box::new(app) as Box<dyn eframe::App>)
-                .map_err(Into::into)
+            BlockApp::new(storage_root).map(|app| Box::new(app) as Box<dyn eframe::App>)
         }),
     )
 }
@@ -1611,6 +1609,7 @@ impl BlockApp {
         self.expanded.remove(&id);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_reference(
         &mut self,
         ui: &mut egui::Ui,
@@ -2395,9 +2394,7 @@ impl BlockApp {
     }
 
     fn show_statusbar(&mut self, ui: &mut egui::Ui, active: Uuid) -> Option<BlockTabHistoryItem> {
-        let Some(editor) = self.editors.get(&active) else {
-            return None;
-        };
+        let editor = self.editors.get(&active)?;
         let block_type = editor.block_type();
         let type_name = self
             .registry
