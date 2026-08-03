@@ -490,6 +490,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "block 0.1.0",
+ "block-server",
  "eips",
  "futures-util",
  "image",

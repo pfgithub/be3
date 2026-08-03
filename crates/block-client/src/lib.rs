@@ -1,6 +1,7 @@
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    fmt,
     ops::Deref,
     ops::Range,
     process,
@@ -13,9 +14,10 @@ use std::{
 };
 
 use block::{
-    Block, BlockHistory, BlockHistoryTransaction, BlockOperation, BlockParent, BlockReference,
-    BlockReferenceList, BlockUpdate, ClientMessage, CommandKind, ErrorCode, HistoryDirection,
-    OperationRecord, ReferenceDelta, ServerMessage,
+    Account, Block, BlockHistory, BlockHistoryTransaction, BlockOperation, BlockParent,
+    BlockReference, BlockReferenceList, BlockUpdate, ClientMessage, CommandKind, ErrorCode,
+    HistoryDirection, ManagementClientMessage, ManagementErrorCode, ManagementServerMessage,
+    OperationRecord, ReferenceDelta, ServerMessage, Workspace, WorkspaceInvitation, WorkspaceRole,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -35,6 +37,231 @@ pub const BLOCK_URL_PREFIX: &str = "https://blocks.pfg.pw/0/";
 const UUID_TEXT_BYTES: usize = 36;
 const MAX_HISTORY_ACTIONS: usize = 100;
 const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug)]
+pub struct ManagementClient {
+    url: String,
+}
+
+#[derive(Debug)]
+pub enum ManagementClientError {
+    InvalidUrl(String),
+    Transport(tokio_tungstenite::tungstenite::Error),
+    InvalidResponse(String),
+    Server {
+        code: ManagementErrorCode,
+        message: String,
+    },
+}
+
+impl fmt::Display for ManagementClientError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidUrl(message) | Self::InvalidResponse(message) => {
+                formatter.write_str(message)
+            }
+            Self::Transport(error) => write!(formatter, "management connection failed: {error}"),
+            Self::Server { message, .. } => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ManagementClientError {}
+
+impl From<tokio_tungstenite::tungstenite::Error> for ManagementClientError {
+    fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::Transport(error)
+    }
+}
+
+impl ManagementClient {
+    pub fn new(url: impl Into<String>) -> Result<Self, ManagementClientError> {
+        let url = url.into().trim().trim_end_matches('/').to_owned();
+        if url.is_empty() || !(url.starts_with("ws://") || url.starts_with("wss://")) {
+            return Err(ManagementClientError::InvalidUrl(
+                "server URL must start with ws:// or wss://".into(),
+            ));
+        }
+        url.as_str()
+            .into_client_request()
+            .map_err(|error| ManagementClientError::InvalidUrl(error.to_string()))?;
+        Ok(Self { url })
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub async fn register(
+        &self,
+        email: impl Into<String>,
+        display_name: impl Into<String>,
+    ) -> Result<Account, ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::Register {
+                request_id: Uuid::new_v4(),
+                email: email.into(),
+                display_name: display_name.into(),
+            })
+            .await?;
+        let ManagementServerMessage::Account { account, .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(account)
+    }
+
+    pub async fn login(&self, email: impl Into<String>) -> Result<Account, ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::Login {
+                request_id: Uuid::new_v4(),
+                email: email.into(),
+            })
+            .await?;
+        let ManagementServerMessage::Account { account, .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(account)
+    }
+
+    pub async fn list_workspaces(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<Workspace>, ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::ListWorkspaces {
+                request_id: Uuid::new_v4(),
+                account_id,
+            })
+            .await?;
+        let ManagementServerMessage::Workspaces { workspaces, .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(workspaces)
+    }
+
+    pub async fn create_workspace(
+        &self,
+        account_id: Uuid,
+        name: impl Into<String>,
+    ) -> Result<Workspace, ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::CreateWorkspace {
+                request_id: Uuid::new_v4(),
+                account_id,
+                name: name.into(),
+            })
+            .await?;
+        let ManagementServerMessage::Workspace { workspace, .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(workspace)
+    }
+
+    pub async fn list_invitations(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<WorkspaceInvitation>, ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::ListInvitations {
+                request_id: Uuid::new_v4(),
+                account_id,
+            })
+            .await?;
+        let ManagementServerMessage::Invitations { invitations, .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(invitations)
+    }
+
+    pub async fn invite(
+        &self,
+        account_id: Uuid,
+        workspace_id: Uuid,
+        email: impl Into<String>,
+        role: WorkspaceRole,
+    ) -> Result<WorkspaceInvitation, ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::Invite {
+                request_id: Uuid::new_v4(),
+                account_id,
+                workspace_id,
+                email: email.into(),
+                role,
+            })
+            .await?;
+        let ManagementServerMessage::Invitation { invitation, .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(invitation)
+    }
+
+    pub async fn respond_invitation(
+        &self,
+        account_id: Uuid,
+        invitation_id: Uuid,
+        accept: bool,
+    ) -> Result<(), ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::RespondInvitation {
+                request_id: Uuid::new_v4(),
+                account_id,
+                invitation_id,
+                accept,
+            })
+            .await?;
+        let ManagementServerMessage::Ok { .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(())
+    }
+
+    async fn request(
+        &self,
+        request: ManagementClientMessage,
+    ) -> Result<ManagementServerMessage, ManagementClientError> {
+        let request_id = request.request_id();
+        let (mut socket, _) = connect_async(&self.url).await?;
+        socket
+            .send(Message::Text(serde_json::to_string(&request).map_err(
+                |error| ManagementClientError::InvalidResponse(error.to_string()),
+            )?))
+            .await?;
+        let message = socket.next().await.ok_or_else(|| {
+            ManagementClientError::InvalidResponse(
+                "management server closed without a response".into(),
+            )
+        })??;
+        let response: ManagementServerMessage = serde_json::from_str(&message.into_text()?)
+            .map_err(|error| ManagementClientError::InvalidResponse(error.to_string()))?;
+        match response {
+            ManagementServerMessage::Error { code, message, .. } => {
+                Err(ManagementClientError::Server { code, message })
+            }
+            response if management_response_request_id(&response) == request_id => Ok(response),
+            _ => Err(ManagementClientError::InvalidResponse(
+                "management response request ID did not match".into(),
+            )),
+        }
+    }
+}
+
+fn management_response_request_id(response: &ManagementServerMessage) -> Uuid {
+    match response {
+        ManagementServerMessage::Account { request_id, .. }
+        | ManagementServerMessage::Workspace { request_id, .. }
+        | ManagementServerMessage::Workspaces { request_id, .. }
+        | ManagementServerMessage::Invitation { request_id, .. }
+        | ManagementServerMessage::Invitations { request_id, .. }
+        | ManagementServerMessage::Ok { request_id } => *request_id,
+        ManagementServerMessage::Error { .. } => Uuid::nil(),
+    }
+}
+
+fn unexpected_management_response(response: ManagementServerMessage) -> ManagementClientError {
+    ManagementClientError::InvalidResponse(format!(
+        "management server returned an unexpected response: {response:?}"
+    ))
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DynamicArtifactDescriptor {
