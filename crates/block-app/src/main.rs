@@ -15,7 +15,10 @@ use std::{
 };
 
 use app_state::{AppStateStore, SavedAccount, ServerLocation};
-use block::{BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
+use block::{
+    BlockParent, BlockReference, BlockReferenceList, Workspace, WorkspaceInvitation, WorkspaceRole,
+    MAX_NAME_BYTES,
+};
 use block_client::{
     blocks::workspace_index::BlockEntry, BlockClient, ManagementClient, ReferenceList,
 };
@@ -93,6 +96,16 @@ struct BlockApp {
     account_form: AccountForm,
     pending_account_request: Option<PendingAccountRequest>,
     account_error: Option<String>,
+    workspace: Option<Workspace>,
+    workspaces: Vec<Workspace>,
+    invitations: Vec<WorkspaceInvitation>,
+    workspaces_loaded: bool,
+    pending_workspace_request: Option<std::sync::mpsc::Receiver<Result<WorkspaceResult, String>>>,
+    workspace_name: String,
+    workspace_error: Option<String>,
+    invite_open: bool,
+    invite_email: String,
+    scheduled_workspace_list: bool,
     server_url: String,
     account: Account,
     client: BlockClient,
@@ -264,9 +277,24 @@ struct PendingAccountRequest {
     url: String,
 }
 
+enum WorkspaceOperation {
+    Load,
+    Create(String),
+    Respond(Uuid, bool),
+    Invite(Uuid, String),
+}
+
+enum WorkspaceResult {
+    Loaded(Vec<Workspace>, Vec<WorkspaceInvitation>),
+    Created(Workspace),
+    Responded,
+    Invited,
+}
+
 #[derive(Clone)]
 enum PendingDestructiveAction {
     Switch(Account),
+    ChooseWorkspace,
     Close,
 }
 
@@ -357,6 +385,16 @@ impl BlockApp {
             account_form: AccountForm::default(),
             pending_account_request: None,
             account_error: None,
+            workspace: None,
+            workspaces: Vec::new(),
+            invitations: Vec::new(),
+            workspaces_loaded: false,
+            pending_workspace_request: None,
+            workspace_name: String::new(),
+            workspace_error: None,
+            invite_open: false,
+            invite_email: String::new(),
+            scheduled_workspace_list: false,
             server_url,
             account,
             client,
@@ -556,6 +594,255 @@ impl BlockApp {
         });
     }
 
+    fn begin_workspace_request(&mut self, operation: WorkspaceOperation) {
+        if self.pending_workspace_request.is_some() {
+            return;
+        }
+        let client = match ManagementClient::new(self.server_url.clone()) {
+            Ok(client) => client,
+            Err(error) => {
+                self.workspace_error = Some(error.to_string());
+                return;
+            }
+        };
+        let account_id = self.account.id;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        thread::Builder::new()
+            .name("block-workspace-request".into())
+            .spawn(move || {
+                let result = tokio::runtime::Runtime::new()
+                    .map_err(|error| error.to_string())
+                    .and_then(|runtime| {
+                        runtime.block_on(async move {
+                            match operation {
+                                WorkspaceOperation::Load => {
+                                    let workspaces = client
+                                        .list_workspaces(account_id)
+                                        .await
+                                        .map_err(|error| error.to_string())?;
+                                    let invitations = client
+                                        .list_invitations(account_id)
+                                        .await
+                                        .map_err(|error| error.to_string())?;
+                                    Ok(WorkspaceResult::Loaded(workspaces, invitations))
+                                }
+                                WorkspaceOperation::Create(name) => client
+                                    .create_workspace(account_id, name)
+                                    .await
+                                    .map(WorkspaceResult::Created)
+                                    .map_err(|error| error.to_string()),
+                                WorkspaceOperation::Respond(invitation_id, accept) => client
+                                    .respond_invitation(account_id, invitation_id, accept)
+                                    .await
+                                    .map(|()| WorkspaceResult::Responded)
+                                    .map_err(|error| error.to_string()),
+                                WorkspaceOperation::Invite(workspace_id, email) => client
+                                    .invite(
+                                        account_id,
+                                        workspace_id,
+                                        email,
+                                        WorkspaceRole::Administrator,
+                                    )
+                                    .await
+                                    .map(|_| WorkspaceResult::Invited)
+                                    .map_err(|error| error.to_string()),
+                            }
+                        })
+                    });
+                let _ = sender.send(result);
+            })
+            .unwrap_or_else(|error| panic!("failed to start workspace request: {error}"));
+        self.workspace_error = None;
+        self.pending_workspace_request = Some(receiver);
+    }
+
+    fn poll_workspace_request(&mut self) {
+        let result = self
+            .pending_workspace_request
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some(result) = result else {
+            return;
+        };
+        self.pending_workspace_request = None;
+        match result {
+            Ok(WorkspaceResult::Loaded(workspaces, invitations)) => {
+                self.workspaces = workspaces;
+                self.invitations = invitations;
+                self.workspaces_loaded = true;
+                if let Some(last_workspace_id) = self.account.last_workspace_id {
+                    if let Some(workspace) = self
+                        .workspaces
+                        .iter()
+                        .find(|workspace| workspace.id == last_workspace_id)
+                        .cloned()
+                    {
+                        self.open_workspace(workspace);
+                    }
+                }
+            }
+            Ok(WorkspaceResult::Created(workspace)) => {
+                self.workspaces.push(workspace.clone());
+                self.workspace_name.clear();
+                self.open_workspace(workspace);
+            }
+            Ok(WorkspaceResult::Responded) => {
+                self.workspaces_loaded = false;
+                self.begin_workspace_request(WorkspaceOperation::Load);
+            }
+            Ok(WorkspaceResult::Invited) => {
+                self.invite_email.clear();
+                self.invite_open = false;
+            }
+            Err(error) => self.workspace_error = Some(error),
+        }
+    }
+
+    fn open_workspace(&mut self, workspace: Workspace) {
+        self.workspace = Some(workspace.clone());
+        self.account.last_workspace_id = Some(workspace.id);
+        if let Some(saved) = self
+            .accounts
+            .iter_mut()
+            .find(|saved| saved.server == self.account.server && saved.id == self.account.id)
+        {
+            saved.last_workspace_id = Some(workspace.id);
+        }
+        if let Err(error) = self
+            .app_state
+            .set_last_workspace(&self.account, Some(workspace.id))
+        {
+            self.workspace_error = Some(error.to_string());
+        }
+    }
+
+    fn show_workspace_onboarding(&mut self, ui: &mut egui::Ui) {
+        if !self.workspaces_loaded && self.pending_workspace_request.is_none() {
+            self.begin_workspace_request(WorkspaceOperation::Load);
+        }
+        self.poll_workspace_request();
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Workspaces");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Accounts").clicked() {
+                        self.signed_in = false;
+                        let _ = self.app_state.clear_active_account();
+                    }
+                });
+            });
+            ui.label(format!("Signed in as {}", self.account.name));
+            ui.add_space(12.0);
+            for workspace in self.workspaces.clone() {
+                if ui.button(&workspace.name).clicked() {
+                    self.open_workspace(workspace);
+                }
+            }
+            if self.workspaces_loaded && self.workspaces.is_empty() {
+                ui.weak("You do not have any workspaces yet.");
+            }
+
+            ui.add_space(16.0);
+            ui.heading("Create workspace");
+            ui.text_edit_singleline(&mut self.workspace_name);
+            if ui
+                .add_enabled(
+                    !self.workspace_name.trim().is_empty()
+                        && self.pending_workspace_request.is_none(),
+                    egui::Button::new("Create"),
+                )
+                .clicked()
+            {
+                self.begin_workspace_request(WorkspaceOperation::Create(
+                    self.workspace_name.clone(),
+                ));
+            }
+
+            if !self.invitations.is_empty() {
+                ui.add_space(20.0);
+                ui.heading("Invitations");
+            }
+            for invitation in self.invitations.clone() {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.strong(&invitation.workspace_name);
+                        ui.label("Administrator");
+                        if ui
+                            .add_enabled(
+                                self.pending_workspace_request.is_none(),
+                                egui::Button::new("Accept"),
+                            )
+                            .clicked()
+                        {
+                            self.begin_workspace_request(WorkspaceOperation::Respond(
+                                invitation.id,
+                                true,
+                            ));
+                        }
+                        if ui
+                            .add_enabled(
+                                self.pending_workspace_request.is_none(),
+                                egui::Button::new("Decline"),
+                            )
+                            .clicked()
+                        {
+                            self.begin_workspace_request(WorkspaceOperation::Respond(
+                                invitation.id,
+                                false,
+                            ));
+                        }
+                    });
+                });
+            }
+            if self.pending_workspace_request.is_some() {
+                ui.spinner();
+            }
+            if let Some(error) = &self.workspace_error {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            }
+        });
+    }
+
+    fn show_invite(&mut self, ctx: &egui::Context) {
+        if !self.invite_open {
+            return;
+        }
+        let Some(workspace) = self.workspace.clone() else {
+            return;
+        };
+        let mut open = self.invite_open;
+        egui::Window::new("Invite member")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(format!("Workspace: {}", workspace.name));
+                ui.label("Email address");
+                ui.text_edit_singleline(&mut self.invite_email);
+                ui.label("Role");
+                let _ = ui.selectable_label(true, "Administrator");
+                ui.add_enabled(false, egui::Button::new("Editor"));
+                ui.add_enabled(false, egui::Button::new("Viewer"));
+                if ui
+                    .add_enabled(
+                        !self.invite_email.trim().is_empty()
+                            && self.pending_workspace_request.is_none(),
+                        egui::Button::new("Send invitation"),
+                    )
+                    .clicked()
+                {
+                    self.begin_workspace_request(WorkspaceOperation::Invite(
+                        workspace.id,
+                        self.invite_email.clone(),
+                    ));
+                }
+                if let Some(error) = &self.workspace_error {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+            });
+        self.invite_open = open;
+    }
+
     fn request_account_switch(&mut self, account: Account) {
         if account == self.account {
             return;
@@ -600,6 +887,13 @@ impl BlockApp {
         self.pending_destructive_action = None;
         self.scheduled_account_switch = None;
         self.allow_close = false;
+        self.workspace = None;
+        self.workspaces.clear();
+        self.invitations.clear();
+        self.workspaces_loaded = false;
+        self.pending_workspace_request = None;
+        self.workspace_error = None;
+        self.invite_open = false;
         self.roots = roots;
         self.client = client;
         self.account = account;
@@ -637,6 +931,12 @@ impl BlockApp {
                 ),
                 "Discard and switch",
             ),
+            PendingDestructiveAction::ChooseWorkspace => (
+                "Discard unsaved changes?",
+                "Switching workspaces will discard changes that have not reached the server."
+                    .into(),
+                "Discard and switch",
+            ),
             PendingDestructiveAction::Close => (
                 "Discard unsaved changes?",
                 "Closing Block Editor will discard changes that have not reached the server."
@@ -660,6 +960,9 @@ impl BlockApp {
             match action {
                 PendingDestructiveAction::Switch(account) => {
                     self.scheduled_account_switch = Some(account);
+                }
+                PendingDestructiveAction::ChooseWorkspace => {
+                    self.scheduled_workspace_list = true;
                 }
                 PendingDestructiveAction::Close => {
                     self.allow_close = true;
@@ -1426,6 +1729,24 @@ impl BlockApp {
                         ui.close();
                     }
                     ui.separator();
+                    ui.strong("Workspace");
+                    if let Some(workspace) = &self.workspace {
+                        ui.small(&workspace.name);
+                    }
+                    if ui.button("Invite member").clicked() {
+                        self.invite_open = true;
+                        ui.close();
+                    }
+                    if ui.button("Switch workspace").clicked() {
+                        if debug.changes_saved {
+                            self.scheduled_workspace_list = true;
+                        } else {
+                            self.pending_destructive_action =
+                                Some(PendingDestructiveAction::ChooseWorkspace);
+                        }
+                        ui.close();
+                    }
+                    ui.separator();
                     ui.strong("Accounts");
                     ui.small(format!("Signed in as {}", self.account.name));
                     ui.small(self.account.id.to_string());
@@ -2127,15 +2448,30 @@ impl eframe::App for BlockApp {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
             return;
         }
+        if self.scheduled_workspace_list {
+            self.scheduled_workspace_list = false;
+            let mut account = self.account.clone();
+            account.last_workspace_id = None;
+            let _ = self.app_state.set_last_workspace(&account, None);
+            self.switch_account(ui.ctx(), account);
+        }
         if let Some(account) = self.scheduled_account_switch.take() {
             self.switch_account(ui.ctx(), account);
         }
+        if self.workspace.is_none() {
+            self.show_workspace_onboarding(ui);
+            performance::end_frame();
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
+            return;
+        }
+        self.poll_workspace_request();
         self.intercept_close(ui.ctx());
         self.process_pending_transfers();
         self.show_block_picker(ui.ctx());
         self.show_rename(ui);
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
+        self.show_invite(ui.ctx());
 
         self.show_dock(ui, frame);
         self.show_discard_confirmation(ui.ctx());
