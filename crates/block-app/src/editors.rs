@@ -275,6 +275,12 @@ impl<'a> EditorAccess<'a> {
             .map(|editor| editor.direct_editor_resize())
     }
 
+    pub fn direct_editor_handles_viewport_input(&self, id: Uuid) -> bool {
+        self.editors
+            .get(&id)
+            .is_some_and(|editor| editor.direct_editor_handles_viewport_input(self))
+    }
+
     pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
         self.with_editor(id, |editor, editors| {
             editor.direct_editor_intrinsic_size(editors)
@@ -438,6 +444,9 @@ pub trait BlockEditor {
         DirectEditorResize::None
     }
     fn direct_editor_fills_viewport(&self) -> bool {
+        false
+    }
+    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
         false
     }
     fn direct_editor_intrinsic_size(
@@ -611,6 +620,7 @@ pub fn direct_editor_tab_ui(
         );
         viewport.replace_content_rect(Some(content_rect));
         let fills_viewport = editor.direct_editor_fills_viewport();
+        let handles_viewport_input = editor.direct_editor_handles_viewport_input(editors);
         let editor_rect = if fills_viewport {
             viewport_rect
         } else {
@@ -633,7 +643,7 @@ pub fn direct_editor_tab_ui(
             action = next_action;
         }
 
-        if !fills_viewport
+        if !handles_viewport_input
             && handle_direct_editor_background_input(
                 ui.ctx(),
                 viewport_rect,

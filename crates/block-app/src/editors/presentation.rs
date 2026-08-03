@@ -586,6 +586,14 @@ impl BlockEditor for PresentationEditor {
         true
     }
 
+    fn direct_editor_handles_viewport_input(&self, editors: &EditorAccess<'_>) -> bool {
+        let Some(slides) = self.slides() else {
+            return false;
+        };
+        self.selected_slide(&slides)
+            .is_some_and(|slide| editors.direct_editor_handles_viewport_input(slide.block_id))
+    }
+
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {
         let slides = self.slides()?;
         self.synchronize_selection(&slides);

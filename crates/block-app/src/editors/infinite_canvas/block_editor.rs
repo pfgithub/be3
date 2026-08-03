@@ -82,6 +82,10 @@ impl BlockEditor for InfiniteCanvasEditor {
         true
     }
 
+    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
+        true
+    }
+
     fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
         let canvas = self.block.read()?;
         let region = canvas
