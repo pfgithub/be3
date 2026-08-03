@@ -1,3 +1,4 @@
+mod app_state;
 mod block_picker;
 mod debug;
 mod editors;
@@ -13,8 +14,11 @@ use std::{
     time::Duration,
 };
 
+use app_state::{AppStateStore, SavedAccount, ServerLocation};
 use block::{BlockParent, BlockReference, BlockReferenceList, MAX_NAME_BYTES};
-use block_client::{blocks::workspace_index::BlockEntry, BlockClient, ReferenceList};
+use block_client::{
+    blocks::workspace_index::BlockEntry, BlockClient, ManagementClient, ReferenceList,
+};
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
     direct_editor_tab_ui, BlockEditor, DynamicArtifactRegeneration, EditorAccess, EditorAction,
@@ -32,29 +36,6 @@ use uuid::Uuid;
 
 const APP_ID: &str = "Block";
 const COMPACT_FILES_WIDTH: f32 = 700.0;
-const ACCOUNTS: [Account; 5] = [
-    Account {
-        name: "Account A",
-        id: Uuid::from_u128(0x88ee0604_544d_4b45_bfed_75b295301153),
-    },
-    Account {
-        name: "Account B",
-        id: Uuid::from_u128(0x380531b6_3b86_452d_bbcd_ae94ce002f8e),
-    },
-    Account {
-        name: "Account C",
-        id: Uuid::from_u128(0x81a47f30_6c99_4154_8075_5d53998d6cd4),
-    },
-    Account {
-        name: "Account D",
-        id: Uuid::from_u128(0xc4b6705d_f2be_403e_a1b7_bc336314d741),
-    },
-    Account {
-        name: "Account E",
-        id: Uuid::from_u128(0x51db8e56_fe52_42c7_9d92_1c298502fa32),
-    },
-];
-
 fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -105,6 +86,13 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
 }
 
 struct BlockApp {
+    app_state: AppStateStore,
+    local_server_url: String,
+    accounts: Vec<Account>,
+    signed_in: bool,
+    account_form: AccountForm,
+    pending_account_request: Option<PendingAccountRequest>,
+    account_error: Option<String>,
     server_url: String,
     account: Account,
     client: BlockClient,
@@ -259,13 +247,24 @@ fn set_files_compact(dock_state: &mut DockState<DockTab>, compact: bool) {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Account {
-    name: &'static str,
-    id: Uuid,
+type Account = SavedAccount;
+
+#[derive(Default)]
+struct AccountForm {
+    remote: bool,
+    remote_url: String,
+    register: bool,
+    email: String,
+    display_name: String,
 }
 
-#[derive(Clone, Copy)]
+struct PendingAccountRequest {
+    receiver: std::sync::mpsc::Receiver<Result<block::Account, String>>,
+    server: ServerLocation,
+    url: String,
+}
+
+#[derive(Clone)]
 enum PendingDestructiveAction {
     Switch(Account),
     Close,
@@ -320,15 +319,45 @@ impl BlockApp {
     fn new(storage_root: Option<PathBuf>) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let data_dir = storage_root
             .or_else(|| eframe::storage_dir(APP_ID))
-            .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?
-            .join("blocks");
-        let url = start_embedded_server(data_dir)?;
-        let account = ACCOUNTS[0];
+            .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?;
+        std::fs::create_dir_all(&data_dir)?;
+        let url = start_embedded_server(data_dir.join("server"))?;
+        let app_state = AppStateStore::open(data_dir.join("app.sqlite3"))?;
+        let accounts = app_state.accounts()?;
+        let active = app_state.active_account()?;
+        let account = active
+            .and_then(|(server, id)| {
+                accounts
+                    .iter()
+                    .find(|account| account.server.key() == server && account.id == id)
+            })
+            .cloned();
+        let signed_in = account.is_some();
+        let account = account.unwrap_or_else(|| Account {
+            server: ServerLocation::Local,
+            id: Uuid::nil(),
+            email: String::new(),
+            name: String::new(),
+            last_workspace_id: None,
+        });
+        let server_url = match &account.server {
+            ServerLocation::Local => url.clone(),
+            ServerLocation::Remote(remote) => remote.clone(),
+        };
         let client = BlockClient::new(account.id);
-        client.connect(url.clone());
+        if signed_in {
+            client.connect(server_url.clone());
+        }
         let roots = client.watch_references(BlockReferenceList::Roots);
         Ok(Self {
-            server_url: url,
+            app_state,
+            local_server_url: url,
+            accounts,
+            signed_in,
+            account_form: AccountForm::default(),
+            pending_account_request: None,
+            account_error: None,
+            server_url,
             account,
             client,
             roots,
@@ -359,6 +388,174 @@ impl BlockApp {
         })
     }
 
+    fn begin_account_request(&mut self) {
+        let requested_url = if self.account_form.remote {
+            self.account_form.remote_url.clone()
+        } else {
+            self.local_server_url.clone()
+        };
+        let client = match ManagementClient::new(requested_url) {
+            Ok(client) => client,
+            Err(error) => {
+                self.account_error = Some(error.to_string());
+                return;
+            }
+        };
+        let server = if self.account_form.remote {
+            ServerLocation::Remote(client.url().to_owned())
+        } else {
+            ServerLocation::Local
+        };
+        let url = client.url().to_owned();
+        let register = self.account_form.register;
+        let email = self.account_form.email.clone();
+        let display_name = self.account_form.display_name.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        thread::Builder::new()
+            .name("block-account-request".into())
+            .spawn(move || {
+                let result = tokio::runtime::Runtime::new()
+                    .map_err(|error| error.to_string())
+                    .and_then(|runtime| {
+                        runtime
+                            .block_on(async move {
+                                if register {
+                                    client.register(email, display_name).await
+                                } else {
+                                    client.login(email).await
+                                }
+                            })
+                            .map_err(|error| error.to_string())
+                    });
+                let _ = sender.send(result);
+            })
+            .unwrap_or_else(|error| panic!("failed to start account request: {error}"));
+        self.account_error = None;
+        self.pending_account_request = Some(PendingAccountRequest {
+            receiver,
+            server,
+            url,
+        });
+    }
+
+    fn poll_account_request(&mut self, ctx: &egui::Context) {
+        let result = self
+            .pending_account_request
+            .as_ref()
+            .and_then(|pending| pending.receiver.try_recv().ok());
+        let Some(result) = result else {
+            return;
+        };
+        let pending = self.pending_account_request.take().unwrap();
+        match result {
+            Ok(account) => {
+                let saved = SavedAccount {
+                    server: pending.server,
+                    id: account.id,
+                    email: account.email,
+                    name: account.display_name,
+                    last_workspace_id: None,
+                };
+                if let Err(error) = self.app_state.save_account(&saved) {
+                    self.account_error = Some(error.to_string());
+                    return;
+                }
+                self.accounts = self.app_state.accounts().unwrap_or_else(|error| {
+                    self.account_error = Some(error.to_string());
+                    Vec::new()
+                });
+                self.server_url = pending.url;
+                self.account_form = AccountForm::default();
+                self.switch_account(ctx, saved);
+            }
+            Err(error) => self.account_error = Some(error),
+        }
+    }
+
+    fn show_account_onboarding(&mut self, ui: &mut egui::Ui) {
+        self.poll_account_request(ui.ctx());
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(40.0);
+                ui.heading("Block Editor");
+                ui.label("Choose an account or add one to get started.");
+                ui.add_space(16.0);
+            });
+
+            let accounts = self.accounts.clone();
+            for account in accounts {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.strong(&account.name);
+                            ui.small(&account.email);
+                            ui.weak(match &account.server {
+                                ServerLocation::Local => "Local server",
+                                ServerLocation::Remote(url) => url,
+                            });
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Open").clicked() {
+                                self.switch_account(ui.ctx(), account.clone());
+                            }
+                            if ui.button("Forget").clicked() {
+                                if let Err(error) = self.app_state.remove_account(&account) {
+                                    self.account_error = Some(error.to_string());
+                                } else {
+                                    self.accounts.retain(|saved| saved != &account);
+                                }
+                            }
+                        });
+                    });
+                });
+            }
+
+            ui.add_space(16.0);
+            ui.heading("Add account");
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.account_form.remote, false, "Local server");
+                ui.selectable_value(&mut self.account_form.remote, true, "Remote server");
+            });
+            if self.account_form.remote {
+                ui.label("Server URL");
+                ui.text_edit_singleline(&mut self.account_form.remote_url);
+            }
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.account_form.register, false, "Log in");
+                ui.selectable_value(&mut self.account_form.register, true, "Register");
+            });
+            ui.label("Email address");
+            ui.text_edit_singleline(&mut self.account_form.email);
+            if self.account_form.register {
+                ui.label("Display name");
+                ui.text_edit_singleline(&mut self.account_form.display_name);
+            }
+            if let Some(error) = &self.account_error {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            }
+            if self.pending_account_request.is_some() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Contacting server...");
+                });
+            } else if ui
+                .add_enabled(
+                    !self.account_form.email.trim().is_empty()
+                        && (!self.account_form.register
+                            || !self.account_form.display_name.trim().is_empty()),
+                    egui::Button::new(if self.account_form.register {
+                        "Register"
+                    } else {
+                        "Log in"
+                    }),
+                )
+                .clicked()
+            {
+                self.begin_account_request();
+            }
+        });
+    }
+
     fn request_account_switch(&mut self, account: Account) {
         if account == self.account {
             return;
@@ -371,8 +568,12 @@ impl BlockApp {
     }
 
     fn switch_account(&mut self, ctx: &egui::Context, account: Account) {
+        let server_url = match &account.server {
+            ServerLocation::Local => self.local_server_url.clone(),
+            ServerLocation::Remote(url) => url.clone(),
+        };
         let client = BlockClient::new(account.id);
-        client.connect(self.server_url.clone());
+        client.connect(server_url.clone());
         let roots = client.watch_references(BlockReferenceList::Roots);
 
         self.orphaned = None;
@@ -402,6 +603,11 @@ impl BlockApp {
         self.roots = roots;
         self.client = client;
         self.account = account;
+        self.server_url = server_url;
+        self.signed_in = true;
+        if let Err(error) = self.app_state.set_active_account(&self.account) {
+            self.account_error = Some(error.to_string());
+        }
         ctx.memory_mut(|memory| *memory = Default::default());
     }
 
@@ -417,13 +623,13 @@ impl BlockApp {
     }
 
     fn show_discard_confirmation(&mut self, ctx: &egui::Context) {
-        let Some(action) = self.pending_destructive_action else {
+        let Some(action) = self.pending_destructive_action.clone() else {
             return;
         };
         let mut discard = false;
         let mut cancel = false;
         let (title, message, button) = match action {
-            PendingDestructiveAction::Switch(account) => (
+            PendingDestructiveAction::Switch(ref account) => (
                 "Discard unsaved changes?",
                 format!(
                     "Switching to {} will discard changes that have not reached the server.",
@@ -1223,15 +1429,26 @@ impl BlockApp {
                     ui.strong("Accounts");
                     ui.small(format!("Signed in as {}", self.account.name));
                     ui.small(self.account.id.to_string());
-                    for account in ACCOUNTS {
+                    for account in self.accounts.clone() {
                         if ui
-                            .selectable_label(account == self.account, account.name)
+                            .selectable_label(account == self.account, &account.name)
                             .on_hover_text(account.id.to_string())
                             .clicked()
                         {
                             self.request_account_switch(account);
                             ui.close();
                         }
+                    }
+                    if ui
+                        .add_enabled(debug.changes_saved, egui::Button::new("Manage accounts"))
+                        .on_disabled_hover_text("Wait for changes to finish saving")
+                        .clicked()
+                    {
+                        self.signed_in = false;
+                        if let Err(error) = self.app_state.clear_active_account() {
+                            self.account_error = Some(error.to_string());
+                        }
+                        ui.close();
                     }
                 });
             });
@@ -1904,6 +2121,12 @@ fn sidebar_source(parent: BlockParent) -> SidebarDragSource {
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         performance::begin_frame();
+        if !self.signed_in {
+            self.show_account_onboarding(ui);
+            performance::end_frame();
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
+            return;
+        }
         if let Some(account) = self.scheduled_account_switch.take() {
             self.switch_account(ui.ctx(), account);
         }

@@ -464,6 +464,7 @@ dependencies = [
  "harfbuzz_rs",
  "image",
  "rfd",
+ "rusqlite",
  "serde",
  "serde_json",
  "text-editor-core",
