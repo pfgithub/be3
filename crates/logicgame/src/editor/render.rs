@@ -92,7 +92,7 @@ impl LogicEditor {
             .snapshot
             .as_ref()
             .filter(|simulation_snapshot| *simulation_snapshot == snapshot)
-            .and_then(|_| self.simulation.vm.as_ref());
+            .and(self.simulation.vm.as_ref());
         let root_memory = simulation_vm.map(Vm::root_memory).unwrap_or_default();
 
         let mut values = Vec::new();

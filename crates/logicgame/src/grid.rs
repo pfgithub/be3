@@ -592,6 +592,12 @@ pub struct InputId(pub Uuid);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct OutputId(pub Uuid);
 
+impl Default for InputId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InputId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -599,6 +605,12 @@ impl InputId {
 
     pub const fn from_u128(value: u128) -> Self {
         Self(Uuid::from_u128(value))
+    }
+}
+
+impl Default for OutputId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -792,6 +804,7 @@ impl GridBounds {
     }
 }
 
+#[derive(Default)]
 pub struct LogicGrid {
     wires: Vec<Wire>,
     components: BTreeMap<ComponentId, Component>,
@@ -805,16 +818,6 @@ pub struct LogicGridSnapshot {
     pub wires: Vec<Wire>,
 }
 
-impl Default for LogicGrid {
-    fn default() -> Self {
-        Self {
-            wires: Vec::new(),
-            components: BTreeMap::new(),
-            next_component_id: 0,
-            revision: 0,
-        }
-    }
-}
 
 impl LogicGrid {
     pub fn new() -> Self {
@@ -955,11 +958,8 @@ impl LogicGrid {
         rotation: Rotation,
         mut kind: ComponentKind,
     ) -> ComponentId {
-        match &mut kind {
-            ComponentKind::Storage { scale, value } => {
-                *value &= value_mask(*scale);
-            }
-            _ => {}
+        if let ComponentKind::Storage { scale, value } = &mut kind {
+            *value &= value_mask(*scale);
         }
         let id = ComponentId(self.next_component_id);
         self.next_component_id = self

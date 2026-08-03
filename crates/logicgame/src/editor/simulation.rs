@@ -163,8 +163,8 @@ impl LogicEditor {
                             SimulationInstructionSelection::ReturnFrame(index);
                     }
                 }
-                if !vm.returns.is_empty() {
-                    if ui
+                if !vm.returns.is_empty()
+                    && ui
                         .selectable_label(
                             matches!(
                                 self.simulation.instruction_selection,
@@ -177,7 +177,6 @@ impl LogicEditor {
                         self.simulation.instruction_selection =
                             SimulationInstructionSelection::Active;
                     }
-                }
 
                 ui.separator();
                 ui.strong("Instructions");

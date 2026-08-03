@@ -238,7 +238,7 @@ impl LogicGame {
                     }
                     response.context_menu(|ui| {
                         if ui.button("Add to hotbar").clicked() {
-                            requested_add_hotbar = Some((file.clone(), solution.name.clone()));
+                            requested_add_hotbar = Some((file, solution.name.clone()));
                             ui.close();
                         }
                         if ui.button("Rename").clicked() {
@@ -792,10 +792,7 @@ impl eframe::App for LogicGame {
 
         match self.active_file.clone() {
             Some(ActiveFile::SpecialChallenge { challenge }) => {
-                match challenge {
-                    challenges::ChallengeId::BinaryAddition => self.binary_addition.ui(ui),
-                    _ => {}
-                }
+                if challenge == challenges::ChallengeId::BinaryAddition { self.binary_addition.ui(ui) }
                 if self.binary_addition.take_passed() {
                     self.mark_special_challenge_passed(challenge);
                 }

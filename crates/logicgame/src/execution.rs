@@ -58,6 +58,7 @@ pub enum Instruction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct UnlinkedComponent {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
@@ -77,6 +78,7 @@ pub struct UnlinkedSubgraph {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Default)]
 pub struct Component {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
@@ -113,34 +115,7 @@ pub struct Vm {
     pub returns: Vec<Pc>,
 }
 
-impl Default for UnlinkedComponent {
-    fn default() -> Self {
-        Self {
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            components: Vec::new(),
-            instructions: Vec::new(),
-            subgraphs: Vec::new(),
-            memory_size: 0,
-            storage_init: Vec::new(),
-        }
-    }
-}
 
-impl Default for Component {
-    fn default() -> Self {
-        Self {
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            components: Vec::new(),
-            instructions: Vec::new(),
-            subgraphs: Vec::new(),
-            memory_size: 0,
-            storage_init: Vec::new(),
-            source_hash: None,
-        }
-    }
-}
 
 impl Default for Vm {
     fn default() -> Self {
@@ -222,12 +197,9 @@ impl UnlinkedComponent {
         let mut inputs = vec![0; input_indices.len()];
         let mut outputs = vec![0; output_indices.len()];
         for component in grid.components() {
-            match &component.kind {
-                ComponentKind::Storage { value, .. } => {
-                    storage_ids.insert(component.id, storage_init.len());
-                    storage_init.push(*value);
-                }
-                _ => {}
+            if let ComponentKind::Storage { value, .. } = &component.kind {
+                storage_ids.insert(component.id, storage_init.len());
+                storage_init.push(*value);
             }
         }
 

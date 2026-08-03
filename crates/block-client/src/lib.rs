@@ -3066,7 +3066,7 @@ impl<B: Block> TypedBlock<B> {
             state.confirmed_seq = record.seq;
             state.in_flight.remove(&record.operation_id);
             self.revision.fetch_add(1, Ordering::Relaxed);
-            self.rebuild_visible(&state);
+            self.rebuild_visible(state);
             return;
         }
 
@@ -3085,7 +3085,7 @@ impl<B: Block> TypedBlock<B> {
         }
         self.revision.fetch_add(1, Ordering::Relaxed);
         self.recompute_pending_references(state);
-        self.rebuild_visible(&state);
+        self.rebuild_visible(state);
     }
 }
 
