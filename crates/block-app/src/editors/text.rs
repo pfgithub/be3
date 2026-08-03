@@ -642,8 +642,10 @@ impl TextEditor {
         origin: Pos2,
         layout: &DocumentLayout,
         highlight: &SyntaxHighlight,
+        focused: bool,
     ) -> (Option<Rect>, PaintTimings) {
         let selection_start = Instant::now();
+        paint_code_backgrounds(painter, origin, layout, highlight);
         let selection_color = ui.visuals().selection.bg_fill;
         let cursor_color = ui.visuals().selection.stroke.color;
         let mut cursor_rect = None;
@@ -693,7 +695,11 @@ impl TextEditor {
                     selection_color,
                 );
             }
-            if let Some(position) = layout.positions.get(focus).and_then(|position| *position) {
+            if focused {
+                let Some(position) = layout.positions.get(focus).and_then(|position| *position)
+                else {
+                    continue;
+                };
                 let top = Pos2::new(
                     origin.x + position.x,
                     origin.y + layout.lines[position.line].y,
@@ -1145,7 +1151,14 @@ impl BlockEditor for TextEditor {
                 }
             }
         }
-        let (cursor, paint) = self.paint(ui, &painter, origin, &layout, &highlight);
+        let (cursor, paint) = self.paint(
+            ui,
+            &painter,
+            origin,
+            &layout,
+            &highlight,
+            response.has_focus(),
+        );
         self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
         profile.paint = paint;
         if reveal_cursor {
@@ -1300,6 +1313,56 @@ fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
         })
         .min_by(|left, right| left.1.total_cmp(&right.1))
         .map_or(line_layout.start, |(byte, _)| byte)
+}
+
+fn paint_code_backgrounds(
+    painter: &egui::Painter,
+    origin: Pos2,
+    layout: &DocumentLayout,
+    highlight: &SyntaxHighlight,
+) {
+    let fill = Color32::from_rgb(23, 30, 36);
+    for line in &layout.lines {
+        let mut start = None;
+        for byte in line.start..=line.end {
+            let is_code =
+                byte < line.end && highlight.style_at(byte).color == SynHlColorScope::MarkdownCode;
+            if is_code {
+                start.get_or_insert(byte);
+                continue;
+            }
+            let Some(run_start) = start.take() else {
+                continue;
+            };
+            let Some(left) = layout
+                .positions
+                .get(run_start)
+                .and_then(|position| *position)
+            else {
+                continue;
+            };
+            let right = layout
+                .positions
+                .get(byte)
+                .and_then(|position| *position)
+                .filter(|right| right.line == left.line)
+                .unwrap_or(BytePosition {
+                    line: left.line,
+                    x: line.width,
+                });
+            painter.rect_filled(
+                Rect::from_min_max(
+                    Pos2::new(origin.x + left.x - 3.0, origin.y + line.y + 1.0),
+                    Pos2::new(
+                        origin.x + right.x + 3.0,
+                        origin.y + line.y + line.height - 1.0,
+                    ),
+                ),
+                3.0,
+                fill,
+            );
+        }
+    }
 }
 
 fn syntax_color(scope: SynHlColorScope) -> Color32 {
