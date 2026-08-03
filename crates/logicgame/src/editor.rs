@@ -657,7 +657,7 @@ impl LogicEditor {
             canvas.inner.1.rect_stroke(
                 selection_rect,
                 0.0,
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 180, 255)),
+                egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(90, 180, 255)),
                 egui::StrokeKind::Inside,
             );
         }

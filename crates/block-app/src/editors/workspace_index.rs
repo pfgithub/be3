@@ -282,7 +282,7 @@ impl WorkspaceIndexEditor {
             ui.painter().rect_stroke(
                 rect.shrink(2.0),
                 4.0,
-                egui::Stroke::new(2.0, color),
+                egui::Stroke::new(2.0_f32, color),
                 egui::StrokeKind::Inside,
             );
             if valid {

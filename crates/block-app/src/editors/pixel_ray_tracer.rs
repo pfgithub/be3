@@ -300,9 +300,9 @@ impl PixelRayTracerEditor {
                     let color = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
                     let button = egui::Button::new("  ").fill(color).stroke(
                         if usize::from(self.color_index) == index {
-                            Stroke::new(2.0, ui.visuals().selection.stroke.color)
+                            Stroke::new(2.0_f32, ui.visuals().selection.stroke.color)
                         } else {
-                            Stroke::new(1.0, Color32::GRAY)
+                            Stroke::new(1.0_f32, Color32::GRAY)
                         },
                     );
                     if ui
@@ -825,7 +825,7 @@ impl PixelRayTracerEditor {
                     painter.rect_stroke(
                         rect,
                         0.0,
-                        Stroke::new(1.0, Color32::from_rgb(100, 220, 255)),
+                        Stroke::new(1.0_f32, Color32::from_rgb(100, 220, 255)),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -842,7 +842,7 @@ impl PixelRayTracerEditor {
                     painter.circle_stroke(
                         world_to_screen(*position, canvas),
                         (2.5 * scale).clamp(3.0, 9.0),
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0_f32, Color32::WHITE),
                     );
                 }
             }
@@ -852,7 +852,7 @@ impl PixelRayTracerEditor {
                         painter.circle_stroke(
                             world_to_screen(*position, canvas),
                             7.0,
-                            Stroke::new(2.0, Color32::YELLOW),
+                            Stroke::new(2.0_f32, Color32::YELLOW),
                         );
                     }
                     RayEntity::Surface { start, end, .. } | RayEntity::Water { start, end, .. } => {
@@ -901,7 +901,7 @@ impl PixelRayTracerEditor {
                         world_to_screen(*start, canvas),
                         world_to_screen(*current, canvas),
                     ],
-                    Stroke::new(2.0, palette_color(self.color_index)),
+                    Stroke::new(2.0_f32, palette_color(self.color_index)),
                 );
             }
             ActiveInteraction::Entity { start, current } => {

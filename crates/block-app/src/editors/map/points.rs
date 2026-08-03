@@ -68,13 +68,13 @@ fn draw_marker(painter: &Painter, tip: Pos2, color: Color32, selected: bool, opa
         color,
         Stroke::NONE,
     ));
-    painter.circle(head, HEAD_RADIUS, color, Stroke::new(1.5, outline));
+    painter.circle(head, HEAD_RADIUS, color, Stroke::new(1.5_f32, outline));
     painter.circle_filled(head, HEAD_RADIUS * 0.35, outline);
     if selected {
         painter.circle_stroke(
             head,
             HEAD_RADIUS + 3.5,
-            Stroke::new(2.0, Color32::from_rgb(66, 153, 225).gamma_multiply(opacity)),
+            Stroke::new(2.0_f32, Color32::from_rgb(66, 153, 225).gamma_multiply(opacity)),
         );
     }
 }

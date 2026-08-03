@@ -1027,7 +1027,7 @@ impl InfiniteCanvasEditor {
             painter.rect_stroke(
                 preview_rect,
                 0.0,
-                Stroke::new(1.5, Color32::from_rgb(245, 180, 60)),
+                Stroke::new(1.5_f32, Color32::from_rgb(245, 180, 60)),
                 egui::StrokeKind::Inside,
             );
             painter.text(
@@ -1048,7 +1048,7 @@ impl InfiniteCanvasEditor {
         }) = &self.gesture
         {
             let preview_stroke =
-                Stroke::new(2.0, painter.ctx().global_style().visuals.text_color());
+                Stroke::new(2.0_f32, painter.ctx().global_style().visuals.text_color());
             match tool {
                 Tool::Line => {
                     painter.line_segment(
@@ -1081,7 +1081,7 @@ impl InfiniteCanvasEditor {
                     .iter()
                     .map(|point| self.world_to_screen(*point, rect))
                     .collect(),
-                Stroke::new(2.0, painter.ctx().global_style().visuals.text_color()),
+                Stroke::new(2.0_f32, painter.ctx().global_style().visuals.text_color()),
             ));
         }
         if let Some(Gesture::SelectBox {
@@ -1100,7 +1100,7 @@ impl InfiniteCanvasEditor {
             painter.rect_stroke(
                 selection,
                 0.0,
-                Stroke::new(1.0, Color32::LIGHT_BLUE),
+                Stroke::new(1.0_f32, Color32::LIGHT_BLUE),
                 egui::StrokeKind::Inside,
             );
         }

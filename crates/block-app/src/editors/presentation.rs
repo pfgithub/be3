@@ -217,7 +217,7 @@ impl PresentationEditor {
                         ui.visuals().faint_bg_color
                     })
                     .stroke(Stroke::new(
-                        if selected { 2.0 } else { 1.0 },
+                        if selected { 2.0_f32 } else { 1.0_f32 },
                         if selected {
                             ui.visuals().selection.stroke.color
                         } else {
@@ -792,7 +792,7 @@ fn paint_fallback(
     painter.rect_stroke(
         rect,
         5.0,
-        Stroke::new(1.0, Color32::from_gray(75)),
+        Stroke::new(1.0_f32, Color32::from_gray(75)),
         egui::StrokeKind::Inside,
     );
     let (name, icon) = reference.map_or(("Loading…", None), |reference| {

@@ -807,7 +807,7 @@ impl TextEditor {
                     rect,
                     6.0,
                     ui.visuals().panel_fill,
-                    egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                    egui::Stroke::new(1.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color),
                     egui::StrokeKind::Inside,
                 );
                 painter.rect_filled(title_bar, 4.0, ui.visuals().widgets.inactive.bg_fill);
@@ -974,7 +974,7 @@ impl TextEditor {
                 } else {
                     Color32::TRANSPARENT
                 },
-                egui::Stroke::new(1.5, ui.visuals().widgets.inactive.fg_stroke.color),
+                egui::Stroke::new(1.5_f32, ui.visuals().widgets.inactive.fg_stroke.color),
                 egui::StrokeKind::Inside,
             );
             if checkbox.checked {

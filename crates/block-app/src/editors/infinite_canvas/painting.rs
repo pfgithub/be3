@@ -341,7 +341,7 @@ pub(super) fn paint_selection(
     .map(|point| editor.world_to_screen(frame.point(point), rect));
     painter.add(egui::Shape::closed_line(
         corners.to_vec(),
-        Stroke::new(1.0, Color32::LIGHT_BLUE),
+        Stroke::new(1.0_f32, Color32::LIGHT_BLUE),
     ));
     if resize != DirectEditorResize::None {
         for (handle, point) in resize_handles(frame) {
@@ -358,7 +358,7 @@ pub(super) fn paint_selection(
     if allow_rotation {
         let rotate = rotate_handle_at(editor, frame, rect);
         let top = editor.world_to_screen(frame.point(CanvasPoint::new(0.0, -0.5)), rect);
-        painter.line_segment([top, rotate], Stroke::new(1.0, Color32::LIGHT_BLUE));
+        painter.line_segment([top, rotate], Stroke::new(1.0_f32, Color32::LIGHT_BLUE));
         painter.circle_filled(rotate, HANDLE_RADIUS, Color32::LIGHT_BLUE);
     }
 }

@@ -445,7 +445,7 @@ impl LogicEditor {
             let second = positions[edge.second.0] + origin;
             painter.line_segment(
                 [first, second],
-                egui::Stroke::new(2.0, ui.visuals().widgets.noninteractive.fg_stroke.color),
+                egui::Stroke::new(2.0_f32, ui.visuals().widgets.noninteractive.fg_stroke.color),
             );
         }
 
@@ -457,7 +457,7 @@ impl LogicEditor {
             painter.rect_stroke(
                 rect,
                 6.0,
-                egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                egui::Stroke::new(1.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color),
                 egui::StrokeKind::Inside,
             );
             painter.text(

@@ -279,7 +279,7 @@ impl LogicEditor {
             ui.painter().rect_stroke(
                 hotbar_header.response.rect.expand(2.0),
                 4.0,
-                egui::Stroke::new(1.5, ui.visuals().selection.stroke.color),
+                egui::Stroke::new(1.5_f32, ui.visuals().selection.stroke.color),
                 egui::StrokeKind::Inside,
             );
         }
@@ -886,7 +886,7 @@ pub(super) fn hotbar_button(
         (
             visuals.widgets.inactive.bg_fill.gamma_multiply(0.55),
             egui::Stroke::new(
-                1.0,
+                1.0_f32,
                 visuals
                     .widgets
                     .inactive
@@ -898,32 +898,32 @@ pub(super) fn hotbar_button(
     } else if dragging {
         (
             visuals.widgets.inactive.bg_fill.gamma_multiply(0.65),
-            egui::Stroke::new(1.5, visuals.selection.stroke.color),
+            egui::Stroke::new(1.5_f32, visuals.selection.stroke.color),
         )
     } else if drop_target && response.hovered() {
         (
             visuals.widgets.hovered.bg_fill,
-            egui::Stroke::new(2.0, visuals.selection.stroke.color),
+            egui::Stroke::new(2.0_f32, visuals.selection.stroke.color),
         )
     } else if selected {
         (
             visuals.selection.bg_fill,
-            egui::Stroke::new(1.5, visuals.selection.stroke.color),
+            egui::Stroke::new(1.5_f32, visuals.selection.stroke.color),
         )
     } else if open_folder {
         (
             visuals.widgets.active.bg_fill,
-            egui::Stroke::new(1.5, visuals.selection.stroke.color),
+            egui::Stroke::new(1.5_f32, visuals.selection.stroke.color),
         )
     } else if response.hovered() {
         (
             visuals.widgets.hovered.bg_fill,
-            egui::Stroke::new(1.0, visuals.widgets.hovered.bg_stroke.color),
+            egui::Stroke::new(1.0_f32, visuals.widgets.hovered.bg_stroke.color),
         )
     } else {
         (
             visuals.widgets.inactive.bg_fill,
-            egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color),
+            egui::Stroke::new(1.0_f32, visuals.widgets.inactive.bg_stroke.color),
         )
     };
     let text_color = if disabled || dragging {
@@ -976,7 +976,7 @@ pub(super) fn paint_hotbar_drag_preview(context: &egui::Context, slot: &HotbarSl
         rect,
         4.0,
         egui::Color32::from_rgba_unmultiplied(24, 28, 36, 224),
-        egui::Stroke::new(1.5, egui::Color32::from_rgb(140, 190, 255)),
+        egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(140, 190, 255)),
         egui::StrokeKind::Inside,
     );
     let inner = rect.shrink(4.0);
@@ -1011,7 +1011,7 @@ pub(super) fn paint_glyph_box(painter: &egui::Painter, rect: egui::Rect, color: 
     painter.rect_stroke(
         glyph_inset(rect, 0.08, 0.08, 0.92, 0.92),
         0.0,
-        egui::Stroke::new(1.5, color),
+        egui::Stroke::new(1.5_f32, color),
         egui::StrokeKind::Inside,
     );
 }
@@ -1085,7 +1085,7 @@ pub(super) fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot
         HotbarSlot::Builtin(ToolKind::Wire) => {
             painter.line_segment(
                 [glyph_point(rect, 0.15, 0.85), glyph_point(rect, 0.85, 0.15)],
-                egui::Stroke::new(3.0, color32(DrawTriangle::WIRE_COLOR)),
+                egui::Stroke::new(3.0_f32, color32(DrawTriangle::WIRE_COLOR)),
             );
         }
         HotbarSlot::Builtin(ToolKind::Not) => {
@@ -1115,7 +1115,7 @@ pub(super) fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot
             painter.rect_stroke(
                 glyph_inset(rect, 0.22, 0.18, 0.78, 0.82),
                 0.0,
-                egui::Stroke::new(1.5, gate),
+                egui::Stroke::new(1.5_f32, gate),
                 egui::StrokeKind::Inside,
             );
         }
@@ -1124,7 +1124,7 @@ pub(super) fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot
             painter.rect_stroke(
                 glyph_inset(rect, 0.22, 0.18, 0.78, 0.82),
                 0.0,
-                egui::Stroke::new(1.5, gate),
+                egui::Stroke::new(1.5_f32, gate),
                 egui::StrokeKind::Inside,
             );
             paint_glyph_diamond(
@@ -1146,7 +1146,7 @@ pub(super) fn paint_slot_preview(painter: &egui::Painter, rect: egui::Rect, slot
             painter.circle_stroke(
                 glyph_point(rect, 0.5, 0.42),
                 rect.width() * 0.13,
-                egui::Stroke::new(2.0, egui::Color32::DARK_GRAY),
+                egui::Stroke::new(2.0_f32, egui::Color32::DARK_GRAY),
             );
         }
         HotbarSlot::Folder { .. } => {

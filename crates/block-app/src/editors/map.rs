@@ -683,7 +683,7 @@ fn draw_region_outline(painter: &egui::Painter, rect: Rect) {
     painter.rect_stroke(
         rect,
         0.0,
-        Stroke::new(1.5, REGION_COLOR),
+        Stroke::new(1.5_f32, REGION_COLOR),
         egui::StrokeKind::Inside,
     );
     painter.text(

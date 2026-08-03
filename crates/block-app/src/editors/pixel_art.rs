@@ -1337,7 +1337,7 @@ fn color_swatch(ui: &mut egui::Ui, color: PixelColor, selected: bool) -> egui::R
             rect,
             2.0,
             Stroke::new(
-                if selected { 2.0 } else { 1.0 },
+                if selected { 2.0_f32 } else { 1.0_f32 },
                 if selected {
                     ui.visuals().selection.stroke.color
                 } else {
@@ -1631,7 +1631,7 @@ fn paint_canvas_border(painter: &egui::Painter, rect: Rect) {
     painter.rect_stroke(
         rect,
         0.0,
-        Stroke::new(1.0, Color32::from_black_alpha(160)),
+        Stroke::new(1.0_f32, Color32::from_black_alpha(160)),
         egui::StrokeKind::Inside,
     );
 }
@@ -1644,7 +1644,7 @@ fn paint_grid(painter: &egui::Painter, rect: Rect, width: u16, height: u16) {
         return;
     }
 
-    let grid = Stroke::new(1.0, Color32::from_black_alpha(60));
+    let grid = Stroke::new(1.0_f32, Color32::from_black_alpha(60));
     for x in 1..width {
         let x = rect.left() + f32::from(x) * cell_width;
         painter.line_segment(
@@ -1687,13 +1687,13 @@ fn paint_hovered_pixel(
     painter.rect_stroke(
         rect,
         0.0,
-        Stroke::new(2.0, Color32::WHITE),
+        Stroke::new(2.0_f32, Color32::WHITE),
         egui::StrokeKind::Inside,
     );
     painter.rect_stroke(
         rect.shrink(2.0),
         0.0,
-        Stroke::new(1.0, Color32::BLACK),
+        Stroke::new(1.0_f32, Color32::BLACK),
         egui::StrokeKind::Inside,
     );
 }

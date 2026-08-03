@@ -274,7 +274,7 @@ fn bit_buttons(
             ui.painter().rect_stroke(
                 rect,
                 2.0,
-                egui::Stroke::new(1.0, ui.visuals().error_fg_color),
+                egui::Stroke::new(1.0_f32, ui.visuals().error_fg_color),
                 egui::StrokeKind::Outside,
             );
         }

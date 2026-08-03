@@ -626,7 +626,7 @@ fn paint_cell_background(ui: &egui::Ui, rect: egui::Rect, selected: bool) {
         ui.painter().rect_stroke(
             rect,
             0.0,
-            egui::Stroke::new(2.0, visuals.selection.stroke.color),
+            egui::Stroke::new(2.0_f32, visuals.selection.stroke.color),
             egui::StrokeKind::Inside,
         );
     }
