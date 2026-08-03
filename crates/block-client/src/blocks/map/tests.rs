@@ -1,0 +1,9 @@
+use super::*;
+
+mod map_adds_updates_and_removes_points;
+mod map_clamps_point_positions;
+mod map_history_undoes_and_redoes_points;
+mod map_history_undoes_and_redoes_preview_region;
+mod map_normalizes_preview_region;
+mod map_references_each_block_once;
+mod map_serialization_round_trips;
