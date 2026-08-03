@@ -69,7 +69,15 @@ fn worker(requests: Receiver<TileId>, results: Sender<TileResult>, context: egui
         .timeout(Duration::from_secs(20))
         .build();
     while let Ok(id) = requests.recv() {
-        let result = load_tile(&agent, id);
+        // A panic must fail the one tile, not silently kill the worker.
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_tile(&agent, id)))
+                .unwrap_or_else(|_| {
+                    Err(format!(
+                        "tile {}/{}/{} rendering panicked",
+                        id.zoom, id.x, id.y
+                    ))
+                });
         if results.send(TileResult { id, result }).is_err() {
             return;
         }

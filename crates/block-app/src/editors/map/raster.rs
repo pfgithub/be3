@@ -347,8 +347,9 @@ impl Canvas {
             }
             crossings.sort_unstable_by(f32::total_cmp);
             for span in crossings.chunks_exact(2) {
-                let start = (span[0] - 0.5).ceil().max(0.0) as usize;
-                let end = ((span[1] - 0.5).ceil().min(CANVAS as f32) as usize).min(CANVAS);
+                let clamp = |edge: f32| ((edge - 0.5).ceil().max(0.0) as usize).min(CANVAS);
+                let start = clamp(span[0]);
+                let end = clamp(span[1]);
                 for pixel in &mut self.pixels[row * CANVAS + start..row * CANVAS + end] {
                     blend(pixel, color);
                 }
