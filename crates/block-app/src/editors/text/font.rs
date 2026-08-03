@@ -19,7 +19,7 @@ use text_editor_core::{
 use unicode_script::{Script, UnicodeScript};
 use uuid::Uuid;
 
-use super::profiling::LayoutTimings;
+use super::timings::LayoutTimings;
 
 unsafe extern "C" {
     fn FT_GlyphSlot_Embolden(slot: ft::FT_GlyphSlot);

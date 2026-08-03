@@ -1,4 +1,3 @@
-mod profiling;
 mod raytracer;
 
 use std::{
@@ -7,7 +6,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use self::profiling::RayTracerProfiler;
 use super::{
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
     EditorRegistration,
@@ -22,6 +20,8 @@ use block_client::{
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use egui_material_icons::icons::ICON_FLARE;
+
+use crate::performance;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LightingCacheKey {
@@ -137,7 +137,6 @@ pub(super) struct PixelRayTracerEditor {
     ray_overlay: Option<(Point, Vec<[u8; 4]>, Vec<Point>, u64, RaySettings, bool)>,
     ray_texture: Option<TextureHandle>,
     ray_job: Option<Receiver<RayJobResult>>,
-    profiler: RayTracerProfiler,
 }
 
 impl PixelRayTracerEditor {
@@ -162,11 +161,15 @@ impl PixelRayTracerEditor {
             ray_overlay: None,
             ray_texture: None,
             ray_job: None,
-            profiler: RayTracerProfiler::default(),
         }
     }
 
+    fn performance_group(&self) -> String {
+        format!("Pixel ray tracer ({})", self.block.id())
+    }
+
     fn ensure_texture(&mut self, context: &egui::Context) -> bool {
+        let _performance_group = performance::GroupGuard::new(self.performance_group());
         let Some(scene) = self.block.read() else {
             return false;
         };
@@ -187,7 +190,7 @@ impl PixelRayTracerEditor {
         if let Some(completed) = completed {
             self.lighting_job = None;
             if let Ok((completed_revision, pixels, duration)) = completed {
-                self.profiler.lighting_completed(duration);
+                performance::record_duration("Lighting trace", duration);
                 self.rendered = pixels;
                 self.ray_overlay = None;
                 self.ray_texture = None;
@@ -205,7 +208,7 @@ impl PixelRayTracerEditor {
             }
         }
         if self.texture_revision == Some(revision) {
-            self.profiler.lighting_hit();
+            performance::increment("Lighting cache hits");
             return true;
         }
         if self.lighting_job.is_none() {
@@ -235,7 +238,7 @@ impl PixelRayTracerEditor {
                 })
                 .expect("failed to start pixel ray tracer lighting job");
             self.lighting_job = Some(receiver);
-            self.profiler.lighting_miss();
+            performance::increment("Lighting cache misses");
         }
         drop(scene);
         self.texture.is_some()
@@ -928,7 +931,7 @@ impl PixelRayTracerEditor {
             if let Ok((origin, pixels, debug, revision, settings, include_debug, duration)) =
                 completed
             {
-                self.profiler.ray_completed(duration);
+                performance::record_duration("View-ray trace", duration);
                 let image = color_image(&pixels);
                 if let Some(texture) = &mut self.ray_texture {
                     texture.set(image, egui::TextureOptions::NEAREST);
@@ -962,7 +965,7 @@ impl PixelRayTracerEditor {
                 },
             );
         if cache_hit {
-            self.profiler.ray_hit();
+            performance::increment("View-ray cache hits");
         } else if lighting_ready && self.ray_job.is_none() {
             let source = self.rendered.clone();
             let entities = scene.entities().to_vec();
@@ -988,7 +991,7 @@ impl PixelRayTracerEditor {
                 })
                 .expect("failed to start pixel ray tracer view-ray job");
             self.ray_job = Some(receiver);
-            self.profiler.ray_miss();
+            performance::increment("View-ray cache misses");
         }
         drop(scene);
         if let (Some((_, _, debug, ..)), Some(texture)) = (&self.ray_overlay, &self.ray_texture) {
@@ -1051,7 +1054,6 @@ impl BlockEditor for PixelRayTracerEditor {
         _editors: &mut super::EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.profiler.show(ui.ctx());
         ui.horizontal_wrapped(|ui| {
             ui.strong("Pixel Ray Tracer");
             ui.weak("128 × 128");
@@ -1059,7 +1061,9 @@ impl BlockEditor for PixelRayTracerEditor {
             if ui.button("Fit view").clicked() {
                 viewport.fit();
             }
-            self.profiler.toggle(ui);
+            if ui.button("Performance").clicked() {
+                performance::open();
+            }
             if ui.button("Reset artwork").clicked() {
                 self.block.operate(PixelRayTracerOperation::Reset);
                 self.selected_entity = None;
@@ -1096,9 +1100,9 @@ impl BlockEditor for PixelRayTracerEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let start = Instant::now();
+        let _performance_group = performance::GroupGuard::new(self.performance_group());
+        let _frame_measurement = performance::MeasurementGuard::new("Editor frame");
         self.canvas(ui, viewport);
-        self.profiler.record_frame(start.elapsed());
         None
     }
 }

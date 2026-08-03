@@ -1,6 +1,7 @@
 mod block_picker;
 mod debug;
 mod editors;
+mod performance;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -1214,6 +1215,10 @@ impl BlockApp {
                         self.network_debug_open = true;
                         ui.close();
                     }
+                    if ui.button("Performance").clicked() {
+                        performance::open();
+                        ui.close();
+                    }
                     ui.separator();
                     ui.strong("Accounts");
                     ui.small(format!("Signed in as {}", self.account.name));
@@ -1898,6 +1903,7 @@ fn sidebar_source(parent: BlockParent) -> SidebarDragSource {
 
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        performance::begin_frame();
         if let Some(account) = self.scheduled_account_switch.take() {
             self.switch_account(ui.ctx(), account);
         }
@@ -1910,6 +1916,8 @@ impl eframe::App for BlockApp {
 
         self.show_dock(ui, frame);
         self.show_discard_confirmation(ui.ctx());
+        performance::show(ui.ctx());
+        performance::end_frame();
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
 }

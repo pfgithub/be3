@@ -1,7 +1,7 @@
 mod font;
-mod profiling;
 #[cfg(test)]
 mod tests;
+mod timings;
 use std::{
     collections::HashMap,
     ops::Range,
@@ -30,10 +30,10 @@ use text_editor_core::{
 };
 use uuid::Uuid;
 
-use crate::block_picker::BlockPicker;
+use crate::{block_picker::BlockPicker, performance};
 
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
-use self::profiling::{FrameProfile, PaintTimings, TextProfiler};
+use self::timings::{FrameProfile, PaintTimings};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
@@ -115,7 +115,6 @@ struct TextEditor {
     highlight_language: HighlightLanguage,
     click_count: u8,
     last_click: Option<(f64, Pos2)>,
-    profiler: TextProfiler,
     toolbar_profile: Duration,
     layout_cache: Option<CachedLayout>,
     picker: BlockPicker,
@@ -146,7 +145,6 @@ impl TextEditor {
             highlight_language: HighlightLanguage::Markdown,
             click_count: 0,
             last_click: None,
-            profiler: TextProfiler::default(),
             toolbar_profile: Duration::default(),
             layout_cache: None,
             picker: BlockPicker::default(),
@@ -179,7 +177,9 @@ impl TextEditor {
                         HighlightLanguage::Zig.label(),
                     );
                 });
-            self.profiler.toggle(ui);
+            if ui.button("Performance").clicked() {
+                performance::open();
+            }
             if self.highlight_language == HighlightLanguage::Markdown {
                 ui.separator();
                 if ui.button(ICON_FORMAT_BOLD).on_hover_text("Bold").clicked() {
@@ -1010,7 +1010,6 @@ impl BlockEditor for TextEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.profiler.show(ui.ctx());
         let toolbar_start = Instant::now();
         self.toolbar(ui, editors);
         if let Some(error) = self.image_import_error.clone() {
@@ -1032,6 +1031,8 @@ impl BlockEditor for TextEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        let _performance_group =
+            performance::GroupGuard::new(format!("Text editor ({})", self.block.id()));
         let frame_start = Instant::now();
         let mut profile = FrameProfile::default();
         profile.toolbar = std::mem::take(&mut self.toolbar_profile);
@@ -1048,7 +1049,7 @@ impl BlockEditor for TextEditor {
             });
             profile.document = document_start.elapsed();
             profile.total = frame_start.elapsed() + profile.toolbar;
-            self.profiler.record(profile);
+            record_profile(profile);
             return None;
         };
         profile.document = document_start.elapsed();
@@ -1085,7 +1086,7 @@ impl BlockEditor for TextEditor {
                     });
                     profile.layout = layout_start.elapsed();
                     profile.total = frame_start.elapsed() + profile.toolbar;
-                    self.profiler.record(profile);
+                    record_profile(profile);
                     return None;
                 }
             };
@@ -1171,9 +1172,43 @@ impl BlockEditor for TextEditor {
             }
         }
         profile.total = frame_start.elapsed() + profile.toolbar;
-        self.profiler.record(profile);
+        record_profile(profile);
         edit_block.or(embedded_action)
     }
+}
+
+fn record_profile(profile: FrameProfile) {
+    for (id, duration) in [
+        ("Frame total", profile.total),
+        ("Keyboard input", profile.keyboard),
+        ("Toolbar", profile.toolbar),
+        ("Document read + copy", profile.document),
+        ("Syntax highlight", profile.highlight),
+        ("Layout total", profile.layout),
+        ("Pointer hit testing", profile.pointer),
+        ("Selection + cursor paint", profile.paint.selection),
+        ("Glyph paint", profile.paint.glyphs),
+    ] {
+        performance::record_duration(id, duration);
+    }
+    if let Some(layout) = profile.layout_detail {
+        for (id, duration) in [
+            ("Display-line conversion", layout.display_lines),
+            ("Font/style run detection", layout.font_runs),
+            ("HarfBuzz shaping", layout.shape),
+            ("Line positions + metrics", layout.line_finalize),
+            ("Markdown table alignment", layout.tables),
+        ] {
+            performance::record_duration(id, duration);
+        }
+    }
+    if profile.paint.cache_misses != 0 {
+        performance::record_duration("Glyph rasterization", profile.paint.rasterize);
+    }
+    performance::record_count("Document bytes", profile.document_bytes as u64);
+    performance::record_count("Lines", profile.line_count as u64);
+    performance::record_count("Glyphs visited", profile.paint.glyph_count as u64);
+    performance::record_count("Glyph cache misses", profile.paint.cache_misses as u64);
 }
 
 fn image_embed_directive(id: Uuid, source_name: &str, markdown: bool) -> String {
