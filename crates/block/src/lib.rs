@@ -1,6 +1,61 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct Account {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagementErrorCode {
+    AccountNotFound,
+    EmailAlreadyRegistered,
+    InvalidEmail,
+    InvalidMessage,
+    InvalidName,
+    StorageError,
+    UnsupportedMessage,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+pub enum ManagementClientMessage {
+    Register {
+        request_id: Uuid,
+        email: String,
+        display_name: String,
+    },
+    Login {
+        request_id: Uuid,
+        email: String,
+    },
+}
+
+impl ManagementClientMessage {
+    pub fn request_id(&self) -> Uuid {
+        match self {
+            Self::Register { request_id, .. } | Self::Login { request_id, .. } => *request_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ManagementServerMessage {
+    Account {
+        request_id: Uuid,
+        account: Account,
+    },
+    Error {
+        request_id: Option<Uuid>,
+        code: ManagementErrorCode,
+        message: String,
+    },
+}
+
 pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
     type Operation: Clone + Serialize + DeserializeOwned + Send + Sync + 'static;
     type History: BlockHistory<Self>;

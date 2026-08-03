@@ -2,6 +2,9 @@ use super::*;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue};
 
+mod account_login_is_case_insensitive;
+mod account_registration_rejects_duplicates;
+mod account_state_survives_a_server_restart;
 mod batch_is_acknowledged_before_watch_notifications;
 mod batch_updates_apply_reference_deltas_in_request_order;
 mod dependency_state_survives_a_server_restart;
@@ -10,6 +13,7 @@ mod explicit_sequences_cannot_be_applied_out_of_order;
 mod lists_backrefs_with_relationship_metadata;
 mod lists_every_root_block_in_uuid_order;
 mod lists_parents;
+mod login_rejects_unknown_accounts;
 mod merges_reference_deltas_from_concurrent_clients;
 mod missing_references_reject_creates_and_do_not_commit_updates;
 mod names_longer_than_128_utf8_bytes_are_rejected;
@@ -68,8 +72,8 @@ mod support {
     use std::path::PathBuf;
 
     use block::{
-        BlockParent, BlockReference, BlockReferenceList, ClientMessage, ReferenceDelta,
-        ServerMessage,
+        BlockParent, BlockReference, BlockReferenceList, ClientMessage, ManagementClientMessage,
+        ManagementServerMessage, ReferenceDelta, ServerMessage,
     };
     use futures_util::{SinkExt, StreamExt};
     use tokio::{fs, net::TcpListener, task::JoinHandle};
@@ -109,6 +113,10 @@ mod support {
             self.connect_as(Uuid::new_v4()).await
         }
 
+        pub async fn connect_management(&self) -> Socket {
+            connect_async(&self.url).await.unwrap().0
+        }
+
         pub async fn connect_as(&self, account_id: Uuid) -> Socket {
             let mut request = self.url.as_str().into_client_request().unwrap();
             request.headers_mut().insert(
@@ -131,6 +139,18 @@ mod support {
     }
 
     pub async fn request(socket: &mut Socket, message: ClientMessage) -> ServerMessage {
+        socket
+            .send(Message::Text(serde_json::to_string(&message).unwrap()))
+            .await
+            .unwrap();
+        let message = socket.next().await.unwrap().unwrap();
+        serde_json::from_str(&message.into_text().unwrap()).unwrap()
+    }
+
+    pub async fn management_request(
+        socket: &mut Socket,
+        message: ManagementClientMessage,
+    ) -> ManagementServerMessage {
         socket
             .send(Message::Text(serde_json::to_string(&message).unwrap()))
             .await

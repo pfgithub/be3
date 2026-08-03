@@ -9,8 +9,9 @@ use std::{
 };
 
 use block::{
-    BlockOperation, BlockParent, BlockReference, BlockReferenceList, ClientMessage, CommandKind,
-    ErrorCode, OperationRecord, ReferenceDelta, ServerMessage, MAX_NAME_BYTES,
+    Account, BlockOperation, BlockParent, BlockReference, BlockReferenceList, ClientMessage,
+    CommandKind, ErrorCode, ManagementClientMessage, ManagementErrorCode, ManagementServerMessage,
+    OperationRecord, ReferenceDelta, ServerMessage, MAX_NAME_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
@@ -25,14 +26,13 @@ use tokio_tungstenite::{
     accept_hdr_async,
     tungstenite::{
         handshake::server::{ErrorResponse, Request, Response},
-        http::StatusCode,
         Message,
     },
 };
 use uuid::Uuid;
 
 const ACCOUNT_HEADER: &str = "x-block-account-id";
-const DATABASE_FILE: &str = "blocks.sqlite3";
+const DATABASE_FILE: &str = "server.sqlite3";
 
 pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
     let root = data_dir.into();
@@ -71,23 +71,18 @@ async fn handle_connection(
     let socket = accept_hdr_async(
         stream,
         |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
-            let parsed = request
+            account_id = request
                 .headers()
                 .get(ACCOUNT_HEADER)
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| Uuid::parse_str(value).ok());
-            let Some(parsed) = parsed else {
-                return Err(http_error(
-                    StatusCode::BAD_REQUEST,
-                    format!("missing or invalid {ACCOUNT_HEADER} header"),
-                ));
-            };
-            account_id = Some(parsed);
             Ok(response)
         },
     )
     .await?;
-    let account_id = account_id.expect("accepted handshake omitted account identity");
+    let Some(account_id) = account_id else {
+        return handle_management_connection(socket, store).await;
+    };
     let (mut sink, mut source) = socket.split();
     let (outbound, mut outbound_rx) = mpsc::unbounded_channel();
     let client_id = watch_hub.next_client_id();
@@ -143,10 +138,60 @@ async fn handle_connection(
     Ok(())
 }
 
-fn http_error(status: StatusCode, message: String) -> ErrorResponse {
-    let mut response = ErrorResponse::new(Some(message));
-    *response.status_mut() = status;
-    response
+async fn handle_management_connection(
+    mut socket: tokio_tungstenite::WebSocketStream<TcpStream>,
+    store: Arc<BlockStore>,
+) -> Result<(), ServerError> {
+    while let Some(message) = socket.next().await {
+        let response = match message? {
+            Message::Text(text) => handle_management_message(&store, &text).await,
+            Message::Close(_) => break,
+            Message::Ping(payload) => {
+                socket.send(Message::Pong(payload)).await?;
+                continue;
+            }
+            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
+                ManagementServerMessage::Error {
+                    request_id: None,
+                    code: ManagementErrorCode::UnsupportedMessage,
+                    message: "only JSON text websocket messages are supported".into(),
+                }
+            }
+        };
+        socket
+            .send(Message::Text(serde_json::to_string(&response)?))
+            .await?;
+    }
+    Ok(())
+}
+
+async fn handle_management_message(store: &BlockStore, text: &str) -> ManagementServerMessage {
+    let message = match serde_json::from_str::<ManagementClientMessage>(text) {
+        Ok(message) => message,
+        Err(error) => {
+            return ManagementServerMessage::Error {
+                request_id: None,
+                code: ManagementErrorCode::InvalidMessage,
+                message: format!("invalid management command JSON: {error}"),
+            };
+        }
+    };
+    let request_id = message.request_id();
+    let result = match message {
+        ManagementClientMessage::Register {
+            email,
+            display_name,
+            ..
+        } => store.register_account(email, display_name).await,
+        ManagementClientMessage::Login { email, .. } => store.login_account(email).await,
+    };
+    match result {
+        Ok(account) => ManagementServerMessage::Account {
+            request_id,
+            account,
+        },
+        Err(error) => error.to_response(request_id),
+    }
 }
 
 async fn handle_text_message(
@@ -661,6 +706,63 @@ impl BlockStore {
         Arc::clone(locks.entry(id).or_insert_with(|| Arc::new(Mutex::new(()))))
     }
 
+    async fn register_account(
+        &self,
+        email: String,
+        display_name: String,
+    ) -> Result<Account, ManagementStoreError> {
+        let email = normalize_email(&email)?;
+        let display_name = normalize_display_name(&display_name)?;
+        let account = Account {
+            id: Uuid::new_v4(),
+            email,
+            display_name,
+        };
+        let database = self.database.lock().await;
+        let result = database.execute(
+            "INSERT INTO accounts (id, email, display_name) VALUES (?1, ?2, ?3)",
+            params![
+                account.id.to_string(),
+                &account.email,
+                &account.display_name
+            ],
+        );
+        match result {
+            Ok(_) => Ok(account),
+            Err(error)
+                if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) =>
+            {
+                Err(ManagementStoreError::EmailAlreadyRegistered)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn login_account(&self, email: String) -> Result<Account, ManagementStoreError> {
+        let email = normalize_email(&email)?;
+        let database = self.database.lock().await;
+        let account = database
+            .query_row(
+                "SELECT id, email, display_name FROM accounts WHERE email = ?1",
+                [&email],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(ManagementStoreError::AccountNotFound)?;
+        Ok(Account {
+            id: Uuid::parse_str(&account.0)
+                .map_err(|error| ManagementStoreError::InvalidStorage(error.to_string()))?,
+            email: account.1,
+            display_name: account.2,
+        })
+    }
+
     async fn create_block_unlocked(
         &self,
         id: Uuid,
@@ -1065,6 +1167,25 @@ fn validate_name(name: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+fn normalize_email(email: &str) -> Result<String, ManagementStoreError> {
+    let email = email.trim().to_lowercase();
+    let Some((local, domain)) = email.split_once('@') else {
+        return Err(ManagementStoreError::InvalidEmail);
+    };
+    if local.is_empty() || domain.is_empty() || domain.contains('@') {
+        return Err(ManagementStoreError::InvalidEmail);
+    }
+    Ok(email)
+}
+
+fn normalize_display_name(name: &str) -> Result<String, ManagementStoreError> {
+    let name = name.trim();
+    if name.is_empty() || name.len() > MAX_NAME_BYTES {
+        return Err(ManagementStoreError::InvalidName);
+    }
+    Ok(name.to_owned())
+}
+
 fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
     let mut seen = HashSet::new();
     ids.retain(|id| seen.insert(*id));
@@ -1110,8 +1231,59 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
             PRIMARY KEY (block_id, seq),
             UNIQUE (block_id, operation_id)
         );
+
+        CREATE TABLE IF NOT EXISTS accounts (
+            id              TEXT PRIMARY KEY,
+            email           TEXT NOT NULL UNIQUE,
+            display_name    TEXT NOT NULL
+        );
         ",
     )
+}
+
+enum ManagementStoreError {
+    AccountNotFound,
+    EmailAlreadyRegistered,
+    InvalidEmail,
+    InvalidName,
+    InvalidStorage(String),
+    Sqlite(rusqlite::Error),
+}
+
+impl ManagementStoreError {
+    fn to_response(&self, request_id: Uuid) -> ManagementServerMessage {
+        let (code, message) = match self {
+            Self::AccountNotFound => (
+                ManagementErrorCode::AccountNotFound,
+                "account not found".into(),
+            ),
+            Self::EmailAlreadyRegistered => (
+                ManagementErrorCode::EmailAlreadyRegistered,
+                "email is already registered".into(),
+            ),
+            Self::InvalidEmail => (
+                ManagementErrorCode::InvalidEmail,
+                "invalid email address".into(),
+            ),
+            Self::InvalidName => (
+                ManagementErrorCode::InvalidName,
+                "invalid display name".into(),
+            ),
+            Self::InvalidStorage(message) => (ManagementErrorCode::StorageError, message.clone()),
+            Self::Sqlite(error) => (ManagementErrorCode::StorageError, error.to_string()),
+        };
+        ManagementServerMessage::Error {
+            request_id: Some(request_id),
+            code,
+            message,
+        }
+    }
+}
+
+impl From<rusqlite::Error> for ManagementStoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
+    }
 }
 
 fn load_dependencies(connection: &Connection) -> Result<DependencyState, StoreError> {
