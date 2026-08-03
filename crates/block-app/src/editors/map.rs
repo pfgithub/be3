@@ -21,10 +21,10 @@ use super::{
 const WORLD_POINTS: f32 = 1024.0;
 /// Screen size of one tile at an integer map zoom level.
 const TILE_POINTS: f32 = 256.0;
-const MAX_CACHED_TILES: usize = 128;
-/// Tiles at or below this zoom are never evicted; they back previews and
-/// serve as fallbacks while deeper tiles load.
-const EVICTION_MIN_ZOOM: u8 = 2;
+/// Viewport zoom that reaches the deepest source tiles: zoom 14 tiles are
+/// 256 points each, so full detail spans 2^14 tiles * 256 points against the
+/// 1024 point world.
+const MAX_VIEWPORT_ZOOM: f32 = 4096.0;
 const ZOOM_STEP: f32 = 1.25;
 const BACKGROUND: Color32 = Color32::from_rgb(242, 239, 233);
 const ATTRIBUTION: &str = "© OpenStreetMap contributors";
@@ -43,36 +43,15 @@ pub(super) fn registration() -> EditorRegistration {
 }
 
 enum TileState {
-    Loading {
-        last_used: u64,
-    },
+    Loading,
     Ready {
         texture: TextureHandle,
         labels: Vec<TileLabel>,
-        last_used: u64,
     },
-    Failed {
-        last_used: u64,
-    },
+    Failed,
 }
 
 impl TileState {
-    fn touch(&mut self, frame: u64) {
-        match self {
-            TileState::Loading { last_used }
-            | TileState::Ready { last_used, .. }
-            | TileState::Failed { last_used } => *last_used = frame,
-        }
-    }
-
-    fn last_used(&self) -> u64 {
-        match self {
-            TileState::Loading { last_used }
-            | TileState::Ready { last_used, .. }
-            | TileState::Failed { last_used } => *last_used,
-        }
-    }
-
     fn texture(&self) -> Option<&TextureHandle> {
         match self {
             TileState::Ready { texture, .. } => Some(texture),
@@ -85,7 +64,6 @@ pub(super) struct MapEditor {
     block: BlockHandle<Map>,
     worker: Option<TileWorker>,
     tiles: HashMap<TileId, TileState>,
-    frame: u64,
     last_error: Option<String>,
 }
 
@@ -95,13 +73,11 @@ impl MapEditor {
             block,
             worker: None,
             tiles: HashMap::new(),
-            frame: 0,
             last_error: None,
         }
     }
 
     fn poll(&mut self, context: &egui::Context) {
-        self.frame += 1;
         let worker = self
             .worker
             .get_or_insert_with(|| TileWorker::spawn(context.clone()));
@@ -123,13 +99,10 @@ impl MapEditor {
                         egui::TextureOptions::LINEAR,
                     ),
                     labels: raster.labels,
-                    last_used: self.frame,
                 },
                 Err(message) => {
                     self.last_error = Some(message);
-                    TileState::Failed {
-                        last_used: self.frame,
-                    }
+                    TileState::Failed
                 }
             };
             self.tiles.insert(result.id, state);
@@ -137,32 +110,14 @@ impl MapEditor {
     }
 
     fn ensure_tile(&mut self, id: TileId) {
-        let frame = self.frame;
-        self.tiles
-            .entry(id)
-            .and_modify(|state| state.touch(frame))
-            .or_insert_with(|| {
-                if let Some(worker) = &self.worker {
-                    worker.request(id);
-                }
-                TileState::Loading { last_used: frame }
-            });
-    }
-
-    fn evict_stale_tiles(&mut self) {
-        if self.tiles.len() <= MAX_CACHED_TILES {
-            return;
-        }
-        let mut candidates: Vec<(TileId, u64)> = self
-            .tiles
-            .iter()
-            .filter(|(id, state)| id.zoom > EVICTION_MIN_ZOOM && state.last_used() < self.frame)
-            .map(|(id, state)| (*id, state.last_used()))
-            .collect();
-        candidates.sort_by_key(|(_, last_used)| *last_used);
-        let excess = self.tiles.len().saturating_sub(MAX_CACHED_TILES);
-        for (id, _) in candidates.into_iter().take(excess) {
-            self.tiles.remove(&id);
+        let state = self.tiles.entry(id).or_insert(TileState::Loading);
+        // Keep re-requesting loading tiles: the worker serves the most
+        // recent requests first, so the tiles still in view stay ahead of
+        // any backlog from earlier views.
+        if matches!(state, TileState::Loading) {
+            if let Some(worker) = &self.worker {
+                worker.request(id);
+            }
         }
     }
 
@@ -378,6 +333,10 @@ impl BlockEditor for MapEditor {
         true
     }
 
+    fn direct_editor_max_zoom(&self) -> f32 {
+        MAX_VIEWPORT_ZOOM
+    }
+
     fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
         true
     }
@@ -407,6 +366,9 @@ impl BlockEditor for MapEditor {
                 .on_hover_text("Reload tiles")
                 .clicked()
             {
+                // Drop the worker too: it remembers which tiles it already
+                // served and would refuse to fetch them again.
+                self.worker = None;
                 self.tiles.clear();
                 self.last_error = None;
             }
@@ -439,7 +401,6 @@ impl BlockEditor for MapEditor {
         );
         self.poll(ui.ctx());
         self.draw_map(&painter, world_rect, clip);
-        self.evict_stale_tiles();
         draw_attribution(&painter, clip);
 
         if response.dragged() {

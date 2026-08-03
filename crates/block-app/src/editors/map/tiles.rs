@@ -3,6 +3,7 @@
 //! Tiles come from the OSMF vector tile service (Shortbread schema); see
 //! <https://operations.osmfoundation.org/policies/vector/>.
 
+use std::collections::HashSet;
 use std::io::Read;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
@@ -63,12 +64,61 @@ impl TileWorker {
     }
 }
 
+/// Pending tile requests, served most recent first so the tiles currently in
+/// view take priority over any backlog from earlier views. Each tile is
+/// served at most once; re-requesting a pending tile moves it back to the
+/// top.
+struct RequestQueue {
+    pending: Vec<TileId>,
+    served: HashSet<TileId>,
+}
+
+impl RequestQueue {
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            served: HashSet::new(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    fn enqueue(&mut self, id: TileId) {
+        if self.served.contains(&id) {
+            return;
+        }
+        self.pending.retain(|pending| *pending != id);
+        self.pending.push(id);
+    }
+
+    fn pop(&mut self) -> Option<TileId> {
+        let id = self.pending.pop()?;
+        self.served.insert(id);
+        Some(id)
+    }
+}
+
 fn worker(requests: Receiver<TileId>, results: Sender<TileResult>, context: egui::Context) {
     let agent = ureq::AgentBuilder::new()
         .user_agent(USER_AGENT)
         .timeout(Duration::from_secs(20))
         .build();
-    while let Ok(id) = requests.recv() {
+    let mut queue = RequestQueue::new();
+    loop {
+        if queue.is_empty() {
+            match requests.recv() {
+                Ok(id) => queue.enqueue(id),
+                Err(_) => return,
+            }
+        }
+        while let Ok(id) = requests.try_recv() {
+            queue.enqueue(id);
+        }
+        let Some(id) = queue.pop() else {
+            continue;
+        };
         // A panic must fail the one tile, not silently kill the worker.
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_tile(&agent, id)))
@@ -113,3 +163,6 @@ fn fetch(agent: &ureq::Agent, id: TileId) -> Result<Vec<u8>, String> {
     }
     Ok(data)
 }
+
+#[cfg(test)]
+mod tests;

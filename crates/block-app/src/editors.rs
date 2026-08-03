@@ -447,6 +447,11 @@ pub trait BlockEditor {
     fn direct_editor_fills_viewport(&self) -> bool {
         false
     }
+    /// Upper limit for the tab viewport zoom; editors with deep content can
+    /// raise it above the shared default.
+    fn direct_editor_max_zoom(&self) -> f32 {
+        DIRECT_EDITOR_MAX_ZOOM
+    }
     fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
         false
     }
@@ -529,6 +534,7 @@ pub fn direct_editor_tab_ui(
     let compact = ui.available_width() < COMPACT_DIRECT_EDITOR_WIDTH;
     let mut action = None;
     let capabilities = editor.direct_editor_capabilities();
+    let max_zoom = editor.direct_editor_max_zoom();
     let viewport_id = egui::Id::new(("direct-editor-tab-viewport", id));
     let mut viewport_state = ui
         .ctx()
@@ -650,6 +656,7 @@ pub fn direct_editor_tab_ui(
                 viewport_rect,
                 content_rect,
                 &mut viewport_state,
+                max_zoom,
             )
         {
             if let Some(auto_fit) = &mut viewport_state.auto_fit {
@@ -667,8 +674,7 @@ pub fn direct_editor_tab_ui(
                 }
                 DirectEditorViewportCommand::Zoom { factor, anchor } => {
                     let old_zoom = viewport_state.zoom;
-                    let new_zoom =
-                        (old_zoom * factor).clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+                    let new_zoom = (old_zoom * factor).clamp(DIRECT_EDITOR_MIN_ZOOM, max_zoom);
                     if new_zoom != old_zoom {
                         let anchor = anchor.unwrap_or_else(|| viewport_rect.center());
                         viewport_state.pan = (anchor - viewport_rect.center())
@@ -739,6 +745,7 @@ fn handle_direct_editor_background_input(
     viewport_rect: egui::Rect,
     content_rect: egui::Rect,
     viewport: &mut DirectEditorTabViewport,
+    max_zoom: f32,
 ) -> bool {
     let Some(pointer) = context
         .pointer_hover_pos()
@@ -769,8 +776,7 @@ fn handle_direct_editor_background_input(
     };
     if let Some(zoom_factor) = zoom_factor {
         let old_zoom = viewport.zoom;
-        let new_zoom =
-            (old_zoom * zoom_factor).clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+        let new_zoom = (old_zoom * zoom_factor).clamp(DIRECT_EDITOR_MIN_ZOOM, max_zoom);
         if new_zoom != old_zoom {
             viewport.pan = (pointer - viewport_rect.center())
                 - ((pointer - viewport_rect.center()) - viewport.pan) * (new_zoom / old_zoom);
