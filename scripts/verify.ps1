@@ -32,19 +32,17 @@ try {
     # Tests and examples are linted too, so a warning cannot hide in them.
     $clippyTargets = @('--workspace', '--all-targets', '--all-features')
 
-    if (-not $Check) {
+    if ($Check) {
+        Write-Host 'Checking for clippy warnings...'
+        & cargo clippy @clippyTargets -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw 'cargo clippy reported warnings' }
+    } else {
         Write-Host 'Applying clippy fixes...'
         # The tree is expected to be mid-change; fixing only a pristine
         # checkout would make the script useless during development.
-        & cargo clippy --fix --allow-dirty --allow-staged @clippyTargets
-        if ($LASTEXITCODE -ne 0) { throw 'cargo clippy --fix failed' }
+        & cargo clippy --fix --allow-dirty --allow-staged @clippyTargets -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw 'cargo clippy reported warnings' }
     }
-
-    # Everything clippy could not fix by itself, as an error. In fix mode this
-    # re-runs against the freshly fixed sources, which cargo has already built.
-    Write-Host 'Checking for clippy warnings...'
-    & cargo clippy @clippyTargets -- -D warnings
-    if ($LASTEXITCODE -ne 0) { throw 'cargo clippy reported warnings' }
 
     Write-Host 'Formatting...'
     $formatArguments = @('--all')
