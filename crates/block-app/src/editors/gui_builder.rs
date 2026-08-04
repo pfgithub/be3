@@ -1,19 +1,23 @@
+pub(super) mod dynamic_artifact;
 mod inspector;
 mod surface;
 
 use block::Block;
 use block_client::{
-    blocks::gui_builder::{
-        GuiBuilder, GuiBuilderOperation, GuiCanvasSize, GuiLayout, GuiLocation, GuiWidgetKind,
+    blocks::{
+        gui_builder::{
+            GuiBuilder, GuiBuilderOperation, GuiCanvasSize, GuiLayout, GuiLocation, GuiWidgetKind,
+        },
+        text::TextDocument,
     },
-    BlockHandle,
+    BlockClient, BlockHandle,
 };
 use eframe::egui;
 use egui_material_icons::{
     icons::{
-        ICON_CHECK_BOX, ICON_CODE, ICON_CONTENT_COPY, ICON_DESIGN_SERVICES, ICON_HORIZONTAL_RULE,
-        ICON_LABEL, ICON_PLAY_ARROW, ICON_SMART_BUTTON, ICON_SPACE_BAR, ICON_TEXT_FIELDS,
-        ICON_TITLE, ICON_TUNE, ICON_VIEW_COLUMN, ICON_VIEW_STREAM, ICON_WIDGETS,
+        ICON_CHECK_BOX, ICON_CODE, ICON_DESIGN_SERVICES, ICON_HORIZONTAL_RULE, ICON_LABEL,
+        ICON_PLAY_ARROW, ICON_SMART_BUTTON, ICON_SPACE_BAR, ICON_TEXT_FIELDS, ICON_TITLE,
+        ICON_TUNE, ICON_VIEW_COLUMN, ICON_VIEW_STREAM, ICON_WIDGETS,
     },
     MaterialIcon,
 };
@@ -44,7 +48,7 @@ pub(super) fn registration() -> EditorRegistration {
         open: |client, id| Box::new(GuiBuilderEditor::new(client.get_block::<GuiBuilder>(id))),
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        regenerate_dynamic_artifact: Some(dynamic_artifact::regenerate),
     }
 }
 
@@ -54,7 +58,6 @@ pub(super) struct GuiBuilderEditor {
     design: bool,
     selected: Option<Uuid>,
     preview: PreviewState,
-    show_code: bool,
 }
 
 impl GuiBuilderEditor {
@@ -64,7 +67,6 @@ impl GuiBuilderEditor {
             design: true,
             selected: None,
             preview: PreviewState::default(),
-            show_code: false,
         }
     }
 
@@ -85,37 +87,17 @@ impl GuiBuilderEditor {
         }
     }
 
-    fn show_code_window(&mut self, ui: &egui::Ui, builder: &GuiBuilder) {
-        if !self.show_code {
-            return;
-        }
-        let code = builder.generate_code();
-        let mut open = true;
-        egui::Window::new("Generated code")
-            .id(egui::Id::new(("gui-builder-code", self.block.id())))
-            .open(&mut open)
-            .default_width(520.0)
-            .default_height(420.0)
-            .vscroll(false)
-            .show(ui.ctx(), |ui| {
-                if ui
-                    .button(format!("{} Copy", ICON_CONTENT_COPY.codepoint))
-                    .clicked()
-                {
-                    ui.ctx().copy_text(code.clone());
-                }
-                ui.add_space(4.0);
-                egui::ScrollArea::both().show(ui, |ui| {
-                    // Read-only: the design is the source of truth, so the
-                    // code is shown rather than edited.
-                    ui.add(
-                        egui::TextEdit::multiline(&mut code.as_str())
-                            .code_editor()
-                            .desired_width(f32::INFINITY),
-                    );
-                });
-            });
-        self.show_code = open;
+    /// Exports the design as a Text block that stays linked to this one, so
+    /// the code can be regenerated after the design changes.
+    fn export_code(&self, client: &BlockClient) -> Option<EditorAction> {
+        let generated = dynamic_artifact::generate(&*self.block.read()?);
+        let artifact = client
+            .create_dynamic_artifact(generated, dynamic_artifact::descriptor(self.block.id()));
+        artifact.set_name(dynamic_artifact::artifact_name(&self.block.name()));
+        Some(EditorAction::OpenBlock {
+            id: artifact.id(),
+            block_type: TextDocument::TYPE_ID,
+        })
     }
 
     fn show_window(&mut self, ui: &mut egui::Ui, builder: &GuiBuilder) {
@@ -289,39 +271,38 @@ impl BlockEditor for GuiBuilderEditor {
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
+        editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        ui.horizontal(|ui| {
-            if ui
-                .selectable_label(
-                    self.design,
-                    format!("{} Design", ICON_DESIGN_SERVICES.codepoint),
-                )
-                .clicked()
-            {
-                self.design = true;
-            }
-            if ui
-                .selectable_label(
-                    !self.design,
-                    format!("{} Preview", ICON_PLAY_ARROW.codepoint),
-                )
-                .clicked()
-            {
-                // Each preview run starts from the designed values.
-                self.design = false;
-                self.preview.reset();
-            }
-            ui.separator();
-            if ui
-                .selectable_label(self.show_code, format!("{} Code", ICON_CODE.codepoint))
-                .clicked()
-            {
-                self.show_code = !self.show_code;
-            }
-        });
-        None
+        let export = ui
+            .horizontal(|ui| {
+                if ui
+                    .selectable_label(
+                        self.design,
+                        format!("{} Design", ICON_DESIGN_SERVICES.codepoint),
+                    )
+                    .clicked()
+                {
+                    self.design = true;
+                }
+                if ui
+                    .selectable_label(
+                        !self.design,
+                        format!("{} Preview", ICON_PLAY_ARROW.codepoint),
+                    )
+                    .clicked()
+                {
+                    // Each preview run starts from the designed values.
+                    self.design = false;
+                    self.preview.reset();
+                }
+                ui.separator();
+                ui.button(format!("{} Generate code", ICON_CODE.codepoint))
+                    .on_hover_text("Create a Text block holding the generated egui code")
+                    .clicked()
+            })
+            .inner;
+        export.then(|| self.export_code(editors.client())).flatten()
     }
 
     fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
@@ -370,7 +351,6 @@ impl BlockEditor for GuiBuilderEditor {
             return None;
         };
         self.synchronize_selection(&builder);
-        self.show_code_window(ui, &builder);
         self.show_window(ui, &builder);
         None
     }
