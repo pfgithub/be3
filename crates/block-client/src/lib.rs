@@ -819,12 +819,6 @@ impl BlockClient {
             .unwrap_or(BlockAccess::Edit)
     }
 
-    /// Whether the server has refused this client access to `id`. Blocks in
-    /// this state never load, so editors show an explanation instead.
-    pub fn access_denied(&self, id: Uuid) -> bool {
-        !self.block_access(id).can_view()
-    }
-
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
         self.debug.read().clone()
     }

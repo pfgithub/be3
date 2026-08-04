@@ -17,8 +17,8 @@ use std::{io, path::PathBuf};
 
 use app_state::{AppStateStore, SavedAccount, ServerLocation};
 use block::{
-    BlockParent, BlockReference, BlockReferenceList, Workspace, WorkspaceInvitation, WorkspaceRole,
-    MAX_NAME_BYTES,
+    BlockAccess, BlockParent, BlockReference, BlockReferenceList, Workspace, WorkspaceInvitation,
+    WorkspaceRole, MAX_NAME_BYTES,
 };
 use block_client::{
     blocks::workspace_index::BlockEntry, BlockClient, DynamicArtifactDescriptor, ManagementClient,
@@ -33,10 +33,10 @@ use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK,
-    ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_CLOUD, ICON_COMPUTER, ICON_GROUP_ADD,
+    ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_CLOUD, ICON_COMPUTER, ICON_EDIT, ICON_GROUP_ADD,
     ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ,
     ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO,
-    ICON_WORKSPACES,
+    ICON_VISIBILITY, ICON_WORKSPACES,
 };
 use share::ShareDialog;
 use uuid::Uuid;
@@ -162,6 +162,9 @@ struct BlockApp {
     block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
+    /// The access a tab is being shown at, when it is not the most its account
+    /// has. Lets someone with edit access see what a viewer would see.
+    editor_access: HashMap<Uuid, BlockAccess>,
     dynamic_artifact_regenerations: HashMap<Uuid, Box<dyn DynamicArtifactRegeneration>>,
     dynamic_artifact_errors: HashMap<Uuid, String>,
     /// Settings being edited in an artifact bar, until they are applied.
@@ -485,6 +488,7 @@ impl BlockApp {
             block_types: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
+            editor_access: HashMap::new(),
             dynamic_artifact_regenerations: HashMap::new(),
             dynamic_artifact_errors: HashMap::new(),
             dynamic_artifact_settings: HashMap::new(),
@@ -1293,9 +1297,15 @@ impl BlockApp {
             BlockPickerTarget::Block(_) => BlockParent::Orphaned,
         };
         let active = self.active_tab.unwrap_or(Uuid::nil());
+        let access = self.editor_access(active);
         let result = {
-            let mut editors =
-                EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
+            let mut editors = EditorAccess::new(
+                active,
+                access,
+                &self.client,
+                &self.registry,
+                &mut self.editors,
+            );
             self.block_picker.handle(context, &mut editors, parent)
         };
         let Some(result) = result else {
@@ -1531,6 +1541,7 @@ impl BlockApp {
     }
 
     fn close_tab_resources(&mut self, id: Uuid) {
+        self.editor_access.remove(&id);
         self.parents.remove(&id);
         self.references.remove(&id);
         self.backrefs.remove(&id);
@@ -2076,6 +2087,21 @@ impl BlockApp {
         });
     }
 
+    /// The most a tab may do with its block, which is what its mode dropdown is
+    /// locked to.
+    fn editor_access_ceiling(&self, id: Uuid) -> BlockAccess {
+        editors::editor_access_ceiling(&self.client, id)
+    }
+
+    /// The access a tab is being shown at: the mode it was put in, never above
+    /// what the account is allowed.
+    fn editor_access(&self, id: Uuid) -> BlockAccess {
+        let ceiling = self.editor_access_ceiling(id);
+        self.editor_access
+            .get(&id)
+            .map_or(ceiling, |chosen| (*chosen).min(ceiling))
+    }
+
     fn show_content(
         &mut self,
         ui: &mut egui::Ui,
@@ -2086,7 +2112,8 @@ impl BlockApp {
         let Some(mut editor) = self.editors.remove(&active) else {
             return (None, None);
         };
-        let denied = self.client.access_denied(active);
+        let access = self.editor_access(active);
+        let denied = !access.can_view();
         let artifact_navigation = if denied {
             None
         } else {
@@ -2098,20 +2125,26 @@ impl BlockApp {
             egui::Key::Z,
         );
         let redo_y_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::Y);
-        let redo_requested = ui
-            .ctx()
-            .input_mut(|input| input.consume_shortcut(&redo_shortcut))
-            || ui
+        let redo_requested = access.can_edit()
+            && (ui
                 .ctx()
-                .input_mut(|input| input.consume_shortcut(&redo_y_shortcut));
-        let undo_requested = ui
-            .ctx()
-            .input_mut(|input| input.consume_shortcut(&undo_shortcut));
+                .input_mut(|input| input.consume_shortcut(&redo_shortcut))
+                || ui
+                    .ctx()
+                    .input_mut(|input| input.consume_shortcut(&redo_y_shortcut)));
+        let undo_requested = access.can_edit()
+            && ui
+                .ctx()
+                .input_mut(|input| input.consume_shortcut(&undo_shortcut));
         let block_type = editor.block_type();
         let current_name = editor.name();
         let relationships = editor.relationships();
         let mut navigation = artifact_navigation.map(TabNavigation::Open);
         let mut share = false;
+        let can_share = self.client.block_access(active).can_edit();
+        let ceiling = self.editor_access_ceiling(active);
+        let generated = self.client.dynamic_artifact(active).is_some();
+        let mut chosen_access = access;
         egui::Sides::new().shrink_left().show(
             ui,
             |ui| {
@@ -2131,7 +2164,7 @@ impl BlockApp {
                         navigation = Some(TabNavigation::Forward);
                     }
                     ui.separator();
-                    let history = editor.history();
+                    let history = editor.history().filter(|_| access.can_edit());
                     if ui
                         .add_enabled(
                             history.map_or_else(|| false, |history| history.can_undo()),
@@ -2174,37 +2207,54 @@ impl BlockApp {
             |ui| {
                 share = ui
                     .add_enabled(
-                        !denied,
+                        can_share,
                         egui::Button::new(format!("{} Share", ICON_SHARE.codepoint)),
                     )
                     .on_hover_text("Share this block")
+                    .on_disabled_hover_text("Only accounts that can edit a block may share it")
                     .clicked();
+                chosen_access = show_access_mode(ui, active, access, ceiling, generated);
             },
         );
         if share {
             self.share.open(&self.client, active, current_name.clone());
         }
+        if chosen_access != access {
+            self.editor_access.insert(active, chosen_access);
+        }
         ui.separator();
         if denied {
             self.editors.insert(active, editor);
-            self.show_access_denied(ui);
+            self.show_access_denied(ui, self.editor_access_ceiling(active).can_view());
             return (None, navigation);
         }
-        let mut editors =
-            EditorAccess::new(active, &self.client, &self.registry, &mut self.editors);
+        let mut editors = EditorAccess::new(
+            active,
+            access,
+            &self.client,
+            &self.registry,
+            &mut self.editors,
+        );
         let action = direct_editor_tab_ui(editor.as_mut(), ui, &mut editors);
         self.editors.insert(active, editor);
         (action, navigation)
     }
 
-    /// Replaces an editor whose block the server refused to hand over. The
-    /// block can still be listed, so the tab has to explain why it is empty.
-    fn show_access_denied(&self, ui: &mut egui::Ui) {
+    /// Replaces an editor whose block cannot be opened, either because the
+    /// server refuses it or because the tab is showing it as an account that
+    /// only knows it exists. The block is still listed either way, so the tab
+    /// has to explain why it is empty.
+    fn show_access_denied(&self, ui: &mut egui::Ui, simulated: bool) {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
                 ui.heading(format!("{} No access", ICON_LOCK.codepoint));
-                ui.weak("You do not have permission to open this block.");
-                ui.weak("Ask someone who can edit it to share it with you.");
+                if simulated {
+                    ui.weak("An account that only knows this block exists cannot open it.");
+                    ui.weak("Switch back to Can view or Can edit to see it.");
+                } else {
+                    ui.weak("You do not have permission to open this block.");
+                    ui.weak("Ask someone who can edit it to share it with you.");
+                }
             });
         });
     }
@@ -2278,6 +2328,9 @@ impl BlockApp {
 
         let support = self.registry.dynamic_artifact(descriptor.source_type);
         let running = self.dynamic_artifact_regenerations.contains_key(&id);
+        // The artifact is read-only in its editor, but rebuilding it is an edit
+        // like any other, so it needs edit access to the block itself.
+        let can_regenerate = self.client.block_access(id).can_edit();
         // The draft is held outside the UI so the bar only reads from `self`.
         let mut draft = self.dynamic_artifact_settings.remove(&id);
         let mut navigate = None;
@@ -2294,14 +2347,16 @@ impl BlockApp {
                             navigate = self.show_dynamic_artifact_source(ui, &descriptor, *support);
                             ui.separator();
                             ui.weak((support.summary)(&descriptor.data));
-                            if let Some(settings) = self.show_dynamic_artifact_settings(
-                                ui,
-                                &descriptor,
-                                *support,
-                                &mut draft,
-                            ) {
-                                apply = Some(settings);
-                            }
+                            ui.add_enabled_ui(can_regenerate, |ui| {
+                                if let Some(settings) = self.show_dynamic_artifact_settings(
+                                    ui,
+                                    &descriptor,
+                                    *support,
+                                    &mut draft,
+                                ) {
+                                    apply = Some(settings);
+                                }
+                            });
                         }
                         Err(error) => {
                             ui.colored_label(ui.visuals().error_fg_color, error);
@@ -2311,8 +2366,12 @@ impl BlockApp {
                         ui.spinner();
                     }
                     regenerate = ui
-                        .add_enabled(!running && support.is_ok(), egui::Button::new(ICON_REFRESH))
+                        .add_enabled(
+                            can_regenerate && !running && support.is_ok(),
+                            egui::Button::new(ICON_REFRESH),
+                        )
                         .on_hover_text("Regenerate")
+                        .on_disabled_hover_text("You cannot change this block")
                         .clicked();
                 });
                 if let Some(error) = self.dynamic_artifact_errors.get(&id) {
@@ -2906,6 +2965,48 @@ fn block_context_menu(
         ui.close();
     }
     action
+}
+
+/// The mode a tab is showing its block in. Modes above what the account is
+/// allowed cannot be picked; the ones below it show what someone with less
+/// access would see. Returns the mode to show the block in from now on.
+fn show_access_mode(
+    ui: &mut egui::Ui,
+    active: Uuid,
+    access: BlockAccess,
+    ceiling: BlockAccess,
+    generated: bool,
+) -> BlockAccess {
+    let mut chosen = access;
+    egui::ComboBox::from_id_salt(("editor-access-mode", active))
+        .selected_text(format!("{} {}", access_mode_icon(access), access.label()))
+        .show_ui(ui, |ui| {
+            for mode in [BlockAccess::Edit, BlockAccess::View, BlockAccess::KnowExists] {
+                let label = format!("{} {}", access_mode_icon(mode), mode.label());
+                ui.add_enabled_ui(mode <= ceiling, |ui| {
+                    if ui.selectable_label(access == mode, label).clicked() {
+                        chosen = mode;
+                    }
+                })
+                .response
+                .on_disabled_hover_text(if generated {
+                    "Generated blocks are replaced whenever they are rebuilt, so they cannot be edited here"
+                } else {
+                    "You do not have that much access to this block"
+                });
+            }
+        })
+        .response
+        .on_hover_text("Show this block as an account with this much access would see it");
+    chosen
+}
+
+fn access_mode_icon(access: BlockAccess) -> &'static str {
+    match access {
+        BlockAccess::Edit => ICON_EDIT.codepoint,
+        BlockAccess::View => ICON_VISIBILITY.codepoint,
+        BlockAccess::KnowExists | BlockAccess::None => ICON_LOCK.codepoint,
+    }
 }
 
 enum AccountAction {

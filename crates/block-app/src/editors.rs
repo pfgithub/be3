@@ -19,13 +19,13 @@ mod workspace_index;
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use block::{Block, BlockParent};
+use block::{Block, BlockAccess, BlockParent};
 use block_client::{
     blocks::workspace_index::BlockEntry, BlockClient, BlockHandle, BlockHandleAccess,
     BlockHistoryHandle, BlockRelationships,
 };
 use eframe::egui;
-use egui_material_icons::MaterialIcon;
+use egui_material_icons::{icons::ICON_LOCK, MaterialIcon};
 use uuid::Uuid;
 
 use self::unsupported::UnsupportedEditor;
@@ -157,8 +157,45 @@ impl DirectEditorViewport {
     }
 }
 
+/// The most an editor may ever do with a block: what the server grants, and
+/// never more than viewing for a generated artifact, whose contents are
+/// replaced wholesale the next time it is regenerated.
+pub fn editor_access_ceiling(client: &BlockClient, id: Uuid) -> BlockAccess {
+    let access = client.block_access(id);
+    if client.dynamic_artifact(id).is_some() {
+        access.min(BlockAccess::View)
+    } else {
+        access
+    }
+}
+
+/// Draws `contents`, non-interactive when the block may only be viewed. The
+/// fade a disabled `Ui` normally gets is turned off: a block being read should
+/// stay as legible as one being edited.
+pub fn editor_scope<R>(
+    ui: &mut egui::Ui,
+    read_only: bool,
+    contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    if !read_only {
+        return contents(ui);
+    }
+    let mut style = (**ui.style()).clone();
+    style.visuals.disabled_alpha = 1.0;
+    ui.scope_builder(egui::UiBuilder::new().style(style).disabled(), contents)
+        .inner
+}
+
+/// Replaces an editor the account may only know the existence of.
+fn no_access_notice(ui: &mut egui::Ui) {
+    ui.centered_and_justified(|ui| {
+        ui.weak(format!("{} No access", ICON_LOCK.codepoint));
+    });
+}
+
 pub struct EditorAccess<'a> {
     active: Vec<Uuid>,
+    access: BlockAccess,
     client: &'a BlockClient,
     registry: &'a EditorRegistry,
     editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
@@ -193,16 +230,29 @@ pub fn embedded_editor_ui(
 impl<'a> EditorAccess<'a> {
     pub fn new(
         active: Uuid,
+        access: BlockAccess,
         client: &'a BlockClient,
         registry: &'a EditorRegistry,
         editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
     ) -> Self {
         Self {
             active: vec![active],
+            access,
             client,
             registry,
             editors,
         }
+    }
+
+    /// What the editor currently being drawn may do with its block.
+    pub fn access(&self) -> BlockAccess {
+        self.access
+    }
+
+    /// What a block nested in the current editor may be shown as. An editor
+    /// never lets a block inside it be changed more than it is itself.
+    fn access_for(&self, id: Uuid) -> BlockAccess {
+        self.access.min(editor_access_ceiling(self.client, id))
     }
 
     pub fn client(&self) -> &BlockClient {
@@ -238,11 +288,33 @@ impl<'a> EditorAccess<'a> {
         callback: impl FnOnce(&mut dyn BlockEditor, &mut Self) -> T,
     ) -> Option<T> {
         let mut editor = self.editors.remove(&id)?;
+        let nested = self.access_for(id);
+        let access = std::mem::replace(&mut self.access, nested);
         self.active.push(id);
         let result = callback(editor.as_mut(), self);
         assert_eq!(self.active.pop(), Some(id));
+        self.access = access;
         self.editors.insert(id, editor);
         Some(result)
+    }
+
+    /// Draws a nested editor at the access it is allowed: blocks that may only
+    /// be known to exist are replaced by a notice, and blocks that may only be
+    /// viewed are drawn without any way to change them.
+    fn with_editor_ui<T>(
+        &mut self,
+        id: Uuid,
+        ui: &mut egui::Ui,
+        callback: impl FnOnce(&mut dyn BlockEditor, &mut Self, &mut egui::Ui) -> T,
+    ) -> Option<T> {
+        let access = self.access_for(id);
+        if !access.can_view() {
+            no_access_notice(ui);
+            return None;
+        }
+        editor_scope(ui, !access.can_edit(), |ui| {
+            self.with_editor(id, |editor, editors| callback(editor, editors, ui))
+        })
     }
 
     pub fn default_preserve_aspect_ratio(&self, id: Uuid) -> bool {
@@ -258,6 +330,9 @@ impl<'a> EditorAccess<'a> {
     }
 
     pub fn render(&mut self, id: Uuid, context: BlockRenderContext<'_>) -> bool {
+        if !self.access_for(id).can_view() {
+            return false;
+        }
         self.with_editor(id, |editor, editors| editor.render(context, editors))
             .unwrap_or(false)
     }
@@ -315,7 +390,7 @@ impl<'a> EditorAccess<'a> {
         ui: &mut egui::Ui,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.with_editor(id, |editor, editors| {
+        self.with_editor_ui(id, ui, |editor, editors, ui| {
             editor.direct_editor_top_bar(ui, editors, viewport)
         })?
     }
@@ -332,7 +407,7 @@ impl<'a> EditorAccess<'a> {
         id: Uuid,
         ui: &mut egui::Ui,
     ) -> Option<EditorAction> {
-        self.with_editor(id, |editor, editors| {
+        self.with_editor_ui(id, ui, |editor, editors, ui| {
             editor.direct_editor_left_sidebar(ui, editors)
         })?
     }
@@ -349,7 +424,7 @@ impl<'a> EditorAccess<'a> {
         id: Uuid,
         ui: &mut egui::Ui,
     ) -> Option<EditorAction> {
-        self.with_editor(id, |editor, editors| {
+        self.with_editor_ui(id, ui, |editor, editors, ui| {
             editor.direct_editor_right_sidebar(ui, editors)
         })?
     }
@@ -361,7 +436,7 @@ impl<'a> EditorAccess<'a> {
         scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.with_editor(id, |editor, editors| {
+        self.with_editor_ui(id, ui, |editor, editors, ui| {
             editor.direct_editor_ui(ui, editors, scale, viewport)
         })?
     }
@@ -373,7 +448,7 @@ impl<'a> EditorAccess<'a> {
         scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.with_editor(id, |editor, editors| {
+        self.with_editor_ui(id, ui, |editor, editors, ui| {
             editor.embedded_direct_editor_ui(ui, editors, scale, viewport)
         })?
     }
@@ -536,6 +611,7 @@ pub fn direct_editor_tab_ui(
 ) -> Option<EditorAction> {
     let id = editor.id();
     let compact = ui.available_width() < COMPACT_DIRECT_EDITOR_WIDTH;
+    let read_only = !editors.access().can_edit();
     let mut action = None;
     let capabilities = editor.direct_editor_capabilities();
     let max_zoom = editor.direct_editor_max_zoom();
@@ -549,7 +625,9 @@ pub fn direct_editor_tab_ui(
     egui::Panel::top(egui::Id::new(("direct-editor-tab-toolbar", id)))
         .show_separator_line(true)
         .show_inside(ui, |ui| {
-            let next_action = editor.direct_editor_top_bar(ui, editors, &mut viewport);
+            let next_action = editor_scope(ui, read_only, |ui| {
+                editor.direct_editor_top_bar(ui, editors, &mut viewport)
+            });
             if action.is_none() {
                 action = next_action;
             }
@@ -563,7 +641,9 @@ pub fn direct_editor_tab_ui(
                 .default_width(240.0)
                 .default_pos(available.left_top() + egui::vec2(16.0, 16.0))
                 .show(ui.ctx(), |ui| {
-                    let next_action = editor.direct_editor_left_sidebar(ui, editors);
+                    let next_action = editor_scope(ui, read_only, |ui| {
+                        editor.direct_editor_left_sidebar(ui, editors)
+                    });
                     if action.is_none() {
                         action = next_action;
                     }
@@ -576,7 +656,9 @@ pub fn direct_editor_tab_ui(
                 .default_width(240.0)
                 .default_pos(available.right_top() + egui::vec2(-16.0, 16.0))
                 .show(ui.ctx(), |ui| {
-                    let next_action = editor.direct_editor_right_sidebar(ui, editors);
+                    let next_action = editor_scope(ui, read_only, |ui| {
+                        editor.direct_editor_right_sidebar(ui, editors)
+                    });
                     if action.is_none() {
                         action = next_action;
                     }
@@ -590,7 +672,9 @@ pub fn direct_editor_tab_ui(
                 .max_size(340.0)
                 .resizable(true)
                 .show_inside(ui, |ui| {
-                    let next_action = editor.direct_editor_left_sidebar(ui, editors);
+                    let next_action = editor_scope(ui, read_only, |ui| {
+                        editor.direct_editor_left_sidebar(ui, editors)
+                    });
                     if action.is_none() {
                         action = next_action;
                     }
@@ -603,7 +687,9 @@ pub fn direct_editor_tab_ui(
                 .max_size(340.0)
                 .resizable(true)
                 .show_inside(ui, |ui| {
-                    let next_action = editor.direct_editor_right_sidebar(ui, editors);
+                    let next_action = editor_scope(ui, read_only, |ui| {
+                        editor.direct_editor_right_sidebar(ui, editors)
+                    });
                     if action.is_none() {
                         action = next_action;
                     }
@@ -631,7 +717,11 @@ pub fn direct_editor_tab_ui(
         );
         viewport.replace_content_rect(Some(content_rect));
         let fills_viewport = editor.direct_editor_fills_viewport();
-        let handles_viewport_input = editor.direct_editor_handles_viewport_input(editors);
+        // A read-only editor answers no input, so the tab drives the viewport
+        // for it. Editors read the content rect back, so panning and zooming
+        // still reach the ones that normally steer it themselves.
+        let handles_viewport_input =
+            !read_only && editor.direct_editor_handles_viewport_input(editors);
         let editor_rect = if fills_viewport {
             viewport_rect
         } else {
@@ -647,7 +737,9 @@ pub fn direct_editor_tab_ui(
             .scope(|ui| {
                 ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
                 ui.set_min_size(editor_rect.size());
-                editor.direct_editor_ui(ui, editors, viewport_state.zoom, &mut viewport)
+                editor_scope(ui, read_only, |ui| {
+                    editor.direct_editor_ui(ui, editors, viewport_state.zoom, &mut viewport)
+                })
             })
             .inner;
         if action.is_none() {
@@ -658,7 +750,7 @@ pub fn direct_editor_tab_ui(
             && handle_direct_editor_background_input(
                 ui.ctx(),
                 viewport_rect,
-                content_rect,
+                (!read_only).then_some(content_rect),
                 &mut viewport_state,
                 max_zoom,
             )
@@ -734,7 +826,9 @@ pub fn direct_editor_tab_ui(
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_min_size(content_size);
-                let next_action = editor.direct_editor_ui(ui, editors, 1.0, &mut viewport);
+                let next_action = editor_scope(ui, read_only, |ui| {
+                    editor.direct_editor_ui(ui, editors, 1.0, &mut viewport)
+                });
                 if action.is_none() {
                     action = next_action;
                 }
@@ -744,17 +838,20 @@ pub fn direct_editor_tab_ui(
     action
 }
 
+/// Pans and zooms the tab viewport. `content_rect` is the area the editor
+/// steers itself, which is left out; a read-only editor steers nothing and
+/// passes `None`.
 fn handle_direct_editor_background_input(
     context: &egui::Context,
     viewport_rect: egui::Rect,
-    content_rect: egui::Rect,
+    content_rect: Option<egui::Rect>,
     viewport: &mut DirectEditorTabViewport,
     max_zoom: f32,
 ) -> bool {
-    let Some(pointer) = context
-        .pointer_hover_pos()
-        .filter(|pointer| viewport_rect.contains(*pointer) && !content_rect.contains(*pointer))
-    else {
+    let Some(pointer) = context.pointer_hover_pos().filter(|pointer| {
+        viewport_rect.contains(*pointer)
+            && !content_rect.is_some_and(|content| content.contains(*pointer))
+    }) else {
         return false;
     };
     let (scroll, zoom_delta, command, panning, delta) = context.input(|input| {
