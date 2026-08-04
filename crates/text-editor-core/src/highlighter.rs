@@ -1,4 +1,7 @@
-use block_client::{blocks::text::TextDocument, BlockHandle};
+use block_client::{
+    blocks::text::{TextDocument, TextLanguage},
+    BlockHandle,
+};
 use tree_sitter::{InputEdit, Parser, Point, Tree};
 use tree_sitter_md::{MarkdownParser, MarkdownTree};
 
@@ -16,6 +19,17 @@ pub enum Language {
 }
 
 impl Language {
+    /// The highlighter for a document's stored language, or `None` when that
+    /// language is not highlighted at all.
+    pub const fn for_document(language: TextLanguage) -> Option<Self> {
+        match language {
+            TextLanguage::PlainText => None,
+            TextLanguage::Markdown => Some(Self::Markdown),
+            TextLanguage::Rust => Some(Self::Rust),
+            TextLanguage::Zig => Some(Self::Zig),
+        }
+    }
+
     fn chain_start_offset(self, kind: &str, source: &[u8]) -> usize {
         match self {
             Self::Markdown => 0,

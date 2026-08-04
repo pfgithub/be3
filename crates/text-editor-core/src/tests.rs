@@ -1,4 +1,7 @@
-use block_client::{blocks::text::TextDocument, BlockClient};
+use block_client::{
+    blocks::text::{TextDocument, TextLanguage},
+    BlockClient,
+};
 use uuid::Uuid;
 
 use super::*;
@@ -48,14 +51,14 @@ struct EditorTester {
 
 impl EditorTester {
     fn new(initial: impl AsRef<[u8]>) -> Self {
-        Self::with_language(initial, Language::Zig)
+        Self::with_language(initial, TextLanguage::Zig)
     }
 
-    fn with_language(initial: impl AsRef<[u8]>, language: Language) -> Self {
+    fn with_language(initial: impl AsRef<[u8]>, language: TextLanguage) -> Self {
         let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
         let block = client.create_block(TextDocument::from_bytes(initial));
         let mut editor = Core::new(block);
-        editor.set_syntax_highlighter(Some(language));
+        editor.set_language(language);
         Self {
             _client: client,
             editor,

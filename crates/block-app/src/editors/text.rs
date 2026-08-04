@@ -11,8 +11,9 @@ use std::{
 
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
-    block_url, blocks::text::TextDocument, parse_block_urls, BlockClient, BlockHandle,
-    ReferenceList,
+    block_url,
+    blocks::text::{TextDocument, TextLanguage},
+    parse_block_urls, BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{
     self, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton, Pos2, Rect, Sense,
@@ -25,8 +26,8 @@ use egui_material_icons::icons::{
 };
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
-    EditorCommand, LRDirection, Language, MarkdownCommand, MoveMode, SynHlColorScope,
-    SyntaxHighlight, SyntaxNodeDirection, UDDirection, VerticalMoveMode,
+    EditorCommand, LRDirection, MarkdownCommand, MoveMode, SynHlColorScope, SyntaxHighlight,
+    SyntaxNodeDirection, UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
@@ -63,34 +64,6 @@ struct MarkdownCheckbox {
     checked: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HighlightLanguage {
-    Markdown,
-    PlainText,
-    Rust,
-    Zig,
-}
-
-impl HighlightLanguage {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Markdown => "Markdown",
-            Self::PlainText => "Plain text",
-            Self::Rust => "Rust",
-            Self::Zig => "Zig",
-        }
-    }
-
-    const fn core_language(self) -> Option<Language> {
-        match self {
-            Self::Markdown => Some(Language::Markdown),
-            Self::PlainText => None,
-            Self::Rust => Some(Language::Rust),
-            Self::Zig => Some(Language::Zig),
-        }
-    }
-}
-
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
         block_type: TextDocument::TYPE_ID,
@@ -118,7 +91,6 @@ struct TextEditor {
     core: Core,
     renderer: Result<TextRenderer, String>,
     selecting: bool,
-    highlight_language: HighlightLanguage,
     click_count: u8,
     last_click: Option<(f64, Pos2)>,
     toolbar_profile: Duration,
@@ -138,7 +110,7 @@ struct FocusedEmbed {
 
 struct CachedLayout {
     bytes: Vec<u8>,
-    language: HighlightLanguage,
+    language: TextLanguage,
     embeds: Vec<ResolvedEmbed>,
     layout: Arc<DocumentLayout>,
 }
@@ -146,7 +118,6 @@ struct CachedLayout {
 impl TextEditor {
     fn new(block: BlockHandle<TextDocument>, client: &BlockClient) -> Self {
         let mut core = Core::new(block.clone());
-        core.set_syntax_highlighter(Some(Language::Markdown));
         core.execute_command(EditorCommand::SetCursorPosition(core.position(0)));
         let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
         Self {
@@ -155,7 +126,6 @@ impl TextEditor {
             core,
             renderer: TextRenderer::new(),
             selecting: false,
-            highlight_language: HighlightLanguage::Markdown,
             click_count: 0,
             last_click: None,
             toolbar_profile: Duration::default(),
@@ -169,37 +139,21 @@ impl TextEditor {
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
-        let previous = self.highlight_language;
+        let previous = self.core.language();
+        let mut language = previous;
         ui.horizontal(|ui| {
             ui.label("Language:");
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
-                .selected_text(self.highlight_language.label())
+                .selected_text(previous.label())
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut self.highlight_language,
-                        HighlightLanguage::Markdown,
-                        HighlightLanguage::Markdown.label(),
-                    );
-                    ui.selectable_value(
-                        &mut self.highlight_language,
-                        HighlightLanguage::PlainText,
-                        HighlightLanguage::PlainText.label(),
-                    );
-                    ui.selectable_value(
-                        &mut self.highlight_language,
-                        HighlightLanguage::Rust,
-                        HighlightLanguage::Rust.label(),
-                    );
-                    ui.selectable_value(
-                        &mut self.highlight_language,
-                        HighlightLanguage::Zig,
-                        HighlightLanguage::Zig.label(),
-                    );
+                    for choice in TextLanguage::ALL {
+                        ui.selectable_value(&mut language, choice, choice.label());
+                    }
                 });
             if ui.button("Performance").clicked() {
                 performance::open();
             }
-            if self.highlight_language == HighlightLanguage::Markdown {
+            if previous == TextLanguage::Markdown {
                 ui.separator();
                 if ui.button(ICON_FORMAT_BOLD).on_hover_text("Bold").clicked() {
                     self.core
@@ -277,9 +231,8 @@ impl TextEditor {
                 });
             });
         });
-        if self.highlight_language != previous {
-            self.core
-                .set_syntax_highlighter(self.highlight_language.core_language());
+        if language != previous {
+            self.core.set_language(language);
         }
     }
 
@@ -288,7 +241,7 @@ impl TextEditor {
             self.workspace_id,
             id,
             source_name,
-            self.highlight_language == HighlightLanguage::Markdown,
+            self.core.language() == TextLanguage::Markdown,
         );
         self.core
             .execute_command(EditorCommand::InsertText(directive.as_bytes()));
@@ -335,7 +288,7 @@ impl TextEditor {
         let parsed = parse_embeds(
             bytes,
             self.workspace_id,
-            self.highlight_language == HighlightLanguage::Markdown,
+            self.core.language() == TextLanguage::Markdown,
         );
         let references = self.dependencies.read();
         let referenced = references
@@ -1191,7 +1144,8 @@ impl BlockEditor for TextEditor {
         };
         profile.document = document_start.elapsed();
         profile.document_bytes = bytes.len();
-        let checkboxes = if self.highlight_language == HighlightLanguage::Markdown {
+        let language = self.core.language();
+        let checkboxes = if language == TextLanguage::Markdown {
             parse_markdown_checkboxes(&bytes)
         } else {
             Vec::new()
@@ -1202,9 +1156,7 @@ impl BlockEditor for TextEditor {
         let layout_start = Instant::now();
         let embeds = self.resolve_embeds(&bytes, editors);
         let layout = if let Some(cached) = self.layout_cache.as_ref().filter(|cached| {
-            cached.language == self.highlight_language
-                && cached.bytes == bytes
-                && cached.embeds == embeds
+            cached.language == language && cached.bytes == bytes && cached.embeds == embeds
         }) {
             Arc::clone(&cached.layout)
         } else {
@@ -1226,7 +1178,7 @@ impl BlockEditor for TextEditor {
             };
             self.layout_cache = Some(CachedLayout {
                 bytes,
-                language: self.highlight_language,
+                language,
                 embeds,
                 layout: Arc::clone(&layout),
             });

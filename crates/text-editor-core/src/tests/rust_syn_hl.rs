@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn rust_syn_hl() {
-    let mut tester = EditorTester::with_language(b"const MAX: usize = 10;", Language::Rust);
+    let mut tester = EditorTester::with_language(b"const MAX: usize = 10;", TextLanguage::Rust);
     assert_eq!(
         rendered_highlight(&mut tester, 0),
         "<keyword_storage>const <variable_constant>MAX<punctuation_important>: <keyword_primitive_type>usize <keyword>= <literal>10<punctuation>;"

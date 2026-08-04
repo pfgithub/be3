@@ -1,6 +1,9 @@
 use block::Block;
 use block_client::{
-    blocks::{gui_builder::GuiBuilder, text::TextDocument},
+    blocks::{
+        gui_builder::GuiBuilder,
+        text::{TextDocument, TextLanguage},
+    },
     BlockClient, BlockHandle, DynamicArtifactDescriptor,
 };
 use uuid::Uuid;
@@ -15,7 +18,7 @@ pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
 }
 
 pub(super) fn generate(builder: &GuiBuilder) -> TextDocument {
-    TextDocument::from_bytes(builder.generate_code())
+    TextDocument::from_bytes(builder.generate_code()).with_language(TextLanguage::Rust)
 }
 
 pub(super) fn artifact_name(source_name: &str) -> String {

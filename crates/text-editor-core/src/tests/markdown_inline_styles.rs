@@ -4,7 +4,7 @@ use super::*;
 fn markdown_inline_styles() {
     let mut tester = EditorTester::with_language(
         b"Hello **bold** *italic* ***both*** ~~gone~~ `code` [link](target)",
-        Language::Markdown,
+        TextLanguage::Markdown,
     );
     let highlight = tester.editor.highlight();
 

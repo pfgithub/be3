@@ -14,16 +14,47 @@ use crate::parse_block_urls;
 
 const TEXT_BURST_DELAY: Duration = Duration::from_millis(750);
 
+/// The language a text document is highlighted with. Stored on the document so
+/// that every editor of a block agrees on how it is displayed.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextLanguage {
+    #[default]
+    Markdown,
+    PlainText,
+    Rust,
+    Zig,
+}
+
+impl TextLanguage {
+    pub const ALL: [Self; 4] = [Self::Markdown, Self::PlainText, Self::Rust, Self::Zig];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Markdown => "Markdown",
+            Self::PlainText => "Plain text",
+            Self::Rust => "Rust",
+            Self::Zig => "Zig",
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TextDocument {
     sequence: eips::Eips<Uuid>,
     bytes: Vec<u8>,
+    language: TextLanguage,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TextOperation {
-    change: RemoteChange<Uuid>,
-    item: Option<u8>,
+pub enum TextOperation {
+    Edit {
+        change: RemoteChange<Uuid>,
+        item: Option<u8>,
+    },
+    SetLanguage {
+        language: TextLanguage,
+    },
 }
 
 pub struct TextHistory;
@@ -55,6 +86,7 @@ impl TextDocument {
         Self {
             sequence: eips::Eips::new(),
             bytes: Vec::new(),
+            language: TextLanguage::default(),
         }
     }
 
@@ -85,6 +117,19 @@ impl TextDocument {
         String::from_utf8_lossy(&self.bytes)
     }
 
+    pub fn with_language(mut self, language: TextLanguage) -> Self {
+        self.language = language;
+        self
+    }
+
+    pub const fn language(&self) -> TextLanguage {
+        self.language
+    }
+
+    pub const fn set_language_operation(language: TextLanguage) -> TextOperation {
+        TextOperation::SetLanguage { language }
+    }
+
     pub fn insert_operation(
         &self,
         index: usize,
@@ -99,14 +144,14 @@ impl TextDocument {
         id: Uuid,
         byte: u8,
     ) -> Result<TextOperation, eips::error::IndexError> {
-        Ok(TextOperation {
+        Ok(TextOperation::Edit {
             change: self.sequence.insert(index, id)?,
             item: Some(byte),
         })
     }
 
     pub fn remove_operation(&self, index: usize) -> Result<TextOperation, eips::error::IndexError> {
-        Ok(TextOperation {
+        Ok(TextOperation::Edit {
             change: self.sequence.remove(index)?,
             item: None,
         })
@@ -146,18 +191,23 @@ impl Block for TextDocument {
     const CRDT: bool = true;
 
     fn apply_operation(block: &mut Self, operation: &Self::Operation) {
+        let (change, item) = match operation {
+            TextOperation::Edit { change, item } => (*change, *item),
+            TextOperation::SetLanguage { language } => {
+                block.language = *language;
+                return;
+            }
+        };
         let local = block
             .sequence
-            .apply_change(operation.change)
+            .apply_change(change)
             .unwrap_or_else(|error| panic!("invalid eips text operation: {error}"));
         match local {
             LocalChange::AlreadyApplied | LocalChange::None => {}
             LocalChange::Insert(index) => {
                 block.bytes.insert(
                     index,
-                    operation
-                        .item
-                        .expect("eips insertion operation omitted its byte"),
+                    item.expect("eips insertion operation omitted its byte"),
                 );
             }
             LocalChange::Remove(index) => {

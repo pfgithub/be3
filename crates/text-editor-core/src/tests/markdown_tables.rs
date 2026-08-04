@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn markdown_tables() {
     let source = b"before\n| Left | Center | Right |\n| :--- | :----: | ----: |\nno pipe | *middle* | escaped \\| pipe\n\nafter\n";
-    let mut tester = EditorTester::with_language(source, Language::Markdown);
+    let mut tester = EditorTester::with_language(source, TextLanguage::Markdown);
     let highlight = tester.editor.highlight();
     let tables = highlight.markdown_tables();
 

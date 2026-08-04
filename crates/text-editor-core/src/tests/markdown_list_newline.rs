@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn markdown_list_newline() {
-    let mut tester = EditorTester::with_language(b"- first", Language::Markdown);
+    let mut tester = EditorTester::with_language(b"- first", TextLanguage::Markdown);
     tester.execute(EditorCommand::SetCursorPosition(Position::END));
     tester.execute(EditorCommand::Newline);
     tester.expect_content(b"- first\n- |");

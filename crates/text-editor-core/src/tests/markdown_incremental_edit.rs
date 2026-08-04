@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn markdown_incremental_edit() {
-    let mut tester = EditorTester::with_language(b"plain", Language::Markdown);
+    let mut tester = EditorTester::with_language(b"plain", TextLanguage::Markdown);
     assert!(!tester.editor.highlight().style_at(0).bold);
 
     tester.execute(EditorCommand::SelectAll);

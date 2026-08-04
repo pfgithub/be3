@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn markdown_checkbox_toggle() {
-    let mut tester = EditorTester::with_language(b"- [ ] task", Language::Markdown);
+    let mut tester = EditorTester::with_language(b"- [ ] task", TextLanguage::Markdown);
     tester.execute(EditorCommand::Markdown(MarkdownCommand::ToggleCheckbox(
         tester.pos(0),
     )));

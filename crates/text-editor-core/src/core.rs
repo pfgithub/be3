@@ -1,7 +1,8 @@
 use std::{cmp::Ordering, mem::size_of};
 
 use block_client::{
-    blocks::text::TextDocument, parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_BYTES,
+    blocks::text::{TextDocument, TextLanguage},
+    parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_BYTES,
 };
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 use unicode_segmentation::UnicodeSegmentation;
@@ -308,6 +309,9 @@ pub struct Core {
     clipboard_cache: Option<ClipboardCache>,
     last_undo_classification: UndoClassification,
     highlighter: Option<Highlighter>,
+    /// The document language `highlighter` was built for, so that a language
+    /// change made here or by another editor rebuilds it.
+    highlighter_language: Option<TextLanguage>,
 }
 
 impl Core {
@@ -319,6 +323,7 @@ impl Core {
             clipboard_cache: None,
             last_undo_classification: UndoClassification::AlwaysSplit,
             highlighter: None,
+            highlighter_language: None,
         }
     }
 
@@ -366,12 +371,35 @@ impl Core {
         self.cursor_positions.push(CursorPosition::from(selection));
     }
 
-    pub fn set_syntax_highlighter(&mut self, language: Option<Language>) {
-        self.highlighter =
-            language.map(|language| Highlighter::new(self.document.clone(), language));
+    pub fn language(&self) -> TextLanguage {
+        self.document
+            .read()
+            .map_or_else(TextLanguage::default, |document| document.language())
+    }
+
+    pub fn set_language(&mut self, language: TextLanguage) {
+        if self.language() == language {
+            return;
+        }
+        self.document
+            .operate(TextDocument::set_language_operation(language));
+        self.sync_highlighter();
+    }
+
+    /// Rebuilds the highlighter when the document's language differs from the
+    /// one it was built for.
+    fn sync_highlighter(&mut self) {
+        let language = self.language();
+        if self.highlighter_language == Some(language) {
+            return;
+        }
+        self.highlighter_language = Some(language);
+        self.highlighter = Language::for_document(language)
+            .map(|language| Highlighter::new(self.document.clone(), language));
     }
 
     pub fn highlight(&mut self) -> SyntaxHighlight {
+        self.sync_highlighter();
         self.highlighter
             .as_mut()
             .map(Highlighter::highlight)
@@ -1117,6 +1145,7 @@ impl Core {
     }
 
     fn select_syntax_node(&mut self, direction: SyntaxNodeDirection) {
+        self.sync_highlighter();
         let Some(document) = self.document.read() else {
             return;
         };
@@ -1196,6 +1225,7 @@ impl Core {
     }
 
     fn drag(&mut self, position: Position) {
+        self.sync_highlighter();
         if self.cursor_positions.is_empty() {
             self.cursor_positions.push(CursorPosition::at(position));
         }

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn markdown_block_styles() {
     let source = b"# Heading\n> quote\n- [x] task\n\n| Head |\n| --- |\n| cell |\n\n```zig\nconst x = 1;\n```\n";
-    let mut tester = EditorTester::with_language(source, Language::Markdown);
+    let mut tester = EditorTester::with_language(source, TextLanguage::Markdown);
     let highlight = tester.editor.highlight();
 
     assert_eq!(highlight.style_at(0).color, SynHlColorScope::MarkdownSymbol);
