@@ -13,7 +13,6 @@ impl InfiniteCanvasEditor {
             selection: HashSet::new(),
             gesture: None,
             picker: BlockPicker::default(),
-            armed_block: None,
             pending_block_center: None,
             context_menu_position: None,
             context_menu_for_selection: false,

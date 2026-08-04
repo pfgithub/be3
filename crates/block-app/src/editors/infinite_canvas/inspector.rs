@@ -714,7 +714,6 @@ impl InfiniteCanvasEditor {
                     .clicked()
                 {
                     self.tool = tool;
-                    self.armed_block = None;
                 }
             }
             ui.menu_button(ICON_DATA_OBJECT, |ui| {
@@ -873,17 +872,6 @@ impl InfiniteCanvasEditor {
             })
             .response
             .on_hover_text("Canvas help and shortcuts");
-
-            if let Some(block) = &self.armed_block {
-                ui.weak(format!(
-                    "Place: {}",
-                    if block.name.is_empty() {
-                        block.id.to_string()
-                    } else {
-                        block.name.clone()
-                    }
-                ));
-            }
         });
         ui.separator();
     }

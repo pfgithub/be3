@@ -79,12 +79,6 @@ impl BlockPicker {
         }
     }
 
-    pub fn open(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
-        self.open = true;
-        self.search.clear();
-        self.excluded = excluded.into_iter().collect();
-    }
-
     pub fn close(&mut self) {
         self.open = false;
     }

@@ -20,7 +20,7 @@ use block_client::{
             CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
         },
     },
-    BlockClient, BlockHandle, CachedBlock, ReferenceList,
+    BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::{
@@ -84,7 +84,6 @@ enum Tool {
     Rectangle,
     Text,
     Pen,
-    Block,
 }
 
 #[derive(Clone, Copy)]
@@ -292,7 +291,6 @@ pub(super) struct InfiniteCanvasEditor {
     selection: HashSet<Uuid>,
     gesture: Option<Gesture>,
     picker: BlockPicker,
-    armed_block: Option<CachedBlock>,
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
     context_menu_for_selection: bool,

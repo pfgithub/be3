@@ -10,19 +10,13 @@ impl InfiniteCanvasEditor {
             self.picker
                 .handle(context, editors, BlockParent::Uuid(self.block.id()))
         {
+            let center = self
+                .pending_block_center
+                .take()
+                .unwrap_or(self.viewport_center);
+            self.add_direct_editor(block.id, center);
             editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
-            if let Some(center) = self.pending_block_center.take() {
-                self.add_direct_editor(block.id, center);
-                self.tool = Tool::Select;
-            } else {
-                self.armed_block = Some(CachedBlock {
-                    id: block.id,
-                    block_type: block.block_type,
-                    author: block.author,
-                    name: block.name,
-                });
-                self.tool = Tool::Block;
-            }
+            self.tool = Tool::Select;
         }
     }
 
@@ -188,7 +182,6 @@ impl InfiniteCanvasEditor {
         let cursor = match self.tool {
             Tool::Line | Tool::Rectangle | Tool::Pen => egui::CursorIcon::Crosshair,
             Tool::Text => egui::CursorIcon::Text,
-            Tool::Block => egui::CursorIcon::Copy,
             Tool::Select => {
                 let frame = self.selected_frame(entities);
                 let resize = self.selection_resize(entities, editors);
@@ -240,7 +233,6 @@ impl InfiniteCanvasEditor {
             self.focused_editor = None;
         } else if escape_pressed {
             self.gesture = None;
-            self.armed_block = None;
             self.picker.close();
             self.tool = Tool::Select;
         }
@@ -260,7 +252,6 @@ impl InfiniteCanvasEditor {
                     if response.ctx.input(|input| input.key_pressed(key)) {
                         self.tool = tool;
                         self.gesture = None;
-                        self.armed_block = None;
                     }
                 }
             }
@@ -551,7 +542,6 @@ impl InfiniteCanvasEditor {
                     }
                     if ui.button("Freehand").clicked() {
                         self.tool = Tool::Pen;
-                        self.armed_block = None;
                         ui.close();
                     }
                     if ui.button("Image…").clicked() {
@@ -721,15 +711,6 @@ impl InfiniteCanvasEditor {
                     self.gesture = Some(Gesture::Pen {
                         points: vec![world],
                     });
-                }
-                Tool::Block => {
-                    if let Some(block) = self.armed_block.take() {
-                        self.add_direct_editor(block.id, world);
-                        editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
-                        self.tool = Tool::Select;
-                    } else {
-                        self.picker.open([self.block.id()]);
-                    }
                 }
             }
         }
@@ -1123,7 +1104,6 @@ impl InfiniteCanvasEditor {
             Tool::Rectangle => Some(ICON_RECTANGLE),
             Tool::Text => Some(ICON_TEXT_FIELDS),
             Tool::Pen => Some(ICON_DRAW),
-            Tool::Block => Some(ICON_DATA_OBJECT),
         };
         let pointer = painter.ctx().pointer_hover_pos();
         let panning = painter
