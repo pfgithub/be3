@@ -13,10 +13,10 @@ fn gui_builder_export_generates_the_designed_code() {
         },
     );
 
-    let generated = generate(&builder);
+    let generated = generate_initial(&builder);
     let code = generated.text_lossy();
 
-    assert_eq!(code, builder.generate_code());
+    assert_eq!(code, builder.generate_code(None));
     assert!(
         code.contains("if ui.button(\"Submit\").clicked() {"),
         "{code}"

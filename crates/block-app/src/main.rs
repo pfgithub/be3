@@ -21,12 +21,13 @@ use block::{
     MAX_NAME_BYTES,
 };
 use block_client::{
-    blocks::workspace_index::BlockEntry, BlockClient, ManagementClient, ReferenceList,
+    blocks::workspace_index::BlockEntry, BlockClient, DynamicArtifactDescriptor, ManagementClient,
+    ReferenceList,
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
-    direct_editor_tab_ui, BlockEditor, DynamicArtifactRegeneration, EditorAccess, EditorAction,
-    EditorRegistry, SidebarDragPayload, SidebarDragSource,
+    direct_editor_tab_ui, BlockEditor, DynamicArtifactRegeneration, DynamicArtifactSupport,
+    EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
@@ -34,7 +35,8 @@ use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK,
     ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_CLOUD, ICON_COMPUTER, ICON_GROUP_ADD,
     ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ,
-    ICON_REDO, ICON_REFRESH, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO, ICON_WORKSPACES,
+    ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO,
+    ICON_WORKSPACES,
 };
 use share::ShareDialog;
 use uuid::Uuid;
@@ -162,6 +164,8 @@ struct BlockApp {
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
     dynamic_artifact_regenerations: HashMap<Uuid, Box<dyn DynamicArtifactRegeneration>>,
     dynamic_artifact_errors: HashMap<Uuid, String>,
+    /// Settings being edited in an artifact bar, until they are applied.
+    dynamic_artifact_settings: HashMap<Uuid, Vec<u8>>,
     dock_state: DockState<DockTab>,
     files_compact: bool,
     active_tab: Option<Uuid>,
@@ -483,6 +487,7 @@ impl BlockApp {
             editors: HashMap::new(),
             dynamic_artifact_regenerations: HashMap::new(),
             dynamic_artifact_errors: HashMap::new(),
+            dynamic_artifact_settings: HashMap::new(),
             dock_state: default_dock_state(),
             files_compact: false,
             active_tab: None,
@@ -847,6 +852,7 @@ impl BlockApp {
         self.editors.clear();
         self.dynamic_artifact_regenerations.clear();
         self.dynamic_artifact_errors.clear();
+        self.dynamic_artifact_settings.clear();
         self.dock_state = default_dock_state();
         self.active_tab = None;
         self.share = ShareDialog::default();
@@ -1156,6 +1162,7 @@ impl BlockApp {
         self.editors.clear();
         self.dynamic_artifact_regenerations.clear();
         self.dynamic_artifact_errors.clear();
+        self.dynamic_artifact_settings.clear();
         self.dock_state = default_dock_state();
         self.files_compact = false;
         self.active_tab = None;
@@ -1525,6 +1532,7 @@ impl BlockApp {
         self.backrefs.remove(&id);
         self.dynamic_artifact_regenerations.remove(&id);
         self.dynamic_artifact_errors.remove(&id);
+        self.dynamic_artifact_settings.remove(&id);
         if let Some(editor) = self.editors.get_mut(&id) {
             editor.tab_closed();
         }
@@ -2075,9 +2083,11 @@ impl BlockApp {
             return (None, None);
         };
         let denied = self.client.access_denied(active);
-        if !denied {
-            self.show_dynamic_artifact_bar(ui, active, editor.block_type());
-        }
+        let artifact_navigation = if denied {
+            None
+        } else {
+            self.show_dynamic_artifact_bar(ui, active, editor.block_type())
+        };
         let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
         let redo_shortcut = egui::KeyboardShortcut::new(
             egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -2096,7 +2106,7 @@ impl BlockApp {
         let block_type = editor.block_type();
         let current_name = editor.name();
         let relationships = editor.relationships();
-        let mut navigation = None;
+        let mut navigation = artifact_navigation.map(TabNavigation::Open);
         let mut share = false;
         egui::Sides::new().shrink_left().show(
             ui,
@@ -2236,10 +2246,15 @@ impl BlockApp {
         navigate
     }
 
-    fn show_dynamic_artifact_bar(&mut self, ui: &mut egui::Ui, id: Uuid, block_type: Uuid) {
-        let Some(descriptor) = self.client.dynamic_artifact(id) else {
-            return;
-        };
+    /// The bar above an artifact editor: where the block came from, what the
+    /// generator is currently set to produce, and how to change or rerun it.
+    fn show_dynamic_artifact_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: Uuid,
+        block_type: Uuid,
+    ) -> Option<BlockTabHistoryItem> {
+        let descriptor = self.client.dynamic_artifact(id)?;
 
         let completed = self
             .dynamic_artifact_regenerations
@@ -2257,46 +2272,168 @@ impl BlockApp {
             }
         }
 
+        let support = self.registry.dynamic_artifact(descriptor.source_type);
+        let running = self.dynamic_artifact_regenerations.contains_key(&id);
+        // The draft is held outside the UI so the bar only reads from `self`.
+        let mut draft = self.dynamic_artifact_settings.remove(&id);
+        let mut navigate = None;
+        let mut regenerate = false;
+        let mut apply = None;
         egui::Frame::new()
             .fill(ui.visuals().faint_bg_color)
             .inner_margin(egui::Margin::symmetric(8, 5))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.strong("Dynamic artifact");
-                    ui.weak("Generated from another block.");
-                    let running = self.dynamic_artifact_regenerations.contains_key(&id);
+                    match &support {
+                        Ok(support) => {
+                            navigate = self.show_dynamic_artifact_source(ui, &descriptor, *support);
+                            ui.weak(format!("· {}", (support.summary)(&descriptor.data)));
+                            if let Some(settings) = self.show_dynamic_artifact_settings(
+                                ui,
+                                &descriptor,
+                                *support,
+                                &mut draft,
+                            ) {
+                                apply = Some(settings);
+                            }
+                        }
+                        Err(error) => {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                    }
                     if running {
                         ui.spinner();
                     }
-                    if ui
-                        .add_enabled(!running, egui::Button::new(ICON_REFRESH))
+                    regenerate = ui
+                        .add_enabled(!running && support.is_ok(), egui::Button::new(ICON_REFRESH))
                         .on_hover_text("Regenerate")
-                        .clicked()
-                    {
-                        self.dynamic_artifact_errors.remove(&id);
-                        match self.registry.regenerate_dynamic_artifact(
-                            descriptor.source_type,
-                            &self.client,
-                            id,
-                            block_type,
-                            &descriptor.data,
-                        ) {
-                            Ok(regeneration) => {
-                                self.dynamic_artifact_regenerations.insert(id, regeneration);
-                            }
-                            Err(error) => {
-                                self.dynamic_artifact_errors.insert(id, error);
-                            }
-                        }
-                    }
+                        .clicked();
                 });
                 if let Some(error) = self.dynamic_artifact_errors.get(&id) {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 }
             });
         ui.separator();
+        if let Some(data) = apply {
+            self.client.set_dynamic_artifact(
+                id,
+                DynamicArtifactDescriptor {
+                    source_type: descriptor.source_type,
+                    data: data.clone(),
+                },
+            );
+            self.regenerate_dynamic_artifact(id, block_type, descriptor.source_type, &data);
+            draft = None;
+        } else if regenerate {
+            self.regenerate_dynamic_artifact(
+                id,
+                block_type,
+                descriptor.source_type,
+                &descriptor.data,
+            );
+        }
+        if let Some(draft) = draft {
+            self.dynamic_artifact_settings.insert(id, draft);
+        }
         if self.dynamic_artifact_regenerations.contains_key(&id) {
             ui.ctx().request_repaint();
+        }
+        navigate
+    }
+
+    /// A link to the block the artifact was generated from.
+    fn show_dynamic_artifact_source(
+        &self,
+        ui: &mut egui::Ui,
+        descriptor: &DynamicArtifactDescriptor,
+        support: DynamicArtifactSupport,
+    ) -> Option<BlockTabHistoryItem> {
+        let source = match (support.source)(&descriptor.data) {
+            Ok(source) => source,
+            Err(error) => {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+                return None;
+            }
+        };
+        ui.weak("Generated from");
+        let name = self
+            .client
+            .cached_block(source)
+            .map(|block| block.name)
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| {
+                self.registry
+                    .display_name(descriptor.source_type)
+                    .unwrap_or("source block")
+                    .to_owned()
+            });
+        ui.button(self.registry.icon_label(descriptor.source_type, &name))
+            .on_hover_text(format!("Open the source block\n{source}"))
+            .clicked()
+            .then_some(BlockTabHistoryItem {
+                id: source,
+                block_type: descriptor.source_type,
+            })
+    }
+
+    /// The settings menu. Edits go to `draft` until they are applied, and
+    /// closing the menu throws them away.
+    fn show_dynamic_artifact_settings(
+        &self,
+        ui: &mut egui::Ui,
+        descriptor: &DynamicArtifactDescriptor,
+        support: DynamicArtifactSupport,
+        draft: &mut Option<Vec<u8>>,
+    ) -> Option<Vec<u8>> {
+        let mut applied = None;
+        let menu = ui.menu_button(ICON_SETTINGS, |ui| {
+            ui.set_min_width(240.0);
+            let data = draft.get_or_insert_with(|| descriptor.data.clone());
+            (support.settings_ui)(ui, data);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(*data != descriptor.data, egui::Button::new("Apply"))
+                    .on_disabled_hover_text("The settings are unchanged")
+                    .clicked()
+                {
+                    applied = Some(data.clone());
+                    ui.close();
+                }
+                if ui.button("Cancel").clicked() {
+                    ui.close();
+                }
+            });
+        });
+        menu.response.on_hover_text("Settings");
+        if menu.inner.is_none() {
+            *draft = None;
+        }
+        applied
+    }
+
+    fn regenerate_dynamic_artifact(
+        &mut self,
+        id: Uuid,
+        block_type: Uuid,
+        source_type: Uuid,
+        data: &[u8],
+    ) {
+        self.dynamic_artifact_errors.remove(&id);
+        match self.registry.regenerate_dynamic_artifact(
+            source_type,
+            &self.client,
+            id,
+            block_type,
+            data,
+        ) {
+            Ok(regeneration) => {
+                self.dynamic_artifact_regenerations.insert(id, regeneration);
+            }
+            Err(error) => {
+                self.dynamic_artifact_errors.insert(id, error);
+            }
         }
     }
 

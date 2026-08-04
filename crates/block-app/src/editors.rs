@@ -838,6 +838,19 @@ pub trait DynamicArtifactRegeneration {
     fn poll(&mut self) -> Option<Result<(), String>>;
 }
 
+/// What a source block type can tell the app about the artifacts it produces.
+/// The descriptor payload is opaque to everything but these functions.
+#[derive(Clone, Copy)]
+pub(super) struct DynamicArtifactSupport {
+    /// The block the artifact was generated from.
+    pub source: fn(&[u8]) -> Result<Uuid, String>,
+    /// A short description of what the current settings produce.
+    pub summary: fn(&[u8]) -> String,
+    /// Edits the payload in place; `true` when the settings changed.
+    pub settings_ui: fn(&mut egui::Ui, &mut Vec<u8>) -> bool,
+    pub regenerate: RegenerateDynamicArtifact,
+}
+
 struct EditorRegistration {
     block_type: Uuid,
     display_name: &'static str,
@@ -846,25 +859,7 @@ struct EditorRegistration {
     open: OpenEditor,
     can_add_child: bool,
     can_delete_child: bool,
-    regenerate_dynamic_artifact: Option<RegenerateDynamicArtifact>,
-}
-
-impl EditorRegistration {
-    fn regenerate_dynamic_artifact(
-        &self,
-        client: &BlockClient,
-        target_id: Uuid,
-        target_type: Uuid,
-        data: &[u8],
-    ) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
-        let regenerate = self.regenerate_dynamic_artifact.ok_or_else(|| {
-            format!(
-                "{} blocks do not support dynamic artifact regeneration",
-                self.display_name
-            )
-        })?;
-        regenerate(client, target_id, target_type, data)
-    }
+    dynamic_artifact: Option<DynamicArtifactSupport>,
 }
 
 pub struct EditorRegistry {
@@ -938,6 +933,23 @@ impl EditorRegistry {
             .is_some_and(|registration| registration.can_delete_child)
     }
 
+    /// The functions that describe and rebuild artifacts made by `source_type`.
+    pub(super) fn dynamic_artifact(
+        &self,
+        source_type: Uuid,
+    ) -> Result<DynamicArtifactSupport, String> {
+        let registration = self
+            .registrations
+            .get(&source_type)
+            .ok_or_else(|| format!("unsupported dynamic artifact source type {source_type}"))?;
+        registration.dynamic_artifact.ok_or_else(|| {
+            format!(
+                "{} blocks do not generate dynamic artifacts",
+                registration.display_name
+            )
+        })
+    }
+
     pub fn regenerate_dynamic_artifact(
         &self,
         source_type: Uuid,
@@ -946,11 +958,8 @@ impl EditorRegistry {
         target_type: Uuid,
         data: &[u8],
     ) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
-        let registration = self
-            .registrations
-            .get(&source_type)
-            .ok_or_else(|| format!("unsupported dynamic artifact source type {source_type}"))?;
-        registration.regenerate_dynamic_artifact(client, target_id, target_type, data)
+        let support = self.dynamic_artifact(source_type)?;
+        (support.regenerate)(client, target_id, target_type, data)
     }
 
     pub fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<Box<dyn BlockEditor>> {

@@ -232,9 +232,11 @@ impl GuiBuilder {
         }
     }
 
-    /// Rust source for an `egui` window matching the current design.
-    pub fn generate_code(&self) -> String {
-        codegen::generate(self)
+    /// Rust source for an `egui` window matching the current design. The
+    /// struct is named after the design title unless `struct_name` overrides
+    /// it.
+    pub fn generate_code(&self, struct_name: Option<&str>) -> String {
+        codegen::generate(self, struct_name)
     }
 
     /// A widget can only be inserted when every id in its subtree is new and

@@ -8,6 +8,7 @@ use crate::blocks::gui_builder::{
 mod generated_code_binds_stateful_widgets_to_struct_fields;
 mod generated_code_nests_container_children;
 mod repeated_labels_get_unique_field_names;
+mod struct_name_override_replaces_the_title;
 
 fn insert(builder: &mut GuiBuilder, parent: Option<Uuid>, index: usize, widget: GuiWidget) -> Uuid {
     let id = widget.id;

@@ -34,7 +34,7 @@ pub(super) fn registration() -> EditorRegistration {
         },
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 
@@ -150,7 +150,22 @@ if let Some(result) = self.picker.handle(
 
 `BlockPicker::handle` creates and registers new editors, runs image import, shows errors, and displays the existing-block picker. It sets the requested parent only for newly created blocks, so linked blocks keep their current parent.
 
-## 6. Register the editor
+## 6. Generate dynamic artifacts when applicable
+
+A dynamic artifact is a block generated from another block, such as the code exported from a GUI design. Blocks that generate one set `dynamic_artifact` to a `DynamicArtifactSupport`:
+
+```rust
+pub(in crate::editors) const SUPPORT: DynamicArtifactSupport = DynamicArtifactSupport {
+    source: |data| MyArtifact::decode(data).map(|artifact| artifact.source),
+    summary,
+    settings_ui,
+    regenerate,
+};
+```
+
+The descriptor payload is opaque to the app, so it carries both the source block ID and whatever settings the generator needs. `summary` describes what those settings produce, and `settings_ui` edits the payload in place. The artifact bar shows all of this, saves edited settings back onto the block, and reruns `regenerate`.
+
+## 7. Register the editor
 
 In `editors.rs`:
 
@@ -166,7 +181,7 @@ registry.register(my_block::registration());
 
 The registration automatically adds creatable types to block pickers and teaches the app how to open cached blocks of that type.
 
-## 7. Testing and verification
+## 8. Testing and verification
 
 Do not add tests for GUI behavior. Put deterministic data behavior in the block model and test it in `block-client` instead. Note any interactions that still require manual testing in the final handoff.
 

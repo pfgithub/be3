@@ -23,8 +23,11 @@ struct Field {
     default: String,
 }
 
-pub(super) fn generate(builder: &GuiBuilder) -> String {
-    let struct_name = pascal_case(builder.title());
+pub(super) fn generate(builder: &GuiBuilder, struct_name: Option<&str>) -> String {
+    let struct_name = pascal_case(match struct_name {
+        Some(name) if !name.trim().is_empty() => name,
+        _ => builder.title(),
+    });
     let mut fields = Vec::new();
     let mut names = HashSet::new();
     let mut bindings = HashMap::new();

@@ -1,4 +1,4 @@
-mod geo;
+﻿mod geo;
 // Tiles are downloaded, decoded, and rasterised on a worker thread that the
 // browser build does not start yet, so this pipeline is unreachable there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -56,7 +56,7 @@ const MAX_PREVIEW_WORLD: f64 = (WORLD_POINTS * MAX_VIEWPORT_ZOOM) as f64;
 const ZOOM_STEP: f32 = 1.25;
 const BACKGROUND: Color32 = Color32::from_rgb(242, 239, 233);
 const REGION_COLOR: Color32 = Color32::from_rgb(245, 180, 60);
-const ATTRIBUTION: &str = "© OpenStreetMap contributors";
+const ATTRIBUTION: &str = "Â© OpenStreetMap contributors";
 
 pub(super) fn registration() -> EditorRegistration {
     EditorRegistration {
@@ -67,7 +67,7 @@ pub(super) fn registration() -> EditorRegistration {
         open: |client, id| Box::new(MapEditor::new(client.get_block::<Map>(id), client)),
         can_add_child: true,
         can_delete_child: true,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 

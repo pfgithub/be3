@@ -1,4 +1,4 @@
-mod block_editor;
+﻿mod block_editor;
 mod core;
 mod geometry;
 mod inspector;
@@ -62,7 +62,7 @@ pub(super) fn registration() -> EditorRegistration {
         },
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 

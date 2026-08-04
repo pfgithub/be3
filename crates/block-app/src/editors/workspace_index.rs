@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::HashMap};
+﻿use std::{cmp::Ordering, collections::HashMap};
 
 use block::{Block, BlockReference, BlockReferenceList};
 use block_client::{
@@ -80,7 +80,7 @@ pub(super) fn registration() -> EditorRegistration {
         },
         can_add_child: true,
         can_delete_child: true,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 
@@ -237,7 +237,7 @@ impl WorkspaceIndexEditor {
         let mut action = None;
         for entry in entries {
             let (label, block_type) = entry.reference.as_ref().map_or_else(
-                || (format!("Loading…  {}", entry.id), "Loading…".to_owned()),
+                || (format!("Loadingâ€¦  {}", entry.id), "Loadingâ€¦".to_owned()),
                 |reference| {
                     (
                         editors
@@ -357,7 +357,7 @@ fn grid_tile(
     let icon_size = if size == LARGE_TILE_SIZE { 52.0 } else { 34.0 };
     let name_size = if size == LARGE_TILE_SIZE { 15.0 } else { 13.0 };
     let (icon, name, block_type) = entry.reference.as_ref().map_or_else(
-        || (ICON_FOLDER, "Loading…".to_owned(), entry.id.to_string()),
+        || (ICON_FOLDER, "Loadingâ€¦".to_owned(), entry.id.to_string()),
         |reference| {
             (
                 editors

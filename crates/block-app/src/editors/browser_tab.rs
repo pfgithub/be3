@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, Receiver, Sender};
+﻿use std::sync::mpsc::{self, Receiver, Sender};
 
 use block::Block;
 use block_client::{
@@ -38,7 +38,7 @@ pub(super) fn registration() -> EditorRegistration {
         },
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 

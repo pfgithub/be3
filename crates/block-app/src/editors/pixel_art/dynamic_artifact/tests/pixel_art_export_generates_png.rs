@@ -1,7 +1,7 @@
 use block::Block;
 use block_client::blocks::pixel_art::{PixelArt, PixelArtOperation, PixelColor, PixelUpdate};
 
-use super::generate;
+use super::generate_initial;
 
 #[test]
 fn pixel_art_export_generates_png() {
@@ -17,7 +17,7 @@ fn pixel_art_export_generates_png() {
         },
     );
 
-    let generated = generate(&art, "Sprite").unwrap();
+    let generated = generate_initial(&art, "Sprite").unwrap();
     let decoded = image::load_from_memory(generated.data())
         .unwrap()
         .into_rgba8();

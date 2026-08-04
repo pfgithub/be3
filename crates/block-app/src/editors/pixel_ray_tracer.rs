@@ -1,4 +1,4 @@
-mod raytracer;
+﻿mod raytracer;
 
 use std::{
     sync::mpsc::{self, Receiver, TryRecvError},
@@ -57,7 +57,7 @@ pub(super) fn registration() -> EditorRegistration {
         },
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 
@@ -1057,7 +1057,7 @@ impl BlockEditor for PixelRayTracerEditor {
     ) -> Option<EditorAction> {
         ui.horizontal_wrapped(|ui| {
             ui.strong("Pixel Ray Tracer");
-            ui.weak("128 × 128");
+            ui.weak("128 Ã— 128");
             ui.separator();
             if ui.button("Fit view").clicked() {
                 viewport.fit();

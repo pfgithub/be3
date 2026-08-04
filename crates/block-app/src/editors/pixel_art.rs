@@ -34,7 +34,7 @@ pub(super) fn registration() -> EditorRegistration {
         open: |client, id| Box::new(PixelArtEditor::new(client.get_block::<PixelArt>(id))),
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: Some(dynamic_artifact::regenerate),
+        dynamic_artifact: Some(dynamic_artifact::SUPPORT),
     }
 }
 
@@ -626,7 +626,7 @@ impl PixelArtEditor {
         let generated = self
             .block
             .read()
-            .map(|art| dynamic_artifact::generate(&art, &self.block.name()));
+            .map(|art| dynamic_artifact::generate_initial(&art, &self.block.name()));
         match generated {
             Some(Ok(image)) => {
                 let child = client

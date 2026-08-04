@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 #[test]
 fn repeated_labels_get_unique_field_names() {
@@ -30,7 +30,7 @@ fn repeated_labels_get_unique_field_names() {
         },
     );
 
-    let code = builder.generate_code();
+    let code = builder.generate_code(None);
     assert!(code.contains("pub name: String,"), "{code}");
     assert!(code.contains("pub name_2: String,"), "{code}");
     assert!(code.contains("pub checked: bool,"), "{code}");

@@ -1,4 +1,4 @@
-use block::{Block, BlockParent};
+﻿use block::{Block, BlockParent};
 use block_client::{
     blocks::{
         database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue},
@@ -43,7 +43,7 @@ pub(super) fn registration() -> EditorRegistration {
         open: |client, id| Box::new(DatabaseEditor::new(client.get_block::<Database>(id), None)),
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 
@@ -458,7 +458,7 @@ impl DatabaseEditor {
                         scale,
                     );
                     response.on_hover_text(format!(
-                        "Column {} · {}",
+                        "Column {} Â· {}",
                         column_name(column_index),
                         field_type_label(field.field_type),
                     ));

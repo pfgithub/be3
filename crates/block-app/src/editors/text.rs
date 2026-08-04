@@ -1,4 +1,4 @@
-mod font;
+﻿mod font;
 #[cfg(test)]
 mod tests;
 mod timings;
@@ -81,7 +81,7 @@ pub(super) fn registration() -> EditorRegistration {
         },
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 

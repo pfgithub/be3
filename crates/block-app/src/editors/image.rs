@@ -1,4 +1,4 @@
-use block::{Block, BlockParent};
+﻿use block::{Block, BlockParent};
 use block_client::{
     blocks::image::{Image, ImageOperation},
     BlockClient, BlockHandle,
@@ -24,7 +24,7 @@ pub(super) fn registration() -> EditorRegistration {
         open: |client: &BlockClient, id| Box::new(ImageEditor::new(client.get_block::<Image>(id))),
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 

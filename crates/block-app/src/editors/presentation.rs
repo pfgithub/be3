@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList};
 use block_client::{
@@ -50,7 +50,7 @@ pub(super) fn registration() -> EditorRegistration {
         },
         can_add_child: true,
         can_delete_child: true,
-        regenerate_dynamic_artifact: None,
+        dynamic_artifact: None,
     }
 }
 
@@ -250,7 +250,7 @@ impl PresentationEditor {
                             ui.small(format!("{}", index + 1));
                             let name = dependencies
                                 .get(&slide.block_id)
-                                .map_or("Loading…", |reference| reference.name.as_str());
+                                .map_or("Loadingâ€¦", |reference| reference.name.as_str());
                             ui.add(
                                 egui::Label::new(name)
                                     .truncate()
@@ -743,7 +743,7 @@ impl BlockEditor for PresentationEditor {
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Loading presentation…",
+                "Loading presentationâ€¦",
                 egui::FontId::proportional(18.0),
                 Color32::WHITE,
             );
@@ -795,7 +795,7 @@ fn paint_fallback(
         Stroke::new(1.0_f32, Color32::from_gray(75)),
         egui::StrokeKind::Inside,
     );
-    let (name, icon) = reference.map_or(("Loading…", None), |reference| {
+    let (name, icon) = reference.map_or(("Loadingâ€¦", None), |reference| {
         (
             if reference.name.is_empty() {
                 "Untitled"

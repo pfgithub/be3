@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 #[test]
 fn generated_code_binds_stateful_widgets_to_struct_fields() {
@@ -46,7 +46,7 @@ fn generated_code_binds_stateful_widgets_to_struct_fields() {
         },
     );
 
-    let code = builder.generate_code();
+    let code = builder.generate_code(None);
     assert!(code.contains("pub struct SignUp {"), "{code}");
     assert!(code.contains("pub full_name: String,"), "{code}");
     assert!(code.contains("pub i_agree: bool,"), "{code}");

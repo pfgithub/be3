@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 #[test]
 fn generated_code_nests_container_children() {
@@ -19,7 +19,7 @@ fn generated_code_nests_container_children() {
         }),
     );
 
-    let code = builder.generate_code();
+    let code = builder.generate_code(None);
     assert!(
         code.contains("        egui::Frame::group(ui.style()).show(ui, |ui| {\n"),
         "{code}"

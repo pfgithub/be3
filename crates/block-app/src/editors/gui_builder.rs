@@ -48,7 +48,7 @@ pub(super) fn registration() -> EditorRegistration {
         open: |client, id| Box::new(GuiBuilderEditor::new(client.get_block::<GuiBuilder>(id))),
         can_add_child: false,
         can_delete_child: false,
-        regenerate_dynamic_artifact: Some(dynamic_artifact::regenerate),
+        dynamic_artifact: Some(dynamic_artifact::SUPPORT),
     }
 }
 
@@ -90,7 +90,7 @@ impl GuiBuilderEditor {
     /// Exports the design as a Text block that stays linked to this one, so
     /// the code can be regenerated after the design changes.
     fn export_code(&self, client: &BlockClient) -> Option<EditorAction> {
-        let generated = dynamic_artifact::generate(&*self.block.read()?);
+        let generated = dynamic_artifact::generate_initial(&*self.block.read()?);
         let artifact = client
             .create_dynamic_artifact(generated, dynamic_artifact::descriptor(self.block.id()));
         artifact.set_name(dynamic_artifact::artifact_name(&self.block.name()));
