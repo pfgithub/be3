@@ -51,6 +51,8 @@ const NO_EDIT_ACCESS: &str = "You do not have permission to change this block";
 /// How a block generated from another one is marked wherever it is listed.
 const ICON_DYNAMIC_ARTIFACT: MaterialIcon = ICON_AUTO_AWESOME;
 const ONBOARDING_WIDTH: f32 = 460.0;
+/// The commit this build came from, stamped in by the build script.
+const COMMIT: &str = env!("BLOCK_APP_COMMIT");
 #[cfg(not(target_arch = "wasm32"))]
 fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
@@ -188,6 +190,7 @@ struct BlockApp {
     share: ShareDialog,
     client_debug_open: bool,
     network_debug_open: bool,
+    about_open: bool,
     block_picker: BlockPicker,
     block_picker_target: Option<BlockPickerTarget>,
     pending_destructive_action: Option<PendingDestructiveAction>,
@@ -513,6 +516,7 @@ impl BlockApp {
             share: ShareDialog::default(),
             client_debug_open: false,
             network_debug_open: false,
+            about_open: false,
             block_picker: BlockPicker::default(),
             block_picker_target: None,
             pending_destructive_action: None,
@@ -1150,6 +1154,36 @@ impl BlockApp {
         self.invite_open = open;
     }
 
+    fn show_about(&mut self, ctx: &egui::Context) {
+        if !self.about_open {
+            return;
+        }
+        let mut open = self.about_open;
+        egui::Window::new("About")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.strong("Block");
+                ui.add_space(8.0);
+                egui::Grid::new("about-build")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Version");
+                        ui.monospace(env!("CARGO_PKG_VERSION"));
+                        ui.end_row();
+                        ui.label("Commit");
+                        // Selectable so the hash can be copied into a bug report.
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(COMMIT).monospace())
+                                .selectable(true),
+                        );
+                        ui.end_row();
+                    });
+            });
+        self.about_open = open;
+    }
+
     fn request_account_switch(&mut self, account: Account) {
         if account == self.account {
             return;
@@ -1192,6 +1226,7 @@ impl BlockApp {
         self.share = ShareDialog::default();
         self.client_debug_open = false;
         self.network_debug_open = false;
+        self.about_open = false;
         self.block_picker = BlockPicker::default();
         self.block_picker_target = None;
         self.pending_destructive_action = None;
@@ -2133,7 +2168,7 @@ impl BlockApp {
                 ui.small("Submitting changes\u{2026}");
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button("Debug", |ui| {
+                ui.menu_button("More", |ui| {
                     if ui.button("Client").clicked() {
                         self.client_debug_open = true;
                         ui.close();
@@ -2187,6 +2222,11 @@ impl BlockApp {
                         if let Err(error) = self.app_state.clear_active_account() {
                             self.account_error = Some(error.to_string());
                         }
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("About").clicked() {
+                        self.about_open = true;
                         ui.close();
                     }
                 });
@@ -3394,6 +3434,7 @@ impl eframe::App for BlockApp {
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
         self.show_invite(ui.ctx());
+        self.show_about(ui.ctx());
 
         self.show_dock(ui, frame);
         self.show_discard_confirmation(ui.ctx());
