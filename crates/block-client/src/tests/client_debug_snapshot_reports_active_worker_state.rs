@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::AtomicUsize, Arc},
 };
 
-use block::{Block, BlockParent, BlockReference, BlockReferenceList, ClientMessage};
+use block::{Block, BlockAccess, BlockParent, BlockReference, BlockReferenceList, ClientMessage};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
@@ -86,6 +86,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
                 name: "Referenced".into(),
                 parent: BlockParent::Root,
                 references: 0,
+                access: BlockAccess::Edit,
             }]),
             loaded,
             subscribers: AtomicUsize::new(1),

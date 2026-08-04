@@ -1683,8 +1683,11 @@ impl BlockStore {
             }
         };
         ids.into_iter()
-            .filter(|id| access.get(*id).can_know_exists())
             .filter_map(|id| {
+                let listed = access.get(id);
+                if !listed.can_know_exists() {
+                    return None;
+                }
                 dependencies.blocks.get(&id).map(|block| BlockReference {
                     id,
                     block_type: block.block_type,
@@ -1696,6 +1699,7 @@ impl BlockStore {
                         .iter()
                         .filter(|reference| access.get(**reference).can_know_exists())
                         .count(),
+                    access: listed,
                 })
             })
             .collect()

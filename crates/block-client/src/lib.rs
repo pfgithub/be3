@@ -1541,6 +1541,7 @@ impl WorkerState {
 
     fn cache_reference_blocks(&self, blocks: &[BlockReference]) {
         let mut cache = self.cached_blocks.write();
+        let mut block_access = self.block_access.write();
         for block in blocks {
             cache.insert(
                 block.id,
@@ -1551,6 +1552,7 @@ impl WorkerState {
                     name: block.name.clone(),
                 },
             );
+            block_access.insert(block.id, block.access);
         }
     }
 

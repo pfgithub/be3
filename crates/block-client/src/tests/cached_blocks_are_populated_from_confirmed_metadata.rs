@@ -117,6 +117,7 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
             name: "Listed".into(),
             parent: BlockParent::Root,
             references: 0,
+            access: BlockAccess::Edit,
         }],
     });
     assert_eq!(cache.read()[&listed_id].name, "Listed");

@@ -353,6 +353,9 @@ pub struct BlockReference {
     pub name: String,
     pub parent: BlockParent,
     pub references: usize,
+    /// What the listing account may do with the block, so a client can tell
+    /// which of the things it offers would be refused without opening it.
+    pub access: BlockAccess,
 }
 
 pub const MAX_NAME_BYTES: usize = 128;

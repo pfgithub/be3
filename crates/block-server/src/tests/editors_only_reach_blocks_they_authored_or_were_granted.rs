@@ -44,12 +44,10 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
 
     // Viewers see the block and can read it, but cannot change it.
     set_access(&mut owner_socket, private, editor.id, BlockAccess::View).await;
-    assert_eq!(
-        references(&mut editor_socket, BlockReferenceList::Roots)
-            .await
-            .len(),
-        1
-    );
+    let listed = references(&mut editor_socket, BlockReferenceList::Roots).await;
+    assert_eq!(listed.len(), 1);
+    // The listing says so too, so a client can tell before opening anything.
+    assert_eq!(listed[0].access, BlockAccess::View);
     assert!(matches!(
         read(&mut editor_socket, private).await,
         ServerMessage::ReadBlock {

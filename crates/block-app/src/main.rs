@@ -44,6 +44,7 @@ use uuid::Uuid;
 #[cfg(not(target_arch = "wasm32"))]
 const APP_ID: &str = "Block";
 const COMPACT_FILES_WIDTH: f32 = 700.0;
+const NO_EDIT_ACCESS: &str = "You do not have permission to change this block";
 const ONBOARDING_WIDTH: f32 = 460.0;
 #[cfg(not(target_arch = "wasm32"))]
 fn native_options() -> eframe::NativeOptions {
@@ -1280,6 +1281,8 @@ impl BlockApp {
                     name: result.name,
                     parent: BlockParent::Orphaned,
                     references: 0,
+                    // The account just made the block, so it is theirs.
+                    access: BlockAccess::Edit,
                 },
                 parent,
             ),
@@ -1618,14 +1621,32 @@ impl BlockApp {
             .icon_label(reference.block_type, &reference.name)
     }
 
+    /// Whether the account may change a block. Blocks the sidebar has listed
+    /// but never opened count as editable until the server says otherwise.
+    fn can_edit_block(&self, id: Uuid) -> bool {
+        self.client.block_access(id).can_edit()
+    }
+
+    /// Whether a block may be taken out of where it is listed. Blocks holding
+    /// their children have to accept the removal and be editable; the root and
+    /// the orphan list are the workspace's own and hold nothing back.
     fn can_delete_from(&self, source: SidebarDragSource) -> bool {
         match source {
             SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
-            SidebarDragSource::Block(id) => self
-                .block_types
-                .get(&id)
-                .is_some_and(|block_type| self.registry.can_delete_child(*block_type)),
+            SidebarDragSource::Block(id) => {
+                self.block_types
+                    .get(&id)
+                    .is_some_and(|block_type| self.registry.can_delete_child(*block_type))
+                    && self.can_edit_block(id)
+            }
         }
+    }
+
+    /// Whether a block may be moved out of `source`. Moving one that is listed
+    /// where it lives reparents the block itself; moving a reference to it only
+    /// touches the block that holds the reference.
+    fn can_move_out_of(&self, source: SidebarDragSource, child: Uuid, is_reference: bool) -> bool {
+        self.can_delete_from(source) && (is_reference || self.can_edit_block(child))
     }
 
     fn collapse_reference(&mut self, id: Uuid) {
@@ -1653,9 +1674,12 @@ impl BlockApp {
             },
             SidebarDragSource::Block,
         );
+        let can_edit = self.can_edit_block(reference.id);
         let can_add_child = self.registry.can_add_child(reference.block_type);
-        let can_delete_child =
-            source != SidebarDragSource::Orphaned && self.can_delete_from(source);
+        // Taking a child in means changing the block that takes it.
+        let can_add_here = can_add_child && can_edit;
+        let can_delete_child = source != SidebarDragSource::Orphaned
+            && self.can_move_out_of(source, reference.id, is_reference);
         let can_expand = !is_reference && reference.references > 0;
         let was_expanded = self.expanded.contains_key(&reference.id);
         let is_active = !is_reference && active.is_some_and(|active| active.id == reference.id);
@@ -1754,8 +1778,11 @@ impl BlockApp {
                     &self.registry,
                     &mut self.block_picker,
                     picker_excluded.clone(),
-                    can_add_child,
-                    can_delete_child,
+                    BlockMenuPermissions {
+                        add: can_add_here,
+                        edit: can_edit,
+                        delete: can_delete_child,
+                    },
                 ) {
                     Some(BlockContextMenuAction::Picker) => {
                         self.block_picker_target =
@@ -1777,16 +1804,19 @@ impl BlockApp {
             });
             row_response = Some(response);
             if can_add_child {
-                ui.menu_button(ICON_ADD, |ui| {
-                    self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
-                    self.block_picker.show_menu_excluding(
-                        ui,
-                        &self.registry,
-                        picker_excluded.clone(),
-                    );
+                ui.add_enabled_ui(can_add_here, |ui| {
+                    ui.menu_button(ICON_ADD, |ui| {
+                        self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
+                        self.block_picker.show_menu_excluding(
+                            ui,
+                            &self.registry,
+                            picker_excluded.clone(),
+                        );
+                    })
                 })
                 .response
-                .on_hover_text("Add a child");
+                .on_hover_text("Add a child")
+                .on_disabled_hover_text(NO_EDIT_ACCESS);
             }
         });
 
@@ -1796,10 +1826,15 @@ impl BlockApp {
         if can_add_child {
             if let Some(response) = row_response {
                 if let Some(dragged) = response.dnd_hover_payload::<SidebarDragPayload>() {
-                    let valid = dragged.reference.id != reference.id
+                    let valid = can_add_here
+                        && dragged.reference.id != reference.id
                         && dragged.source != SidebarDragSource::Block(reference.id)
                         && !path.contains(&dragged.reference.id)
-                        && self.can_delete_from(dragged.source);
+                        && self.can_move_out_of(
+                            dragged.source,
+                            dragged.reference.id,
+                            dragged.is_reference,
+                        );
                     let color = if valid {
                         ui.visuals().selection.stroke.color
                     } else {
@@ -1813,10 +1848,15 @@ impl BlockApp {
                     );
                 }
                 if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
-                    if dragged.reference.id != reference.id
+                    if can_add_here
+                        && dragged.reference.id != reference.id
                         && dragged.source != SidebarDragSource::Block(reference.id)
                         && !path.contains(&dragged.reference.id)
-                        && self.can_delete_from(dragged.source)
+                        && self.can_move_out_of(
+                            dragged.source,
+                            dragged.reference.id,
+                            dragged.is_reference,
+                        )
                     {
                         self.queue_move(dragged.as_ref().clone(), reference.id);
                     }
@@ -2767,16 +2807,20 @@ impl BlockApp {
                 *navigate = Some((reference.id, reference.block_type));
                 ui.close();
             }
-            let can_add = self.registry.can_add_child(reference.block_type);
-            let can_delete = source != SidebarDragSource::Orphaned && self.can_delete_from(source);
+            let can_edit = self.can_edit_block(reference.id);
+            let permissions = BlockMenuPermissions {
+                add: self.registry.can_add_child(reference.block_type) && can_edit,
+                edit: can_edit,
+                delete: source != SidebarDragSource::Orphaned
+                    && self.can_move_out_of(source, reference.id, is_reference),
+            };
             response.context_menu(|ui| {
                 if let Some(action) = block_context_menu(
                     ui,
                     &self.registry,
                     &mut self.block_picker,
                     [reference.id],
-                    can_add,
-                    can_delete,
+                    permissions,
                 ) {
                     *context_action = Some((reference.clone(), source, is_reference, action));
                 }
@@ -2925,40 +2969,58 @@ enum BlockContextMenuAction {
     Delete,
 }
 
+/// What the account may do with the block a menu was opened on. Entries it is
+/// not allowed are shown disabled rather than left out, so the menu reads the
+/// same however much access the block was shared with.
+struct BlockMenuPermissions {
+    add: bool,
+    edit: bool,
+    delete: bool,
+}
+
 fn block_context_menu(
     ui: &mut egui::Ui,
     registry: &EditorRegistry,
     picker: &mut BlockPicker,
     excluded: impl IntoIterator<Item = Uuid>,
-    can_add: bool,
-    can_delete: bool,
+    permissions: BlockMenuPermissions,
 ) -> Option<BlockContextMenuAction> {
     let mut action = None;
-    ui.add_enabled_ui(can_add, |ui| {
+    ui.add_enabled_ui(permissions.add, |ui| {
         ui.menu_button("Add", |ui| {
             picker.show_menu_excluding(ui, registry, excluded);
             action = Some(BlockContextMenuAction::Picker);
         });
-    });
-    if ui.button("Rename").clicked() {
+    })
+    .response
+    .on_disabled_hover_text(NO_EDIT_ACCESS);
+    if ui
+        .add_enabled(permissions.edit, egui::Button::new("Rename"))
+        .on_disabled_hover_text(NO_EDIT_ACCESS)
+        .clicked()
+    {
         action = Some(BlockContextMenuAction::Rename);
         ui.close();
     }
     if ui
-        .button(format!("{} Share", ICON_SHARE.codepoint))
+        .add_enabled(
+            permissions.edit,
+            egui::Button::new(format!("{} Share", ICON_SHARE.codepoint)),
+        )
+        .on_disabled_hover_text("Only accounts that can edit a block may share it")
         .clicked()
     {
         action = Some(BlockContextMenuAction::Share);
         ui.close();
     }
     let delete_text = egui::RichText::new("Delete");
-    let delete_text = if can_delete {
+    let delete_text = if permissions.delete {
         delete_text.color(ui.visuals().error_fg_color)
     } else {
         delete_text
     };
     if ui
-        .add_enabled(can_delete, egui::Button::new(delete_text))
+        .add_enabled(permissions.delete, egui::Button::new(delete_text))
         .clicked()
     {
         action = Some(BlockContextMenuAction::Delete);
