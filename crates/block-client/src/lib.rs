@@ -310,8 +310,9 @@ enum StoredOperation<B, O> {
     Operate(O),
     Replace(B),
     /// Rewrites the descriptor without touching the block value, so artifact
-    /// settings can be changed after the block has been created.
-    SetDynamicArtifact(DynamicArtifactDescriptor),
+    /// settings can be changed after the block has been created. `None` unlinks
+    /// the block from its source and leaves the generated value behind.
+    SetDynamicArtifact(Option<DynamicArtifactDescriptor>),
 }
 
 #[cfg(test)]
@@ -689,6 +690,17 @@ impl BlockClient {
     /// Stores new artifact settings on a block that is already open. Blocks
     /// this client has not registered are ignored.
     pub fn set_dynamic_artifact(&self, id: Uuid, descriptor: DynamicArtifactDescriptor) {
+        self.write_dynamic_artifact(id, Some(descriptor));
+    }
+
+    /// Detaches a block from the source it was generated from. The value it
+    /// currently holds stays, but nothing regenerates it any more, so it
+    /// becomes an ordinary editable block.
+    pub fn clear_dynamic_artifact(&self, id: Uuid) {
+        self.write_dynamic_artifact(id, None);
+    }
+
+    fn write_dynamic_artifact(&self, id: Uuid, descriptor: Option<DynamicArtifactDescriptor>) {
         let block = self
             .registered_blocks
             .read()
@@ -2555,7 +2567,7 @@ trait ErasedBlock: Send + Sync {
     fn author(&self) -> Option<Uuid>;
     fn dynamic_artifact(&self) -> Option<DynamicArtifactDescriptor>;
     fn is_dynamic_artifact(&self) -> bool;
-    fn set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor);
+    fn set_dynamic_artifact(&self, descriptor: Option<DynamicArtifactDescriptor>);
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
@@ -2748,7 +2760,7 @@ impl<B: Block> TypedBlock<B> {
             StoredOperation::Operate(operation) => B::apply_operation(value, operation),
             StoredOperation::Replace(replacement) => value.clone_from(replacement),
             StoredOperation::SetDynamicArtifact(descriptor) => {
-                *self.dynamic_artifact.write() = Some(descriptor.clone());
+                self.dynamic_artifact.write().clone_from(descriptor);
             }
         }
     }
@@ -2947,9 +2959,10 @@ impl<B: Block> TypedBlock<B> {
         (result, true)
     }
 
-    /// Rewrites the descriptor of an existing artifact. The block value is
-    /// untouched, so this never enters the undo history.
-    fn local_set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor) {
+    /// Rewrites the descriptor of an existing artifact, or drops it when the
+    /// block is unlinked from its source. The block value is untouched, so this
+    /// never enters the undo history.
+    fn local_set_dynamic_artifact(&self, descriptor: Option<DynamicArtifactDescriptor>) {
         let mut state = self.state.write();
         let implicit_name = self
             .shared
@@ -2957,7 +2970,7 @@ impl<B: Block> TypedBlock<B> {
             .read()
             .as_ref()
             .map_or_else(String::new, Block::implicit_name);
-        *self.dynamic_artifact.write() = Some(descriptor.clone());
+        self.dynamic_artifact.write().clone_from(&descriptor);
         state.pending.push_back(PendingOperation {
             id: Uuid::new_v4(),
             operation: StoredOperation::SetDynamicArtifact(descriptor),
@@ -3105,7 +3118,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         self.dynamic_artifact.read().is_some()
     }
 
-    fn set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor) {
+    fn set_dynamic_artifact(&self, descriptor: Option<DynamicArtifactDescriptor>) {
         self.local_set_dynamic_artifact(descriptor);
     }
 

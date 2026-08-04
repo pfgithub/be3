@@ -31,12 +31,15 @@ use editors::{
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
-use egui_material_icons::icons::{
-    ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK,
-    ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_CLOUD, ICON_COMPUTER, ICON_EDIT, ICON_GROUP_ADD,
-    ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ,
-    ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO,
-    ICON_VISIBILITY, ICON_WORKSPACES,
+use egui_material_icons::{
+    icons::{
+        ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_AUTO_AWESOME,
+        ICON_CHECK, ICON_CHEVRON_RIGHT, ICON_CIRCLE, ICON_CLOUD, ICON_COMPUTER, ICON_EDIT,
+        ICON_GROUP_ADD, ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_LINK_OFF,
+        ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ, ICON_REDO, ICON_REFRESH, ICON_SETTINGS,
+        ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO, ICON_VISIBILITY, ICON_WORKSPACES,
+    },
+    MaterialIcon,
 };
 use share::ShareDialog;
 use uuid::Uuid;
@@ -45,6 +48,8 @@ use uuid::Uuid;
 const APP_ID: &str = "Block";
 const COMPACT_FILES_WIDTH: f32 = 700.0;
 const NO_EDIT_ACCESS: &str = "You do not have permission to change this block";
+/// How a block generated from another one is marked wherever it is listed.
+const ICON_DYNAMIC_ARTIFACT: MaterialIcon = ICON_AUTO_AWESOME;
 const ONBOARDING_WIDTH: f32 = 460.0;
 #[cfg(not(target_arch = "wasm32"))]
 fn native_options() -> eframe::NativeOptions {
@@ -170,6 +175,10 @@ struct BlockApp {
     dynamic_artifact_errors: HashMap<Uuid, String>,
     /// Settings being edited in an artifact bar, until they are applied.
     dynamic_artifact_settings: HashMap<Uuid, Vec<u8>>,
+    /// The block whose artifact settings modal is open, if any.
+    dynamic_artifact_settings_open: Option<Uuid>,
+    /// The block whose unlink confirmation is open, if any.
+    dynamic_artifact_unlink: Option<Uuid>,
     dock_state: DockState<DockTab>,
     files_compact: bool,
     active_tab: Option<Uuid>,
@@ -493,6 +502,8 @@ impl BlockApp {
             dynamic_artifact_regenerations: HashMap::new(),
             dynamic_artifact_errors: HashMap::new(),
             dynamic_artifact_settings: HashMap::new(),
+            dynamic_artifact_settings_open: None,
+            dynamic_artifact_unlink: None,
             dock_state: default_dock_state(),
             files_compact: false,
             active_tab: None,
@@ -858,6 +869,8 @@ impl BlockApp {
         self.dynamic_artifact_regenerations.clear();
         self.dynamic_artifact_errors.clear();
         self.dynamic_artifact_settings.clear();
+        self.dynamic_artifact_settings_open = None;
+        self.dynamic_artifact_unlink = None;
         self.dock_state = default_dock_state();
         self.active_tab = None;
         self.share = ShareDialog::default();
@@ -1168,6 +1181,8 @@ impl BlockApp {
         self.dynamic_artifact_regenerations.clear();
         self.dynamic_artifact_errors.clear();
         self.dynamic_artifact_settings.clear();
+        self.dynamic_artifact_settings_open = None;
+        self.dynamic_artifact_unlink = None;
         self.dock_state = default_dock_state();
         self.files_compact = false;
         self.active_tab = None;
@@ -1550,7 +1565,7 @@ impl BlockApp {
         self.backrefs.remove(&id);
         self.dynamic_artifact_regenerations.remove(&id);
         self.dynamic_artifact_errors.remove(&id);
-        self.dynamic_artifact_settings.remove(&id);
+        self.forget_dynamic_artifact_dialogs(id);
         if let Some(editor) = self.editors.get_mut(&id) {
             editor.tab_closed();
         }
@@ -2371,15 +2386,32 @@ impl BlockApp {
         navigate
     }
 
+    /// Drops the artifact dialogs a block may have open, so a block that is
+    /// closed or has stopped being an artifact leaves nothing behind.
+    fn forget_dynamic_artifact_dialogs(&mut self, id: Uuid) {
+        self.dynamic_artifact_settings.remove(&id);
+        if self.dynamic_artifact_settings_open == Some(id) {
+            self.dynamic_artifact_settings_open = None;
+        }
+        if self.dynamic_artifact_unlink == Some(id) {
+            self.dynamic_artifact_unlink = None;
+        }
+    }
+
     /// The bar above an artifact editor: where the block came from, what the
-    /// generator is currently set to produce, and how to change or rerun it.
+    /// generator is currently set to produce, and how to change, rerun or
+    /// unlink it.
     fn show_dynamic_artifact_bar(
         &mut self,
         ui: &mut egui::Ui,
         id: Uuid,
         block_type: Uuid,
     ) -> Option<BlockTabHistoryItem> {
-        let descriptor = self.client.dynamic_artifact(id)?;
+        let Some(descriptor) = self.client.dynamic_artifact(id) else {
+            // A block that has just been unlinked keeps its tab open.
+            self.forget_dynamic_artifact_dialogs(id);
+            return None;
+        };
 
         let completed = self
             .dynamic_artifact_regenerations
@@ -2406,28 +2438,27 @@ impl BlockApp {
         let mut draft = self.dynamic_artifact_settings.remove(&id);
         let mut navigate = None;
         let mut regenerate = false;
-        let mut apply = None;
+        let mut open_settings = false;
+        let mut open_unlink = false;
         egui::Frame::new()
             .fill(ui.visuals().faint_bg_color)
             .inner_margin(egui::Margin::symmetric(8, 5))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.strong("Dynamic artifact");
+                    ui.strong(format!(
+                        "{} Dynamic artifact",
+                        ICON_DYNAMIC_ARTIFACT.codepoint
+                    ));
                     match &support {
                         Ok(support) => {
                             navigate = self.show_dynamic_artifact_source(ui, &descriptor, *support);
                             ui.separator();
                             ui.weak((support.summary)(&descriptor.data));
-                            ui.add_enabled_ui(can_regenerate, |ui| {
-                                if let Some(settings) = self.show_dynamic_artifact_settings(
-                                    ui,
-                                    &descriptor,
-                                    *support,
-                                    &mut draft,
-                                ) {
-                                    apply = Some(settings);
-                                }
-                            });
+                            open_settings = ui
+                                .add_enabled(can_regenerate, egui::Button::new(ICON_SETTINGS))
+                                .on_hover_text("Settings")
+                                .on_disabled_hover_text(NO_EDIT_ACCESS)
+                                .clicked();
                         }
                         Err(error) => {
                             ui.colored_label(ui.visuals().error_fg_color, error);
@@ -2444,12 +2475,60 @@ impl BlockApp {
                         .on_hover_text("Regenerate")
                         .on_disabled_hover_text("You cannot change this block")
                         .clicked();
+                    open_unlink = ui
+                        .add_enabled(can_regenerate && !running, egui::Button::new(ICON_LINK_OFF))
+                        .on_hover_text("Unlink from the source block")
+                        .on_disabled_hover_text("You cannot change this block")
+                        .clicked();
                 });
                 if let Some(error) = self.dynamic_artifact_errors.get(&id) {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 }
             });
         ui.separator();
+        if open_settings {
+            self.dynamic_artifact_settings_open = Some(id);
+        }
+        if open_unlink {
+            self.dynamic_artifact_unlink = Some(id);
+        }
+        let mut apply = None;
+        if self.dynamic_artifact_settings_open == Some(id) {
+            match &support {
+                Ok(support) => {
+                    match self.show_dynamic_artifact_settings(
+                        ui.ctx(),
+                        &descriptor,
+                        *support,
+                        &mut draft,
+                    ) {
+                        ModalOutcome::Open => {}
+                        ModalOutcome::Accepted(data) => {
+                            apply = Some(data);
+                            self.dynamic_artifact_settings_open = None;
+                        }
+                        ModalOutcome::Dismissed => {
+                            draft = None;
+                            self.dynamic_artifact_settings_open = None;
+                        }
+                    }
+                }
+                Err(_) => self.dynamic_artifact_settings_open = None,
+            }
+        }
+        if self.dynamic_artifact_unlink == Some(id) {
+            match show_dynamic_artifact_unlink(ui.ctx()) {
+                ModalOutcome::Open => {}
+                ModalOutcome::Accepted(()) => {
+                    self.client.clear_dynamic_artifact(id);
+                    self.dynamic_artifact_regenerations.remove(&id);
+                    self.dynamic_artifact_errors.remove(&id);
+                    self.forget_dynamic_artifact_dialogs(id);
+                    return navigate;
+                }
+                ModalOutcome::Dismissed => self.dynamic_artifact_unlink = None,
+            }
+        }
         if let Some(data) = apply {
             self.client.set_dynamic_artifact(
                 id,
@@ -2512,40 +2591,44 @@ impl BlockApp {
             })
     }
 
-    /// The settings menu. Edits go to `draft` until they are applied, and
-    /// closing the menu throws them away.
+    /// The settings modal. Edits go to `draft` until they are applied, and
+    /// dismissing the modal throws them away. A modal rather than a menu
+    /// because a menu closes as soon as something inside it is clicked.
     fn show_dynamic_artifact_settings(
         &self,
-        ui: &mut egui::Ui,
+        ctx: &egui::Context,
         descriptor: &DynamicArtifactDescriptor,
         support: DynamicArtifactSupport,
         draft: &mut Option<Vec<u8>>,
-    ) -> Option<Vec<u8>> {
-        let mut applied = None;
-        let menu = ui.menu_button(ICON_SETTINGS, |ui| {
-            ui.set_min_width(240.0);
-            let data = draft.get_or_insert_with(|| descriptor.data.clone());
-            (support.settings_ui)(ui, data);
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(*data != descriptor.data, egui::Button::new("Apply"))
-                    .on_disabled_hover_text("The settings are unchanged")
-                    .clicked()
-                {
-                    applied = Some(data.clone());
-                    ui.close();
-                }
-                if ui.button("Cancel").clicked() {
-                    ui.close();
-                }
+    ) -> ModalOutcome<Vec<u8>> {
+        let mut outcome = ModalOutcome::Open;
+        let response =
+            egui::Modal::new(egui::Id::new("dynamic-artifact-settings")).show(ctx, |ui| {
+                ui.set_width(320.0);
+                ui.heading("Dynamic artifact settings");
+                ui.add_space(12.0);
+                let data = draft.get_or_insert_with(|| descriptor.data.clone());
+                (support.settings_ui)(ui, data);
+                ui.add_space(12.0);
+                ui.weak((support.summary)(data));
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(*data != descriptor.data, egui::Button::new("Apply"))
+                        .on_disabled_hover_text("The settings are unchanged")
+                        .clicked()
+                    {
+                        outcome = ModalOutcome::Accepted(data.clone());
+                    }
+                    if ui.button("Cancel").clicked() {
+                        outcome = ModalOutcome::Dismissed;
+                    }
+                });
             });
-        });
-        menu.response.on_hover_text("Settings");
-        if menu.inner.is_none() {
-            *draft = None;
+        if matches!(outcome, ModalOutcome::Open) && response.should_close() {
+            outcome = ModalOutcome::Dismissed;
         }
-        applied
+        outcome
     }
 
     fn regenerate_dynamic_artifact(
@@ -3058,6 +3141,40 @@ fn block_context_menu(
         ui.close();
     }
     action
+}
+
+/// What a modal did with the frame it was drawn in: nothing yet, went ahead
+/// with what it was opened for, or was closed without doing it.
+enum ModalOutcome<T> {
+    Open,
+    Accepted(T),
+    Dismissed,
+}
+
+/// Confirms unlinking an artifact from its source. The generated value stays
+/// where it is, so the only thing lost is the link and its settings.
+fn show_dynamic_artifact_unlink(ctx: &egui::Context) -> ModalOutcome<()> {
+    let mut outcome = ModalOutcome::Open;
+    let response = egui::Modal::new(egui::Id::new("dynamic-artifact-unlink")).show(ctx, |ui| {
+        ui.set_width(360.0);
+        ui.heading("Unlink from the source block?");
+        ui.add_space(12.0);
+        ui.label("This block keeps what was generated for it, but stops being rebuilt from its source and becomes editable.");
+        ui.label("The link and its settings cannot be restored.");
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            if ui.button("Unlink").clicked() {
+                outcome = ModalOutcome::Accepted(());
+            }
+            if ui.button("Cancel").clicked() {
+                outcome = ModalOutcome::Dismissed;
+            }
+        });
+    });
+    if matches!(outcome, ModalOutcome::Open) && response.should_close() {
+        outcome = ModalOutcome::Dismissed;
+    }
+    outcome
 }
 
 /// The mode a tab is showing its block in. Modes above what the account is
