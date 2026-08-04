@@ -1274,7 +1274,7 @@ impl BlockApp {
                     block_type: result.block_type,
                     author: result.author,
                     name: result.name,
-                    parent: BlockParent::Root,
+                    parent: BlockParent::Orphaned,
                     references: 0,
                 },
                 parent,
@@ -1286,7 +1286,11 @@ impl BlockApp {
         let target = self.block_picker_target.unwrap_or(BlockPickerTarget::Root);
         let parent = match target {
             BlockPickerTarget::Root => BlockParent::Root,
-            BlockPickerTarget::Block(parent) => BlockParent::Uuid(parent),
+            // The server rejects a parent that does not reference the child,
+            // and the parent only takes the reference once its editor has
+            // loaded, which can be several frames later. Leave the block
+            // orphaned; the queued placement sets the parent after that.
+            BlockPickerTarget::Block(_) => BlockParent::Orphaned,
         };
         let active = self.active_tab.unwrap_or(Uuid::nil());
         let result = {
