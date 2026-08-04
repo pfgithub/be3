@@ -1,7 +1,8 @@
 use std::{sync::mpsc, thread, time::Duration};
 
 use block::{
-    Block, BlockParent, ClientMessage, CommandKind, OperationRecord, ReferenceDelta, ServerMessage,
+    Block, BlockAccess, BlockParent, ClientMessage, CommandKind, OperationRecord, ReferenceDelta,
+    ServerMessage,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
@@ -56,6 +57,7 @@ async fn get_block_resolves_from_a_websocket_read_response() {
                             }],
                             parent: BlockParent::Root,
                             name: "Counter 5".into(),
+                            access: BlockAccess::Edit,
                         })
                         .unwrap(),
                     ))

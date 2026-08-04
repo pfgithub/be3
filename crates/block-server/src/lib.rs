@@ -603,7 +603,8 @@ async fn handle_text_message(
             id,
             watch,
         } => {
-            if !store.access(identity).await.get(id).can_view() {
+            let access = store.access(identity).await.get(id);
+            if !access.can_view() {
                 return (
                     permission_denied(request_id, CommandKind::ReadBlock, id),
                     None,
@@ -627,6 +628,7 @@ async fn handle_text_message(
                         operations: read.operations,
                         parent: read.parent,
                         name: read.name,
+                        access,
                     }
                 }
                 Err(error) => error.to_response(request_id, CommandKind::ReadBlock, id),

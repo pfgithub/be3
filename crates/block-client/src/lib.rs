@@ -330,7 +330,7 @@ pub struct BlockClient {
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
     registered_blocks: Arc<RwLock<HashMap<Uuid, RegisteredBlock>>>,
     watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
-    denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
+    block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
 }
 
 /// A sharing request that is still in flight. The UI polls it each frame rather
@@ -554,12 +554,12 @@ impl BlockClient {
         let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
         let registered_blocks = Arc::new(RwLock::new(HashMap::new()));
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
-        let denied_blocks = Arc::new(RwLock::new(HashSet::new()));
+        let block_access = Arc::new(RwLock::new(HashMap::new()));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
         let worker_client_debug = Arc::clone(&client_debug);
         let worker_cached_blocks = Arc::clone(&cached_blocks);
-        let worker_denied_blocks = Arc::clone(&denied_blocks);
+        let worker_block_access = Arc::clone(&block_access);
         transport::spawn_worker(worker_main(
             command_rx,
             shutdown.clone(),
@@ -567,7 +567,7 @@ impl BlockClient {
             worker_debug,
             worker_client_debug,
             worker_cached_blocks,
-            worker_denied_blocks,
+            worker_block_access,
         ));
         Self {
             id,
@@ -582,7 +582,7 @@ impl BlockClient {
             cached_blocks,
             registered_blocks,
             watched_reference_lists,
-            denied_blocks,
+            block_access,
         }
     }
 
@@ -808,10 +808,21 @@ impl BlockClient {
         });
     }
 
+    /// What this account may do with `id`, as last reported by the server.
+    /// Blocks that have not been read yet count as editable: the server has
+    /// the final say, and a refusal lowers this to what it did allow.
+    pub fn block_access(&self, id: Uuid) -> BlockAccess {
+        self.block_access
+            .read()
+            .get(&id)
+            .copied()
+            .unwrap_or(BlockAccess::Edit)
+    }
+
     /// Whether the server has refused this client access to `id`. Blocks in
     /// this state never load, so editors show an explanation instead.
     pub fn access_denied(&self, id: Uuid) -> bool {
-        self.denied_blocks.read().contains(&id)
+        !self.block_access(id).can_view()
     }
 
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
@@ -1342,9 +1353,9 @@ async fn worker_main(
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
-    denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
+    block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
 ) {
-    let mut state = WorkerState::new(access, debug, client_debug, cached_blocks, denied_blocks);
+    let mut state = WorkerState::new(access, debug, client_debug, cached_blocks, block_access);
     while let Some(command) = commands.next().await {
         match command {
             WorkerCommand::Connect {
@@ -1478,7 +1489,7 @@ struct WorkerState {
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
-    denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
+    block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
 }
 
 impl WorkerState {
@@ -1487,7 +1498,7 @@ impl WorkerState {
         debug: Arc<RwLock<NetworkDebugSnapshot>>,
         client_debug: Arc<RwLock<ClientDebugSnapshot>>,
         cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
-        denied_blocks: Arc<RwLock<HashSet<Uuid>>>,
+        block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
     ) -> Self {
         Self {
             connected: false,
@@ -1503,8 +1514,21 @@ impl WorkerState {
             debug,
             client_debug,
             cached_blocks,
-            denied_blocks,
+            block_access,
         }
+    }
+
+    /// Records what the server let this account do with a block. Access is only
+    /// ever lowered by a refusal, so a denial for one command cannot raise what
+    /// an earlier read reported.
+    fn record_access(&self, id: Uuid, access: BlockAccess) {
+        self.block_access.write().insert(id, access);
+    }
+
+    fn lower_access(&self, id: Uuid, ceiling: BlockAccess) {
+        let mut block_access = self.block_access.write();
+        let entry = block_access.entry(id).or_insert(ceiling);
+        *entry = (*entry).min(ceiling);
     }
 
     fn cache_block(&self, block: CachedBlock) {
@@ -1880,12 +1904,14 @@ impl WorkerState {
                 operations,
                 parent,
                 name,
+                access,
             } => {
                 match (self.requests.remove(&request_id), command) {
                     (Some(PendingRequest::Read { id: expected }), CommandKind::ReadBlock)
                         if expected == id => {}
                     _ => fatal("read response did not match its request"),
                 }
+                self.record_access(id, access);
                 let block = &self.blocks[&id];
                 if block.block_type_id() != block_type {
                     fatal(format!(
@@ -1975,7 +2001,7 @@ impl WorkerState {
                 if code == ErrorCode::PermissionDenied {
                     // Permissions can be withdrawn while a block is open, so a
                     // refusal is an expected answer rather than a protocol fault.
-                    self.deny_access(request_id, response_id, message);
+                    self.deny_access(request_id, command, response_id, message);
                     return;
                 }
                 fatal(format!(
@@ -2094,13 +2120,25 @@ impl WorkerState {
 
     /// Records that the server refused a request, dropping it so the client
     /// keeps running with the block marked inaccessible.
-    fn deny_access(&mut self, request_id: Option<Uuid>, id: Option<Uuid>, message: String) {
+    fn deny_access(
+        &mut self,
+        request_id: Option<Uuid>,
+        command: Option<CommandKind>,
+        id: Option<Uuid>,
+        message: String,
+    ) {
         let pending = request_id.and_then(|request_id| self.requests.remove(&request_id));
         if let Some(PendingRequest::ListBlockAccess { completed, .. }) = pending {
             let _ = completed.send(Err(message));
         }
         if let Some(id) = id {
-            self.denied_blocks.write().insert(id);
+            // A refused read means the block cannot be opened at all; every
+            // other command needs edit access, so reading may still be allowed.
+            let ceiling = match command {
+                Some(CommandKind::ReadBlock) => BlockAccess::KnowExists,
+                _ => BlockAccess::View,
+            };
+            self.lower_access(id, ceiling);
         }
     }
 

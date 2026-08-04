@@ -507,6 +507,9 @@ pub enum ServerMessage {
         operations: Vec<OperationRecord>,
         parent: BlockParent,
         name: String,
+        /// What the reading account may do with the block, so the client knows
+        /// whether to let it be changed without asking the server first.
+        access: BlockAccess,
     },
     BatchOk {
         request_id: Uuid,

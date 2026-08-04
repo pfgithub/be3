@@ -1,9 +1,8 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use block::{Block, BlockParent, BlockReference, BlockReferenceList, CommandKind, ServerMessage};
+use block::{
+    Block, BlockAccess, BlockParent, BlockReference, BlockReferenceList, CommandKind, ServerMessage,
+};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -39,7 +38,7 @@ fn state(cache: Arc<RwLock<HashMap<Uuid, CachedBlock>>>) -> WorkerState {
             Uuid::nil(),
         ))),
         cache,
-        Arc::new(RwLock::new(HashSet::new())),
+        Arc::new(RwLock::new(HashMap::new())),
     )
 }
 
@@ -98,6 +97,7 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
         operations: Vec::new(),
         parent: BlockParent::Root,
         name: "Read".into(),
+        access: BlockAccess::Edit,
     });
     assert_eq!(cache.read()[&read_id].name, "Read");
 

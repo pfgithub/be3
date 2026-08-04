@@ -52,7 +52,10 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
     );
     assert!(matches!(
         read(&mut editor_socket, private).await,
-        ServerMessage::ReadBlock { .. }
+        ServerMessage::ReadBlock {
+            access: BlockAccess::View,
+            ..
+        }
     ));
     assert!(matches!(
         update(&mut editor_socket, private, vec![], vec![]).await,
@@ -64,6 +67,13 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
 
     // Granting edit lets the same account write.
     set_access(&mut owner_socket, private, editor.id, BlockAccess::Edit).await;
+    assert!(matches!(
+        read(&mut editor_socket, private).await,
+        ServerMessage::ReadBlock {
+            access: BlockAccess::Edit,
+            ..
+        }
+    ));
     assert!(matches!(
         update(&mut editor_socket, private, vec![], vec![]).await,
         ServerMessage::Ok { .. }
