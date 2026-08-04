@@ -1674,7 +1674,9 @@ impl BlockApp {
             },
             SidebarDragSource::Block,
         );
-        let can_edit = self.can_edit_block(reference.id);
+        let access = self.client.block_access(reference.id);
+        let can_edit = access.can_edit();
+        let can_open = access.can_view();
         let can_add_child = self.registry.can_add_child(reference.block_type);
         // Taking a child in means changing the block that takes it.
         let can_add_here = can_add_child && can_edit;
@@ -1743,22 +1745,51 @@ impl BlockApp {
                 0.0
             };
             let label_width = (ui.available_width() - trailing_width).max(0.0);
-            let response = ui.add_sized(
-                [label_width, ui.spacing().interact_size.y],
-                egui::Button::selectable(
-                    is_active,
-                    self.reference_label(&reference),
-                )
-                .right_text(())
+            let label = egui::Button::selectable(is_active, self.reference_label(&reference))
                 .truncate()
-                .sense(egui::Sense::click_and_drag()),
-            );
+                .sense(egui::Sense::click_and_drag());
+            // Editable blocks are the common case and stay unmarked. The rest
+            // carry the icon for as far as the account may go with them.
+            let label = match access_mode_icon(access) {
+                Some(icon) => label.right_text(icon),
+                None => label.right_text(()),
+            };
+            let response = ui
+                .add_enabled_ui(can_open, |ui| {
+                    ui.add_sized([label_width, ui.spacing().interact_size.y], label)
+                })
+                .inner;
+            let response = match access {
+                BlockAccess::Edit => response,
+                BlockAccess::View => response.on_hover_text(format!(
+                    "{}\nYou can view this block, but not change it.",
+                    reference.id
+                )),
+                BlockAccess::KnowExists | BlockAccess::None => response.on_disabled_hover_text(
+                    format!(
+                        "{}\nYou can see that this block exists, but not open it.",
+                        reference.id
+                    ),
+                ),
+            };
+            // A block that may only be known to exist cannot be opened, but its
+            // row still has to answer right clicks and drags: a reference to one
+            // could otherwise never be taken out of the block holding it.
+            let response = if can_open {
+                response
+            } else {
+                ui.interact(
+                    response.rect,
+                    response.id.with("locked"),
+                    egui::Sense::click_and_drag(),
+                )
+            };
             response.dnd_set_drag_payload(SidebarDragPayload {
                 reference: reference.clone(),
                 source,
                 is_reference,
             });
-            if response.clicked() {
+            if can_open && response.clicked() {
                 open = true;
             }
             if is_active {
@@ -3041,10 +3072,10 @@ fn show_access_mode(
 ) -> BlockAccess {
     let mut chosen = access;
     egui::ComboBox::from_id_salt(("editor-access-mode", active))
-        .selected_text(format!("{} {}", access_mode_icon(access), access.label()))
+        .selected_text(access_mode_label(access))
         .show_ui(ui, |ui| {
             for mode in [BlockAccess::Edit, BlockAccess::View, BlockAccess::KnowExists] {
-                let label = format!("{} {}", access_mode_icon(mode), mode.label());
+                let label = access_mode_label(mode);
                 ui.add_enabled_ui(mode <= ceiling, |ui| {
                     if ui.selectable_label(access == mode, label).clicked() {
                         chosen = mode;
@@ -3063,11 +3094,19 @@ fn show_access_mode(
     chosen
 }
 
-fn access_mode_icon(access: BlockAccess) -> &'static str {
+/// An access mode named for a menu, where every mode is spelled out.
+fn access_mode_label(access: BlockAccess) -> String {
+    let icon = access_mode_icon(access).unwrap_or(ICON_EDIT.codepoint);
+    format!("{icon} {}", access.label())
+}
+
+/// How a block's access is marked where it is listed. Editing is what every
+/// block allows until it is shared more narrowly, so it goes unmarked.
+fn access_mode_icon(access: BlockAccess) -> Option<&'static str> {
     match access {
-        BlockAccess::Edit => ICON_EDIT.codepoint,
-        BlockAccess::View => ICON_VISIBILITY.codepoint,
-        BlockAccess::KnowExists | BlockAccess::None => ICON_LOCK.codepoint,
+        BlockAccess::Edit => None,
+        BlockAccess::View => Some(ICON_VISIBILITY.codepoint),
+        BlockAccess::KnowExists | BlockAccess::None => Some(ICON_LOCK.codepoint),
     }
 }
 
