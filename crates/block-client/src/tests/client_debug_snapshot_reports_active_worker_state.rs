@@ -86,6 +86,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
                 name: "Referenced".into(),
                 parent: BlockParent::Root,
                 references: 0,
+                dynamic_artifact: false,
                 access: BlockAccess::Edit,
             }]),
             loaded,

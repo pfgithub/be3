@@ -36,6 +36,7 @@ async fn batch_is_acknowledged_before_watch_notifications() {
                 block_type: Uuid::new_v4(),
                 data: vec![],
                 implicit_name: "Block".into(),
+                dynamic_artifact: false,
                 references: vec![],
                 watch: true,
             },
@@ -62,6 +63,7 @@ async fn batch_is_acknowledged_before_watch_notifications() {
                     operation_id: Uuid::new_v4(),
                     operation: vec![1],
                     implicit_name: "First".into(),
+                    dynamic_artifact: false,
                     references: ReferenceDelta::default(),
                 },
                 block::BlockUpdate {
@@ -70,6 +72,7 @@ async fn batch_is_acknowledged_before_watch_notifications() {
                     operation_id: Uuid::new_v4(),
                     operation: vec![2],
                     implicit_name: "Second".into(),
+                    dynamic_artifact: false,
                     references: ReferenceDelta::default(),
                 },
             ],

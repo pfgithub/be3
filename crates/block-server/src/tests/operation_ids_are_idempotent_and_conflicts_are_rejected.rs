@@ -21,6 +21,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
             Uuid::new_v4(),
             vec![1],
             "Block".into(),
+            false,
             vec![],
         )
         .await
@@ -37,6 +38,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
                 Uuid::new_v4(),
                 vec![2],
                 "Block".into(),
+                false,
                 ReferenceDelta::default(),
             )
             .await
@@ -53,6 +55,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
                 Uuid::new_v4(),
                 vec![2],
                 "Block".into(),
+                false,
                 ReferenceDelta::default(),
             )
             .await
@@ -69,6 +72,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
                 Uuid::new_v4(),
                 vec![3],
                 "Block".into(),
+                false,
                 ReferenceDelta::default(),
             )
             .await,

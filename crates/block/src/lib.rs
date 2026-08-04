@@ -319,6 +319,8 @@ pub struct BlockOperation {
 pub struct BlockUpdate {
     pub id: Uuid,
     pub implicit_name: String,
+    /// Whether the block is generated from another one after this update.
+    pub dynamic_artifact: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
     pub operation_id: Uuid,
@@ -353,6 +355,9 @@ pub struct BlockReference {
     pub name: String,
     pub parent: BlockParent,
     pub references: usize,
+    /// Whether the block is generated from another one, so a client can mark
+    /// it where it is listed without opening it.
+    pub dynamic_artifact: bool,
     /// What the listing account may do with the block, so a client can tell
     /// which of the things it offers would be refused without opening it.
     pub access: BlockAccess,
@@ -404,6 +409,7 @@ pub enum ClientMessage {
         block_type: Uuid,
         data: Vec<u8>,
         implicit_name: String,
+        dynamic_artifact: bool,
         references: Vec<Uuid>,
         watch: bool,
     },
@@ -415,6 +421,7 @@ pub enum ClientMessage {
         operation_id: Uuid,
         operation: Vec<u8>,
         implicit_name: String,
+        dynamic_artifact: bool,
         references: ReferenceDelta,
     },
     UpdateBatch {

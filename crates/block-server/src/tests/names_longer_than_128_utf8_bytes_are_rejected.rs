@@ -14,6 +14,7 @@ async fn names_longer_than_128_utf8_bytes_are_rejected() {
             block_type: Uuid::new_v4(),
             data: vec![],
             implicit_name: "a".repeat(MAX_NAME_BYTES + 1),
+            dynamic_artifact: false,
             references: vec![],
             watch: false,
         },

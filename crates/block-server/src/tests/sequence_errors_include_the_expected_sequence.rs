@@ -21,6 +21,7 @@ async fn sequence_errors_include_the_expected_sequence() {
             Uuid::new_v4(),
             vec![],
             "Block".into(),
+            false,
             vec![],
         )
         .await
@@ -35,6 +36,7 @@ async fn sequence_errors_include_the_expected_sequence() {
                 Uuid::new_v4(),
                 vec![],
                 "Block".into(),
+                false,
                 ReferenceDelta::default(),
             )
             .await,

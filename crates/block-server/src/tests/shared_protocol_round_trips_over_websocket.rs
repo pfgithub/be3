@@ -36,6 +36,7 @@ async fn shared_protocol_round_trips_over_websocket() {
             block_type,
             data: vec![1, 2],
             implicit_name: "Block".into(),
+            dynamic_artifact: false,
             references: vec![],
             watch: true,
         },
@@ -60,6 +61,7 @@ async fn shared_protocol_round_trips_over_websocket() {
             operation_id,
             operation: vec![3],
             implicit_name: "Block".into(),
+            dynamic_artifact: false,
             references: ReferenceDelta::default(),
         },
     )

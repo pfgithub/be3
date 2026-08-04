@@ -39,6 +39,7 @@ async fn preserves_reference_order() {
                 operation_id: Uuid::new_v4(),
                 operation: vec![],
                 implicit_name: "Block".into(),
+                dynamic_artifact: false,
                 references: ReferenceDelta {
                     before: vec![second, first],
                     after: vec![first, second],

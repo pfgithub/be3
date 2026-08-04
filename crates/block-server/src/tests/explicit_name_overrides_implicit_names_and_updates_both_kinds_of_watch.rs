@@ -84,6 +84,7 @@ async fn explicit_name_overrides_implicit_names_and_updates_both_kinds_of_watch(
                 operation_id: Uuid::new_v4(),
                 operation: vec![],
                 implicit_name: "Changed implicit".into(),
+                dynamic_artifact: false,
                 references: ReferenceDelta::default(),
             },
         )

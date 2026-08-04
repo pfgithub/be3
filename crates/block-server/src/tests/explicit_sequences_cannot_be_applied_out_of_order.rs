@@ -21,6 +21,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
             Uuid::new_v4(),
             vec![],
             "Block".into(),
+            false,
             vec![],
         )
         .await
@@ -36,6 +37,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
                 Uuid::new_v4(),
                 vec![2],
                 "Block".into(),
+                false,
                 ReferenceDelta::default(),
             )
             .await,
@@ -53,6 +55,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
             Uuid::new_v4(),
             vec![1],
             "Block".into(),
+            false,
             ReferenceDelta::default(),
         )
         .await
@@ -66,6 +69,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
             Uuid::new_v4(),
             vec![2],
             "Block".into(),
+            false,
             ReferenceDelta::default(),
         )
         .await

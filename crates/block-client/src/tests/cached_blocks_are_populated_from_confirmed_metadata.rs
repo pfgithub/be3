@@ -117,6 +117,7 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
             name: "Listed".into(),
             parent: BlockParent::Root,
             references: 0,
+            dynamic_artifact: false,
             access: BlockAccess::Edit,
         }],
     });

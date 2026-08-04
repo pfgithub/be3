@@ -1770,6 +1770,7 @@ impl WorkerState {
                 block_type: block.block_type_id(),
                 data,
                 implicit_name: block.initial_name(),
+                dynamic_artifact: block.initial_dynamic_artifact(),
                 references: block.initial_references(),
                 watch: true,
             }
@@ -1809,6 +1810,7 @@ impl WorkerState {
                 operation_id: update.operation_id,
                 operation: update.operation,
                 implicit_name: update.implicit_name,
+                dynamic_artifact: update.dynamic_artifact,
                 references: update.references,
             });
         }
@@ -1827,6 +1829,7 @@ impl WorkerState {
                     operation_id: update.operation_id,
                     operation: update.operation,
                     implicit_name: update.implicit_name,
+                    dynamic_artifact: update.dynamic_artifact,
                     references: update.references,
                 });
             }
@@ -2558,6 +2561,7 @@ struct OutboundUpdate {
     operation_id: Uuid,
     operation: Vec<u8>,
     implicit_name: String,
+    dynamic_artifact: bool,
     references: ReferenceDelta,
 }
 
@@ -2571,6 +2575,7 @@ trait ErasedBlock: Send + Sync {
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
+    fn initial_dynamic_artifact(&self) -> bool;
     fn name(&self) -> String;
     fn initial_references(&self) -> Vec<Uuid>;
     fn created(&self);
@@ -2751,6 +2756,9 @@ struct PendingOperation<B, O> {
     id: Uuid,
     operation: StoredOperation<B, O>,
     implicit_name: String,
+    /// What the block's artifact descriptor amounts to once this operation has
+    /// been applied. The server keeps it as listing metadata.
+    dynamic_artifact: bool,
     references: ReferenceDelta,
 }
 
@@ -2877,6 +2885,7 @@ impl<B: Block> TypedBlock<B> {
                     operation: StoredOperation::Operate(operation.clone()),
                     references: reference_delta(&before, &after),
                     implicit_name,
+                    dynamic_artifact: self.dynamic_artifact.read().is_some(),
                 });
             }
             self.revision.fetch_add(1, Ordering::Relaxed);
@@ -2946,6 +2955,7 @@ impl<B: Block> TypedBlock<B> {
                 operation: StoredOperation::Operate(applied.operation),
                 references: applied.references,
                 implicit_name: applied.implicit_name,
+                dynamic_artifact: self.dynamic_artifact.read().is_some(),
             });
         }
         self.revision.fetch_add(1, Ordering::Relaxed);
@@ -2973,8 +2983,9 @@ impl<B: Block> TypedBlock<B> {
         self.dynamic_artifact.write().clone_from(&descriptor);
         state.pending.push_back(PendingOperation {
             id: Uuid::new_v4(),
-            operation: StoredOperation::SetDynamicArtifact(descriptor),
             implicit_name,
+            dynamic_artifact: descriptor.is_some(),
+            operation: StoredOperation::SetDynamicArtifact(descriptor),
             references: ReferenceDelta::default(),
         });
         self.revision.fetch_add(1, Ordering::Relaxed);
@@ -2995,6 +3006,7 @@ impl<B: Block> TypedBlock<B> {
             id: Uuid::new_v4(),
             operation: StoredOperation::Replace(replacement),
             implicit_name: value.implicit_name(),
+            dynamic_artifact: self.dynamic_artifact.read().is_some(),
             references: reference_delta(&before, &after),
         });
         self.history.write().finish_group();
@@ -3065,6 +3077,7 @@ impl<B: Block> TypedBlock<B> {
                 id: Uuid::new_v4(),
                 operation: StoredOperation::Operate(applied.operation),
                 implicit_name: applied.implicit_name,
+                dynamic_artifact: self.dynamic_artifact.read().is_some(),
                 references: applied.references,
             });
         }
@@ -3164,6 +3177,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             .initial
             .as_ref()
             .map_or_else(String::new, Block::implicit_name)
+    }
+
+    fn initial_dynamic_artifact(&self) -> bool {
+        self.dynamic_artifact.read().is_some()
     }
 
     fn name(&self) -> String {
@@ -3268,6 +3285,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             operation: serde_json::to_vec(&pending.operation)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize operation: {error}"))),
             implicit_name: pending.implicit_name.clone(),
+            dynamic_artifact: pending.dynamic_artifact,
             references: pending.references.clone(),
         };
         state.in_flight.insert(pending_id);

@@ -22,6 +22,7 @@ async fn reads_replay_contiguous_operation_records() {
             Uuid::new_v4(),
             vec![1],
             "Block".into(),
+            false,
             vec![],
         )
         .await
@@ -35,6 +36,7 @@ async fn reads_replay_contiguous_operation_records() {
             Uuid::new_v4(),
             vec![2],
             "Block".into(),
+            false,
             ReferenceDelta::default(),
         )
         .await
@@ -48,6 +50,7 @@ async fn reads_replay_contiguous_operation_records() {
             Uuid::new_v4(),
             vec![3],
             "Block".into(),
+            false,
             ReferenceDelta::default(),
         )
         .await

@@ -381,6 +381,7 @@ async fn handle_text_message(
             block_type,
             data,
             implicit_name,
+            dynamic_artifact,
             references,
             watch,
         } => {
@@ -406,6 +407,7 @@ async fn handle_text_message(
                     account_id,
                     data,
                     implicit_name,
+                    dynamic_artifact,
                     references,
                 )
                 .await
@@ -433,6 +435,7 @@ async fn handle_text_message(
             operation_id,
             operation,
             implicit_name,
+            dynamic_artifact,
             references,
         } => {
             let access = store.access(identity).await;
@@ -458,6 +461,7 @@ async fn handle_text_message(
                     account_id,
                     operation,
                     implicit_name,
+                    dynamic_artifact,
                     references,
                 )
                 .await
@@ -559,6 +563,7 @@ async fn handle_text_message(
                         account_id,
                         update.operation,
                         update.implicit_name,
+                        update.dynamic_artifact,
                         update.references,
                     )
                     .await
@@ -1381,6 +1386,7 @@ impl BlockStore {
         author: Uuid,
         data: Vec<u8>,
         implicit_name: String,
+        dynamic_artifact: bool,
         references: Vec<Uuid>,
     ) -> Result<(), StoreError> {
         validate_name(&implicit_name)?;
@@ -1404,6 +1410,7 @@ impl BlockStore {
                 author,
                 name: implicit_name.clone(),
                 explicit_name: None,
+                dynamic_artifact,
                 parent: BlockParent::Orphaned,
                 references,
                 backrefs: Vec::new(),
@@ -1422,8 +1429,8 @@ impl BlockStore {
         transaction.execute(
             "INSERT INTO blocks (
                 workspace_id, id, block_type, author, snapshot, snapshot_seq, name, explicit_name,
-                parent_kind, parent_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, 0, NULL)",
+                dynamic_artifact, parent_kind, parent_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, ?7, 0, NULL)",
             params![
                 workspace_id.to_string(),
                 id.to_string(),
@@ -1431,6 +1438,7 @@ impl BlockStore {
                 author.to_string(),
                 data,
                 implicit_name,
+                dynamic_artifact,
             ],
         )?;
         persist_dependencies(&transaction, workspace_id, &updated)?;
@@ -1449,6 +1457,7 @@ impl BlockStore {
         author: Uuid,
         operation: Vec<u8>,
         implicit_name: String,
+        dynamic_artifact: bool,
         references: ReferenceDelta,
     ) -> Result<UpdateOutcome, StoreError> {
         validate_name(&implicit_name)?;
@@ -1517,6 +1526,7 @@ impl BlockStore {
         if block.explicit_name.is_none() {
             block.name = implicit_name;
         }
+        block.dynamic_artifact = dynamic_artifact;
         let name = block.name.clone();
         let mut database = self.database.lock().await;
         let transaction = database.transaction()?;
@@ -1699,6 +1709,7 @@ impl BlockStore {
                         .iter()
                         .filter(|reference| access.get(**reference).can_know_exists())
                         .count(),
+                    dynamic_artifact: block.dynamic_artifact,
                     access: listed,
                 })
             })
@@ -2056,6 +2067,9 @@ struct DependencyBlock {
     author: Uuid,
     name: String,
     explicit_name: Option<String>,
+    /// Whether the block is generated from another one. The server never reads
+    /// what a block holds, so its author reports this alongside the name.
+    dynamic_artifact: bool,
     parent: BlockParent,
     references: Vec<Uuid>,
     backrefs: Vec<Uuid>,
@@ -2203,11 +2217,17 @@ fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
 fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Error> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
-    let has_legacy_blocks = connection
+    // A table that predates any of the columns the current schema expects is
+    // dropped rather than migrated: stored blocks are not kept compatible.
+    let columns: Vec<String> = connection
         .prepare("PRAGMA table_info(blocks)")?
         .query_map([], |row| row.get::<_, String>(1))?
         .filter_map(Result::ok)
-        .all(|column| column != "workspace_id");
+        .collect();
+    let has_legacy_blocks = !columns.is_empty()
+        && ["workspace_id", "dynamic_artifact"]
+            .iter()
+            .any(|expected| !columns.iter().any(|column| column == expected));
     if has_legacy_blocks {
         connection.execute_batch(
             "DROP TABLE IF EXISTS operations;
@@ -2227,6 +2247,7 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
             snapshot_seq    INTEGER NOT NULL CHECK (snapshot_seq >= 0),
             name            TEXT NOT NULL,
             explicit_name   TEXT,
+            dynamic_artifact INTEGER NOT NULL CHECK (dynamic_artifact IN (0, 1)),
             parent_kind     INTEGER NOT NULL CHECK (parent_kind IN (0, 1, 2)),
             parent_id       TEXT,
             CHECK (
@@ -2381,7 +2402,8 @@ fn load_dependencies(
     let mut states: HashMap<Uuid, DependencyState> = HashMap::new();
     {
         let mut statement = connection.prepare(
-            "SELECT workspace_id, id, block_type, author, name, explicit_name, parent_kind, parent_id
+            "SELECT workspace_id, id, block_type, author, name, explicit_name, dynamic_artifact,
+                    parent_kind, parent_id
              FROM blocks ORDER BY workspace_id, rowid",
         )?;
         let rows = statement.query_map([], |row| {
@@ -2392,13 +2414,23 @@ fn load_dependencies(
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, Option<String>>(5)?,
-                row.get::<_, i64>(6)?,
-                row.get::<_, Option<String>>(7)?,
+                row.get::<_, bool>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         })?;
         for row in rows {
-            let (workspace_id, id, block_type, author, name, explicit_name, parent_kind, parent_id) =
-                row?;
+            let (
+                workspace_id,
+                id,
+                block_type,
+                author,
+                name,
+                explicit_name,
+                dynamic_artifact,
+                parent_kind,
+                parent_id,
+            ) = row?;
             let parent = decode_parent(parent_kind, parent_id)?;
             states
                 .entry(parse_uuid(&workspace_id)?)
@@ -2411,6 +2443,7 @@ fn load_dependencies(
                         author: parse_uuid(&author)?,
                         name,
                         explicit_name,
+                        dynamic_artifact,
                         parent,
                         references: Vec::new(),
                         backrefs: Vec::new(),
@@ -2506,13 +2539,15 @@ fn persist_dependencies(
         let (parent_kind, parent_id) = encode_parent(block.parent);
         let updated = transaction.execute(
             "UPDATE blocks
-             SET name = ?3, explicit_name = ?4, parent_kind = ?5, parent_id = ?6
+             SET name = ?3, explicit_name = ?4, dynamic_artifact = ?5, parent_kind = ?6,
+                 parent_id = ?7
              WHERE workspace_id = ?1 AND id = ?2",
             params![
                 workspace_id.to_string(),
                 id.to_string(),
                 block.name,
                 block.explicit_name,
+                block.dynamic_artifact,
                 parent_kind,
                 parent_id,
             ],

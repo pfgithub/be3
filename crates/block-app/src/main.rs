@@ -1296,6 +1296,8 @@ impl BlockApp {
                     name: result.name,
                     parent: BlockParent::Orphaned,
                     references: 0,
+                    // The picker only creates blocks from scratch.
+                    dynamic_artifact: false,
                     // The account just made the block, so it is theirs.
                     access: BlockAccess::Edit,
                 },
@@ -1763,11 +1765,22 @@ impl BlockApp {
             let label = egui::Button::selectable(is_active, self.reference_label(&reference))
                 .truncate()
                 .sense(egui::Sense::click_and_drag());
-            // Editable blocks are the common case and stay unmarked. The rest
-            // carry the icon for as far as the account may go with them.
-            let label = match access_mode_icon(access) {
-                Some(icon) => label.right_text(icon),
-                None => label.right_text(()),
+            // Generated blocks are marked as such, and editable blocks are the
+            // common case so only the rest carry the icon for as far as the
+            // account may go with them.
+            let markers: Vec<_> = [
+                reference
+                    .dynamic_artifact
+                    .then_some(ICON_DYNAMIC_ARTIFACT.codepoint),
+                access_mode_icon(access),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            let label = if markers.is_empty() {
+                label.right_text(())
+            } else {
+                label.right_text(markers.join(" "))
             };
             let response = ui
                 .add_enabled_ui(can_open, |ui| {
@@ -1786,6 +1799,14 @@ impl BlockApp {
                         reference.id
                     ),
                 ),
+            };
+            let response = if reference.dynamic_artifact {
+                response.on_hover_text(format!(
+                    "{}\nThis block is generated from another block.",
+                    ICON_DYNAMIC_ARTIFACT.codepoint
+                ))
+            } else {
+                response
             };
             // A block that may only be known to exist cannot be opened, but its
             // row still has to answer right clicks and drags: a reference to one

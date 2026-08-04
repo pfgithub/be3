@@ -21,6 +21,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
             Uuid::new_v4(),
             vec![],
             "Block".into(),
+            false,
             vec![],
         )
         .await
@@ -35,6 +36,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
             Uuid::new_v4(),
             vec![1],
             "Block".into(),
+            false,
             ReferenceDelta::default(),
         )
         .await
@@ -48,6 +50,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
             Uuid::new_v4(),
             vec![2],
             "Block".into(),
+            false,
             ReferenceDelta::default(),
         )
         .await

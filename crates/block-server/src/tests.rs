@@ -15,6 +15,7 @@ mod dependency_state_survives_a_server_restart;
 mod editors_only_reach_blocks_they_authored_or_were_granted;
 mod explicit_name_overrides_implicit_names_and_updates_both_kinds_of_watch;
 mod explicit_sequences_cannot_be_applied_out_of_order;
+mod listings_report_whether_a_block_is_a_dynamic_artifact;
 mod lists_backrefs_with_relationship_metadata;
 mod lists_every_root_block_in_uuid_order;
 mod lists_parents;
@@ -366,6 +367,7 @@ mod support {
                 block_type: Uuid::new_v4(),
                 data: vec![],
                 implicit_name: "Block".into(),
+                dynamic_artifact: false,
                 references,
                 watch: false,
             },
@@ -388,6 +390,7 @@ mod support {
                 operation_id: Uuid::new_v4(),
                 operation: vec![],
                 implicit_name: "Block".into(),
+                dynamic_artifact: false,
                 references: ReferenceDelta { before, after },
             },
         )
