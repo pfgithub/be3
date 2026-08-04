@@ -378,6 +378,9 @@ impl<'a> EditorAccess<'a> {
     }
 
     pub fn set_direct_editor_intrinsic_size(&mut self, id: Uuid, size: egui::Vec2) -> bool {
+        if !self.access_for(id).can_edit() {
+            return false;
+        }
         self.with_editor(id, |editor, editors| {
             editor.set_direct_editor_intrinsic_size(size, editors)
         })
@@ -454,6 +457,9 @@ impl<'a> EditorAccess<'a> {
     }
 
     pub fn set_parent(&mut self, id: Uuid, parent: BlockParent) -> bool {
+        if !self.access_for(id).can_edit() {
+            return false;
+        }
         self.with_editor(id, |editor, _| editor.set_parent(parent))
             .is_some()
     }
