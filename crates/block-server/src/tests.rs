@@ -2,6 +2,7 @@ use super::*;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
+mod a_database_from_another_schema_is_refused;
 mod access_flows_down_to_owned_children_and_up_to_parents;
 mod account_login_is_case_insensitive;
 mod account_registration_rejects_duplicates;

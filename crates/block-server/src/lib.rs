@@ -2214,27 +2214,26 @@ fn normalize_ids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
     ids
 }
 
-fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Error> {
+fn initialize_database(connection: &mut Connection) -> Result<(), StoreError> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
-    // A table that predates any of the columns the current schema expects is
-    // dropped rather than migrated: stored blocks are not kept compatible.
-    let columns: Vec<String> = connection
-        .prepare("PRAGMA table_info(blocks)")?
-        .query_map([], |row| row.get::<_, String>(1))?
-        .filter_map(Result::ok)
-        .collect();
-    let has_legacy_blocks = !columns.is_empty()
-        && ["workspace_id", "dynamic_artifact"]
-            .iter()
-            .any(|expected| !columns.iter().any(|column| column == expected));
-    if has_legacy_blocks {
-        connection.execute_batch(
-            "DROP TABLE IF EXISTS operations;
-             DROP TABLE IF EXISTS block_references;
-             DROP TABLE IF EXISTS block_access;
-             DROP TABLE IF EXISTS blocks;",
-        )?;
+    for (table, expected) in EXPECTED_TABLES {
+        let columns = table_columns(connection, table)?;
+        // Tables that are not there yet are created below.
+        if !columns.is_empty()
+            && !columns
+                .iter()
+                .map(String::as_str)
+                .eq(expected.iter().copied())
+        {
+            return Err(StoreError::InvalidStorage(format!(
+                "the {table} table has the columns [{}] but this server expects [{}]. \
+                 Stored blocks are never migrated, so the database has to be deleted \
+                 before this server can open it.",
+                columns.join(", "),
+                expected.join(", "),
+            )));
+        }
     }
     connection.execute_batch(
         "
@@ -2322,7 +2321,71 @@ fn initialize_database(connection: &mut Connection) -> Result<(), rusqlite::Erro
                 REFERENCES blocks(workspace_id, id) ON DELETE CASCADE
         );
         ",
-    )
+    )?;
+    Ok(())
+}
+
+/// The columns every table is expected to have, in the order they are declared
+/// above. A database that disagrees was written by a different version of the
+/// schema, and nothing here migrates it, so the server refuses to open it
+/// rather than deciding on its own what to throw away.
+const EXPECTED_TABLES: &[(&str, &[&str])] = &[
+    (
+        "blocks",
+        &[
+            "workspace_id",
+            "id",
+            "block_type",
+            "author",
+            "snapshot",
+            "snapshot_seq",
+            "name",
+            "explicit_name",
+            "dynamic_artifact",
+            "parent_kind",
+            "parent_id",
+        ],
+    ),
+    (
+        "block_references",
+        &["workspace_id", "block_id", "position", "reference_id"],
+    ),
+    (
+        "operations",
+        &[
+            "workspace_id",
+            "block_id",
+            "seq",
+            "operation_id",
+            "author",
+            "operation",
+            "reference_delta",
+        ],
+    ),
+    ("accounts", &["id", "email", "display_name"]),
+    ("workspaces", &["id", "name", "owner_id"]),
+    (
+        "workspace_memberships",
+        &["workspace_id", "account_id", "role"],
+    ),
+    (
+        "workspace_invitations",
+        &["id", "workspace_id", "email", "role", "invited_by"],
+    ),
+    (
+        "block_access",
+        &["workspace_id", "block_id", "account_id", "access"],
+    ),
+];
+
+/// The columns `table` has, or nothing at all when it does not exist yet.
+fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StoreError> {
+    // A table name cannot be bound as a parameter, and these names are ours.
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(columns)
 }
 
 #[derive(Debug)]
