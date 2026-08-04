@@ -2288,7 +2288,8 @@ impl BlockApp {
                     match &support {
                         Ok(support) => {
                             navigate = self.show_dynamic_artifact_source(ui, &descriptor, *support);
-                            ui.weak(format!("· {}", (support.summary)(&descriptor.data)));
+                            ui.separator();
+                            ui.weak((support.summary)(&descriptor.data));
                             if let Some(settings) = self.show_dynamic_artifact_settings(
                                 ui,
                                 &descriptor,
