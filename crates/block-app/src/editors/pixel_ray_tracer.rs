@@ -1062,9 +1062,6 @@ impl BlockEditor for PixelRayTracerEditor {
             if ui.button("Fit view").clicked() {
                 viewport.fit();
             }
-            if ui.button("Performance").clicked() {
-                performance::open();
-            }
             if ui.button("Reset artwork").clicked() {
                 self.block.operate(PixelRayTracerOperation::Reset);
                 self.selected_entity = None;

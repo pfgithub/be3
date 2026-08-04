@@ -150,9 +150,6 @@ impl TextEditor {
                         ui.selectable_value(&mut language, choice, choice.label());
                     }
                 });
-            if ui.button("Performance").clicked() {
-                performance::open();
-            }
             if previous == TextLanguage::Markdown {
                 ui.separator();
                 if ui.button(ICON_FORMAT_BOLD).on_hover_text("Bold").clicked() {
