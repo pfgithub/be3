@@ -17,7 +17,29 @@ mod markdown_list_newline;
 mod markdown_plain_punctuation;
 mod markdown_tables;
 mod raw_bytes;
+mod rust_syn_hl;
 mod zig_syn_hl;
+
+/// Renders the document with `<scope>` markers wherever the colour scope
+/// changes, skipping whitespace so that trailing-scope inheritance is ignored.
+fn rendered_highlight(tester: &mut EditorTester, offset: usize) -> String {
+    let highlight = tester.editor.highlight();
+    let document = tester.editor.document().read().unwrap();
+    let mut result = String::new();
+    let mut previous = SynHlColorScope::Invalid;
+    for index in offset..document.len() {
+        let scope = highlight.advance_and_read(index);
+        let byte = document.bytes()[index];
+        if !byte.is_ascii_whitespace() && scope != previous {
+            result.push('<');
+            result.push_str(scope.as_str());
+            result.push('>');
+        }
+        previous = scope;
+        result.push(char::from(byte));
+    }
+    result
+}
 
 struct EditorTester {
     _client: BlockClient,

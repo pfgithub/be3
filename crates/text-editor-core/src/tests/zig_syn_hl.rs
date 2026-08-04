@@ -1,24 +1,5 @@
 use super::*;
 
-fn rendered_highlight(tester: &mut EditorTester, offset: usize) -> String {
-    let highlight = tester.editor.highlight();
-    let document = tester.editor.document().read().unwrap();
-    let mut result = String::new();
-    let mut previous = SynHlColorScope::Invalid;
-    for index in offset..document.len() {
-        let scope = highlight.advance_and_read(index);
-        let byte = document.bytes()[index];
-        if !byte.is_ascii_whitespace() && scope != previous {
-            result.push('<');
-            result.push_str(scope.as_str());
-            result.push('>');
-        }
-        previous = scope;
-        result.push(char::from(byte));
-    }
-    result
-}
-
 #[test]
 fn zig_syn_hl() {
     let mut tester = EditorTester::new(b"const std = @import(\"std\");");

@@ -67,6 +67,7 @@ struct MarkdownCheckbox {
 enum HighlightLanguage {
     Markdown,
     PlainText,
+    Rust,
     Zig,
 }
 
@@ -75,6 +76,7 @@ impl HighlightLanguage {
         match self {
             Self::Markdown => "Markdown",
             Self::PlainText => "Plain text",
+            Self::Rust => "Rust",
             Self::Zig => "Zig",
         }
     }
@@ -83,6 +85,7 @@ impl HighlightLanguage {
         match self {
             Self::Markdown => Some(Language::Markdown),
             Self::PlainText => None,
+            Self::Rust => Some(Language::Rust),
             Self::Zig => Some(Language::Zig),
         }
     }
@@ -181,6 +184,11 @@ impl TextEditor {
                         &mut self.highlight_language,
                         HighlightLanguage::PlainText,
                         HighlightLanguage::PlainText.label(),
+                    );
+                    ui.selectable_value(
+                        &mut self.highlight_language,
+                        HighlightLanguage::Rust,
+                        HighlightLanguage::Rust.label(),
                     );
                     ui.selectable_value(
                         &mut self.highlight_language,

@@ -3,6 +3,7 @@ use tree_sitter::{InputEdit, Parser, Point, Tree};
 use tree_sitter_md::{MarkdownParser, MarkdownTree};
 
 mod markdown;
+mod rust;
 mod zig;
 
 pub use markdown::{MarkdownTable, MarkdownTableAlignment, MarkdownTableRow};
@@ -10,6 +11,7 @@ pub use markdown::{MarkdownTable, MarkdownTableAlignment, MarkdownTableRow};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Language {
     Markdown,
+    Rust,
     Zig,
 }
 
@@ -17,6 +19,7 @@ impl Language {
     fn chain_start_offset(self, kind: &str, source: &[u8]) -> usize {
         match self {
             Self::Markdown => 0,
+            Self::Rust => rust::chain_start_offset(kind, source),
             Self::Zig => zig::chain_start_offset(kind, source),
         }
     }
@@ -192,6 +195,7 @@ impl Highlighter {
                 parser: MarkdownParser::default(),
                 tree: None,
             },
+            Language::Rust => ParserBackend::tree_sitter(&tree_sitter_rust::LANGUAGE.into()),
             Language::Zig => ParserBackend::tree_sitter(&tree_sitter_zig::LANGUAGE.into()),
         };
         Self {
@@ -288,6 +292,7 @@ impl Highlighter {
                     markdown_tables,
                 }
             }
+            Language::Rust => SyntaxHighlight::from_scopes(rust::scopes(bytes), bytes),
             Language::Zig => SyntaxHighlight::from_scopes(zig::scopes(bytes), bytes),
         }
     }
