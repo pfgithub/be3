@@ -7,8 +7,10 @@ mod compiled_logic;
 mod database;
 mod database_schema;
 mod gui_builder;
+mod hotbar;
 pub(crate) mod image;
 mod infinite_canvas;
+mod logic_game;
 mod logic_grid;
 mod map;
 mod pixel_art;
@@ -48,6 +50,13 @@ pub(super) fn embedded_editor_frame_size(intrinsic: egui::Vec2, scale: f32) -> e
             + EMBEDDED_EDITOR_TITLE_GAP)
             * scale,
     )
+}
+
+/// Sets up the render resources editors need before any of them draws. eframe
+/// hands these out once, at startup, so they are claimed here rather than from
+/// inside an editor.
+pub fn install_render_resources(creation_context: &eframe::CreationContext<'_>) {
+    logic_grid::renderer::install(creation_context);
 }
 
 pub enum EditorAction {
@@ -1080,6 +1089,8 @@ impl EditorRegistry {
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
+        registry.register::<hotbar::HotbarEditor>();
+        registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
         registry.register_creatable::<pixel_art::PixelArtEditor>();

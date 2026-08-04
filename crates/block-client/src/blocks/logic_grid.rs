@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use block::{Block, BlockHistory, HistoryDirection};
+use logicgame::challenges::ChallengeId;
 use logicgame::grid::{
     Component, ComponentId, ComponentKind, ComponentOrientation, LogicGrid as Grid, Point, Wire,
 };
@@ -16,6 +17,14 @@ pub struct LogicGrid {
     /// have none and fall back to the built-in tools.
     #[serde(default)]
     hotbar: Option<Uuid>,
+    /// The level this grid is an attempt at. A grid built outside a game has
+    /// none, and is edited without a goal or a test to run against.
+    #[serde(default)]
+    challenge: Option<ChallengeId>,
+    /// Whether this grid has passed its level's test. The game reads it back
+    /// off its solutions rather than being told by the editor that ran them.
+    #[serde(default)]
+    completed: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -61,6 +70,9 @@ pub enum LogicGridOperation {
     SetHotbar {
         hotbar: Option<Uuid>,
     },
+    SetCompleted {
+        completed: bool,
+    },
 }
 
 pub struct LogicGridHistory;
@@ -87,6 +99,10 @@ enum LogicGridHistoryChange {
         before: Option<Uuid>,
         after: Option<Uuid>,
     },
+    Completed {
+        before: bool,
+        after: bool,
+    },
 }
 
 impl LogicGrid {
@@ -94,10 +110,31 @@ impl LogicGrid {
         Self::default()
     }
 
-    pub fn with_hotbar(hotbar: Uuid) -> Self {
+    /// Wraps a circuit that was built elsewhere, such as one being imported or
+    /// one a test set up directly.
+    pub fn from_grid(grid: Grid) -> Self {
+        Self {
+            grid,
+            hotbar: None,
+            challenge: None,
+            completed: false,
+        }
+    }
+
+    /// Marks the grid as an attempt at `challenge`.
+    #[must_use]
+    pub fn with_challenge(mut self, challenge: ChallengeId) -> Self {
+        self.challenge = Some(challenge);
+        self
+    }
+
+    /// An empty grid started for `challenge`, sharing the game's hotbar.
+    pub fn for_challenge(hotbar: Option<Uuid>, challenge: ChallengeId) -> Self {
         Self {
             grid: Grid::new(),
-            hotbar: Some(hotbar),
+            hotbar,
+            challenge: Some(challenge),
+            completed: false,
         }
     }
 
@@ -107,6 +144,14 @@ impl LogicGrid {
 
     pub fn hotbar(&self) -> Option<Uuid> {
         self.hotbar
+    }
+
+    pub fn challenge(&self) -> Option<ChallengeId> {
+        self.challenge
+    }
+
+    pub fn completed(&self) -> bool {
+        self.completed
     }
 
     /// The ID the next [`LogicGridOperation::AddComponent`] should carry.
@@ -165,6 +210,7 @@ impl Block for LogicGrid {
                 grid.remove_wire_segment(*wire);
             }
             LogicGridOperation::SetHotbar { hotbar } => block.hotbar = *hotbar,
+            LogicGridOperation::SetCompleted { completed } => block.completed = *completed,
         }
     }
 
@@ -220,6 +266,7 @@ impl BlockHistory<LogicGrid> for LogicGridHistory {
                     (removed.len() + added.len()) * size_of::<Wire>()
                 }
                 LogicGridHistoryChange::Hotbar { .. } => size_of::<Uuid>() * 2,
+                LogicGridHistoryChange::Completed { .. } => 2,
             })
             .sum()
     }
@@ -284,6 +331,11 @@ impl BlockHistory<LogicGrid> for LogicGridHistory {
                         hotbar: if to_after { *after } else { *before },
                     }]
                 }
+                LogicGridHistoryChange::Completed { before, after } => {
+                    vec![LogicGridOperation::SetCompleted {
+                        completed: if to_after { *after } else { *before },
+                    }]
+                }
             })
             .collect()
     }
@@ -342,6 +394,12 @@ fn change_between(
                 after: after.hotbar,
             }
         }),
+        LogicGridOperation::SetCompleted { .. } => {
+            (before.completed != after.completed).then_some(LogicGridHistoryChange::Completed {
+                before: before.completed,
+                after: after.completed,
+            })
+        }
     }
 }
 

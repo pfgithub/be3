@@ -41,6 +41,7 @@ exported = true
 [dependencies]
 block = { path = "../block" }
 block-client = { path = "../block-client" }
+bytemuck = { version = "1.24.0", features = ["derive"] }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "persistence", "wgpu"] }
 egui_dock = "0.19.1"
 egui_material_icons = "0.6.0"

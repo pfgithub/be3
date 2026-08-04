@@ -457,6 +457,7 @@ dependencies = [
  "block 0.1.0",
  "block-client",
  "block-server",
+ "bytemuck",
  "eframe",
  "egui_dock",
  "egui_material_icons",
