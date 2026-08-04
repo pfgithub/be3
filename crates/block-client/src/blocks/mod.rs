@@ -1,5 +1,6 @@
 pub mod database;
 pub mod database_schema;
+pub mod gui_builder;
 pub mod image;
 pub mod infinite_canvas;
 pub mod map;
