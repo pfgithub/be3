@@ -743,13 +743,24 @@ impl GridBounds {
 /// A grid of components and the wires between them. Serializing one writes the
 /// same snapshot `snapshot` returns: the next component ID and the revision
 /// counter are working state, not part of the circuit.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct LogicGrid {
     wires: Vec<Wire>,
     components: BTreeMap<ComponentId, Component>,
     next_component_id: u64,
     revision: u64,
 }
+
+/// Two grids are the same when they hold the same circuit. The revision
+/// counter only says how often a grid has been edited, and the next component
+/// ID only affects what is placed next, so neither takes part.
+impl PartialEq for LogicGrid {
+    fn eq(&self, other: &Self) -> bool {
+        self.wires == other.wires && self.components == other.components
+    }
+}
+
+impl Eq for LogicGrid {}
 
 impl Serialize for LogicGrid {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

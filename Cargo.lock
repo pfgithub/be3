@@ -503,6 +503,7 @@ dependencies = [
  "futures-util",
  "image",
  "js-sys",
+ "logicgame",
  "parking_lot",
  "serde",
  "serde_json",

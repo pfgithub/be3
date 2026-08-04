@@ -1,8 +1,12 @@
+pub mod compiled_logic;
 pub mod database;
 pub mod database_schema;
 pub mod gui_builder;
+pub mod hotbar;
 pub mod image;
 pub mod infinite_canvas;
+pub mod logic_game;
+pub mod logic_grid;
 pub mod map;
 pub mod pixel_art;
 pub mod pixel_ray_tracer;
