@@ -3,11 +3,13 @@
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 mod browser_tab;
 mod clipboard;
+mod compiled_logic;
 mod database;
 mod database_schema;
 mod gui_builder;
 pub(crate) mod image;
 mod infinite_canvas;
+mod logic_grid;
 mod map;
 mod pixel_art;
 mod pixel_ray_tracer;
@@ -1077,6 +1079,8 @@ impl EditorRegistry {
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
+        registry.register::<compiled_logic::CompiledLogicEditor>();
+        registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
         registry.register_creatable::<pixel_art::PixelArtEditor>();
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
@@ -1086,6 +1090,12 @@ impl EditorRegistry {
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         registry.register_creatable::<workspace_index::WorkspaceIndexEditor>();
         registry
+    }
+
+    /// Registers an editor for a block type that is only ever produced by
+    /// another block, so it never appears in the new-block menu.
+    fn register<E: EditorKind>(&mut self) {
+        self.insert(EditorRegistration::of::<E>());
     }
 
     fn register_creatable<E: CreatableEditor>(&mut self) {
