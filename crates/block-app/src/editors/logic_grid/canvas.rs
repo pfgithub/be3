@@ -649,8 +649,7 @@ impl LogicGridEditor {
                     if let Some(position) =
                         subcomponent_placement_position(anchor, orientation, &kind)
                     {
-                        self.grid
-                            .add_component_with_orientation(position, orientation, kind);
+                        self.place(position, orientation, kind);
                     }
                 }
                 Some(Gesture::SelectBox { start, additive }) => {
