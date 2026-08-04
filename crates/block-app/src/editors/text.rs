@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{Block, BlockParent, BlockReferenceList};
+use block::{BlockParent, BlockReferenceList};
 use block_client::{
     block_url,
     blocks::text::{TextDocument, TextLanguage},
@@ -19,10 +19,13 @@ use eframe::egui::{
     self, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton, Pos2, Rect, Sense,
     Vec2,
 };
-use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_DESCRIPTION, ICON_FORMAT_BOLD,
-    ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED,
-    ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_LINK, ICON_TITLE,
+use egui_material_icons::{
+    icons::{
+        ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_DESCRIPTION, ICON_FORMAT_BOLD,
+        ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED,
+        ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_LINK, ICON_TITLE,
+    },
+    MaterialIcon,
 };
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
@@ -39,9 +42,9 @@ use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_frame_size, embedded_editor_ui,
     image::create_image_block,
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
-    SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
     EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
@@ -64,28 +67,24 @@ struct MarkdownCheckbox {
     checked: bool,
 }
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: TextDocument::TYPE_ID,
-        display_name: "Text",
-        icon: ICON_DESCRIPTION,
-        create: Some(|client| {
-            let block = client.create_block(TextDocument::new());
-            Box::new(TextEditor::new(block, client))
-        }),
-        open: |client: &BlockClient, id| {
-            Box::new(TextEditor::new(
-                client.get_block::<TextDocument>(id),
-                client,
-            ))
-        },
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: None,
+impl EditorKind for TextEditor {
+    type Block = TextDocument;
+
+    const DISPLAY_NAME: &'static str = "Text";
+    const ICON: MaterialIcon = ICON_DESCRIPTION;
+
+    fn open(client: &BlockClient, block: BlockHandle<TextDocument>) -> Self {
+        Self::new(block, client)
     }
 }
 
-struct TextEditor {
+impl CreatableEditor for TextEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(TextDocument::new()), client)
+    }
+}
+
+pub(super) struct TextEditor {
     block: BlockHandle<TextDocument>,
     workspace_id: Uuid,
     core: Core,

@@ -9,12 +9,15 @@ use block_client::{
     BlockClient, BlockHandle,
 };
 use eframe::egui;
-use egui_material_icons::icons::{ICON_ADD, ICON_DATABASE, ICON_DELETE, ICON_SCHEMA};
+use egui_material_icons::{
+    icons::{ICON_ADD, ICON_DATABASE, ICON_DELETE, ICON_SCHEMA},
+    MaterialIcon,
+};
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    EditorAction, EditorRegistration,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, EditorAction, EditorKind,
 };
 
 const ROW_HEADER_WIDTH: f32 = 44.0;
@@ -22,28 +25,30 @@ const ROW_HEIGHT: f32 = 28.0;
 const STRING_COLUMN_WIDTH: f32 = 180.0;
 const NUMBER_COLUMN_WIDTH: f32 = 120.0;
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: Database::TYPE_ID,
-        display_name: "Database",
-        icon: ICON_DATABASE,
-        create: Some(|client| {
-            let schema = client.create_block(DatabaseSchema::new());
-            schema.operate(DatabaseSchemaOperation::AddField {
-                field: DatabaseField {
-                    id: Uuid::new_v4(),
-                    name: "Name".into(),
-                    field_type: DatabaseFieldType::String,
-                },
-            });
-            let database = client.create_block(Database::new(schema.id()));
-            schema.set_parent(BlockParent::Uuid(database.id()));
-            Box::new(DatabaseEditor::new(database, Some(schema)))
-        }),
-        open: |client, id| Box::new(DatabaseEditor::new(client.get_block::<Database>(id), None)),
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: None,
+impl EditorKind for DatabaseEditor {
+    type Block = Database;
+
+    const DISPLAY_NAME: &'static str = "Database";
+    const ICON: MaterialIcon = ICON_DATABASE;
+
+    fn open(_client: &BlockClient, block: BlockHandle<Database>) -> Self {
+        Self::new(block, None)
+    }
+}
+
+impl CreatableEditor for DatabaseEditor {
+    fn create(client: &BlockClient) -> Self {
+        let schema = client.create_block(DatabaseSchema::new());
+        schema.operate(DatabaseSchemaOperation::AddField {
+            field: DatabaseField {
+                id: Uuid::new_v4(),
+                name: "Name".into(),
+                field_type: DatabaseFieldType::String,
+            },
+        });
+        let database = client.create_block(Database::new(schema.id()));
+        schema.set_parent(BlockParent::Uuid(database.id()));
+        Self::new(database, Some(schema))
     }
 }
 
@@ -53,7 +58,7 @@ struct CellAddress {
     field_id: Uuid,
 }
 
-struct DatabaseEditor {
+pub(super) struct DatabaseEditor {
     block: BlockHandle<Database>,
     schema: Option<BlockHandle<DatabaseSchema>>,
     selected: Option<CellAddress>,

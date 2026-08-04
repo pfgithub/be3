@@ -12,18 +12,21 @@ use block_client::{
     BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{self, Color32, Key, Modifiers, Rect, Sense, Stroke, Vec2};
-use egui_material_icons::icons::{
-    ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_DELETE, ICON_FULLSCREEN,
-    ICON_FULLSCREEN_EXIT, ICON_KEYBOARD_ARROW_DOWN, ICON_SLIDESHOW,
+use egui_material_icons::{
+    icons::{
+        ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_DELETE, ICON_FULLSCREEN,
+        ICON_FULLSCREEN_EXIT, ICON_KEYBOARD_ARROW_DOWN, ICON_SLIDESHOW,
+    },
+    MaterialIcon,
 };
 use uuid::Uuid;
 
 use crate::block_picker::BlockPicker;
 
 use super::{
-    infinite_canvas::InfiniteCanvasEditor, BlockEditor, BlockRenderContext,
+    infinite_canvas::InfiniteCanvasEditor, BlockEditor, BlockRenderContext, CreatableEditor,
     DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorRegistration,
+    EditorAccess, EditorAction, EditorKind,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
@@ -31,26 +34,22 @@ const THUMBNAIL_SIZE: Vec2 = egui::vec2(176.0, 104.0);
 const DEFAULT_SLIDE_SIZE: Vec2 = egui::vec2(960.0, 540.0);
 const PLAYBACK_CONTROLS_HEIGHT: f32 = 48.0;
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: Presentation::TYPE_ID,
-        display_name: "Presentation",
-        icon: ICON_SLIDESHOW,
-        create: Some(|client| {
-            Box::new(PresentationEditor::new(
-                client.create_block(Presentation::new()),
-                client,
-            ))
-        }),
-        open: |client, id| {
-            Box::new(PresentationEditor::new(
-                client.get_block::<Presentation>(id),
-                client,
-            ))
-        },
-        can_add_child: true,
-        can_delete_child: true,
-        dynamic_artifact: None,
+impl EditorKind for PresentationEditor {
+    type Block = Presentation;
+
+    const DISPLAY_NAME: &'static str = "Presentation";
+    const ICON: MaterialIcon = ICON_SLIDESHOW;
+    const CAN_ADD_CHILD: bool = true;
+    const CAN_DELETE_CHILD: bool = true;
+
+    fn open(client: &BlockClient, block: BlockHandle<Presentation>) -> Self {
+        Self::new(block, client)
+    }
+}
+
+impl CreatableEditor for PresentationEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(Presentation::new()), client)
     }
 }
 

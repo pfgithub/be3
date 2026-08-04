@@ -1,40 +1,38 @@
-use block::Block;
 use block_client::{
     blocks::database_schema::{
         DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
     },
-    BlockHandle,
+    BlockClient, BlockHandle,
 };
 use eframe::egui;
-use egui_material_icons::icons::{ICON_ADD, ICON_DELETE, ICON_SCHEMA};
+use egui_material_icons::{
+    icons::{ICON_ADD, ICON_DELETE, ICON_SCHEMA},
+    MaterialIcon,
+};
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorRegistration,
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 600.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 40.0;
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: DatabaseSchema::TYPE_ID,
-        display_name: "Database Schema",
-        icon: ICON_SCHEMA,
-        create: Some(|client| {
-            Box::new(DatabaseSchemaEditor::new(
-                client.create_block(DatabaseSchema::new()),
-            ))
-        }),
-        open: |client, id| {
-            Box::new(DatabaseSchemaEditor::new(
-                client.get_block::<DatabaseSchema>(id),
-            ))
-        },
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: None,
+impl EditorKind for DatabaseSchemaEditor {
+    type Block = DatabaseSchema;
+
+    const DISPLAY_NAME: &'static str = "Database Schema";
+    const ICON: MaterialIcon = ICON_SCHEMA;
+
+    fn open(_client: &BlockClient, block: BlockHandle<DatabaseSchema>) -> Self {
+        Self::new(block)
+    }
+}
+
+impl CreatableEditor for DatabaseSchemaEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(DatabaseSchema::new()))
     }
 }
 

@@ -1,19 +1,20 @@
 use std::{cmp::Ordering, collections::HashMap};
 
-use block::{Block, BlockReference, BlockReferenceList};
+use block::{BlockReference, BlockReferenceList};
 use block_client::{
     blocks::workspace_index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation},
     BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui;
-use egui_material_icons::icons::{
-    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_FOLDER, ICON_GRID_VIEW, ICON_VIEW_LIST,
+use egui_material_icons::{
+    icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_FOLDER, ICON_GRID_VIEW, ICON_VIEW_LIST},
+    MaterialIcon,
 };
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorRegistration, SidebarDragPayload,
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorKind, SidebarDragPayload,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 400.0;
@@ -61,26 +62,22 @@ struct BrowserEntry {
     reference: Option<BlockReference>,
 }
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: WorkspaceIndex::TYPE_ID,
-        display_name: "Folder",
-        icon: ICON_FOLDER,
-        create: Some(|client| {
-            Box::new(WorkspaceIndexEditor::new(
-                client,
-                client.create_block(WorkspaceIndex::default()),
-            ))
-        }),
-        open: |client, id| {
-            Box::new(WorkspaceIndexEditor::new(
-                client,
-                client.get_block::<WorkspaceIndex>(id),
-            ))
-        },
-        can_add_child: true,
-        can_delete_child: true,
-        dynamic_artifact: None,
+impl EditorKind for WorkspaceIndexEditor {
+    type Block = WorkspaceIndex;
+
+    const DISPLAY_NAME: &'static str = "Folder";
+    const ICON: MaterialIcon = ICON_FOLDER;
+    const CAN_ADD_CHILD: bool = true;
+    const CAN_DELETE_CHILD: bool = true;
+
+    fn open(client: &BlockClient, block: BlockHandle<WorkspaceIndex>) -> Self {
+        Self::new(client, block)
+    }
+}
+
+impl CreatableEditor for WorkspaceIndexEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client, client.create_block(WorkspaceIndex::default()))
     }
 }
 

@@ -10,7 +10,7 @@ use painting::*;
 
 use std::collections::{HashMap, HashSet};
 
-use block::{Block, BlockParent, BlockReferenceList};
+use block::{BlockParent, BlockReferenceList};
 use block_client::{
     blocks::{
         image::Image as ImageBlock,
@@ -23,10 +23,13 @@ use block_client::{
     BlockClient, BlockHandle, CachedBlock, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
-use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW,
-    ICON_FORMAT_COLOR_RESET, ICON_KEYBOARD_ARROW_DOWN, ICON_RECTANGLE, ICON_SELECT,
-    ICON_TEXT_FIELDS, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+use egui_material_icons::{
+    icons::{
+        ICON_ARROW_BACK, ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW,
+        ICON_FORMAT_COLOR_RESET, ICON_KEYBOARD_ARROW_DOWN, ICON_RECTANGLE, ICON_SELECT,
+        ICON_TEXT_FIELDS, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+    },
+    MaterialIcon,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -37,32 +40,26 @@ use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
-    SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
     EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: InfiniteCanvas::TYPE_ID,
-        display_name: "Canvas",
-        icon: ICON_DRAW,
-        create: Some(|client| {
-            Box::new(InfiniteCanvasEditor::new(
-                client.create_block(InfiniteCanvas::new()),
-                client,
-            ))
-        }),
-        open: |client, id| {
-            Box::new(InfiniteCanvasEditor::new(
-                client.get_block::<InfiniteCanvas>(id),
-                client,
-            ))
-        },
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: None,
+impl EditorKind for InfiniteCanvasEditor {
+    type Block = InfiniteCanvas;
+
+    const DISPLAY_NAME: &'static str = "Canvas";
+    const ICON: MaterialIcon = ICON_DRAW;
+
+    fn open(client: &BlockClient, block: BlockHandle<InfiniteCanvas>) -> Self {
+        Self::new(block, client)
+    }
+}
+
+impl CreatableEditor for InfiniteCanvasEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(InfiniteCanvas::new()), client)
     }
 }
 

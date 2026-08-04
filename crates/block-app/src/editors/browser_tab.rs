@@ -1,13 +1,13 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use block::Block;
 use block_client::{
     blocks::web_browser_tab::{HistoryItem, WebBrowserTab, WebBrowserTabOperation},
-    BlockHandle,
+    BlockClient, BlockHandle,
 };
 use eframe::egui;
-use egui_material_icons::icons::{
-    ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_LANGUAGE, ICON_REFRESH,
+use egui_material_icons::{
+    icons::{ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_LANGUAGE, ICON_REFRESH},
+    MaterialIcon,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -15,30 +15,26 @@ use wry::{
 };
 
 use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorRegistration,
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_SIZE: egui::Vec2 = egui::Vec2::new(1024.0, 768.0);
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: WebBrowserTab::TYPE_ID,
-        display_name: "Web Browser Tab",
-        icon: ICON_LANGUAGE,
-        create: Some(|client| {
-            Box::new(WebBrowserTabEditor::new(
-                client.create_block(WebBrowserTab::new()),
-            ))
-        }),
-        open: |client, id| {
-            Box::new(WebBrowserTabEditor::new(
-                client.get_block::<WebBrowserTab>(id),
-            ))
-        },
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: None,
+impl EditorKind for WebBrowserTabEditor {
+    type Block = WebBrowserTab;
+
+    const DISPLAY_NAME: &'static str = "Web Browser Tab";
+    const ICON: MaterialIcon = ICON_LANGUAGE;
+
+    fn open(_client: &BlockClient, block: BlockHandle<WebBrowserTab>) -> Self {
+        Self::new(block)
+    }
+}
+
+impl CreatableEditor for WebBrowserTabEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(WebBrowserTab::new()))
     }
 }
 

@@ -26,8 +26,9 @@ use uuid::Uuid;
 use self::surface::{PreviewState, Surface};
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, EditorRegistration,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, DynamicArtifactSupport,
+    EditorAccess, EditorAction, EditorKind,
 };
 
 const TITLE_BAR_HEIGHT: f32 = 26.0;
@@ -35,20 +36,24 @@ const CANVAS_PADDING: f32 = 8.0;
 const CANVAS_CORNER_RADIUS: f32 = 6.0;
 const PREVIEW_LINE_HEIGHT: f32 = 14.0;
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: GuiBuilder::TYPE_ID,
-        display_name: "GUI Builder",
-        icon: ICON_WIDGETS,
-        create: Some(|client| {
-            Box::new(GuiBuilderEditor::new(
-                client.create_block(GuiBuilder::new()),
-            ))
-        }),
-        open: |client, id| Box::new(GuiBuilderEditor::new(client.get_block::<GuiBuilder>(id))),
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: Some(dynamic_artifact::SUPPORT),
+impl EditorKind for GuiBuilderEditor {
+    type Block = GuiBuilder;
+
+    const DISPLAY_NAME: &'static str = "GUI Builder";
+    const ICON: MaterialIcon = ICON_WIDGETS;
+
+    fn open(_client: &BlockClient, block: BlockHandle<GuiBuilder>) -> Self {
+        Self::new(block)
+    }
+
+    fn dynamic_artifact() -> Option<DynamicArtifactSupport> {
+        Some(dynamic_artifact::SUPPORT)
+    }
+}
+
+impl CreatableEditor for GuiBuilderEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(GuiBuilder::new()))
     }
 }
 

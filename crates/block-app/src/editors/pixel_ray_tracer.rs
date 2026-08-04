@@ -7,19 +7,18 @@ use std::{
 };
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
-    EditorRegistration,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAction, EditorKind,
 };
-use block::Block;
 use block_client::{
     blocks::pixel_ray_tracer::{
         PixelRayTracer, PixelRayTracerOperation, PixelUpdate, Point, RayEntity, RaySettings,
         PIXEL_RAY_TRACER_PALETTE, PIXEL_RAY_TRACER_SIZE,
     },
-    BlockHandle,
+    BlockClient, BlockHandle,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
-use egui_material_icons::icons::ICON_FLARE;
+use egui_material_icons::{icons::ICON_FLARE, MaterialIcon};
 
 use crate::performance;
 
@@ -40,24 +39,20 @@ type RayJobResult = (
     Duration,
 );
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: PixelRayTracer::TYPE_ID,
-        display_name: "Pixel Ray Tracer",
-        icon: ICON_FLARE,
-        create: Some(|client| {
-            Box::new(PixelRayTracerEditor::new(
-                client.create_block(PixelRayTracer::new()),
-            ))
-        }),
-        open: |client, id| {
-            Box::new(PixelRayTracerEditor::new(
-                client.get_block::<PixelRayTracer>(id),
-            ))
-        },
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: None,
+impl EditorKind for PixelRayTracerEditor {
+    type Block = PixelRayTracer;
+
+    const DISPLAY_NAME: &'static str = "Pixel Ray Tracer";
+    const ICON: MaterialIcon = ICON_FLARE;
+
+    fn open(_client: &BlockClient, block: BlockHandle<PixelRayTracer>) -> Self {
+        Self::new(block)
+    }
+}
+
+impl CreatableEditor for PixelRayTracerEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(PixelRayTracer::new()))
     }
 }
 

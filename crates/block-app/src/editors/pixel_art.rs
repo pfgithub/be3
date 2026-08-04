@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 pub(super) mod dynamic_artifact;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAction,
-    EditorRegistration,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, DynamicArtifactSupport, EditorAction, EditorKind,
 };
 use block::Block;
 use block_client::{
@@ -25,16 +25,24 @@ use egui_material_icons::icons::{
 };
 use egui_material_icons::MaterialIcon;
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: PixelArt::TYPE_ID,
-        display_name: "Pixel Art",
-        icon: ICON_GRID_ON,
-        create: Some(|client| Box::new(PixelArtEditor::new(client.create_block(PixelArt::new())))),
-        open: |client, id| Box::new(PixelArtEditor::new(client.get_block::<PixelArt>(id))),
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: Some(dynamic_artifact::SUPPORT),
+impl EditorKind for PixelArtEditor {
+    type Block = PixelArt;
+
+    const DISPLAY_NAME: &'static str = "Pixel Art";
+    const ICON: MaterialIcon = ICON_GRID_ON;
+
+    fn open(_client: &BlockClient, block: BlockHandle<PixelArt>) -> Self {
+        Self::new(block)
+    }
+
+    fn dynamic_artifact() -> Option<DynamicArtifactSupport> {
+        Some(dynamic_artifact::SUPPORT)
+    }
+}
+
+impl CreatableEditor for PixelArtEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(PixelArt::new()))
     }
 }
 

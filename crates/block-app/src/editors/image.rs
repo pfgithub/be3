@@ -1,30 +1,29 @@
-use block::{Block, BlockParent};
+use block::BlockParent;
 use block_client::{
     blocks::image::{Image, ImageOperation},
     BlockClient, BlockHandle,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, TextureHandle, Vec2};
-use egui_material_icons::icons::ICON_IMAGE;
+use egui_material_icons::{icons::ICON_IMAGE, MaterialIcon};
 use uuid::Uuid;
 
 use super::{
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorRegistration,
+    EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_LONG_SIDE: f32 = 1024.0;
 const DIRECT_EDITOR_SHORT_SIDE: f32 = 24.0;
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: Image::TYPE_ID,
-        display_name: "Image",
-        icon: ICON_IMAGE,
-        create: None,
-        open: |client: &BlockClient, id| Box::new(ImageEditor::new(client.get_block::<Image>(id))),
-        can_add_child: false,
-        can_delete_child: false,
-        dynamic_artifact: None,
+// Images arrive by import, so there is nothing for users to create.
+impl EditorKind for ImageEditor {
+    type Block = Image;
+
+    const DISPLAY_NAME: &'static str = "Image";
+    const ICON: MaterialIcon = ICON_IMAGE;
+
+    fn open(_client: &BlockClient, block: BlockHandle<Image>) -> Self {
+        Self::new(block)
     }
 }
 

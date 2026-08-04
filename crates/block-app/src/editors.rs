@@ -19,10 +19,10 @@ mod workspace_index;
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use block::BlockParent;
+use block::{Block, BlockParent};
 use block_client::{
-    blocks::workspace_index::BlockEntry, BlockClient, BlockHandleAccess, BlockHistoryHandle,
-    BlockRelationships,
+    blocks::workspace_index::BlockEntry, BlockClient, BlockHandle, BlockHandleAccess,
+    BlockHistoryHandle, BlockRelationships,
 };
 use eframe::egui;
 use egui_material_icons::MaterialIcon;
@@ -851,6 +851,33 @@ pub(super) struct DynamicArtifactSupport {
     pub regenerate: RegenerateDynamicArtifact,
 }
 
+/// How an editor is registered. Only the block type, name, icon and `open`
+/// are required: every other item describes an optional capability and
+/// defaults to not having it.
+pub(super) trait EditorKind: BlockEditor + Sized + 'static {
+    /// The block type this editor edits. Its `TYPE_ID` identifies the editor.
+    type Block: Block;
+
+    const DISPLAY_NAME: &'static str;
+    const ICON: MaterialIcon;
+    /// Set these only alongside the matching `BlockEditor` method.
+    const CAN_ADD_CHILD: bool = false;
+    const CAN_DELETE_CHILD: bool = false;
+
+    fn open(client: &BlockClient, block: BlockHandle<Self::Block>) -> Self;
+
+    /// What this block type can say about the artifacts it generates.
+    fn dynamic_artifact() -> Option<DynamicArtifactSupport> {
+        None
+    }
+}
+
+/// Editors for block types users can create directly. Types that only appear
+/// through import or generation, such as images, implement only `EditorKind`.
+pub(super) trait CreatableEditor: EditorKind {
+    fn create(client: &BlockClient) -> Self;
+}
+
 struct EditorRegistration {
     block_type: Uuid,
     display_name: &'static str,
@@ -860,6 +887,21 @@ struct EditorRegistration {
     can_add_child: bool,
     can_delete_child: bool,
     dynamic_artifact: Option<DynamicArtifactSupport>,
+}
+
+impl EditorRegistration {
+    fn of<E: EditorKind>() -> Self {
+        Self {
+            block_type: E::Block::TYPE_ID,
+            display_name: E::DISPLAY_NAME,
+            icon: E::ICON,
+            create: None,
+            open: |client, id| Box::new(E::open(client, client.get_block::<E::Block>(id))),
+            can_add_child: E::CAN_ADD_CHILD,
+            can_delete_child: E::CAN_DELETE_CHILD,
+            dynamic_artifact: E::dynamic_artifact(),
+        }
+    }
 }
 
 pub struct EditorRegistry {
@@ -873,23 +915,33 @@ impl EditorRegistry {
             registrations: HashMap::new(),
             new_block_actions: Vec::new(),
         };
-        registry.register(database::registration());
-        registry.register(database_schema::registration());
-        registry.register(gui_builder::registration());
-        registry.register(image::registration());
-        registry.register(infinite_canvas::registration());
-        registry.register(map::registration());
-        registry.register(pixel_art::registration());
-        registry.register(pixel_ray_tracer::registration());
-        registry.register(presentation::registration());
-        registry.register(text::registration());
+        registry.register_creatable::<database::DatabaseEditor>();
+        registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
+        registry.register_creatable::<gui_builder::GuiBuilderEditor>();
+        registry.register::<image::ImageEditor>();
+        registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
+        registry.register_creatable::<map::MapEditor>();
+        registry.register_creatable::<pixel_art::PixelArtEditor>();
+        registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
+        registry.register_creatable::<presentation::PresentationEditor>();
+        registry.register_creatable::<text::TextEditor>();
         #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-        registry.register(browser_tab::registration());
-        registry.register(workspace_index::registration());
+        registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
+        registry.register_creatable::<workspace_index::WorkspaceIndexEditor>();
         registry
     }
 
-    fn register(&mut self, registration: EditorRegistration) {
+    fn register<E: EditorKind>(&mut self) {
+        self.insert(EditorRegistration::of::<E>());
+    }
+
+    fn register_creatable<E: CreatableEditor>(&mut self) {
+        let mut registration = EditorRegistration::of::<E>();
+        registration.create = Some(|client| Box::new(E::create(client)));
+        self.insert(registration);
+    }
+
+    fn insert(&mut self, registration: EditorRegistration) {
         if registration.create.is_some() {
             self.new_block_actions
                 .push((registration.display_name, registration.block_type));

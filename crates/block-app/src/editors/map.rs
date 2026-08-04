@@ -13,7 +13,7 @@ mod tiles;
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use block::{Block, BlockParent, BlockReferenceList};
+use block::{BlockParent, BlockReferenceList};
 use block_client::{
     blocks::{
         image::Image as ImageBlock,
@@ -23,9 +23,12 @@ use block_client::{
     BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
-use egui_material_icons::icons::{
-    ICON_ADD, ICON_ARROW_BACK, ICON_CROP_FREE, ICON_DELETE, ICON_MAP, ICON_MY_LOCATION,
-    ICON_REFRESH, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+use egui_material_icons::{
+    icons::{
+        ICON_ADD, ICON_ARROW_BACK, ICON_CROP_FREE, ICON_DELETE, ICON_MAP, ICON_MY_LOCATION,
+        ICON_REFRESH, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+    },
+    MaterialIcon,
 };
 use uuid::Uuid;
 
@@ -38,8 +41,8 @@ use self::tiles::{TileId, TileWorker, SOURCE_MAX_ZOOM};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::create_image_block,
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorRegistration, SidebarDragPayload,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
 };
 
 /// Size of the whole world (the intrinsic content) at 100% viewport zoom.
@@ -58,16 +61,22 @@ const BACKGROUND: Color32 = Color32::from_rgb(242, 239, 233);
 const REGION_COLOR: Color32 = Color32::from_rgb(245, 180, 60);
 const ATTRIBUTION: &str = "© OpenStreetMap contributors";
 
-pub(super) fn registration() -> EditorRegistration {
-    EditorRegistration {
-        block_type: Map::TYPE_ID,
-        display_name: "Map",
-        icon: ICON_MAP,
-        create: Some(|client| Box::new(MapEditor::new(client.create_block(Map::new()), client))),
-        open: |client, id| Box::new(MapEditor::new(client.get_block::<Map>(id), client)),
-        can_add_child: true,
-        can_delete_child: true,
-        dynamic_artifact: None,
+impl EditorKind for MapEditor {
+    type Block = Map;
+
+    const DISPLAY_NAME: &'static str = "Map";
+    const ICON: MaterialIcon = ICON_MAP;
+    const CAN_ADD_CHILD: bool = true;
+    const CAN_DELETE_CHILD: bool = true;
+
+    fn open(client: &BlockClient, block: BlockHandle<Map>) -> Self {
+        Self::new(block, client)
+    }
+}
+
+impl CreatableEditor for MapEditor {
+    fn create(client: &BlockClient) -> Self {
+        Self::new(client.create_block(Map::new()), client)
     }
 }
 
