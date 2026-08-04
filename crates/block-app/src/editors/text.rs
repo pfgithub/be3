@@ -16,8 +16,8 @@ use block_client::{
     parse_block_urls, BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{
-    self, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton, Pos2, Rect, Sense,
-    Vec2,
+    self, output::IMEOutput, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton,
+    Pos2, Rect, Sense, Vec2,
 };
 use egui_material_icons::{
     icons::{
@@ -1246,6 +1246,9 @@ impl BlockEditor for TextEditor {
             response.has_focus(),
         );
         self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
+        if response.has_focus() {
+            report_ime_area(ui, response.rect, cursor);
+        }
         profile.paint = paint;
         if reveal_cursor {
             if let Some(cursor) = cursor {
@@ -1256,6 +1259,23 @@ impl BlockEditor for TextEditor {
         record_profile(profile);
         edit_block.or(embedded_action)
     }
+}
+
+/// Publishes the focused editor area as this frame's IME target. The backend
+/// only allows IME while some widget reports one, and on Android allowing IME
+/// is what raises the on-screen keyboard.
+fn report_ime_area(ui: &egui::Ui, rect: Rect, cursor: Option<Rect>) {
+    let to_global = ui
+        .ctx()
+        .layer_transform_to_global(ui.layer_id())
+        .unwrap_or_default();
+    let cursor = cursor.unwrap_or_else(|| Rect::from_min_size(rect.min + PADDING, Vec2::X));
+    ui.output_mut(|output| {
+        output.ime = Some(IMEOutput {
+            rect: to_global * rect,
+            cursor_rect: to_global * cursor,
+        });
+    });
 }
 
 fn record_profile(profile: FrameProfile) {
