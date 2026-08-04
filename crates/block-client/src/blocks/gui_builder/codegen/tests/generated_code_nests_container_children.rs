@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 #[test]
 fn generated_code_nests_container_children() {

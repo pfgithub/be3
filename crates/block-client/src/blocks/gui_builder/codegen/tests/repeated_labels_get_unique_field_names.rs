@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 #[test]
 fn repeated_labels_get_unique_field_names() {

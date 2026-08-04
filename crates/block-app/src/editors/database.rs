@@ -1,4 +1,4 @@
-﻿use block::{Block, BlockParent};
+use block::{Block, BlockParent};
 use block_client::{
     blocks::{
         database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue},
@@ -458,7 +458,7 @@ impl DatabaseEditor {
                         scale,
                     );
                     response.on_hover_text(format!(
-                        "Column {} Â· {}",
+                        "Column {} · {}",
                         column_name(column_index),
                         field_type_label(field.field_type),
                     ));

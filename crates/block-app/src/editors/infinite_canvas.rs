@@ -1,4 +1,4 @@
-﻿mod block_editor;
+mod block_editor;
 mod core;
 mod geometry;
 mod inspector;

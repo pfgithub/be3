@@ -1,4 +1,4 @@
-﻿use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 
 use block::Block;
 use block_client::{

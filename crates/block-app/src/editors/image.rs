@@ -1,4 +1,4 @@
-﻿use block::{Block, BlockParent};
+use block::{Block, BlockParent};
 use block_client::{
     blocks::image::{Image, ImageOperation},
     BlockClient, BlockHandle,

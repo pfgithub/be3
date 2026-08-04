@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 #[test]
 fn generated_code_binds_stateful_widgets_to_struct_fields() {

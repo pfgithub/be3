@@ -1,4 +1,4 @@
-﻿mod font;
+mod font;
 #[cfg(test)]
 mod tests;
 mod timings;

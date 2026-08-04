@@ -1,4 +1,4 @@
-﻿use block::Block;
+use block::Block;
 use block_client::{
     blocks::database_schema::{
         DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
