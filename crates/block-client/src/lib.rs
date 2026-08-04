@@ -676,6 +676,16 @@ impl BlockClient {
             .and_then(|registered| registered.erased.dynamic_artifact())
     }
 
+    /// Whether `id` was generated from another block. Callers that only need
+    /// the answer take this rather than the descriptor, which copies the
+    /// settings it carries.
+    pub fn is_dynamic_artifact(&self, id: Uuid) -> bool {
+        self.registered_blocks
+            .read()
+            .get(&id)
+            .is_some_and(|registered| registered.erased.is_dynamic_artifact())
+    }
+
     /// Stores new artifact settings on a block that is already open. Blocks
     /// this client has not registered are ignored.
     pub fn set_dynamic_artifact(&self, id: Uuid, descriptor: DynamicArtifactDescriptor) {
@@ -2542,6 +2552,7 @@ trait ErasedBlock: Send + Sync {
     fn block_type_id(&self) -> Uuid;
     fn author(&self) -> Option<Uuid>;
     fn dynamic_artifact(&self) -> Option<DynamicArtifactDescriptor>;
+    fn is_dynamic_artifact(&self) -> bool;
     fn set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor);
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn initial_data(&self) -> Option<Vec<u8>>;
@@ -3086,6 +3097,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 
     fn dynamic_artifact(&self) -> Option<DynamicArtifactDescriptor> {
         self.dynamic_artifact.read().clone()
+    }
+
+    fn is_dynamic_artifact(&self) -> bool {
+        self.dynamic_artifact.read().is_some()
     }
 
     fn set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor) {

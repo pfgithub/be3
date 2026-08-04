@@ -2143,7 +2143,7 @@ impl BlockApp {
         let mut share = false;
         let can_share = self.client.block_access(active).can_edit();
         let ceiling = self.editor_access_ceiling(active);
-        let generated = self.client.dynamic_artifact(active).is_some();
+        let generated = self.client.is_dynamic_artifact(active);
         let mut chosen_access = access;
         egui::Sides::new().shrink_left().show(
             ui,

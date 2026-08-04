@@ -162,7 +162,7 @@ impl DirectEditorViewport {
 /// replaced wholesale the next time it is regenerated.
 pub fn editor_access_ceiling(client: &BlockClient, id: Uuid) -> BlockAccess {
     let access = client.block_access(id);
-    if client.dynamic_artifact(id).is_some() {
+    if client.is_dynamic_artifact(id) {
         access.min(BlockAccess::View)
     } else {
         access
@@ -172,7 +172,7 @@ pub fn editor_access_ceiling(client: &BlockClient, id: Uuid) -> BlockAccess {
 /// Draws `contents`, non-interactive when the block may only be viewed. The
 /// fade a disabled `Ui` normally gets is turned off: a block being read should
 /// stay as legible as one being edited.
-pub fn editor_scope<R>(
+fn editor_scope<R>(
     ui: &mut egui::Ui,
     read_only: bool,
     contents: impl FnOnce(&mut egui::Ui) -> R,
