@@ -2,10 +2,7 @@ use super::*;
 
 #[test]
 fn split_subcomponent_outputs_can_feed_later_inputs() {
-    let child_file_id = ComponentFileRef {
-        id: Uuid::from_u128(0xb),
-    };
-    let child_hash = ComponentHash::new("b".repeat(64)).unwrap();
+    let child_block = Uuid::from_u128(0xb);
     let child = {
         let mut grid = LogicGrid::new();
         let input_a = grid.add_component(
@@ -67,7 +64,7 @@ fn split_subcomponent_outputs_can_feed_later_inputs() {
             ),
         )
         .unwrap()
-        .link_with_hash(child_hash.clone(), |_| -> Result<Rc<Component>, ()> {
+        .link_with_source(child_block, |_| -> Result<Rc<Component>, ()> {
             panic!("child has no dependencies")
         })
         .unwrap()
@@ -97,8 +94,7 @@ fn split_subcomponent_outputs_can_feed_later_inputs() {
         Point::new(0, 0),
         Rotation::Up,
         ComponentKind::subcomponent_with_subgraphs(
-            child_file_id,
-            child_hash.clone(),
+            child_block,
             Size::new(4, 4),
             vec![
                 crate::grid::ComponentPort::input(0, Scale::ONE, ComponentSide::Left, 0, 1),
@@ -136,8 +132,8 @@ fn split_subcomponent_outputs_can_feed_later_inputs() {
         ),
     )
     .unwrap()
-    .link(|hash| -> Result<Rc<Component>, ()> {
-        assert_eq!(hash, &child_hash);
+    .link(|called| -> Result<Rc<Component>, ()> {
+        assert_eq!(called, child_block);
         Ok(Rc::clone(&child))
     })
     .unwrap();

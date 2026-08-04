@@ -7,7 +7,7 @@ fn subcomponent_ports_are_validated_and_rotate_with_the_component() {
         ComponentPort::input(0, scale(2), ComponentSide::Left, 2, 5),
         ComponentPort::output(0, scale(4), ComponentSide::Bottom, 3, 7),
     ];
-    let kind = ComponentKind::subcomponent(file_id(), component_hash(), size, ports).unwrap();
+    let kind = ComponentKind::subcomponent(compiled_block(), size, ports).unwrap();
     let mut grid = LogicGrid::new();
     let id = grid.add_component(Point::new(8, 4), Rotation::Left, kind);
     let component = grid.component(id).unwrap();
@@ -37,7 +37,7 @@ fn subcomponent_ports_are_validated_and_rotate_with_the_component() {
 
     let invalid = ComponentPort::input(0, scale(2), ComponentSide::Top, 6, 8);
     assert_eq!(
-        ComponentKind::subcomponent(file_id(), component_hash(), size, vec![invalid.clone()]),
+        ComponentKind::subcomponent(compiled_block(), size, vec![invalid.clone()]),
         Err(GeometryError::InvalidSubcomponentPort {
             size,
             port: invalid,

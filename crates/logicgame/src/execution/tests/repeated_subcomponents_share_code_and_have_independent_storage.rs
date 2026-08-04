@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn repeated_subcomponents_share_code_and_have_independent_storage() {
-    let hash = ComponentHash::new("3".repeat(64)).unwrap();
+    let leaf_block = Uuid::from_u128(3);
     let leaf_unlinked = UnlinkedComponent {
         memory_size: 1,
         storage_init: vec![0],
@@ -27,7 +27,7 @@ fn repeated_subcomponents_share_code_and_have_independent_storage() {
         storage_init: Vec::new(),
         inputs: Vec::new(),
         outputs: Vec::new(),
-        components: vec![hash.clone()],
+        components: vec![leaf_block],
         instructions: vec![
             Instruction::Call {
                 component: 0,
@@ -48,15 +48,15 @@ fn repeated_subcomponents_share_code_and_have_independent_storage() {
         ],
         subgraphs: Vec::new(),
     };
-    let mut cache = BTreeMap::<ComponentHash, Rc<Component>>::new();
+    let mut cache = BTreeMap::<Uuid, Rc<Component>>::new();
     let root = root_unlinked
         .link(|requested| {
             Ok::<_, ()>(
                 cache
-                    .entry(requested.clone())
+                    .entry(requested)
                     .or_insert_with(|| {
                         leaf_unlinked
-                            .link_with_hash(requested.clone(), |_| -> Result<Rc<Component>, ()> {
+                            .link_with_source(requested, |_| -> Result<Rc<Component>, ()> {
                                 panic!("leaf has no child components")
                             })
                             .unwrap()

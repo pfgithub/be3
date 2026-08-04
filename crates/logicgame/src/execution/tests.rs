@@ -2,8 +2,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::grid::{
-    ComponentFileRef, ComponentSide, ComponentSubgraph, GraphEdge, InputId, OutputId, Point,
-    Rotation, Scale, Size,
+    ComponentSide, ComponentSubgraph, GraphEdge, InputId, OutputId, Point, Rotation, Scale, Size,
 };
 
 fn graph(
@@ -92,7 +91,7 @@ fn component_with_children(
             outputs: subgraph_outputs,
             instructions: subgraph_instructions,
         }],
-        source_hash: None,
+        source: None,
     })
 }
 
@@ -112,7 +111,7 @@ fn component_with_subgraphs(
         components: Vec::new(),
         instructions,
         subgraphs,
-        source_hash: None,
+        source: None,
     })
 }
 

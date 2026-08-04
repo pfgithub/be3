@@ -52,8 +52,7 @@ fn serialized_snapshot_round_trips_and_regenerates_ids() {
                 position: Point::new(16, 0),
                 orientation: ComponentOrientation::Right,
                 kind: ComponentKind::subcomponent(
-                    file_id(),
-                    component_hash(),
+                    compiled_block(),
                     Size::new(4, 6),
                     vec![
                         ComponentPort::input(0, scale(2), ComponentSide::Left, 0, 2),

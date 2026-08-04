@@ -4,13 +4,8 @@ fn scale(value: u8) -> Scale {
     Scale::new(value).unwrap()
 }
 
-fn component_hash() -> ComponentHash {
-    ComponentHash::new("0".repeat(64)).unwrap()
-}
-fn file_id() -> ComponentFileRef {
-    ComponentFileRef {
-        id: Uuid::from_u128(0),
-    }
+fn compiled_block() -> Uuid {
+    Uuid::from_u128(0)
 }
 
 fn wire(start: (i64, i64), end: (i64, i64), scale: u8) -> Wire {
@@ -34,6 +29,7 @@ mod graph_collapses_branches_and_keeps_separate_component_contacts;
 mod infinite_leads_are_blocked_by_components_but_not_wires;
 mod input_and_output_ids_are_unique_uuid_namespaces;
 mod input_components_rotate_their_connection_slots;
+mod inserting_a_component_keeps_its_id_and_ignores_repeats;
 mod interior_crossings_and_mixed_scales_do_not_connect;
 mod isolated_components_are_present_in_the_graph;
 mod led_has_a_bottom_input_and_rejects_other_contacts;

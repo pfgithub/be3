@@ -1,68 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use std::fmt;
-
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ComponentHash(String);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ComponentFileRef {
-    pub id: Uuid,
-}
-
-impl ComponentHash {
-    pub fn new(value: String) -> Result<Self, ComponentHashError> {
-        if value.len() == 64
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            Ok(Self(value))
-        } else {
-            Err(ComponentHashError)
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for ComponentHash {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl Serialize for ComponentHash {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for ComponentHash {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Self::new(String::deserialize(deserializer)?).map_err(de::Error::custom)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ComponentHashError;
-
-impl fmt::Display for ComponentHashError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("component hashes must be 64 lowercase hexadecimal characters")
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Point {
@@ -367,11 +306,11 @@ pub enum ComponentKind {
         label: String,
     },
     Subcomponent {
-        source_file_id: ComponentFileRef,
-        component: ComponentHash,
-        /// Display name of the subcomponent, shown in its centre. Sourced from
-        /// the component file's name at compile time; not part of the content
-        /// hash, so renaming a file does not change the compiled identity.
+        /// The compiled logic block whose program this subcomponent calls.
+        compiled: Uuid,
+        /// Display name of the subcomponent, shown in its centre. Copied from
+        /// the compiled block's name when it is placed, so renaming the block
+        /// later does not disturb grids already using it.
         name: String,
         size: Size,
         snap: Scale,
@@ -382,8 +321,7 @@ pub enum ComponentKind {
 
 impl ComponentKind {
     pub fn subcomponent(
-        source_file_id: ComponentFileRef,
-        component: ComponentHash,
+        compiled: Uuid,
         size: Size,
         ports: Vec<ComponentPort>,
     ) -> Result<Self, GeometryError> {
@@ -403,8 +341,7 @@ impl ComponentKind {
             .unwrap_or(Scale::ONE);
         let subgraphs = vec![ComponentSubgraph::all_ports(&ports)];
         Ok(Self::Subcomponent {
-            source_file_id,
-            component,
+            compiled,
             name: String::new(),
             size,
             snap,
@@ -414,13 +351,12 @@ impl ComponentKind {
     }
 
     pub fn subcomponent_with_subgraphs(
-        source_file_id: ComponentFileRef,
-        component: ComponentHash,
+        compiled: Uuid,
         size: Size,
         ports: Vec<ComponentPort>,
         subgraphs: Vec<ComponentSubgraph>,
     ) -> Result<Self, GeometryError> {
-        let mut kind = Self::subcomponent(source_file_id, component, size, ports)?;
+        let mut kind = Self::subcomponent(compiled, size, ports)?;
         if let Self::Subcomponent {
             subgraphs: target, ..
         } = &mut kind
@@ -804,12 +740,35 @@ impl GridBounds {
     }
 }
 
-#[derive(Default)]
+/// A grid of components and the wires between them. Serializing one writes the
+/// same snapshot `snapshot` returns: the next component ID and the revision
+/// counter are working state, not part of the circuit.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LogicGrid {
     wires: Vec<Wire>,
     components: BTreeMap<ComponentId, Component>,
     next_component_id: u64,
     revision: u64,
+}
+
+impl Serialize for LogicGrid {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.snapshot().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LogicGrid {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::from_snapshot(LogicGridSnapshot::deserialize(
+            deserializer,
+        )?))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -844,9 +803,7 @@ impl LogicGrid {
             .iter()
             .map(|component| component.id.0)
             .max()
-            .map_or(0, |id| {
-                id.checked_add(1).expect("component ID space exhausted")
-            });
+            .map_or(0, |id| id.saturating_add(1));
         let components = snapshot
             .components
             .into_iter()
@@ -900,6 +857,26 @@ impl LogicGrid {
 
     pub fn component(&self, id: ComponentId) -> Option<&Component> {
         self.components.get(&id)
+    }
+
+    /// The ID `add_component` would hand out next. Callers that have to name a
+    /// component before adding it - because the addition travels as an
+    /// operation - allocate through this and `insert_component`.
+    pub fn next_component_id(&self) -> ComponentId {
+        ComponentId(self.next_component_id)
+    }
+
+    /// Adds a component under the ID it already carries. Returns `false` when
+    /// that ID is taken, which is how an operation that has already been
+    /// applied is ignored when it arrives again.
+    pub fn insert_component(&mut self, component: Component) -> bool {
+        if self.components.contains_key(&component.id) {
+            return false;
+        }
+        self.next_component_id = self.next_component_id.max(component.id.0.saturating_add(1));
+        self.components.insert(component.id, component);
+        self.mark_changed();
+        true
     }
 
     pub fn add_component(

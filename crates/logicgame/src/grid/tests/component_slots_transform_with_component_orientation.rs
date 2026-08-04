@@ -7,7 +7,7 @@ fn component_slots_transform_with_component_orientation() {
         ComponentPort::input(0, scale(1), ComponentSide::Left, 1, 3),
         ComponentPort::output(0, scale(1), ComponentSide::Top, 2, 5),
     ];
-    let kind = ComponentKind::subcomponent(file_id(), component_hash(), size, ports).unwrap();
+    let kind = ComponentKind::subcomponent(compiled_block(), size, ports).unwrap();
     let mut grid = LogicGrid::new();
     let id = grid.add_component(Point::new(4, 7), Rotation::Up, kind);
 

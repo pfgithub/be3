@@ -5,9 +5,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use uuid::Uuid;
+
 use crate::grid::{
-    value_mask, CircuitGraph, ComponentHash, ComponentId, ComponentKind, ConnectionDirection,
-    ConnectionSlotId, GraphNode, GraphNodeId, InputId, LogicGrid, OutputId,
+    value_mask, CircuitGraph, ComponentId, ComponentKind, ConnectionDirection, ConnectionSlotId,
+    GraphNode, GraphNodeId, InputId, LogicGrid, OutputId,
 };
 
 pub type MemoryAddress = usize;
@@ -61,7 +63,8 @@ pub enum Instruction {
 pub struct UnlinkedComponent {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
-    pub components: Vec<ComponentHash>,
+    /// The compiled logic blocks this program calls, in call order.
+    pub components: Vec<Uuid>,
     pub instructions: Vec<Instruction>,
     #[serde(default)]
     pub subgraphs: Vec<UnlinkedSubgraph>,
@@ -85,7 +88,9 @@ pub struct Component {
     pub subgraphs: Vec<ComponentExecutionSubgraph>,
     pub memory_size: usize,
     pub storage_init: Vec<u64>,
-    pub source_hash: Option<ComponentHash>,
+    /// The compiled logic block this program was linked from, when it came
+    /// from one rather than straight off a grid.
+    pub source: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -385,7 +390,7 @@ impl UnlinkedComponent {
                 }
                 ComponentKind::Led => {}
                 ComponentKind::Subcomponent {
-                    component: component_hash,
+                    compiled,
                     ports,
                     subgraphs,
                     ..
@@ -432,11 +437,10 @@ impl UnlinkedComponent {
                             }
                         }
                     }
-                    let child_component = *component_indices
-                        .entry(component_hash.clone())
-                        .or_insert_with(|| {
+                    let child_component =
+                        *component_indices.entry(*compiled).or_insert_with(|| {
                             let index = components.len();
-                            components.push(component_hash.clone());
+                            components.push(*compiled);
                             index
                         });
                     let instance = component.id.0 as usize;
@@ -531,26 +535,25 @@ impl UnlinkedComponent {
 
     pub fn link<E>(
         &self,
-        mut load: impl FnMut(&ComponentHash) -> Result<Rc<Component>, E>,
+        mut load: impl FnMut(Uuid) -> Result<Rc<Component>, E>,
     ) -> Result<Rc<Component>, E> {
         link_unlinked_component(self, None, &mut load)
     }
 
-    pub fn link_with_hash<E>(
+    pub fn link_with_source<E>(
         &self,
-        hash: ComponentHash,
-        mut load: impl FnMut(&ComponentHash) -> Result<Rc<Component>, E>,
+        source: Uuid,
+        mut load: impl FnMut(Uuid) -> Result<Rc<Component>, E>,
     ) -> Result<Rc<Component>, E> {
-        link_unlinked_component(self, Some(hash), &mut load)
+        link_unlinked_component(self, Some(source), &mut load)
     }
 }
 
 impl Vm {
     pub fn from_graph(grid: &LogicGrid, graph: &CircuitGraph) -> Result<Self, GenerationError> {
         Ok(Self::from_unlinked_component(
-            UnlinkedComponent::from_graph(grid, graph)?.link(|hash| {
-                Ok::<_, GenerationError>(Rc::new(Component::unresolved(hash.clone())))
-            })?,
+            UnlinkedComponent::from_graph(grid, graph)?
+                .link(|source| Ok::<_, GenerationError>(Rc::new(Component::unresolved(source))))?,
         ))
     }
 
@@ -573,7 +576,7 @@ impl Vm {
 
     pub fn load_components<E>(
         &mut self,
-        mut load: impl FnMut(&ComponentHash) -> Result<Rc<Component>, E>,
+        mut load: impl FnMut(Uuid) -> Result<Rc<Component>, E>,
     ) -> Result<(), E> {
         let unlinked = self.root_component.to_unlinked();
         self.root_component = unlinked.link(&mut load)?;
@@ -637,8 +640,8 @@ impl Vm {
                 ..
             } => {
                 let child = Rc::clone(&self.pc.component.components[component]);
-                if let Some(hash) = child.unresolved_hash() {
-                    panic!("component {hash} is not loaded");
+                if let Some(source) = child.unresolved_source() {
+                    panic!("compiled logic block {source} is not loaded");
                 }
                 let program = child
                     .subgraphs
@@ -754,9 +757,9 @@ impl Vm {
 }
 
 impl Component {
-    pub fn unresolved(hash: ComponentHash) -> Self {
+    pub fn unresolved(source: Uuid) -> Self {
         Self {
-            source_hash: Some(hash),
+            source: Some(source),
             ..Self::default()
         }
     }
@@ -829,15 +832,15 @@ impl Component {
         total
     }
 
-    fn unresolved_hash(&self) -> Option<&ComponentHash> {
-        (self.source_hash.is_some()
+    fn unresolved_source(&self) -> Option<Uuid> {
+        (self.source.is_some()
             && self.memory_size == 0
             && self.storage_init.is_empty()
             && self.inputs.is_empty()
             && self.outputs.is_empty()
             && self.instructions.is_empty()
             && self.subgraphs.is_empty())
-        .then(|| self.source_hash.as_ref().unwrap())
+        .then(|| self.source.unwrap())
     }
 
     fn to_unlinked(&self) -> UnlinkedComponent {
@@ -849,9 +852,8 @@ impl Component {
                 .iter()
                 .map(|component| {
                     component
-                        .source_hash
-                        .clone()
-                        .expect("linked components loaded from files keep their source hash")
+                        .source
+                        .expect("linked components keep the block they came from")
                 })
                 .collect(),
             memory_size: self.memory_size,
@@ -891,13 +893,13 @@ impl Pc {
 
 fn link_unlinked_component<E>(
     component: &UnlinkedComponent,
-    source_hash: Option<ComponentHash>,
-    load: &mut impl FnMut(&ComponentHash) -> Result<Rc<Component>, E>,
+    source: Option<Uuid>,
+    load: &mut impl FnMut(Uuid) -> Result<Rc<Component>, E>,
 ) -> Result<Rc<Component>, E> {
     let mut storage_init = component.storage_init.clone();
     let mut components = Vec::with_capacity(component.components.len());
-    for hash in &component.components {
-        components.push(load(hash)?);
+    for called in &component.components {
+        components.push(load(*called)?);
     }
     let mut instructions = component.instructions.clone();
     let mut storage_offsets = BTreeMap::<(usize, usize), StorageId>::new();
@@ -932,7 +934,7 @@ fn link_unlinked_component<E>(
         subgraphs,
         memory_size: component.memory_size,
         storage_init,
-        source_hash,
+        source,
     }))
 }
 

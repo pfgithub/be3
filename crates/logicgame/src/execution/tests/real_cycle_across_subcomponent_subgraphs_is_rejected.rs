@@ -3,16 +3,12 @@ use super::*;
 #[test]
 fn real_cycle_across_subcomponent_subgraphs_is_rejected() {
     let mut grid = LogicGrid::new();
-    let file_id = ComponentFileRef {
-        id: Uuid::from_u128(0xe),
-    };
-    let hash = ComponentHash::new("e".repeat(64)).unwrap();
+    let compiled = Uuid::from_u128(0xe);
     let subcomponent = grid.add_component(
         Point::new(0, 0),
         Rotation::Up,
         ComponentKind::subcomponent_with_subgraphs(
-            file_id,
-            hash,
+            compiled,
             Size::new(4, 4),
             vec![
                 crate::grid::ComponentPort::input(0, Scale::ONE, ComponentSide::Left, 0, 1),

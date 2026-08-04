@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn nested_subcomponent_storage_is_owned_by_the_root_vm() {
-    let leaf_hash = ComponentHash::new("5".repeat(64)).unwrap();
+    let leaf_block = Uuid::from_u128(5);
     let leaf = UnlinkedComponent {
         memory_size: 1,
         storage_init: vec![8],
@@ -27,7 +27,7 @@ fn nested_subcomponent_storage_is_owned_by_the_root_vm() {
         storage_init: Vec::new(),
         inputs: vec![0],
         outputs: Vec::new(),
-        components: vec![leaf_hash.clone()],
+        components: vec![leaf_block],
         instructions: vec![Instruction::Call {
             component: 0,
             instance: 0,
@@ -50,9 +50,9 @@ fn nested_subcomponent_storage_is_owned_by_the_root_vm() {
         }],
     };
     let middle = middle
-        .link(|hash| -> Result<Rc<Component>, ()> {
-            assert_eq!(hash, &leaf_hash);
-            leaf.link_with_hash(hash.clone(), |_| panic!("leaf has no child components"))
+        .link(|called| -> Result<Rc<Component>, ()> {
+            assert_eq!(called, leaf_block);
+            leaf.link_with_source(called, |_| panic!("leaf has no child components"))
         })
         .unwrap();
     let root = component_with_children(

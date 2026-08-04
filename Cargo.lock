@@ -2798,13 +2798,10 @@ checksum = "113b30b4cd05f7c06868fdb2854f66a7b9fece9a48425351cd532e810d74024f"
 name = "logicgame"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
- "eframe",
  "rand 0.9.4",
  "rand_chacha 0.9.0",
  "serde",
  "serde_json",
- "sha2",
  "uuid",
 ]
 

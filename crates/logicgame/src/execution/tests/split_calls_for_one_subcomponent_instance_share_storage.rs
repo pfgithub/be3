@@ -2,10 +2,7 @@ use super::*;
 
 #[test]
 fn split_calls_for_one_subcomponent_instance_share_storage() {
-    let file_id = ComponentFileRef {
-        id: Uuid::from_u128(0xc),
-    };
-    let hash = ComponentHash::new("c".repeat(64)).unwrap();
+    let compiled = Uuid::from_u128(0xc);
     let child = component_with_subgraphs(
         1,
         vec![0],
@@ -38,8 +35,7 @@ fn split_calls_for_one_subcomponent_instance_share_storage() {
         Point::new(0, 0),
         Rotation::Up,
         ComponentKind::subcomponent_with_subgraphs(
-            file_id,
-            hash.clone(),
+            compiled,
             Size::new(2, 2),
             vec![
                 crate::grid::ComponentPort::input(0, Scale::ONE, ComponentSide::Left, 0, 1),
@@ -72,7 +68,7 @@ fn split_calls_for_one_subcomponent_instance_share_storage() {
     )
     .unwrap()
     .link(|requested| -> Result<Rc<Component>, ()> {
-        assert_eq!(requested, &hash);
+        assert_eq!(requested, compiled);
         Ok(Rc::clone(&child))
     })
     .unwrap();

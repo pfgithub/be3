@@ -3,16 +3,12 @@ use super::*;
 #[test]
 fn subcomponents_compile_sparse_bindings() {
     let mut grid = LogicGrid::new();
-    let file_id = ComponentFileRef {
-        id: Uuid::from_u128(0xa),
-    };
-    let component_hash = ComponentHash::new("a".repeat(64)).unwrap();
+    let compiled = Uuid::from_u128(0xa);
     let subcomponent = grid.add_component(
         Point::new(0, 0),
         Rotation::Up,
         ComponentKind::subcomponent(
-            file_id,
-            component_hash.clone(),
+            compiled,
             crate::grid::Size::new(4, 4),
             vec![
                 crate::grid::ComponentPort::input(1, Scale::ONE, ComponentSide::Left, 0, 1),
@@ -58,7 +54,7 @@ fn subcomponents_compile_sparse_bindings() {
 
     let component = UnlinkedComponent::from_graph(&grid, &graph).unwrap();
 
-    assert_eq!(component.components, vec![component_hash]);
+    assert_eq!(component.components, vec![compiled]);
     assert_eq!(
         component.instructions,
         vec![Instruction::Call {
