@@ -5,6 +5,7 @@ mod browser_tab;
 mod clipboard;
 mod database;
 mod database_schema;
+mod gui_builder;
 pub(crate) mod image;
 mod infinite_canvas;
 mod map;
@@ -879,6 +880,7 @@ impl EditorRegistry {
         };
         registry.register(database::registration());
         registry.register(database_schema::registration());
+        registry.register(gui_builder::registration());
         registry.register(image::registration());
         registry.register(infinite_canvas::registration());
         registry.register(map::registration());

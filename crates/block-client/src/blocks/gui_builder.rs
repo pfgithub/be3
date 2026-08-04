@@ -285,7 +285,7 @@ impl Block for GuiBuilder {
                 if !builder.can_insert(widget) || builder.children_mut(location.parent).is_none() {
                     return;
                 }
-                builder.insert_at(*location, widget.clone());
+                builder.insert_at(*location, normalized_widget(widget.clone()));
             }
             GuiBuilderOperation::Remove { id } => {
                 builder.detach(*id);
@@ -374,6 +374,12 @@ fn collect_ids(widget: &GuiWidget, ids: &mut Vec<Uuid>) {
     for child in &widget.children {
         collect_ids(child, ids);
     }
+}
+
+fn normalized_widget(mut widget: GuiWidget) -> GuiWidget {
+    widget.kind = normalized_kind(widget.kind);
+    widget.children = widget.children.into_iter().map(normalized_widget).collect();
+    widget
 }
 
 fn normalized_kind(mut kind: GuiWidgetKind) -> GuiWidgetKind {
