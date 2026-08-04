@@ -309,6 +309,9 @@ struct StoredBlock<B> {
 enum StoredOperation<B, O> {
     Operate(O),
     Replace(B),
+    /// Rewrites the descriptor without touching the block value, so artifact
+    /// settings can be changed after the block has been created.
+    SetDynamicArtifact(DynamicArtifactDescriptor),
 }
 
 #[cfg(test)]
@@ -671,6 +674,21 @@ impl BlockClient {
             .read()
             .get(&id)
             .and_then(|registered| registered.erased.dynamic_artifact())
+    }
+
+    /// Stores new artifact settings on a block that is already open. Blocks
+    /// this client has not registered are ignored.
+    pub fn set_dynamic_artifact(&self, id: Uuid, descriptor: DynamicArtifactDescriptor) {
+        let block = self
+            .registered_blocks
+            .read()
+            .get(&id)
+            .map(|registered| Arc::clone(&registered.erased));
+        let Some(block) = block else {
+            return;
+        };
+        block.set_dynamic_artifact(descriptor);
+        self.send(WorkerCommand::Operate { id });
     }
 
     fn register_block<B: Block>(&self, id: Uuid, block: &Arc<TypedBlock<B>>) {
@@ -2492,6 +2510,7 @@ trait ErasedBlock: Send + Sync {
     fn block_type_id(&self) -> Uuid;
     fn author(&self) -> Option<Uuid>;
     fn dynamic_artifact(&self) -> Option<DynamicArtifactDescriptor>;
+    fn set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor);
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
@@ -2679,10 +2698,13 @@ struct PendingOperation<B, O> {
 }
 
 impl<B: Block> TypedBlock<B> {
-    fn apply_stored_operation(value: &mut B, operation: &StoredOperation<B, B::Operation>) {
+    fn apply_stored_operation(&self, value: &mut B, operation: &StoredOperation<B, B::Operation>) {
         match operation {
             StoredOperation::Operate(operation) => B::apply_operation(value, operation),
             StoredOperation::Replace(replacement) => value.clone_from(replacement),
+            StoredOperation::SetDynamicArtifact(descriptor) => {
+                *self.dynamic_artifact.write() = Some(descriptor.clone());
+            }
         }
     }
 
@@ -2765,7 +2787,7 @@ impl<B: Block> TypedBlock<B> {
             return;
         };
         for pending in &state.pending {
-            Self::apply_stored_operation(&mut value, &pending.operation);
+            self.apply_stored_operation(&mut value, &pending.operation);
         }
         *self.shared.value.write() = Some(value);
         self.changed.send_replace(());
@@ -2878,6 +2900,27 @@ impl<B: Block> TypedBlock<B> {
                 .push::<B, B::History>(action, history_mode, history_metadata);
         }
         (result, true)
+    }
+
+    /// Rewrites the descriptor of an existing artifact. The block value is
+    /// untouched, so this never enters the undo history.
+    fn local_set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor) {
+        let mut state = self.state.write();
+        let implicit_name = self
+            .shared
+            .value
+            .read()
+            .as_ref()
+            .map_or_else(String::new, Block::implicit_name);
+        *self.dynamic_artifact.write() = Some(descriptor.clone());
+        state.pending.push_back(PendingOperation {
+            id: Uuid::new_v4(),
+            operation: StoredOperation::SetDynamicArtifact(descriptor),
+            implicit_name,
+            references: ReferenceDelta::default(),
+        });
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        self.changed.send_replace(());
     }
 
     fn local_replace(&self, replacement: B) {
@@ -3013,6 +3056,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         self.dynamic_artifact.read().clone()
     }
 
+    fn set_dynamic_artifact(&self, descriptor: DynamicArtifactDescriptor) {
+        self.local_set_dynamic_artifact(descriptor);
+    }
+
     fn debug_snapshot(&self) -> BlockDebugSnapshot {
         let state = self.state.read();
         let synchronized = state.ready
@@ -3105,7 +3152,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
                 serde_json::from_slice(&record.operation).unwrap_or_else(|error| {
                     fatal(format!("failed to deserialize operation: {error}"))
                 });
-            Self::apply_stored_operation(&mut value, &operation);
+            self.apply_stored_operation(&mut value, &operation);
             seq = record.seq;
         }
         self.revision.store(seq, Ordering::Relaxed);
@@ -3119,7 +3166,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         *self.name.write() = name;
         if B::CRDT {
             for pending in &state.pending {
-                Self::apply_stored_operation(&mut value, &pending.operation);
+                self.apply_stored_operation(&mut value, &pending.operation);
             }
             *self.shared.value.write() = Some(value);
             self.changed.send_replace(());
@@ -3195,7 +3242,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             fatal("update acknowledgement is not contiguous");
         }
         let operation = state.pending.pop_front().unwrap().operation;
-        Self::apply_stored_operation(state.confirmed.as_mut().unwrap(), &operation);
+        self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &operation);
         state.confirmed_seq = seq;
         state.in_flight.remove(&operation_id);
         self.rebuild_visible(&state);
@@ -3251,7 +3298,7 @@ impl<B: Block> TypedBlock<B> {
         };
         for pending in &mut state.pending {
             let before = normalized_references(value.references_for_workspace(self.workspace_id));
-            Self::apply_stored_operation(&mut value, &pending.operation);
+            self.apply_stored_operation(&mut value, &pending.operation);
             let after = normalized_references(value.references_for_workspace(self.workspace_id));
             pending.references = reference_delta(&before, &after);
         }
@@ -3264,7 +3311,7 @@ impl<B: Block> TypedBlock<B> {
                     fatal(format!("failed to deserialize remote operation: {error}"))
                 });
             if let Some(value) = self.shared.value.write().as_mut() {
-                Self::apply_stored_operation(value, &remote);
+                self.apply_stored_operation(value, &remote);
                 self.changed.send_replace(());
             }
             if let Some(index) = state
@@ -3284,7 +3331,7 @@ impl<B: Block> TypedBlock<B> {
             .pending
             .pop_front_if(|pending| pending.id == record.operation_id)
         {
-            Self::apply_stored_operation(state.confirmed.as_mut().unwrap(), &pending.operation);
+            self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &pending.operation);
             state.confirmed_seq = record.seq;
             state.in_flight.remove(&record.operation_id);
             self.revision.fetch_add(1, Ordering::Relaxed);
@@ -3296,7 +3343,7 @@ impl<B: Block> TypedBlock<B> {
             .unwrap_or_else(|error| {
                 fatal(format!("failed to deserialize remote operation: {error}"))
             });
-        Self::apply_stored_operation(state.confirmed.as_mut().unwrap(), &remote);
+        self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &remote);
         state.confirmed_seq = record.seq;
         if let StoredOperation::Operate(remote) = &remote {
             for pending in &mut state.pending {
