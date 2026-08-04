@@ -872,17 +872,71 @@ pub(super) trait EditorKind: BlockEditor + Sized + 'static {
     }
 }
 
-/// Editors for block types users can create directly. Types that only appear
-/// through import or generation, such as images, implement only `EditorKind`.
+/// Editors whose block is created on the spot. Types that need something from
+/// the user first implement `ConfigurableEditor` instead.
 pub(super) trait CreatableEditor: EditorKind {
     fn create(client: &BlockClient) -> Self;
+}
+
+/// Editors whose block cannot be created until the user supplies something,
+/// such as the file behind an image. The options are collected in a dialog
+/// and handed to `create` when it is accepted.
+pub(super) trait ConfigurableEditor: EditorKind {
+    type Options: CreationOptions;
+
+    fn create(client: &BlockClient, options: Self::Options) -> Result<Self, String>;
+}
+
+/// The options one block type needs before it can be created. The dialog
+/// around them - its frame, its buttons and its errors - is shared, so this
+/// draws only the options themselves.
+pub(super) trait CreationOptions: Default {
+    /// Draws the options. Returns `false` while they are incomplete, which
+    /// keeps the create button disabled.
+    fn ui(&mut self, ui: &mut egui::Ui) -> bool;
+}
+
+/// A creation dialog waiting on the user: the options being filled in, and
+/// how to turn them into an editor.
+pub(super) trait PendingCreation {
+    fn ui(&mut self, ui: &mut egui::Ui) -> bool;
+    fn create(&mut self, client: &BlockClient) -> Result<Box<dyn BlockEditor>, String>;
+}
+
+struct EditorCreation<E: ConfigurableEditor> {
+    options: E::Options,
+}
+
+impl<E: ConfigurableEditor> PendingCreation for EditorCreation<E> {
+    fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        self.options.ui(ui)
+    }
+
+    fn create(&mut self, client: &BlockClient) -> Result<Box<dyn BlockEditor>, String> {
+        E::create(client, std::mem::take(&mut self.options))
+            .map(|editor| Box::new(editor) as Box<dyn BlockEditor>)
+    }
+}
+
+/// Starting to create a block either produces the editor outright or the
+/// dialog that has to be filled in first.
+pub(super) enum BlockCreation {
+    Created(Box<dyn BlockEditor>),
+    Options(Box<dyn PendingCreation>),
+}
+
+enum CreateBlock {
+    /// Nothing to ask about: the block is created on the spot.
+    Immediate(CreateEditor),
+    /// Options are collected before the block exists.
+    Configured(fn() -> Box<dyn PendingCreation>),
 }
 
 struct EditorRegistration {
     block_type: Uuid,
     display_name: &'static str,
     icon: MaterialIcon,
-    create: Option<CreateEditor>,
+    create: Option<CreateBlock>,
     open: OpenEditor,
     can_add_child: bool,
     can_delete_child: bool,
@@ -918,7 +972,7 @@ impl EditorRegistry {
         registry.register_creatable::<database::DatabaseEditor>();
         registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
-        registry.register::<image::ImageEditor>();
+        registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<map::MapEditor>();
         registry.register_creatable::<pixel_art::PixelArtEditor>();
@@ -931,13 +985,19 @@ impl EditorRegistry {
         registry
     }
 
-    fn register<E: EditorKind>(&mut self) {
-        self.insert(EditorRegistration::of::<E>());
-    }
-
     fn register_creatable<E: CreatableEditor>(&mut self) {
         let mut registration = EditorRegistration::of::<E>();
-        registration.create = Some(|client| Box::new(E::create(client)));
+        registration.create = Some(CreateBlock::Immediate(|client| Box::new(E::create(client))));
+        self.insert(registration);
+    }
+
+    fn register_configurable<E: ConfigurableEditor>(&mut self) {
+        let mut registration = EditorRegistration::of::<E>();
+        registration.create = Some(CreateBlock::Configured(|| {
+            Box::new(EditorCreation::<E> {
+                options: E::Options::default(),
+            })
+        }));
         self.insert(registration);
     }
 
@@ -1014,10 +1074,11 @@ impl EditorRegistry {
         (support.regenerate)(client, target_id, target_type, data)
     }
 
-    pub fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<Box<dyn BlockEditor>> {
-        self.registrations
-            .get(&block_type)
-            .and_then(|registration| registration.create.map(|create| create(client)))
+    pub(super) fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<BlockCreation> {
+        match self.registrations.get(&block_type)?.create.as_ref()? {
+            CreateBlock::Immediate(create) => Some(BlockCreation::Created(create(client))),
+            CreateBlock::Configured(options) => Some(BlockCreation::Options(options())),
+        }
     }
 
     pub fn open(&self, client: &BlockClient, id: Uuid, block_type: Uuid) -> Box<dyn BlockEditor> {

@@ -1,20 +1,21 @@
 use std::collections::HashSet;
 
-use block::{Block, BlockParent};
-use block_client::blocks::image::Image;
+use block::BlockParent;
 use block_client::{BlockClient, CachedBlock};
 use eframe::egui;
 use uuid::Uuid;
 
-use crate::editors::{
-    image::{pick_image_file, ImageEditor},
-    EditorAccess, EditorRegistry,
-};
+use crate::editors::{BlockCreation, BlockEditor, EditorAccess, EditorRegistry, PendingCreation};
 
 enum BlockPickerMenuAction {
     New(Uuid),
-    ImportImage,
     LinkExisting,
+}
+
+/// A block whose creation is waiting on options the user has not filled in.
+struct PendingBlock {
+    block_type: Uuid,
+    creation: Box<dyn PendingCreation>,
 }
 
 pub struct BlockPickerResult {
@@ -30,6 +31,7 @@ pub struct BlockPicker {
     search: String,
     excluded: HashSet<Uuid>,
     pending_action: Option<BlockPickerMenuAction>,
+    pending_block: Option<PendingBlock>,
     error: Option<String>,
 }
 
@@ -41,6 +43,7 @@ impl Default for BlockPicker {
             search: String::new(),
             excluded: HashSet::new(),
             pending_action: None,
+            pending_block: None,
             error: None,
         }
     }
@@ -59,10 +62,6 @@ impl BlockPicker {
     ) {
         let mut action = None;
         ui.menu_button("New block", |ui| {
-            if ui.button("Image").clicked() {
-                action = Some(BlockPickerMenuAction::ImportImage);
-                ui.close();
-            }
             for &(label, block_type) in registry.new_block_actions() {
                 if ui.button(label).clicked() {
                     action = Some(BlockPickerMenuAction::New(block_type));
@@ -172,7 +171,6 @@ impl BlockPicker {
             Some(BlockPickerMenuAction::New(block_type)) => {
                 self.create_registered_block(editors, block_type, created_parent)
             }
-            Some(BlockPickerMenuAction::ImportImage) => self.import_image(editors, created_parent),
             Some(BlockPickerMenuAction::LinkExisting) => {
                 self.open = true;
                 self.search.clear();
@@ -180,6 +178,9 @@ impl BlockPicker {
             }
             None => None,
         };
+        if result.is_none() {
+            result = self.show_creation_options(context, editors, created_parent);
+        }
         if result.is_none() {
             if let Some(block) = self.show_link_picker(context, editors.client()) {
                 editors.ensure(block.id, block.block_type);
@@ -201,48 +202,94 @@ impl BlockPicker {
         block_type: Uuid,
         parent: BlockParent,
     ) -> Option<BlockPickerResult> {
-        let Some(editor) = editors.registry().create(editors.client(), block_type) else {
-            self.error = Some(format!("Could not create block type {block_type}"));
+        match editors.registry().create(editors.client(), block_type) {
+            Some(BlockCreation::Created(editor)) => {
+                Some(Self::finish_creation(editors, editor, block_type, parent))
+            }
+            // The block needs options first, so the dialog takes over.
+            Some(BlockCreation::Options(creation)) => {
+                self.pending_block = Some(PendingBlock {
+                    block_type,
+                    creation,
+                });
+                None
+            }
+            None => {
+                self.error = Some(format!("Could not create block type {block_type}"));
+                None
+            }
+        }
+    }
+
+    /// The dialog for a block type that cannot be created until the user
+    /// fills something in.
+    fn show_creation_options(
+        &mut self,
+        context: &egui::Context,
+        editors: &mut EditorAccess<'_>,
+        parent: BlockParent,
+    ) -> Option<BlockPickerResult> {
+        let mut pending = self.pending_block.take()?;
+        let title = editors
+            .registry()
+            .display_name(pending.block_type)
+            .unwrap_or("block");
+        let mut create = false;
+        let mut cancel = false;
+        let mut open = true;
+        egui::Window::new(format!("New {title}"))
+            .id(egui::Id::new(("block-picker-create", self.id)))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(context, |ui| {
+                let ready = pending.creation.ui(ui);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    create = ui
+                        .add_enabled(ready, egui::Button::new("Create"))
+                        .on_disabled_hover_text("Fill in the options first")
+                        .clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if cancel || !open {
             return None;
-        };
+        }
+        if !create {
+            self.pending_block = Some(pending);
+            return None;
+        }
+        match pending.creation.create(editors.client()) {
+            Ok(editor) => Some(Self::finish_creation(
+                editors,
+                editor,
+                pending.block_type,
+                parent,
+            )),
+            Err(error) => {
+                self.error = Some(error);
+                None
+            }
+        }
+    }
+
+    fn finish_creation(
+        editors: &mut EditorAccess<'_>,
+        editor: Box<dyn BlockEditor>,
+        block_type: Uuid,
+        parent: BlockParent,
+    ) -> BlockPickerResult {
         editor.set_parent(parent);
         let id = editor.id();
         let name = editor.name();
         editors.insert(editor);
-        let author = editors.client().account_id();
-        Some(BlockPickerResult {
+        BlockPickerResult {
             id,
             block_type,
-            author,
+            author: editors.client().account_id(),
             name,
-        })
-    }
-
-    fn import_image(
-        &mut self,
-        editors: &mut EditorAccess<'_>,
-        parent: BlockParent,
-    ) -> Option<BlockPickerResult> {
-        let image = match pick_image_file() {
-            Ok(Some(image)) => image,
-            Ok(None) => return None,
-            Err(error) => {
-                self.error = Some(error);
-                return None;
-            }
-        };
-        let block = editors.client().create_block(image);
-        block.set_parent(parent);
-        let id = block.id();
-        let name = block.name();
-        let author = editors.client().account_id();
-        editors.insert(Box::new(ImageEditor::new(block)));
-        Some(BlockPickerResult {
-            id,
-            block_type: Image::TYPE_ID,
-            author,
-            name,
-        })
+        }
     }
 
     fn show_error(&mut self, context: &egui::Context) {

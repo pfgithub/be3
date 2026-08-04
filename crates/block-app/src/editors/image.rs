@@ -8,14 +8,13 @@ use egui_material_icons::{icons::ICON_IMAGE, MaterialIcon};
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    BlockEditor, BlockRenderContext, ConfigurableEditor, CreationOptions, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_LONG_SIDE: f32 = 1024.0;
 const DIRECT_EDITOR_SHORT_SIDE: f32 = 24.0;
 
-// Images arrive by import, so there is nothing for users to create.
 impl EditorKind for ImageEditor {
     type Block = Image;
 
@@ -24,6 +23,50 @@ impl EditorKind for ImageEditor {
 
     fn open(_client: &BlockClient, block: BlockHandle<Image>) -> Self {
         Self::new(block)
+    }
+}
+
+/// An image block is the imported file, so creating one starts by choosing it.
+impl ConfigurableEditor for ImageEditor {
+    type Options = ChosenImage;
+
+    fn create(client: &BlockClient, options: ChosenImage) -> Result<Self, String> {
+        let image = options.image.ok_or("Choose an image file first")?;
+        Ok(Self::new(client.create_block(image)))
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ChosenImage {
+    image: Option<Image>,
+    error: Option<String>,
+}
+
+impl CreationOptions for ChosenImage {
+    fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.horizontal(|ui| {
+            if ui.button("Choose file...").clicked() {
+                match pick_image_file() {
+                    Ok(Some(image)) => {
+                        self.image = Some(image);
+                        self.error = None;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.image = None;
+                        self.error = Some(error);
+                    }
+                }
+            }
+            match &self.image {
+                Some(image) => ui.label(image.source_name()),
+                None => ui.weak("No file chosen"),
+            };
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        self.image.is_some()
     }
 }
 

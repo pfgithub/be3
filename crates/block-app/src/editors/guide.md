@@ -49,7 +49,35 @@ impl MyBlockEditor {
 }
 ```
 
-`EditorKind` states only what the editor needs: everything optional has a default. Implement `CreatableEditor` as well when users can create the type themselves; types that only arrive by import or generation, such as images, implement `EditorKind` alone.
+`EditorKind` states only what the editor needs: everything optional has a default.
+
+Pair it with `CreatableEditor` when the block can be created on the spot. When creating it needs something from the user first — a file, a size, a target — implement `ConfigurableEditor` instead and put that in a `CreationOptions` type. The picker then shows the options in a dialog and creates the block only when it is accepted:
+
+```rust
+impl ConfigurableEditor for MyBlockEditor {
+    type Options = MyBlockOptions;
+
+    fn create(client: &BlockClient, options: MyBlockOptions) -> Result<Self, String> {
+        let source = options.source.ok_or("Choose a source first")?;
+        Ok(Self::new(client.create_block(MyBlock::from_source(source))))
+    }
+}
+
+#[derive(Default)]
+pub(super) struct MyBlockOptions {
+    source: Option<Source>,
+}
+
+impl CreationOptions for MyBlockOptions {
+    fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        // Draw the options only: the dialog frame, its Create and Cancel
+        // buttons, and its errors are shared.
+        self.source.is_some()
+    }
+}
+```
+
+Returning `false` from `ui` keeps Create disabled, so `create` runs only against options the editor already called complete.
 
 ## 2. Implement the common block behavior
 
@@ -187,7 +215,7 @@ Then register it in `EditorRegistry::new`:
 registry.register_creatable::<my_block::MyBlockEditor>();
 ```
 
-Use `registry.register::<...>()` for editors that implement only `EditorKind`.
+Use `registry.register_configurable::<...>()` for editors that implement `ConfigurableEditor`.
 
 The registration automatically adds creatable types to block pickers and teaches the app how to open cached blocks of that type.
 
