@@ -19,7 +19,7 @@ jobs:
     name: clippy, fmt and tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # block-app links GTK and WebKitGTK for the file picker and the embedded
       # browser, so the workspace does not compile without their headers.
@@ -40,7 +40,7 @@ jobs:
           tool: cargo-nextest
 
       # libghostty-vt-sys builds libghostty-vt from source via Zig.
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
 
@@ -50,7 +50,7 @@ jobs:
     name: web bundle
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The WASI sysroot is built against by clang, not by rustc, so the build
       # needs a local LLVM of at least version 17.
@@ -80,7 +80,7 @@ jobs:
 
       - run: pwsh -File ./scripts/build-block-web.ps1 -Release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: block-web
           path: target/web
@@ -90,9 +90,9 @@ jobs:
     name: android apk
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -135,7 +135,7 @@ jobs:
 
       - run: pwsh -File ./scripts/build-block-android.ps1 -AndroidSdk "$ANDROID_SDK_ROOT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: block-app-android-aarch64
           path: target/debug/apk/block-app.apk
