@@ -213,7 +213,7 @@ jobs:
       # supported on Windows, where the client excludes it entirely.
       - name: Install Zig
         if: matrix.client && runner.os != 'Windows'
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
 
