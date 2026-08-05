@@ -3182,9 +3182,9 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
     }
 
     fn debug_data(&self) -> Option<String> {
-        self.state.read().confirmed.as_ref().map(|confirmed| {
+        self.shared.value.read().as_ref().map(|value| {
             serde_json::to_string_pretty(&StoredBlock {
-                value: confirmed,
+                value,
                 dynamic_artifact: self.dynamic_artifact.read().clone(),
             })
             .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
