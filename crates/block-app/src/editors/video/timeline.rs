@@ -72,11 +72,177 @@ fn lane_at(content: Rect, y: f32) -> usize {
         .max(0.0) as usize
 }
 
-/// Which clip owns `lane`, so a drag can tell what it would attach to.
-fn clip_in_lane(rows: &[ClipRow], lane: usize) -> Option<Uuid> {
-    rows.iter()
-        .find(|row| row.lane == lane)
-        .map(|row| row.timing.id)
+#[derive(Clone, Copy)]
+enum ClipDropZone {
+    Before,
+    Center(Rect),
+    After,
+}
+
+#[derive(Clone, Copy)]
+enum TimelineDropTarget {
+    Attach {
+        parent: Uuid,
+        start: u64,
+        highlight: Rect,
+    },
+    Base {
+        index: usize,
+        x: f32,
+    },
+    Offset {
+        start: u64,
+        lane: usize,
+        length: u64,
+    },
+}
+
+fn clip_rect(content: Rect, row: &ClipRow, pixels_per_frame: f32) -> Rect {
+    let lane = lane_rect(content, row.lane);
+    let left = content.left() + row.timing.start as f32 * pixels_per_frame;
+    Rect::from_min_max(
+        egui::pos2(left, lane.top()),
+        egui::pos2(
+            left + (row.timing.length as f32 * pixels_per_frame).max(3.0),
+            lane.bottom(),
+        ),
+    )
+}
+
+fn drop_zone(rect: Rect, x: f32) -> ClipDropZone {
+    let edge = rect.width() * 0.25;
+    if x < rect.left() + edge {
+        ClipDropZone::Before
+    } else if x > rect.right() - edge {
+        ClipDropZone::After
+    } else {
+        ClipDropZone::Center(Rect::from_min_max(
+            egui::pos2(rect.left() + edge, rect.top()),
+            egui::pos2(rect.right() - edge, rect.bottom()),
+        ))
+    }
+}
+
+fn would_create_cycle(video: &Video, clip_id: Uuid, parent: Uuid) -> bool {
+    let mut current = Some(parent);
+    while let Some(id) = current {
+        if id == clip_id {
+            return true;
+        }
+        current = video.clip(id).and_then(VideoClip::parent);
+    }
+    false
+}
+
+/// Converts an insertion boundary in the current base track into the index
+/// expected after `moving` has been removed from that track.
+fn adjusted_base_index(video: &Video, boundary: usize, moving: Option<Uuid>) -> usize {
+    let moving_index = moving.and_then(|clip_id| {
+        video
+            .clip(clip_id)
+            .filter(|clip| clip.attachment.is_none())
+            .and_then(|_| video.sibling_index(clip_id))
+    });
+    boundary.saturating_sub(usize::from(
+        moving_index.is_some_and(|moving_index| moving_index < boundary),
+    ))
+}
+
+fn base_target(
+    video: &Video,
+    rows: &[ClipRow],
+    content: Rect,
+    pixels_per_frame: f32,
+    pointer_x: f32,
+    moving: Option<Uuid>,
+) -> TimelineDropTarget {
+    let mut boundaries = Vec::new();
+    for row in rows.iter().filter(|row| row.timing.depth == 0) {
+        if moving == Some(row.timing.id) {
+            continue;
+        }
+        let rect = clip_rect(content, row, pixels_per_frame);
+        let index = video.sibling_index(row.timing.id).unwrap_or(0);
+        boundaries.push((rect.left(), index));
+        boundaries.push((rect.right(), index + 1));
+    }
+    let (x, boundary) = boundaries
+        .into_iter()
+        .min_by(|left, right| {
+            (left.0 - pointer_x)
+                .abs()
+                .total_cmp(&(right.0 - pointer_x).abs())
+        })
+        .unwrap_or((content.left(), 0));
+    TimelineDropTarget::Base {
+        index: adjusted_base_index(video, boundary, moving),
+        x,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn drop_target_at(
+    video: &Video,
+    rows: &[ClipRow],
+    content: Rect,
+    pixels_per_frame: f32,
+    pointer: egui::Pos2,
+    moving: Option<&ClipDrag>,
+) -> Option<TimelineDropTarget> {
+    let moving_id = moving.map(|drag| drag.clip);
+    let start = ((pointer.x - content.left()) / pixels_per_frame).max(0.0) as u64;
+    let start = start.saturating_sub(moving.map_or(0, |drag| drag.grab));
+
+    if let Some((row, rect)) = rows
+        .iter()
+        .rev()
+        .filter(|row| moving_id != Some(row.timing.id))
+        .map(|row| (row, clip_rect(content, row, pixels_per_frame)))
+        .find(|(_, rect)| rect.contains(pointer))
+    {
+        match drop_zone(rect, pointer.x) {
+            ClipDropZone::Center(highlight) => {
+                if moving_id
+                    .is_none_or(|clip_id| !would_create_cycle(video, clip_id, row.timing.id))
+                {
+                    return Some(TimelineDropTarget::Attach {
+                        parent: row.timing.id,
+                        start,
+                        highlight,
+                    });
+                }
+            }
+            ClipDropZone::Before if row.timing.depth == 0 => {
+                let boundary = video.sibling_index(row.timing.id).unwrap_or(0);
+                return Some(TimelineDropTarget::Base {
+                    index: adjusted_base_index(video, boundary, moving_id),
+                    x: rect.left(),
+                });
+            }
+            ClipDropZone::After if row.timing.depth == 0 => {
+                let boundary = video.sibling_index(row.timing.id).unwrap_or(0) + 1;
+                return Some(TimelineDropTarget::Base {
+                    index: adjusted_base_index(video, boundary, moving_id),
+                    x: rect.right(),
+                });
+            }
+            ClipDropZone::Before | ClipDropZone::After => {}
+        }
+    }
+
+    let lane = lane_at(content, pointer.y);
+    if let Some(drag) = moving {
+        let row = rows.iter().find(|row| row.timing.id == drag.clip)?;
+        let clip = video.clip(drag.clip)?;
+        if lane == row.lane && clip.attachment.is_some() {
+            return Some(TimelineDropTarget::Offset {
+                start,
+                lane,
+                length: clip.length,
+            });
+        }
+    }
+    (lane == 0).then(|| base_target(video, rows, content, pixels_per_frame, pointer.x, moving_id))
 }
 
 /// The tick spacing, in seconds, that keeps ruler labels readable.
@@ -178,19 +344,11 @@ impl VideoEditor {
 
         let parent_of_selected = self.selected_clip(video).and_then(VideoClip::parent);
         let mut operations = Vec::new();
-        let mut reorder = None;
         for row in rows {
             let Some(clip) = video.clip(row.timing.id).cloned() else {
                 continue;
             };
-            let lane = lane_rect(content, row.lane);
-            let clip_rect = Rect::from_min_max(
-                egui::pos2(x_at(row.timing.start), lane.top()),
-                egui::pos2(
-                    x_at(row.timing.start) + (row.timing.length as f32 * pixels_per_frame).max(3.0),
-                    lane.bottom(),
-                ),
-            );
+            let clip_rect = clip_rect(content, row, pixels_per_frame);
             let selected = self.selected == Some(clip.id);
             let response = ui.interact(
                 clip_rect,
@@ -247,96 +405,71 @@ impl VideoEditor {
                         .saturating_sub(row.timing.start),
                 });
             }
-            let drag = self.drag.as_ref().filter(|drag| drag.clip == clip.id);
-            // Dragging within the clip's own row only repositions it (an
-            // offset for an attachment, or nothing yet for a base clip, which
-            // only reorders once the drag ends). Dragging into another row
-            // attaches or detaches the clip instead, applied on release so the
-            // clip does not flicker between parents while still moving.
-            if let (true, Some(drag), Some(pointer)) =
-                (response.dragged(), drag, ui.ctx().pointer_interact_pos())
-            {
-                if clip.attachment.is_some() && lane_at(content, pointer.y) == row.lane {
-                    let start = frame_at(pointer.x).saturating_sub(drag.grab);
-                    if let Some(update) = reattached(video, &clip, start) {
-                        operations.push(VideoOperation::UpdateClips {
-                            clips: vec![update],
-                        });
-                    }
-                }
-            }
-            if let (true, Some(drag), Some(pointer)) = (
-                response.drag_stopped(),
-                drag,
-                ui.ctx().pointer_interact_pos(),
-            ) {
-                let target_lane = lane_at(content, pointer.y);
-                if target_lane == row.lane {
-                    if clip.attachment.is_none() {
-                        reorder = Some((clip.id, frame_at(pointer.x)));
-                    }
-                } else if target_lane == 0 {
-                    if clip.attachment.is_some() {
-                        let mut detached = clip.clone();
-                        detached.attachment = None;
-                        operations.push(VideoOperation::UpdateClips {
-                            clips: vec![detached],
-                        });
-                        reorder = Some((clip.id, frame_at(pointer.x)));
-                    }
-                } else if let Some(parent) = clip_in_lane(rows, target_lane) {
-                    if parent != clip.id {
-                        if let Some(parent_start) = video.timing(parent).map(|timing| timing.start)
-                        {
-                            let start = frame_at(pointer.x).saturating_sub(drag.grab);
-                            let offset = i64::try_from(start).unwrap_or(i64::MAX)
-                                - i64::try_from(parent_start).unwrap_or(0);
-                            let attachment = Some(VideoAttachment::new(parent, offset));
-                            if attachment != clip.attachment {
-                                let mut attached = clip.clone();
-                                attached.attachment = attachment;
-                                operations.push(VideoOperation::UpdateClips {
-                                    clips: vec![attached],
-                                });
-                            }
-                        }
-                    }
-                }
-            }
         }
-        if let Some(dragged) = background.dnd_hover_payload::<SidebarDragPayload>() {
-            if dragged.reference.id != self.block.id() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
+
+        let pointer = ui
+            .ctx()
+            .pointer_interact_pos()
+            .or_else(|| ui.ctx().pointer_hover_pos());
+        let internal_target = self.drag.as_ref().and_then(|drag| {
+            pointer.and_then(|pointer| {
+                drop_target_at(video, rows, content, pixels_per_frame, pointer, Some(drag))
+            })
+        });
+        let sidebar_payload = background
+            .dnd_hover_payload::<SidebarDragPayload>()
+            .filter(|dragged| dragged.reference.id != self.block.id());
+        let sidebar_target = sidebar_payload.as_ref().and_then(|_| {
+            pointer.and_then(|pointer| {
+                drop_target_at(video, rows, content, pixels_per_frame, pointer, None)
+            })
+        });
+        if internal_target.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if sidebar_target.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
+        }
+        if let Some(target) = internal_target.or(sidebar_target) {
+            paint_drop_target(&painter, content, pixels_per_frame, target, &visuals);
+        }
+
+        let released = ui.input(|input| input.pointer.any_released());
+        let had_internal_drag = self.drag.is_some();
+        if released {
+            if let (Some(drag), Some(target)) = (self.drag.as_ref(), internal_target) {
+                apply_clip_drop(video, drag.clip, target, &mut operations);
             }
+            self.drag = None;
         }
         if let Some(dragged) = background.dnd_release_payload::<SidebarDragPayload>() {
             if dragged.reference.id != self.block.id() {
-                let pointer = ui.ctx().pointer_interact_pos();
-                let attachment = pointer.and_then(|pointer| {
-                    let lane = lane_at(content, pointer.y);
-                    (lane != 0).then(|| clip_in_lane(rows, lane)).flatten()
-                });
-                let frame = pointer.map_or(self.playhead, |pointer| frame_at(pointer.x));
-                self.insert_clip(video, dragged.reference.id, attachment, frame);
-                editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
+                if let Some(target) = sidebar_target {
+                    match target {
+                        TimelineDropTarget::Attach { parent, start, .. } => {
+                            self.insert_clip(
+                                video,
+                                dragged.reference.id,
+                                Some(parent),
+                                start,
+                                None,
+                            );
+                        }
+                        TimelineDropTarget::Base { index, .. } => {
+                            self.insert_clip(video, dragged.reference.id, None, 0, Some(index));
+                        }
+                        TimelineDropTarget::Offset { .. } => {}
+                    }
+                    editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
+                }
             }
         }
-        if background.clicked() || background.dragged() {
+        if background.clicked() || (background.dragged() && !had_internal_drag) {
             if let Some(pointer) = ui.ctx().pointer_interact_pos() {
                 self.seek(frame_at(pointer.x), duration);
             }
             if background.clicked() {
                 self.selected = None;
             }
-        }
-        if let Some((clip_id, frame)) = reorder {
-            self.drag = None;
-            if let Some(index) = base_index_at(video, frame) {
-                operations.push(VideoOperation::MoveClip { clip_id, index });
-            }
-        }
-        if ui.input(|input| input.pointer.any_released()) {
-            self.drag = None;
         }
         for operation in operations {
             self.block.operate(operation);
@@ -477,13 +610,99 @@ fn reattached(
     })
 }
 
-/// Which base track slot `frame` falls in, so a dragged clip knows where it
-/// was dropped.
-fn base_index_at(video: &Video, frame: u64) -> Option<usize> {
-    let timings = video.timeline();
-    let covering = timings
-        .iter()
-        .filter(|timing| timing.depth == 0)
-        .find(|timing| timing.covers(frame))?;
-    video.sibling_index(covering.id)
+fn paint_drop_target(
+    painter: &egui::Painter,
+    content: Rect,
+    pixels_per_frame: f32,
+    target: TimelineDropTarget,
+    visuals: &egui::Visuals,
+) {
+    let color = visuals.selection.stroke.color;
+    match target {
+        TimelineDropTarget::Attach { highlight, .. } => {
+            painter.rect_filled(highlight.shrink(2.0), 3.0, color.gamma_multiply(0.25));
+            painter.rect_stroke(
+                highlight.shrink(1.0),
+                3.0,
+                Stroke::new(2.0_f32, color),
+                egui::StrokeKind::Inside,
+            );
+        }
+        TimelineDropTarget::Base { x, .. } => {
+            let lane = lane_rect(content, 0);
+            painter.line_segment(
+                [egui::pos2(x, lane.top()), egui::pos2(x, lane.bottom())],
+                Stroke::new(3.0_f32, color),
+            );
+            painter.circle_filled(egui::pos2(x, lane.top() + 3.0), 4.0, color);
+            painter.circle_filled(egui::pos2(x, lane.bottom() - 3.0), 4.0, color);
+        }
+        TimelineDropTarget::Offset {
+            start,
+            lane,
+            length,
+        } => {
+            let lane = lane_rect(content, lane);
+            let left = content.left() + start as f32 * pixels_per_frame;
+            let rect = Rect::from_min_max(
+                egui::pos2(left, lane.top()),
+                egui::pos2(
+                    left + (length as f32 * pixels_per_frame).max(3.0),
+                    lane.bottom(),
+                ),
+            );
+            painter.rect_filled(rect, 4.0, color.gamma_multiply(0.18));
+            painter.rect_stroke(
+                rect,
+                4.0,
+                Stroke::new(2.0_f32, color),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+}
+
+fn apply_clip_drop(
+    video: &Video,
+    clip_id: Uuid,
+    target: TimelineDropTarget,
+    operations: &mut Vec<VideoOperation>,
+) {
+    let Some(clip) = video.clip(clip_id) else {
+        return;
+    };
+    match target {
+        TimelineDropTarget::Attach { parent, start, .. } => {
+            let Some(parent_start) = video.timing(parent).map(|timing| timing.start) else {
+                return;
+            };
+            let offset =
+                i64::try_from(start).unwrap_or(i64::MAX) - i64::try_from(parent_start).unwrap_or(0);
+            let attachment = Some(VideoAttachment::new(parent, offset));
+            if clip.attachment != attachment {
+                let mut attached = clip.clone();
+                attached.attachment = attachment;
+                operations.push(VideoOperation::UpdateClips {
+                    clips: vec![attached],
+                });
+            }
+        }
+        TimelineDropTarget::Base { index, .. } => {
+            if clip.attachment.is_some() {
+                let mut detached = clip.clone();
+                detached.attachment = None;
+                operations.push(VideoOperation::UpdateClips {
+                    clips: vec![detached],
+                });
+            }
+            operations.push(VideoOperation::MoveClip { clip_id, index });
+        }
+        TimelineDropTarget::Offset { start, .. } => {
+            if let Some(update) = reattached(video, clip, start) {
+                operations.push(VideoOperation::UpdateClips {
+                    clips: vec![update],
+                });
+            }
+        }
+    }
 }

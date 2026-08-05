@@ -153,9 +153,16 @@ impl VideoEditor {
             .operate(VideoOperation::UpdateClips { clips: vec![clip] });
     }
 
-    /// Adds a clip showing `block_id`, either at the end of the base track or
-    /// attached to `attachment` at `frame`.
-    fn insert_clip(&mut self, video: &Video, block_id: Uuid, attachment: Option<Uuid>, frame: u64) {
+    /// Adds a clip showing `block_id`, attached to `attachment` at `frame` or
+    /// at `base_index` on the base track. Omitting the index appends it.
+    fn insert_clip(
+        &mut self,
+        video: &Video,
+        block_id: Uuid,
+        attachment: Option<Uuid>,
+        frame: u64,
+        base_index: Option<usize>,
+    ) {
         let length = video.frame_rate().frames(DEFAULT_CLIP_SECONDS).max(1);
         let mut clip = VideoClip::new(block_id, length);
         let index = match attachment {
@@ -166,7 +173,7 @@ impl VideoEditor {
                 clip = clip.attached_to(parent, offset);
                 video.children(Some(parent)).len()
             }
-            None => video.children(None).len(),
+            None => base_index.unwrap_or_else(|| video.children(None).len()),
         };
         self.selected = Some(clip.id);
         self.block
@@ -517,7 +524,7 @@ impl BlockEditor for VideoEditor {
                 .handle(ui.ctx(), editors, BlockParent::Uuid(self.block.id()))
         {
             let attachment = self.picker_attachment.take();
-            self.insert_clip(&video, result.id, attachment, self.playhead);
+            self.insert_clip(&video, result.id, attachment, self.playhead, None);
         }
 
         let rect = ui.available_rect_before_wrap();
