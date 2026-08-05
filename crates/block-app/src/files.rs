@@ -623,6 +623,7 @@ impl BlockApp {
                     #[cfg(not(any(
                         target_os = "android",
                         target_os = "windows",
+                        target_os = "macos",
                         target_arch = "wasm32"
                     )))]
                     if ui.button("Terminal").clicked() {

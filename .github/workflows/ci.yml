@@ -233,10 +233,11 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      # libghostty-vt-sys builds libghostty-vt from source via Zig. It is not
-      # supported on Windows, where the client excludes it entirely.
+      # libghostty-vt-sys builds libghostty-vt from source via Zig. The client
+      # excludes it on Windows because it is not supported there, and on macOS
+      # because the build is currently broken.
       - name: Install Zig
-        if: matrix.client && runner.os != 'Windows'
+        if: matrix.client && runner.os == 'Linux'
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2

@@ -72,8 +72,9 @@ eframe = { version = "0.34.3", default-features = false, features = ["wayland", 
 rfd = "0.15"
 wry = "0.55.1"
 
-# libghostty-vt is not supported on Windows.
-[target.'cfg(not(any(target_os = "android", target_os = "windows", target_arch = "wasm32")))'.dependencies]
+# libghostty-vt is not supported on Windows, and is disabled on macOS because
+# it does not currently build there.
+[target.'cfg(not(any(target_os = "android", target_os = "windows", target_os = "macos", target_arch = "wasm32")))'.dependencies]
 libghostty-vt = "0.2.1"
 portable-pty = "0.9.0"
 
