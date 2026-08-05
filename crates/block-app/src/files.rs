@@ -620,6 +620,11 @@ impl BlockApp {
                         performance::open();
                         ui.close();
                     }
+                    #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+                    if ui.button("Terminal").clicked() {
+                        crate::debug::terminal::open();
+                        ui.close();
+                    }
                     ui.separator();
                     ui.strong("Workspace");
                     if let Some(workspace) = &self.workspace {
