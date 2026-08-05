@@ -181,6 +181,17 @@ jobs:
               -validity 10000
           fi
 
+      # A CI build sharing the app's real package name would either silently
+      # overwrite a locally-built install (if it happened to share a signing
+      # key) or block installation with a signature-mismatch error (since it
+      # doesn't, now that the key is pinned in "Restore the debug keystore").
+      # Give it its own application ID and label instead, so it installs
+      # side by side with a local build rather than colliding with it.
+      - name: Set a CI-only application ID
+        run: |
+          sed -i 's/^package = "com.be3.block"$/package = "com.be3.block.ci"/' crates/block-app/Cargo.toml
+          sed -i 's/^label = "Block"$/label = "Block (CI)"/' crates/block-app/Cargo.toml
+
       - run: pwsh -File ./scripts/build-block-android.ps1 -AndroidSdk "$ANDROID_SDK_ROOT"
 
       - uses: actions/upload-artifact@v7
