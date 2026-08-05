@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use block::BlockReference;
+use block::{BlockParent, BlockReference};
 use block_client::blocks::video::{
     Video, VideoAttachment, VideoClip, VideoClipTiming, VideoFrameRate, VideoOperation,
 };
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, Vec2};
 use uuid::Uuid;
 
-use crate::editors::{rect_corners, BlockRenderContext, EditorAccess};
+use crate::editors::{rect_corners, BlockRenderContext, EditorAccess, SidebarDragPayload};
 
 use super::{ClipDrag, VideoEditor};
 
@@ -62,6 +62,21 @@ fn lane_rect(content: Rect, lane: usize) -> Rect {
         egui::pos2(content.left(), top),
         egui::pos2(content.right(), top + LANE_HEIGHT),
     )
+}
+
+/// The lane a `y` coordinate falls in. Lane zero is the base track; every
+/// other lane belongs to whichever clip is attached there.
+fn lane_at(content: Rect, y: f32) -> usize {
+    ((y - content.top() - RULER_HEIGHT) / (LANE_HEIGHT + LANE_GAP))
+        .floor()
+        .max(0.0) as usize
+}
+
+/// Which clip owns `lane`, so a drag can tell what it would attach to.
+fn clip_in_lane(rows: &[ClipRow], lane: usize) -> Option<Uuid> {
+    rows.iter()
+        .find(|row| row.lane == lane)
+        .map(|row| row.timing.id)
 }
 
 /// The tick spacing, in seconds, that keeps ruler labels readable.
@@ -137,7 +152,8 @@ impl VideoEditor {
         self.draw_ruler(&painter, content, video, &visuals);
 
         // Attachments live on their own rows, so a tether shows what each one
-        // hangs off.
+        // hangs off. The tether into the selected clip's own parent is bolded
+        // so the parenting is visible at a glance.
         for row in rows {
             let Some(parent) = video.clip(row.timing.id).and_then(|clip| clip.parent()) else {
                 continue;
@@ -146,15 +162,21 @@ impl VideoEditor {
                 continue;
             };
             let x = x_at(row.timing.start);
+            let stroke = if self.selected == Some(row.timing.id) {
+                Stroke::new(2.0_f32, visuals.selection.stroke.color)
+            } else {
+                Stroke::new(1.0_f32, visuals.widgets.noninteractive.bg_stroke.color)
+            };
             painter.line_segment(
                 [
                     egui::pos2(x, lane_rect(content, parent_lane.lane).bottom()),
                     egui::pos2(x, lane_rect(content, row.lane).top()),
                 ],
-                Stroke::new(1.0_f32, visuals.widgets.noninteractive.bg_stroke.color),
+                stroke,
             );
         }
 
+        let parent_of_selected = self.selected_clip(video).and_then(VideoClip::parent);
         let mut operations = Vec::new();
         let mut reorder = None;
         for row in rows {
@@ -192,6 +214,7 @@ impl VideoEditor {
                 clip_rect,
                 &clip,
                 selected,
+                parent_of_selected == Some(clip.id),
                 dependencies,
                 editors,
                 &visuals,
@@ -224,27 +247,78 @@ impl VideoEditor {
                         .saturating_sub(row.timing.start),
                 });
             }
-            // A base clip has no offset of its own - it plays after the clip
-            // before it - so dragging one reorders the track instead.
-            if response.dragged() && clip.attachment.is_some() {
-                if let (Some(pointer), Some(drag)) =
-                    (ui.ctx().pointer_interact_pos(), self.drag.as_ref())
-                {
-                    if drag.clip == clip.id {
-                        let start = frame_at(pointer.x).saturating_sub(drag.grab);
-                        if let Some(update) = reattached(video, &clip, start) {
-                            operations.push(VideoOperation::UpdateClips {
-                                clips: vec![update],
-                            });
+            let drag = self.drag.as_ref().filter(|drag| drag.clip == clip.id);
+            // Dragging within the clip's own row only repositions it (an
+            // offset for an attachment, or nothing yet for a base clip, which
+            // only reorders once the drag ends). Dragging into another row
+            // attaches or detaches the clip instead, applied on release so the
+            // clip does not flicker between parents while still moving.
+            if let (true, Some(drag), Some(pointer)) =
+                (response.dragged(), drag, ui.ctx().pointer_interact_pos())
+            {
+                if clip.attachment.is_some() && lane_at(content, pointer.y) == row.lane {
+                    let start = frame_at(pointer.x).saturating_sub(drag.grab);
+                    if let Some(update) = reattached(video, &clip, start) {
+                        operations.push(VideoOperation::UpdateClips {
+                            clips: vec![update],
+                        });
+                    }
+                }
+            }
+            if let (true, Some(drag), Some(pointer)) = (
+                response.drag_stopped(),
+                drag,
+                ui.ctx().pointer_interact_pos(),
+            ) {
+                let target_lane = lane_at(content, pointer.y);
+                if target_lane == row.lane {
+                    if clip.attachment.is_none() {
+                        reorder = Some((clip.id, frame_at(pointer.x)));
+                    }
+                } else if target_lane == 0 {
+                    if clip.attachment.is_some() {
+                        let mut detached = clip.clone();
+                        detached.attachment = None;
+                        operations.push(VideoOperation::UpdateClips {
+                            clips: vec![detached],
+                        });
+                        reorder = Some((clip.id, frame_at(pointer.x)));
+                    }
+                } else if let Some(parent) = clip_in_lane(rows, target_lane) {
+                    if parent != clip.id {
+                        if let Some(parent_start) = video.timing(parent).map(|timing| timing.start)
+                        {
+                            let start = frame_at(pointer.x).saturating_sub(drag.grab);
+                            let offset = i64::try_from(start).unwrap_or(i64::MAX)
+                                - i64::try_from(parent_start).unwrap_or(0);
+                            let attachment = Some(VideoAttachment::new(parent, offset));
+                            if attachment != clip.attachment {
+                                let mut attached = clip.clone();
+                                attached.attachment = attachment;
+                                operations.push(VideoOperation::UpdateClips {
+                                    clips: vec![attached],
+                                });
+                            }
                         }
                     }
                 }
             }
-            if response.drag_stopped() && clip.attachment.is_none() {
-                reorder = ui
-                    .ctx()
-                    .pointer_interact_pos()
-                    .map(|pointer| (clip.id, frame_at(pointer.x)));
+        }
+        if let Some(dragged) = background.dnd_hover_payload::<SidebarDragPayload>() {
+            if dragged.reference.id != self.block.id() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
+            }
+        }
+        if let Some(dragged) = background.dnd_release_payload::<SidebarDragPayload>() {
+            if dragged.reference.id != self.block.id() {
+                let pointer = ui.ctx().pointer_interact_pos();
+                let attachment = pointer.and_then(|pointer| {
+                    let lane = lane_at(content, pointer.y);
+                    (lane != 0).then(|| clip_in_lane(rows, lane)).flatten()
+                });
+                let frame = pointer.map_or(self.playhead, |pointer| frame_at(pointer.x));
+                self.insert_clip(video, dragged.reference.id, attachment, frame);
+                editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
             }
         }
         if background.clicked() || background.dragged() {
@@ -333,6 +407,7 @@ impl VideoEditor {
         rect: Rect,
         clip: &VideoClip,
         selected: bool,
+        is_parent_of_selected: bool,
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &mut EditorAccess<'_>,
         visuals: &egui::Visuals,
@@ -374,6 +449,8 @@ impl VideoEditor {
             4.0,
             if selected {
                 Stroke::new(2.0_f32, visuals.selection.stroke.color)
+            } else if is_parent_of_selected {
+                Stroke::new(2.0_f32, visuals.selection.stroke.color.gamma_multiply(0.7))
             } else {
                 Stroke::new(1.0_f32, Color32::from_black_alpha(90))
             },

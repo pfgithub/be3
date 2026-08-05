@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use block::{BlockParent, BlockReference, BlockReferenceList};
 use block_client::{
     blocks::{
-        video::{Video, VideoClip, VideoFrameRate, VideoOperation},
+        video::{Video, VideoAttachment, VideoClip, VideoFrameRate, VideoOperation},
         workspace_index::BlockEntry,
     },
     BlockClient, BlockHandle, ReferenceList,
@@ -15,9 +15,9 @@ use block_client::{
 use eframe::egui::{self, Sense, Vec2};
 use egui_material_icons::{
     icons::{
-        ICON_ADD, ICON_DELETE, ICON_FIT_SCREEN, ICON_MOVIE, ICON_PAUSE, ICON_PLAY_ARROW,
-        ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_SUBDIRECTORY_ARROW_RIGHT, ICON_ZOOM_IN,
-        ICON_ZOOM_OUT,
+        ICON_ADD, ICON_CONTENT_CUT, ICON_DELETE, ICON_FIT_SCREEN, ICON_MOVIE, ICON_PAUSE,
+        ICON_PLAY_ARROW, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_SUBDIRECTORY_ARROW_RIGHT,
+        ICON_ZOOM_IN, ICON_ZOOM_OUT,
     },
     MaterialIcon,
 };
@@ -40,6 +40,10 @@ const DEFAULT_PIXELS_PER_FRAME: f32 = 4.0;
 /// How long a clip is when it is first added.
 const DEFAULT_CLIP_SECONDS: f64 = 5.0;
 const PANEL_GAP: f32 = 6.0;
+/// Height of the playback controls strip under the preview panel.
+const PLAYBACK_BAR_HEIGHT: f32 = 30.0;
+/// Height of the toolbar strip above the timeline panel.
+const TIMELINE_TOOLBAR_HEIGHT: f32 = 30.0;
 
 impl EditorKind for VideoEditor {
     type Block = Video;
@@ -150,14 +154,14 @@ impl VideoEditor {
     }
 
     /// Adds a clip showing `block_id`, either at the end of the base track or
-    /// attached to `attachment` at the playhead.
-    fn insert_clip(&mut self, video: &Video, block_id: Uuid, attachment: Option<Uuid>) {
+    /// attached to `attachment` at `frame`.
+    fn insert_clip(&mut self, video: &Video, block_id: Uuid, attachment: Option<Uuid>, frame: u64) {
         let length = video.frame_rate().frames(DEFAULT_CLIP_SECONDS).max(1);
         let mut clip = VideoClip::new(block_id, length);
         let index = match attachment {
             Some(parent) => {
                 let parent_start = video.timing(parent).map_or(0, |timing| timing.start);
-                let offset = i64::try_from(self.playhead).unwrap_or(i64::MAX)
+                let offset = i64::try_from(frame).unwrap_or(i64::MAX)
                     - i64::try_from(parent_start).unwrap_or(0);
                 clip = clip.attached_to(parent, offset);
                 video.children(Some(parent)).len()
@@ -167,6 +171,47 @@ impl VideoEditor {
         self.selected = Some(clip.id);
         self.block
             .operate(VideoOperation::InsertClip { clip, index });
+    }
+
+    /// Splits the selected clip into two at the playhead, keeping the first
+    /// half in place and inserting the second half right after it.
+    fn split_selected_clip(&mut self, video: &Video) {
+        let Some(selected) = self.selected else {
+            return;
+        };
+        let Some(clip) = video.clip(selected) else {
+            return;
+        };
+        let Some(timing) = video.timing(selected) else {
+            return;
+        };
+        if !timing.covers(self.playhead) || self.playhead == timing.start {
+            return;
+        }
+        let first_length = self.playhead - timing.start;
+        let second_length = timing.length - first_length;
+
+        let mut first = clip.clone();
+        first.length = first_length;
+
+        let mut second = clip.clone();
+        second.id = Uuid::new_v4();
+        second.length = second_length;
+        second.attachment = clip.attachment.map(|attachment| {
+            VideoAttachment::new(
+                attachment.clip_id,
+                attachment.offset + i64::try_from(first_length).unwrap_or(i64::MAX),
+            )
+        });
+
+        let index = video.sibling_index(selected).unwrap_or(0) + 1;
+        self.selected = Some(second.id);
+        self.block
+            .operate(VideoOperation::UpdateClips { clips: vec![first] });
+        self.block.operate(VideoOperation::InsertClip {
+            clip: second,
+            index,
+        });
     }
 
     fn remove_clip(&mut self, clip_id: Uuid) {
@@ -248,7 +293,7 @@ impl VideoEditor {
         .on_hover_text(format!("Frame {} of {duration}", self.playhead));
     }
 
-    fn clip_menu(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
+    fn clip_menu(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>, video: &Video) {
         ui.menu_button(format!("{} Add clip", ICON_ADD.codepoint), |ui| {
             self.picker_attachment = None;
             self.picker
@@ -265,8 +310,18 @@ impl VideoEditor {
                     .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
             })
             .response
-            .on_hover_text("Attach a clip to the selected clip at the playhead");
+            .on_hover_text(
+                "Attach a clip to the selected clip at the playhead\n\
+                 You can also drag any clip onto another clip's row to attach it there.",
+            );
         });
+        if ui
+            .add_enabled(selected.is_some(), egui::Button::new(ICON_CONTENT_CUT))
+            .on_hover_text("Split the selected clip in two at the playhead")
+            .clicked()
+        {
+            self.split_selected_clip(video);
+        }
         if ui
             .add_enabled(selected.is_some(), egui::Button::new(ICON_DELETE))
             .on_hover_text("Delete the selected clip and everything attached to it")
@@ -428,17 +483,12 @@ impl BlockEditor for VideoEditor {
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
+        _editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let video = self.video()?;
         self.synchronize(&video);
         ui.horizontal_wrapped(|ui| {
-            self.clip_menu(ui, editors);
-            ui.separator();
-            self.playback_controls(ui, &video);
-            ui.separator();
-            self.zoom_controls(ui);
             self.frame_rate_control(ui, &video);
         });
         None
@@ -467,7 +517,7 @@ impl BlockEditor for VideoEditor {
                 .handle(ui.ctx(), editors, BlockParent::Uuid(self.block.id()))
         {
             let attachment = self.picker_attachment.take();
-            self.insert_clip(&video, result.id, attachment);
+            self.insert_clip(&video, result.id, attachment, self.playhead);
         }
 
         let rect = ui.available_rect_before_wrap();
@@ -478,10 +528,19 @@ impl BlockEditor for VideoEditor {
         let (top, timeline) = rect.split_top_bottom_at_y(rect.bottom() - timeline_height);
         let (effects, player) =
             top.split_left_right_at_x(top.left() + EFFECTS_WIDTH.min(top.width() * 0.45));
+        let (player, playback_bar) =
+            player.split_top_bottom_at_y(player.bottom() - PLAYBACK_BAR_HEIGHT);
+        let (timeline_toolbar, timeline) =
+            timeline.split_top_bottom_at_y(timeline.top() + TIMELINE_TOOLBAR_HEIGHT);
 
         let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
         ui.painter().vline(effects.right(), top.y_range(), stroke);
-        ui.painter().hline(rect.x_range(), timeline.top(), stroke);
+        ui.painter()
+            .hline(player.x_range(), playback_bar.top(), stroke);
+        ui.painter()
+            .hline(rect.x_range(), timeline_toolbar.top(), stroke);
+        ui.painter()
+            .hline(timeline_toolbar.x_range(), timeline.top(), stroke);
 
         let block_id = self.block.id();
         let region = |ui: &mut egui::Ui, salt: &'static str, rect: egui::Rect| {
@@ -501,6 +560,18 @@ impl BlockEditor for VideoEditor {
         let mut player_ui = region(ui, "video-player", player);
         player_ui.set_clip_rect(player.intersect(ui.clip_rect()));
         self.player_ui(&mut player_ui, player_rect, &video, &dependencies, editors);
+
+        let mut playback_bar_ui = region(ui, "video-playback-bar", playback_bar);
+        playback_bar_ui.set_clip_rect(playback_bar.intersect(ui.clip_rect()));
+        playback_bar_ui.horizontal_centered(|ui| self.playback_controls(ui, &video));
+
+        let mut timeline_toolbar_ui = region(ui, "video-timeline-toolbar", timeline_toolbar);
+        timeline_toolbar_ui.set_clip_rect(timeline_toolbar.intersect(ui.clip_rect()));
+        timeline_toolbar_ui.horizontal(|ui| {
+            self.clip_menu(ui, editors, &video);
+            ui.separator();
+            self.zoom_controls(ui);
+        });
 
         let mut timeline_ui = region(ui, "video-timeline-panel", timeline);
         timeline_ui.set_clip_rect(timeline.intersect(ui.clip_rect()));

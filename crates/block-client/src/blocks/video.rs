@@ -25,7 +25,7 @@ pub struct VideoFrameRate {
 }
 
 impl VideoFrameRate {
-    pub const DEFAULT: Self = Self::new(30, 1);
+    pub const DEFAULT: Self = Self::new(60, 1);
 
     pub const fn new(numerator: u32, denominator: u32) -> Self {
         Self {
