@@ -24,9 +24,10 @@ use uuid::Uuid;
 use crate::block_picker::BlockPicker;
 
 use super::{
-    infinite_canvas::InfiniteCanvasEditor, BlockEditor, BlockRenderContext, CreatableEditor,
-    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorKind,
+    fit_rect, infinite_canvas::InfiniteCanvasEditor, paint_block_fallback, rect_corners,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
@@ -238,7 +239,7 @@ impl PresentationEditor {
                             },
                         );
                         if !rendered {
-                            paint_fallback(
+                            paint_block_fallback(
                                 &painter,
                                 preview,
                                 dependencies.get(&slide.block_id),
@@ -360,7 +361,7 @@ impl PresentationEditor {
                 opacity: 1.0,
             },
         ) {
-            paint_fallback(
+            paint_block_fallback(
                 &painter,
                 preview,
                 dependencies.get(&slide.block_id),
@@ -556,7 +557,7 @@ impl BlockEditor for PresentationEditor {
             return true;
         }
         let rect = Rect::from_min_max(context.corners[0], context.corners[2]);
-        paint_fallback(
+        paint_block_fallback(
             context.painter,
             rect,
             dependencies.get(&slide.block_id),
@@ -759,66 +760,4 @@ impl BlockEditor for PresentationEditor {
         }
         None
     }
-}
-
-fn rect_corners(rect: Rect) -> [egui::Pos2; 4] {
-    [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-    ]
-}
-
-fn fit_rect(available: Rect, ratio: f32) -> Rect {
-    let ratio = ratio.max(0.01);
-    let available_ratio = available.width() / available.height().max(1.0);
-    let size = if available_ratio > ratio {
-        Vec2::new(available.height() * ratio, available.height())
-    } else {
-        Vec2::new(available.width(), available.width() / ratio)
-    };
-    Rect::from_center_size(available.center(), size)
-}
-
-fn paint_fallback(
-    painter: &egui::Painter,
-    rect: Rect,
-    reference: Option<&BlockReference>,
-    editors: &EditorAccess<'_>,
-) {
-    painter.rect_filled(rect, 5.0, Color32::from_gray(28));
-    painter.rect_stroke(
-        rect,
-        5.0,
-        Stroke::new(1.0_f32, Color32::from_gray(75)),
-        egui::StrokeKind::Inside,
-    );
-    let (name, icon) = reference.map_or(("Loading…", None), |reference| {
-        (
-            if reference.name.is_empty() {
-                "Untitled"
-            } else {
-                reference.name.as_str()
-            },
-            editors.registry().icon(reference.block_type),
-        )
-    });
-    let center = rect.center();
-    if let Some(icon) = icon {
-        painter.text(
-            center - Vec2::new(0.0, 18.0),
-            egui::Align2::CENTER_CENTER,
-            icon.codepoint,
-            egui::FontId::new(28.0, icon.font_family()),
-            Color32::LIGHT_GRAY,
-        );
-    }
-    painter.text(
-        center + Vec2::new(0.0, 18.0),
-        egui::Align2::CENTER_CENTER,
-        name,
-        egui::FontId::proportional(16.0),
-        Color32::LIGHT_GRAY,
-    );
 }

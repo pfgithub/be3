@@ -18,12 +18,13 @@ mod pixel_ray_tracer;
 mod presentation;
 mod text;
 mod unsupported;
+mod video;
 mod workspace_index;
 
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use block::{Block, BlockAccess, BlockParent};
+use block::{Block, BlockAccess, BlockParent, BlockReference};
 use block_client::{
     blocks::workspace_index::BlockEntry, BlockClient, BlockHandle, BlockHandleAccess,
     BlockHistoryHandle, BlockRelationships,
@@ -202,6 +203,72 @@ fn no_access_notice(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
         ui.weak(format!("{} No access", ICON_LOCK.codepoint));
     });
+}
+
+/// An unrotated rectangle as the corners `BlockRenderContext` wants.
+fn rect_corners(rect: egui::Rect) -> [egui::Pos2; 4] {
+    [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ]
+}
+
+/// The largest centered rectangle of `ratio` that fits inside `available`.
+fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
+    let ratio = ratio.max(0.01);
+    let available_ratio = available.width() / available.height().max(1.0);
+    let size = if available_ratio > ratio {
+        egui::Vec2::new(available.height() * ratio, available.height())
+    } else {
+        egui::Vec2::new(available.width(), available.width() / ratio)
+    };
+    egui::Rect::from_center_size(available.center(), size)
+}
+
+/// Stands in for a block whose preview could not be drawn, naming the block
+/// and showing the icon of its type.
+fn paint_block_fallback(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    reference: Option<&BlockReference>,
+    editors: &EditorAccess<'_>,
+) {
+    painter.rect_filled(rect, 5.0, egui::Color32::from_gray(28));
+    painter.rect_stroke(
+        rect,
+        5.0,
+        egui::Stroke::new(1.0_f32, egui::Color32::from_gray(75)),
+        egui::StrokeKind::Inside,
+    );
+    let (name, icon) = reference.map_or(("Loading…", None), |reference| {
+        (
+            if reference.name.is_empty() {
+                "Untitled"
+            } else {
+                reference.name.as_str()
+            },
+            editors.registry().icon(reference.block_type),
+        )
+    });
+    let center = rect.center();
+    if let Some(icon) = icon {
+        painter.text(
+            center - egui::Vec2::new(0.0, 18.0),
+            egui::Align2::CENTER_CENTER,
+            icon.codepoint,
+            egui::FontId::new(28.0, icon.font_family()),
+            egui::Color32::LIGHT_GRAY,
+        );
+    }
+    painter.text(
+        center + egui::Vec2::new(0.0, 18.0),
+        egui::Align2::CENTER_CENTER,
+        name,
+        egui::FontId::proportional(16.0),
+        egui::Color32::LIGHT_GRAY,
+    );
 }
 
 pub struct EditorAccess<'a> {
@@ -1097,6 +1164,7 @@ impl EditorRegistry {
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<presentation::PresentationEditor>();
         registry.register_creatable::<text::TextEditor>();
+        registry.register_creatable::<video::VideoEditor>();
         #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         registry.register_creatable::<workspace_index::WorkspaceIndexEditor>();
