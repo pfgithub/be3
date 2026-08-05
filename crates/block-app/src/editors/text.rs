@@ -518,12 +518,13 @@ impl TextEditor {
         layout: &DocumentLayout,
         checkboxes: &[MarkdownCheckbox],
     ) -> bool {
-        let (pressed, down, time, modifiers) = ui.input(|input| {
+        let (pressed, down, time, modifiers, touch_screen) = ui.input(|input| {
             (
                 input.pointer.button_pressed(PointerButton::Primary),
                 input.pointer.button_down(PointerButton::Primary),
                 input.time,
                 input.modifiers,
+                input.any_touches(),
             )
         });
         let Some(pointer) = response.interact_pointer_pos() else {
@@ -538,6 +539,16 @@ impl TextEditor {
         }) {
             self.selecting = false;
             return false;
+        }
+        if touch_screen && !pressed && down {
+            // A finger dragging across the editor on a touch screen scrolls
+            // the view rather than extending the text selection.
+            self.selecting = false;
+            let delta = ui.input(|input| input.pointer.delta());
+            if delta != Vec2::ZERO {
+                ui.scroll_with_delta(delta);
+            }
+            return true;
         }
         let target = hit_test(layout, local_pointer);
         if pressed && response.contains_pointer() {
