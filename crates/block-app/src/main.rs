@@ -166,6 +166,10 @@ struct BlockApp {
     parents: HashMap<Uuid, ReferenceList>,
     references: HashMap<Uuid, ReferenceList>,
     backrefs: HashMap<Uuid, ReferenceList>,
+    /// Backrefs fetched on demand for the "Set parent" menu, keyed by the
+    /// block whose parent is being changed. Unlike `backrefs`, this covers
+    /// any block a context menu was opened on, not just open tabs.
+    parent_candidates: HashMap<Uuid, ReferenceList>,
     block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
@@ -478,6 +482,7 @@ impl BlockApp {
             parents: HashMap::new(),
             references: HashMap::new(),
             backrefs: HashMap::new(),
+            parent_candidates: HashMap::new(),
             block_types: HashMap::new(),
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
@@ -1384,6 +1389,16 @@ impl BlockApp {
         });
     }
 
+    /// Sets a block's designated parent, going through its open editor if it
+    /// has one so the change is reflected optimistically like other edits.
+    fn set_block_parent(&mut self, id: Uuid, parent: BlockParent) {
+        if let Some(editor) = self.editors.get(&id) {
+            editor.set_parent(parent);
+        } else {
+            self.client.set_block_parent(id, parent);
+        }
+    }
+
     fn queue_move(&mut self, dragged: SidebarDragPayload, destination: Uuid) {
         if self.pending_transfers.iter().any(|pending| {
             pending.child.id == dragged.reference.id && pending.destination == Some(destination)
@@ -1478,11 +1493,7 @@ impl BlockApp {
             }
 
             if let Some(parent) = transfer.parent_after {
-                if let Some(child) = self.editors.get(&transfer.child.id) {
-                    child.set_parent(parent);
-                } else {
-                    self.client.set_block_parent(transfer.child.id, parent);
-                }
+                self.set_block_parent(transfer.child.id, parent);
             }
         }
     }
@@ -2277,6 +2288,9 @@ impl BlockApp {
                 BlockContextMenuAction::Picker => {
                     self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
                 }
+                BlockContextMenuAction::SetParent(parent) => {
+                    self.set_block_parent(reference.id, parent);
+                }
                 BlockContextMenuAction::Rename => {
                     self.rename = Some(RenameState {
                         id: reference.id,
@@ -2352,6 +2366,10 @@ impl BlockApp {
                     ui,
                     &self.registry,
                     &mut self.block_picker,
+                    &self.client,
+                    &mut self.parent_candidates,
+                    reference.id,
+                    reference.parent,
                     [reference.id],
                     permissions,
                 ) {
@@ -2497,6 +2515,7 @@ impl TabViewer for BlockTabViewer<'_> {
 
 enum BlockContextMenuAction {
     Picker,
+    SetParent(BlockParent),
     Rename,
     Share,
     Delete,
@@ -2511,10 +2530,15 @@ struct BlockMenuPermissions {
     delete: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn block_context_menu(
     ui: &mut egui::Ui,
     registry: &EditorRegistry,
     picker: &mut BlockPicker,
+    client: &BlockClient,
+    parent_candidates: &mut HashMap<Uuid, ReferenceList>,
+    subject: Uuid,
+    current_parent: BlockParent,
     excluded: impl IntoIterator<Item = Uuid>,
     permissions: BlockMenuPermissions,
 ) -> Option<BlockContextMenuAction> {
@@ -2523,6 +2547,59 @@ fn block_context_menu(
         ui.menu_button("Add", |ui| {
             picker.show_menu_excluding(ui, registry, excluded);
             action = Some(BlockContextMenuAction::Picker);
+        });
+    })
+    .response
+    .on_disabled_hover_text(NO_EDIT_ACCESS);
+    ui.add_enabled_ui(permissions.edit, |ui| {
+        ui.menu_button("Set parent", |ui| {
+            if ui
+                .add_enabled(
+                    current_parent != BlockParent::Root,
+                    egui::Button::new("Root"),
+                )
+                .clicked()
+            {
+                action = Some(BlockContextMenuAction::SetParent(BlockParent::Root));
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    current_parent != BlockParent::Orphaned,
+                    egui::Button::new("Orphaned"),
+                )
+                .clicked()
+            {
+                action = Some(BlockContextMenuAction::SetParent(BlockParent::Orphaned));
+                ui.close();
+            }
+            ui.separator();
+            let backrefs = parent_candidates
+                .entry(subject)
+                .or_insert_with(|| client.watch_references(BlockReferenceList::Backrefs(subject)));
+            let listed = backrefs.read();
+            if listed.is_empty() {
+                ui.weak(if backrefs.is_loaded() {
+                    "No backrefs"
+                } else {
+                    "Loading…"
+                });
+            }
+            for backref in listed {
+                let is_current = current_parent == BlockParent::Uuid(backref.id);
+                if ui
+                    .add_enabled(
+                        !is_current,
+                        egui::Button::new(registry.icon_label(backref.block_type, &backref.name)),
+                    )
+                    .clicked()
+                {
+                    action = Some(BlockContextMenuAction::SetParent(BlockParent::Uuid(
+                        backref.id,
+                    )));
+                    ui.close();
+                }
+            }
         });
     })
     .response

@@ -311,6 +311,10 @@ impl BlockApp {
                     ui,
                     &self.registry,
                     &mut self.block_picker,
+                    &self.client,
+                    &mut self.parent_candidates,
+                    reference.id,
+                    reference.parent,
                     picker_excluded.clone(),
                     BlockMenuPermissions {
                         add: can_add_here,
@@ -321,6 +325,9 @@ impl BlockApp {
                     Some(BlockContextMenuAction::Picker) => {
                         self.block_picker_target =
                             Some(BlockPickerTarget::Block(reference.id));
+                    }
+                    Some(BlockContextMenuAction::SetParent(parent)) => {
+                        self.set_block_parent(reference.id, parent);
                     }
                     Some(BlockContextMenuAction::Rename) => {
                         self.rename = Some(RenameState {
