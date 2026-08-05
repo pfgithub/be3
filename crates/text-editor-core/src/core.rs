@@ -844,29 +844,57 @@ impl Core {
         let Some(document) = self.document.read() else {
             return;
         };
+        let bytes = document.bytes();
         let mut selection_lengths = Vec::new();
         let replacements = self
             .cursor_positions
             .iter()
             .map(|cursor| {
                 let range = resolve_selection(&document, cursor.pos);
-                let selected = &document.bytes()[range.left..range.right];
-                let contents = if selected.is_empty() {
-                    placeholder
+                let selected = &bytes[range.left..range.right];
+                if selected.len() >= before.len() + after.len()
+                    && selected.starts_with(before)
+                    && selected.ends_with(after)
+                {
+                    // Selection itself includes the markers (e.g. "**bold**"): unwrap in place.
+                    let inner = selected[before.len()..selected.len() - after.len()].to_vec();
+                    selection_lengths.push((inner.len(), 0));
+                    (
+                        Position::at(&document, range.left),
+                        range.right - range.left,
+                        inner,
+                    )
+                } else if range.left >= before.len()
+                    && range.right + after.len() <= bytes.len()
+                    && &bytes[range.left - before.len()..range.left] == before
+                    && &bytes[range.right..range.right + after.len()] == after
+                {
+                    // Selection sits inside existing markers: remove the surrounding markers.
+                    let inner = selected.to_vec();
+                    selection_lengths.push((inner.len(), 0));
+                    (
+                        Position::at(&document, range.left - before.len()),
+                        range.right - range.left + before.len() + after.len(),
+                        inner,
+                    )
                 } else {
-                    selected
-                };
-                let mut replacement =
-                    Vec::with_capacity(before.len() + contents.len() + after.len());
-                replacement.extend(before);
-                replacement.extend(contents);
-                replacement.extend(after);
-                selection_lengths.push(contents.len());
-                (
-                    Position::at(&document, range.left),
-                    range.right - range.left,
-                    replacement,
-                )
+                    let contents = if selected.is_empty() {
+                        placeholder
+                    } else {
+                        selected
+                    };
+                    let mut replacement =
+                        Vec::with_capacity(before.len() + contents.len() + after.len());
+                    replacement.extend(before);
+                    replacement.extend(contents);
+                    replacement.extend(after);
+                    selection_lengths.push((contents.len(), after.len()));
+                    (
+                        Position::at(&document, range.left),
+                        range.right - range.left,
+                        replacement,
+                    )
+                }
             })
             .collect();
         drop(document);
@@ -878,14 +906,14 @@ impl Core {
         let Some(document) = self.document.read() else {
             return;
         };
-        for (((cursor, end), contents_len), original) in self
+        for (((cursor, end), (contents_len, trailing_len)), original) in self
             .cursor_positions
             .iter_mut()
             .zip(positions)
             .zip(selection_lengths)
             .zip(history_cursors)
         {
-            let end = end.resolve(&document).saturating_sub(after.len());
+            let end = end.resolve(&document).saturating_sub(trailing_len);
             let start = end.saturating_sub(contents_len);
             let original_range = resolve_selection(&document, original.pos);
             cursor.pos = if original_range.left == original_range.right || original_range.is_right {

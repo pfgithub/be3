@@ -13,6 +13,7 @@ mod has_stop;
 mod markdown_block_styles;
 mod markdown_checkbox_toggle;
 mod markdown_formatting;
+mod markdown_formatting_toggles_off;
 mod markdown_incremental_edit;
 mod markdown_inline_styles;
 mod markdown_invalid_utf8;
