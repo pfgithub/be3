@@ -105,11 +105,32 @@ impl LogicGridEditor {
         }
     }
 
-    /// Rebuilds the palette from the hotbar block, filling in what each pinned
-    /// component places now that its compiled block has loaded. An empty block
-    /// keeps the default tree, so a fresh hotbar needs no eager write.
+    /// Finds the shared hotbar and rebuilds the palette from it, filling in what
+    /// each pinned component places now that its compiled block has loaded. An
+    /// empty block keeps the default tree, so a fresh hotbar needs no eager
+    /// write.
     pub(super) fn sync_hotbar(&mut self, client: Option<&BlockClient>) {
-        let Some(hotbar) = self.hotbar_block.as_ref().and_then(BlockHandle::read) else {
+        if let Some(client) = client {
+            let pending = self.hotbar_needs_write;
+            let root = self
+                .hotbar_block
+                .get_or_insert_with(|| RootHotbar::new(client));
+            if pending {
+                root.ensure(client);
+            } else {
+                root.find(client);
+            }
+        }
+        if self.hotbar_needs_write {
+            self.persist_hotbar();
+        }
+
+        let Some(hotbar) = self
+            .hotbar_block
+            .as_ref()
+            .and_then(RootHotbar::block)
+            .and_then(BlockHandle::read)
+        else {
             return;
         };
         let slots = hotbar.slots().to_vec();
@@ -229,15 +250,19 @@ impl LogicGridEditor {
         self.persist_hotbar();
     }
 
-    /// Writes the palette back to the hotbar block. A grid opened outside a
-    /// game has no hotbar block, and keeps its palette for the session only.
-    pub(super) fn persist_hotbar(&self) {
-        let Some(block) = &self.hotbar_block else {
+    /// Writes the palette back to the shared hotbar block. An editor that has
+    /// not found one yet - because the root listing is still on its way, or
+    /// because it is running without a client - notes the change instead, and
+    /// the next sync writes it to the hotbar it finds or creates.
+    pub(super) fn persist_hotbar(&mut self) {
+        let Some(block) = self.hotbar_block.as_ref().and_then(RootHotbar::block) else {
+            self.hotbar_needs_write = true;
             return;
         };
         block.operate(HotbarOperation::SetSlots {
             slots: self.hotbar.iter().map(hotbar_slot_to_block).collect(),
         });
+        self.hotbar_needs_write = false;
     }
 
     pub(super) fn show_hotbar(&mut self, ui: &mut egui::Ui) {

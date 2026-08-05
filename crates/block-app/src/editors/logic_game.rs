@@ -21,8 +21,8 @@ use uuid::Uuid;
 
 use self::binary_addition::BinaryAdditionQuiz;
 use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    hotbar::RootHotbar, BlockEditor, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 720.0;
@@ -36,6 +36,10 @@ pub(super) struct LogicGameEditor {
     solutions: HashMap<Uuid, BlockHandle<LogicGrid>>,
     /// The level whose solutions are shown, if any.
     expanded: Option<ChallengeId>,
+    /// The palette the game's grids are built from. The game does not own it:
+    /// it is the hotbar at the root of the block tree, offered here so it can
+    /// be opened without finding a grid first.
+    hotbar: Option<RootHotbar>,
     quiz: BinaryAdditionQuiz,
 }
 
@@ -62,24 +66,9 @@ impl LogicGameEditor {
             block,
             solutions: HashMap::new(),
             expanded: None,
+            hotbar: None,
             quiz: BinaryAdditionQuiz::default(),
         }
-    }
-
-    /// The hotbar every grid of this game is built from, creating it the first
-    /// time a level is started. It sits at the root of the block tree so it can
-    /// be opened on its own.
-    fn hotbar(&mut self, client: &BlockClient) -> Uuid {
-        if let Some(hotbar) = self.block.read().and_then(|game| game.hotbar()) {
-            return hotbar;
-        }
-        let hotbar = client.create_block(Hotbar::new());
-        hotbar.set_name(format!("{} Hotbar", self.block.name()));
-        hotbar.set_parent(BlockParent::Root);
-        let id = hotbar.id();
-        self.block
-            .operate(LogicGameOperation::SetHotbar { hotbar: Some(id) });
-        id
     }
 
     fn start_solution(
@@ -88,8 +77,7 @@ impl LogicGameEditor {
         challenge: ChallengeId,
         index: usize,
     ) -> EditorAction {
-        let hotbar = self.hotbar(client);
-        let solution = client.create_block(LogicGrid::for_challenge(Some(hotbar), challenge));
+        let solution = client.create_block(LogicGrid::for_challenge(challenge));
         solution.set_name(format!("{} {}", challenge.name(), index + 1));
         solution.set_parent(BlockParent::Uuid(self.block.id()));
         let id = solution.id();
@@ -106,8 +94,12 @@ impl LogicGameEditor {
     }
 
     /// Keeps a handle on every listed solution and carries each level's
-    /// progress over from the grids that passed it.
+    /// progress over from the grids that passed it, and looks for the shared
+    /// hotbar so it can be offered once the block tree has one.
     fn sync(&mut self, client: &BlockClient) {
+        self.hotbar
+            .get_or_insert_with(|| RootHotbar::new(client))
+            .find(client);
         let Some(game) = self.block.read() else {
             return;
         };
@@ -203,8 +195,12 @@ impl BlockEditor for LogicGameEditor {
             .iter()
             .map(|level| (level.challenge, level.solutions.clone(), level.completed))
             .collect::<Vec<_>>();
-        let hotbar = game.hotbar();
         drop(game);
+        let hotbar = self
+            .hotbar
+            .as_ref()
+            .and_then(RootHotbar::block)
+            .map(BlockHandle::id);
 
         let mut action = None;
         ui.horizontal(|ui| {

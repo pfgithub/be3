@@ -16,7 +16,7 @@ use block::Block;
 use block_client::{
     blocks::{
         compiled_logic::CompiledLogic,
-        hotbar::{Hotbar, HotbarOperation, HotbarSlot as BlockHotbarSlot},
+        hotbar::{HotbarOperation, HotbarSlot as BlockHotbarSlot},
         logic_grid::{LogicGrid, LogicGridOperation},
     },
     BlockClient, BlockHandle,
@@ -42,8 +42,8 @@ use self::renderer::{
     WireValue,
 };
 use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport,
-    DynamicArtifactSupport, EditorAccess, EditorAction, EditorKind,
+    hotbar::RootHotbar, BlockEditor, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, DynamicArtifactSupport, EditorAccess, EditorAction, EditorKind,
 };
 
 use geometry::*;
@@ -541,8 +541,14 @@ pub(super) struct LogicGridEditor {
     /// changes, including from this editor's own edits.
     grid: Grid,
     observed_revision: Option<u64>,
-    /// The hotbar block backing the palette, when the grid names one.
-    hotbar_block: Option<BlockHandle<Hotbar>>,
+    /// The hotbar block backing the palette: the one at the root of the block
+    /// tree, which every grid shares. It is `None` until the editor has a
+    /// client to look it up with.
+    hotbar_block: Option<RootHotbar>,
+    /// Set when the palette changed before the hotbar block was there, so the
+    /// change is written - creating the hotbar if the tree has none - as soon
+    /// as the root listing arrives.
+    hotbar_needs_write: bool,
     /// Every compiled block reachable from this grid, by ID. Pinned components
     /// and called programs are both read from here.
     compiled: HashMap<Uuid, BlockHandle<CompiledLogic>>,
@@ -601,6 +607,7 @@ impl LogicGridEditor {
             grid: Grid::new(),
             observed_revision: None,
             hotbar_block: None,
+            hotbar_needs_write: false,
             compiled: HashMap::new(),
             tool: Tool {
                 kind: ToolKind::Select,
@@ -680,7 +687,8 @@ impl LogicGridEditor {
     }
 
     /// Refreshes everything read out of the block: the circuit, the level it
-    /// belongs to, the hotbar and the compiled components it can reach.
+    /// belongs to, and the compiled components it can reach. The palette comes
+    /// from the shared hotbar instead, which `sync_hotbar` finds on its own.
     fn sync(&mut self, client: Option<&BlockClient>) {
         let revision = self.block.revision();
         if self.observed_revision == Some(revision) {
@@ -691,7 +699,6 @@ impl LogicGridEditor {
             return;
         };
         self.grid = block.grid().clone();
-        let hotbar_id = block.hotbar();
         let challenge = block.challenge();
         let called = block.called_blocks();
         drop(block);
@@ -706,9 +713,6 @@ impl LogicGridEditor {
             });
         }
         if let Some(client) = client {
-            if self.hotbar_block.as_ref().map(BlockHandle::id) != hotbar_id {
-                self.hotbar_block = hotbar_id.map(|id| client.get_block::<Hotbar>(id));
-            }
             for compiled in called {
                 self.ensure_compiled(client, compiled);
             }

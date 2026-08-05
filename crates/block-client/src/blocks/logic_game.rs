@@ -42,14 +42,12 @@ pub enum QuizRow {
     Sums,
 }
 
-/// The list of levels, the palette its circuits are built from, and the answers
-/// to the levels that are worked through on paper rather than on a grid.
+/// The list of levels and the answers to the levels that are worked through on
+/// paper rather than on a grid. The palette its circuits are built from is not
+/// part of it: the editor finds the shared hotbar at the root of the block tree.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct LogicGame {
     levels: Vec<Level>,
-    /// The hotbar block shared by the grids created for these levels.
-    #[serde(default)]
-    hotbar: Option<Uuid>,
     #[serde(default)]
     quiz: BTreeMap<usize, QuizProblem>,
 }
@@ -69,9 +67,6 @@ pub enum LogicGameOperation {
     SetCompleted {
         challenge: ChallengeId,
         completed: bool,
-    },
-    SetHotbar {
-        hotbar: Option<Uuid>,
     },
     SetQuizRow {
         problem: usize,
@@ -98,10 +93,6 @@ enum LogicGameHistoryChange {
         before: bool,
         after: bool,
     },
-    Hotbar {
-        before: Option<Uuid>,
-        after: Option<Uuid>,
-    },
     QuizRow {
         problem: usize,
         row: QuizRow,
@@ -121,7 +112,6 @@ impl LogicGame {
     pub fn new() -> Self {
         Self {
             levels: CHALLENGES.into_iter().map(Level::new).collect(),
-            hotbar: None,
             quiz: BTreeMap::new(),
         }
     }
@@ -134,10 +124,6 @@ impl LogicGame {
         self.levels
             .iter()
             .find(|level| level.challenge == challenge)
-    }
-
-    pub fn hotbar(&self) -> Option<Uuid> {
-        self.hotbar
     }
 
     pub fn quiz(&self, problem: usize) -> Option<&QuizProblem> {
@@ -187,7 +173,6 @@ impl Block for LogicGame {
                     level.completed = *completed;
                 }
             }
-            LogicGameOperation::SetHotbar { hotbar } => game.hotbar = *hotbar,
             LogicGameOperation::SetQuizRow {
                 problem,
                 row,
@@ -208,13 +193,9 @@ impl Block for LogicGame {
 
     fn references(&self) -> Vec<Uuid> {
         let mut seen = HashSet::new();
-        self.hotbar
-            .into_iter()
-            .chain(
-                self.levels
-                    .iter()
-                    .flat_map(|level| level.solutions.iter().copied()),
-            )
+        self.levels
+            .iter()
+            .flat_map(|level| level.solutions.iter().copied())
             .filter(|reference| seen.insert(*reference))
             .collect()
     }
@@ -290,9 +271,6 @@ impl BlockHistory<LogicGame> for LogicGameHistory {
                     challenge: *challenge,
                     completed: if to_after { *after } else { *before },
                 },
-                LogicGameHistoryChange::Hotbar { before, after } => LogicGameOperation::SetHotbar {
-                    hotbar: if to_after { *after } else { *before },
-                },
                 LogicGameHistoryChange::QuizRow {
                     problem,
                     row,
@@ -358,10 +336,6 @@ fn change_between(
                 after: after.level(*challenge)?.completed,
             })
         }
-        LogicGameOperation::SetHotbar { .. } => Some(LogicGameHistoryChange::Hotbar {
-            before: before.hotbar,
-            after: after.hotbar,
-        }),
         LogicGameOperation::SetQuizRow { problem, row, .. } => {
             let read = |game: &LogicGame| {
                 game.quiz(*problem).map_or_else(Vec::new, |answers| {

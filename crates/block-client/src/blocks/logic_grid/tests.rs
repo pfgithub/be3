@@ -63,6 +63,6 @@ fn add(block: &BlockHandle<LogicGrid>, make: impl FnOnce(ComponentId) -> Compone
 
 mod logic_grid_history_restores_removed_components;
 mod logic_grid_history_restores_wires_split_by_a_removal;
-mod logic_grid_references_called_blocks_and_the_hotbar;
+mod logic_grid_references_called_blocks;
 mod logic_grid_repeated_additions_are_ignored;
 mod logic_grid_serialization_round_trips;

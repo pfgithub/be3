@@ -8,15 +8,12 @@ use logicgame::grid::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// One circuit: the components placed on the grid, the wires between them, and
-/// the hotbar the editor offers while it is open.
+/// One circuit: the components placed on the grid and the wires between them.
+/// The palette it is edited with is not part of it: the editor finds the shared
+/// hotbar at the root of the block tree instead.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct LogicGrid {
     grid: Grid,
-    /// The hotbar block this grid is edited with. Grids created outside a game
-    /// have none and fall back to the built-in tools.
-    #[serde(default)]
-    hotbar: Option<Uuid>,
     /// The level this grid is an attempt at. A grid built outside a game has
     /// none, and is edited without a goal or a test to run against.
     #[serde(default)]
@@ -67,9 +64,6 @@ pub enum LogicGridOperation {
     RemoveWireSegment {
         wire: Wire,
     },
-    SetHotbar {
-        hotbar: Option<Uuid>,
-    },
     SetCompleted {
         completed: bool,
     },
@@ -95,10 +89,6 @@ enum LogicGridHistoryChange {
         removed: Vec<Wire>,
         added: Vec<Wire>,
     },
-    Hotbar {
-        before: Option<Uuid>,
-        after: Option<Uuid>,
-    },
     Completed {
         before: bool,
         after: bool,
@@ -115,7 +105,6 @@ impl LogicGrid {
     pub fn from_grid(grid: Grid) -> Self {
         Self {
             grid,
-            hotbar: None,
             challenge: None,
             completed: false,
         }
@@ -128,11 +117,10 @@ impl LogicGrid {
         self
     }
 
-    /// An empty grid started for `challenge`, sharing the game's hotbar.
-    pub fn for_challenge(hotbar: Option<Uuid>, challenge: ChallengeId) -> Self {
+    /// An empty grid started for `challenge`.
+    pub fn for_challenge(challenge: ChallengeId) -> Self {
         Self {
             grid: Grid::new(),
-            hotbar,
             challenge: Some(challenge),
             completed: false,
         }
@@ -140,10 +128,6 @@ impl LogicGrid {
 
     pub fn grid(&self) -> &Grid {
         &self.grid
-    }
-
-    pub fn hotbar(&self) -> Option<Uuid> {
-        self.hotbar
     }
 
     pub fn challenge(&self) -> Option<ChallengeId> {
@@ -209,7 +193,6 @@ impl Block for LogicGrid {
             LogicGridOperation::RemoveWireSegment { wire } => {
                 grid.remove_wire_segment(*wire);
             }
-            LogicGridOperation::SetHotbar { hotbar } => block.hotbar = *hotbar,
             LogicGridOperation::SetCompleted { completed } => block.completed = *completed,
         }
     }
@@ -219,13 +202,7 @@ impl Block for LogicGrid {
     }
 
     fn references(&self) -> Vec<Uuid> {
-        let mut references = self.called_blocks();
-        if let Some(hotbar) = self.hotbar {
-            if !references.contains(&hotbar) {
-                references.push(hotbar);
-            }
-        }
-        references
+        self.called_blocks()
     }
 }
 
@@ -265,7 +242,6 @@ impl BlockHistory<LogicGrid> for LogicGridHistory {
                 LogicGridHistoryChange::Wires { removed, added } => {
                     (removed.len() + added.len()) * size_of::<Wire>()
                 }
-                LogicGridHistoryChange::Hotbar { .. } => size_of::<Uuid>() * 2,
                 LogicGridHistoryChange::Completed { .. } => 2,
             })
             .sum()
@@ -326,11 +302,6 @@ impl BlockHistory<LogicGrid> for LogicGridHistory {
                         )
                         .collect()
                 }
-                LogicGridHistoryChange::Hotbar { before, after } => {
-                    vec![LogicGridOperation::SetHotbar {
-                        hotbar: if to_after { *after } else { *before },
-                    }]
-                }
                 LogicGridHistoryChange::Completed { before, after } => {
                     vec![LogicGridOperation::SetCompleted {
                         completed: if to_after { *after } else { *before },
@@ -388,12 +359,6 @@ fn change_between(
             (!removed.is_empty() || !added.is_empty())
                 .then_some(LogicGridHistoryChange::Wires { removed, added })
         }
-        LogicGridOperation::SetHotbar { .. } => (before.hotbar != after.hotbar).then_some({
-            LogicGridHistoryChange::Hotbar {
-                before: before.hotbar,
-                after: after.hotbar,
-            }
-        }),
         LogicGridOperation::SetCompleted { .. } => {
             (before.completed != after.completed).then_some(LogicGridHistoryChange::Completed {
                 before: before.completed,

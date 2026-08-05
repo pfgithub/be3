@@ -9,9 +9,6 @@ fn logic_grid_serialization_round_trips() {
     block.operate(LogicGridOperation::AddWire {
         wire: wire((0, 4), (6, 4)),
     });
-    block.operate(LogicGridOperation::SetHotbar {
-        hotbar: Some(Uuid::new_v4()),
-    });
     let original = block.read().unwrap().clone();
 
     let encoded = serde_json::to_vec(&original).unwrap();

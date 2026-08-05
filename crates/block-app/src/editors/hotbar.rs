@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use block::Block;
+use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
     blocks::{
         compiled_logic::CompiledLogic,
         hotbar::{Hotbar, HotbarOperation, HotbarSlot},
     },
-    BlockClient, BlockHandle,
+    BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui;
 use egui_material_icons::{
@@ -23,6 +23,55 @@ use super::{
 const DIRECT_EDITOR_WIDTH: f32 = 460.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 28.0;
 const DIRECT_EDITOR_CHROME_HEIGHT: f32 = 80.0;
+
+/// The hotbar the logic editors share. Nothing points at it: it is the hotbar
+/// block sitting at the root of the block tree, so every grid in a workspace is
+/// built from the same palette however it was created.
+pub(super) struct RootHotbar {
+    roots: ReferenceList,
+    block: Option<BlockHandle<Hotbar>>,
+}
+
+impl RootHotbar {
+    pub(super) fn new(client: &BlockClient) -> Self {
+        Self {
+            roots: client.watch_references(BlockReferenceList::Roots),
+            block: None,
+        }
+    }
+
+    /// The hotbar found so far, if any.
+    pub(super) fn block(&self) -> Option<&BlockHandle<Hotbar>> {
+        self.block.as_ref()
+    }
+
+    /// Looks the hotbar up in the root listing, which is only there to be
+    /// searched once the workspace has answered.
+    pub(super) fn find(&mut self, client: &BlockClient) -> Option<&BlockHandle<Hotbar>> {
+        if self.block.is_none() {
+            let found = self
+                .roots
+                .read()
+                .into_iter()
+                .find(|reference| reference.block_type == Hotbar::TYPE_ID)?;
+            self.block = Some(client.get_block::<Hotbar>(found.id));
+        }
+        self.block.as_ref()
+    }
+
+    /// The hotbar to write to, creating it at the root when the tree has none.
+    /// Nothing is created before the root listing has loaded, so a workspace
+    /// that already has a hotbar is never given a second one.
+    pub(super) fn ensure(&mut self, client: &BlockClient) -> Option<&BlockHandle<Hotbar>> {
+        if self.find(client).is_none() && self.roots.is_loaded() {
+            let hotbar = client.create_block(Hotbar::new());
+            hotbar.set_name("Hotbar".to_string());
+            hotbar.set_parent(BlockParent::Root);
+            self.block = Some(hotbar);
+        }
+        self.block.as_ref()
+    }
+}
 
 /// A hotbar is arranged from inside the grid editor that uses it. This shows
 /// what is pinned, and lets a component be unpinned or opened without having
