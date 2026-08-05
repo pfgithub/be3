@@ -31,8 +31,8 @@ unsafe extern "C" {
     fn FT_GlyphSlot_Oblique(slot: ft::FT_GlyphSlot);
 }
 
-const BODY_PIXEL_SIZE: u32 = 18;
-const CODE_PIXEL_SIZE: u32 = 17;
+const BODY_PIXEL_SIZE: u32 = 12;
+const CODE_PIXEL_SIZE: u32 = 12;
 const INLINE_EMBED_HEIGHT: f32 = 24.0;
 const UNAVAILABLE_EMBED_SIZE: Vec2 = Vec2::new(320.0, 120.0);
 
