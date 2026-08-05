@@ -1,7 +1,7 @@
+mod audio;
 // The embedded browser is a native webview. Android and the browser sandbox
 // have no equivalent, so those builds fall back to UnsupportedEditor.
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-mod audio;
 mod browser_tab;
 mod calendar;
 mod clipboard;

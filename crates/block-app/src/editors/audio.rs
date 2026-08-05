@@ -109,8 +109,10 @@ fn format_duration(duration: Duration) -> String {
     format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
 }
 
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 const AUDIO_EXTENSIONS: [&str; 6] = ["mp3", "wav", "ogg", "oga", "flac", "m4a"];
 
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 fn guess_audio_media_type(source_name: &str) -> &'static str {
     match source_name
         .rsplit('.')

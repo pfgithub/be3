@@ -25,12 +25,13 @@ jobs:
       - uses: actions/checkout@v7
 
       # block-app links GTK and WebKitGTK for the file picker and the embedded
-      # browser, so the workspace does not compile without their headers.
+      # browser, and ALSA for audio playback, so the workspace does not
+      # compile without their headers.
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
+            libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -219,7 +220,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
+            libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
 
       # rusqlite compiles SQLite from source, so the cross build needs a C
       # compiler and a linker for the target as well as the Rust std. The cross
