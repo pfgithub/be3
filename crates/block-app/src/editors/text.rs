@@ -553,10 +553,7 @@ impl TextEditor {
         let target = hit_test(layout, local_pointer);
         if pressed && response.contains_pointer() {
             response.request_focus();
-            if let Some(checkbox) = checkboxes.iter().find(|checkbox| {
-                checkbox_rect(layout, checkbox)
-                    .is_some_and(|rect| rect.contains(local_pointer.to_pos2()))
-            }) {
+            if let Some(checkbox) = checkbox_at(layout, checkboxes, local_pointer.to_pos2()) {
                 self.core.execute_command(EditorCommand::Markdown(
                     MarkdownCommand::ToggleCheckbox(self.core.position(checkbox.line_start)),
                 ));
@@ -631,12 +628,12 @@ impl TextEditor {
         layout: &DocumentLayout,
         highlight: &SyntaxHighlight,
         focused: bool,
-    ) -> (Option<Rect>, PaintTimings) {
+    ) -> (Option<Rect>, Vec<Rect>, PaintTimings) {
         let selection_start = Instant::now();
         paint_code_backgrounds(painter, origin, layout, highlight);
         let selection_color = ui.visuals().selection.bg_fill;
-        let cursor_color = ui.visuals().selection.stroke.color;
         let mut cursor_rect = None;
+        let mut cursor_rects = Vec::new();
         let mut selected_bytes = vec![false; layout.positions.len().saturating_sub(1)];
         for cursor in self.core.cursor_positions() {
             let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
@@ -694,7 +691,7 @@ impl TextEditor {
                 );
                 let rect =
                     Rect::from_min_size(top, Vec2::new(2.0, layout.lines[position.line].height));
-                painter.rect_filled(rect, 0.0, cursor_color);
+                cursor_rects.push(rect);
                 cursor_rect = Some(rect);
             }
         }
@@ -705,6 +702,7 @@ impl TextEditor {
             Err(_) => {
                 return (
                     cursor_rect,
+                    cursor_rects,
                     PaintTimings {
                         selection,
                         ..PaintTimings::default()
@@ -732,6 +730,7 @@ impl TextEditor {
         }
         (
             cursor_rect,
+            cursor_rects,
             PaintTimings {
                 selection,
                 glyphs: glyph_start.elapsed(),
@@ -916,6 +915,23 @@ impl TextEditor {
         action
     }
 
+    fn checkbox_selected(&self, checkbox: &MarkdownCheckbox) -> bool {
+        self.core.cursor_positions().iter().any(|cursor| {
+            let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
+                return false;
+            };
+            let Some(focus) = self.core.position_index(cursor.pos.focus) else {
+                return false;
+            };
+            let (start, end) = if anchor <= focus {
+                (anchor, focus)
+            } else {
+                (focus, anchor)
+            };
+            start < checkbox.marker.end && end > checkbox.marker.start
+        })
+    }
+
     fn paint_checkboxes(
         &self,
         ui: &egui::Ui,
@@ -933,7 +949,12 @@ impl TextEditor {
             };
             let marker_rect = marker_rect.translate(origin.to_vec2());
             let rect = rect.translate(origin.to_vec2());
-            painter.rect_filled(marker_rect, 0.0, Color32::from_rgb(29, 37, 44));
+            let marker_background = if self.checkbox_selected(checkbox) {
+                ui.visuals().selection.bg_fill
+            } else {
+                Color32::from_rgb(29, 37, 44)
+            };
+            painter.rect_filled(marker_rect, 0.0, marker_background);
             painter.rect(
                 rect,
                 3.0,
@@ -1140,7 +1161,7 @@ impl BlockEditor for TextEditor {
         profile.keyboard = keyboard_start.elapsed();
         self.handle_picker(ui.ctx(), editors);
         let document_start = Instant::now();
-        let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
+        let Some(mut bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
@@ -1157,6 +1178,14 @@ impl BlockEditor for TextEditor {
         } else {
             Vec::new()
         };
+        // Checkboxes are painted as custom widgets over the raw "[ ]"/"[x]"
+        // text, but that text still feeds the glyph layout pass. Normalize
+        // the state character so toggling a checkbox never reflows the line.
+        for checkbox in &checkboxes {
+            if let Some(byte) = bytes.get_mut(checkbox.marker.start + 1) {
+                *byte = b' ';
+            }
+        }
         let highlight_start = Instant::now();
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
@@ -1206,6 +1235,11 @@ impl BlockEditor for TextEditor {
         let pointer_start = Instant::now();
         reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
         profile.pointer = pointer_start.elapsed();
+        if let Some(hover) = response.hover_pos() {
+            if checkbox_at(&layout, &checkboxes, (hover - origin).to_pos2()).is_some() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+        }
         let embedded_action = self.paint_embeds(ui, &painter, origin, &layout, editors, viewport);
         let pointer = response
             .interact_pointer_pos()
@@ -1248,7 +1282,7 @@ impl BlockEditor for TextEditor {
                 }
             }
         }
-        let (cursor, paint) = self.paint(
+        let (cursor, caret_rects, paint) = self.paint(
             ui,
             &painter,
             origin,
@@ -1257,6 +1291,10 @@ impl BlockEditor for TextEditor {
             response.has_focus(),
         );
         self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
+        let cursor_color = ui.visuals().selection.stroke.color;
+        for rect in caret_rects {
+            painter.rect_filled(rect, 0.0, cursor_color);
+        }
         if response.has_focus() {
             report_ime_area(ui, response.rect, cursor);
         }
@@ -1416,6 +1454,16 @@ fn checkbox_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) -> Option
         Pos2::new(marker.left() + size * 0.5, marker.center().y),
         Vec2::splat(size),
     ))
+}
+
+fn checkbox_at<'a>(
+    layout: &DocumentLayout,
+    checkboxes: &'a [MarkdownCheckbox],
+    point: Pos2,
+) -> Option<&'a MarkdownCheckbox> {
+    checkboxes
+        .iter()
+        .find(|checkbox| checkbox_rect(layout, checkbox).is_some_and(|rect| rect.contains(point)))
 }
 
 fn markdown_image_range(bytes: &[u8], url: &Range<usize>) -> Option<Range<usize>> {

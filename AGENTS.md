@@ -20,5 +20,5 @@ Verification:
 - Commit using `git add --all` and `git commit`. Don't check the status. Don't worry about it if the wrong file ends up in a commit unless it is supposed to be gitignored.
 - When there are multiple or large changes, split them up into tasks and test & commit to git after each one.
 - Use commit message format `type: message` where type is fix/feat/docs/...
-- Do not perform any manual verification besides those commands.
+- Do not perform any verification beyond running the verify script. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work — the verify script is the only verification step.
 - Do not use the browser tool.
