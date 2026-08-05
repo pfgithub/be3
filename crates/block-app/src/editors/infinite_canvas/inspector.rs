@@ -696,6 +696,13 @@ impl InfiniteCanvasEditor {
                         self.execute_command(CanvasCommand::Unlock, entities);
                     }
                 });
+                let can_delete = selected.iter().any(|entity| !entity.locked);
+                if ui
+                    .add_enabled(can_delete, egui::Button::new("Delete"))
+                    .clicked()
+                {
+                    self.execute_command(CanvasCommand::Delete, entities);
+                }
             });
         movement
     }
