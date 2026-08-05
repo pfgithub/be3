@@ -6,6 +6,7 @@ use uuid::Uuid;
 async fn dependency_state_survives_a_server_restart() {
     let server = TestServer::start().await;
     let account_id = server.account_id;
+    let token = server.token.clone();
     let workspace_id = server.workspace_id;
     let mut socket = server.connect().await;
     let parent = Uuid::new_v4();
@@ -30,7 +31,7 @@ async fn dependency_state_survives_a_server_restart() {
     assert!(!root.join(parent.to_string()).exists());
     assert!(!root.join(child.to_string()).exists());
 
-    let restarted = TestServer::start_at_as(root, account_id, workspace_id).await;
+    let restarted = TestServer::start_at_as(root, token, account_id, workspace_id).await;
     let mut socket = restarted.connect().await;
     assert_eq!(
         read_parent(read(&mut socket, child).await),

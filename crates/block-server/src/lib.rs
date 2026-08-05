@@ -8,6 +8,13 @@ use std::{
     },
 };
 
+use argon2::{
+    password_hash::{
+        rand_core::OsRng as PasswordHashOsRng, PasswordHash, PasswordHasher, PasswordVerifier,
+        SaltString,
+    },
+    Argon2,
+};
 use block::{
     Account, BlockAccess, BlockAccessEntry, BlockOperation, BlockParent, BlockReference,
     BlockReferenceList, ClientMessage, CommandKind, ErrorCode, ManagementClientMessage,
@@ -16,7 +23,9 @@ use block::{
 };
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
+use rand::{rngs::OsRng, RngCore};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use sha2::{Digest, Sha256};
 use tokio::{
     fs,
     net::{TcpListener, TcpStream},
@@ -33,17 +42,47 @@ use self::http::{PrefixedStream, Status};
 /// Block connections identify themselves in the websocket URL's query string.
 /// Browsers cannot set request headers on a websocket handshake, so the query
 /// string is the only place a web client can put this.
-const ACCOUNT_PARAMETER: &str = "account";
+const TOKEN_PARAMETER: &str = "token";
 const WORKSPACE_PARAMETER: &str = "workspace";
 /// Management commands are POSTed here as JSON; the websocket carries block
 /// traffic only.
 const MANAGEMENT_PATH: &str = "/management";
 const DATABASE_FILE: &str = "server.sqlite3";
+/// The shortest password `register_account` accepts.
+const MIN_PASSWORD_BYTES: usize = 8;
+/// How many random bytes back a session token before it is hex-encoded.
+const TOKEN_BYTES: usize = 32;
+
+/// Controls that only make sense to change for a standalone, publicly hosted
+/// server. The embedded server block-app starts for itself uses the default.
+#[derive(Clone, Copy)]
+pub struct ServerConfig {
+    /// Whether `ManagementClientMessage::Register` is answered at all. An
+    /// operator running a public instance can turn this off and provision
+    /// accounts by hand instead, so a stranger cannot self-register.
+    pub allow_registration: bool,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            allow_registration: true,
+        }
+    }
+}
 
 pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Result<(), ServerError> {
+    serve_with_config(listener, data_dir, ServerConfig::default()).await
+}
+
+pub async fn serve_with_config(
+    listener: TcpListener,
+    data_dir: impl Into<PathBuf>,
+    config: ServerConfig,
+) -> Result<(), ServerError> {
     let root = data_dir.into();
     fs::create_dir_all(&root).await?;
-    let store = Arc::new(BlockStore::open(root).await?);
+    let store = Arc::new(BlockStore::open_with_config(root, config).await?);
     let watch_hub = Arc::new(WatchHub::new());
     let mut connections = JoinSet::new();
 
@@ -68,6 +107,32 @@ pub async fn serve(listener: TcpListener, data_dir: impl Into<PathBuf>) -> Resul
     }
 }
 
+/// Creates an account directly against the database at `data_dir`, bypassing
+/// the management protocol entirely (and whatever `ServerConfig` a running
+/// instance was started with). This is how an operator provisions accounts
+/// by hand on a server that has registration turned off.
+pub async fn add_account(
+    data_dir: impl Into<PathBuf>,
+    email: String,
+    display_name: String,
+    password: String,
+) -> Result<Account, ServerError> {
+    let root = data_dir.into();
+    fs::create_dir_all(&root).await?;
+    let store = BlockStore::open_with_config(root, ServerConfig::default()).await?;
+    let (account, _token) = store
+        .register_account(email, display_name, password)
+        .await
+        .map_err(|error| {
+            let ManagementServerMessage::Error { message, .. } = error.to_response(Uuid::nil())
+            else {
+                unreachable!("to_response always returns Error")
+            };
+            ServerError::Storage(message)
+        })?;
+    Ok(account)
+}
+
 async fn handle_connection(
     mut stream: TcpStream,
     store: Arc<BlockStore>,
@@ -90,15 +155,14 @@ async fn handle_connection(
     handle_block_connection(socket, store, watch_hub, identity).await
 }
 
-/// Reads the account and workspace a block connection claims and confirms the
-/// account is a member of that workspace.
+/// Resolves the account a block connection's token proves and the workspace
+/// it claims, confirming the account is a member of that workspace.
 async fn connection_identity(head: &http::RequestHead, store: &BlockStore) -> Option<Identity> {
-    let parameter_id = |parameter| {
-        head.query_parameter(parameter)
-            .and_then(|value| Uuid::parse_str(value).ok())
-    };
-    let account_id = parameter_id(ACCOUNT_PARAMETER)?;
-    let workspace_id = parameter_id(WORKSPACE_PARAMETER)?;
+    let token = head.query_parameter(TOKEN_PARAMETER)?;
+    let workspace_id = head
+        .query_parameter(WORKSPACE_PARAMETER)
+        .and_then(|value| Uuid::parse_str(value).ok())?;
+    let account_id = store.resolve_token(token).await.ok()?;
     let role = store.workspace_role(account_id, workspace_id).await.ok()?;
     Some(Identity {
         account_id,
@@ -253,72 +317,101 @@ async fn handle_management_message(store: &BlockStore, body: &[u8]) -> Managemen
         ManagementClientMessage::Register {
             email,
             display_name,
+            password,
             ..
-        } => match store.register_account(email, display_name).await {
-            Ok(account) => ManagementServerMessage::Account {
-                request_id,
-                account,
-            },
-            Err(error) => error.to_response(request_id),
-        },
-        ManagementClientMessage::Login { email, .. } => match store.login_account(email).await {
-            Ok(account) => ManagementServerMessage::Account {
-                request_id,
-                account,
-            },
-            Err(error) => error.to_response(request_id),
-        },
-        ManagementClientMessage::ListWorkspaces { account_id, .. } => {
-            match store.list_workspaces(account_id).await {
-                Ok(workspaces) => ManagementServerMessage::Workspaces {
+        } => {
+            if !store.allow_registration {
+                return ManagementStoreError::RegistrationDisabled.to_response(request_id);
+            }
+            match store.register_account(email, display_name, password).await {
+                Ok((account, token)) => ManagementServerMessage::Account {
                     request_id,
-                    workspaces,
+                    account,
+                    token,
                 },
                 Err(error) => error.to_response(request_id),
             }
         }
-        ManagementClientMessage::CreateWorkspace {
-            account_id, name, ..
-        } => match store.create_workspace(account_id, name).await {
-            Ok(workspace) => ManagementServerMessage::Workspace {
+        ManagementClientMessage::Login {
+            email, password, ..
+        } => match store.login_account(email, password).await {
+            Ok((account, token)) => ManagementServerMessage::Account {
                 request_id,
-                workspace,
+                account,
+                token,
             },
             Err(error) => error.to_response(request_id),
         },
-        ManagementClientMessage::ListInvitations { account_id, .. } => {
-            match store.list_invitations(account_id).await {
-                Ok(invitations) => ManagementServerMessage::Invitations {
-                    request_id,
-                    invitations,
+        ManagementClientMessage::Logout { token, .. } => match store.logout(&token).await {
+            Ok(()) => ManagementServerMessage::Ok { request_id },
+            Err(error) => error.to_response(request_id),
+        },
+        ManagementClientMessage::ListWorkspaces { token, .. } => {
+            match store.resolve_token(&token).await {
+                Ok(account_id) => match store.list_workspaces(account_id).await {
+                    Ok(workspaces) => ManagementServerMessage::Workspaces {
+                        request_id,
+                        workspaces,
+                    },
+                    Err(error) => error.to_response(request_id),
+                },
+                Err(error) => error.to_response(request_id),
+            }
+        }
+        ManagementClientMessage::CreateWorkspace { token, name, .. } => {
+            match store.resolve_token(&token).await {
+                Ok(account_id) => match store.create_workspace(account_id, name).await {
+                    Ok(workspace) => ManagementServerMessage::Workspace {
+                        request_id,
+                        workspace,
+                    },
+                    Err(error) => error.to_response(request_id),
+                },
+                Err(error) => error.to_response(request_id),
+            }
+        }
+        ManagementClientMessage::ListInvitations { token, .. } => {
+            match store.resolve_token(&token).await {
+                Ok(account_id) => match store.list_invitations(account_id).await {
+                    Ok(invitations) => ManagementServerMessage::Invitations {
+                        request_id,
+                        invitations,
+                    },
+                    Err(error) => error.to_response(request_id),
                 },
                 Err(error) => error.to_response(request_id),
             }
         }
         ManagementClientMessage::Invite {
-            account_id,
+            token,
             workspace_id,
             email,
             role,
             ..
-        } => match store.invite(account_id, workspace_id, email, role).await {
-            Ok(invitation) => ManagementServerMessage::Invitation {
-                request_id,
-                invitation,
+        } => match store.resolve_token(&token).await {
+            Ok(account_id) => match store.invite(account_id, workspace_id, email, role).await {
+                Ok(invitation) => ManagementServerMessage::Invitation {
+                    request_id,
+                    invitation,
+                },
+                Err(error) => error.to_response(request_id),
             },
             Err(error) => error.to_response(request_id),
         },
         ManagementClientMessage::RespondInvitation {
-            account_id,
+            token,
             invitation_id,
             accept,
             ..
-        } => match store
-            .respond_invitation(account_id, invitation_id, accept)
-            .await
-        {
-            Ok(()) => ManagementServerMessage::Ok { request_id },
+        } => match store.resolve_token(&token).await {
             Err(error) => error.to_response(request_id),
+            Ok(account_id) => match store
+                .respond_invitation(account_id, invitation_id, accept)
+                .await
+            {
+                Ok(()) => ManagementServerMessage::Ok { request_id },
+                Err(error) => error.to_response(request_id),
+            },
         },
     }
 }
@@ -1051,6 +1144,7 @@ struct BlockStore {
     database: Mutex<Connection>,
     locks: Mutex<BlockLocks>,
     dependencies: Mutex<HashMap<Uuid, DependencyState>>,
+    allow_registration: bool,
 }
 
 impl BlockStore {
@@ -1059,21 +1153,22 @@ impl BlockStore {
         std::fs::create_dir_all(&root).unwrap();
         let mut connection = Connection::open(root.join(DATABASE_FILE)).unwrap();
         initialize_database(&mut connection).unwrap();
-        Self::from_connection(connection).unwrap()
+        Self::from_connection(connection, ServerConfig::default()).unwrap()
     }
 
-    async fn open(root: PathBuf) -> Result<Self, ServerError> {
+    async fn open_with_config(root: PathBuf, config: ServerConfig) -> Result<Self, ServerError> {
         let mut connection = Connection::open(root.join(DATABASE_FILE))?;
         initialize_database(&mut connection)?;
-        Self::from_connection(connection).map_err(ServerError::from)
+        Self::from_connection(connection, config).map_err(ServerError::from)
     }
 
-    fn from_connection(connection: Connection) -> Result<Self, StoreError> {
+    fn from_connection(connection: Connection, config: ServerConfig) -> Result<Self, StoreError> {
         let dependencies = load_dependencies(&connection)?;
         Ok(Self {
             database: Mutex::new(connection),
             locks: Mutex::new(HashMap::new()),
             dependencies: Mutex::new(dependencies),
+            allow_registration: config.allow_registration,
         })
     }
 
@@ -1112,57 +1207,112 @@ impl BlockStore {
         &self,
         email: String,
         display_name: String,
-    ) -> Result<Account, ManagementStoreError> {
+        password: String,
+    ) -> Result<(Account, String), ManagementStoreError> {
         let email = normalize_email(&email)?;
         let display_name = normalize_display_name(&display_name)?;
+        let password_hash = hash_password(&password)?;
         let account = Account {
             id: Uuid::new_v4(),
             email,
             display_name,
         };
-        let database = self.database.lock().await;
-        let result = database.execute(
-            "INSERT INTO accounts (id, email, display_name) VALUES (?1, ?2, ?3)",
+        let token = generate_token();
+        let token_hash = hash_token(&token);
+        let mut database = self.database.lock().await;
+        let transaction = database.transaction()?;
+        let result = transaction.execute(
+            "INSERT INTO accounts (id, email, display_name, password_hash) VALUES (?1, ?2, ?3, ?4)",
             params![
                 account.id.to_string(),
                 &account.email,
-                &account.display_name
+                &account.display_name,
+                &password_hash,
             ],
         );
         match result {
-            Ok(_) => Ok(account),
+            Ok(_) => {}
             Err(error)
                 if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) =>
             {
-                Err(ManagementStoreError::EmailAlreadyRegistered)
+                return Err(ManagementStoreError::EmailAlreadyRegistered);
             }
-            Err(error) => Err(error.into()),
+            Err(error) => return Err(error.into()),
         }
+        transaction.execute(
+            "INSERT INTO sessions (token_hash, account_id) VALUES (?1, ?2)",
+            params![&token_hash, account.id.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok((account, token))
     }
 
-    async fn login_account(&self, email: String) -> Result<Account, ManagementStoreError> {
+    async fn login_account(
+        &self,
+        email: String,
+        password: String,
+    ) -> Result<(Account, String), ManagementStoreError> {
         let email = normalize_email(&email)?;
-        let database = self.database.lock().await;
-        let account = database
+        let mut database = self.database.lock().await;
+        let row = database
             .query_row(
-                "SELECT id, email, display_name FROM accounts WHERE email = ?1",
+                "SELECT id, email, display_name, password_hash FROM accounts WHERE email = ?1",
                 [&email],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )
             .optional()?
-            .ok_or(ManagementStoreError::AccountNotFound)?;
-        Ok(Account {
-            id: Uuid::parse_str(&account.0)
+            .ok_or(ManagementStoreError::InvalidCredentials)?;
+        if !verify_password(&password, &row.3) {
+            return Err(ManagementStoreError::InvalidCredentials);
+        }
+        let account = Account {
+            id: Uuid::parse_str(&row.0)
                 .map_err(|error| ManagementStoreError::InvalidStorage(error.to_string()))?,
-            email: account.1,
-            display_name: account.2,
-        })
+            email: row.1,
+            display_name: row.2,
+        };
+        let token = generate_token();
+        let token_hash = hash_token(&token);
+        let transaction = database.transaction()?;
+        transaction.execute(
+            "INSERT INTO sessions (token_hash, account_id) VALUES (?1, ?2)",
+            params![&token_hash, account.id.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok((account, token))
+    }
+
+    /// Resolves a session token to the account it authenticates, as proven by
+    /// possession of the token rather than anything the client asserts.
+    async fn resolve_token(&self, token: &str) -> Result<Uuid, ManagementStoreError> {
+        let token_hash = hash_token(token);
+        let database = self.database.lock().await;
+        let account_id = database
+            .query_row(
+                "SELECT account_id FROM sessions WHERE token_hash = ?1",
+                [&token_hash],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or(ManagementStoreError::InvalidToken)?;
+        parse_management_uuid(&account_id)
+    }
+
+    /// Revokes a session token. Revoking a token that is already invalid is
+    /// not an error: the caller's goal, that the token no longer works, is
+    /// already true.
+    async fn logout(&self, token: &str) -> Result<(), ManagementStoreError> {
+        let token_hash = hash_token(token);
+        let database = self.database.lock().await;
+        database.execute("DELETE FROM sessions WHERE token_hash = ?1", [&token_hash])?;
+        Ok(())
     }
 
     async fn list_workspaces(
@@ -2105,6 +2255,51 @@ fn normalize_display_name(name: &str) -> Result<String, ManagementStoreError> {
     Ok(name.to_owned())
 }
 
+/// Hashes a password for storage. Argon2's own salt and work-factor defaults
+/// are used, encoded into the returned PHC string alongside the hash so
+/// `verify_password` needs nothing else to check it later.
+fn hash_password(password: &str) -> Result<String, ManagementStoreError> {
+    if password.len() < MIN_PASSWORD_BYTES {
+        return Err(ManagementStoreError::InvalidPassword);
+    }
+    let salt = SaltString::generate(&mut PasswordHashOsRng);
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|error| ManagementStoreError::InvalidStorage(error.to_string()))
+}
+
+/// Checks a password against a hash produced by `hash_password`. Any error
+/// parsing the stored hash is treated as a mismatch rather than propagated,
+/// since a garbled `password_hash` should never be able to authenticate.
+fn verify_password(password: &str, hash: &str) -> bool {
+    let Ok(parsed) = PasswordHash::new(hash) else {
+        return false;
+    };
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok()
+}
+
+/// A fresh, high-entropy session token. Tokens are bearer credentials, so
+/// their strength comes entirely from this randomness rather than from a
+/// deliberately slow hash like passwords use.
+fn generate_token() -> String {
+    let mut bytes = [0u8; TOKEN_BYTES];
+    OsRng.fill_bytes(&mut bytes);
+    to_hex(&bytes)
+}
+
+/// The value actually stored for a session token: only its hash, so a
+/// database leak does not hand out working credentials.
+fn hash_token(token: &str) -> String {
+    to_hex(&Sha256::digest(token.as_bytes()))
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn require_account(database: &Connection, account_id: Uuid) -> Result<(), ManagementStoreError> {
     database
         .query_row(
@@ -2286,7 +2481,13 @@ fn initialize_database(connection: &mut Connection) -> Result<(), StoreError> {
         CREATE TABLE IF NOT EXISTS accounts (
             id              TEXT PRIMARY KEY,
             email           TEXT NOT NULL UNIQUE,
-            display_name    TEXT NOT NULL
+            display_name    TEXT NOT NULL,
+            password_hash   TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            token_hash      TEXT PRIMARY KEY,
+            account_id      TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS workspaces (
@@ -2362,7 +2563,11 @@ const EXPECTED_TABLES: &[(&str, &[&str])] = &[
             "reference_delta",
         ],
     ),
-    ("accounts", &["id", "email", "display_name"]),
+    (
+        "accounts",
+        &["id", "email", "display_name", "password_hash"],
+    ),
+    ("sessions", &["token_hash", "account_id"]),
     ("workspaces", &["id", "name", "owner_id"]),
     (
         "workspace_memberships",
@@ -2393,12 +2598,16 @@ enum ManagementStoreError {
     AccountAlreadyMember,
     AccountNotFound,
     EmailAlreadyRegistered,
+    InvalidCredentials,
     InvalidEmail,
     InvalidName,
+    InvalidPassword,
+    InvalidToken,
     InvitationAlreadyExists,
     InvitationNotFound,
     InvalidStorage(String),
     PermissionDenied,
+    RegistrationDisabled,
     Sqlite(rusqlite::Error),
     WorkspaceNotFound,
 }
@@ -2418,6 +2627,10 @@ impl ManagementStoreError {
                 ManagementErrorCode::EmailAlreadyRegistered,
                 "email is already registered".into(),
             ),
+            Self::InvalidCredentials => (
+                ManagementErrorCode::InvalidCredentials,
+                "incorrect email or password".into(),
+            ),
             Self::InvalidEmail => (
                 ManagementErrorCode::InvalidEmail,
                 "invalid email address".into(),
@@ -2425,6 +2638,14 @@ impl ManagementStoreError {
             Self::InvalidName => (
                 ManagementErrorCode::InvalidName,
                 "invalid display name".into(),
+            ),
+            Self::InvalidPassword => (
+                ManagementErrorCode::InvalidPassword,
+                format!("password must be at least {MIN_PASSWORD_BYTES} bytes"),
+            ),
+            Self::InvalidToken => (
+                ManagementErrorCode::InvalidToken,
+                "session token is invalid or has been revoked".into(),
             ),
             Self::InvitationAlreadyExists => (
                 ManagementErrorCode::InvitationAlreadyExists,
@@ -2438,6 +2659,10 @@ impl ManagementStoreError {
             Self::PermissionDenied => (
                 ManagementErrorCode::PermissionDenied,
                 "permission denied".into(),
+            ),
+            Self::RegistrationDisabled => (
+                ManagementErrorCode::RegistrationDisabled,
+                "this server does not accept new registrations".into(),
             ),
             Self::Sqlite(error) => (ManagementErrorCode::StorageError, error.to_string()),
             Self::WorkspaceNotFound => (

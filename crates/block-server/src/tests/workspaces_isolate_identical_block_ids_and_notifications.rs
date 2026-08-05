@@ -7,9 +7,9 @@ use uuid::Uuid;
 async fn workspaces_isolate_identical_block_ids_and_notifications() {
     let server = TestServer::start().await;
     let management = server.management();
-    let second = create_workspace(&management, server.account_id, "Second").await;
+    let second = create_workspace(&management, &server.token, "Second").await;
     let mut first_socket = server.connect().await;
-    let mut second_socket = server.connect_to(server.account_id, second.id).await;
+    let mut second_socket = server.connect_to(&server.token, second.id).await;
     let shared_id = Uuid::new_v4();
     assert!(matches!(
         create(&mut first_socket, shared_id, vec![]).await,

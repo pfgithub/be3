@@ -23,7 +23,7 @@ use block::{
 };
 use block_client::{
     blocks::workspace_index::BlockEntry, BlockClient, DynamicArtifactDescriptor, ManagementClient,
-    ReferenceList,
+    ReferenceList, Session,
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
@@ -340,6 +340,7 @@ struct AccountForm {
     register: bool,
     email: String,
     display_name: String,
+    password: String,
 }
 
 impl Default for AccountForm {
@@ -351,12 +352,13 @@ impl Default for AccountForm {
             register: false,
             email: String::new(),
             display_name: String::new(),
+            password: String::new(),
         }
     }
 }
 
 struct PendingAccountRequest {
-    receiver: platform::RequestResult<Result<block::Account, String>>,
+    receiver: platform::RequestResult<Result<Session, String>>,
     server: ServerLocation,
     url: String,
 }
@@ -451,6 +453,7 @@ impl BlockApp {
             id: Uuid::nil(),
             email: String::new(),
             name: String::new(),
+            token: String::new(),
             last_workspace_id: None,
         });
         let server_url = match &account.server {
@@ -540,11 +543,12 @@ impl BlockApp {
         let register = self.account_form.register;
         let email = self.account_form.email.clone();
         let display_name = self.account_form.display_name.clone();
+        let password = self.account_form.password.clone();
         let receiver = platform::spawn_request(async move {
             if register {
-                client.register(email, display_name).await
+                client.register(email, display_name, password).await
             } else {
-                client.login(email).await
+                client.login(email, password).await
             }
             .map_err(|error| error.to_string())
         });
@@ -566,12 +570,13 @@ impl BlockApp {
         };
         let pending = self.pending_account_request.take().unwrap();
         match result {
-            Ok(account) => {
+            Ok(session) => {
                 let saved = SavedAccount {
                     server: pending.server,
-                    id: account.id,
-                    email: account.email,
-                    name: account.display_name,
+                    id: session.account.id,
+                    email: session.account.email,
+                    name: session.account.display_name,
+                    token: session.token,
                     last_workspace_id: None,
                 };
                 if let Err(error) = self.app_state.save_account(&saved) {
@@ -659,6 +664,20 @@ impl BlockApp {
     }
 
     fn log_out_account(&mut self, account: &Account) {
+        // Best-effort: revokes the token server-side so a lost or stolen
+        // device cannot keep using it. The local sign-out below happens
+        // either way, since that's the part the user actually asked for.
+        let url = match &account.server {
+            ServerLocation::Local => self.local_server_url.clone(),
+            ServerLocation::Remote(url) => url.clone(),
+        };
+        let token = account.token.clone();
+        let _ = platform::spawn_request(async move {
+            if let Ok(client) = ManagementClient::new(url) {
+                let _ = client.logout(token).await;
+            }
+        });
+
         if let Err(error) = self.app_state.remove_account(account) {
             self.account_error = Some(error.to_string());
             return;
@@ -678,6 +697,7 @@ impl BlockApp {
         let pending = self.pending_account_request.is_some();
         let ready = !pending
             && !self.account_form.email.trim().is_empty()
+            && !self.account_form.password.is_empty()
             && (!self.account_form.register || !self.account_form.display_name.trim().is_empty());
         let response = egui::Modal::new(egui::Id::new("add-account")).show(ctx, |ui| {
             ui.set_width(320.0);
@@ -720,6 +740,13 @@ impl BlockApp {
                         .desired_width(f32::INFINITY),
                 );
             }
+            ui.add_space(12.0);
+            ui.label("Password");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.account_form.password)
+                    .password(true)
+                    .desired_width(f32::INFINITY),
+            );
             if let Some(error) = &self.account_error {
                 ui.add_space(8.0);
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -773,32 +800,32 @@ impl BlockApp {
                 return;
             }
         };
-        let account_id = self.account.id;
+        let token = self.account.token.clone();
         let receiver = platform::spawn_request(async move {
             match operation {
                 WorkspaceOperation::Load => {
                     let workspaces = client
-                        .list_workspaces(account_id)
+                        .list_workspaces(&token)
                         .await
                         .map_err(|error| error.to_string())?;
                     let invitations = client
-                        .list_invitations(account_id)
+                        .list_invitations(&token)
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok(WorkspaceResult::Loaded(workspaces, invitations))
                 }
                 WorkspaceOperation::Create(name) => client
-                    .create_workspace(account_id, name)
+                    .create_workspace(&token, name)
                     .await
                     .map(WorkspaceResult::Created)
                     .map_err(|error| error.to_string()),
                 WorkspaceOperation::Respond(invitation_id, accept) => client
-                    .respond_invitation(account_id, invitation_id, accept)
+                    .respond_invitation(&token, invitation_id, accept)
                     .await
                     .map(|()| WorkspaceResult::Responded)
                     .map_err(|error| error.to_string()),
                 WorkspaceOperation::Invite(workspace_id, email, role) => client
-                    .invite(account_id, workspace_id, email, role)
+                    .invite(&token, workspace_id, email, role)
                     .await
                     .map(|_| WorkspaceResult::Invited)
                     .map_err(|error| error.to_string()),
@@ -852,7 +879,7 @@ impl BlockApp {
 
     fn open_workspace(&mut self, workspace: Workspace) {
         let client = BlockClient::new(self.account.id, workspace.id);
-        client.connect(self.server_url.clone());
+        client.connect(self.server_url.clone(), self.account.token.clone());
         let roots = client.watch_references(BlockReferenceList::Roots);
         self.orphaned = None;
         self.orphaned_expanded = false;

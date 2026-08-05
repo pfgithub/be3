@@ -9,12 +9,12 @@ async fn client_orders_parent_assignment_after_creation_and_reference_updates() 
     let server = tokio::spawn(async move {
         block_server::serve(listener, server_root).await.unwrap();
     });
-    let (account_id, workspace_id) = test_identity(&url).await;
+    let (account_id, token, workspace_id) = test_identity(&url).await;
 
     let client = BlockClient::new(account_id, workspace_id);
     let parent = client.create_block(ReferencingBlock::default());
     let child = client.create_block(ReferencingBlock::default());
-    client.connect(url);
+    client.connect(url, token);
     parent.loaded().await;
     child.loaded().await;
     parent.set_parent(BlockParent::Root);

@@ -101,12 +101,16 @@ pub enum ManagementErrorCode {
     AccountAlreadyMember,
     AccountNotFound,
     EmailAlreadyRegistered,
+    InvalidCredentials,
     InvalidEmail,
     InvalidMessage,
     InvalidName,
+    InvalidPassword,
+    InvalidToken,
     InvitationAlreadyExists,
     InvitationNotFound,
     PermissionDenied,
+    RegistrationDisabled,
     StorageError,
     UnsupportedMessage,
     WorkspaceNotFound,
@@ -119,34 +123,40 @@ pub enum ManagementClientMessage {
         request_id: Uuid,
         email: String,
         display_name: String,
+        password: String,
     },
     Login {
         request_id: Uuid,
         email: String,
+        password: String,
+    },
+    Logout {
+        request_id: Uuid,
+        token: String,
     },
     ListWorkspaces {
         request_id: Uuid,
-        account_id: Uuid,
+        token: String,
     },
     CreateWorkspace {
         request_id: Uuid,
-        account_id: Uuid,
+        token: String,
         name: String,
     },
     ListInvitations {
         request_id: Uuid,
-        account_id: Uuid,
+        token: String,
     },
     Invite {
         request_id: Uuid,
-        account_id: Uuid,
+        token: String,
         workspace_id: Uuid,
         email: String,
         role: WorkspaceRole,
     },
     RespondInvitation {
         request_id: Uuid,
-        account_id: Uuid,
+        token: String,
         invitation_id: Uuid,
         accept: bool,
     },
@@ -157,6 +167,7 @@ impl ManagementClientMessage {
         match self {
             Self::Register { request_id, .. }
             | Self::Login { request_id, .. }
+            | Self::Logout { request_id, .. }
             | Self::ListWorkspaces { request_id, .. }
             | Self::CreateWorkspace { request_id, .. }
             | Self::ListInvitations { request_id, .. }
@@ -172,6 +183,7 @@ pub enum ManagementServerMessage {
     Account {
         request_id: Uuid,
         account: Account,
+        token: String,
     },
     Workspace {
         request_id: Uuid,

@@ -23,7 +23,8 @@ async fn a_database_from_another_schema_is_refused() {
             .unwrap();
     }
 
-    let Err(error) = BlockStore::open(root.clone()).await else {
+    let Err(error) = BlockStore::open_with_config(root.clone(), ServerConfig::default()).await
+    else {
         panic!("a database from another schema must not open");
     };
     let message = error.to_string();

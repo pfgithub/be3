@@ -11,16 +11,16 @@ async fn access_flows_down_to_owned_children_and_up_to_parents() {
     let management = server.management();
     let owner = register(&management, "owner@example.com").await;
     let editor = register(&management, "editor@example.com").await;
-    let workspace = create_workspace(&management, owner.id, "Shared").await;
+    let workspace = create_workspace(&management, &owner.token, "Shared").await;
     add_member(
         &management,
-        owner.id,
+        &owner.token,
         workspace.id,
         &editor,
         WorkspaceRole::Editor,
     )
     .await;
-    let mut socket = server.connect_to(owner.id, workspace.id).await;
+    let mut socket = server.connect_to(&owner.token, workspace.id).await;
 
     // grandparent -> parent -> child, all owned, plus a plain reference the
     // parent points at without owning.
@@ -51,7 +51,7 @@ async fn access_flows_down_to_owned_children_and_up_to_parents() {
     assert_eq!(access_for(&entries, editor.id), BlockAccess::KnowExists);
 
     // The grandparent is only known to exist, so the editor cannot write to it.
-    let mut editor_socket = server.connect_to(editor.id, workspace.id).await;
+    let mut editor_socket = server.connect_to(&editor.token, workspace.id).await;
     assert!(matches!(
         update(&mut editor_socket, grandparent, vec![], vec![]).await,
         block::ServerMessage::Error {

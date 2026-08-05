@@ -4,8 +4,12 @@ use super::*;
 async fn omitted_sequences_are_assigned_by_the_server() {
     let root = test_root();
     let store = BlockStore::new(root.clone());
-    let account = store
-        .register_account("omitted@example.com".into(), "Omitted".into())
+    let (account, _token) = store
+        .register_account(
+            "omitted@example.com".into(),
+            "Omitted".into(),
+            TEST_PASSWORD.into(),
+        )
         .await
         .unwrap();
     let workspace = store

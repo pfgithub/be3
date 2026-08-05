@@ -22,11 +22,14 @@ async fn management_client_reports_server_errors() {
         block_server::serve(listener, server_root).await.unwrap();
     });
 
-    let error = client.login("missing@example.com").await.unwrap_err();
+    let error = client
+        .login("missing@example.com", "whatever-password")
+        .await
+        .unwrap_err();
     assert!(matches!(
         error,
         ManagementClientError::Server {
-            code: ManagementErrorCode::AccountNotFound,
+            code: ManagementErrorCode::InvalidCredentials,
             ..
         }
     ));

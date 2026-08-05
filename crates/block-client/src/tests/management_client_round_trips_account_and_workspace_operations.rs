@@ -15,20 +15,34 @@ async fn management_client_round_trips_account_and_workspace_operations() {
     let client = ManagementClient::new(format!(" {url}/ ")).unwrap();
     assert_eq!(client.url(), url);
 
-    let owner = client.register("owner@example.com", "Owner").await.unwrap();
-    assert_eq!(client.login("OWNER@example.com").await.unwrap(), owner);
-    assert!(client.list_workspaces(owner.id).await.unwrap().is_empty());
-    let workspace = client
-        .create_workspace(owner.id, "Workspace")
+    let owner = client
+        .register("owner@example.com", "Owner", "owner-password")
         .await
         .unwrap();
     assert_eq!(
-        client.list_workspaces(owner.id).await.unwrap(),
+        client
+            .login("OWNER@example.com", "owner-password")
+            .await
+            .unwrap()
+            .account,
+        owner.account
+    );
+    assert!(client
+        .list_workspaces(&owner.token)
+        .await
+        .unwrap()
+        .is_empty());
+    let workspace = client
+        .create_workspace(&owner.token, "Workspace")
+        .await
+        .unwrap();
+    assert_eq!(
+        client.list_workspaces(&owner.token).await.unwrap(),
         vec![workspace.clone()]
     );
     let invitation = client
         .invite(
-            owner.id,
+            &owner.token,
             workspace.id,
             "recipient@example.com",
             WorkspaceRole::Administrator,
@@ -36,19 +50,19 @@ async fn management_client_round_trips_account_and_workspace_operations() {
         .await
         .unwrap();
     let recipient = client
-        .register("recipient@example.com", "Recipient")
+        .register("recipient@example.com", "Recipient", "recipient-password")
         .await
         .unwrap();
     assert_eq!(
-        client.list_invitations(recipient.id).await.unwrap(),
+        client.list_invitations(&recipient.token).await.unwrap(),
         vec![invitation.clone()]
     );
     client
-        .respond_invitation(recipient.id, invitation.id, true)
+        .respond_invitation(&recipient.token, invitation.id, true)
         .await
         .unwrap();
     assert_eq!(
-        client.list_workspaces(recipient.id).await.unwrap()[0].id,
+        client.list_workspaces(&recipient.token).await.unwrap()[0].id,
         workspace.id
     );
 

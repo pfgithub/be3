@@ -4,8 +4,12 @@ use super::*;
 async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
     let root = test_root();
     let store = BlockStore::new(root.clone());
-    let account = store
-        .register_account("operation@example.com".into(), "Operation".into())
+    let (account, _token) = store
+        .register_account(
+            "operation@example.com".into(),
+            "Operation".into(),
+            TEST_PASSWORD.into(),
+        )
         .await
         .unwrap();
     let workspace = store

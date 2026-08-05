@@ -11,7 +11,7 @@ async fn workspaces_start_empty_and_creation_adds_the_owner() {
         &management,
         ManagementClientMessage::ListWorkspaces {
             request_id: Uuid::new_v4(),
-            account_id: account.id,
+            token: account.token.clone(),
         },
     )
     .await;
@@ -20,7 +20,7 @@ async fn workspaces_start_empty_and_creation_adds_the_owner() {
         ManagementServerMessage::Workspaces { workspaces, .. } if workspaces.is_empty()
     ));
 
-    let workspace = create_workspace(&management, account.id, " Project ").await;
+    let workspace = create_workspace(&management, &account.token, " Project ").await;
     assert_eq!(workspace.name, "Project");
     assert_eq!(workspace.owner_id, account.id);
     assert_eq!(workspace.role, WorkspaceRole::Administrator);
@@ -28,7 +28,7 @@ async fn workspaces_start_empty_and_creation_adds_the_owner() {
         &management,
         ManagementClientMessage::ListWorkspaces {
             request_id: Uuid::new_v4(),
-            account_id: account.id,
+            token: account.token.clone(),
         },
     )
     .await;

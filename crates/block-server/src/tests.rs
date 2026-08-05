@@ -11,6 +11,7 @@ mod administrators_reach_every_block_without_grants;
 mod batch_is_acknowledged_before_watch_notifications;
 mod batch_updates_apply_reference_deltas_in_request_order;
 mod block_access_survives_a_server_restart;
+mod block_connections_require_a_valid_token;
 mod block_connections_require_workspace_membership;
 mod dependency_state_survives_a_server_restart;
 mod editors_only_reach_blocks_they_authored_or_were_granted;
@@ -20,7 +21,9 @@ mod listings_report_whether_a_block_is_a_dynamic_artifact;
 mod lists_backrefs_with_relationship_metadata;
 mod lists_every_root_block_in_uuid_order;
 mod lists_parents;
+mod login_rejects_incorrect_passwords;
 mod login_rejects_unknown_accounts;
+mod logout_revokes_the_session_token;
 mod management_answers_a_cors_preflight;
 mod merges_reference_deltas_from_concurrent_clients;
 mod missing_references_reject_creates_and_do_not_commit_updates;
@@ -35,6 +38,7 @@ mod read_returns_parent;
 mod reads_replay_contiguous_operation_records;
 mod reference_watch_updates_when_a_listed_blocks_parent_changes;
 mod reference_watch_updates_when_a_listed_blocks_reference_count_changes;
+mod registration_can_be_disabled;
 mod rejects_missing_parent_references_and_parent_cycles;
 mod removing_a_parent_reference_orphans_the_child_without_restoring_it_on_readd;
 mod reparents_without_changing_either_parents_references;
@@ -60,10 +64,10 @@ where
 
 async fn test_connect(
     url: String,
-    account_id: Uuid,
+    token: &str,
     workspace_id: Uuid,
 ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
-    let request = format!("{url}/?account={account_id}&workspace={workspace_id}")
+    let request = format!("{url}/?token={token}&workspace={workspace_id}")
         .into_client_request()
         .unwrap();
     connect_async(request).await.unwrap().0
@@ -81,10 +85,17 @@ fn test_root() -> PathBuf {
     std::env::temp_dir().join(format!("block-server-test-{}", Uuid::new_v4()))
 }
 
+/// A password meeting the server's minimum length, used by every test account
+/// since none of these tests are about password strength.
+const TEST_PASSWORD: &str = "correct horse battery staple";
+
 mod support {
     #![allow(dead_code)]
 
-    use std::path::{Path, PathBuf};
+    use std::{
+        ops::Deref,
+        path::{Path, PathBuf},
+    };
 
     use block::{
         Account, BlockAccess, BlockAccessEntry, BlockParent, BlockReference, BlockReferenceList,
@@ -100,7 +111,24 @@ mod support {
     };
     use uuid::Uuid;
 
+    use super::TEST_PASSWORD;
+
     pub type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+
+    /// An account plus the session token `register` obtained for it. Most call
+    /// sites only care about the account fields, so this derefs to `Account`.
+    pub struct TestAccount {
+        pub account: Account,
+        pub token: String,
+    }
+
+    impl Deref for TestAccount {
+        type Target = Account;
+
+        fn deref(&self) -> &Account {
+            &self.account
+        }
+    }
 
     /// The HTTP endpoint management commands are sent to, kept separate from the
     /// websocket the block protocol runs on.
@@ -120,6 +148,7 @@ mod support {
         pub root: PathBuf,
         pub url: String,
         pub account_id: Uuid,
+        pub token: String,
         pub workspace_id: Uuid,
         task: JoinHandle<()>,
     }
@@ -135,22 +164,29 @@ mod support {
             let (url, task) = serve(&root).await;
             let management = Management::new(&url);
             let account = register(&management, &format!("{}@example.com", Uuid::new_v4())).await;
-            let workspace = create_workspace(&management, account.id, "Test").await;
+            let workspace = create_workspace(&management, &account.token, "Test").await;
             Self {
                 root,
                 url,
                 account_id: account.id,
+                token: account.token,
                 workspace_id: workspace.id,
                 task,
             }
         }
 
-        pub async fn start_at_as(root: PathBuf, account_id: Uuid, workspace_id: Uuid) -> Self {
+        pub async fn start_at_as(
+            root: PathBuf,
+            token: String,
+            account_id: Uuid,
+            workspace_id: Uuid,
+        ) -> Self {
             let (url, task) = serve(&root).await;
             Self {
                 root,
                 url,
                 account_id,
+                token,
                 workspace_id,
                 task,
             }
@@ -161,26 +197,22 @@ mod support {
         }
 
         pub async fn connect(&self) -> Socket {
-            self.connect_as(self.account_id).await
+            self.connect_to(&self.token, self.workspace_id).await
         }
 
-        pub async fn connect_as(&self, account_id: Uuid) -> Socket {
-            self.connect_to(account_id, self.workspace_id).await
-        }
-
-        pub async fn connect_to(&self, account_id: Uuid, workspace_id: Uuid) -> Socket {
-            self.try_connect_to(account_id, workspace_id).await.unwrap()
+        pub async fn connect_to(&self, token: &str, workspace_id: Uuid) -> Socket {
+            self.try_connect_to(token, workspace_id).await.unwrap()
         }
 
         /// Opens a block connection without asserting that the server accepted
         /// the handshake.
         pub async fn try_connect_to(
             &self,
-            account_id: Uuid,
+            token: &str,
             workspace_id: Uuid,
         ) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
             let request = format!(
-                "{}/?account={account_id}&workspace={workspace_id}",
+                "{}/?token={token}&workspace={workspace_id}",
                 websocket_url(&self.url)
             )
             .into_client_request()
@@ -243,32 +275,37 @@ mod support {
         .unwrap()
     }
 
-    pub async fn register(management: &Management, email: &str) -> Account {
+    pub async fn register(management: &Management, email: &str) -> TestAccount {
+        register_with_password(management, email, TEST_PASSWORD).await
+    }
+
+    pub async fn register_with_password(
+        management: &Management,
+        email: &str,
+        password: &str,
+    ) -> TestAccount {
         let response = management_request(
             management,
             ManagementClientMessage::Register {
                 request_id: Uuid::new_v4(),
                 email: email.into(),
                 display_name: email.split('@').next().unwrap().into(),
+                password: password.into(),
             },
         )
         .await;
-        let ManagementServerMessage::Account { account, .. } = response else {
+        let ManagementServerMessage::Account { account, token, .. } = response else {
             panic!("registration failed: {response:?}");
         };
-        account
+        TestAccount { account, token }
     }
 
-    pub async fn create_workspace(
-        management: &Management,
-        account_id: Uuid,
-        name: &str,
-    ) -> Workspace {
+    pub async fn create_workspace(management: &Management, token: &str, name: &str) -> Workspace {
         let response = management_request(
             management,
             ManagementClientMessage::CreateWorkspace {
                 request_id: Uuid::new_v4(),
-                account_id,
+                token: token.into(),
                 name: name.into(),
             },
         )
@@ -283,16 +320,16 @@ mod support {
     /// behalf, leaving it a full member.
     pub async fn add_member(
         management: &Management,
-        inviter_id: Uuid,
+        inviter_token: &str,
         workspace_id: Uuid,
-        account: &Account,
+        account: &TestAccount,
         role: WorkspaceRole,
     ) {
         let response = management_request(
             management,
             ManagementClientMessage::Invite {
                 request_id: Uuid::new_v4(),
-                account_id: inviter_id,
+                token: inviter_token.into(),
                 workspace_id,
                 email: account.email.clone(),
                 role,
@@ -306,7 +343,7 @@ mod support {
             management,
             ManagementClientMessage::RespondInvitation {
                 request_id: Uuid::new_v4(),
-                account_id: account.id,
+                token: account.token.clone(),
                 invitation_id: invitation.id,
                 accept: true,
             },

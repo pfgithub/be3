@@ -1,4 +1,5 @@
 use super::support::{management_request, TestServer};
+use super::TEST_PASSWORD;
 use block::{ManagementClientMessage, ManagementErrorCode, ManagementServerMessage};
 use uuid::Uuid;
 
@@ -13,6 +14,7 @@ async fn account_registration_rejects_duplicates() {
                 request_id: Uuid::new_v4(),
                 email: email.into(),
                 display_name: "Duplicate".into(),
+                password: TEST_PASSWORD.into(),
             },
         )
         .await;

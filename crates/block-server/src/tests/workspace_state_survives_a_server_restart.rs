@@ -7,7 +7,7 @@ async fn workspace_state_survives_a_server_restart() {
     let server = TestServer::start().await;
     let management = server.management();
     let owner = register(&management, "restart-owner@example.com").await;
-    let workspace = create_workspace(&management, owner.id, "Persistent").await;
+    let workspace = create_workspace(&management, &owner.token, "Persistent").await;
     let root = server.stop().await;
 
     let restarted = TestServer::start_at(root).await;
@@ -16,7 +16,7 @@ async fn workspace_state_survives_a_server_restart() {
         &management,
         ManagementClientMessage::ListWorkspaces {
             request_id: Uuid::new_v4(),
-            account_id: owner.id,
+            token: owner.token.clone(),
         },
     )
     .await;

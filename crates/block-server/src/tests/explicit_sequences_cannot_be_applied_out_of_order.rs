@@ -4,8 +4,12 @@ use super::*;
 async fn explicit_sequences_cannot_be_applied_out_of_order() {
     let root = test_root();
     let store = BlockStore::new(root.clone());
-    let account = store
-        .register_account("sequence@example.com".into(), "Sequence".into())
+    let (account, _token) = store
+        .register_account(
+            "sequence@example.com".into(),
+            "Sequence".into(),
+            TEST_PASSWORD.into(),
+        )
         .await
         .unwrap();
     let workspace = store

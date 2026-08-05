@@ -12,10 +12,10 @@ async fn real_clients_synchronize_through_the_real_server() {
             .unwrap();
     });
     let url = format!("http://{address}");
-    let (account_id, workspace_id) = test_identity(&url).await;
+    let (account_id, token, workspace_id) = test_identity(&url).await;
 
     let client_a = BlockClient::new(account_id, workspace_id);
-    client_a.connect(url.clone());
+    client_a.connect(url.clone(), token.clone());
     let block_a = client_a.create_block(Counter { count: 0 });
     let block_id = block_a.id();
     timeout(block_a.loaded()).await;
@@ -24,7 +24,7 @@ async fn real_clients_synchronize_through_the_real_server() {
     assert_eq!(block_a.read().unwrap().count, 1);
 
     let client_b = BlockClient::new(account_id, workspace_id);
-    client_b.connect(url.clone());
+    client_b.connect(url.clone(), token.clone());
     let block_b = client_b.get_block::<Counter>(block_id);
     assert!(block_b.read().is_none());
     timeout(block_b.loaded()).await;
@@ -41,7 +41,7 @@ async fn real_clients_synchronize_through_the_real_server() {
     assert_eq!(block_b.read().unwrap().count, 1_111);
 
     let client_c = BlockClient::new(account_id, workspace_id);
-    client_c.connect(url);
+    client_c.connect(url, token);
     let block_c = client_c.get_block::<Counter>(block_id);
     timeout(block_c.loaded()).await;
     assert_eq!(block_c.read().unwrap().count, 1_111);

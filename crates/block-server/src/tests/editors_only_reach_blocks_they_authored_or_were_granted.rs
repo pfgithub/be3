@@ -13,22 +13,22 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
     let management = server.management();
     let owner = register(&management, "owner@example.com").await;
     let editor = register(&management, "editor@example.com").await;
-    let workspace = create_workspace(&management, owner.id, "Shared").await;
+    let workspace = create_workspace(&management, &owner.token, "Shared").await;
     add_member(
         &management,
-        owner.id,
+        &owner.token,
         workspace.id,
         &editor,
         WorkspaceRole::Editor,
     )
     .await;
 
-    let mut owner_socket = server.connect_to(owner.id, workspace.id).await;
+    let mut owner_socket = server.connect_to(&owner.token, workspace.id).await;
     let private = Uuid::new_v4();
     create(&mut owner_socket, private, vec![]).await;
     set_parent(&mut owner_socket, private, BlockParent::Root).await;
 
-    let mut editor_socket = server.connect_to(editor.id, workspace.id).await;
+    let mut editor_socket = server.connect_to(&editor.token, workspace.id).await;
 
     // The block is invisible until it is shared.
     assert!(references(&mut editor_socket, BlockReferenceList::Roots)

@@ -1,4 +1,5 @@
 use super::support::{management_request, TestServer};
+use super::TEST_PASSWORD;
 use block::{ManagementClientMessage, ManagementServerMessage};
 use uuid::Uuid;
 
@@ -12,6 +13,7 @@ async fn account_state_survives_a_server_restart() {
             request_id: Uuid::new_v4(),
             email: "restart@example.com".into(),
             display_name: "Restart".into(),
+            password: TEST_PASSWORD.into(),
         },
     )
     .await;
@@ -28,6 +30,7 @@ async fn account_state_survives_a_server_restart() {
         ManagementClientMessage::Login {
             request_id: Uuid::new_v4(),
             email: account.email.clone(),
+            password: TEST_PASSWORD.into(),
         },
     )
     .await;

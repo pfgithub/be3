@@ -20,6 +20,7 @@ impl AppStateStore {
                 account_id        TEXT NOT NULL,
                 email             TEXT NOT NULL,
                 display_name      TEXT NOT NULL,
+                token             TEXT NOT NULL,
                 last_workspace_id TEXT,
                 PRIMARY KEY (server_key, account_id)
             );
@@ -33,7 +34,7 @@ impl AppStateStore {
 
     pub fn accounts(&self) -> Result<Vec<SavedAccount>, AppStateError> {
         let mut statement = self.connection.prepare(
-            "SELECT server_key, server_url, account_id, email, display_name, last_workspace_id
+            "SELECT server_key, server_url, account_id, email, display_name, token, last_workspace_id
              FROM saved_accounts ORDER BY display_name COLLATE NOCASE, account_id",
         )?;
         let accounts = statement
@@ -42,7 +43,7 @@ impl AppStateStore {
                 let server_url = row.get::<_, Option<String>>(1)?;
                 let account_id = parse_uuid(row.get::<_, String>(2)?)?;
                 let last_workspace_id = row
-                    .get::<_, Option<String>>(5)?
+                    .get::<_, Option<String>>(6)?
                     .map(parse_uuid)
                     .transpose()?;
                 Ok(SavedAccount {
@@ -54,6 +55,7 @@ impl AppStateStore {
                     id: account_id,
                     email: row.get(3)?,
                     name: row.get(4)?,
+                    token: row.get(5)?,
                     last_workspace_id,
                 })
             })?
@@ -68,12 +70,13 @@ impl AppStateStore {
         };
         self.connection.execute(
             "INSERT INTO saved_accounts
-             (server_key, server_url, account_id, email, display_name, last_workspace_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             (server_key, server_url, account_id, email, display_name, token, last_workspace_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(server_key, account_id) DO UPDATE SET
                 server_url = excluded.server_url,
                 email = excluded.email,
                 display_name = excluded.display_name,
+                token = excluded.token,
                 last_workspace_id = excluded.last_workspace_id",
             params![
                 saved.server.key(),
@@ -81,6 +84,7 @@ impl AppStateStore {
                 saved.id.to_string(),
                 &saved.email,
                 &saved.name,
+                &saved.token,
                 saved.last_workspace_id.map(|id| id.to_string())
             ],
         )?;

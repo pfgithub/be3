@@ -71,7 +71,7 @@ async fn get_block_resolves_from_a_websocket_read_response() {
     let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.get_block::<Counter>(id);
     assert!(block.read().is_none());
-    client.connect(format!("http://{address}"));
+    client.connect(format!("http://{address}"), "test-token");
     tokio::time::timeout(Duration::from_secs(2), block.loaded())
         .await
         .unwrap();

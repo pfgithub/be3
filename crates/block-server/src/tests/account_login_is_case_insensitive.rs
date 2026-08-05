@@ -1,4 +1,5 @@
 use super::support::{management_request, TestServer};
+use super::TEST_PASSWORD;
 use block::{ManagementClientMessage, ManagementServerMessage};
 use uuid::Uuid;
 
@@ -12,6 +13,7 @@ async fn account_login_is_case_insensitive() {
             request_id: Uuid::new_v4(),
             email: "  Person@Example.COM ".into(),
             display_name: " Person ".into(),
+            password: TEST_PASSWORD.into(),
         },
     )
     .await;
@@ -26,6 +28,7 @@ async fn account_login_is_case_insensitive() {
         ManagementClientMessage::Login {
             request_id: Uuid::new_v4(),
             email: "PERSON@example.com".into(),
+            password: TEST_PASSWORD.into(),
         },
     )
     .await;

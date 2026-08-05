@@ -8,12 +8,12 @@ async fn pending_invitation_can_be_declined() {
     let management = server.management();
     let owner = register(&management, "owner@example.com").await;
     let recipient = register(&management, "recipient@example.com").await;
-    let workspace = create_workspace(&management, owner.id, "Decline").await;
+    let workspace = create_workspace(&management, &owner.token, "Decline").await;
     let response = management_request(
         &management,
         ManagementClientMessage::Invite {
             request_id: Uuid::new_v4(),
-            account_id: owner.id,
+            token: owner.token.clone(),
             workspace_id: workspace.id,
             email: recipient.email.clone(),
             role: WorkspaceRole::Administrator,
@@ -27,7 +27,7 @@ async fn pending_invitation_can_be_declined() {
         &management,
         ManagementClientMessage::RespondInvitation {
             request_id: Uuid::new_v4(),
-            account_id: recipient.id,
+            token: recipient.token.clone(),
             invitation_id: invitation.id,
             accept: false,
         },
@@ -37,7 +37,7 @@ async fn pending_invitation_can_be_declined() {
         &management,
         ManagementClientMessage::ListInvitations {
             request_id: Uuid::new_v4(),
-            account_id: recipient.id,
+            token: recipient.token.clone(),
         },
     )
     .await;

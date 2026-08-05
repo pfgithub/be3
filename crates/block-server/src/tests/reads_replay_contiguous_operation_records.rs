@@ -4,8 +4,12 @@ use super::*;
 async fn reads_replay_contiguous_operation_records() {
     let root = test_root();
     let store = BlockStore::new(root.clone());
-    let account = store
-        .register_account("reads@example.com".into(), "Reads".into())
+    let (account, _token) = store
+        .register_account(
+            "reads@example.com".into(),
+            "Reads".into(),
+            TEST_PASSWORD.into(),
+        )
         .await
         .unwrap();
     let workspace = store

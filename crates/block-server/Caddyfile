@@ -1,0 +1,18 @@
+# Reverse-proxies a publicly hosted block-server, terminating HTTPS/WSS
+# automatically via Caddy's built-in ACME client and forwarding both the
+# /management HTTP endpoint and the block websocket to the plain-HTTP
+# block-server process behind it. Caddy's `reverse_proxy` upgrades websocket
+# connections transparently -- no extra directive is needed for that.
+#
+# Usage:
+#   caddy run --config Caddyfile
+#
+# Replace blocks.example.com below with the public hostname. block-server
+# itself should be bound to loopback only (its default, 127.0.0.1:9090) so
+# it is never reachable except through this proxy, and should be started
+# with --disable-registration; provision accounts with the `add-account`
+# subcommand instead of letting anyone register.
+
+blocks.example.com {
+    reverse_proxy 127.0.0.1:9090
+}

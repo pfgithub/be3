@@ -4,8 +4,12 @@ use super::*;
 async fn sequence_errors_include_the_expected_sequence() {
     let root = test_root();
     let store = BlockStore::new(root.clone());
-    let account = store
-        .register_account("errors@example.com".into(), "Errors".into())
+    let (account, _token) = store
+        .register_account(
+            "errors@example.com".into(),
+            "Errors".into(),
+            TEST_PASSWORD.into(),
+        )
         .await
         .unwrap();
     let workspace = store

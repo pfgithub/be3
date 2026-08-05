@@ -64,7 +64,7 @@ impl Shutdown {
 /// Block connections identify themselves in the websocket URL's query string.
 /// Browsers cannot set request headers on a websocket handshake, so the query
 /// string is the only place a web client can put this.
-const ACCOUNT_PARAMETER: &str = "account";
+const TOKEN_PARAMETER: &str = "token";
 const WORKSPACE_PARAMETER: &str = "workspace";
 /// Where the server answers management commands, relative to the server URL.
 const MANAGEMENT_PATH: &str = "/management";
@@ -106,6 +106,15 @@ impl fmt::Display for ManagementClientError {
 
 impl std::error::Error for ManagementClientError {}
 
+/// An account plus the session token that authenticates it. The token is
+/// what a caller should keep around and use for later requests -- never the
+/// password.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Session {
+    pub account: Account,
+    pub token: String,
+}
+
 impl ManagementClient {
     pub fn new(url: impl Into<String>) -> Result<Self, ManagementClientError> {
         let url = url.into().trim().trim_end_matches('/').to_owned();
@@ -128,41 +137,63 @@ impl ManagementClient {
         &self,
         email: impl Into<String>,
         display_name: impl Into<String>,
-    ) -> Result<Account, ManagementClientError> {
+        password: impl Into<String>,
+    ) -> Result<Session, ManagementClientError> {
         let response = self
             .request(ManagementClientMessage::Register {
                 request_id: Uuid::new_v4(),
                 email: email.into(),
                 display_name: display_name.into(),
+                password: password.into(),
             })
             .await?;
-        let ManagementServerMessage::Account { account, .. } = response else {
+        let ManagementServerMessage::Account { account, token, .. } = response else {
             return Err(unexpected_management_response(response));
         };
-        Ok(account)
+        Ok(Session { account, token })
     }
 
-    pub async fn login(&self, email: impl Into<String>) -> Result<Account, ManagementClientError> {
+    pub async fn login(
+        &self,
+        email: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<Session, ManagementClientError> {
         let response = self
             .request(ManagementClientMessage::Login {
                 request_id: Uuid::new_v4(),
                 email: email.into(),
+                password: password.into(),
             })
             .await?;
-        let ManagementServerMessage::Account { account, .. } = response else {
+        let ManagementServerMessage::Account { account, token, .. } = response else {
             return Err(unexpected_management_response(response));
         };
-        Ok(account)
+        Ok(Session { account, token })
+    }
+
+    /// Revokes a session token, so it no longer authenticates anything. Not
+    /// an error if the token was already invalid.
+    pub async fn logout(&self, token: impl Into<String>) -> Result<(), ManagementClientError> {
+        let response = self
+            .request(ManagementClientMessage::Logout {
+                request_id: Uuid::new_v4(),
+                token: token.into(),
+            })
+            .await?;
+        let ManagementServerMessage::Ok { .. } = response else {
+            return Err(unexpected_management_response(response));
+        };
+        Ok(())
     }
 
     pub async fn list_workspaces(
         &self,
-        account_id: Uuid,
+        token: impl Into<String>,
     ) -> Result<Vec<Workspace>, ManagementClientError> {
         let response = self
             .request(ManagementClientMessage::ListWorkspaces {
                 request_id: Uuid::new_v4(),
-                account_id,
+                token: token.into(),
             })
             .await?;
         let ManagementServerMessage::Workspaces { workspaces, .. } = response else {
@@ -173,13 +204,13 @@ impl ManagementClient {
 
     pub async fn create_workspace(
         &self,
-        account_id: Uuid,
+        token: impl Into<String>,
         name: impl Into<String>,
     ) -> Result<Workspace, ManagementClientError> {
         let response = self
             .request(ManagementClientMessage::CreateWorkspace {
                 request_id: Uuid::new_v4(),
-                account_id,
+                token: token.into(),
                 name: name.into(),
             })
             .await?;
@@ -191,12 +222,12 @@ impl ManagementClient {
 
     pub async fn list_invitations(
         &self,
-        account_id: Uuid,
+        token: impl Into<String>,
     ) -> Result<Vec<WorkspaceInvitation>, ManagementClientError> {
         let response = self
             .request(ManagementClientMessage::ListInvitations {
                 request_id: Uuid::new_v4(),
-                account_id,
+                token: token.into(),
             })
             .await?;
         let ManagementServerMessage::Invitations { invitations, .. } = response else {
@@ -207,7 +238,7 @@ impl ManagementClient {
 
     pub async fn invite(
         &self,
-        account_id: Uuid,
+        token: impl Into<String>,
         workspace_id: Uuid,
         email: impl Into<String>,
         role: WorkspaceRole,
@@ -215,7 +246,7 @@ impl ManagementClient {
         let response = self
             .request(ManagementClientMessage::Invite {
                 request_id: Uuid::new_v4(),
-                account_id,
+                token: token.into(),
                 workspace_id,
                 email: email.into(),
                 role,
@@ -229,14 +260,14 @@ impl ManagementClient {
 
     pub async fn respond_invitation(
         &self,
-        account_id: Uuid,
+        token: impl Into<String>,
         invitation_id: Uuid,
         accept: bool,
     ) -> Result<(), ManagementClientError> {
         let response = self
             .request(ManagementClientMessage::RespondInvitation {
                 request_id: Uuid::new_v4(),
-                account_id,
+                token: token.into(),
                 invitation_id,
                 accept,
             })
@@ -588,14 +619,16 @@ impl BlockClient {
     }
 
     /// Connects to the block websocket of the server at `url`, which is the same
-    /// `http://` or `https://` URL [`ManagementClient`] is given.
-    pub fn connect(&self, url: impl Into<String>) {
+    /// `http://` or `https://` URL [`ManagementClient`] is given, authenticating
+    /// with the session `token` obtained from [`ManagementClient::register`] or
+    /// [`ManagementClient::login`].
+    pub fn connect(&self, url: impl Into<String>, token: impl Into<String>) {
         if self.connected.set(()).is_err() {
             fatal("BlockClient::connect may only be called once");
         }
         self.send(WorkerCommand::Connect {
             url: url.into(),
-            account_id: self.account_id,
+            token: token.into(),
             workspace_id: self.workspace_id,
         });
     }
@@ -1328,7 +1361,7 @@ struct BlockShared<B: Block> {
 enum WorkerCommand {
     Connect {
         url: String,
-        account_id: Uuid,
+        token: String,
         workspace_id: Uuid,
     },
     AddBlock(Arc<dyn ErasedBlock>),
@@ -1385,12 +1418,12 @@ async fn worker_main(
         match command {
             WorkerCommand::Connect {
                 url,
-                account_id,
+                token,
                 workspace_id,
             } => {
                 run_connected(
                     url,
-                    account_id,
+                    token,
                     workspace_id,
                     &shutdown,
                     &mut state,
@@ -1407,26 +1440,26 @@ async fn worker_main(
 /// The websocket endpoint for a server URL. The blocks websocket shares the
 /// server's host and scheme with the management endpoint, and carries the
 /// connection's identity in its query string.
-fn websocket_url(url: &str, account_id: Uuid, workspace_id: Uuid) -> String {
+fn websocket_url(url: &str, token: &str, workspace_id: Uuid) -> String {
     let base = match url.split_once("://") {
         Some(("http", host)) => format!("ws://{host}"),
         Some(("https", host)) => format!("wss://{host}"),
         _ => url.to_owned(),
     };
-    format!("{base}/?{ACCOUNT_PARAMETER}={account_id}&{WORKSPACE_PARAMETER}={workspace_id}")
+    format!("{base}/?{TOKEN_PARAMETER}={token}&{WORKSPACE_PARAMETER}={workspace_id}")
 }
 
 /// Runs the connection until it ends. There is no reconnecting, so every way
 /// out of here stops the worker for good.
 async fn run_connected(
     url: String,
-    account_id: Uuid,
+    token: String,
     workspace_id: Uuid,
     shutdown: &Shutdown,
     state: &mut WorkerState,
     commands: &mut mpsc::UnboundedReceiver<WorkerCommand>,
 ) {
-    let url = websocket_url(&url, account_id, workspace_id);
+    let url = websocket_url(&url, &token, workspace_id);
     let mut socket = match Socket::connect(&url).await {
         Ok(socket) => socket,
         Err(error) => return stop_or_fatal(shutdown, error),

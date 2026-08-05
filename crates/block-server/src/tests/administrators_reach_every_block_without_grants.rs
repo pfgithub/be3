@@ -14,10 +14,10 @@ async fn administrators_reach_every_block_without_grants() {
     let owner = register(&management, "owner@example.com").await;
     let editor = register(&management, "editor@example.com").await;
     let second_admin = register(&management, "admin@example.com").await;
-    let workspace = create_workspace(&management, owner.id, "Shared").await;
+    let workspace = create_workspace(&management, &owner.token, "Shared").await;
     add_member(
         &management,
-        owner.id,
+        &owner.token,
         workspace.id,
         &editor,
         WorkspaceRole::Editor,
@@ -25,7 +25,7 @@ async fn administrators_reach_every_block_without_grants() {
     .await;
     add_member(
         &management,
-        owner.id,
+        &owner.token,
         workspace.id,
         &second_admin,
         WorkspaceRole::Administrator,
@@ -33,12 +33,12 @@ async fn administrators_reach_every_block_without_grants() {
     .await;
 
     // A block only the editor has ever touched.
-    let mut editor_socket = server.connect_to(editor.id, workspace.id).await;
+    let mut editor_socket = server.connect_to(&editor.token, workspace.id).await;
     let block = Uuid::new_v4();
     create(&mut editor_socket, block, vec![]).await;
     set_parent(&mut editor_socket, block, BlockParent::Root).await;
 
-    let mut admin_socket = server.connect_to(second_admin.id, workspace.id).await;
+    let mut admin_socket = server.connect_to(&second_admin.token, workspace.id).await;
     assert!(matches!(
         read(&mut admin_socket, block).await,
         ServerMessage::ReadBlock { .. }

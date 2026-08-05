@@ -1,4 +1,5 @@
 use super::support::{management_request, TestServer};
+use super::TEST_PASSWORD;
 use block::{ManagementClientMessage, ManagementErrorCode, ManagementServerMessage};
 use uuid::Uuid;
 
@@ -11,13 +12,14 @@ async fn login_rejects_unknown_accounts() {
         ManagementClientMessage::Login {
             request_id: Uuid::new_v4(),
             email: "missing@example.com".into(),
+            password: TEST_PASSWORD.into(),
         },
     )
     .await;
     assert!(matches!(
         response,
         ManagementServerMessage::Error {
-            code: ManagementErrorCode::AccountNotFound,
+            code: ManagementErrorCode::InvalidCredentials,
             ..
         }
     ));

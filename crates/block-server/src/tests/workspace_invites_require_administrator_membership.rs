@@ -8,12 +8,12 @@ async fn workspace_invites_require_administrator_membership() {
     let management = server.management();
     let owner = register(&management, "owner@example.com").await;
     let stranger = register(&management, "stranger@example.com").await;
-    let workspace = create_workspace(&management, owner.id, "Private").await;
+    let workspace = create_workspace(&management, &owner.token, "Private").await;
     let response = management_request(
         &management,
         ManagementClientMessage::Invite {
             request_id: Uuid::new_v4(),
-            account_id: stranger.id,
+            token: stranger.token.clone(),
             workspace_id: workspace.id,
             email: "target@example.com".into(),
             role: WorkspaceRole::Administrator,

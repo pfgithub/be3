@@ -60,6 +60,9 @@ pub struct SavedAccount {
     pub id: Uuid,
     pub email: String,
     pub name: String,
+    /// The session token proving this is really the account it claims to be.
+    /// The password itself is never stored.
+    pub token: String,
     pub last_workspace_id: Option<Uuid>,
 }
 

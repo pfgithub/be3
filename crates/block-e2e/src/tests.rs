@@ -77,15 +77,19 @@ async fn timeout(future: impl Future<Output = ()>) {
         .unwrap();
 }
 
-async fn test_identity(url: &str) -> (Uuid, Uuid) {
+async fn test_identity(url: &str) -> (Uuid, String, Uuid) {
     let management = ManagementClient::new(url).unwrap();
-    let account = management
-        .register(format!("{}@example.com", Uuid::new_v4()), "Test")
+    let session = management
+        .register(
+            format!("{}@example.com", Uuid::new_v4()),
+            "Test",
+            "e2e-test-password",
+        )
         .await
         .unwrap();
     let workspace = management
-        .create_workspace(account.id, "Test")
+        .create_workspace(&session.token, "Test")
         .await
         .unwrap();
-    (account.id, workspace.id)
+    (session.account.id, session.token, workspace.id)
 }
