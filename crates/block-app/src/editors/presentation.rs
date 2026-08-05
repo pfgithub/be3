@@ -4,7 +4,9 @@ use block::{Block, BlockParent, BlockReference, BlockReferenceList};
 use block_client::{
     blocks::{
         infinite_canvas::{
-            CanvasPoint, CanvasPreviewRegion, InfiniteCanvas, InfiniteCanvasOperation,
+            CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasPreviewRegion,
+            CanvasTextAlign, CanvasTextStyle, CanvasTextWeight, CanvasTransform, InfiniteCanvas,
+            InfiniteCanvasOperation,
         },
         presentation::{Presentation, PresentationOperation, PresentationSlide},
         workspace_index::BlockEntry,
@@ -35,6 +37,113 @@ const THUMBNAIL_SIZE: Vec2 = egui::vec2(176.0, 104.0);
 const DEFAULT_SLIDE_SIZE: Vec2 = egui::vec2(960.0, 540.0);
 const PLAYBACK_CONTROLS_HEIGHT: f32 = 48.0;
 
+const TITLE_FONT_SIZE: f32 = 54.0;
+const SUBTITLE_FONT_SIZE: f32 = 26.0;
+const HEADER_FONT_SIZE: f32 = 40.0;
+const BODY_FONT_SIZE: f32 = 24.0;
+
+#[derive(Clone, Copy)]
+enum SlideTemplate {
+    Title,
+    Regular,
+    Blank,
+}
+
+fn template_text_entity(
+    center: CanvasPoint,
+    size: CanvasPoint,
+    placeholder: &str,
+    text_style: CanvasTextStyle,
+) -> CanvasEntity {
+    CanvasEntity {
+        id: Uuid::new_v4(),
+        transform: CanvasTransform::new(center, size, 0.0),
+        kind: CanvasEntityKind::Text {
+            text: String::new(),
+            text_style,
+            placeholder: placeholder.into(),
+        },
+        style: CanvasEntityStyle::default(),
+        group_id: None,
+        locked: false,
+    }
+}
+
+fn template_entities(template: SlideTemplate) -> Vec<CanvasEntity> {
+    match template {
+        SlideTemplate::Blank => Vec::new(),
+        SlideTemplate::Title => vec![
+            template_text_entity(
+                CanvasPoint::new(0.0, -40.0),
+                CanvasPoint::new(820.0, 110.0),
+                "Title",
+                CanvasTextStyle {
+                    font_size: TITLE_FONT_SIZE,
+                    weight: CanvasTextWeight::Bold,
+                    alignment: CanvasTextAlign::Center,
+                    line_height: 1.2,
+                    wrap: false,
+                },
+            ),
+            template_text_entity(
+                CanvasPoint::new(0.0, 70.0),
+                CanvasPoint::new(700.0, 60.0),
+                "Subtitle",
+                CanvasTextStyle {
+                    font_size: SUBTITLE_FONT_SIZE,
+                    weight: CanvasTextWeight::Regular,
+                    alignment: CanvasTextAlign::Center,
+                    line_height: 1.2,
+                    wrap: false,
+                },
+            ),
+        ],
+        SlideTemplate::Regular => vec![
+            template_text_entity(
+                CanvasPoint::new(0.0, -220.0),
+                CanvasPoint::new(860.0, 80.0),
+                "Header",
+                CanvasTextStyle {
+                    font_size: HEADER_FONT_SIZE,
+                    weight: CanvasTextWeight::Bold,
+                    alignment: CanvasTextAlign::Left,
+                    line_height: 1.2,
+                    wrap: false,
+                },
+            ),
+            template_text_entity(
+                CanvasPoint::new(0.0, 40.0),
+                CanvasPoint::new(860.0, 380.0),
+                "Body",
+                CanvasTextStyle {
+                    font_size: BODY_FONT_SIZE,
+                    weight: CanvasTextWeight::Regular,
+                    alignment: CanvasTextAlign::Left,
+                    line_height: 1.3,
+                    wrap: true,
+                },
+            ),
+        ],
+    }
+}
+
+fn build_template_canvas(template: SlideTemplate) -> InfiniteCanvas {
+    let mut canvas = InfiniteCanvas::new();
+    InfiniteCanvas::apply_operation(
+        &mut canvas,
+        &InfiniteCanvasOperation::SetPreviewRegion {
+            region: Some(CanvasPreviewRegion::new(
+                CanvasPoint::default(),
+                CanvasPoint::new(DEFAULT_SLIDE_SIZE.x, DEFAULT_SLIDE_SIZE.y),
+            )),
+        },
+    );
+    for entity in template_entities(template) {
+        InfiniteCanvas::apply_operation(&mut canvas, &InfiniteCanvasOperation::Add { entity });
+    }
+    canvas
+}
+
 impl EditorKind for PresentationEditor {
     type Block = Presentation;
 
@@ -50,7 +159,9 @@ impl EditorKind for PresentationEditor {
 
 impl CreatableEditor for PresentationEditor {
     fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(Presentation::new()), client)
+        let mut editor = Self::new(client.create_block(Presentation::new()), client);
+        editor.needs_default_slide = true;
+        editor
     }
 }
 
@@ -65,6 +176,7 @@ pub(super) struct PresentationEditor {
     active_this_frame: bool,
     last_context: Option<egui::Context>,
     playback_controls_visible_until: f64,
+    needs_default_slide: bool,
 }
 
 impl PresentationEditor {
@@ -81,6 +193,14 @@ impl PresentationEditor {
             active_this_frame: false,
             last_context: None,
             playback_controls_visible_until: 0.0,
+            needs_default_slide: false,
+        }
+    }
+
+    fn ensure_default_slide(&mut self, editors: &mut EditorAccess<'_>) {
+        if std::mem::take(&mut self.needs_default_slide) {
+            let index = self.slides().map_or(0, |slides| slides.len());
+            self.insert_template_slide(editors, SlideTemplate::Title, index);
         }
     }
 
@@ -138,17 +258,13 @@ impl PresentationEditor {
         slide.id
     }
 
-    fn insert_canvas_slide(&mut self, editors: &mut EditorAccess<'_>, index: usize) {
-        let mut canvas = InfiniteCanvas::new();
-        InfiniteCanvas::apply_operation(
-            &mut canvas,
-            &InfiniteCanvasOperation::SetPreviewRegion {
-                region: Some(CanvasPreviewRegion::new(
-                    CanvasPoint::default(),
-                    CanvasPoint::new(DEFAULT_SLIDE_SIZE.x, DEFAULT_SLIDE_SIZE.y),
-                )),
-            },
-        );
+    fn insert_template_slide(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+        template: SlideTemplate,
+        index: usize,
+    ) {
+        let canvas = build_template_canvas(template);
         let block = editors.client().create_block(canvas);
         let id = block.id();
         block.set_parent(BlockParent::Uuid(self.block.id()));
@@ -181,10 +297,24 @@ impl PresentationEditor {
                 .clicked()
             {
                 let index = self.slides().map_or(0, |slides| slides.len());
-                self.insert_canvas_slide(editors, index);
+                self.insert_template_slide(editors, SlideTemplate::Regular, index);
             }
             ui.menu_button(ICON_KEYBOARD_ARROW_DOWN, |ui| {
-                self.picker_insert_index = Some(self.slides().map_or(0, |slides| slides.len()));
+                let index = self.slides().map_or(0, |slides| slides.len());
+                if ui.button("Title page").clicked() {
+                    self.insert_template_slide(editors, SlideTemplate::Title, index);
+                    ui.close();
+                }
+                if ui.button("Regular page").clicked() {
+                    self.insert_template_slide(editors, SlideTemplate::Regular, index);
+                    ui.close();
+                }
+                if ui.button("Blank page").clicked() {
+                    self.insert_template_slide(editors, SlideTemplate::Blank, index);
+                    ui.close();
+                }
+                ui.separator();
+                self.picker_insert_index = Some(index);
                 self.picker
                     .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
             })
@@ -610,6 +740,7 @@ impl BlockEditor for PresentationEditor {
         editors: &mut EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        self.ensure_default_slide(editors);
         let slides = self.slides()?;
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
@@ -677,6 +808,7 @@ impl BlockEditor for PresentationEditor {
     ) -> Option<EditorAction> {
         self.active_this_frame = true;
         self.last_context = Some(ui.ctx().clone());
+        self.ensure_default_slide(editors);
         let Some(slides) = self.slides() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -737,6 +869,7 @@ impl BlockEditor for PresentationEditor {
     ) -> Option<EditorAction> {
         self.active_this_frame = true;
         self.last_context = Some(ui.ctx().clone());
+        self.ensure_default_slide(editors);
         let rect = ui.available_rect_before_wrap();
         let Some(slides) = self.slides() else {
             ui.painter().rect_filled(rect, 0.0, Color32::BLACK);

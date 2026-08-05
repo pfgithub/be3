@@ -58,6 +58,7 @@ pub enum CanvasEntityKind {
     Text {
         text: String,
         text_style: CanvasTextStyle,
+        placeholder: String,
     },
     Pen {
         points: Vec<CanvasPoint>,

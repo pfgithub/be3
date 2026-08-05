@@ -438,12 +438,18 @@ impl InfiniteCanvasEditor {
                     ui.strong("Text");
 
                     if let [entity] = selected.as_slice() {
-                        if let CanvasEntityKind::Text { text, text_style } = &entity.kind {
+                        if let CanvasEntityKind::Text {
+                            text,
+                            text_style,
+                            placeholder,
+                        } = &entity.kind
+                        {
                             let mut edited = text.clone();
                             let response = ui.add_enabled(
                                 !entity.locked,
                                 egui::TextEdit::multiline(&mut edited)
                                     .id_salt(("canvas-inspector-text", entity.id))
+                                    .hint_text(placeholder.as_str())
                                     .desired_width(f32::INFINITY)
                                     .desired_rows(4),
                             );
@@ -460,6 +466,7 @@ impl InfiniteCanvasEditor {
                                 updated.kind = CanvasEntityKind::Text {
                                     text: edited,
                                     text_style: *text_style,
+                                    placeholder: placeholder.clone(),
                                 };
                                 if !text_style.wrap {
                                     updated.transform.size = inspector_text_size(

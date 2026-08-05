@@ -47,7 +47,16 @@ pub(super) fn paint_entity(
                 .unwrap_or(Color32::TRANSPARENT);
             painter.add(egui::Shape::convex_polygon(points, fill, stroke));
         }
-        CanvasEntityKind::Text { text, text_style } => {
+        CanvasEntityKind::Text {
+            text,
+            text_style,
+            placeholder,
+        } => {
+            let (displayed, color) = if text.is_empty() {
+                (placeholder.as_str(), with_opacity(color, 0.4))
+            } else {
+                (text.as_str(), color)
+            };
             let center = editor.world_to_screen(entity.transform.center, rect);
             let font_size = (text_style.font_size * editor.render_scale).clamp(4.0, 256.0);
             let font = egui::FontId::proportional(font_size);
@@ -56,7 +65,8 @@ pub(super) fn paint_entity(
             } else {
                 f32::INFINITY
             };
-            let mut job = egui::text::LayoutJob::simple(text.clone(), font, color, wrap_width);
+            let mut job =
+                egui::text::LayoutJob::simple(displayed.to_string(), font, color, wrap_width);
             job.halign = match text_style.alignment {
                 CanvasTextAlign::Left => egui::Align::LEFT,
                 CanvasTextAlign::Center => egui::Align::Center,

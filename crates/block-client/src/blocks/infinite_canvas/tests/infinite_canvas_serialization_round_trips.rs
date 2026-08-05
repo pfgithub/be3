@@ -22,6 +22,7 @@ fn infinite_canvas_serialization_round_trips() {
                 line_height: 1.5,
                 wrap: true,
             },
+            placeholder: "Placeholder".into(),
         },
         style: CanvasEntityStyle {
             foreground: CanvasColor::Rgba {

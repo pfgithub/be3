@@ -531,6 +531,7 @@ impl InfiniteCanvasEditor {
                                 kind: CanvasEntityKind::Text {
                                     text: String::new(),
                                     text_style: CanvasTextStyle::default(),
+                                    placeholder: "Text".into(),
                                 },
                                 style: CanvasEntityStyle::default(),
                                 group_id: None,
@@ -879,6 +880,7 @@ impl InfiniteCanvasEditor {
                                     wrap: dragged,
                                     ..CanvasTextStyle::default()
                                 },
+                                placeholder: "Text".into(),
                             },
                             style: CanvasEntityStyle::default(),
                             group_id: None,
