@@ -1,3 +1,4 @@
+pub mod calendar;
 pub mod compiled_logic;
 pub mod database;
 pub mod database_schema;

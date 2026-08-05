@@ -2,6 +2,7 @@
 // have no equivalent, so those builds fall back to UnsupportedEditor.
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 mod browser_tab;
+mod calendar;
 mod clipboard;
 mod compiled_logic;
 mod database;
@@ -1150,6 +1151,7 @@ impl EditorRegistry {
             registrations: HashMap::new(),
             new_block_actions: Vec::new(),
         };
+        registry.register_creatable::<calendar::CalendarEditor>();
         registry.register_creatable::<database::DatabaseEditor>();
         registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
