@@ -1,4 +1,5 @@
 use std::{
+    cell::{Ref, RefCell},
     collections::{BTreeMap, HashMap},
     ops::Range,
     ptr,
@@ -85,18 +86,136 @@ pub(super) struct BytePosition {
     pub x: f32,
 }
 
-struct FontFace {
+/// A font file FreeType/HarfBuzz have opened and parsed.
+struct LoadedFont {
     face: ft::FT_Face,
+    hb_face: Shared<HbFace<'static>>,
+    /// Built lazily per pixel size on first use, since a document only ever
+    /// touches a handful of the sizes a font could be shaped at.
     hb_fonts: HashMap<u32, Owned<HbFont<'static>>>,
+}
+
+enum FontLoadState {
+    /// Not yet opened: the file has only been located, not read.
+    Pending(FontSource),
+    Loaded(LoadedFont),
+    /// Tried once and the file could not be opened as a font; never retried.
+    Failed,
+}
+
+/// A font a document could use, opened from disk/memory on first actual use
+/// rather than at startup, since most documents only ever touch a handful of
+/// the variants (regular/bold/italic/monospace/fallback) candidates offer.
+struct FontFace {
+    state: RefCell<FontLoadState>,
+    library: ft::FT_Library,
     family: SynHlFontFamily,
     bold: bool,
     italic: bool,
 }
 
 impl FontFace {
-    fn hb_font(&self, pixel_size: u32) -> &HbFont<'static> {
-        &self.hb_fonts[&pixel_size]
+    /// Opens the underlying font file if this is the first use of it. Returns
+    /// whether a usable face is now loaded.
+    fn ensure_loaded(&self) -> bool {
+        let mut state = self.state.borrow_mut();
+        if matches!(&*state, FontLoadState::Pending(_)) {
+            let FontLoadState::Pending(source) =
+                std::mem::replace(&mut *state, FontLoadState::Failed)
+            else {
+                unreachable!("just matched Pending");
+            };
+            if let Some((face, hb_face)) = load_font_face(self.library, &source) {
+                *state = FontLoadState::Loaded(LoadedFont {
+                    face,
+                    hb_face,
+                    hb_fonts: HashMap::new(),
+                });
+            }
+        }
+        matches!(&*state, FontLoadState::Loaded(_))
     }
+
+    fn supports(&self, character: char) -> bool {
+        if !self.ensure_loaded() {
+            return false;
+        }
+        let state = self.state.borrow();
+        let FontLoadState::Loaded(loaded) = &*state else {
+            unreachable!("just ensured loaded")
+        };
+        unsafe { ft::FT_Get_Char_Index(loaded.face, character as ft::FT_ULong) != 0 }
+    }
+
+    /// The FreeType face, valid for the lifetime of this `FontFace`. Only
+    /// call this for a font index chosen via [`Self::supports`], which
+    /// guarantees loading already happened.
+    fn face(&self) -> ft::FT_Face {
+        let state = self.state.borrow();
+        let FontLoadState::Loaded(loaded) = &*state else {
+            unreachable!("font used for layout was never loaded")
+        };
+        loaded.face
+    }
+
+    /// See [`Self::face`]: only call this for an already-loaded font.
+    fn hb_font(&self, pixel_size: u32) -> Ref<'_, Owned<HbFont<'static>>> {
+        {
+            let mut state = self.state.borrow_mut();
+            let FontLoadState::Loaded(loaded) = &mut *state else {
+                unreachable!("font used for layout was never loaded")
+            };
+            loaded
+                .hb_fonts
+                .entry(pixel_size)
+                .or_insert_with(|| configured_hb_font(loaded.hb_face.clone(), pixel_size));
+        }
+        Ref::map(self.state.borrow(), |state| {
+            let FontLoadState::Loaded(loaded) = state else {
+                unreachable!("just ensured this pixel size is present")
+            };
+            &loaded.hb_fonts[&pixel_size]
+        })
+    }
+}
+
+/// Opens and validates a font file's FreeType face and HarfBuzz face.
+fn load_font_face(
+    library: ft::FT_Library,
+    source: &FontSource,
+) -> Option<(ft::FT_Face, Shared<HbFace<'static>>)> {
+    let mut face = ptr::null_mut();
+    let hb_face = match source {
+        #[cfg(not(target_arch = "wasm32"))]
+        FontSource::File(path) => path
+            .to_str()
+            .and_then(|path_text| CString::new(path_text).ok())
+            .filter(|path_c| unsafe {
+                ft::FT_New_Face(library, path_c.as_ptr(), 0, &mut face) == 0
+            })
+            .and_then(|_| HbFace::from_file(path, 0).ok()),
+        FontSource::Memory(bytes) => unsafe {
+            ft::FT_New_Memory_Face(
+                library,
+                bytes.as_ptr(),
+                bytes.len() as ft::FT_Long,
+                0,
+                &mut face,
+            ) == 0
+        }
+        .then(|| HbFace::from_bytes(bytes, 0)),
+    };
+    let Some(hb_face) = hb_face else {
+        if !face.is_null() {
+            unsafe { ft::FT_Done_Face(face) };
+        }
+        return None;
+    };
+    if unsafe { ft::FT_Set_Pixel_Sizes(face, 0, BODY_PIXEL_SIZE) } != 0 {
+        unsafe { ft::FT_Done_Face(face) };
+        return None;
+    }
+    Some((face, hb_face.to_shared()))
 }
 
 fn configured_hb_font(face: Shared<HbFace<'static>>, pixel_size: u32) -> Owned<HbFont<'static>> {
@@ -181,56 +300,21 @@ impl TextRenderer {
             return Err("FreeType could not be initialized".to_owned());
         }
 
-        let mut fonts = Vec::new();
-        for (source, family, bold, italic) in font_sources() {
-            let mut face = ptr::null_mut();
-            let Some(hb_face) = (match &source {
-                #[cfg(not(target_arch = "wasm32"))]
-                FontSource::File(path) => path
-                    .to_str()
-                    .and_then(|path_text| CString::new(path_text).ok())
-                    .filter(|path_c| unsafe {
-                        ft::FT_New_Face(library, path_c.as_ptr(), 0, &mut face) == 0
-                    })
-                    .and_then(|_| HbFace::from_file(path, 0).ok()),
-                FontSource::Memory(bytes) => unsafe {
-                    ft::FT_New_Memory_Face(
-                        library,
-                        bytes.as_ptr(),
-                        bytes.len() as ft::FT_Long,
-                        0,
-                        &mut face,
-                    ) == 0
-                }
-                .then(|| HbFace::from_bytes(bytes, 0)),
-            }) else {
-                if !face.is_null() {
-                    unsafe { ft::FT_Done_Face(face) };
-                }
-                continue;
-            };
-            if unsafe { ft::FT_Set_Pixel_Sizes(face, 0, BODY_PIXEL_SIZE) } != 0 {
-                unsafe { ft::FT_Done_Face(face) };
-                continue;
-            }
-            let hb_face = hb_face.to_shared();
-            let hb_fonts = [17, 18, 19, 21, 24, 28, 32]
-                .into_iter()
-                .map(|pixel_size| (pixel_size, configured_hb_font(hb_face.clone(), pixel_size)))
-                .collect();
-            fonts.push(FontFace {
-                face,
-                hb_fonts,
-                family,
-                bold,
-                italic,
-            });
-        }
-
-        if fonts.is_empty() {
+        let sources = font_sources();
+        if sources.is_empty() {
             unsafe { ft::FT_Done_FreeType(library) };
             return Err("Verdana or a compatible fallback font was not found".to_owned());
         }
+        let fonts = sources
+            .into_iter()
+            .map(|(source, family, bold, italic)| FontFace {
+                state: RefCell::new(FontLoadState::Pending(source)),
+                library,
+                family,
+                bold,
+                italic,
+            })
+            .collect();
 
         Ok(Self {
             library,
@@ -391,7 +475,7 @@ impl TextRenderer {
             }
             buffer = buffer.guess_segment_properties();
             let rtl = buffer.get_direction() == Direction::Rtl;
-            let output = shape(font, buffer, &[]);
+            let output = shape(&font, buffer, &[]);
             timings.shape += shape_start.elapsed();
             let finalize_start = Instant::now();
             let run_start_x = pen_x;
@@ -494,21 +578,14 @@ impl TextRenderer {
                 font.family == family
                     && font.bold == bold
                     && font.italic == italic
-                    && unsafe { ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0 }
+                    && font.supports(character)
             })
             .or_else(|| {
-                self.fonts.iter().position(|font| {
-                    font.family == family
-                        && unsafe {
-                            ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0
-                        }
-                })
+                self.fonts
+                    .iter()
+                    .position(|font| font.family == family && font.supports(character))
             })
-            .or_else(|| {
-                self.fonts.iter().position(|font| unsafe {
-                    ft::FT_Get_Char_Index(font.face, character as ft::FT_ULong) != 0
-                })
-            })
+            .or_else(|| self.fonts.iter().position(|font| font.supports(character)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -590,7 +667,7 @@ impl TextRenderer {
         let mut ascender = BODY_PIXEL_SIZE as f32;
         let mut descender = BODY_PIXEL_SIZE as f32 * 0.3;
         for glyph in glyphs {
-            let face = self.fonts[glyph.font_index].face;
+            let face = self.fonts[glyph.font_index].face();
             unsafe {
                 if ft::FT_Set_Pixel_Sizes(face, 0, glyph.pixel_size) == 0 && !(*face).size.is_null()
                 {
@@ -606,7 +683,7 @@ impl TextRenderer {
         if self.glyphs.contains_key(&key) {
             return;
         }
-        let face = self.fonts[key.font_index].face;
+        let face = self.fonts[key.font_index].face();
         let mut result = RasterizedGlyph {
             texture: None,
             size: Vec2::ZERO,
@@ -805,8 +882,8 @@ impl Drop for TextRenderer {
     fn drop(&mut self) {
         unsafe {
             for font in &self.fonts {
-                if !font.face.is_null() {
-                    ft::FT_Done_Face(font.face);
+                if let FontLoadState::Loaded(loaded) = &*font.state.borrow() {
+                    ft::FT_Done_Face(loaded.face);
                 }
             }
             if !self.library.is_null() {
