@@ -44,7 +44,7 @@ const PANEL_GAP: f32 = 6.0;
 impl EditorKind for VideoEditor {
     type Block = Video;
 
-    const DISPLAY_NAME: &'static str = "Video";
+    const DISPLAY_NAME: &'static str = "Video Editor";
     const ICON: MaterialIcon = ICON_MOVIE;
     const CAN_ADD_CHILD: bool = true;
     const CAN_DELETE_CHILD: bool = true;

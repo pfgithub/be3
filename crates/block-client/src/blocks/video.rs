@@ -404,7 +404,7 @@ impl Block for Video {
     }
 
     fn implicit_name(&self) -> String {
-        "Video".into()
+        "Video Editor".into()
     }
 
     fn references(&self) -> Vec<Uuid> {
