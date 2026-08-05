@@ -140,7 +140,7 @@ impl TextEditor {
     fn toolbar(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
         let previous = self.core.language();
         let mut language = previous;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Language:");
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
                 .selected_text(previous.label())
