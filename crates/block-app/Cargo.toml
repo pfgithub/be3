@@ -70,6 +70,7 @@ ureq = { version = "2", features = ["gzip"] }
 arboard = "3.6"
 eframe = { version = "0.34.3", default-features = false, features = ["wayland", "x11"] }
 rfd = "0.15"
+rodio = "0.20"
 wry = "0.55.1"
 
 # libghostty-vt is not supported on Windows, and is disabled on macOS because

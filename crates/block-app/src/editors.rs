@@ -1,6 +1,7 @@
 // The embedded browser is a native webview. Android and the browser sandbox
 // have no equivalent, so those builds fall back to UnsupportedEditor.
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+mod audio;
 mod browser_tab;
 mod calendar;
 mod clipboard;
@@ -1151,6 +1152,7 @@ impl EditorRegistry {
             registrations: HashMap::new(),
             new_block_actions: Vec::new(),
         };
+        registry.register_configurable::<audio::AudioEditor>();
         registry.register_creatable::<calendar::CalendarEditor>();
         registry.register_creatable::<database::DatabaseEditor>();
         registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
