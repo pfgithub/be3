@@ -154,14 +154,15 @@ impl VideoEditor {
     }
 
     /// Adds a clip showing `block_id`, attached to `attachment` at `frame` or
-    /// at `base_index` on the base track. Omitting the index appends it.
+    /// on the base track. `insertion_index` chooses its place among siblings;
+    /// omitting it appends the clip.
     fn insert_clip(
         &mut self,
         video: &Video,
         block_id: Uuid,
         attachment: Option<Uuid>,
         frame: u64,
-        base_index: Option<usize>,
+        insertion_index: Option<usize>,
     ) {
         let length = video.frame_rate().frames(DEFAULT_CLIP_SECONDS).max(1);
         let mut clip = VideoClip::new(block_id, length);
@@ -171,9 +172,9 @@ impl VideoEditor {
                 let offset = i64::try_from(frame).unwrap_or(i64::MAX)
                     - i64::try_from(parent_start).unwrap_or(0);
                 clip = clip.attached_to(parent, offset);
-                video.children(Some(parent)).len()
+                insertion_index.unwrap_or_else(|| video.children(Some(parent)).len())
             }
-            None => base_index.unwrap_or_else(|| video.children(None).len()),
+            None => insertion_index.unwrap_or_else(|| video.children(None).len()),
         };
         self.selected = Some(clip.id);
         self.block

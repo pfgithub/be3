@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::editors::{rect_corners, BlockRenderContext, EditorAccess, SidebarDragPayload};
 
-use super::{ClipDrag, VideoEditor};
+use super::{ClipDrag, VideoEditor, DEFAULT_CLIP_SECONDS};
 
 pub(super) const MIN_PIXELS_PER_FRAME: f32 = 0.02;
 pub(super) const MAX_PIXELS_PER_FRAME: f32 = 40.0;
@@ -84,6 +84,8 @@ enum TimelineDropTarget {
     Attach {
         parent: Uuid,
         start: u64,
+        lane: usize,
+        length: u64,
         highlight: Rect,
     },
     Base {
@@ -110,15 +112,22 @@ fn clip_rect(content: Rect, row: &ClipRow, pixels_per_frame: f32) -> Rect {
 }
 
 fn drop_zone(rect: Rect, x: f32) -> ClipDropZone {
-    let edge = rect.width() * 0.25;
-    if x < rect.left() + edge {
+    const EDGE_WIDTH: f32 = 10.0;
+    if rect.width() <= EDGE_WIDTH * 2.0 {
+        return if x < rect.center().x {
+            ClipDropZone::Before
+        } else {
+            ClipDropZone::After
+        };
+    }
+    if x < rect.left() + EDGE_WIDTH {
         ClipDropZone::Before
-    } else if x > rect.right() - edge {
+    } else if x > rect.right() - EDGE_WIDTH {
         ClipDropZone::After
     } else {
         ClipDropZone::Center(Rect::from_min_max(
-            egui::pos2(rect.left() + edge, rect.top()),
-            egui::pos2(rect.right() - edge, rect.bottom()),
+            egui::pos2(rect.left() + EDGE_WIDTH, rect.top()),
+            egui::pos2(rect.right() - EDGE_WIDTH, rect.bottom()),
         ))
     }
 }
@@ -190,8 +199,12 @@ fn drop_target_at(
     moving: Option<&ClipDrag>,
 ) -> Option<TimelineDropTarget> {
     let moving_id = moving.map(|drag| drag.clip);
-    let start = ((pointer.x - content.left()) / pixels_per_frame).max(0.0) as u64;
-    let start = start.saturating_sub(moving.map_or(0, |drag| drag.grab));
+    let pointer_frame = ((pointer.x - content.left()) / pixels_per_frame).max(0.0) as u64;
+    let moved_start = pointer_frame.saturating_sub(moving.map_or(0, |drag| drag.grab));
+    let dragged_length = moving.and_then(|drag| video.clip(drag.clip)).map_or_else(
+        || video.frame_rate().frames(DEFAULT_CLIP_SECONDS).max(1),
+        |clip| clip.length,
+    );
 
     if let Some((row, rect)) = rows
         .iter()
@@ -207,7 +220,9 @@ fn drop_target_at(
                 {
                     return Some(TimelineDropTarget::Attach {
                         parent: row.timing.id,
-                        start,
+                        start: pointer_frame,
+                        lane: row.lane + 1,
+                        length: dragged_length,
                         highlight,
                     });
                 }
@@ -236,7 +251,7 @@ fn drop_target_at(
         let clip = video.clip(drag.clip)?;
         if lane == row.lane && clip.attachment.is_some() {
             return Some(TimelineDropTarget::Offset {
-                start,
+                start: moved_start,
                 lane,
                 length: clip.length,
             });
@@ -263,7 +278,7 @@ impl VideoEditor {
         editors: &mut EditorAccess<'_>,
     ) {
         let rows = lane_rows(video);
-        let lanes = rows.iter().map(|row| row.lane + 1).max().unwrap_or(1);
+        let lanes = rows.iter().map(|row| row.lane + 1).max().unwrap_or(1) + 1;
         let duration = video.duration();
         let viewport = ui.available_size();
         if std::mem::take(&mut self.fit_requested) && duration > 0 {
@@ -303,7 +318,7 @@ impl VideoEditor {
         let visuals = ui.visuals().clone();
         let painter = ui.painter().clone();
 
-        let lanes = rows.iter().map(|row| row.lane + 1).max().unwrap_or(1);
+        let lanes = rows.iter().map(|row| row.lane + 1).max().unwrap_or(1) + 1;
         for lane in 0..lanes {
             painter.rect_filled(
                 lane_rect(content, lane),
@@ -451,7 +466,7 @@ impl VideoEditor {
                                 dragged.reference.id,
                                 Some(parent),
                                 start,
-                                None,
+                                Some(0),
                             );
                         }
                         TimelineDropTarget::Base { index, .. } => {
@@ -619,11 +634,33 @@ fn paint_drop_target(
 ) {
     let color = visuals.selection.stroke.color;
     match target {
-        TimelineDropTarget::Attach { highlight, .. } => {
+        TimelineDropTarget::Attach {
+            start,
+            lane,
+            length,
+            highlight,
+            ..
+        } => {
             painter.rect_filled(highlight.shrink(2.0), 3.0, color.gamma_multiply(0.25));
             painter.rect_stroke(
                 highlight.shrink(1.0),
                 3.0,
+                Stroke::new(2.0_f32, color),
+                egui::StrokeKind::Inside,
+            );
+            let lane = lane_rect(content, lane);
+            let left = content.left() + start as f32 * pixels_per_frame;
+            let preview = Rect::from_min_max(
+                egui::pos2(left, lane.top()),
+                egui::pos2(
+                    left + (length as f32 * pixels_per_frame).max(3.0),
+                    lane.bottom(),
+                ),
+            );
+            painter.rect_filled(preview, 4.0, color.gamma_multiply(0.18));
+            painter.rect_stroke(
+                preview,
+                4.0,
                 Stroke::new(2.0_f32, color),
                 egui::StrokeKind::Inside,
             );
@@ -686,6 +723,7 @@ fn apply_clip_drop(
                     clips: vec![attached],
                 });
             }
+            operations.push(VideoOperation::MoveClip { clip_id, index: 0 });
         }
         TimelineDropTarget::Base { index, .. } => {
             if clip.attachment.is_some() {
