@@ -725,14 +725,19 @@ pub fn direct_editor_tab_ui(
             egui::Window::new("Left sidebar")
                 .id(egui::Id::new(("direct-editor-tab-left-window", id)))
                 .default_width(240.0)
+                .resizable(true)
                 .default_pos(available.left_top() + egui::vec2(16.0, 16.0))
                 .show(ui.ctx(), |ui| {
-                    let next_action = editor_scope(ui, read_only, |ui| {
-                        editor.direct_editor_left_sidebar(ui, editors)
-                    });
-                    if action.is_none() {
-                        action = next_action;
-                    }
+                    egui::ScrollArea::both()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let next_action = editor_scope(ui, read_only, |ui| {
+                                editor.direct_editor_left_sidebar(ui, editors)
+                            });
+                            if action.is_none() {
+                                action = next_action;
+                            }
+                        });
                 });
         }
         if editor.direct_editor_has_right_sidebar(editors) {
@@ -740,14 +745,19 @@ pub fn direct_editor_tab_ui(
                 .id(egui::Id::new(("direct-editor-tab-right-window", id)))
                 .pivot(egui::Align2::RIGHT_TOP)
                 .default_width(240.0)
+                .resizable(true)
                 .default_pos(available.right_top() + egui::vec2(-16.0, 16.0))
                 .show(ui.ctx(), |ui| {
-                    let next_action = editor_scope(ui, read_only, |ui| {
-                        editor.direct_editor_right_sidebar(ui, editors)
-                    });
-                    if action.is_none() {
-                        action = next_action;
-                    }
+                    egui::ScrollArea::both()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let next_action = editor_scope(ui, read_only, |ui| {
+                                editor.direct_editor_right_sidebar(ui, editors)
+                            });
+                            if action.is_none() {
+                                action = next_action;
+                            }
+                        });
                 });
         }
     } else {
