@@ -7,7 +7,11 @@ mod performance;
 mod platform;
 mod share;
 
-use std::{collections::HashMap, error::Error, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    time::Duration,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::{io, path::PathBuf};
@@ -31,10 +35,10 @@ use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabVi
 use egui_material_icons::{
     icons::{
         ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_AUTO_AWESOME, ICON_CHEVRON_RIGHT,
-        ICON_CLOUD, ICON_COMPUTER, ICON_EDIT, ICON_GROUP_ADD, ICON_KEYBOARD_ARROW_DOWN,
-        ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ, ICON_REDO, ICON_REFRESH,
-        ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO, ICON_VISIBILITY,
-        ICON_WORKSPACES,
+        ICON_CLOUD, ICON_COMPUTER, ICON_DATA_OBJECT, ICON_EDIT, ICON_GROUP_ADD,
+        ICON_KEYBOARD_ARROW_DOWN, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ,
+        ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO,
+        ICON_VISIBILITY, ICON_WORKSPACES,
     },
     MaterialIcon,
 };
@@ -176,6 +180,9 @@ struct BlockApp {
     /// The access a tab is being shown at, when it is not the most its account
     /// has. Lets someone with edit access see what a viewer would see.
     editor_access: HashMap<Uuid, BlockAccess>,
+    /// Tabs currently showing their block's raw serialized data instead of
+    /// its editor.
+    debug_tabs: HashSet<Uuid>,
     dynamic_artifact_regenerations: HashMap<Uuid, Box<dyn DynamicArtifactRegeneration>>,
     dynamic_artifact_errors: HashMap<Uuid, String>,
     /// Settings being edited in an artifact bar, until they are applied.
@@ -487,6 +494,7 @@ impl BlockApp {
             registry: EditorRegistry::new(),
             editors: HashMap::new(),
             editor_access: HashMap::new(),
+            debug_tabs: HashSet::new(),
             dynamic_artifact_regenerations: HashMap::new(),
             dynamic_artifact_errors: HashMap::new(),
             dynamic_artifact_settings: HashMap::new(),
@@ -1588,6 +1596,7 @@ impl BlockApp {
 
     fn close_tab_resources(&mut self, id: Uuid) {
         self.editor_access.remove(&id);
+        self.debug_tabs.remove(&id);
         self.parents.remove(&id);
         self.references.remove(&id);
         self.backrefs.remove(&id);
@@ -1660,7 +1669,12 @@ impl BlockApp {
         let can_share = self.client.block_access(active).can_edit();
         let ceiling = self.editor_access_ceiling(active);
         let generated = self.client.is_dynamic_artifact(active);
-        let mut chosen_access = access;
+        let debug = self.debug_tabs.contains(&active);
+        let mut mode = if debug {
+            TabMode::Debug
+        } else {
+            TabMode::Access(access)
+        };
         egui::Sides::new().shrink_left().show(
             ui,
             |ui| {
@@ -1729,16 +1743,32 @@ impl BlockApp {
                     .on_hover_text("Share this block")
                     .on_disabled_hover_text("Only accounts that can edit a block may share it")
                     .clicked();
-                chosen_access = show_access_mode(ui, active, access, ceiling, generated);
+                mode = show_access_mode(ui, active, access, ceiling, generated, debug);
             },
         );
         if share {
             self.share.open(&self.client, active, current_name.clone());
         }
-        if chosen_access != access {
-            self.editor_access.insert(active, chosen_access);
+        match mode {
+            TabMode::Access(chosen_access) => {
+                self.debug_tabs.remove(&active);
+                if chosen_access != access {
+                    self.editor_access.insert(active, chosen_access);
+                }
+            }
+            TabMode::Debug => {
+                self.debug_tabs.insert(active);
+            }
         }
         ui.separator();
+        if self.debug_tabs.contains(&active) {
+            if ceiling.can_view() {
+                self.editors.insert(active, editor);
+                self.show_debug_data(ui, active);
+                return (None, navigation);
+            }
+            self.debug_tabs.remove(&active);
+        }
         if denied {
             self.editors.insert(active, editor);
             self.show_access_denied(ui, self.editor_access_ceiling(active).can_view());
@@ -2673,25 +2703,40 @@ fn show_dynamic_artifact_unlink(ctx: &egui::Context) -> ModalOutcome<()> {
     outcome
 }
 
-/// The mode a tab is showing its block in. Modes above what the account is
-/// allowed cannot be picked; the ones below it show what someone with less
-/// access would see. Returns the mode to show the block in from now on.
+/// What a tab's mode dropdown is currently showing: the block simulated at
+/// some level of access, or its raw serialized data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TabMode {
+    Access(BlockAccess),
+    Debug,
+}
+
+/// The mode a tab is showing its block in. Access modes above what the
+/// account is allowed cannot be picked; the ones below it show what someone
+/// with less access would see. Debug is only offered once the block can be
+/// viewed at all. Returns the mode to show the block in from now on.
 fn show_access_mode(
     ui: &mut egui::Ui,
     active: Uuid,
     access: BlockAccess,
     ceiling: BlockAccess,
     generated: bool,
-) -> BlockAccess {
-    let mut chosen = access;
+    debug: bool,
+) -> TabMode {
+    let current = if debug {
+        TabMode::Debug
+    } else {
+        TabMode::Access(access)
+    };
+    let mut chosen = current;
     egui::ComboBox::from_id_salt(("editor-access-mode", active))
-        .selected_text(access_mode_label(access))
+        .selected_text(tab_mode_label(current))
         .show_ui(ui, |ui| {
             for mode in [BlockAccess::Edit, BlockAccess::View, BlockAccess::KnowExists] {
                 let label = access_mode_label(mode);
                 ui.add_enabled_ui(mode <= ceiling, |ui| {
-                    if ui.selectable_label(access == mode, label).clicked() {
-                        chosen = mode;
+                    if ui.selectable_label(current == TabMode::Access(mode), label).clicked() {
+                        chosen = TabMode::Access(mode);
                     }
                 })
                 .response
@@ -2701,16 +2746,50 @@ fn show_access_mode(
                     "You do not have that much access to this block"
                 });
             }
+            ui.separator();
+            ui.add_enabled_ui(ceiling.can_view(), |ui| {
+                if ui
+                    .selectable_label(current == TabMode::Debug, debug_mode_label())
+                    .clicked()
+                {
+                    chosen = TabMode::Debug;
+                }
+            })
+            .response
+            .on_disabled_hover_text("You do not have that much access to this block");
         })
         .response
-        .on_hover_text("Show this block as an account with this much access would see it");
+        .on_hover_text(
+            "Show this block as an account with this much access would see it, or inspect its raw data",
+        );
     chosen
 }
 
 /// An access mode named for a menu, where every mode is spelled out.
 fn access_mode_label(access: BlockAccess) -> String {
     let icon = access_mode_icon(access).unwrap_or(ICON_EDIT.codepoint);
-    format!("{icon} {}", access.label())
+    format!("{icon} {}", tab_mode_wording(access))
+}
+
+/// The wording this dropdown uses for each access level. Kept separate from
+/// `BlockAccess::label`, whose wording fits the sharing dialog instead.
+fn tab_mode_wording(access: BlockAccess) -> &'static str {
+    match access {
+        BlockAccess::Edit => "Editing",
+        BlockAccess::View => "Viewing",
+        BlockAccess::KnowExists | BlockAccess::None => "No access",
+    }
+}
+
+fn debug_mode_label() -> String {
+    format!("{} Debug", ICON_DATA_OBJECT.codepoint)
+}
+
+fn tab_mode_label(mode: TabMode) -> String {
+    match mode {
+        TabMode::Access(access) => access_mode_label(access),
+        TabMode::Debug => debug_mode_label(),
+    }
 }
 
 /// How a block's access is marked where it is listed. Editing is what every

@@ -687,6 +687,15 @@ impl BlockClient {
             .is_some_and(|registered| registered.erased.is_dynamic_artifact())
     }
 
+    /// The block's current value, serialized as pretty-printed JSON, for the
+    /// debug view. `None` while the block has not loaded yet.
+    pub fn block_debug_data(&self, id: Uuid) -> Option<String> {
+        self.registered_blocks
+            .read()
+            .get(&id)
+            .and_then(|registered| registered.erased.debug_data())
+    }
+
     /// Stores new artifact settings on a block that is already open. Blocks
     /// this client has not registered are ignored.
     pub fn set_dynamic_artifact(&self, id: Uuid, descriptor: DynamicArtifactDescriptor) {
@@ -2573,6 +2582,7 @@ trait ErasedBlock: Send + Sync {
     fn is_dynamic_artifact(&self) -> bool;
     fn set_dynamic_artifact(&self, descriptor: Option<DynamicArtifactDescriptor>);
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
+    fn debug_data(&self) -> Option<String>;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_name(&self) -> String;
     fn initial_dynamic_artifact(&self) -> bool;
@@ -3165,6 +3175,16 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         self.state.read().initial.as_ref().map(|initial| {
             serde_json::to_vec(&StoredBlock {
                 value: initial,
+                dynamic_artifact: self.dynamic_artifact.read().clone(),
+            })
+            .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
+        })
+    }
+
+    fn debug_data(&self) -> Option<String> {
+        self.state.read().confirmed.as_ref().map(|confirmed| {
+            serde_json::to_string_pretty(&StoredBlock {
+                value: confirmed,
                 dynamic_artifact: self.dynamic_artifact.read().clone(),
             })
             .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))

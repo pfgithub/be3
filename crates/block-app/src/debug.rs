@@ -1,3 +1,4 @@
+mod block_data;
 mod client;
 mod network;
 // libghostty-vt is not supported on Windows.
