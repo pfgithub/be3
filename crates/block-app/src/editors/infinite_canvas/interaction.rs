@@ -134,6 +134,18 @@ impl InfiniteCanvasEditor {
         viewport: &mut DirectEditorViewport,
     ) -> bool {
         if response.hovered() {
+            if let Some(touch) = response.ctx.input(|input| input.multi_touch()) {
+                // A second finger landing should immediately take over from
+                // whatever the first finger was doing (selecting, dragging, …).
+                self.gesture = None;
+                if (touch.zoom_delta - 1.0).abs() > f32::EPSILON {
+                    viewport.change_zoom(touch.zoom_delta, Some(touch.center_pos));
+                }
+                if touch.translation_delta != Vec2::ZERO {
+                    viewport.pan(touch.translation_delta);
+                }
+                return true;
+            }
             if let Some(pointer) = response.ctx.pointer_hover_pos() {
                 let (scroll, zoom_delta, command) = response.ctx.input(|input| {
                     (
