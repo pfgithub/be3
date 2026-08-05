@@ -155,20 +155,31 @@ jobs:
       - name: Install cargo-apk
         run: cargo install cargo-apk --version 0.10.0 --locked
 
-      # The development build signs with a throwaway keystore, the same one the
-      # README has developers create by hand.
-      - name: Create the debug keystore
+      # A freshly generated keystore would sign every CI build with a different
+      # key, and Android refuses to install an update signed with a different
+      # key than the one already on the device. Restore a persisted keystore
+      # from a repo secret instead, so successive CI builds stay installable
+      # as updates over one another. Fork PRs don't get repo secrets, so fall
+      # back to a throwaway keystore there (and locally) just to keep the
+      # build working; those builds won't share a key with the real ones.
+      - name: Restore the debug keystore
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
           mkdir -p target
-          keytool -genkeypair -v \
-            -keystore target/android-debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US" \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000
+          if [ -n "$ANDROID_DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 -d > target/android-debug.keystore
+          else
+            keytool -genkeypair -v \
+              -keystore target/android-debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
 
       - run: pwsh -File ./scripts/build-block-android.ps1 -AndroidSdk "$ANDROID_SDK_ROOT"
 
