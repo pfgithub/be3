@@ -2868,7 +2868,7 @@ impl eframe::App for BlockApp {
         self.share.show(ui.ctx(), &self.client);
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
-        #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+        #[cfg(not(any(target_os = "android", target_os = "windows", target_arch = "wasm32")))]
         debug::terminal::show(ui.ctx());
         self.show_invite(ui.ctx());
         self.show_about(ui.ctx());

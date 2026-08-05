@@ -620,7 +620,11 @@ impl BlockApp {
                         performance::open();
                         ui.close();
                     }
-                    #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+                    #[cfg(not(any(
+                        target_os = "android",
+                        target_os = "windows",
+                        target_arch = "wasm32"
+                    )))]
                     if ui.button("Terminal").clicked() {
                         crate::debug::terminal::open();
                         ui.close();

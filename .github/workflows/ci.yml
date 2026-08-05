@@ -39,6 +39,11 @@ jobs:
         with:
           tool: cargo-nextest
 
+      # libghostty-vt-sys builds libghostty-vt from source via Zig.
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
+
       - run: pwsh -File ./scripts/verify.ps1 -Check
 
   web:
@@ -203,6 +208,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+
+      # libghostty-vt-sys builds libghostty-vt from source via Zig. It is not
+      # supported on Windows, where the client excludes it entirely.
+      - name: Install Zig
+        if: matrix.client && runner.os != 'Windows'
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
 
       - name: Build the standalone server
         run: cargo build --release --target ${{ matrix.target }} -p block-server --bins
