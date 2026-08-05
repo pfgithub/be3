@@ -72,7 +72,14 @@ jobs:
         with:
           targets: wasm32-wasip1
 
+      # CC_wasm32_wasip1 names the compiler as plain "clang", resolved through
+      # PATH, so a cached target/ from a run with a different LLVM on PATH
+      # looks unchanged to cargo's own rebuild detection and gets reused as
+      # is. Keying the cache to the LLVM version forces a clean rebuild
+      # whenever that version changes instead of silently linking old objects.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: llvm-20
 
       # The build script installs this itself when it is missing; a prebuilt one
       # is much faster. The version has to match the wasm-bindgen crate.
