@@ -12,6 +12,12 @@ resolves with an import map.
 The WASI sysroot supplies those headers and libraries. It is downloaded into
 target/tools on first use unless -WasiSysroot points at an existing one.
 
+clang must be at least LLVM 19. FreeType's setjmp/longjmp calls need
+-wasm-enable-sjlj to lower, and older LLVMs lower that to env.saveSetjmp /
+env.testSetjmp / env.getTempRet0 JS imports that nothing here provides. LLVM
+19+ lowers them to __wasm_setjmp / __wasm_setjmp_test / __wasm_longjmp
+instead, which resolve entirely inside the wasm module against libsetjmp.a.
+
 .PARAMETER WasiSysroot
 An existing WASI sysroot to build against, instead of downloading one.
 

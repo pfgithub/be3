@@ -56,12 +56,17 @@ jobs:
       - uses: actions/checkout@v7
 
       # The WASI sysroot is built against by clang, not by rustc, so the build
-      # needs a local LLVM of at least version 17.
+      # needs a local LLVM of at least version 19: FreeType's setjmp/longjmp
+      # calls are lowered by `-wasm-enable-sjlj`, and older LLVMs lower those
+      # to env.saveSetjmp/testSetjmp/getTempRet0 JS imports that no browser
+      # (and no import map here) provides. LLVM 19+ lowers them to
+      # __wasm_setjmp/__wasm_setjmp_test/__wasm_longjmp instead, which resolve
+      # entirely inside the wasm module against libsetjmp.a.
       - name: Install LLVM
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y clang-18 llvm-18
-          echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
+          sudo apt-get install --no-install-recommends -y clang-20 llvm-20
+          echo /usr/lib/llvm-20/bin >> "$GITHUB_PATH"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
