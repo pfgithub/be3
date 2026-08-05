@@ -285,7 +285,7 @@ struct FontRun<'a> {
     start: usize,
     script: Option<Script>,
     font_index: usize,
-    style: SynHlStyle,
+    pixel_size: u32,
 }
 
 struct DisplayLine {
@@ -461,7 +461,7 @@ impl TextRenderer {
         timings.font_runs = font_runs_start.elapsed();
         for run in font_runs {
             let shape_start = Instant::now();
-            let pixel_size = style_pixel_size(run.style);
+            let pixel_size = run.pixel_size;
             let font = self.fonts[run.font_index].hb_font(pixel_size);
             let mut buffer = UnicodeBuffer::new().add_str(run.value);
             if let Some(script) = run.script {
@@ -507,7 +507,7 @@ impl TextRenderer {
                     invisible: document
                         .get(doc_byte)
                         .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r')),
-                    style: run.style,
+                    style: highlight.style_at(doc_byte),
                     pixel_size,
                     advance,
                 });
@@ -558,7 +558,7 @@ impl TextRenderer {
                     let style = highlight.style_at(map_display_byte(display, display_byte));
                     (
                         self.font_index_for(character, style.family, style.bold, style.italic),
-                        style,
+                        style_pixel_size(style),
                     )
                 })
             })
@@ -1043,39 +1043,39 @@ fn script_runs(value: &str) -> Vec<TextRun<'_>> {
 
 fn split_font_runs<'a>(
     run: TextRun<'a>,
-    mut font_and_style_for: impl FnMut(usize, char) -> (Option<usize>, SynHlStyle),
+    mut font_and_size_for: impl FnMut(usize, char) -> (Option<usize>, u32),
 ) -> Vec<FontRun<'a>> {
     let mut runs = Vec::new();
     let mut start = 0;
-    let mut current: Option<(usize, SynHlStyle)> = None;
+    let mut current: Option<(usize, u32)> = None;
     for (index, character) in run.value.char_indices() {
-        let (font_index, style) = font_and_style_for(run.start + index, character);
+        let (font_index, pixel_size) = font_and_size_for(run.start + index, character);
         let font_index = font_index
             .or_else(|| current.map(|(font_index, _)| font_index))
             .unwrap_or(0);
         match current {
-            None => current = Some((font_index, style)),
-            Some(active) if active == (font_index, style) => {}
-            Some((active_font, active_style)) => {
+            None => current = Some((font_index, pixel_size)),
+            Some(active) if active == (font_index, pixel_size) => {}
+            Some((active_font, active_size)) => {
                 runs.push(FontRun {
                     value: &run.value[start..index],
                     start: run.start + start,
                     script: run.script,
                     font_index: active_font,
-                    style: active_style,
+                    pixel_size: active_size,
                 });
                 start = index;
-                current = Some((font_index, style));
+                current = Some((font_index, pixel_size));
             }
         }
     }
-    if let Some((font_index, style)) = current {
+    if let Some((font_index, pixel_size)) = current {
         runs.push(FontRun {
             value: &run.value[start..],
             start: run.start + start,
             script: run.script,
             font_index,
-            style,
+            pixel_size,
         });
     }
     runs
