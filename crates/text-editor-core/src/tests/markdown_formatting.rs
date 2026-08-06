@@ -7,7 +7,7 @@ fn markdown_formatting() {
     tester.execute(EditorCommand::Markdown(MarkdownCommand::Bold));
     tester.expect_content(b"**[hello|**");
 
-    tester.execute(EditorCommand::SetCursorPosition(tester.pos(9)));
+    tester.set_cursor(tester.pos(9));
     tester.execute(EditorCommand::Markdown(MarkdownCommand::Link));
     tester.expect_content(b"**hello**[[link text|](url)");
 }

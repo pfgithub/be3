@@ -5,11 +5,11 @@ fn core() {
     let mut tester = EditorTester::new(b"hello!");
 
     tester.expect_content(b"hello!");
-    tester.execute(EditorCommand::SetCursorPosition(tester.pos(0)));
+    tester.set_cursor(tester.pos(0));
     tester.expect_content(b"|hello!");
     tester.execute(EditorCommand::InsertText(b"abcd!"));
     tester.expect_content(b"abcd!|hello!");
-    tester.execute(EditorCommand::SetCursorPosition(tester.pos(0)));
+    tester.set_cursor(tester.pos(0));
     tester.expect_content(b"|abcd!hello!");
     tester.execute(EditorCommand::Delete {
         direction: LRDirection::Right,
@@ -283,7 +283,7 @@ fn core() {
     tester.execute(EditorCommand::InsertText(
         b"    \\\\    }\n    \\\\    @vertex fn vert(in: VertexIn)",
     ));
-    tester.execute(EditorCommand::SetCursorPosition(tester.pos(11)));
+    tester.set_cursor(tester.pos(11));
     tester.expect_content(b"    \\\\    }|\n    \\\\    @vertex fn vert(in: VertexIn)");
     tester.execute(EditorCommand::MoveCursorLeftRight {
         direction: LRDirection::Right,

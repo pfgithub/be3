@@ -9,6 +9,13 @@ use super::*;
 mod block_urls_are_single_cursor_units;
 mod core;
 mod ctrl_d;
+mod find_matches_is_case_insensitive_by_default;
+mod find_matches_matches_are_non_overlapping;
+mod find_matches_respects_case_sensitive_flag;
+mod find_matches_returns_empty_for_empty_query;
+mod find_next_cycles_through_matches_and_wraps;
+mod find_previous_cycles_through_matches_and_wraps;
+mod find_status_reports_current_match_index;
 mod has_stop;
 mod markdown_block_styles;
 mod markdown_checkbox_toggle;
@@ -75,6 +82,13 @@ impl EditorTester {
 
     fn execute(&mut self, command: EditorCommand<'_>) {
         self.editor.execute_command(command);
+    }
+
+    fn set_cursor(&mut self, position: Position) {
+        self.execute(EditorCommand::SetSelection {
+            anchor: position,
+            focus: position,
+        });
     }
 
     fn expect_content(&self, expected: impl AsRef<[u8]>) {

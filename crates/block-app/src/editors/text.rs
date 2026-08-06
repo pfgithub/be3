@@ -30,8 +30,8 @@ use egui_material_icons::{
 };
 use text_editor_core::{
     CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
-    EditorCommand, LRDirection, MarkdownCommand, MoveMode, SynHlColorScope, SyntaxHighlight,
-    SyntaxNodeDirection, UDDirection, VerticalMoveMode,
+    EditorCommand, FindDirection, LRDirection, MarkdownCommand, MoveMode, SynHlColorScope,
+    SyntaxHighlight, SyntaxNodeDirection, UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
@@ -104,17 +104,24 @@ pub(super) struct TextEditor {
     find_reveal: bool,
 }
 
-/// State for the find/replace bar. Deliberately independent of
-/// [`EditorCommand::DuplicateCursor`]'s "select next occurrence" mechanism:
-/// find/replace always operates on a single cursor built from its own query,
-/// never on the multi-cursor state ctrl+d builds up.
+/// UI-only state for the find/replace bar: what's typed and which panel is
+/// showing. Deliberately independent of [`EditorCommand::DuplicateCursor`]'s
+/// "select next occurrence" mechanism: find/replace always operates on a
+/// single cursor built from its own query, never on the multi-cursor state
+/// ctrl+d builds up.
+///
+/// The matching and navigation logic itself is *not* reimplemented here.
+/// Anything that manages document state — locating matches, moving the
+/// selection to one, replacing it — is an [`EditorCommand`] or query on
+/// [`text_editor_core::Core`] ([`EditorCommand::Find`], `find_status`,
+/// `find_matches`). This module only renders the bar and dispatches those
+/// operations; it should never scan document bytes or track match ranges
+/// itself.
 struct FindState {
     query: String,
     replace: String,
     case_sensitive: bool,
     show_replace: bool,
-    matches: Vec<Range<usize>>,
-    current: Option<usize>,
     focus_query: bool,
 }
 
@@ -125,8 +132,6 @@ impl Default for FindState {
             replace: String::new(),
             case_sensitive: false,
             show_replace: false,
-            matches: Vec::new(),
-            current: None,
             focus_query: true,
         }
     }
@@ -148,7 +153,11 @@ struct CachedLayout {
 impl TextEditor {
     fn new(block: BlockHandle<TextDocument>, client: &BlockClient) -> Self {
         let mut core = Core::new(block.clone());
-        core.execute_command(EditorCommand::SetCursorPosition(core.position(0)));
+        let start = core.position(0);
+        core.execute_command(EditorCommand::SetSelection {
+            anchor: start,
+            focus: start,
+        });
         let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
         Self {
             block,
@@ -396,99 +405,74 @@ impl TextEditor {
             find.show_replace = show_replace;
             find.focus_query = true;
         }
-        self.sync_find();
+        self.find_reveal |= self.sync_find();
     }
 
     fn close_find(&mut self) {
         self.find = None;
     }
 
-    /// Recomputes matches for the current query against the live document,
-    /// clamping (but preserving) the current match index.
-    fn refresh_find_matches(&mut self) {
-        let bytes = self.block.read().map(|document| document.bytes().to_vec());
-        let Some(find) = self.find.as_mut() else {
-            return;
-        };
-        let Some(bytes) = bytes else {
-            return;
-        };
-        find.matches = find_matches(&bytes, &find.query, find.case_sensitive);
-        find.current = if find.matches.is_empty() {
-            None
-        } else {
-            Some(find.current.unwrap_or(0).min(find.matches.len() - 1))
-        };
-    }
-
-    /// Selects the current match in the editor, independent of whatever
-    /// multi-cursor state ctrl+d built up.
-    fn select_current_match(&mut self) -> bool {
-        let Some(range) = self.find.as_ref().and_then(|find| {
-            find.current
-                .and_then(|index| find.matches.get(index))
-                .cloned()
-        }) else {
+    /// Moves the selection onto a match only if it isn't sitting on one
+    /// already, so opening the bar or editing the query doesn't jump past a
+    /// match the selection already prefilled it from.
+    fn sync_find(&mut self) -> bool {
+        let Some(find) = self.find.as_ref() else {
             return false;
         };
-        let anchor = self.core.position(range.start);
-        let focus = self.core.position(range.end);
-        self.core
-            .execute_command(EditorCommand::SetSelection { anchor, focus });
-        true
-    }
-
-    fn sync_find(&mut self) -> bool {
-        self.refresh_find_matches();
-        self.select_current_match()
+        let status = self.core.find_status(&find.query, find.case_sensitive);
+        if status.current.is_none() && status.total > 0 {
+            self.core.execute_command(EditorCommand::Find {
+                text: &find.query,
+                case_sensitive: find.case_sensitive,
+                direction: FindDirection::Next,
+            });
+        }
+        status.total > 0
     }
 
     fn find_next(&mut self) -> bool {
-        self.refresh_find_matches();
-        let Some(find) = self.find.as_mut() else {
+        let Some(find) = self.find.as_ref() else {
             return false;
         };
-        if find.matches.is_empty() {
-            return false;
-        }
-        let len = find.matches.len();
-        find.current = Some(find.current.map_or(0, |current| (current + 1) % len));
-        self.select_current_match()
+        self.core.execute_command(EditorCommand::Find {
+            text: &find.query,
+            case_sensitive: find.case_sensitive,
+            direction: FindDirection::Next,
+        });
+        self.core
+            .find_status(&find.query, find.case_sensitive)
+            .total
+            > 0
     }
 
     fn find_previous(&mut self) -> bool {
-        self.refresh_find_matches();
-        let Some(find) = self.find.as_mut() else {
+        let Some(find) = self.find.as_ref() else {
             return false;
         };
-        if find.matches.is_empty() {
-            return false;
-        }
-        let len = find.matches.len();
-        find.current = Some(
-            find.current
-                .map_or(len - 1, |current| (current + len - 1) % len),
-        );
-        self.select_current_match()
+        self.core.execute_command(EditorCommand::Find {
+            text: &find.query,
+            case_sensitive: find.case_sensitive,
+            direction: FindDirection::Previous,
+        });
+        self.core
+            .find_status(&find.query, find.case_sensitive)
+            .total
+            > 0
     }
 
+    /// Replaces the match the selection currently sits on, if any.
     fn replace_current(&mut self) {
-        let Some((range, replacement)) = self.find.as_ref().and_then(|find| {
-            if find.query.is_empty() {
-                return None;
-            }
-            let range = find
-                .current
-                .and_then(|index| find.matches.get(index))
-                .cloned()?;
-            Some((range, find.replace.clone()))
-        }) else {
+        let Some(find) = self.find.as_ref() else {
             return;
         };
-        let anchor = self.core.position(range.start);
-        let focus = self.core.position(range.end);
-        self.core
-            .execute_command(EditorCommand::SetSelection { anchor, focus });
+        if find.query.is_empty() {
+            return;
+        }
+        let status = self.core.find_status(&find.query, find.case_sensitive);
+        if status.current.is_none() {
+            return;
+        }
+        let replacement = find.replace.clone();
         self.core
             .execute_command(EditorCommand::InsertText(replacement.as_bytes()));
         self.sync_find();
@@ -510,10 +494,9 @@ impl TextEditor {
         }) else {
             return;
         };
-        let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
-            return;
-        };
-        let ranges = find_matches(&bytes, &query, case_sensitive)
+        let positions = self
+            .core
+            .find_matches(&query, case_sensitive)
             .into_iter()
             .map(|range| {
                 (
@@ -522,7 +505,7 @@ impl TextEditor {
                 )
             })
             .collect::<Vec<_>>();
-        for (anchor, focus) in ranges {
+        for (anchor, focus) in positions {
             self.core
                 .execute_command(EditorCommand::SetSelection { anchor, focus });
             self.core
@@ -542,6 +525,7 @@ impl TextEditor {
         let Some(find) = self.find.as_mut() else {
             return;
         };
+        let status = self.core.find_status(&find.query, find.case_sensitive);
         let mut changed = false;
         let mut go_next = false;
         let mut go_previous = false;
@@ -576,17 +560,14 @@ impl TextEditor {
                 find.case_sensitive = !find.case_sensitive;
                 changed = true;
             }
-            ui.weak(match (find.matches.len(), find.current) {
+            ui.weak(match (status.total, status.current) {
                 (0, _) if find.query.is_empty() => String::new(),
                 (0, _) => "No results".to_owned(),
                 (total, Some(current)) => format!("{}/{total}", current + 1),
                 (total, None) => format!("0/{total}"),
             });
             if ui
-                .add_enabled(
-                    !find.matches.is_empty(),
-                    egui::Button::new(ICON_KEYBOARD_ARROW_UP),
-                )
+                .add_enabled(status.total > 0, egui::Button::new(ICON_KEYBOARD_ARROW_UP))
                 .on_hover_text("Previous match")
                 .clicked()
             {
@@ -594,7 +575,7 @@ impl TextEditor {
             }
             if ui
                 .add_enabled(
-                    !find.matches.is_empty(),
+                    status.total > 0,
                     egui::Button::new(ICON_KEYBOARD_ARROW_DOWN),
                 )
                 .on_hover_text("Next match")
@@ -614,13 +595,13 @@ impl TextEditor {
                         .hint_text("Replace"),
                 );
                 if ui
-                    .add_enabled(!find.matches.is_empty(), egui::Button::new("Replace"))
+                    .add_enabled(status.current.is_some(), egui::Button::new("Replace"))
                     .clicked()
                 {
                     do_replace = true;
                 }
                 if ui
-                    .add_enabled(!find.matches.is_empty(), egui::Button::new("Replace All"))
+                    .add_enabled(status.total > 0, egui::Button::new("Replace All"))
                     .clicked()
                 {
                     do_replace_all = true;
@@ -1596,8 +1577,10 @@ impl BlockEditor for TextEditor {
                     let position = self
                         .core
                         .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
-                    self.core
-                        .execute_command(EditorCommand::SetCursorPosition(position));
+                    self.core.execute_command(EditorCommand::SetSelection {
+                        anchor: position,
+                        focus: position,
+                    });
                     let name = display_name(
                         editors.registry(),
                         dragged.reference.block_type,
@@ -1699,36 +1682,6 @@ fn image_embed_directive(
     } else {
         url
     }
-}
-
-/// Every non-overlapping byte range in `bytes` matching `query`, scanned
-/// left to right. ASCII-only case folding when `case_sensitive` is false.
-/// Returns no matches for an empty query.
-fn find_matches(bytes: &[u8], query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
-    if query.is_empty() {
-        return Vec::new();
-    }
-    let haystack = if case_sensitive {
-        bytes.to_vec()
-    } else {
-        bytes.to_ascii_lowercase()
-    };
-    let needle = if case_sensitive {
-        query.as_bytes().to_vec()
-    } else {
-        query.as_bytes().to_ascii_lowercase()
-    };
-    let mut matches = Vec::new();
-    let mut start = 0;
-    while start + needle.len() <= haystack.len() {
-        if haystack[start..start + needle.len()] == needle[..] {
-            matches.push(start..start + needle.len());
-            start += needle.len();
-        } else {
-            start += 1;
-        }
-    }
-    matches
 }
 
 fn parse_embeds(bytes: &[u8], workspace_id: Uuid, markdown: bool) -> Vec<ParsedEmbed> {

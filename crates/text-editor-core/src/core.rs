@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, mem::size_of};
+use std::{cmp::Ordering, mem::size_of, ops::Range};
 
 use block_client::{
     blocks::text::{TextDocument, TextLanguage},
@@ -245,10 +245,14 @@ pub enum EditorCommand<'a> {
     SelectSyntaxNode(SyntaxNodeDirection),
     Undo,
     Redo,
-    SetCursorPosition(Position),
     SetSelection {
         anchor: Position,
         focus: Position,
+    },
+    Find {
+        text: &'a str,
+        case_sensitive: bool,
+        direction: FindDirection,
     },
     DuplicateLine(UDDirection),
     DuplicateCursor(LRDirection),
@@ -261,6 +265,21 @@ pub enum EditorCommand<'a> {
     Drag(Position),
     ReplaceWholeFile(&'a [u8]),
     Markdown(MarkdownCommand),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FindDirection {
+    Next,
+    Previous,
+}
+
+/// The result of matching a query against the document: how many
+/// non-overlapping matches exist, and which one (if any) the current
+/// selection sits on exactly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FindStatus {
+    pub total: usize,
+    pub current: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -350,6 +369,73 @@ impl Core {
         self.document
             .read()
             .map(|document| position.resolve(&document))
+    }
+
+    /// Every non-overlapping byte range matching `query` in the current
+    /// document, left to right.
+    pub fn find_matches(&self, query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
+        self.document
+            .read()
+            .map(|document| scan_matches(document.bytes(), query, case_sensitive))
+            .unwrap_or_default()
+    }
+
+    /// How many matches `query` has in the document, and which one (if any)
+    /// the current selection sits on exactly.
+    pub fn find_status(&self, query: &str, case_sensitive: bool) -> FindStatus {
+        let Some(document) = self.document.read() else {
+            return FindStatus::default();
+        };
+        let matches = scan_matches(document.bytes(), query, case_sensitive);
+        let current = self.cursor_positions.first().and_then(|cursor| {
+            let anchor = cursor.pos.anchor.resolve(&document);
+            let focus = cursor.pos.focus.resolve(&document);
+            let range = anchor.min(focus)..anchor.max(focus);
+            matches.iter().position(|candidate| *candidate == range)
+        });
+        FindStatus {
+            total: matches.len(),
+            current,
+        }
+    }
+
+    /// Moves the selection to the next (or previous) match relative to the
+    /// current selection, wrapping around either end of the document. If the
+    /// selection already sits exactly on a match, that match is skipped so
+    /// repeated calls cycle through every occurrence.
+    fn find(&mut self, query: &str, case_sensitive: bool, direction: FindDirection) {
+        let target = {
+            let Some(document) = self.document.read() else {
+                return;
+            };
+            let matches = scan_matches(document.bytes(), query, case_sensitive);
+            if matches.is_empty() {
+                return;
+            }
+            let (selection_start, selection_end) =
+                self.cursor_positions.first().map_or((0, 0), |cursor| {
+                    let anchor = cursor.pos.anchor.resolve(&document);
+                    let focus = cursor.pos.focus.resolve(&document);
+                    (anchor.min(focus), anchor.max(focus))
+                });
+            let range = match direction {
+                FindDirection::Next => matches
+                    .iter()
+                    .find(|range| range.start >= selection_end)
+                    .or_else(|| matches.first()),
+                FindDirection::Previous => matches
+                    .iter()
+                    .rev()
+                    .find(|range| range.end <= selection_start)
+                    .or_else(|| matches.last()),
+            }
+            .expect("matches is non-empty");
+            (
+                Position::at(&document, range.start),
+                Position::at(&document, range.end),
+            )
+        };
+        self.select(Selection::range(target.0, target.1));
     }
 
     pub fn cursor_stop(&self, byte_index: usize, stop: CursorLeftRightStop) -> Position {
@@ -509,10 +595,14 @@ impl Core {
     pub fn execute_command(&mut self, command: EditorCommand<'_>) {
         self.normalize_cursors();
         match command {
-            EditorCommand::SetCursorPosition(position) => self.select(Selection::at(position)),
             EditorCommand::SetSelection { anchor, focus } => {
                 self.select(Selection::range(anchor, focus));
             }
+            EditorCommand::Find {
+                text,
+                case_sensitive,
+                direction,
+            } => self.find(text, case_sensitive, direction),
             EditorCommand::SelectAll => {
                 let start = self.position(0);
                 self.select(Selection::range(start, Position::END));
@@ -2163,6 +2253,36 @@ fn rfind_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
         .rposition(|window| window == needle)
+}
+
+/// Every non-overlapping byte range in `bytes` matching `query`, scanned left
+/// to right. ASCII-only case folding when `case_sensitive` is false. Returns
+/// no matches for an empty query.
+pub(crate) fn scan_matches(bytes: &[u8], query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let haystack = if case_sensitive {
+        bytes.to_vec()
+    } else {
+        bytes.to_ascii_lowercase()
+    };
+    let needle = if case_sensitive {
+        query.as_bytes().to_vec()
+    } else {
+        query.as_bytes().to_ascii_lowercase()
+    };
+    let mut matches = Vec::new();
+    let mut start = 0;
+    while start + needle.len() <= haystack.len() {
+        if haystack[start..start + needle.len()] == needle[..] {
+            matches.push(start..start + needle.len());
+            start += needle.len();
+        } else {
+            start += 1;
+        }
+    }
+    matches
 }
 
 #[allow(dead_code)]

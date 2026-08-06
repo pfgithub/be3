@@ -1,13 +1,9 @@
 use block_client::block_url;
 use uuid::Uuid;
 
-use super::{find_matches, image_embed_directive, parse_embeds};
+use super::{image_embed_directive, parse_embeds};
 
 mod classifies_markdown_image;
-mod find_matches_is_case_insensitive_by_default;
-mod find_matches_matches_are_non_overlapping;
-mod find_matches_respects_case_sensitive_flag;
-mod find_matches_returns_empty_for_empty_query;
 mod foreign_workspace_url_is_not_an_embed;
 mod image_embed_directive_uses_markdown_image;
 mod image_embed_directive_uses_plain_url;

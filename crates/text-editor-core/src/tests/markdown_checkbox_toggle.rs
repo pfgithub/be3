@@ -8,7 +8,7 @@ fn markdown_checkbox_toggle() {
     )));
     tester.expect_content(b"- [x] task");
 
-    tester.execute(EditorCommand::SetCursorPosition(Position::END));
+    tester.set_cursor(Position::END);
     tester.execute(EditorCommand::Newline);
     tester.expect_content(b"- [x] task\n- [ ] |");
 }
