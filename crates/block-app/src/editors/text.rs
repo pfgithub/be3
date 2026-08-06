@@ -110,13 +110,15 @@ pub(super) struct TextEditor {
 /// single cursor built from its own query, never on the multi-cursor state
 /// ctrl+d builds up.
 ///
-/// The matching and navigation logic itself is *not* reimplemented here.
-/// Anything that manages document state — locating matches, moving the
-/// selection to one, replacing it — is an [`EditorCommand`] or query on
-/// [`text_editor_core::Core`] ([`EditorCommand::Find`], `find_status`,
-/// `find_matches`). This module only renders the bar and dispatches those
-/// operations; it should never scan document bytes or track match ranges
-/// itself.
+/// The matching, navigation, and replacement logic itself is *not*
+/// reimplemented here. Anything that manages document state — locating
+/// matches, moving the selection to one, replacing one or all of them — is
+/// an [`EditorCommand`] or query on [`text_editor_core::Core`]
+/// ([`EditorCommand::Find`], [`EditorCommand::ReplaceMatch`],
+/// [`EditorCommand::ReplaceAllMatches`], `find_status`, `find_matches`).
+/// This module only renders the bar and dispatches those operations; it
+/// should never scan document bytes, track match ranges, or loop over
+/// matches applying edits itself.
 struct FindState {
     query: String,
     replace: String,
@@ -460,58 +462,29 @@ impl TextEditor {
             > 0
     }
 
-    /// Replaces the match the selection currently sits on, if any.
+    /// Replaces the match the selection currently sits on, if any, and
+    /// advances to the next one (see [`EditorCommand::ReplaceMatch`]).
     fn replace_current(&mut self) {
         let Some(find) = self.find.as_ref() else {
             return;
         };
-        if find.query.is_empty() {
-            return;
-        }
-        let status = self.core.find_status(&find.query, find.case_sensitive);
-        if status.current.is_none() {
-            return;
-        }
-        let replacement = find.replace.clone();
-        self.core
-            .execute_command(EditorCommand::InsertText(replacement.as_bytes()));
-        self.sync_find();
+        self.core.execute_command(EditorCommand::ReplaceMatch {
+            text: &find.query,
+            case_sensitive: find.case_sensitive,
+            replacement: find.replace.as_bytes(),
+        });
     }
 
-    /// Replaces every match. Matches are located up front against the
-    /// document as it stood before any replacement; each match's start/end
-    /// [`text_editor_core::Position`] tracks its own CRDT item, so replacing
-    /// earlier matches doesn't invalidate the positions of later ones.
+    /// Replaces every match (see [`EditorCommand::ReplaceAllMatches`]).
     fn replace_all(&mut self) {
-        let Some((query, replacement, case_sensitive)) = self.find.as_ref().and_then(|find| {
-            (!find.query.is_empty()).then(|| {
-                (
-                    find.query.clone(),
-                    find.replace.clone(),
-                    find.case_sensitive,
-                )
-            })
-        }) else {
+        let Some(find) = self.find.as_ref() else {
             return;
         };
-        let positions = self
-            .core
-            .find_matches(&query, case_sensitive)
-            .into_iter()
-            .map(|range| {
-                (
-                    self.core.position(range.start),
-                    self.core.position(range.end),
-                )
-            })
-            .collect::<Vec<_>>();
-        for (anchor, focus) in positions {
-            self.core
-                .execute_command(EditorCommand::SetSelection { anchor, focus });
-            self.core
-                .execute_command(EditorCommand::InsertText(replacement.as_bytes()));
-        }
-        self.sync_find();
+        self.core.execute_command(EditorCommand::ReplaceAllMatches {
+            text: &find.query,
+            case_sensitive: find.case_sensitive,
+            replacement: find.replace.as_bytes(),
+        });
     }
 
     /// Renders the find/replace bar and dispatches interactions. Sets

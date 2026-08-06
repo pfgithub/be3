@@ -31,6 +31,10 @@ mod markdown_list_newline;
 mod markdown_plain_punctuation;
 mod markdown_tables;
 mod raw_bytes;
+mod replace_all_matches_does_nothing_when_there_are_no_matches;
+mod replace_all_matches_replaces_every_match;
+mod replace_match_does_nothing_when_selection_is_not_on_a_match;
+mod replace_match_replaces_current_and_advances_to_next_match;
 mod rust_syn_hl;
 mod zig_syn_hl;
 

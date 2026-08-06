@@ -254,6 +254,21 @@ pub enum EditorCommand<'a> {
         case_sensitive: bool,
         direction: FindDirection,
     },
+    /// Replaces the match the selection currently sits on exactly (as
+    /// reported by [`Core::find_status`]) with `replacement`, then selects
+    /// the next match so repeated calls step through every occurrence.
+    /// Does nothing if the selection isn't sitting on a match.
+    ReplaceMatch {
+        text: &'a str,
+        case_sensitive: bool,
+        replacement: &'a [u8],
+    },
+    /// Replaces every match of `text` with `replacement`.
+    ReplaceAllMatches {
+        text: &'a str,
+        case_sensitive: bool,
+        replacement: &'a [u8],
+    },
     DuplicateLine(UDDirection),
     DuplicateCursor(LRDirection),
     Click {
@@ -438,6 +453,72 @@ impl Core {
         self.select(Selection::range(target.0, target.1));
     }
 
+    /// Replaces the match the selection sits on exactly with `replacement`,
+    /// then advances the selection to the next match. Does nothing if the
+    /// selection isn't sitting on a match.
+    fn replace_match(&mut self, query: &str, case_sensitive: bool, replacement: &[u8]) {
+        let history_cursors = self.cursor_positions.clone();
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let matches = scan_matches(document.bytes(), query, case_sensitive);
+        let Some(range) = self.cursor_positions.first().and_then(|cursor| {
+            let anchor = cursor.pos.anchor.resolve(&document);
+            let focus = cursor.pos.focus.resolve(&document);
+            let selection = anchor.min(focus)..anchor.max(focus);
+            matches
+                .into_iter()
+                .find(|candidate| *candidate == selection)
+        }) else {
+            return;
+        };
+        let position = Position::at(&document, range.start);
+        drop(document);
+        let positions = self.apply_replacements(
+            vec![(position, range.end - range.start, replacement.to_vec())],
+            UndoClassification::AlwaysSplit,
+            history_cursors,
+        );
+        if let Some(position) = positions.first() {
+            self.select(Selection::at(*position));
+        }
+        self.find(query, case_sensitive, FindDirection::Next);
+    }
+
+    /// Replaces every match of `query` with `replacement`. Matches are
+    /// located once, up front; each match's start/end tracks its own CRDT
+    /// item, so replacing earlier matches doesn't invalidate the positions of
+    /// later ones.
+    fn replace_all_matches(&mut self, query: &str, case_sensitive: bool, replacement: &[u8]) {
+        let history_cursors = self.cursor_positions.clone();
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let matches = scan_matches(document.bytes(), query, case_sensitive);
+        if matches.is_empty() {
+            return;
+        }
+        let replacements = matches
+            .into_iter()
+            .map(|range| {
+                (
+                    Position::at(&document, range.start),
+                    range.end - range.start,
+                    replacement.to_vec(),
+                )
+            })
+            .collect();
+        drop(document);
+        let positions = self.apply_replacements(
+            replacements,
+            UndoClassification::AlwaysSplit,
+            history_cursors,
+        );
+        if let Some(position) = positions.last() {
+            self.select(Selection::at(*position));
+        }
+    }
+
     pub fn cursor_stop(&self, byte_index: usize, stop: CursorLeftRightStop) -> Position {
         let Some(document) = self.document.read() else {
             return Position::END;
@@ -603,6 +684,16 @@ impl Core {
                 case_sensitive,
                 direction,
             } => self.find(text, case_sensitive, direction),
+            EditorCommand::ReplaceMatch {
+                text,
+                case_sensitive,
+                replacement,
+            } => self.replace_match(text, case_sensitive, replacement),
+            EditorCommand::ReplaceAllMatches {
+                text,
+                case_sensitive,
+                replacement,
+            } => self.replace_all_matches(text, case_sensitive, replacement),
             EditorCommand::SelectAll => {
                 let start = self.position(0);
                 self.select(Selection::range(start, Position::END));
