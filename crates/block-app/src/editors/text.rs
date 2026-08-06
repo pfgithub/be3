@@ -21,9 +21,10 @@ use eframe::egui::{
 };
 use egui_material_icons::{
     icons::{
-        ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CODE, ICON_DESCRIPTION, ICON_FORMAT_BOLD,
-        ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED,
-        ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_LINK, ICON_TITLE,
+        ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DESCRIPTION,
+        ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED,
+        ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_UP,
+        ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH, ICON_TITLE,
     },
     MaterialIcon,
 };
@@ -99,6 +100,36 @@ pub(super) struct TextEditor {
     clipboard_image_paste: ClipboardImagePaste,
     image_import_error: Option<String>,
     focused_embed: Option<FocusedEmbed>,
+    find: Option<FindState>,
+    find_reveal: bool,
+}
+
+/// State for the find/replace bar. Deliberately independent of
+/// [`EditorCommand::DuplicateCursor`]'s "select next occurrence" mechanism:
+/// find/replace always operates on a single cursor built from its own query,
+/// never on the multi-cursor state ctrl+d builds up.
+struct FindState {
+    query: String,
+    replace: String,
+    case_sensitive: bool,
+    show_replace: bool,
+    matches: Vec<Range<usize>>,
+    current: Option<usize>,
+    focus_query: bool,
+}
+
+impl Default for FindState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            replace: String::new(),
+            case_sensitive: false,
+            show_replace: false,
+            matches: Vec::new(),
+            current: None,
+            focus_query: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -134,6 +165,8 @@ impl TextEditor {
             clipboard_image_paste: ClipboardImagePaste::default(),
             image_import_error: None,
             focused_embed: None,
+            find: None,
+            find_reveal: false,
         }
     }
 
@@ -343,6 +376,293 @@ impl TextEditor {
             .collect()
     }
 
+    /// Opens the find bar (or the find/replace bar, if `show_replace`),
+    /// prefilling the query from the current selection the first time it's
+    /// opened.
+    fn open_find(&mut self, show_replace: bool) {
+        if self.find.is_none() {
+            let selected = self.core.copy_utf8(CopyMode::Copy);
+            let query = if !selected.is_empty() && !selected.contains('\n') {
+                selected
+            } else {
+                String::new()
+            };
+            self.find = Some(FindState {
+                query,
+                ..FindState::default()
+            });
+        }
+        if let Some(find) = self.find.as_mut() {
+            find.show_replace = show_replace;
+            find.focus_query = true;
+        }
+        self.sync_find();
+    }
+
+    fn close_find(&mut self) {
+        self.find = None;
+    }
+
+    /// Recomputes matches for the current query against the live document,
+    /// clamping (but preserving) the current match index.
+    fn refresh_find_matches(&mut self) {
+        let bytes = self.block.read().map(|document| document.bytes().to_vec());
+        let Some(find) = self.find.as_mut() else {
+            return;
+        };
+        let Some(bytes) = bytes else {
+            return;
+        };
+        find.matches = find_matches(&bytes, &find.query, find.case_sensitive);
+        find.current = if find.matches.is_empty() {
+            None
+        } else {
+            Some(find.current.unwrap_or(0).min(find.matches.len() - 1))
+        };
+    }
+
+    /// Selects the current match in the editor, independent of whatever
+    /// multi-cursor state ctrl+d built up.
+    fn select_current_match(&mut self) -> bool {
+        let Some(range) = self.find.as_ref().and_then(|find| {
+            find.current
+                .and_then(|index| find.matches.get(index))
+                .cloned()
+        }) else {
+            return false;
+        };
+        let start = self.core.position(range.start);
+        let end = self.core.position(range.end);
+        self.core.execute_command(EditorCommand::Click {
+            position: start,
+            mode: DragSelectionMode::select(CursorLeftRightStop::Byte),
+            extend: false,
+            select_syntax_node: false,
+        });
+        self.core.execute_command(EditorCommand::Drag(end));
+        true
+    }
+
+    fn sync_find(&mut self) -> bool {
+        self.refresh_find_matches();
+        self.select_current_match()
+    }
+
+    fn find_next(&mut self) -> bool {
+        self.refresh_find_matches();
+        let Some(find) = self.find.as_mut() else {
+            return false;
+        };
+        if find.matches.is_empty() {
+            return false;
+        }
+        let len = find.matches.len();
+        find.current = Some(find.current.map_or(0, |current| (current + 1) % len));
+        self.select_current_match()
+    }
+
+    fn find_previous(&mut self) -> bool {
+        self.refresh_find_matches();
+        let Some(find) = self.find.as_mut() else {
+            return false;
+        };
+        if find.matches.is_empty() {
+            return false;
+        }
+        let len = find.matches.len();
+        find.current = Some(
+            find.current
+                .map_or(len - 1, |current| (current + len - 1) % len),
+        );
+        self.select_current_match()
+    }
+
+    fn replace_current(&mut self) {
+        let Some((range, replacement)) = self.find.as_ref().and_then(|find| {
+            if find.query.is_empty() {
+                return None;
+            }
+            let range = find
+                .current
+                .and_then(|index| find.matches.get(index))
+                .cloned()?;
+            Some((range, find.replace.clone()))
+        }) else {
+            return;
+        };
+        let start = self.core.position(range.start);
+        let end = self.core.position(range.end);
+        self.core.execute_command(EditorCommand::Click {
+            position: start,
+            mode: DragSelectionMode::select(CursorLeftRightStop::Byte),
+            extend: false,
+            select_syntax_node: false,
+        });
+        self.core.execute_command(EditorCommand::Drag(end));
+        self.core
+            .execute_command(EditorCommand::InsertText(replacement.as_bytes()));
+        self.sync_find();
+    }
+
+    /// Replaces every match. Matches are located up front against the
+    /// document as it stood before any replacement; each match's start/end
+    /// [`text_editor_core::Position`] tracks its own CRDT item, so replacing
+    /// earlier matches doesn't invalidate the positions of later ones.
+    fn replace_all(&mut self) {
+        let Some((query, replacement, case_sensitive)) = self.find.as_ref().and_then(|find| {
+            (!find.query.is_empty()).then(|| {
+                (
+                    find.query.clone(),
+                    find.replace.clone(),
+                    find.case_sensitive,
+                )
+            })
+        }) else {
+            return;
+        };
+        let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
+            return;
+        };
+        let ranges = find_matches(&bytes, &query, case_sensitive)
+            .into_iter()
+            .map(|range| {
+                (
+                    self.core.position(range.start),
+                    self.core.position(range.end),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (start, end) in ranges {
+            self.core.execute_command(EditorCommand::Click {
+                position: start,
+                mode: DragSelectionMode::select(CursorLeftRightStop::Byte),
+                extend: false,
+                select_syntax_node: false,
+            });
+            self.core.execute_command(EditorCommand::Drag(end));
+            self.core
+                .execute_command(EditorCommand::InsertText(replacement.as_bytes()));
+        }
+        self.sync_find();
+    }
+
+    /// Renders the find/replace bar and dispatches interactions. Sets
+    /// `self.find_reveal` when the visible selection moved and the view
+    /// should scroll to follow it.
+    fn find_bar(&mut self, ui: &mut egui::Ui) {
+        if ui.input(|input| input.key_pressed(Key::Escape)) {
+            self.close_find();
+            return;
+        }
+        let Some(find) = self.find.as_mut() else {
+            return;
+        };
+        let mut changed = false;
+        let mut go_next = false;
+        let mut go_previous = false;
+        let mut do_replace = false;
+        let mut do_replace_all = false;
+        let mut close = false;
+        ui.horizontal(|ui| {
+            ui.label(ICON_SEARCH);
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut find.query)
+                    .desired_width(160.0)
+                    .hint_text("Find"),
+            );
+            if find.focus_query {
+                response.request_focus();
+                find.focus_query = false;
+            }
+            changed |= response.changed();
+            if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
+                if ui.input(|input| input.modifiers.shift) {
+                    go_previous = true;
+                } else {
+                    go_next = true;
+                }
+                response.request_focus();
+            }
+            if ui
+                .selectable_label(find.case_sensitive, ICON_MATCH_CASE)
+                .on_hover_text("Match case")
+                .clicked()
+            {
+                find.case_sensitive = !find.case_sensitive;
+                changed = true;
+            }
+            ui.weak(match (find.matches.len(), find.current) {
+                (0, _) if find.query.is_empty() => String::new(),
+                (0, _) => "No results".to_owned(),
+                (total, Some(current)) => format!("{}/{total}", current + 1),
+                (total, None) => format!("0/{total}"),
+            });
+            if ui
+                .add_enabled(
+                    !find.matches.is_empty(),
+                    egui::Button::new(ICON_KEYBOARD_ARROW_UP),
+                )
+                .on_hover_text("Previous match")
+                .clicked()
+            {
+                go_previous = true;
+            }
+            if ui
+                .add_enabled(
+                    !find.matches.is_empty(),
+                    egui::Button::new(ICON_KEYBOARD_ARROW_DOWN),
+                )
+                .on_hover_text("Next match")
+                .clicked()
+            {
+                go_next = true;
+            }
+            if ui.button(ICON_CLOSE).on_hover_text("Close").clicked() {
+                close = true;
+            }
+        });
+        if find.show_replace {
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut find.replace)
+                        .desired_width(160.0)
+                        .hint_text("Replace"),
+                );
+                if ui
+                    .add_enabled(!find.matches.is_empty(), egui::Button::new("Replace"))
+                    .clicked()
+                {
+                    do_replace = true;
+                }
+                if ui
+                    .add_enabled(!find.matches.is_empty(), egui::Button::new("Replace All"))
+                    .clicked()
+                {
+                    do_replace_all = true;
+                }
+            });
+        }
+        if changed {
+            self.find_reveal |= self.sync_find();
+        }
+        if go_next {
+            self.find_reveal |= self.find_next();
+        }
+        if go_previous {
+            self.find_reveal |= self.find_previous();
+        }
+        if do_replace {
+            self.replace_current();
+            self.find_reveal = true;
+        }
+        if do_replace_all {
+            self.replace_all();
+        }
+        if close {
+            self.close_find();
+        }
+    }
+
     fn keyboard_input(&mut self, ui: &egui::Ui, id: egui::Id, suppress_text_paste: bool) -> bool {
         if !ui.memory(|memory| memory.has_focus(id)) {
             return false;
@@ -509,6 +829,8 @@ impl TextEditor {
                 });
             }
             Key::Y if modifiers.command => self.core.execute_command(EditorCommand::Redo),
+            Key::F if modifiers.command => self.open_find(false),
+            Key::H if modifiers.command => self.open_find(true),
             Key::D if modifiers.command && modifiers.shift => self
                 .core
                 .execute_command(EditorCommand::DuplicateLine(UDDirection::Down)),
@@ -1110,6 +1432,9 @@ impl BlockEditor for TextEditor {
         }
         let toolbar_start = Instant::now();
         self.toolbar(ui, editors);
+        if self.find.is_some() {
+            self.find_bar(ui);
+        }
         if let Some(error) = self.image_import_error.clone() {
             ui.horizontal(|ui| {
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -1168,6 +1493,7 @@ impl BlockEditor for TextEditor {
         let keyboard_start = Instant::now();
         let pasted_image = self.paste_clipboard_image(ui, id, editors);
         let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
+        reveal_cursor |= std::mem::take(&mut self.find_reveal);
         profile.keyboard = keyboard_start.elapsed();
         self.handle_picker(ui.ctx(), editors);
         let document_start = Instant::now();
@@ -1388,6 +1714,36 @@ fn image_embed_directive(
     } else {
         url
     }
+}
+
+/// Every non-overlapping byte range in `bytes` matching `query`, scanned
+/// left to right. ASCII-only case folding when `case_sensitive` is false.
+/// Returns no matches for an empty query.
+fn find_matches(bytes: &[u8], query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let haystack = if case_sensitive {
+        bytes.to_vec()
+    } else {
+        bytes.to_ascii_lowercase()
+    };
+    let needle = if case_sensitive {
+        query.as_bytes().to_vec()
+    } else {
+        query.as_bytes().to_ascii_lowercase()
+    };
+    let mut matches = Vec::new();
+    let mut start = 0;
+    while start + needle.len() <= haystack.len() {
+        if haystack[start..start + needle.len()] == needle[..] {
+            matches.push(start..start + needle.len());
+            start += needle.len();
+        } else {
+            start += 1;
+        }
+    }
+    matches
 }
 
 fn parse_embeds(bytes: &[u8], workspace_id: Uuid, markdown: bool) -> Vec<ParsedEmbed> {
