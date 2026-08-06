@@ -280,6 +280,9 @@ pub enum EditorCommand<'a> {
     Drag(Position),
     ReplaceWholeFile(&'a [u8]),
     Markdown(MarkdownCommand),
+    /// Changes the document's language, rebuilding the syntax highlighter to
+    /// match. Does nothing if `language` is already the document's language.
+    SetLanguage(TextLanguage),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -556,7 +559,7 @@ impl Core {
             .map_or_else(TextLanguage::default, |document| document.language())
     }
 
-    pub fn set_language(&mut self, language: TextLanguage) {
+    pub(crate) fn set_language(&mut self, language: TextLanguage) {
         if self.language() == language {
             return;
         }
@@ -737,6 +740,7 @@ impl Core {
             EditorCommand::Drag(position) => self.drag(position),
             EditorCommand::ReplaceWholeFile(bytes) => self.replace_whole_file(bytes),
             EditorCommand::Markdown(command) => self.markdown(command),
+            EditorCommand::SetLanguage(language) => self.set_language(language),
         }
         self.normalize_cursors();
     }

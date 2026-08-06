@@ -272,7 +272,8 @@ impl TextEditor {
             });
         });
         if language != previous {
-            self.core.set_language(language);
+            self.core
+                .execute_command(EditorCommand::SetLanguage(language));
         }
     }
 
