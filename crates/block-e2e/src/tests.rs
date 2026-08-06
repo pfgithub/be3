@@ -31,8 +31,8 @@ impl Block for Counter {
         block.count += amount;
     }
 
-    fn implicit_name(&self) -> String {
-        format!("Counter {}", self.count)
+    fn implicit_name(&self) -> Option<String> {
+        Some(format!("Counter {}", self.count))
     }
 
     fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
@@ -62,8 +62,8 @@ impl Block for ReferencingBlock {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "References".into()
+    fn implicit_name(&self) -> Option<String> {
+        Some("References".into())
     }
 
     fn references(&self) -> Vec<Uuid> {
