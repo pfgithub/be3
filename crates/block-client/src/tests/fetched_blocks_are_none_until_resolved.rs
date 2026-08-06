@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use block::{BlockParent, OperationRecord, ReferenceDelta};
 use parking_lot::RwLock;
@@ -27,7 +27,7 @@ fn fetched_blocks_are_none_until_resolved() {
             references: ReferenceDelta::default(),
         }],
         BlockParent::Root,
-        "Counter 5".into(),
+        BTreeMap::new(),
     );
     assert_eq!(shared.value.read().as_ref().unwrap().count, 5);
 }

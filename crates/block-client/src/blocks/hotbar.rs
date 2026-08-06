@@ -94,10 +94,6 @@ impl Block for Hotbar {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Hotbar".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         self.components()
     }

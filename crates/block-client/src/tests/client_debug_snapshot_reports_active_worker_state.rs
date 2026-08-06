@@ -13,6 +13,7 @@ use super::{
     BlockShared, CachedBlock, ClientDebugSnapshot, DeferredRequest, ErasedBlock,
     NetworkDebugSnapshot, PendingRequest, ReferenceListShared, TypedBlock, WorkerState,
 };
+use crate::properties::{self, BlockName};
 
 #[derive(Clone, Deserialize, Serialize)]
 struct DebugBlock;
@@ -25,9 +26,16 @@ impl Block for DebugBlock {
 
     fn apply_operation(_block: &mut Self, _operation: &Self::Operation) {}
 
-    fn implicit_name(&self) -> String {
-        "Debug block".into()
+    fn implicit_name(&self) -> Option<String> {
+        Some("Debug block".into())
     }
+}
+
+fn name_property(value: &str) -> Vec<u8> {
+    properties::encode_name(&BlockName {
+        manual: false,
+        value: value.to_owned(),
+    })
 }
 
 fn block(id: Uuid, ready: bool) -> Arc<dyn ErasedBlock> {
@@ -83,7 +91,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
                 id: reference_id,
                 block_type: DebugBlock::TYPE_ID,
                 author: Uuid::new_v4(),
-                name: "Referenced".into(),
+                properties: [(properties::NAME, name_property("Referenced"))].into(),
                 parent: BlockParent::Root,
                 references: 0,
                 dynamic_artifact: false,
@@ -100,7 +108,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
             id: reference_id,
             block_type: DebugBlock::TYPE_ID,
             author: Uuid::new_v4(),
-            name: "Referenced".into(),
+            properties: [(properties::NAME, name_property("Referenced"))].into(),
         },
     );
 
@@ -121,9 +129,10 @@ fn client_debug_snapshot_reports_active_worker_state() {
         id: later_block_id,
         watch: true,
     });
-    state.deferred.push_back(DeferredRequest::SetBlockName {
+    state.deferred.push_back(DeferredRequest::SetBlockProperty {
         id: earlier_block_id,
-        name: "Renamed".into(),
+        key: properties::NAME,
+        value: name_property("Renamed"),
     });
     let (completed, _completion) = oneshot::channel();
     state.synchronization_waiters.push(completed);
@@ -163,5 +172,5 @@ fn client_debug_snapshot_reports_active_worker_state() {
         vec![earlier_request_id, later_request_id]
     );
     assert_eq!(snapshot.outbound_messages[0].kind, "Read block");
-    assert_eq!(snapshot.deferred_requests[0].kind, "Set block name");
+    assert_eq!(snapshot.deferred_requests[0].kind, "Set block property");
 }

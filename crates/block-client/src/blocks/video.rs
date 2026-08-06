@@ -403,10 +403,6 @@ impl Block for Video {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Video Editor".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         let mut seen = HashSet::new();
         self.clips

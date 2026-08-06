@@ -197,10 +197,6 @@ impl Block for LogicGrid {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Logic Grid".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         self.called_blocks()
     }

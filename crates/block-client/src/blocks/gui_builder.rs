@@ -320,12 +320,8 @@ impl Block for GuiBuilder {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        if self.title.trim().is_empty() {
-            "GUI".into()
-        } else {
-            self.title.clone()
-        }
+    fn implicit_name(&self) -> Option<String> {
+        (!self.title.trim().is_empty()).then(|| self.title.clone())
     }
 }
 

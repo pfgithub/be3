@@ -343,10 +343,6 @@ impl Block for InfiniteCanvas {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Canvas".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         let mut references: Vec<_> = self
             .entities

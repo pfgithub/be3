@@ -20,8 +20,8 @@ impl Block for UnlinkTestBlock {
         match *operation {}
     }
 
-    fn implicit_name(&self) -> String {
-        format!("Unlink test {}", self.0)
+    fn implicit_name(&self) -> Option<String> {
+        Some(format!("Unlink test {}", self.0))
     }
 }
 

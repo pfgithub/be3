@@ -44,10 +44,6 @@ impl Block for WorkspaceIndex {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Folder".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         self.entries.iter().map(|entry| entry.id).collect()
     }

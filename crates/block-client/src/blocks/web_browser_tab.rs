@@ -85,13 +85,9 @@ impl Block for WebBrowserTab {
         }
     }
 
-    fn implicit_name(&self) -> String {
+    fn implicit_name(&self) -> Option<String> {
         let title = self.current().title.trim();
-        if title.is_empty() {
-            "Web Browser Tab".into()
-        } else {
-            title.into()
-        }
+        (!title.is_empty()).then(|| title.to_owned())
     }
 }
 

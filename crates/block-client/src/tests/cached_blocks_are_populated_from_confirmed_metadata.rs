@@ -11,6 +11,7 @@ use super::{
     BlockShared, CachedBlock, ClientDebugSnapshot, ErasedBlock, NetworkDebugSnapshot,
     PendingRequest, StoredBlock, TypedBlock, WorkerState,
 };
+use crate::properties::{self, BlockName};
 
 #[derive(Clone, Deserialize, Serialize)]
 struct MetadataBlock;
@@ -23,9 +24,22 @@ impl Block for MetadataBlock {
 
     fn apply_operation(_block: &mut Self, _operation: &Self::Operation) {}
 
-    fn implicit_name(&self) -> String {
-        "Created".into()
+    fn implicit_name(&self) -> Option<String> {
+        Some("Created".into())
     }
+}
+
+fn name_property(value: &str) -> Vec<u8> {
+    properties::encode_name(&BlockName {
+        manual: false,
+        value: value.to_owned(),
+    })
+}
+
+fn cached_name(cache: &Arc<RwLock<HashMap<Uuid, CachedBlock>>>, id: Uuid) -> String {
+    properties::read_name(&cache.read()[&id].properties)
+        .unwrap()
+        .value
 }
 
 fn state(cache: Arc<RwLock<HashMap<Uuid, CachedBlock>>>) -> WorkerState {
@@ -67,7 +81,7 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
         seq: Some(0),
         operation_id: None,
     });
-    assert_eq!(cache.read()[&created_id].name, "Created");
+    assert_eq!(cached_name(&cache, created_id), "Created");
 
     let read_id = Uuid::new_v4();
     let read: Arc<dyn ErasedBlock> = Arc::new(TypedBlock::<MetadataBlock>::unresolved(
@@ -96,10 +110,10 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
         snapshot_seq: 0,
         operations: Vec::new(),
         parent: BlockParent::Root,
-        name: "Read".into(),
+        properties: [(properties::NAME, name_property("Read"))].into(),
         access: BlockAccess::Edit,
     });
-    assert_eq!(cache.read()[&read_id].name, "Read");
+    assert_eq!(cached_name(&cache, read_id), "Read");
 
     let listed_id = Uuid::new_v4();
     let list = BlockReferenceList::Roots;
@@ -114,18 +128,19 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
             id: listed_id,
             block_type: Uuid::from_u128(0xbeef),
             author: Uuid::new_v4(),
-            name: "Listed".into(),
+            properties: [(properties::NAME, name_property("Listed"))].into(),
             parent: BlockParent::Root,
             references: 0,
             dynamic_artifact: false,
             access: BlockAccess::Edit,
         }],
     });
-    assert_eq!(cache.read()[&listed_id].name, "Listed");
+    assert_eq!(cached_name(&cache, listed_id), "Listed");
 
-    state.handle_server_message(ServerMessage::BlockNameUpdated {
+    state.handle_server_message(ServerMessage::BlockPropertyUpdated {
         id: listed_id,
-        name: "Renamed".into(),
+        key: properties::NAME,
+        value: name_property("Renamed"),
     });
-    assert_eq!(cache.read()[&listed_id].name, "Renamed");
+    assert_eq!(cached_name(&cache, listed_id), "Renamed");
 }

@@ -163,10 +163,6 @@ impl Block for CompiledLogic {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Compiled Logic".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         self.calls().to_vec()
     }

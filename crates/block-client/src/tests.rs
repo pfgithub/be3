@@ -20,6 +20,7 @@ mod history_metadata_preserves_first_value_when_actions_merge;
 mod history_metadata_round_trips_through_undo_and_redo;
 mod management_client_reports_server_errors;
 mod management_client_round_trips_account_and_workspace_operations;
+mod manual_name_survives_a_subsequent_automatic_rename;
 mod matching_broadcast_before_acknowledgement_is_applied_once;
 mod new_history_action_clears_redo;
 mod no_history_policy_disables_undo;
@@ -52,8 +53,8 @@ impl Block for Counter {
         block.count += amount;
     }
 
-    fn implicit_name(&self) -> String {
-        format!("Counter {}", self.count)
+    fn implicit_name(&self) -> Option<String> {
+        Some(format!("Counter {}", self.count))
     }
 
     fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
@@ -102,8 +103,8 @@ impl Block for HistoryBlock {
         block.value = *value;
     }
 
-    fn implicit_name(&self) -> String {
-        "History test".into()
+    fn implicit_name(&self) -> Option<String> {
+        Some("History test".into())
     }
 }
 
@@ -158,8 +159,8 @@ impl Block for DisabledHistoryBlock {
 
     fn apply_operation(_block: &mut Self, _operation: &Self::Operation) {}
 
-    fn implicit_name(&self) -> String {
-        "No history test".into()
+    fn implicit_name(&self) -> Option<String> {
+        Some("No history test".into())
     }
 }
 

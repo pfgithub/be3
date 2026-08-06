@@ -315,9 +315,6 @@ impl Block for PixelRayTracer {
     fn apply_operation(block: &mut Self, operation: &Self::Operation) {
         block.apply(operation);
     }
-    fn implicit_name(&self) -> String {
-        "Pixel Ray Tracer".into()
-    }
 }
 
 impl BlockHistory<PixelRayTracer> for PixelRayTracerHistory {

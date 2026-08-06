@@ -5,12 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{Block, BlockHistory, BlockHistoryTransaction, HistoryDirection, MAX_NAME_BYTES};
+use block::{Block, BlockHistory, BlockHistoryTransaction, HistoryDirection};
 use eips::{LocalChange, RemoteChange};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::parse_block_urls;
+use crate::{parse_block_urls, properties::MAX_NAME_BYTES};
 
 const TEXT_BURST_DELAY: Duration = Duration::from_millis(750);
 
@@ -220,7 +220,7 @@ impl Block for TextDocument {
         }
     }
 
-    fn implicit_name(&self) -> String {
+    fn implicit_name(&self) -> Option<String> {
         let line_end = self
             .bytes
             .iter()
@@ -233,10 +233,7 @@ impl Block for TextDocument {
             }
             name.push(character);
         }
-        if name.is_empty() {
-            return "Untitled".to_owned();
-        }
-        name
+        (!name.is_empty()).then_some(name)
     }
 
     fn references(&self) -> Vec<Uuid> {

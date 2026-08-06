@@ -82,10 +82,6 @@ impl Block for DatabaseSchema {
             }
         }
     }
-
-    fn implicit_name(&self) -> String {
-        "Database Schema".into()
-    }
 }
 
 #[cfg(test)]

@@ -27,6 +27,7 @@ use tokio::sync::{oneshot, watch};
 use uuid::Uuid;
 
 pub mod blocks;
+pub mod properties;
 mod transport;
 
 use transport::{Socket, SocketMessage};
@@ -400,7 +401,7 @@ pub struct CachedBlock {
     pub id: Uuid,
     pub block_type: Uuid,
     pub author: Uuid,
-    pub name: String,
+    pub properties: BTreeMap<Uuid, Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -841,9 +842,13 @@ impl BlockClient {
     }
 
     pub fn set_block_name(&self, id: Uuid, name: impl Into<String>) {
-        self.send(WorkerCommand::SetBlockName {
+        self.send(WorkerCommand::SetBlockProperty {
             id,
-            name: name.into(),
+            key: properties::NAME,
+            value: properties::encode_name(&properties::BlockName {
+                manual: true,
+                value: name.into(),
+            }),
         });
     }
 
@@ -938,7 +943,7 @@ pub struct BlockHandle<B: Block> {
 
 struct AppliedCrdtOperation<O> {
     operation: O,
-    implicit_name: String,
+    implicit_name: Option<String>,
     references: ReferenceDelta,
 }
 
@@ -1158,15 +1163,29 @@ impl<B: Block> BlockHandle<B> {
             .unwrap_or_else(|_| fatal("block client worker stopped"));
     }
 
-    pub fn name(&self) -> String {
-        self.block.name.read().clone()
+    pub fn name(&self) -> Option<String> {
+        properties::read_name(&self.block.properties.read()).map(|name| name.value)
     }
 
     pub fn set_name(&self, name: impl Into<String>) {
+        let name = properties::BlockName {
+            manual: true,
+            value: name.into(),
+        };
+        self.set_property(properties::NAME, properties::encode_name(&name));
+    }
+
+    pub fn properties(&self) -> BTreeMap<Uuid, Vec<u8>> {
+        self.block.properties.read().clone()
+    }
+
+    pub fn set_property(&self, key: Uuid, value: Vec<u8>) {
+        self.block.properties.write().insert(key, value.clone());
         self.commands
-            .send(WorkerCommand::SetBlockName {
+            .send(WorkerCommand::SetBlockProperty {
                 id: self.id,
-                name: name.into(),
+                key,
+                value,
             })
             .unwrap_or_else(|_| fatal("block client worker stopped"));
     }
@@ -1210,7 +1229,7 @@ pub trait BlockHistoryHandle {
 pub trait BlockHandleAccess {
     fn id(&self) -> Uuid;
     fn block_type(&self) -> Uuid;
-    fn name(&self) -> String;
+    fn name(&self) -> Option<String>;
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
     fn history(&self) -> Option<&dyn BlockHistoryHandle>;
@@ -1225,7 +1244,7 @@ impl<B: Block> BlockHandleAccess for BlockHandle<B> {
         B::TYPE_ID
     }
 
-    fn name(&self) -> String {
+    fn name(&self) -> Option<String> {
         BlockHandle::name(self)
     }
 
@@ -1375,9 +1394,10 @@ enum WorkerCommand {
         id: Uuid,
         parent: BlockParent,
     },
-    SetBlockName {
+    SetBlockProperty {
         id: Uuid,
-        name: String,
+        key: Uuid,
+        value: Vec<u8>,
     },
     ListReferences {
         list: BlockReferenceList,
@@ -1603,7 +1623,7 @@ impl WorkerState {
                     id: block.id,
                     block_type: block.block_type,
                     author: block.author,
-                    name: block.name.clone(),
+                    properties: block.properties.clone(),
                 },
             );
             block_access.insert(block.id, block.access);
@@ -1616,7 +1636,7 @@ impl WorkerState {
             id,
             block_type: block.block_type_id(),
             author: block.author().expect("registered block omitted author"),
-            name: block.name(),
+            properties: block.properties(),
         });
     }
 
@@ -1648,9 +1668,9 @@ impl WorkerState {
                 self.deferred
                     .push_back(DeferredRequest::SetBlockParent { id, parent });
             }
-            WorkerCommand::SetBlockName { id, name } => {
+            WorkerCommand::SetBlockProperty { id, key, value } => {
                 self.deferred
-                    .push_back(DeferredRequest::SetBlockName { id, name });
+                    .push_back(DeferredRequest::SetBlockProperty { id, key, value });
             }
             WorkerCommand::ListReferences { list, completed } => {
                 self.deferred
@@ -1811,7 +1831,7 @@ impl WorkerState {
                 id,
                 block_type: block.block_type_id(),
                 data,
-                implicit_name: block.initial_name(),
+                properties: block.initial_properties(),
                 dynamic_artifact: block.initial_dynamic_artifact(),
                 references: block.initial_references(),
                 watch: true,
@@ -1851,7 +1871,7 @@ impl WorkerState {
                 seq: update.seq,
                 operation_id: update.operation_id,
                 operation: update.operation,
-                implicit_name: update.implicit_name,
+                properties: update.properties,
                 dynamic_artifact: update.dynamic_artifact,
                 references: update.references,
             });
@@ -1870,7 +1890,7 @@ impl WorkerState {
                     seq: update.seq,
                     operation_id: update.operation_id,
                     operation: update.operation,
-                    implicit_name: update.implicit_name,
+                    properties: update.properties,
                     dynamic_artifact: update.dynamic_artifact,
                     references: update.references,
                 });
@@ -1940,11 +1960,15 @@ impl WorkerState {
                         }
                     }
                     (
-                        PendingRequest::SetBlockName { id: expected, name },
-                        CommandKind::SetBlockName,
+                        PendingRequest::SetBlockProperty {
+                            id: expected,
+                            key,
+                            value,
+                        },
+                        CommandKind::SetBlockProperty,
                     ) if expected == id => {
                         if let Some(block) = self.cached_blocks.write().get_mut(&id) {
-                            block.name = name;
+                            block.properties.insert(key, value);
                         }
                     }
                     (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
@@ -1966,7 +1990,7 @@ impl WorkerState {
                 snapshot_seq,
                 operations,
                 parent,
-                name,
+                properties,
                 access,
             } => {
                 match (self.requests.remove(&request_id), command) {
@@ -1988,13 +2012,13 @@ impl WorkerState {
                     snapshot_seq,
                     operations,
                     parent,
-                    name.clone(),
+                    properties.clone(),
                 );
                 self.cache_block(CachedBlock {
                     id,
                     block_type,
                     author,
-                    name,
+                    properties,
                 });
                 self.maybe_send_update(id);
             }
@@ -2074,7 +2098,7 @@ impl WorkerState {
             }
             ServerMessage::BlockUpdated {
                 id,
-                name,
+                properties,
                 operation,
             } => {
                 let access = Arc::clone(&self.access);
@@ -2084,9 +2108,9 @@ impl WorkerState {
                     .get(&id)
                     .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
                 block.remote_operation(operation);
-                block.set_name(name.clone());
+                block.apply_properties(properties.clone());
                 if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
-                    cached.name = name;
+                    cached.properties = properties;
                 }
                 drop(_access);
                 self.maybe_send_update(id);
@@ -2097,7 +2121,7 @@ impl WorkerState {
                 let mut ids = Vec::with_capacity(operations.len());
                 for BlockOperation {
                     id,
-                    name,
+                    properties,
                     operation,
                 } in operations
                 {
@@ -2106,9 +2130,9 @@ impl WorkerState {
                         .get(&id)
                         .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
                     block.remote_operation(operation);
-                    block.set_name(name.clone());
+                    block.apply_properties(properties.clone());
                     if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
-                        cached.name = name;
+                        cached.properties = properties;
                     }
                     ids.push(id);
                 }
@@ -2118,12 +2142,12 @@ impl WorkerState {
                 }
             }
             ServerMessage::Presence { .. } => {}
-            ServerMessage::BlockNameUpdated { id, name } => {
+            ServerMessage::BlockPropertyUpdated { id, key, value } => {
                 if let Some(block) = self.blocks.get(&id) {
-                    block.set_name(name.clone());
+                    block.set_property(key, value.clone());
                 }
                 if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
-                    cached.name = name;
+                    cached.properties.insert(key, value);
                 }
             }
             ServerMessage::References {
@@ -2243,18 +2267,20 @@ impl WorkerState {
                     parent,
                 });
             }
-            DeferredRequest::SetBlockName { id, name } => {
+            DeferredRequest::SetBlockProperty { id, key, value } => {
                 self.requests.insert(
                     request_id,
-                    PendingRequest::SetBlockName {
+                    PendingRequest::SetBlockProperty {
                         id,
-                        name: name.clone(),
+                        key,
+                        value: value.clone(),
                     },
                 );
-                self.outbound.push_back(ClientMessage::SetBlockName {
+                self.outbound.push_back(ClientMessage::SetBlockProperty {
                     request_id,
                     id,
-                    name,
+                    key,
+                    value,
                 });
             }
             DeferredRequest::ListReferences { list, completed } => {
@@ -2336,9 +2362,10 @@ enum PendingRequest {
         id: Uuid,
         parent: BlockParent,
     },
-    SetBlockName {
+    SetBlockProperty {
         id: Uuid,
-        name: String,
+        key: Uuid,
+        value: Vec<u8>,
     },
     ListReferences {
         list: BlockReferenceList,
@@ -2376,9 +2403,10 @@ impl PendingRequest {
             Self::SetBlockParent { id, parent } => {
                 ("Set block parent", format!("block {id}, parent {parent:?}"))
             }
-            Self::SetBlockName { id, name } => {
-                ("Set block name", format!("block {id}, name {name:?}"))
-            }
+            Self::SetBlockProperty { id, key, value } => (
+                "Set block property",
+                format!("block {id}, property {key}, {} bytes", value.len()),
+            ),
             Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
             Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
             Self::CacheReferences { list } => ("Cache references", format!("list {list:?}")),
@@ -2400,7 +2428,7 @@ impl PendingRequest {
                 | Self::Update { .. }
                 | Self::Batch { .. }
                 | Self::SetBlockParent { .. }
-                | Self::SetBlockName { .. }
+                | Self::SetBlockProperty { .. }
                 | Self::SetBlockAccess { .. }
         )
     }
@@ -2411,9 +2439,10 @@ enum DeferredRequest {
         id: Uuid,
         parent: BlockParent,
     },
-    SetBlockName {
+    SetBlockProperty {
         id: Uuid,
-        name: String,
+        key: Uuid,
+        value: Vec<u8>,
     },
     ListReferences {
         list: BlockReferenceList,
@@ -2445,9 +2474,10 @@ impl DeferredRequest {
             Self::SetBlockParent { id, parent } => {
                 ("Set block parent", format!("block {id}, parent {parent:?}"))
             }
-            Self::SetBlockName { id, name } => {
-                ("Set block name", format!("block {id}, name {name:?}"))
-            }
+            Self::SetBlockProperty { id, key, value } => (
+                "Set block property",
+                format!("block {id}, property {key}, {} bytes", value.len()),
+            ),
             Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
             Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
             Self::CacheReferences { list } => ("Cache references", format!("list {list:?}")),
@@ -2471,7 +2501,9 @@ impl DeferredRequest {
     fn changes_data(&self) -> bool {
         matches!(
             self,
-            Self::SetBlockParent { .. } | Self::SetBlockName { .. } | Self::SetBlockAccess { .. }
+            Self::SetBlockParent { .. }
+                | Self::SetBlockProperty { .. }
+                | Self::SetBlockAccess { .. }
         )
     }
 }
@@ -2483,7 +2515,7 @@ fn client_message_changes_data(message: &ClientMessage) -> bool {
             | ClientMessage::UpdateBlock { .. }
             | ClientMessage::UpdateBatch { .. }
             | ClientMessage::SetBlockParent { .. }
-            | ClientMessage::SetBlockName { .. }
+            | ClientMessage::SetBlockProperty { .. }
             | ClientMessage::SetBlockAccess { .. }
     )
 }
@@ -2546,13 +2578,17 @@ fn client_message_debug_entry(message: &ClientMessage) -> ClientDebugEntry {
             "Set block parent",
             format!("request {request_id}, block {id}, parent {parent:?}"),
         ),
-        ClientMessage::SetBlockName {
+        ClientMessage::SetBlockProperty {
             request_id,
             id,
-            name,
+            key,
+            value,
         } => (
-            "Set block name",
-            format!("request {request_id}, block {id}, name {name:?}"),
+            "Set block property",
+            format!(
+                "request {request_id}, block {id}, property {key}, {} bytes",
+                value.len()
+            ),
         ),
         ClientMessage::ListReferences {
             request_id,
@@ -2602,7 +2638,7 @@ struct OutboundUpdate {
     seq: Option<u64>,
     operation_id: Uuid,
     operation: Vec<u8>,
-    implicit_name: String,
+    properties: BTreeMap<Uuid, Vec<u8>>,
     dynamic_artifact: bool,
     references: ReferenceDelta,
 }
@@ -2617,9 +2653,9 @@ trait ErasedBlock: Send + Sync {
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn debug_data(&self) -> Option<String>;
     fn initial_data(&self) -> Option<Vec<u8>>;
-    fn initial_name(&self) -> String;
+    fn initial_properties(&self) -> BTreeMap<Uuid, Vec<u8>>;
     fn initial_dynamic_artifact(&self) -> bool;
-    fn name(&self) -> String;
+    fn properties(&self) -> BTreeMap<Uuid, Vec<u8>>;
     fn initial_references(&self) -> Vec<Uuid>;
     fn created(&self);
     fn resolve_authored(
@@ -2629,9 +2665,13 @@ trait ErasedBlock: Send + Sync {
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         parent: BlockParent,
-        name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
     );
-    fn set_name(&self, name: String);
+    /// Replaces the whole property map, as echoed back after an operation
+    /// that rode a freshly-derived map along with it.
+    fn apply_properties(&self, properties: BTreeMap<Uuid, Vec<u8>>);
+    /// Upserts a single property, as pushed by a standalone property set.
+    fn set_property(&self, key: Uuid, value: Vec<u8>);
     fn set_parent(&self, parent: BlockParent);
     fn next_update(&self) -> Option<OutboundUpdate>;
     fn acknowledge(&self, operation_id: Uuid, seq: u64);
@@ -2650,7 +2690,7 @@ struct TypedBlock<B: Block> {
     loaded: watch::Sender<bool>,
     changed: watch::Sender<()>,
     relationships: RwLock<BlockRelationships>,
-    name: RwLock<String>,
+    properties: RwLock<BTreeMap<Uuid, Vec<u8>>>,
     dynamic_artifact: RwLock<Option<DynamicArtifactDescriptor>>,
     revision: AtomicU64,
     history: RwLock<HistoryStack<HistoryAction<B>>>,
@@ -2798,7 +2838,7 @@ struct TypedState<B: Block> {
 struct PendingOperation<B, O> {
     id: Uuid,
     operation: StoredOperation<B, O>,
-    implicit_name: String,
+    properties: BTreeMap<Uuid, Vec<u8>>,
     /// What the block's artifact descriptor amounts to once this operation has
     /// been applied. The server keeps it as listing metadata.
     dynamic_artifact: bool,
@@ -2816,6 +2856,15 @@ impl<B: Block> TypedBlock<B> {
         }
     }
 
+    /// The full property map to send with the next operation: the
+    /// currently-known map, with the `name` property refreshed from
+    /// `implicit_name` unless it has been manually set.
+    fn merged_properties(&self, implicit_name: Option<String>) -> BTreeMap<Uuid, Vec<u8>> {
+        let mut properties = self.properties.read().clone();
+        properties::apply_implicit_name(&mut properties, implicit_name);
+        properties
+    }
+
     #[cfg(test)]
     fn created(id: Uuid, shared: Arc<BlockShared<B>>, initial: B) -> Self {
         Self::created_by(id, Uuid::nil(), Uuid::nil(), shared, initial, None)
@@ -2830,7 +2879,8 @@ impl<B: Block> TypedBlock<B> {
         dynamic_artifact: Option<DynamicArtifactDescriptor>,
     ) -> Self {
         let references = normalized_references(initial.references_for_workspace(workspace_id));
-        let name = initial.implicit_name();
+        let mut properties = BTreeMap::new();
+        properties::apply_implicit_name(&mut properties, initial.implicit_name());
         Self {
             id,
             workspace_id,
@@ -2853,7 +2903,7 @@ impl<B: Block> TypedBlock<B> {
                 references,
                 backrefs: Vec::new(),
             }),
-            name: RwLock::new(name),
+            properties: RwLock::new(properties),
             dynamic_artifact: RwLock::new(dynamic_artifact),
             revision: AtomicU64::new(0),
             history: RwLock::new(HistoryStack::default()),
@@ -2883,7 +2933,7 @@ impl<B: Block> TypedBlock<B> {
                 references: Vec::new(),
                 backrefs: Vec::new(),
             }),
-            name: RwLock::new(String::new()),
+            properties: RwLock::new(BTreeMap::new()),
             dynamic_artifact: RwLock::new(None),
             revision: AtomicU64::new(0),
             history: RwLock::new(HistoryStack::default()),
@@ -2919,7 +2969,7 @@ impl<B: Block> TypedBlock<B> {
                 let before =
                     normalized_references(value.references_for_workspace(self.workspace_id));
                 B::apply_operation(value, operation);
-                let implicit_name = value.implicit_name();
+                let properties = self.merged_properties(value.implicit_name());
                 let after =
                     normalized_references(value.references_for_workspace(self.workspace_id));
                 self.relationships.write().references.clone_from(&after);
@@ -2927,7 +2977,7 @@ impl<B: Block> TypedBlock<B> {
                     id: Uuid::new_v4(),
                     operation: StoredOperation::Operate(operation.clone()),
                     references: reference_delta(&before, &after),
-                    implicit_name,
+                    properties,
                     dynamic_artifact: self.dynamic_artifact.read().is_some(),
                 });
             }
@@ -2993,11 +3043,12 @@ impl<B: Block> TypedBlock<B> {
                     }),
             );
             self.relationships.write().references = after;
+            let properties = self.merged_properties(applied.implicit_name);
             state.pending.push_back(PendingOperation {
                 id: Uuid::new_v4(),
                 operation: StoredOperation::Operate(applied.operation),
                 references: applied.references,
-                implicit_name: applied.implicit_name,
+                properties,
                 dynamic_artifact: self.dynamic_artifact.read().is_some(),
             });
         }
@@ -3022,11 +3073,12 @@ impl<B: Block> TypedBlock<B> {
             .value
             .read()
             .as_ref()
-            .map_or_else(String::new, Block::implicit_name);
+            .and_then(Block::implicit_name);
+        let properties = self.merged_properties(implicit_name);
         self.dynamic_artifact.write().clone_from(&descriptor);
         state.pending.push_back(PendingOperation {
             id: Uuid::new_v4(),
-            implicit_name,
+            properties,
             dynamic_artifact: descriptor.is_some(),
             operation: StoredOperation::SetDynamicArtifact(descriptor),
             references: ReferenceDelta::default(),
@@ -3045,10 +3097,11 @@ impl<B: Block> TypedBlock<B> {
         value.clone_from(&replacement);
         let after = normalized_references(value.references_for_workspace(self.workspace_id));
         self.relationships.write().references.clone_from(&after);
+        let properties = self.merged_properties(value.implicit_name());
         state.pending.push_back(PendingOperation {
             id: Uuid::new_v4(),
             operation: StoredOperation::Replace(replacement),
-            implicit_name: value.implicit_name(),
+            properties,
             dynamic_artifact: self.dynamic_artifact.read().is_some(),
             references: reference_delta(&before, &after),
         });
@@ -3116,10 +3169,11 @@ impl<B: Block> TypedBlock<B> {
                         value.references_for_workspace(self.workspace_id)
                     }),
             );
+            let properties = self.merged_properties(applied.implicit_name);
             state.pending.push_back(PendingOperation {
                 id: Uuid::new_v4(),
                 operation: StoredOperation::Operate(applied.operation),
-                implicit_name: applied.implicit_name,
+                properties,
                 dynamic_artifact: self.dynamic_artifact.read().is_some(),
                 references: applied.references,
             });
@@ -3139,7 +3193,7 @@ impl<B: Block> TypedBlock<B> {
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         parent: BlockParent,
-        name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
     ) {
         <Self as ErasedBlock>::resolve_authored(
             self,
@@ -3148,7 +3202,7 @@ impl<B: Block> TypedBlock<B> {
             snapshot_seq,
             operations,
             parent,
-            name,
+            properties,
         );
     }
 }
@@ -3191,7 +3245,9 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         BlockDebugSnapshot {
             id: self.id,
             block_type: B::TYPE_ID,
-            name: self.name.read().clone(),
+            name: properties::read_name(&self.properties.read())
+                .map(|name| name.value)
+                .unwrap_or_default(),
             crdt: B::CRDT,
             ready: state.ready,
             synchronized,
@@ -3224,20 +3280,24 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         })
     }
 
-    fn initial_name(&self) -> String {
-        self.state
+    fn initial_properties(&self) -> BTreeMap<Uuid, Vec<u8>> {
+        let implicit_name = self
+            .state
             .read()
             .initial
             .as_ref()
-            .map_or_else(String::new, Block::implicit_name)
+            .and_then(Block::implicit_name);
+        let mut properties = BTreeMap::new();
+        properties::apply_implicit_name(&mut properties, implicit_name);
+        properties
     }
 
     fn initial_dynamic_artifact(&self) -> bool {
         self.dynamic_artifact.read().is_some()
     }
 
-    fn name(&self) -> String {
-        self.name.read().clone()
+    fn properties(&self) -> BTreeMap<Uuid, Vec<u8>> {
+        self.properties.read().clone()
     }
 
     fn initial_references(&self) -> Vec<Uuid> {
@@ -3267,7 +3327,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         parent: BlockParent,
-        name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
     ) {
         *self.author.write() = Some(author);
         let stored: StoredBlock<B> = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
@@ -3295,7 +3355,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             relationships.parent = parent;
             relationships.references = references;
         }
-        *self.name.write() = name;
+        *self.properties.write() = properties;
         if B::CRDT {
             for pending in &state.pending {
                 self.apply_stored_operation(&mut value, &pending.operation);
@@ -3317,8 +3377,13 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         self.relationships.write().parent = parent;
     }
 
-    fn set_name(&self, name: String) {
-        *self.name.write() = name;
+    fn apply_properties(&self, properties: BTreeMap<Uuid, Vec<u8>>) {
+        *self.properties.write() = properties;
+        self.changed.send_replace(());
+    }
+
+    fn set_property(&self, key: Uuid, value: Vec<u8>) {
+        self.properties.write().insert(key, value);
         self.changed.send_replace(());
     }
 
@@ -3337,7 +3402,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             operation_id: pending_id,
             operation: serde_json::to_vec(&pending.operation)
                 .unwrap_or_else(|error| fatal(format!("failed to serialize operation: {error}"))),
-            implicit_name: pending.implicit_name.clone(),
+            properties: pending.properties.clone(),
             dynamic_artifact: pending.dynamic_artifact,
             references: pending.references.clone(),
         };

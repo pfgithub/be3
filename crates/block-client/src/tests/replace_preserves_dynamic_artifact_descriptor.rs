@@ -20,8 +20,8 @@ impl Block for ReplaceTestBlock {
         match *operation {}
     }
 
-    fn implicit_name(&self) -> String {
-        format!("Replace test {}", self.0)
+    fn implicit_name(&self) -> Option<String> {
+        Some(format!("Replace test {}", self.0))
     }
 }
 

@@ -20,8 +20,8 @@ impl Block for ArtifactTestBlock {
         match *operation {}
     }
 
-    fn implicit_name(&self) -> String {
-        "Artifact test".into()
+    fn implicit_name(&self) -> Option<String> {
+        Some("Artifact test".into())
     }
 }
 

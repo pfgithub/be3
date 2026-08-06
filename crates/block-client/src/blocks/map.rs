@@ -185,10 +185,6 @@ impl Block for Map {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Map".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         let mut seen = HashSet::new();
         self.points

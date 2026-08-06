@@ -101,10 +101,6 @@ impl Block for Presentation {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Presentation".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         let mut seen = HashSet::new();
         self.slides

@@ -78,13 +78,9 @@ impl Block for Audio {
         }
     }
 
-    fn implicit_name(&self) -> String {
+    fn implicit_name(&self) -> Option<String> {
         let name = self.source_name.trim();
-        if name.is_empty() {
-            "Audio".into()
-        } else {
-            name.into()
-        }
+        (!name.is_empty()).then(|| name.to_owned())
     }
 }
 

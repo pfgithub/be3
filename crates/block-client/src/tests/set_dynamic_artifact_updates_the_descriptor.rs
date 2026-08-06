@@ -20,8 +20,8 @@ impl Block for SettingsTestBlock {
         match *operation {}
     }
 
-    fn implicit_name(&self) -> String {
-        format!("Settings test {}", self.0)
+    fn implicit_name(&self) -> Option<String> {
+        Some(format!("Settings test {}", self.0))
     }
 }
 

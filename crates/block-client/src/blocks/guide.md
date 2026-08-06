@@ -48,14 +48,20 @@ impl Block for MyBlock {
             MyBlockOperation::SetValue { value } => block.value.clone_from(value),
         }
     }
-
-    fn implicit_name(&self) -> String {
-        "My block".into()
-    }
 }
 ```
 
 Keep fields private when callers only need read access, and expose focused getters. `apply_operation` must be deterministic and must safely ignore operations that no longer apply, such as removing an already-removed item.
+
+Blocks have a generic `name` property (a client-interpreted `{manual, value}` pair, opaque to the server) rather than a single hardcoded name. `implicit_name` defaults to `None`, which leaves the property unset until the user renames the block; the UI then falls back to the block type's registered display name. Override it only when the block type can derive something better from its own content:
+
+```rust
+fn implicit_name(&self) -> Option<String> {
+    (!self.value.trim().is_empty()).then(|| self.value.clone())
+}
+```
+
+Once a block has been manually renamed, automatic re-derivation stops touching its name - that precedence is handled for you.
 
 ## 2. Track block references
 

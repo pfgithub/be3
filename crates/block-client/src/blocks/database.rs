@@ -111,10 +111,6 @@ impl Block for Database {
         }
     }
 
-    fn implicit_name(&self) -> String {
-        "Database".into()
-    }
-
     fn references(&self) -> Vec<Uuid> {
         vec![self.schema_id]
     }

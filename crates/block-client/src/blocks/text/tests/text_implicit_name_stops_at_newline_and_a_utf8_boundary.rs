@@ -1,5 +1,6 @@
 use super::TextDocument;
-use block::{Block, MAX_NAME_BYTES};
+use crate::properties::MAX_NAME_BYTES;
+use block::Block;
 
 #[test]
 fn text_implicit_name_stops_at_newline_and_a_utf8_boundary() {
@@ -9,7 +10,7 @@ fn text_implicit_name_stops_at_newline_and_a_utf8_boundary() {
         TextDocument::apply_operation(&mut document, &operation);
     }
 
-    let name = document.implicit_name();
+    let name = document.implicit_name().unwrap();
     assert_eq!(name, "a".repeat(127));
     assert!(name.len() <= MAX_NAME_BYTES);
 }

@@ -365,10 +365,6 @@ impl Block for PixelArt {
             } => art.resize(*width, *height, *anchor),
         }
     }
-
-    fn implicit_name(&self) -> String {
-        "Pixel Art".into()
-    }
 }
 
 impl BlockHistory<PixelArt> for PixelArtHistory {

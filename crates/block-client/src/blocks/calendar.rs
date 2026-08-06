@@ -104,10 +104,6 @@ impl Block for Calendar {
             }
         }
     }
-
-    fn implicit_name(&self) -> String {
-        "Calendar".into()
-    }
 }
 
 /// Ensures an event never ends before it starts.

@@ -5,7 +5,7 @@ use super::{HistoryItem, WebBrowserTab, WebBrowserTabOperation};
 #[test]
 fn web_browser_tab_title_determines_implicit_name() {
     let mut tab = WebBrowserTab::new();
-    assert_eq!(tab.implicit_name(), "Web Browser Tab");
+    assert_eq!(tab.implicit_name(), None);
 
     WebBrowserTab::apply_operation(
         &mut tab,
@@ -15,5 +15,5 @@ fn web_browser_tab_title_determines_implicit_name() {
         }),
     );
 
-    assert_eq!(tab.implicit_name(), "Example Domain");
+    assert_eq!(tab.implicit_name(), Some("Example Domain".to_owned()));
 }

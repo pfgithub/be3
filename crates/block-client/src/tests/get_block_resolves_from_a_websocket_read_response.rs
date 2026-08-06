@@ -1,4 +1,4 @@
-use std::{sync::mpsc, thread, time::Duration};
+use std::{collections::BTreeMap, sync::mpsc, thread, time::Duration};
 
 use block::{
     Block, BlockAccess, BlockParent, ClientMessage, CommandKind, OperationRecord, ReferenceDelta,
@@ -56,7 +56,7 @@ async fn get_block_resolves_from_a_websocket_read_response() {
                                 references: ReferenceDelta::default(),
                             }],
                             parent: BlockParent::Root,
-                            name: "Counter 5".into(),
+                            properties: BTreeMap::new(),
                             access: BlockAccess::Edit,
                         })
                         .unwrap(),
