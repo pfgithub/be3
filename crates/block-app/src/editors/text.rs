@@ -431,15 +431,10 @@ impl TextEditor {
         }) else {
             return false;
         };
-        let start = self.core.position(range.start);
-        let end = self.core.position(range.end);
-        self.core.execute_command(EditorCommand::Click {
-            position: start,
-            mode: DragSelectionMode::select(CursorLeftRightStop::Byte),
-            extend: false,
-            select_syntax_node: false,
-        });
-        self.core.execute_command(EditorCommand::Drag(end));
+        let anchor = self.core.position(range.start);
+        let focus = self.core.position(range.end);
+        self.core
+            .execute_command(EditorCommand::SetSelection { anchor, focus });
         true
     }
 
@@ -490,15 +485,10 @@ impl TextEditor {
         }) else {
             return;
         };
-        let start = self.core.position(range.start);
-        let end = self.core.position(range.end);
-        self.core.execute_command(EditorCommand::Click {
-            position: start,
-            mode: DragSelectionMode::select(CursorLeftRightStop::Byte),
-            extend: false,
-            select_syntax_node: false,
-        });
-        self.core.execute_command(EditorCommand::Drag(end));
+        let anchor = self.core.position(range.start);
+        let focus = self.core.position(range.end);
+        self.core
+            .execute_command(EditorCommand::SetSelection { anchor, focus });
         self.core
             .execute_command(EditorCommand::InsertText(replacement.as_bytes()));
         self.sync_find();
@@ -532,14 +522,9 @@ impl TextEditor {
                 )
             })
             .collect::<Vec<_>>();
-        for (start, end) in ranges {
-            self.core.execute_command(EditorCommand::Click {
-                position: start,
-                mode: DragSelectionMode::select(CursorLeftRightStop::Byte),
-                extend: false,
-                select_syntax_node: false,
-            });
-            self.core.execute_command(EditorCommand::Drag(end));
+        for (anchor, focus) in ranges {
+            self.core
+                .execute_command(EditorCommand::SetSelection { anchor, focus });
             self.core
                 .execute_command(EditorCommand::InsertText(replacement.as_bytes()));
         }

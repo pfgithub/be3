@@ -246,6 +246,10 @@ pub enum EditorCommand<'a> {
     Undo,
     Redo,
     SetCursorPosition(Position),
+    SetSelection {
+        anchor: Position,
+        focus: Position,
+    },
     DuplicateLine(UDDirection),
     DuplicateCursor(LRDirection),
     Click {
@@ -506,6 +510,9 @@ impl Core {
         self.normalize_cursors();
         match command {
             EditorCommand::SetCursorPosition(position) => self.select(Selection::at(position)),
+            EditorCommand::SetSelection { anchor, focus } => {
+                self.select(Selection::range(anchor, focus));
+            }
             EditorCommand::SelectAll => {
                 let start = self.position(0);
                 self.select(Selection::range(start, Position::END));
