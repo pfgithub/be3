@@ -229,6 +229,50 @@ fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
     egui::Rect::from_center_size(available.center(), size)
 }
 
+/// Decodes a block's `name` property, if it has one.
+pub(super) fn property_name(
+    properties: &std::collections::BTreeMap<Uuid, Vec<u8>>,
+) -> Option<String> {
+    block_client::properties::read_name(properties).map(|name| name.value)
+}
+
+/// What to show for a block: its name if it has one, otherwise its type's
+/// registered display name, otherwise a generic placeholder.
+pub(super) fn display_name(
+    registry: &EditorRegistry,
+    block_type: Uuid,
+    name: Option<&str>,
+) -> String {
+    name.filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| registry.display_name(block_type).map(str::to_owned))
+        .unwrap_or_else(|| "Untitled".to_owned())
+}
+
+/// [`display_name`] for a listed [`BlockReference`].
+pub(super) fn reference_display_name(
+    registry: &EditorRegistry,
+    reference: &BlockReference,
+) -> String {
+    display_name(
+        registry,
+        reference.block_type,
+        property_name(&reference.properties).as_deref(),
+    )
+}
+
+/// [`display_name`] for a [`block_client::CachedBlock`].
+pub(super) fn cached_display_name(
+    registry: &EditorRegistry,
+    cached: &block_client::CachedBlock,
+) -> String {
+    display_name(
+        registry,
+        cached.block_type,
+        property_name(&cached.properties).as_deref(),
+    )
+}
+
 /// Stands in for a block whose preview could not be drawn, naming the block
 /// and showing the icon of its type.
 fn paint_block_fallback(
@@ -244,13 +288,9 @@ fn paint_block_fallback(
         egui::Stroke::new(1.0_f32, egui::Color32::from_gray(75)),
         egui::StrokeKind::Inside,
     );
-    let (name, icon) = reference.map_or(("Loading…", None), |reference| {
+    let (name, icon) = reference.map_or(("Loading…".to_owned(), None), |reference| {
         (
-            if reference.name.is_empty() {
-                "Untitled"
-            } else {
-                reference.name.as_str()
-            },
+            reference_display_name(editors.registry(), reference),
             editors.registry().icon(reference.block_type),
         )
     });
@@ -567,7 +607,7 @@ pub trait BlockEditor {
     fn block_type(&self) -> Uuid {
         self.block().block_type()
     }
-    fn name(&self) -> String {
+    fn name(&self) -> Option<String> {
         self.block().name()
     }
     fn relationships(&self) -> Option<BlockRelationships> {

@@ -98,7 +98,11 @@ impl GuiBuilderEditor {
         let generated = dynamic_artifact::generate_initial(&*self.block.read()?);
         let artifact = client
             .create_dynamic_artifact(generated, dynamic_artifact::descriptor(self.block.id()));
-        artifact.set_name(dynamic_artifact::artifact_name(&self.block.name()));
+        let source_name = self
+            .block
+            .name()
+            .unwrap_or_else(|| Self::DISPLAY_NAME.to_owned());
+        artifact.set_name(dynamic_artifact::artifact_name(&source_name));
         Some(EditorAction::OpenBlock {
             id: artifact.id(),
             block_type: TextDocument::TYPE_ID,

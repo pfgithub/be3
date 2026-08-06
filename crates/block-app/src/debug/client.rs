@@ -1,5 +1,6 @@
 use block_client::{
-    BlockDebugSnapshot, ClientDebugEntry, ClientDebugSnapshot, PendingRequestDebugSnapshot,
+    properties, BlockDebugSnapshot, ClientDebugEntry, ClientDebugSnapshot,
+    PendingRequestDebugSnapshot,
 };
 use eframe::egui;
 
@@ -110,7 +111,10 @@ fn show_snapshot(ui: &mut egui::Ui, snapshot: &ClientDebugSnapshot) {
             }
             for block in &snapshot.cached_blocks {
                 ui.horizontal(|ui| {
-                    monospace(ui, &block.name);
+                    let name = properties::read_name(&block.properties)
+                        .map(|name| name.value)
+                        .unwrap_or_else(|| "(unnamed)".to_owned());
+                    monospace(ui, &name);
                     ui.weak("·");
                     monospace(ui, block.id);
                     ui.weak("·");

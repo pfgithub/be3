@@ -26,7 +26,8 @@ pub fn read_name(properties: &BTreeMap<Uuid, Vec<u8>>) -> Option<BlockName> {
     serde_json::from_slice(bytes).ok()
 }
 
-pub(crate) fn encode_name(name: &BlockName) -> Vec<u8> {
+/// Encodes a [`BlockName`] into a property value.
+pub fn encode_name(name: &BlockName) -> Vec<u8> {
     serde_json::to_vec(name)
         .unwrap_or_else(|error| crate::fatal(format!("failed to encode block name: {error}")))
 }

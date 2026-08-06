@@ -378,9 +378,12 @@ impl PresentationEditor {
                         }
                         ui.horizontal(|ui| {
                             ui.small(format!("{}", index + 1));
-                            let name = dependencies
-                                .get(&slide.block_id)
-                                .map_or("Loading…", |reference| reference.name.as_str());
+                            let name = dependencies.get(&slide.block_id).map_or_else(
+                                || "Loading…".to_owned(),
+                                |reference| {
+                                    super::reference_display_name(editors.registry(), reference)
+                                },
+                            );
                             ui.add(
                                 egui::Label::new(name)
                                     .truncate()

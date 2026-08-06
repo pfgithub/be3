@@ -68,10 +68,16 @@ impl BlockApp {
         path.push(id);
         Some(SidebarActiveLocation {
             id,
-            name: self
-                .client
-                .cached_block(id)
-                .map_or_else(|| editor.name(), |block| block.name),
+            name: self.client.cached_block(id).map_or_else(
+                || {
+                    crate::editors::display_name(
+                        &self.registry,
+                        editor.block_type(),
+                        editor.name().as_deref(),
+                    )
+                },
+                |block| crate::editors::cached_display_name(&self.registry, &block),
+            ),
             root,
             path,
         })
@@ -96,8 +102,8 @@ impl BlockApp {
     }
 
     fn reference_label(&self, reference: &BlockReference) -> String {
-        self.registry
-            .icon_label(reference.block_type, &reference.name)
+        let name = crate::editors::reference_display_name(&self.registry, reference);
+        self.registry.icon_label(reference.block_type, &name)
     }
 
     /// Whether the account may change a block. Blocks the sidebar has listed
@@ -330,14 +336,15 @@ impl BlockApp {
                         self.set_block_parent(reference.id, parent);
                     }
                     Some(BlockContextMenuAction::Rename) => {
+                        let name = crate::editors::reference_display_name(&self.registry, &reference);
                         self.rename = Some(RenameState {
                             id: reference.id,
-                            name: reference.name.clone(),
+                            name,
                         });
                     }
                     Some(BlockContextMenuAction::Share) => {
-                        self.share
-                            .open(&self.client, reference.id, reference.name.clone());
+                        let name = crate::editors::reference_display_name(&self.registry, &reference);
+                        self.share.open(&self.client, reference.id, name);
                     }
                     Some(BlockContextMenuAction::Delete) => delete = true,
                     None => {}

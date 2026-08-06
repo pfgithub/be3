@@ -759,7 +759,11 @@ impl LogicGridEditor {
                     compiled,
                     dynamic_artifact::descriptor(self.block.id()),
                 );
-                let name = dynamic_artifact::artifact_name(&self.block.name());
+                let source_name = self
+                    .block
+                    .name()
+                    .unwrap_or_else(|| Self::DISPLAY_NAME.to_owned());
+                let name = dynamic_artifact::artifact_name(&source_name);
                 child.set_name(name.clone());
                 let id = child.id();
                 // Pinning it here is what makes the component reachable: the

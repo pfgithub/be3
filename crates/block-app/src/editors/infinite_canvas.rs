@@ -37,13 +37,14 @@ use uuid::Uuid;
 use crate::block_picker::BlockPicker;
 
 use super::{
+    cached_display_name,
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
     image::{create_image_block, pick_image_file},
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
-    EMBEDDED_EDITOR_TITLE_HEIGHT,
+    reference_display_name, BlockEditor, BlockRenderContext, CreatableEditor,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING,
+    EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 impl EditorKind for InfiniteCanvasEditor {

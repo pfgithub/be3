@@ -135,7 +135,11 @@ impl DynamicArtifactRegeneration for CompileRegeneration {
         };
         self.target.replace(compiled);
         if self.settings.rename_with_source {
-            self.target.set_name(artifact_name(&self.source.name()));
+            let source_name = self
+                .source
+                .name()
+                .unwrap_or_else(|| "Logic Grid".to_owned());
+            self.target.set_name(artifact_name(&source_name));
         }
         Some(Ok(()))
     }

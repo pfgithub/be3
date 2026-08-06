@@ -631,10 +631,14 @@ impl PixelArtEditor {
     }
 
     fn export(&mut self, client: &BlockClient) -> Option<EditorAction> {
+        let name = self
+            .block
+            .name()
+            .unwrap_or_else(|| Self::DISPLAY_NAME.to_owned());
         let generated = self
             .block
             .read()
-            .map(|art| dynamic_artifact::generate_initial(&art, &self.block.name()));
+            .map(|art| dynamic_artifact::generate_initial(&art, &name));
         match generated {
             Some(Ok(image)) => {
                 let child = client

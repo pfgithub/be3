@@ -104,10 +104,16 @@ impl BlockEditor for CompiledLogicEditor {
 
         ui.horizontal(|ui| {
             ui.strong("Compiled from");
-            let name = self
-                .source
-                .as_ref()
-                .map_or_else(String::new, BlockHandle::name);
+            let name = self.source.as_ref().map_or_else(
+                || "Loading…".to_owned(),
+                |source| {
+                    super::display_name(
+                        editors.registry(),
+                        LogicGrid::TYPE_ID,
+                        source.name().as_deref(),
+                    )
+                },
+            );
             if ui.link(name).clicked() {
                 action = Some(EditorAction::OpenBlock {
                     id: source_id,
@@ -151,10 +157,16 @@ impl BlockEditor for CompiledLogicEditor {
             ui.weak("This component calls nothing else.");
         }
         for called in &calls {
-            let name = self
-                .calls
-                .get(called)
-                .map_or_else(String::new, BlockHandle::name);
+            let name = self.calls.get(called).map_or_else(
+                || "Loading…".to_owned(),
+                |handle| {
+                    super::display_name(
+                        editors.registry(),
+                        CompiledLogic::TYPE_ID,
+                        handle.name().as_deref(),
+                    )
+                },
+            );
             if ui.link(name).clicked() {
                 action = Some(EditorAction::OpenBlock {
                     id: *called,

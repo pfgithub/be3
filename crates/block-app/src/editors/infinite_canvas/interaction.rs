@@ -1195,7 +1195,10 @@ impl InfiniteCanvasEditor {
                 let cached = editors.client().cached_block(block_id);
                 let label = cached.as_ref().map_or_else(
                     || "Loading…".to_owned(),
-                    |block| editors.registry().icon_label(block.block_type, &block.name),
+                    |block| {
+                        let name = cached_display_name(editors.registry(), block);
+                        editors.registry().icon_label(block.block_type, &name)
+                    },
                 );
                 (label, cached, false)
             }

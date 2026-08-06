@@ -131,10 +131,9 @@ impl WorkspaceIndexEditor {
                 }
                 let ordering = match self.sort {
                     FolderSort::Intrinsic => Ordering::Equal,
-                    FolderSort::Name => compare_name(left, right),
-                    FolderSort::Type => {
-                        compare_type(left, right, editors).then_with(|| compare_name(left, right))
-                    }
+                    FolderSort::Name => compare_name(left, right, editors),
+                    FolderSort::Type => compare_type(left, right, editors)
+                        .then_with(|| compare_name(left, right, editors)),
                 };
                 let ordering = if self.descending {
                     ordering.reverse()
@@ -236,10 +235,9 @@ impl WorkspaceIndexEditor {
             let (label, block_type) = entry.reference.as_ref().map_or_else(
                 || (format!("Loading…  {}", entry.id), "Loading…".to_owned()),
                 |reference| {
+                    let name = super::reference_display_name(editors.registry(), reference);
                     (
-                        editors
-                            .registry()
-                            .icon_label(reference.block_type, &reference.name),
+                        editors.registry().icon_label(reference.block_type, &name),
                         editors
                             .registry()
                             .display_name(reference.block_type)
@@ -301,16 +299,13 @@ impl WorkspaceIndexEditor {
     }
 }
 
-fn compare_name(left: &BrowserEntry, right: &BrowserEntry) -> Ordering {
-    let left = left
-        .reference
-        .as_ref()
-        .map(|reference| reference.name.to_lowercase());
-    let right = right
-        .reference
-        .as_ref()
-        .map(|reference| reference.name.to_lowercase());
-    left.cmp(&right)
+fn compare_name(left: &BrowserEntry, right: &BrowserEntry, editors: &EditorAccess<'_>) -> Ordering {
+    let name = |entry: &BrowserEntry| {
+        entry.reference.as_ref().map(|reference| {
+            super::reference_display_name(editors.registry(), reference).to_lowercase()
+        })
+    };
+    name(left).cmp(&name(right))
 }
 
 fn compare_type(left: &BrowserEntry, right: &BrowserEntry, editors: &EditorAccess<'_>) -> Ordering {
@@ -361,7 +356,7 @@ fn grid_tile(
                     .registry()
                     .icon(reference.block_type)
                     .unwrap_or(ICON_FOLDER),
-                reference.name.clone(),
+                super::reference_display_name(editors.registry(), reference),
                 editors
                     .registry()
                     .display_name(reference.block_type)

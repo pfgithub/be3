@@ -169,7 +169,8 @@ impl DynamicArtifactRegeneration for PixelArtRegeneration {
     fn poll(&mut self) -> Option<Result<(), String>> {
         let source = self.source.read()?;
         self.target.read()?;
-        let generated = generate(&source, &self.source.name(), &self.settings);
+        let name = self.source.name().unwrap_or_else(|| "Pixel Art".to_owned());
+        let generated = generate(&source, &name, &self.settings);
         drop(source);
         Some(generated.map(|image| self.target.replace(image)))
     }

@@ -40,9 +40,9 @@ use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::timings::{FrameProfile, PaintTimings};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    embedded_editor_frame_size, embedded_editor_ui,
+    display_name, embedded_editor_frame_size, embedded_editor_ui,
     image::create_image_block,
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    property_name, BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
     DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
     EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
     EMBEDDED_EDITOR_TITLE_HEIGHT,
@@ -277,7 +277,12 @@ impl TextEditor {
             return;
         };
         editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
-        self.insert_image_embed(result.id, &result.name);
+        let name = display_name(
+            editors.registry(),
+            result.block_type,
+            property_name(&result.properties).as_deref(),
+        );
+        self.insert_image_embed(result.id, &name);
     }
 
     fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
@@ -289,7 +294,12 @@ impl TextEditor {
         let references = self.dependencies.read();
         let referenced = references
             .iter()
-            .map(|reference| (reference.id, (reference.block_type, reference.name.clone())))
+            .map(|reference| {
+                (
+                    reference.id,
+                    (reference.block_type, property_name(&reference.properties)),
+                )
+            })
             .collect::<HashMap<_, _>>();
         parsed
             .into_iter()
@@ -299,7 +309,7 @@ impl TextEditor {
                     editors
                         .client()
                         .cached_block(embed.id)
-                        .map(|block| (block.block_type, block.name))
+                        .map(|block| (block.block_type, property_name(&block.properties)))
                 });
                 if embed.large {
                     if let Some((block_type, _)) = &metadata {
@@ -311,12 +321,12 @@ impl TextEditor {
                     .then(|| editors.direct_editor_intrinsic_size(embed.id))
                     .flatten()
                     .map(|intrinsic| embedded_editor_frame_size(intrinsic, 1.0));
-                let label = metadata
-                    .as_ref()
-                    .map(|(_, name)| name)
-                    .filter(|name| !name.is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| embed.id.to_string());
+                let label = metadata.as_ref().map_or_else(
+                    || embed.id.to_string(),
+                    |(block_type, name)| {
+                        display_name(editors.registry(), *block_type, name.as_deref())
+                    },
+                );
                 ResolvedEmbed {
                     range: embed.range,
                     id: embed.id,
@@ -1277,7 +1287,12 @@ impl BlockEditor for TextEditor {
                         .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
                     self.core
                         .execute_command(EditorCommand::SetCursorPosition(position));
-                    self.insert_image_embed(dragged.reference.id, &dragged.reference.name);
+                    let name = display_name(
+                        editors.registry(),
+                        dragged.reference.block_type,
+                        property_name(&dragged.reference.properties).as_deref(),
+                    );
+                    self.insert_image_embed(dragged.reference.id, &name);
                     reveal_cursor = true;
                 }
             }

@@ -164,11 +164,14 @@ impl MapEditor {
     }
 
     /// Names of the blocks the map points at, for marker labels and lists.
-    fn dependency_labels(&self) -> HashMap<Uuid, (String, Uuid)> {
+    fn dependency_labels(&self, editors: &EditorAccess<'_>) -> HashMap<Uuid, (String, Uuid)> {
         self.dependencies
             .read()
             .into_iter()
-            .map(|reference| (reference.id, (reference.name, reference.block_type)))
+            .map(|reference| {
+                let name = super::reference_display_name(editors.registry(), &reference);
+                (reference.id, (name, reference.block_type))
+            })
             .collect()
     }
 
@@ -616,7 +619,7 @@ impl MapEditor {
         painter.rect_filled(rect, 0.0, BACKGROUND.gamma_multiply(opacity));
         let view = MapView::covering(self.displayed_region(), rect, MAX_PREVIEW_WORLD);
         let points = self.points();
-        let labels = self.dependency_labels();
+        let labels = self.dependency_labels(editors);
         self.ensure_point_editors(&points, editors);
         self.draw_map(painter, view.world_rect(), rect, opacity);
         points::draw_points(
@@ -903,7 +906,7 @@ impl BlockEditor for MapEditor {
         draw_attribution(&painter, clip);
 
         let points = self.points();
-        let labels = self.dependency_labels();
+        let labels = self.dependency_labels(editors);
         self.ensure_point_editors(&points, editors);
         if let Some(region) = self.preview_region() {
             draw_region_outline(&painter, view.region_rect(region));

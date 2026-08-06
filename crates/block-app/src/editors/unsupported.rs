@@ -29,8 +29,8 @@ impl BlockHandleAccess for UnsupportedEditor {
         self.block_type
     }
 
-    fn name(&self) -> String {
-        self.id.to_string()
+    fn name(&self) -> Option<String> {
+        Some(self.id.to_string())
     }
 
     fn relationships(&self) -> Option<BlockRelationships> {

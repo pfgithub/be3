@@ -7,7 +7,9 @@ use block_client::blocks::video::{
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, Vec2};
 use uuid::Uuid;
 
-use crate::editors::{rect_corners, BlockRenderContext, EditorAccess, SidebarDragPayload};
+use crate::editors::{
+    rect_corners, reference_display_name, BlockRenderContext, EditorAccess, SidebarDragPayload,
+};
 
 use super::{ClipDrag, VideoEditor, DEFAULT_CLIP_SECONDS};
 
@@ -581,9 +583,10 @@ impl VideoEditor {
                     opacity: 1.0,
                 },
             );
-            let name = dependencies
-                .get(&clip.block_id)
-                .map_or("Loading…", |reference| reference.name.as_str());
+            let name = dependencies.get(&clip.block_id).map_or_else(
+                || "Loading…".to_owned(),
+                |reference| reference_display_name(editors.registry(), reference),
+            );
             painter.text(
                 egui::pos2(thumbnail.right() + 5.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,

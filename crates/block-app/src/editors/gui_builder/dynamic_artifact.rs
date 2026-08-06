@@ -152,7 +152,11 @@ impl DynamicArtifactRegeneration for GuiBuilderRegeneration {
         drop(source);
         self.target.replace(generated);
         if self.settings.rename_with_source {
-            self.target.set_name(artifact_name(&self.source.name()));
+            let source_name = self
+                .source
+                .name()
+                .unwrap_or_else(|| "GUI Builder".to_owned());
+            self.target.set_name(artifact_name(&source_name));
         }
         Some(Ok(()))
     }

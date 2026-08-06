@@ -6,7 +6,7 @@ use eframe::egui;
 use egui_material_icons::icons::ICON_LINK_OFF;
 use uuid::Uuid;
 
-use crate::editors::EditorAccess;
+use crate::editors::{reference_display_name, EditorAccess};
 
 use super::VideoEditor;
 
@@ -29,16 +29,12 @@ impl VideoEditor {
 
         ui.horizontal(|ui| {
             let reference = dependencies.get(&clip.block_id);
-            let name = reference.map_or("Loading…", |reference| {
-                if reference.name.is_empty() {
-                    "Untitled"
-                } else {
-                    reference.name.as_str()
-                }
-            });
             let label = reference.map_or_else(
-                || name.to_owned(),
-                |reference| editors.registry().icon_label(reference.block_type, name),
+                || "Loading…".to_owned(),
+                |reference| {
+                    let name = reference_display_name(editors.registry(), reference);
+                    editors.registry().icon_label(reference.block_type, &name)
+                },
             );
             ui.add(egui::Label::new(egui::RichText::new(label).strong()).truncate());
         });
@@ -47,7 +43,9 @@ impl VideoEditor {
         egui::Grid::new(("video-clip-placement", clip.id))
             .num_columns(2)
             .spacing([8.0, 6.0])
-            .show(ui, |ui| self.placement_ui(ui, video, dependencies, &clip));
+            .show(ui, |ui| {
+                self.placement_ui(ui, video, dependencies, &clip, editors)
+            });
 
         ui.add_space(10.0);
         ui.strong("Effect stack");
@@ -70,6 +68,7 @@ impl VideoEditor {
         video: &Video,
         dependencies: &HashMap<Uuid, BlockReference>,
         clip: &VideoClip,
+        editors: &EditorAccess<'_>,
     ) {
         let frame_rate = video.frame_rate();
         let mut updated = clip.clone();
@@ -101,7 +100,10 @@ impl VideoEditor {
                     let name = video
                         .clip(attachment.clip_id)
                         .and_then(|parent| dependencies.get(&parent.block_id))
-                        .map_or("Loading…", |reference| reference.name.as_str());
+                        .map_or_else(
+                            || "Loading…".to_owned(),
+                            |reference| reference_display_name(editors.registry(), reference),
+                        );
                     ui.add(egui::Label::new(name).truncate());
                     if ui
                         .small_button(ICON_LINK_OFF)

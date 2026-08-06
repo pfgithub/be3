@@ -1,11 +1,16 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use block::BlockParent;
-use block_client::{BlockClient, CachedBlock};
+use block_client::{
+    properties::{self, BlockName},
+    BlockClient, CachedBlock,
+};
 use eframe::egui;
 use uuid::Uuid;
 
-use crate::editors::{BlockCreation, BlockEditor, EditorAccess, EditorRegistry, PendingCreation};
+use crate::editors::{
+    cached_display_name, BlockCreation, BlockEditor, EditorAccess, EditorRegistry, PendingCreation,
+};
 
 enum BlockPickerMenuAction {
     New(Uuid),
@@ -22,7 +27,7 @@ pub struct BlockPickerResult {
     pub id: Uuid,
     pub block_type: Uuid,
     pub author: Uuid,
-    pub name: String,
+    pub properties: BTreeMap<Uuid, Vec<u8>>,
 }
 
 pub struct BlockPicker {
@@ -87,6 +92,7 @@ impl BlockPicker {
         &mut self,
         context: &egui::Context,
         client: &BlockClient,
+        registry: &EditorRegistry,
     ) -> Option<CachedBlock> {
         if !self.open {
             return None;
@@ -99,7 +105,9 @@ impl BlockPicker {
             .filter(|block| !self.excluded.contains(&block.id))
             .filter(|block| {
                 search.is_empty()
-                    || block.name.to_lowercase().contains(&search)
+                    || cached_display_name(registry, block)
+                        .to_lowercase()
+                        .contains(&search)
                     || block.id.to_string().contains(&search)
             })
             .collect();
@@ -129,11 +137,7 @@ impl BlockPicker {
                             });
                         }
                         for block in &blocks {
-                            let label = if block.name.is_empty() {
-                                block.id.to_string()
-                            } else {
-                                block.name.clone()
-                            };
+                            let label = cached_display_name(registry, block);
                             if ui
                                 .button(label)
                                 .on_hover_text(block.id.to_string())
@@ -176,13 +180,15 @@ impl BlockPicker {
             result = self.show_creation_options(context, editors, created_parent);
         }
         if result.is_none() {
-            if let Some(block) = self.show_link_picker(context, editors.client()) {
+            if let Some(block) =
+                self.show_link_picker(context, editors.client(), editors.registry())
+            {
                 editors.ensure(block.id, block.block_type);
                 result = Some(BlockPickerResult {
                     id: block.id,
                     block_type: block.block_type,
                     author: block.author,
-                    name: block.name,
+                    properties: block.properties,
                 });
             }
         }
@@ -276,13 +282,22 @@ impl BlockPicker {
     ) -> BlockPickerResult {
         editor.set_parent(parent);
         let id = editor.id();
-        let name = editor.name();
+        let mut result_properties = BTreeMap::new();
+        if let Some(value) = editor.name() {
+            result_properties.insert(
+                properties::NAME,
+                properties::encode_name(&BlockName {
+                    manual: false,
+                    value,
+                }),
+            );
+        }
         editors.insert(editor);
         BlockPickerResult {
             id,
             block_type,
             author: editors.client().account_id(),
-            name,
+            properties: result_properties,
         }
     }
 

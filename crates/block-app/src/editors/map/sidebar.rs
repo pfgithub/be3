@@ -126,7 +126,7 @@ impl MapEditor {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let points = self.points();
-        let labels = self.dependency_labels();
+        let labels = self.dependency_labels(editors);
         self.ensure_point_editors(&points, editors);
         let selected = self
             .selected

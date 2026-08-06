@@ -65,7 +65,6 @@ impl RootHotbar {
     pub(super) fn ensure(&mut self, client: &BlockClient) -> Option<&BlockHandle<Hotbar>> {
         if self.find(client).is_none() && self.roots.is_loaded() {
             let hotbar = client.create_block(Hotbar::new());
-            hotbar.set_name("Hotbar".to_string());
             hotbar.set_parent(BlockParent::Root);
             self.block = Some(hotbar);
         }
@@ -188,7 +187,8 @@ impl HotbarEditor {
                         let title = self
                             .components
                             .get(compiled)
-                            .map_or_else(|| name.clone(), BlockHandle::name);
+                            .and_then(BlockHandle::name)
+                            .unwrap_or_else(|| name.clone());
                         if ui.link(title).clicked() {
                             *action = Some(EditorAction::OpenBlock {
                                 id: *compiled,
