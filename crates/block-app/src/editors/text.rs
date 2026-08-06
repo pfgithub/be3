@@ -903,16 +903,11 @@ impl TextEditor {
         let mut cursor_rects = Vec::new();
         let mut selected_bytes = vec![false; layout.positions.len().saturating_sub(1)];
         for cursor in self.core.cursor_positions() {
-            let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
+            let Some(Range { start, end }) = self.core.selection_range(cursor) else {
                 continue;
             };
             let Some(focus) = self.core.position_index(cursor.pos.focus) else {
                 continue;
-            };
-            let (start, end) = if anchor <= focus {
-                (anchor, focus)
-            } else {
-                (focus, anchor)
             };
             let selected_len = selected_bytes.len();
             selected_bytes[start.min(selected_len)..end.min(selected_len)].fill(true);
@@ -1142,16 +1137,8 @@ impl TextEditor {
                 continue;
             }
             let selected = self.core.cursor_positions().iter().any(|cursor| {
-                let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
+                let Some(Range { start, end }) = self.core.selection_range(cursor) else {
                     return false;
-                };
-                let Some(focus) = self.core.position_index(cursor.pos.focus) else {
-                    return false;
-                };
-                let (start, end) = if anchor <= focus {
-                    (anchor, focus)
-                } else {
-                    (focus, anchor)
                 };
                 start < embed.range.end && end > embed.range.start
             });
@@ -1184,16 +1171,8 @@ impl TextEditor {
 
     fn checkbox_selected(&self, checkbox: &MarkdownCheckbox) -> bool {
         self.core.cursor_positions().iter().any(|cursor| {
-            let Some(anchor) = self.core.position_index(cursor.pos.anchor) else {
+            let Some(Range { start, end }) = self.core.selection_range(cursor) else {
                 return false;
-            };
-            let Some(focus) = self.core.position_index(cursor.pos.focus) else {
-                return false;
-            };
-            let (start, end) = if anchor <= focus {
-                (anchor, focus)
-            } else {
-                (focus, anchor)
             };
             start < checkbox.marker.end && end > checkbox.marker.start
         })
@@ -1251,9 +1230,7 @@ impl TextEditor {
     ) -> Option<&'a font::EmbedLayout> {
         let cursors = self.core.cursor_positions();
         let cursor = (cursors.len() == 1).then(|| &cursors[0])?;
-        let anchor = self.core.position_index(cursor.pos.anchor)?;
-        let focus = self.core.position_index(cursor.pos.focus)?;
-        let selection = anchor.min(focus)..anchor.max(focus);
+        let selection = self.core.selection_range(cursor)?;
         layout
             .embeds
             .iter()

@@ -386,6 +386,14 @@ impl Core {
             .map(|document| position.resolve(&document))
     }
 
+    /// Resolves a cursor's anchor/focus into a sorted byte range, or `None`
+    /// if either position no longer resolves.
+    pub fn selection_range(&self, cursor: &CursorPosition) -> Option<Range<usize>> {
+        let anchor = self.position_index(cursor.pos.anchor)?;
+        let focus = self.position_index(cursor.pos.focus)?;
+        Some(anchor.min(focus)..anchor.max(focus))
+    }
+
     /// Every non-overlapping byte range matching `query` in the current
     /// document, left to right.
     pub fn find_matches(&self, query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
