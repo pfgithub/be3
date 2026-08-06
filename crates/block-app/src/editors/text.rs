@@ -29,9 +29,9 @@ use egui_material_icons::{
     MaterialIcon,
 };
 use text_editor_core::{
-    CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop, DragSelectionMode,
-    EditorCommand, FindDirection, LRDirection, MarkdownCommand, MoveMode, SynHlColorScope,
-    SyntaxHighlight, SyntaxNodeDirection, UDDirection, VerticalMoveMode,
+    markdown_checkbox_marker, CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop,
+    DragSelectionMode, EditorCommand, FindDirection, LRDirection, MarkdownCommand, MoveMode,
+    SynHlColorScope, SyntaxHighlight, SyntaxNodeDirection, UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
@@ -1656,24 +1656,12 @@ fn parse_markdown_checkboxes(bytes: &[u8]) -> Vec<MarkdownCheckbox> {
             .iter()
             .position(|byte| *byte == b'\n')
             .map_or(bytes.len(), |offset| line_start + offset);
-        let indent = bytes[line_start..line_end]
-            .iter()
-            .take_while(|byte| matches!(byte, b' ' | b'\t'))
-            .count();
-        let start = line_start + indent;
-        if let Some(marker) = bytes.get(start..start + 6) {
-            if matches!(marker[0], b'-' | b'*' | b'+')
-                && marker[1] == b' '
-                && marker[2] == b'['
-                && matches!(marker[3], b' ' | b'x' | b'X')
-                && marker[4..6] == *b"] "
-            {
-                result.push(MarkdownCheckbox {
-                    line_start,
-                    marker: start + 2..start + 5,
-                    checked: matches!(marker[3], b'x' | b'X'),
-                });
-            }
+        if let Some(marker) = markdown_checkbox_marker(bytes, line_start) {
+            result.push(MarkdownCheckbox {
+                line_start,
+                marker: marker.marker,
+                checked: marker.checked,
+            });
         }
         if line_end == bytes.len() {
             break;

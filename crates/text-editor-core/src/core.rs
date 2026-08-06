@@ -1261,16 +1261,11 @@ impl Core {
         };
         let index = position.resolve(&document);
         let start = line_start(document.bytes(), index);
-        let (_, indent) = measure_indent(document.bytes(), start, self.config.indent_with.count());
-        let content_start = start + indent;
-        let bytes = document.bytes();
-        let state = match bytes.get(content_start..content_start + 6) {
-            Some(b"- [ ] ") | Some(b"* [ ] ") | Some(b"+ [ ] ") => b'x',
-            Some(b"- [x] ") | Some(b"* [x] ") | Some(b"+ [x] ") | Some(b"- [X] ")
-            | Some(b"* [X] ") | Some(b"+ [X] ") => b' ',
-            _ => return,
+        let Some(marker) = markdown_checkbox_marker(document.bytes(), start) else {
+            return;
         };
-        let state_position = Position::at(&document, content_start + 3);
+        let state = if marker.checked { b' ' } else { b'x' };
+        let state_position = Position::at(&document, marker.marker.start + 1);
         drop(document);
         self.apply_replacements(
             vec![(state_position, 1, vec![state])],
@@ -2020,6 +2015,35 @@ fn measure_indent(bytes: &[u8], start: usize, width: usize) -> (usize, usize) {
     (segments.div_ceil(width), count)
 }
 
+/// A markdown checkbox marker (`- [ ] `, `* [x] `, etc.) found at the start
+/// of a line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownCheckboxMarker {
+    /// Byte range of the bracketed marker, e.g. the `[x]` in `- [x] `.
+    pub marker: Range<usize>,
+    pub checked: bool,
+}
+
+/// Finds the markdown checkbox marker on the line starting at `line_start`,
+/// if the line begins (after leading whitespace) with one.
+pub fn markdown_checkbox_marker(bytes: &[u8], line_start: usize) -> Option<MarkdownCheckboxMarker> {
+    let indent = bytes[line_start..]
+        .iter()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    let start = line_start + indent;
+    let marker = bytes.get(start..start + 6)?;
+    (matches!(marker[0], b'-' | b'*' | b'+')
+        && marker[1] == b' '
+        && marker[2] == b'['
+        && matches!(marker[3], b' ' | b'x' | b'X')
+        && marker[4..6] == *b"] ")
+        .then(|| MarkdownCheckboxMarker {
+            marker: start + 2..start + 5,
+            checked: matches!(marker[3], b'x' | b'X'),
+        })
+}
+
 struct MarkdownListMarker {
     len: usize,
     continuation: Vec<u8>,
@@ -2027,17 +2051,11 @@ struct MarkdownListMarker {
 
 fn markdown_list_marker(bytes: &[u8], start: usize) -> Option<MarkdownListMarker> {
     let rest = bytes.get(start..)?;
-    if let Some(marker) = rest.get(..6).filter(|marker| {
-        matches!(marker[0], b'-' | b'*' | b'+')
-            && marker[1] == b' '
-            && marker[2] == b'['
-            && matches!(marker[3], b' ' | b'x' | b'X')
-            && marker[4..6] == *b"] "
-    }) {
-        let mut continuation = marker.to_vec();
+    if markdown_checkbox_marker(bytes, start).is_some() {
+        let mut continuation = rest[..6].to_vec();
         continuation[3] = b' ';
         return Some(MarkdownListMarker {
-            len: marker.len(),
+            len: 6,
             continuation,
         });
     }
