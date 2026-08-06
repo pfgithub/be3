@@ -836,14 +836,10 @@ impl TextEditor {
                 .iter()
                 .find(|embed| !embed.large && embed.rect.contains(local_pointer.to_pos2()))
             {
-                self.core.execute_command(EditorCommand::Click {
-                    position: self.core.position(embed.range.start),
-                    mode: DragSelectionMode::move_to(CursorLeftRightStop::Byte),
-                    extend: false,
-                    select_syntax_node: false,
+                self.core.execute_command(EditorCommand::SetSelection {
+                    anchor: self.core.position(embed.range.start),
+                    focus: self.core.position(embed.range.end),
                 });
-                self.core
-                    .execute_command(EditorCommand::Drag(self.core.position(embed.range.end)));
                 self.selecting = false;
                 self.click_count = 0;
                 self.last_click = None;
