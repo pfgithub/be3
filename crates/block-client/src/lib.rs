@@ -14,21 +14,29 @@ use std::{
 
 use block::{
     Account, Block, BlockAccess, BlockAccessEntry, BlockHistory, BlockHistoryTransaction,
-    BlockOperation, BlockParent, BlockReference, BlockReferenceList, BlockUpdate, ClientMessage,
-    CommandKind, ErrorCode, HistoryDirection, ManagementClientMessage, ManagementErrorCode,
-    ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage, Workspace,
-    WorkspaceInvitation, WorkspaceRole,
+    BlockOperation, BlockParent, BlockReference, BlockReferenceList, BlockUpdate, ClientId,
+    ClientMessage, CommandKind, ErrorCode, HistoryDirection, ManagementClientMessage,
+    ManagementErrorCode, ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage,
+    Workspace, WorkspaceInvitation, WorkspaceRole,
 };
 use futures_channel::mpsc;
 use futures_util::{FutureExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use presence::PresenceKind;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
 use uuid::Uuid;
 
 pub mod blocks;
+pub mod presence;
 pub mod properties;
 mod transport;
+
+/// Presence values received from the server for blocks this client is
+/// watching, keyed by block, then by which client posted it and under which
+/// presence id. Entries disappear as soon as the server reports them
+/// cleared.
+type PresenceStore = HashMap<Uuid, HashMap<(ClientId, Uuid), Vec<u8>>>;
 
 use transport::{Socket, SocketMessage};
 
@@ -364,6 +372,7 @@ pub struct BlockClient {
     registered_blocks: Arc<RwLock<HashMap<Uuid, RegisteredBlock>>>,
     watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
     block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
+    presence: Arc<RwLock<PresenceStore>>,
 }
 
 /// A sharing request that is still in flight. The UI polls it each frame rather
@@ -588,11 +597,13 @@ impl BlockClient {
         let registered_blocks = Arc::new(RwLock::new(HashMap::new()));
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
         let block_access = Arc::new(RwLock::new(HashMap::new()));
+        let presence = Arc::new(RwLock::new(HashMap::new()));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
         let worker_client_debug = Arc::clone(&client_debug);
         let worker_cached_blocks = Arc::clone(&cached_blocks);
         let worker_block_access = Arc::clone(&block_access);
+        let worker_presence = Arc::clone(&presence);
         transport::spawn_worker(worker_main(
             command_rx,
             shutdown.clone(),
@@ -601,6 +612,7 @@ impl BlockClient {
             worker_client_debug,
             worker_cached_blocks,
             worker_block_access,
+            worker_presence,
         ));
         Self {
             id,
@@ -616,6 +628,7 @@ impl BlockClient {
             registered_blocks,
             watched_reference_lists,
             block_access,
+            presence,
         }
     }
 
@@ -886,6 +899,47 @@ impl BlockClient {
             .get(&id)
             .copied()
             .unwrap_or(BlockAccess::Edit)
+    }
+
+    /// Posts a presence value of kind `P` for `id`, which must currently be
+    /// watched (e.g. via [`get_block`](Self::get_block)). The server keeps
+    /// the latest value per client and presence kind, and broadcasts it to
+    /// every other client watching the block.
+    pub fn post_presence<P: PresenceKind>(&self, id: Uuid, value: &P) {
+        let data = serde_json::to_vec(value)
+            .unwrap_or_else(|error| fatal(format!("failed to encode presence value: {error}")));
+        self.send(WorkerCommand::PostPresence {
+            id,
+            presence_id: P::ID,
+            data,
+        });
+    }
+
+    /// Clears a presence value of kind `P` this client previously posted for
+    /// `id`, notifying every other client watching the block.
+    pub fn clear_presence<P: PresenceKind>(&self, id: Uuid) {
+        self.send(WorkerCommand::ClearPresence {
+            id,
+            presence_id: P::ID,
+        });
+    }
+
+    /// Every other client's current presence value of kind `P` for `id`,
+    /// alongside the client that posted it. Never includes this client's own
+    /// value: the server never echoes presence back to its author.
+    pub fn presence<P: PresenceKind>(&self, id: Uuid) -> Vec<(ClientId, P)> {
+        self.presence
+            .read()
+            .get(&id)
+            .into_iter()
+            .flat_map(|entries| entries.iter())
+            .filter(|((_, presence_id), _)| *presence_id == P::ID)
+            .filter_map(|((client_id, _), data)| {
+                serde_json::from_slice(data)
+                    .ok()
+                    .map(|value| (*client_id, value))
+            })
+            .collect()
     }
 
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
@@ -1399,6 +1453,15 @@ enum WorkerCommand {
         key: Uuid,
         value: Vec<u8>,
     },
+    PostPresence {
+        id: Uuid,
+        presence_id: Uuid,
+        data: Vec<u8>,
+    },
+    ClearPresence {
+        id: Uuid,
+        presence_id: Uuid,
+    },
     ListReferences {
         list: BlockReferenceList,
         completed: oneshot::Sender<Vec<BlockReference>>,
@@ -1424,6 +1487,7 @@ enum WorkerCommand {
     ResumeSending,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn worker_main(
     mut commands: mpsc::UnboundedReceiver<WorkerCommand>,
     shutdown: Shutdown,
@@ -1432,8 +1496,16 @@ async fn worker_main(
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
     block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
+    presence: Arc<RwLock<PresenceStore>>,
 ) {
-    let mut state = WorkerState::new(access, debug, client_debug, cached_blocks, block_access);
+    let mut state = WorkerState::new(
+        access,
+        debug,
+        client_debug,
+        cached_blocks,
+        block_access,
+        presence,
+    );
     while let Some(command) = commands.next().await {
         match command {
             WorkerCommand::Connect {
@@ -1568,6 +1640,7 @@ struct WorkerState {
     client_debug: Arc<RwLock<ClientDebugSnapshot>>,
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
     block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
+    presence: Arc<RwLock<PresenceStore>>,
 }
 
 impl WorkerState {
@@ -1577,6 +1650,7 @@ impl WorkerState {
         client_debug: Arc<RwLock<ClientDebugSnapshot>>,
         cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
         block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
+        presence: Arc<RwLock<PresenceStore>>,
     ) -> Self {
         Self {
             connected: false,
@@ -1593,6 +1667,7 @@ impl WorkerState {
             client_debug,
             cached_blocks,
             block_access,
+            presence,
         }
     }
 
@@ -1671,6 +1746,21 @@ impl WorkerState {
             WorkerCommand::SetBlockProperty { id, key, value } => {
                 self.deferred
                     .push_back(DeferredRequest::SetBlockProperty { id, key, value });
+            }
+            WorkerCommand::PostPresence {
+                id,
+                presence_id,
+                data,
+            } => {
+                self.deferred.push_back(DeferredRequest::PostPresence {
+                    id,
+                    presence_id,
+                    data,
+                });
+            }
+            WorkerCommand::ClearPresence { id, presence_id } => {
+                self.deferred
+                    .push_back(DeferredRequest::ClearPresence { id, presence_id });
             }
             WorkerCommand::ListReferences { list, completed } => {
                 self.deferred
@@ -1971,6 +2061,8 @@ impl WorkerState {
                             block.properties.insert(key, value);
                         }
                     }
+                    (PendingRequest::PostPresence { .. }, CommandKind::PostPresence) => {}
+                    (PendingRequest::ClearPresence { .. }, CommandKind::ClearPresence) => {}
                     (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
                         if id.is_nil() => {}
                     (
@@ -2141,7 +2233,30 @@ impl WorkerState {
                     self.maybe_send_update(id);
                 }
             }
-            ServerMessage::Presence { .. } => {}
+            ServerMessage::Presence {
+                id,
+                client_id,
+                presence_id,
+                data,
+            } => {
+                let mut presence = self.presence.write();
+                match data {
+                    Some(data) => {
+                        presence
+                            .entry(id)
+                            .or_default()
+                            .insert((client_id, presence_id), data);
+                    }
+                    None => {
+                        if let Some(entries) = presence.get_mut(&id) {
+                            entries.remove(&(client_id, presence_id));
+                            if entries.is_empty() {
+                                presence.remove(&id);
+                            }
+                        }
+                    }
+                }
+            }
             ServerMessage::BlockPropertyUpdated { id, key, value } => {
                 if let Some(block) = self.blocks.get(&id) {
                     block.set_property(key, value.clone());
@@ -2283,6 +2398,31 @@ impl WorkerState {
                     value,
                 });
             }
+            DeferredRequest::PostPresence {
+                id,
+                presence_id,
+                data,
+            } => {
+                self.requests
+                    .insert(request_id, PendingRequest::PostPresence { id, presence_id });
+                self.outbound.push_back(ClientMessage::PostPresence {
+                    request_id,
+                    id,
+                    presence_id,
+                    data,
+                });
+            }
+            DeferredRequest::ClearPresence { id, presence_id } => {
+                self.requests.insert(
+                    request_id,
+                    PendingRequest::ClearPresence { id, presence_id },
+                );
+                self.outbound.push_back(ClientMessage::ClearPresence {
+                    request_id,
+                    id,
+                    presence_id,
+                });
+            }
             DeferredRequest::ListReferences { list, completed } => {
                 self.requests.insert(
                     request_id,
@@ -2367,6 +2507,14 @@ enum PendingRequest {
         key: Uuid,
         value: Vec<u8>,
     },
+    PostPresence {
+        id: Uuid,
+        presence_id: Uuid,
+    },
+    ClearPresence {
+        id: Uuid,
+        presence_id: Uuid,
+    },
     ListReferences {
         list: BlockReferenceList,
         completed: oneshot::Sender<Vec<BlockReference>>,
@@ -2407,6 +2555,14 @@ impl PendingRequest {
                 "Set block property",
                 format!("block {id}, property {key}, {} bytes", value.len()),
             ),
+            Self::PostPresence { id, presence_id } => (
+                "Post presence",
+                format!("block {id}, presence {presence_id}"),
+            ),
+            Self::ClearPresence { id, presence_id } => (
+                "Clear presence",
+                format!("block {id}, presence {presence_id}"),
+            ),
             Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
             Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
             Self::CacheReferences { list } => ("Cache references", format!("list {list:?}")),
@@ -2444,6 +2600,15 @@ enum DeferredRequest {
         key: Uuid,
         value: Vec<u8>,
     },
+    PostPresence {
+        id: Uuid,
+        presence_id: Uuid,
+        data: Vec<u8>,
+    },
+    ClearPresence {
+        id: Uuid,
+        presence_id: Uuid,
+    },
     ListReferences {
         list: BlockReferenceList,
         completed: oneshot::Sender<Vec<BlockReference>>,
@@ -2477,6 +2642,18 @@ impl DeferredRequest {
             Self::SetBlockProperty { id, key, value } => (
                 "Set block property",
                 format!("block {id}, property {key}, {} bytes", value.len()),
+            ),
+            Self::PostPresence {
+                id,
+                presence_id,
+                data,
+            } => (
+                "Post presence",
+                format!("block {id}, presence {presence_id}, {} bytes", data.len()),
+            ),
+            Self::ClearPresence { id, presence_id } => (
+                "Clear presence",
+                format!("block {id}, presence {presence_id}"),
             ),
             Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
             Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
@@ -2567,9 +2744,23 @@ fn client_message_debug_entry(message: &ClientMessage) -> ClientDebugEntry {
         ClientMessage::UnwatchBlock { request_id, id } => {
             ("Unwatch block", format!("request {request_id}, block {id}"))
         }
-        ClientMessage::PostPresence { request_id, id, .. } => {
-            ("Post presence", format!("request {request_id}, block {id}"))
-        }
+        ClientMessage::PostPresence {
+            request_id,
+            id,
+            presence_id,
+            ..
+        } => (
+            "Post presence",
+            format!("request {request_id}, block {id}, presence {presence_id}"),
+        ),
+        ClientMessage::ClearPresence {
+            request_id,
+            id,
+            presence_id,
+        } => (
+            "Clear presence",
+            format!("request {request_id}, block {id}, presence {presence_id}"),
+        ),
         ClientMessage::SetBlockParent {
             request_id,
             id,

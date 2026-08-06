@@ -244,7 +244,7 @@ async fn handle_block_connection(
         }
     }
 
-    watch_hub.remove_client(client_id).await;
+    watch_hub.remove_client(&store, client_id).await;
     Ok(())
 }
 
@@ -433,6 +433,17 @@ fn permission_denied(request_id: Uuid, command: CommandKind, id: Uuid) -> Server
         id: Some(id),
         code: ErrorCode::PermissionDenied,
         message: "you do not have permission to access this block".into(),
+        expected_seq: None,
+    }
+}
+
+fn not_watching(request_id: Uuid, command: CommandKind, id: Uuid) -> ServerMessage {
+    ServerMessage::Error {
+        request_id: Some(request_id),
+        command: Some(command),
+        id: Some(id),
+        code: ErrorCode::NotWatching,
+        message: "the block must be watched before posting presence for it".into(),
         expected_seq: None,
     }
 }
@@ -734,7 +745,7 @@ async fn handle_text_message(
             (response, None)
         }
         ClientMessage::UnwatchBlock { request_id, id } => {
-            watch_hub.unwatch(workspace_id, id, client_id).await;
+            watch_hub.unwatch(store, workspace_id, id, client_id).await;
             (
                 ServerMessage::Ok {
                     request_id,
@@ -749,11 +760,34 @@ async fn handle_text_message(
         ClientMessage::PostPresence {
             request_id,
             id,
+            presence_id,
             data,
         } => {
             if !store.access(identity).await.get(id).can_view() {
                 return (
                     permission_denied(request_id, CommandKind::PostPresence, id),
+                    None,
+                );
+            }
+            if data.len() > MAX_PROPERTY_VALUE_BYTES {
+                return (
+                    ServerMessage::Error {
+                        request_id: Some(request_id),
+                        command: Some(CommandKind::PostPresence),
+                        id: Some(id),
+                        code: ErrorCode::InvalidMessage,
+                        message: "presence value exceeds the maximum size".into(),
+                        expected_seq: None,
+                    },
+                    None,
+                );
+            }
+            let watching = watch_hub
+                .post_presence(store, workspace_id, id, client_id, presence_id, data)
+                .await;
+            if !watching {
+                return (
+                    not_watching(request_id, CommandKind::PostPresence, id),
                     None,
                 );
             }
@@ -765,7 +799,32 @@ async fn handle_text_message(
                     seq: None,
                     operation_id: None,
                 },
-                Some(ServerMessage::Presence { id, data }),
+                None,
+            )
+        }
+        ClientMessage::ClearPresence {
+            request_id,
+            id,
+            presence_id,
+        } => {
+            let watching = watch_hub
+                .clear_presence(store, workspace_id, id, client_id, presence_id)
+                .await;
+            if !watching {
+                return (
+                    not_watching(request_id, CommandKind::ClearPresence, id),
+                    None,
+                );
+            }
+            (
+                ServerMessage::Ok {
+                    request_id,
+                    command: CommandKind::ClearPresence,
+                    id,
+                    seq: None,
+                    operation_id: None,
+                },
+                None,
             )
         }
         ClientMessage::SetBlockParent {
@@ -917,7 +976,7 @@ async fn handle_text_message(
     }
 }
 
-type ClientId = u64;
+use block::ClientId;
 type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
 
 /// Identifies a watcher's view of the workspace. Two accounts watching the same
@@ -959,6 +1018,10 @@ struct WatchHub {
 struct BlockWatch {
     identity: WatchIdentity,
     outbound: OutboundMessages,
+    /// This client's own presence values for the block, keyed by presence id.
+    /// Cleared automatically (and reported to every other watcher) when the
+    /// client unwatches the block or disconnects.
+    presence: HashMap<Uuid, Vec<u8>>,
 }
 
 struct ReferenceWatch {
@@ -979,6 +1042,9 @@ impl WatchHub {
         self.next_client_id.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Starts `client_id` watching `id`, replaying every presence value
+    /// already recorded for it (from other clients) on `outbound` before the
+    /// watch is registered, so the new watcher is caught up immediately.
     async fn watch(
         &self,
         identity: Identity,
@@ -986,42 +1052,183 @@ impl WatchHub {
         client_id: ClientId,
         outbound: OutboundMessages,
     ) {
-        self.watchers
-            .lock()
-            .await
-            .entry((identity.workspace_id, id))
-            .or_default()
-            .insert(
-                client_id,
-                BlockWatch {
-                    identity: identity.into(),
-                    outbound,
-                },
-            );
+        let mut watchers = self.watchers.lock().await;
+        let entries = watchers.entry((identity.workspace_id, id)).or_default();
+        for (&other_id, watch) in entries.iter() {
+            for (&presence_id, data) in &watch.presence {
+                let _ = outbound.send(ServerMessage::Presence {
+                    id,
+                    client_id: other_id,
+                    presence_id,
+                    data: Some(data.clone()),
+                });
+            }
+        }
+        entries.insert(
+            client_id,
+            BlockWatch {
+                identity: identity.into(),
+                outbound,
+                presence: HashMap::new(),
+            },
+        );
     }
 
-    async fn unwatch(&self, workspace_id: Uuid, id: Uuid, client_id: ClientId) {
-        let mut watchers = self.watchers.lock().await;
-        let key = (workspace_id, id);
-        if let Some(entries) = watchers.get_mut(&key) {
-            entries.remove(&client_id);
+    /// Stops `client_id` watching `id` and clears whatever presence it had
+    /// recorded there, notifying every other watcher of the block.
+    async fn unwatch(&self, store: &BlockStore, workspace_id: Uuid, id: Uuid, client_id: ClientId) {
+        let (presence, deliveries) = {
+            let mut watchers = self.watchers.lock().await;
+            let key = (workspace_id, id);
+            let Some(entries) = watchers.get_mut(&key) else {
+                return;
+            };
+            let Some(watch) = entries.remove(&client_id) else {
+                return;
+            };
+            let deliveries = entries
+                .values()
+                .map(|watch| (watch.identity, watch.outbound.clone()))
+                .collect::<Vec<_>>();
             if entries.is_empty() {
                 watchers.remove(&key);
             }
+            (watch.presence, deliveries)
+        };
+        Self::notify_presence_cleared(store, id, client_id, presence, &deliveries).await;
+    }
+
+    async fn remove_client(&self, store: &BlockStore, client_id: ClientId) {
+        let mut cleared = Vec::new();
+        {
+            let mut watchers = self.watchers.lock().await;
+            watchers.retain(|&(_, id), entries| {
+                if let Some(watch) = entries.remove(&client_id) {
+                    if !watch.presence.is_empty() {
+                        let deliveries = entries
+                            .values()
+                            .map(|watch| (watch.identity, watch.outbound.clone()))
+                            .collect::<Vec<_>>();
+                        cleared.push((id, watch.presence, deliveries));
+                    }
+                }
+                !entries.is_empty()
+            });
+        }
+        {
+            let mut watchers = self.reference_watchers.lock().await;
+            watchers.retain(|_, entries| {
+                entries.remove(&client_id);
+                !entries.is_empty()
+            });
+        }
+        for (id, presence, deliveries) in cleared {
+            Self::notify_presence_cleared(store, id, client_id, presence, &deliveries).await;
         }
     }
 
-    async fn remove_client(&self, client_id: ClientId) {
-        let mut watchers = self.watchers.lock().await;
-        watchers.retain(|_, entries| {
-            entries.remove(&client_id);
-            !entries.is_empty()
-        });
-        let mut watchers = self.reference_watchers.lock().await;
-        watchers.retain(|_, entries| {
-            entries.remove(&client_id);
-            !entries.is_empty()
-        });
+    /// Records a presence value from a client that is currently watching
+    /// `id`, broadcasting it to every other watcher. Returns `false` without
+    /// effect if the client is not watching the block.
+    async fn post_presence(
+        &self,
+        store: &BlockStore,
+        workspace_id: Uuid,
+        id: Uuid,
+        client_id: ClientId,
+        presence_id: Uuid,
+        data: Vec<u8>,
+    ) -> bool {
+        let deliveries = {
+            let mut watchers = self.watchers.lock().await;
+            let Some(entries) = watchers.get_mut(&(workspace_id, id)) else {
+                return false;
+            };
+            let Some(watch) = entries.get_mut(&client_id) else {
+                return false;
+            };
+            watch.presence.insert(presence_id, data.clone());
+            entries
+                .iter()
+                .filter(|(&other_id, _)| other_id != client_id)
+                .map(|(_, watch)| (watch.identity, watch.outbound.clone()))
+                .collect::<Vec<_>>()
+        };
+        let message = ServerMessage::Presence {
+            id,
+            client_id,
+            presence_id,
+            data: Some(data),
+        };
+        Self::deliver(store, id, &message, &deliveries).await;
+        true
+    }
+
+    /// Clears a presence value from a client that is currently watching
+    /// `id`, notifying every other watcher. Returns `false` without effect
+    /// if the client is not watching the block.
+    async fn clear_presence(
+        &self,
+        store: &BlockStore,
+        workspace_id: Uuid,
+        id: Uuid,
+        client_id: ClientId,
+        presence_id: Uuid,
+    ) -> bool {
+        let deliveries = {
+            let mut watchers = self.watchers.lock().await;
+            let Some(entries) = watchers.get_mut(&(workspace_id, id)) else {
+                return false;
+            };
+            let Some(watch) = entries.get_mut(&client_id) else {
+                return false;
+            };
+            watch.presence.remove(&presence_id);
+            entries
+                .iter()
+                .filter(|(&other_id, _)| other_id != client_id)
+                .map(|(_, watch)| (watch.identity, watch.outbound.clone()))
+                .collect::<Vec<_>>()
+        };
+        let message = ServerMessage::Presence {
+            id,
+            client_id,
+            presence_id,
+            data: None,
+        };
+        Self::deliver(store, id, &message, &deliveries).await;
+        true
+    }
+
+    async fn notify_presence_cleared(
+        store: &BlockStore,
+        id: Uuid,
+        client_id: ClientId,
+        presence: HashMap<Uuid, Vec<u8>>,
+        deliveries: &[(WatchIdentity, OutboundMessages)],
+    ) {
+        for presence_id in presence.into_keys() {
+            let message = ServerMessage::Presence {
+                id,
+                client_id,
+                presence_id,
+                data: None,
+            };
+            Self::deliver(store, id, &message, deliveries).await;
+        }
+    }
+
+    async fn deliver(
+        store: &BlockStore,
+        id: Uuid,
+        message: &ServerMessage,
+        deliveries: &[(WatchIdentity, OutboundMessages)],
+    ) {
+        for (identity, outbound) in deliveries {
+            if store.access((*identity).into()).await.get(id).can_view() {
+                let _ = outbound.send(message.clone());
+            }
+        }
     }
 
     async fn watch_references(

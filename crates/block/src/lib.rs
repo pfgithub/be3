@@ -389,6 +389,12 @@ pub struct BlockReference {
 /// not interpret properties, so this is the only limit it enforces.
 pub const MAX_PROPERTY_VALUE_BYTES: usize = 4096;
 
+/// Identifies one live connection, not an account: the same account may have
+/// several clients connected at once (e.g. multiple tabs or devices) editing
+/// the same block. Assigned by the server when a connection is accepted and
+/// not stable across reconnects.
+pub type ClientId = u64;
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandKind {
@@ -398,6 +404,7 @@ pub enum CommandKind {
     ReadBlock,
     UnwatchBlock,
     PostPresence,
+    ClearPresence,
     SetBlockParent,
     ListReferences,
     UnwatchReferences,
@@ -415,6 +422,7 @@ pub enum ErrorCode {
     ConflictingOperationId,
     InvalidMessage,
     InvalidSeq,
+    NotWatching,
     ParentCycle,
     ParentMissingReference,
     PermissionDenied,
@@ -461,10 +469,21 @@ pub enum ClientMessage {
         request_id: Uuid,
         id: Uuid,
     },
+    /// Posts a presence value for a block the client is currently watching.
+    /// The server keeps the latest value per `(client, presence_id)` and
+    /// broadcasts it to every other client watching the block.
     PostPresence {
         request_id: Uuid,
         id: Uuid,
+        presence_id: Uuid,
         data: Vec<u8>,
+    },
+    /// Removes a presence value this client previously posted for `id`,
+    /// notifying every other client watching the block.
+    ClearPresence {
+        request_id: Uuid,
+        id: Uuid,
+        presence_id: Uuid,
     },
     SetBlockParent {
         request_id: Uuid,
@@ -507,6 +526,7 @@ impl ClientMessage {
             | Self::ReadBlock { request_id, .. }
             | Self::UnwatchBlock { request_id, .. }
             | Self::PostPresence { request_id, .. }
+            | Self::ClearPresence { request_id, .. }
             | Self::SetBlockParent { request_id, .. }
             | Self::ListReferences { request_id, .. }
             | Self::UnwatchReferences { request_id, .. }
@@ -571,9 +591,16 @@ pub enum ServerMessage {
     BatchUpdated {
         operations: Vec<BlockOperation>,
     },
+    /// A presence value changed for a block being watched. `client_id`
+    /// identifies which watcher it belongs to, never the recipient's own
+    /// connection: the server never echoes a client's presence back to
+    /// itself. `data` is `None` when the value was cleared, either
+    /// explicitly or because that client stopped watching the block.
     Presence {
         id: Uuid,
-        data: Vec<u8>,
+        client_id: ClientId,
+        presence_id: Uuid,
+        data: Option<Vec<u8>>,
     },
     BlockPropertyUpdated {
         id: Uuid,

@@ -67,6 +67,7 @@ fn client_debug_snapshot_reports_active_worker_state() {
         Arc::clone(&debug),
         Arc::clone(&cache),
         Arc::new(RwLock::new(HashMap::new())),
+        Arc::new(RwLock::new(HashMap::new())),
     );
     state.connected = true;
     state.sending_paused = true;

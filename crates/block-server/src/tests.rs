@@ -31,6 +31,12 @@ mod operation_ids_are_idempotent_and_conflicts_are_rejected;
 mod parent_watch_updates;
 mod pending_invitation_can_be_accepted_after_registration;
 mod pending_invitation_can_be_declined;
+mod presence_can_be_cleared_explicitly;
+mod presence_is_broadcast_to_other_watchers_but_not_the_poster;
+mod presence_is_cleared_when_a_client_disconnects;
+mod presence_is_cleared_when_a_client_unwatches;
+mod presence_replays_existing_values_to_a_new_watcher;
+mod presence_requires_watching_the_block;
 mod preserves_reference_order;
 mod property_values_over_the_size_limit_are_rejected;
 mod read_returns_parent;
@@ -480,5 +486,75 @@ mod support {
             ServerMessage::ReadBlock { parent, .. } => parent,
             message => panic!("expected block read, got {message:?}"),
         }
+    }
+
+    pub async fn create_and_watch(socket: &mut Socket, id: Uuid) -> ServerMessage {
+        request(
+            socket,
+            ClientMessage::CreateBlock {
+                request_id: Uuid::new_v4(),
+                id,
+                block_type: Uuid::new_v4(),
+                data: vec![],
+                properties: BTreeMap::new(),
+                dynamic_artifact: false,
+                references: vec![],
+                watch: true,
+            },
+        )
+        .await
+    }
+
+    pub async fn watch(socket: &mut Socket, id: Uuid) -> ServerMessage {
+        request(
+            socket,
+            ClientMessage::ReadBlock {
+                request_id: Uuid::new_v4(),
+                id,
+                watch: true,
+            },
+        )
+        .await
+    }
+
+    pub async fn unwatch(socket: &mut Socket, id: Uuid) -> ServerMessage {
+        request(
+            socket,
+            ClientMessage::UnwatchBlock {
+                request_id: Uuid::new_v4(),
+                id,
+            },
+        )
+        .await
+    }
+
+    pub async fn post_presence(
+        socket: &mut Socket,
+        id: Uuid,
+        presence_id: Uuid,
+        data: Vec<u8>,
+    ) -> ServerMessage {
+        request(
+            socket,
+            ClientMessage::PostPresence {
+                request_id: Uuid::new_v4(),
+                id,
+                presence_id,
+                data,
+            },
+        )
+        .await
+    }
+
+    pub async fn clear_presence(socket: &mut Socket, id: Uuid, presence_id: Uuid) -> ServerMessage {
+        request(
+            socket,
+            ClientMessage::ClearPresence {
+                request_id: Uuid::new_v4(),
+                id,
+                presence_id,
+            },
+        )
+        .await
     }
 }

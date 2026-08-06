@@ -22,8 +22,10 @@ use block::{
     WorkspaceRole,
 };
 use block_client::{
-    blocks::workspace_index::BlockEntry, properties::MAX_NAME_BYTES, BlockClient,
-    DynamicArtifactDescriptor, ManagementClient, ReferenceList, Session,
+    blocks::workspace_index::BlockEntry,
+    presence::{pick_free_color, PresenceColor, UserActive},
+    properties::MAX_NAME_BYTES,
+    BlockClient, DynamicArtifactDescriptor, ManagementClient, ReferenceList, Session,
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
@@ -195,6 +197,10 @@ struct BlockApp {
     dock_state: DockState<DockTab>,
     files_compact: bool,
     active_tab: Option<Uuid>,
+    /// Blocks currently announced as [`UserActive`] presence, i.e. whose tab
+    /// was on screen as of the last frame. Kept in sync by
+    /// [`BlockApp::update_active_presence`].
+    active_presence: HashSet<Uuid>,
     sidebar_reveal: Option<Uuid>,
     pending_transfers: Vec<PendingTransfer>,
     rename: Option<RenameState>,
@@ -507,6 +513,7 @@ impl BlockApp {
             dock_state: default_dock_state(),
             files_compact: false,
             active_tab: None,
+            active_presence: HashSet::new(),
             sidebar_reveal: None,
             pending_transfers: Vec::new(),
             rename: None,
@@ -2167,11 +2174,14 @@ impl BlockApp {
             actions: Vec::new(),
             navigations: Vec::new(),
             tabs_to_close: Vec::new(),
+            active_blocks: HashSet::new(),
         };
         DockArea::new(&mut dock_state).show_inside(ui, &mut viewer);
         for editor in viewer.app.editors.values_mut() {
             editor.finish_frame();
         }
+        let active_blocks = std::mem::take(&mut viewer.active_blocks);
+        viewer.app.update_active_presence(active_blocks);
         let tabs_to_close = std::mem::take(&mut viewer.tabs_to_close);
         for tab_id in tabs_to_close {
             let Some((path, current)) =
@@ -2245,6 +2255,26 @@ impl BlockApp {
         }
     }
 
+    /// Reconciles [`UserActive`] presence with which blocks were actually on
+    /// screen this frame: clears it for blocks that left, and posts it (with
+    /// a color no one else visible on that block is already using) for
+    /// blocks that newly appeared.
+    fn update_active_presence(&mut self, visible: HashSet<Uuid>) {
+        for id in self.active_presence.difference(&visible) {
+            self.client.clear_presence::<UserActive>(*id);
+        }
+        for id in visible.difference(&self.active_presence) {
+            let used = self
+                .client
+                .presence::<UserActive>(*id)
+                .into_iter()
+                .map(|(_, user)| user.color);
+            let color = pick_free_color(used);
+            self.client.post_presence(*id, &UserActive { color });
+        }
+        self.active_presence = visible;
+    }
+
     fn show_statusbar(&mut self, ui: &mut egui::Ui, active: Uuid) -> Option<BlockTabHistoryItem> {
         let editor = self.editors.get(&active)?;
         let block_type = editor.block_type();
@@ -2265,8 +2295,21 @@ impl BlockApp {
         let mut navigate = None;
         let mut context_action = None;
 
+        let active_users = self.client.presence::<UserActive>(active);
+
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("Type: {type_name}"));
+            if !active_users.is_empty() {
+                ui.separator();
+                ui.label("Also viewing:");
+                for (_, user) in &active_users {
+                    let (rect, response) =
+                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter()
+                        .rect_filled(rect, 2.0, presence_color_rgb(user.color));
+                    response.on_hover_text("Someone else is viewing this document");
+                }
+            }
             ui.separator();
             let Some(relationships) = &relationships else {
                 ui.label("Relationships loading…");
@@ -2476,6 +2519,10 @@ struct BlockTabViewer<'a> {
     actions: Vec<(Uuid, Uuid, EditorAction)>,
     navigations: Vec<(Uuid, TabNavigation)>,
     tabs_to_close: Vec<Uuid>,
+    /// Blocks whose tab is on screen this frame, collected as tabs are drawn
+    /// so [`BlockApp::update_active_presence`] can tell who newly appeared
+    /// and who left once the dock has finished drawing.
+    active_blocks: HashSet<Uuid>,
 }
 
 impl TabViewer for BlockTabViewer<'_> {
@@ -2538,6 +2585,7 @@ impl TabViewer for BlockTabViewer<'_> {
                 if let Some(editor) = self.app.editors.get_mut(&current.id) {
                     editor.set_tab_active(true);
                 }
+                self.active_blocks.insert(current.id);
                 let mut status_navigation = None;
                 egui::Panel::bottom(egui::Id::new(("block-statusbar", tab.id)))
                     .resizable(false)
@@ -2836,6 +2884,20 @@ fn access_mode_icon(access: BlockAccess) -> Option<&'static str> {
         BlockAccess::Edit => None,
         BlockAccess::View => Some(ICON_VISIBILITY.codepoint),
         BlockAccess::KnowExists | BlockAccess::None => Some(ICON_LOCK.codepoint),
+    }
+}
+
+/// The concrete color an active-user indicator is painted in.
+fn presence_color_rgb(color: PresenceColor) -> egui::Color32 {
+    match color {
+        PresenceColor::Red => egui::Color32::from_rgb(224, 82, 82),
+        PresenceColor::Orange => egui::Color32::from_rgb(230, 140, 50),
+        PresenceColor::Yellow => egui::Color32::from_rgb(214, 179, 41),
+        PresenceColor::Green => egui::Color32::from_rgb(84, 171, 90),
+        PresenceColor::Teal => egui::Color32::from_rgb(46, 173, 168),
+        PresenceColor::Blue => egui::Color32::from_rgb(74, 134, 227),
+        PresenceColor::Purple => egui::Color32::from_rgb(150, 100, 214),
+        PresenceColor::Pink => egui::Color32::from_rgb(224, 104, 168),
     }
 }
 
