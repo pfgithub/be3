@@ -25,7 +25,7 @@ async fn reads_replay_contiguous_operation_records() {
             block_type,
             Uuid::new_v4(),
             vec![1],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             vec![],
         )
@@ -39,7 +39,7 @@ async fn reads_replay_contiguous_operation_records() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![2],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             ReferenceDelta::default(),
         )
@@ -53,7 +53,7 @@ async fn reads_replay_contiguous_operation_records() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![3],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             ReferenceDelta::default(),
         )

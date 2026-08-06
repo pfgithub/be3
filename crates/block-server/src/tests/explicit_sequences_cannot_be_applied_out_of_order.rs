@@ -24,7 +24,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             vec![],
         )
@@ -40,7 +40,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 vec![2],
-                "Block".into(),
+                BTreeMap::new(),
                 false,
                 ReferenceDelta::default(),
             )
@@ -58,7 +58,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![1],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             ReferenceDelta::default(),
         )
@@ -72,7 +72,7 @@ async fn explicit_sequences_cannot_be_applied_out_of_order() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![2],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             ReferenceDelta::default(),
         )

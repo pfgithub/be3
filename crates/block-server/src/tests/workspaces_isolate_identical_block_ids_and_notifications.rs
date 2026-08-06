@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::support::{create, create_workspace, references, request, TestServer};
 use block::{BlockReferenceList, ClientMessage, ErrorCode, ReferenceDelta, ServerMessage};
 use futures_util::StreamExt;
@@ -53,7 +55,7 @@ async fn workspaces_isolate_identical_block_ids_and_notifications() {
             seq: None,
             operation_id: Uuid::new_v4(),
             operation: vec![1],
-            implicit_name: "Second".into(),
+            properties: BTreeMap::new(),
             dynamic_artifact: false,
             references: ReferenceDelta::default(),
         },

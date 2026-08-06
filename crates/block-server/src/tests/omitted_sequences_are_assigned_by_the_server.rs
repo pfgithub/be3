@@ -24,7 +24,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             vec![],
         )
@@ -39,7 +39,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![1],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             ReferenceDelta::default(),
         )
@@ -53,7 +53,7 @@ async fn omitted_sequences_are_assigned_by_the_server() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![2],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             ReferenceDelta::default(),
         )

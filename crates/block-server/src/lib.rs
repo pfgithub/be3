@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     path::PathBuf,
     sync::{
@@ -19,7 +19,7 @@ use block::{
     Account, BlockAccess, BlockAccessEntry, BlockOperation, BlockParent, BlockReference,
     BlockReferenceList, ClientMessage, CommandKind, ErrorCode, ManagementClientMessage,
     ManagementErrorCode, ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage,
-    Workspace, WorkspaceInvitation, WorkspaceRole, MAX_NAME_BYTES,
+    Workspace, WorkspaceInvitation, WorkspaceRole, MAX_PROPERTY_VALUE_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
@@ -473,7 +473,7 @@ async fn handle_text_message(
             id,
             block_type,
             data,
-            implicit_name,
+            properties,
             dynamic_artifact,
             references,
             watch,
@@ -499,7 +499,7 @@ async fn handle_text_message(
                     block_type,
                     account_id,
                     data,
-                    implicit_name,
+                    properties,
                     dynamic_artifact,
                     references,
                 )
@@ -527,7 +527,7 @@ async fn handle_text_message(
             seq,
             operation_id,
             operation,
-            implicit_name,
+            properties,
             dynamic_artifact,
             references,
         } => {
@@ -553,13 +553,13 @@ async fn handle_text_message(
                     operation_id,
                     account_id,
                     operation,
-                    implicit_name,
+                    properties,
                     dynamic_artifact,
                     references,
                 )
                 .await
             {
-                Ok(UpdateOutcome::Inserted(record, name)) => (
+                Ok(UpdateOutcome::Inserted(record, properties)) => (
                     ServerMessage::Ok {
                         request_id,
                         command: CommandKind::UpdateBlock,
@@ -569,7 +569,7 @@ async fn handle_text_message(
                     },
                     Some(ServerMessage::BlockUpdated {
                         id,
-                        name,
+                        properties,
                         operation: record,
                     }),
                 ),
@@ -655,25 +655,25 @@ async fn handle_text_message(
                         update.operation_id,
                         account_id,
                         update.operation,
-                        update.implicit_name,
+                        update.properties,
                         update.dynamic_artifact,
                         update.references,
                     )
                     .await
                 {
-                    Ok(UpdateOutcome::Inserted(operation, name)) => {
+                    Ok(UpdateOutcome::Inserted(operation, properties)) => {
                         let operation = BlockOperation {
                             id: update.id,
-                            name,
+                            properties,
                             operation,
                         };
                         inserted.push(operation.clone());
                         operations.push(operation);
                     }
-                    Ok(UpdateOutcome::Duplicate(operation, name)) => {
+                    Ok(UpdateOutcome::Duplicate(operation, properties)) => {
                         operations.push(BlockOperation {
                             id: update.id,
-                            name,
+                            properties,
                             operation,
                         });
                     }
@@ -725,7 +725,7 @@ async fn handle_text_message(
                         snapshot_seq: read.snapshot_seq,
                         operations: read.operations,
                         parent: read.parent,
-                        name: read.name,
+                        properties: read.properties,
                         access,
                     }
                 }
@@ -798,32 +798,36 @@ async fn handle_text_message(
             };
             (response, None)
         }
-        ClientMessage::SetBlockName {
+        ClientMessage::SetBlockProperty {
             request_id,
             id,
-            name,
+            key,
+            value,
         } => {
             if !store.access(identity).await.get(id).can_edit() {
                 return (
-                    permission_denied(request_id, CommandKind::SetBlockName, id),
+                    permission_denied(request_id, CommandKind::SetBlockProperty, id),
                     None,
                 );
             }
             let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
-            match store.set_name_unlocked(workspace_id, id, name).await {
-                Ok(name) => (
+            match store
+                .set_property_unlocked(workspace_id, id, key, value)
+                .await
+            {
+                Ok(value) => (
                     ServerMessage::Ok {
                         request_id,
-                        command: CommandKind::SetBlockName,
+                        command: CommandKind::SetBlockProperty,
                         id,
                         seq: None,
                         operation_id: None,
                     },
-                    Some(ServerMessage::BlockNameUpdated { id, name }),
+                    Some(ServerMessage::BlockPropertyUpdated { id, key, value }),
                 ),
                 Err(error) => (
-                    error.to_response(request_id, CommandKind::SetBlockName, id),
+                    error.to_response(request_id, CommandKind::SetBlockProperty, id),
                     None,
                 ),
             }
@@ -1535,11 +1539,11 @@ impl BlockStore {
         block_type: Uuid,
         author: Uuid,
         data: Vec<u8>,
-        implicit_name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
         dynamic_artifact: bool,
         references: Vec<Uuid>,
     ) -> Result<(), StoreError> {
-        validate_name(&implicit_name)?;
+        validate_properties(&properties)?;
         let references = normalize_ids(references);
         let mut dependencies = self.dependencies.lock().await;
         let workspace = dependencies.entry(workspace_id).or_default();
@@ -1558,8 +1562,7 @@ impl BlockStore {
             DependencyBlock {
                 block_type,
                 author,
-                name: implicit_name.clone(),
-                explicit_name: None,
+                properties,
                 dynamic_artifact,
                 parent: BlockParent::Orphaned,
                 references,
@@ -1578,16 +1581,15 @@ impl BlockStore {
         let transaction = database.transaction()?;
         transaction.execute(
             "INSERT INTO blocks (
-                workspace_id, id, block_type, author, snapshot, snapshot_seq, name, explicit_name,
+                workspace_id, id, block_type, author, snapshot, snapshot_seq,
                 dynamic_artifact, parent_kind, parent_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, ?7, 0, NULL)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 0, NULL)",
             params![
                 workspace_id.to_string(),
                 id.to_string(),
                 block_type.to_string(),
                 author.to_string(),
                 data,
-                implicit_name,
                 dynamic_artifact,
             ],
         )?;
@@ -1606,11 +1608,11 @@ impl BlockStore {
         operation_id: Uuid,
         author: Uuid,
         operation: Vec<u8>,
-        implicit_name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
         dynamic_artifact: bool,
         references: ReferenceDelta,
     ) -> Result<UpdateOutcome, StoreError> {
-        validate_name(&implicit_name)?;
+        validate_properties(&properties)?;
         let (exists, records) = {
             let database = self.database.lock().await;
             let exists = database
@@ -1637,15 +1639,15 @@ impl BlockStore {
         {
             if existing.operation == operation && existing.references == references {
                 let dependencies = self.dependencies.lock().await;
-                let name = dependencies
+                let properties = dependencies
                     .get(&workspace_id)
                     .ok_or(StoreError::BlockNotFound)?
                     .blocks
                     .get(&id)
                     .ok_or(StoreError::BlockNotFound)?
-                    .name
+                    .properties
                     .clone();
-                return Ok(UpdateOutcome::Duplicate(existing.clone(), name));
+                return Ok(UpdateOutcome::Duplicate(existing.clone(), properties));
             }
             return Err(StoreError::ConflictingOperationId);
         }
@@ -1673,11 +1675,9 @@ impl BlockStore {
             .blocks
             .get_mut(&id)
             .ok_or(StoreError::BlockNotFound)?;
-        if block.explicit_name.is_none() {
-            block.name = implicit_name;
-        }
+        block.properties = properties;
         block.dynamic_artifact = dynamic_artifact;
-        let name = block.name.clone();
+        let properties = block.properties.clone();
         let mut database = self.database.lock().await;
         let transaction = database.transaction()?;
         transaction.execute(
@@ -1697,7 +1697,7 @@ impl BlockStore {
         persist_dependencies(&transaction, workspace_id, &updated)?;
         transaction.commit()?;
         *workspace = updated;
-        Ok(UpdateOutcome::Inserted(record, name))
+        Ok(UpdateOutcome::Inserted(record, properties))
     }
 
     async fn read_block_unlocked(
@@ -1743,7 +1743,7 @@ impl BlockStore {
             snapshot_seq,
             operations,
             parent: dependency.parent,
-            name: dependency.name.clone(),
+            properties: dependency.properties.clone(),
         })
     }
 
@@ -1765,13 +1765,14 @@ impl BlockStore {
         Ok(())
     }
 
-    async fn set_name_unlocked(
+    async fn set_property_unlocked(
         &self,
         workspace_id: Uuid,
         id: Uuid,
-        name: String,
-    ) -> Result<String, StoreError> {
-        validate_name(&name)?;
+        key: Uuid,
+        value: Vec<u8>,
+    ) -> Result<Vec<u8>, StoreError> {
+        validate_property_value(&value)?;
         let mut dependencies = self.dependencies.lock().await;
         let workspace = dependencies.entry(workspace_id).or_default();
         let mut updated = workspace.clone();
@@ -1779,14 +1780,13 @@ impl BlockStore {
             .blocks
             .get_mut(&id)
             .ok_or(StoreError::BlockNotFound)?;
-        block.name.clone_from(&name);
-        block.explicit_name = Some(name.clone());
+        block.properties.insert(key, value.clone());
         let mut database = self.database.lock().await;
         let transaction = database.transaction()?;
         persist_dependencies(&transaction, workspace_id, &updated)?;
         transaction.commit()?;
         *workspace = updated;
-        Ok(name)
+        Ok(value)
     }
 
     async fn references(
@@ -1852,7 +1852,7 @@ impl BlockStore {
                     id,
                     block_type: block.block_type,
                     author: block.author,
-                    name: block.name.clone(),
+                    properties: block.properties.clone(),
                     parent: block.parent,
                     references: block
                         .references
@@ -2014,8 +2014,8 @@ impl WorkspaceAccess {
 }
 
 enum UpdateOutcome {
-    Inserted(OperationRecord, String),
-    Duplicate(OperationRecord, String),
+    Inserted(OperationRecord, BTreeMap<Uuid, Vec<u8>>),
+    Duplicate(OperationRecord, BTreeMap<Uuid, Vec<u8>>),
 }
 
 struct BlockRead {
@@ -2025,7 +2025,7 @@ struct BlockRead {
     snapshot_seq: u64,
     operations: Vec<OperationRecord>,
     parent: BlockParent,
-    name: String,
+    properties: BTreeMap<Uuid, Vec<u8>>,
 }
 
 #[derive(Clone, Default)]
@@ -2215,8 +2215,9 @@ impl DependencyState {
 struct DependencyBlock {
     block_type: Uuid,
     author: Uuid,
-    name: String,
-    explicit_name: Option<String>,
+    /// Every property key and value recorded against the block. Properties
+    /// are opaque to the server; only the client interprets them.
+    properties: BTreeMap<Uuid, Vec<u8>>,
     /// Whether the block is generated from another one. The server never reads
     /// what a block holds, so its author reports this alongside the name.
     dynamic_artifact: bool,
@@ -2227,13 +2228,19 @@ struct DependencyBlock {
     grants: HashMap<Uuid, BlockAccess>,
 }
 
-fn validate_name(name: &str) -> Result<(), StoreError> {
-    if name.len() > MAX_NAME_BYTES {
+fn validate_property_value(value: &[u8]) -> Result<(), StoreError> {
+    if value.len() > MAX_PROPERTY_VALUE_BYTES {
         return Err(StoreError::InvalidMessage(format!(
-            "block name exceeds {MAX_NAME_BYTES} bytes"
+            "property value exceeds {MAX_PROPERTY_VALUE_BYTES} bytes"
         )));
     }
     Ok(())
+}
+
+fn validate_properties(properties: &BTreeMap<Uuid, Vec<u8>>) -> Result<(), StoreError> {
+    properties
+        .values()
+        .try_for_each(|value| validate_property_value(value))
 }
 
 fn normalize_email(email: &str) -> Result<String, ManagementStoreError> {
@@ -2247,9 +2254,13 @@ fn normalize_email(email: &str) -> Result<String, ManagementStoreError> {
     Ok(email)
 }
 
+/// How long an account's display name may be. Unrelated to block properties;
+/// just a reasonable length cap for a person's name.
+const MAX_DISPLAY_NAME_BYTES: usize = 128;
+
 fn normalize_display_name(name: &str) -> Result<String, ManagementStoreError> {
     let name = name.trim();
-    if name.is_empty() || name.len() > MAX_NAME_BYTES {
+    if name.is_empty() || name.len() > MAX_DISPLAY_NAME_BYTES {
         return Err(ManagementStoreError::InvalidName);
     }
     Ok(name.to_owned())
@@ -2439,8 +2450,6 @@ fn initialize_database(connection: &mut Connection) -> Result<(), StoreError> {
             author          TEXT NOT NULL,
             snapshot        BLOB NOT NULL,
             snapshot_seq    INTEGER NOT NULL CHECK (snapshot_seq >= 0),
-            name            TEXT NOT NULL,
-            explicit_name   TEXT,
             dynamic_artifact INTEGER NOT NULL CHECK (dynamic_artifact IN (0, 1)),
             parent_kind     INTEGER NOT NULL CHECK (parent_kind IN (0, 1, 2)),
             parent_id       TEXT,
@@ -2449,6 +2458,16 @@ fn initialize_database(connection: &mut Connection) -> Result<(), StoreError> {
                 OR (parent_kind != 2 AND parent_id IS NULL)
             ),
             PRIMARY KEY (workspace_id, id)
+        );
+
+        CREATE TABLE IF NOT EXISTS block_properties (
+            workspace_id    TEXT NOT NULL,
+            block_id        TEXT NOT NULL,
+            key             TEXT NOT NULL,
+            value           BLOB NOT NULL,
+            PRIMARY KEY (workspace_id, block_id, key),
+            FOREIGN KEY (workspace_id, block_id)
+                REFERENCES blocks(workspace_id, id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS block_references (
@@ -2540,12 +2559,14 @@ const EXPECTED_TABLES: &[(&str, &[&str])] = &[
             "author",
             "snapshot",
             "snapshot_seq",
-            "name",
-            "explicit_name",
             "dynamic_artifact",
             "parent_kind",
             "parent_id",
         ],
+    ),
+    (
+        "block_properties",
+        &["workspace_id", "block_id", "key", "value"],
     ),
     (
         "block_references",
@@ -2690,7 +2711,7 @@ fn load_dependencies(
     let mut states: HashMap<Uuid, DependencyState> = HashMap::new();
     {
         let mut statement = connection.prepare(
-            "SELECT workspace_id, id, block_type, author, name, explicit_name, dynamic_artifact,
+            "SELECT workspace_id, id, block_type, author, dynamic_artifact,
                     parent_kind, parent_id
              FROM blocks ORDER BY workspace_id, rowid",
         )?;
@@ -2700,25 +2721,14 @@ fn load_dependencies(
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, bool>(6)?,
-                row.get::<_, i64>(7)?,
-                row.get::<_, Option<String>>(8)?,
+                row.get::<_, bool>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         })?;
         for row in rows {
-            let (
-                workspace_id,
-                id,
-                block_type,
-                author,
-                name,
-                explicit_name,
-                dynamic_artifact,
-                parent_kind,
-                parent_id,
-            ) = row?;
+            let (workspace_id, id, block_type, author, dynamic_artifact, parent_kind, parent_id) =
+                row?;
             let parent = decode_parent(parent_kind, parent_id)?;
             states
                 .entry(parse_uuid(&workspace_id)?)
@@ -2729,8 +2739,7 @@ fn load_dependencies(
                     DependencyBlock {
                         block_type: parse_uuid(&block_type)?,
                         author: parse_uuid(&author)?,
-                        name,
-                        explicit_name,
+                        properties: BTreeMap::new(),
                         dynamic_artifact,
                         parent,
                         references: Vec::new(),
@@ -2738,6 +2747,29 @@ fn load_dependencies(
                         grants: HashMap::new(),
                     },
                 );
+        }
+    }
+
+    {
+        let mut statement = connection
+            .prepare("SELECT workspace_id, block_id, key, value FROM block_properties")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (workspace_id, block_id, key, value) = row?;
+            let block_id = parse_uuid(&block_id)?;
+            states
+                .get_mut(&parse_uuid(&workspace_id)?)
+                .and_then(|state| state.blocks.get_mut(&block_id))
+                .ok_or_else(|| StoreError::InvalidStorage("property block is missing".into()))?
+                .properties
+                .insert(parse_uuid(&key)?, value);
         }
     }
 
@@ -2823,18 +2855,19 @@ fn persist_dependencies(
         "DELETE FROM block_references WHERE workspace_id = ?1",
         [workspace_id.to_string()],
     )?;
+    transaction.execute(
+        "DELETE FROM block_properties WHERE workspace_id = ?1",
+        [workspace_id.to_string()],
+    )?;
     for (&id, block) in &dependencies.blocks {
         let (parent_kind, parent_id) = encode_parent(block.parent);
         let updated = transaction.execute(
             "UPDATE blocks
-             SET name = ?3, explicit_name = ?4, dynamic_artifact = ?5, parent_kind = ?6,
-                 parent_id = ?7
+             SET dynamic_artifact = ?3, parent_kind = ?4, parent_id = ?5
              WHERE workspace_id = ?1 AND id = ?2",
             params![
                 workspace_id.to_string(),
                 id.to_string(),
-                block.name,
-                block.explicit_name,
                 block.dynamic_artifact,
                 parent_kind,
                 parent_id,
@@ -2844,6 +2877,18 @@ fn persist_dependencies(
             return Err(StoreError::InvalidStorage(
                 "dependency metadata references a missing block".into(),
             ));
+        }
+        for (key, value) in &block.properties {
+            transaction.execute(
+                "INSERT INTO block_properties (workspace_id, block_id, key, value)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    workspace_id.to_string(),
+                    id.to_string(),
+                    key.to_string(),
+                    value
+                ],
+            )?;
         }
         for (position, reference) in block.references.iter().enumerate() {
             transaction.execute(

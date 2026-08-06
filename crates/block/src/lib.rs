@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -220,7 +222,12 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
 
     fn apply_operation(block: &mut Self, operation: &Self::Operation);
 
-    fn implicit_name(&self) -> String;
+    /// A name this block type can derive from its own content, or `None` if
+    /// it has nothing more useful to say than its type. The result becomes
+    /// the block's `name` property unless a client has manually renamed it.
+    fn implicit_name(&self) -> Option<String> {
+        None
+    }
 
     fn transform_operation(_local: &mut Self::Operation, _remote: &Self::Operation) {}
 
@@ -323,14 +330,14 @@ pub struct ReferenceDelta {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct BlockOperation {
     pub id: Uuid,
-    pub name: String,
+    pub properties: BTreeMap<Uuid, Vec<u8>>,
     pub operation: OperationRecord,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct BlockUpdate {
     pub id: Uuid,
-    pub implicit_name: String,
+    pub properties: BTreeMap<Uuid, Vec<u8>>,
     /// Whether the block is generated from another one after this update.
     pub dynamic_artifact: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -364,7 +371,10 @@ pub struct BlockReference {
     #[serde(rename = "type")]
     pub block_type: Uuid,
     pub author: Uuid,
-    pub name: String,
+    /// Every property key and value recorded against the block. Properties
+    /// are opaque to the server; only the client interprets them (e.g. the
+    /// well-known "name" property).
+    pub properties: BTreeMap<Uuid, Vec<u8>>,
     pub parent: BlockParent,
     pub references: usize,
     /// Whether the block is generated from another one, so a client can mark
@@ -375,7 +385,9 @@ pub struct BlockReference {
     pub access: BlockAccess,
 }
 
-pub const MAX_NAME_BYTES: usize = 128;
+/// A generic guard against abusively large property values. The server does
+/// not interpret properties, so this is the only limit it enforces.
+pub const MAX_PROPERTY_VALUE_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -387,11 +399,11 @@ pub enum CommandKind {
     UnwatchBlock,
     PostPresence,
     SetBlockParent,
-    SetBlockName,
     ListReferences,
     UnwatchReferences,
     ListBlockAccess,
     SetBlockAccess,
+    SetBlockProperty,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -420,7 +432,7 @@ pub enum ClientMessage {
         #[serde(rename = "type")]
         block_type: Uuid,
         data: Vec<u8>,
-        implicit_name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
         dynamic_artifact: bool,
         references: Vec<Uuid>,
         watch: bool,
@@ -432,7 +444,7 @@ pub enum ClientMessage {
         seq: Option<u64>,
         operation_id: Uuid,
         operation: Vec<u8>,
-        implicit_name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
         dynamic_artifact: bool,
         references: ReferenceDelta,
     },
@@ -459,10 +471,11 @@ pub enum ClientMessage {
         id: Uuid,
         parent: BlockParent,
     },
-    SetBlockName {
+    SetBlockProperty {
         request_id: Uuid,
         id: Uuid,
-        name: String,
+        key: Uuid,
+        value: Vec<u8>,
     },
     ListReferences {
         request_id: Uuid,
@@ -495,11 +508,11 @@ impl ClientMessage {
             | Self::UnwatchBlock { request_id, .. }
             | Self::PostPresence { request_id, .. }
             | Self::SetBlockParent { request_id, .. }
-            | Self::SetBlockName { request_id, .. }
             | Self::ListReferences { request_id, .. }
             | Self::UnwatchReferences { request_id, .. }
             | Self::ListBlockAccess { request_id, .. }
-            | Self::SetBlockAccess { request_id, .. } => *request_id,
+            | Self::SetBlockAccess { request_id, .. }
+            | Self::SetBlockProperty { request_id, .. } => *request_id,
         }
     }
 }
@@ -528,7 +541,7 @@ pub enum ServerMessage {
         snapshot_seq: u64,
         operations: Vec<OperationRecord>,
         parent: BlockParent,
-        name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
         /// What the reading account may do with the block, so the client knows
         /// whether to let it be changed without asking the server first.
         access: BlockAccess,
@@ -552,7 +565,7 @@ pub enum ServerMessage {
     },
     BlockUpdated {
         id: Uuid,
-        name: String,
+        properties: BTreeMap<Uuid, Vec<u8>>,
         operation: OperationRecord,
     },
     BatchUpdated {
@@ -562,9 +575,10 @@ pub enum ServerMessage {
         id: Uuid,
         data: Vec<u8>,
     },
-    BlockNameUpdated {
+    BlockPropertyUpdated {
         id: Uuid,
-        name: String,
+        key: Uuid,
+        value: Vec<u8>,
     },
     References {
         request_id: Uuid,
@@ -589,7 +603,7 @@ impl ServerMessage {
             Self::Ok { id, .. }
             | Self::ReadBlock { id, .. }
             | Self::BlockUpdated { id, .. }
-            | Self::BlockNameUpdated { id, .. }
+            | Self::BlockPropertyUpdated { id, .. }
             | Self::BlockAccessList { id, .. }
             | Self::Presence { id, .. } => Some(*id),
             Self::BatchOk { .. }

@@ -15,7 +15,6 @@ mod block_connections_require_a_valid_token;
 mod block_connections_require_workspace_membership;
 mod dependency_state_survives_a_server_restart;
 mod editors_only_reach_blocks_they_authored_or_were_granted;
-mod explicit_name_overrides_implicit_names_and_updates_both_kinds_of_watch;
 mod explicit_sequences_cannot_be_applied_out_of_order;
 mod listings_report_whether_a_block_is_a_dynamic_artifact;
 mod lists_backrefs_with_relationship_metadata;
@@ -27,13 +26,13 @@ mod logout_revokes_the_session_token;
 mod management_answers_a_cors_preflight;
 mod merges_reference_deltas_from_concurrent_clients;
 mod missing_references_reject_creates_and_do_not_commit_updates;
-mod names_longer_than_128_utf8_bytes_are_rejected;
 mod omitted_sequences_are_assigned_by_the_server;
 mod operation_ids_are_idempotent_and_conflicts_are_rejected;
 mod parent_watch_updates;
 mod pending_invitation_can_be_accepted_after_registration;
 mod pending_invitation_can_be_declined;
 mod preserves_reference_order;
+mod property_values_over_the_size_limit_are_rejected;
 mod read_returns_parent;
 mod reads_replay_contiguous_operation_records;
 mod reference_watch_updates_when_a_listed_blocks_parent_changes;
@@ -93,6 +92,7 @@ mod support {
     #![allow(dead_code)]
 
     use std::{
+        collections::BTreeMap,
         ops::Deref,
         path::{Path, PathBuf},
     };
@@ -404,7 +404,7 @@ mod support {
                 id,
                 block_type: Uuid::new_v4(),
                 data: vec![],
-                implicit_name: "Block".into(),
+                properties: BTreeMap::new(),
                 dynamic_artifact: false,
                 references,
                 watch: false,
@@ -427,7 +427,7 @@ mod support {
                 seq: None,
                 operation_id: Uuid::new_v4(),
                 operation: vec![],
-                implicit_name: "Block".into(),
+                properties: BTreeMap::new(),
                 dynamic_artifact: false,
                 references: ReferenceDelta { before, after },
             },

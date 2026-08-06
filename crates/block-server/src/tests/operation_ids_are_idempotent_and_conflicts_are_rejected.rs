@@ -24,7 +24,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![1],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             vec![],
         )
@@ -41,7 +41,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
                 operation_id,
                 Uuid::new_v4(),
                 vec![2],
-                "Block".into(),
+                BTreeMap::new(),
                 false,
                 ReferenceDelta::default(),
             )
@@ -58,7 +58,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
                 operation_id,
                 Uuid::new_v4(),
                 vec![2],
-                "Block".into(),
+                BTreeMap::new(),
                 false,
                 ReferenceDelta::default(),
             )
@@ -75,7 +75,7 @@ async fn operation_ids_are_idempotent_and_conflicts_are_rejected() {
                 operation_id,
                 Uuid::new_v4(),
                 vec![3],
-                "Block".into(),
+                BTreeMap::new(),
                 false,
                 ReferenceDelta::default(),
             )

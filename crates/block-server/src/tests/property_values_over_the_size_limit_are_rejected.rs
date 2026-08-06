@@ -1,11 +1,15 @@
+use std::collections::BTreeMap;
+
 use super::support::{request, TestServer};
-use block::{ClientMessage, ErrorCode, ServerMessage, MAX_NAME_BYTES};
+use block::{ClientMessage, ErrorCode, ServerMessage, MAX_PROPERTY_VALUE_BYTES};
 use uuid::Uuid;
 
 #[tokio::test]
-async fn names_longer_than_128_utf8_bytes_are_rejected() {
+async fn property_values_over_the_size_limit_are_rejected() {
     let server = TestServer::start().await;
     let mut socket = server.connect().await;
+    let mut properties = BTreeMap::new();
+    properties.insert(Uuid::new_v4(), vec![0u8; MAX_PROPERTY_VALUE_BYTES + 1]);
     let response = request(
         &mut socket,
         ClientMessage::CreateBlock {
@@ -13,7 +17,7 @@ async fn names_longer_than_128_utf8_bytes_are_rejected() {
             id: Uuid::new_v4(),
             block_type: Uuid::new_v4(),
             data: vec![],
-            implicit_name: "a".repeat(MAX_NAME_BYTES + 1),
+            properties,
             dynamic_artifact: false,
             references: vec![],
             watch: false,

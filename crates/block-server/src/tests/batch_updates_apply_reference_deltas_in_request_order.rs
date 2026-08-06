@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::support::{create, references, request, TestServer};
 use block::{BlockReferenceList, BlockUpdate, ClientMessage, ReferenceDelta, ServerMessage};
 use uuid::Uuid;
@@ -26,7 +28,7 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
                     seq: None,
                     operation_id: Uuid::new_v4(),
                     operation: vec![],
-                    implicit_name: "First".into(),
+                    properties: BTreeMap::new(),
                     dynamic_artifact: false,
                     references: ReferenceDelta {
                         before: vec![],
@@ -38,7 +40,7 @@ async fn batch_updates_apply_reference_deltas_in_request_order() {
                     seq: None,
                     operation_id: Uuid::new_v4(),
                     operation: vec![],
-                    implicit_name: "Second".into(),
+                    properties: BTreeMap::new(),
                     dynamic_artifact: false,
                     references: ReferenceDelta {
                         before: vec![],

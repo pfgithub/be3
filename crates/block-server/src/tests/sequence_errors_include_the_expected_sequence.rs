@@ -24,7 +24,7 @@ async fn sequence_errors_include_the_expected_sequence() {
             Uuid::new_v4(),
             Uuid::new_v4(),
             vec![],
-            "Block".into(),
+            BTreeMap::new(),
             false,
             vec![],
         )
@@ -39,7 +39,7 @@ async fn sequence_errors_include_the_expected_sequence() {
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 vec![],
-                "Block".into(),
+                BTreeMap::new(),
                 false,
                 ReferenceDelta::default(),
             )

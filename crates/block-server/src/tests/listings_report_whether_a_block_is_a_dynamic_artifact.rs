@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::support::{references, request, TestServer};
 use block::{BlockReferenceList, ClientMessage, ReferenceDelta, ServerMessage};
 use uuid::Uuid;
@@ -19,7 +21,7 @@ async fn listings_report_whether_a_block_is_a_dynamic_artifact() {
                 id,
                 block_type: Uuid::new_v4(),
                 data: vec![],
-                implicit_name: "Generated".into(),
+                properties: BTreeMap::new(),
                 dynamic_artifact: true,
                 references: vec![],
                 watch: false,
@@ -42,7 +44,7 @@ async fn listings_report_whether_a_block_is_a_dynamic_artifact() {
                 seq: None,
                 operation_id: Uuid::new_v4(),
                 operation: vec![],
-                implicit_name: "Generated".into(),
+                properties: BTreeMap::new(),
                 dynamic_artifact: false,
                 references: ReferenceDelta::default(),
             },

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::support::{create, references, request, TestServer};
 use block::{BlockReferenceList, ClientMessage, ReferenceDelta, ServerMessage};
 use uuid::Uuid;
@@ -38,7 +40,7 @@ async fn preserves_reference_order() {
                 seq: None,
                 operation_id: Uuid::new_v4(),
                 operation: vec![],
-                implicit_name: "Block".into(),
+                properties: BTreeMap::new(),
                 dynamic_artifact: false,
                 references: ReferenceDelta {
                     before: vec![second, first],
