@@ -505,7 +505,7 @@ impl InfiniteCanvasEditor {
                                     0.0,
                                 ),
                                 kind: CanvasEntityKind::Rectangle,
-                                style: CanvasEntityStyle::default(),
+                                style: self.default_entity_style(),
                                 group_id: None,
                                 locked: false,
                             });
@@ -523,7 +523,7 @@ impl InfiniteCanvasEditor {
                                     0.0,
                                 ),
                                 kind: CanvasEntityKind::Line,
-                                style: CanvasEntityStyle::default(),
+                                style: self.default_entity_style(),
                                 group_id: None,
                                 locked: false,
                             });
@@ -545,7 +545,7 @@ impl InfiniteCanvasEditor {
                                     text_style: CanvasTextStyle::default(),
                                     placeholder: "Text".into(),
                                 },
-                                style: CanvasEntityStyle::default(),
+                                style: self.default_entity_style(),
                                 group_id: None,
                                 locked: false,
                             });
@@ -848,7 +848,7 @@ impl InfiniteCanvasEditor {
                                 delta.y.atan2(delta.x),
                             ),
                             kind: CanvasEntityKind::Line,
-                            style: CanvasEntityStyle::default(),
+                            style: self.default_entity_style(),
                             group_id: None,
                             locked: false,
                         })
@@ -866,7 +866,7 @@ impl InfiniteCanvasEditor {
                                 0.0,
                             ),
                             kind: CanvasEntityKind::Rectangle,
-                            style: CanvasEntityStyle::default(),
+                            style: self.default_entity_style(),
                             group_id: None,
                             locked: false,
                         })
@@ -894,7 +894,7 @@ impl InfiniteCanvasEditor {
                                 },
                                 placeholder: "Text".into(),
                             },
-                            style: CanvasEntityStyle::default(),
+                            style: self.default_entity_style(),
                             group_id: None,
                             locked: false,
                         })
@@ -911,7 +911,8 @@ impl InfiniteCanvasEditor {
             }
             Gesture::Pen { points } => {
                 if points.len() >= 2 {
-                    self.add_entity(pen_entity(points));
+                    let style = self.default_entity_style();
+                    self.add_entity(pen_entity(points, style));
                 }
             }
             Gesture::SelectBox {

@@ -290,6 +290,7 @@ impl InfiniteCanvasEditor {
                 );
                 if !matches!(foreground, CommonValue::None) {
                     if let Some(color) = color_menu(ui, "Color", foreground) {
+                        self.remember_foreground(color);
                         self.update_selected(
                             entities,
                             |kind| {
@@ -393,6 +394,7 @@ impl InfiniteCanvasEditor {
                     ui.strong("Rectangle");
                     let fill = common_value(rectangles.iter().map(|entity| entity.style.fill));
                     if let Some(fill) = fill_color_menu(ui, fill) {
+                        self.remember_fill(fill);
                         self.update_selected(
                             entities,
                             |kind| matches!(kind, CanvasEntityKind::Rectangle),

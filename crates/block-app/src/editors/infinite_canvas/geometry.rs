@@ -772,7 +772,7 @@ pub(super) fn proportional_resize_bounds(
     }
 }
 
-pub(super) fn pen_entity(points: Vec<CanvasPoint>) -> CanvasEntity {
+pub(super) fn pen_entity(points: Vec<CanvasPoint>, style: CanvasEntityStyle) -> CanvasEntity {
     let bounds = points
         .iter()
         .copied()
@@ -789,7 +789,7 @@ pub(super) fn pen_entity(points: Vec<CanvasPoint>) -> CanvasEntity {
         id: Uuid::new_v4(),
         transform: CanvasTransform::new(center, size, 0.0),
         kind: CanvasEntityKind::Pen { points },
-        style: CanvasEntityStyle::default(),
+        style,
         group_id: None,
         locked: false,
     }
