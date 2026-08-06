@@ -822,7 +822,7 @@ impl Core {
             MarkdownCommand::Bold => self.wrap_markdown_selection(b"**", b"**", b"bold"),
             MarkdownCommand::Italic => self.wrap_markdown_selection(b"_", b"_", b"italic"),
             MarkdownCommand::Strikethrough => self.wrap_markdown_selection(b"~~", b"~~", b"text"),
-            MarkdownCommand::InlineCode => self.wrap_markdown_selection(b"`", b"`", b"code"),
+            MarkdownCommand::InlineCode => self.wrap_inline_code_selection(),
             MarkdownCommand::Link => self.wrap_markdown_selection(b"[", b"](url)", b"link text"),
             MarkdownCommand::Image => self.wrap_markdown_selection(b"![", b"](url)", b"alt text"),
             MarkdownCommand::Heading(level) => {
@@ -898,6 +898,83 @@ impl Core {
             })
             .collect();
         drop(document);
+        self.finish_wrap_markdown_selection(replacements, selection_lengths, history_cursors);
+    }
+
+    /// Toggles inline-code formatting on the current selection(s). Unlike
+    /// [`Self::wrap_markdown_selection`], the delimiter isn't fixed: markdown
+    /// requires a run of backticks one longer than the longest backtick run
+    /// already inside the selection (so the code span isn't terminated
+    /// early), with a padding space added on any edge where the content
+    /// itself starts or ends with a backtick (so the delimiter can't read as
+    /// part of the content). See [`inline_code_markers`].
+    fn wrap_inline_code_selection(&mut self) {
+        let history_cursors = self.cursor_positions.clone();
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let bytes = document.bytes();
+        let mut selection_lengths = Vec::new();
+        let replacements = self
+            .cursor_positions
+            .iter()
+            .map(|cursor| {
+                let range = resolve_selection(&document, cursor.pos);
+                let selected = &bytes[range.left..range.right];
+                if let Some(inner) = unwrap_self_contained_inline_code(selected) {
+                    // Selection itself includes the markers: unwrap in place.
+                    selection_lengths.push((inner.len(), 0));
+                    (
+                        Position::at(&document, range.left),
+                        range.right - range.left,
+                        inner,
+                    )
+                } else if let Some((before_len, after_len)) =
+                    surrounding_inline_code_markers(bytes, range.left, range.right)
+                {
+                    // Selection sits inside existing markers: remove the surrounding markers.
+                    let inner = selected.to_vec();
+                    selection_lengths.push((inner.len(), 0));
+                    (
+                        Position::at(&document, range.left - before_len),
+                        range.right - range.left + before_len + after_len,
+                        inner,
+                    )
+                } else {
+                    let contents: &[u8] = if selected.is_empty() {
+                        b"code"
+                    } else {
+                        selected
+                    };
+                    let (before, after) = inline_code_markers(contents);
+                    let mut replacement =
+                        Vec::with_capacity(before.len() + contents.len() + after.len());
+                    replacement.extend(&before);
+                    replacement.extend(contents);
+                    replacement.extend(&after);
+                    selection_lengths.push((contents.len(), after.len()));
+                    (
+                        Position::at(&document, range.left),
+                        range.right - range.left,
+                        replacement,
+                    )
+                }
+            })
+            .collect();
+        drop(document);
+        self.finish_wrap_markdown_selection(replacements, selection_lengths, history_cursors);
+    }
+
+    /// Shared tail of [`Self::wrap_markdown_selection`] and
+    /// [`Self::wrap_inline_code_selection`]: applies the computed
+    /// replacements and re-selects the (un)wrapped content, preserving
+    /// selection direction.
+    fn finish_wrap_markdown_selection(
+        &mut self,
+        replacements: Vec<(Position, usize, Vec<u8>)>,
+        selection_lengths: Vec<(usize, usize)>,
+        history_cursors: Vec<CursorPosition>,
+    ) {
         let positions = self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
@@ -1610,6 +1687,99 @@ fn resolve_selection(document: &TextDocument, selection: Selection) -> ResolvedS
         left: anchor.min(focus),
         right: anchor.max(focus),
         is_right: anchor <= focus,
+    }
+}
+
+/// The number of consecutive backticks at the very start of `content`.
+fn leading_backtick_run(content: &[u8]) -> usize {
+    content.iter().take_while(|&&byte| byte == b'`').count()
+}
+
+/// The number of consecutive backticks at the very end of `content`.
+fn trailing_backtick_run(content: &[u8]) -> usize {
+    content
+        .iter()
+        .rev()
+        .take_while(|&&byte| byte == b'`')
+        .count()
+}
+
+/// The longest run of consecutive backticks anywhere in `content`.
+fn longest_backtick_run(content: &[u8]) -> usize {
+    let mut longest = 0;
+    let mut current = 0;
+    for &byte in content {
+        if byte == b'`' {
+            current += 1;
+            longest = longest.max(current);
+        } else {
+            current = 0;
+        }
+    }
+    longest
+}
+
+/// The backtick delimiter (and, where needed, a single space of padding) to
+/// wrap `content` in as markdown inline code, per CommonMark's code-span
+/// escaping rules: the delimiter is one backtick longer than the longest run
+/// of backticks already inside `content`, so it can never be confused for
+/// part of the content. If `content` itself starts (or ends) with a
+/// backtick, a padding space is added at that edge so the delimiter doesn't
+/// visually merge with it.
+fn inline_code_markers(content: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let delimiter = vec![b'`'; longest_backtick_run(content) + 1];
+    let mut before = delimiter.clone();
+    let mut after = delimiter;
+    if content.first() == Some(&b'`') {
+        before.push(b' ');
+    }
+    if content.last() == Some(&b'`') {
+        after.insert(0, b' ');
+    }
+    (before, after)
+}
+
+/// If `selected` is itself a complete inline-code span produced by
+/// [`inline_code_markers`] — i.e. the selection includes the surrounding
+/// backtick delimiters — the unescaped content between them.
+fn unwrap_self_contained_inline_code(selected: &[u8]) -> Option<Vec<u8>> {
+    let run = leading_backtick_run(selected);
+    if run == 0 || trailing_backtick_run(selected) != run || selected.len() < 2 * run {
+        return None;
+    }
+    let mut inner = selected[run..selected.len() - run].to_vec();
+    if inner.first() == Some(&b' ') && inner.get(1) == Some(&b'`') {
+        inner.remove(0);
+    }
+    if inner.len() >= 2 && inner[inner.len() - 1] == b' ' && inner[inner.len() - 2] == b'`' {
+        inner.pop();
+    }
+    let (before, after) = inline_code_markers(&inner);
+    let mut reconstructed = before;
+    reconstructed.extend(&inner);
+    reconstructed.extend(&after);
+    (reconstructed == selected).then_some(inner)
+}
+
+/// If the selection `bytes[left..right]` sits directly inside an inline-code
+/// span whose delimiters (as produced by [`inline_code_markers`] for that
+/// exact selected content) surround it, the lengths of the marker bytes
+/// immediately before and after the selection.
+fn surrounding_inline_code_markers(
+    bytes: &[u8],
+    left: usize,
+    right: usize,
+) -> Option<(usize, usize)> {
+    let selected = &bytes[left..right];
+    let (before, after) = inline_code_markers(selected);
+    if left >= before.len()
+        && right + after.len() <= bytes.len()
+        && bytes[left - before.len()..left] == before
+        && bytes[right..right + after.len()] == after
+    {
+        Some((before.len(), after.len()))
+    } else {
+        None
     }
 }
 
