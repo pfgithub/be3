@@ -7,13 +7,14 @@ license.workspace = true
 [dependencies]
 block = { path = "../block" }
 block-client = { path = "../block-client" }
+serde = { version = "1", features = ["derive"] }
 similar = "3.1"
 tree-sitter = "0.26"
 tree-sitter-md = { version = "0.5.3", features = ["parser"] }
 tree-sitter-rust = "0.24"
 tree-sitter-zig = "1.1"
 unicode-segmentation = "1.13"
-uuid = "1"
+uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
 serde_json = "1"

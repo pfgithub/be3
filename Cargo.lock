@@ -5223,6 +5223,7 @@ version = "0.1.0"
 dependencies = [
  "block 0.1.0",
  "block-client",
+ "serde",
  "serde_json",
  "similar",
  "tree-sitter",

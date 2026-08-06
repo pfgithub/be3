@@ -9,11 +9,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block::{BlockParent, BlockReferenceList};
+use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
     block_url,
     blocks::text::{TextDocument, TextLanguage},
-    parse_block_urls, BlockClient, BlockHandle, ReferenceList,
+    parse_block_urls,
+    presence::{PresenceColor, UserActive},
+    BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{
     self, output::IMEOutput, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton,
@@ -30,12 +32,13 @@ use egui_material_icons::{
 };
 use text_editor_core::{
     markdown_checkbox_marker, CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop,
-    DragSelectionMode, EditorCommand, FindDirection, LRDirection, MarkdownCommand, MoveMode,
-    SynHlColorScope, SyntaxHighlight, SyntaxNodeDirection, UDDirection, VerticalMoveMode,
+    CursorPosition, DragSelectionMode, EditorCommand, FindDirection, LRDirection, MarkdownCommand,
+    MoveMode, SynHlColorScope, SyntaxHighlight, SyntaxNodeDirection, TextCursor, UDDirection,
+    VerticalMoveMode,
 };
 use uuid::Uuid;
 
-use crate::{block_picker::BlockPicker, performance};
+use crate::{block_picker::BlockPicker, performance, presence_color_rgb};
 
 use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::timings::{FrameProfile, PaintTimings};
@@ -1004,6 +1007,85 @@ impl TextEditor {
         )
     }
 
+    /// Paints other clients' cursors and selections in this block, in the
+    /// color each one is shown with in the "Also viewing" indicator. A
+    /// remote cursor whose color hasn't arrived yet (a brief race on the
+    /// first frame it appears) is skipped rather than shown in a fallback
+    /// color, since the indicator would otherwise disagree with it.
+    fn paint_remote_cursors(
+        &self,
+        client: &BlockClient,
+        painter: &egui::Painter,
+        origin: Pos2,
+        layout: &DocumentLayout,
+    ) {
+        let colors: HashMap<ClientId, PresenceColor> = client
+            .presence::<UserActive>(self.block.id())
+            .into_iter()
+            .map(|(client_id, user)| (client_id, user.color))
+            .collect();
+        for (client_id, cursor) in client.presence::<TextCursor>(self.block.id()) {
+            let Some(color) = colors.get(&client_id).copied() else {
+                continue;
+            };
+            let Some(Range { start, end }) = self
+                .core
+                .selection_range(&CursorPosition::range(cursor.anchor, cursor.focus))
+            else {
+                continue;
+            };
+            let Some(focus) = self.core.position_index(cursor.focus) else {
+                continue;
+            };
+            let rgb = presence_color_rgb(color);
+            let [red, green, blue, _] = rgb.to_srgba_unmultiplied();
+            let fill = Color32::from_rgba_unmultiplied(red, green, blue, 70);
+            for byte in start..end {
+                let Some(left) = layout.positions.get(byte).and_then(|position| *position) else {
+                    continue;
+                };
+                let right = layout
+                    .positions
+                    .get(byte + 1)
+                    .and_then(|position| *position)
+                    .filter(|right| right.line == left.line)
+                    .unwrap_or(BytePosition {
+                        line: left.line,
+                        x: left.x + 8.0,
+                    });
+                let y = origin.y + layout.lines[left.line].y;
+                painter.rect_filled(
+                    Rect::from_min_max(
+                        Pos2::new(origin.x + left.x.min(right.x), y),
+                        Pos2::new(
+                            origin.x + left.x.max(right.x).max(left.x.min(right.x) + 1.0),
+                            y + layout.lines[left.line].height,
+                        ),
+                    ),
+                    0.0,
+                    fill,
+                );
+            }
+            let Some(position) = layout.positions.get(focus).and_then(|position| *position) else {
+                continue;
+            };
+            let top = Pos2::new(
+                origin.x + position.x,
+                origin.y + layout.lines[position.line].y,
+            );
+            painter.rect_filled(
+                Rect::from_min_size(top, Vec2::new(2.0, layout.lines[position.line].height)),
+                0.0,
+                rgb,
+            );
+            painter.rect_filled(
+                Rect::from_min_size(top - Vec2::new(0.0, 4.0), Vec2::new(6.0, 4.0)),
+                0.0,
+                rgb,
+            );
+        }
+    }
+
     fn paint_embeds(
         &mut self,
         ui: &mut egui::Ui,
@@ -1296,6 +1378,23 @@ impl BlockEditor for TextEditor {
         &self.block
     }
 
+    fn sync_cursor_presence(&mut self, client: &BlockClient, visible: bool) {
+        if !visible {
+            client.clear_presence::<TextCursor>(self.block.id());
+            return;
+        }
+        let Some(cursor) = self.core.cursor_positions().first() else {
+            return;
+        };
+        client.post_presence(
+            self.block.id(),
+            &TextCursor {
+                anchor: cursor.pos.anchor,
+                focus: cursor.pos.focus,
+            },
+        );
+    }
+
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,
@@ -1546,6 +1645,7 @@ impl BlockEditor for TextEditor {
             &highlight,
             response.has_focus(),
         );
+        self.paint_remote_cursors(editors.client(), &painter, origin, &layout);
         self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
         let cursor_color = ui.visuals().selection.stroke.color;
         for rect in caret_rects {

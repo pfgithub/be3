@@ -4,13 +4,18 @@ use block_client::{
     blocks::text::{TextDocument, TextLanguage},
     parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_BYTES,
 };
+use serde::{Deserialize, Serialize};
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
 use crate::{Highlighter, Language, SyntaxHighlight};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A position anchored to the ids of the items immediately around it, so it
+/// keeps pointing at the same place in the document across concurrent edits.
+/// Serializable so it can be round-tripped through [`TextCursor`] presence to
+/// other clients, which resolve it against their own copy of the document.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Position {
     left: Option<Uuid>,
     right: Option<Uuid>,

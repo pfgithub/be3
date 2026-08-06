@@ -626,6 +626,11 @@ pub trait BlockEditor {
     fn finish_frame(&mut self) {}
     fn set_tab_active(&mut self, _active: bool) {}
     fn tab_closed(&mut self) {}
+    /// Posts (or clears) presence describing where this editor's cursor or
+    /// selection currently is, if it has one. Called every frame with the
+    /// same on-screen signal that drives `UserActive` presence, so a cursor
+    /// is announced for exactly as long as its block is visible.
+    fn sync_cursor_presence(&mut self, _client: &BlockClient, _visible: bool) {}
     fn history(&self) -> Option<&dyn BlockHistoryHandle> {
         self.block().history()
     }

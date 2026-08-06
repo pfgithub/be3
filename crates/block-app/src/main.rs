@@ -2262,6 +2262,9 @@ impl BlockApp {
     fn update_active_presence(&mut self, visible: HashSet<Uuid>) {
         for id in self.active_presence.difference(&visible) {
             self.client.clear_presence::<UserActive>(*id);
+            if let Some(editor) = self.editors.get_mut(id) {
+                editor.sync_cursor_presence(&self.client, false);
+            }
         }
         for id in visible.difference(&self.active_presence) {
             let used = self
@@ -2271,6 +2274,11 @@ impl BlockApp {
                 .map(|(_, user)| user.color);
             let color = pick_free_color(used);
             self.client.post_presence(*id, &UserActive { color });
+        }
+        for id in &visible {
+            if let Some(editor) = self.editors.get_mut(id) {
+                editor.sync_cursor_presence(&self.client, true);
+            }
         }
         self.active_presence = visible;
     }
