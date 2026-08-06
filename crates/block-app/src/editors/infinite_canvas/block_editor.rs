@@ -61,6 +61,20 @@ impl BlockEditor for InfiniteCanvasEditor {
         true
     }
 
+    fn sync_cursor_presence(&mut self, client: &BlockClient, visible: bool) {
+        if !visible {
+            client.clear_presence::<CanvasCursor>(self.block.id());
+            return;
+        }
+        client.post_presence(
+            self.block.id(),
+            &CanvasCursor {
+                pointer: self.pointer_world,
+                selection: self.selection.iter().copied().collect(),
+            },
+        );
+    }
+
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,

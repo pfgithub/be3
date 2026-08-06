@@ -334,6 +334,57 @@ pub(super) fn with_opacity(color: Color32, opacity: f32) -> Color32 {
     )
 }
 
+/// Paints other clients' pointers and selections on this canvas, in the
+/// color each one is shown with in the "Also viewing" indicator. A remote
+/// cursor whose color hasn't arrived yet (a brief race on the first frame
+/// it appears) is skipped rather than shown in a fallback color, since the
+/// indicator would otherwise disagree with it.
+pub(super) fn paint_remote_presence(
+    editor: &InfiniteCanvasEditor,
+    client: &BlockClient,
+    painter: &egui::Painter,
+    rect: Rect,
+    entities: &[CanvasEntity],
+) {
+    let colors: HashMap<ClientId, PresenceColor> = client
+        .presence::<UserActive>(editor.block.id())
+        .into_iter()
+        .map(|(client_id, user)| (client_id, user.color))
+        .collect();
+    for (client_id, cursor) in client.presence::<CanvasCursor>(editor.block.id()) {
+        let Some(color) = colors.get(&client_id).copied() else {
+            continue;
+        };
+        let rgb = presence_color_rgb(color);
+        if !cursor.selection.is_empty() {
+            let selected: HashSet<_> = cursor.selection.iter().copied().collect();
+            if let Some(bounds) = entities
+                .iter()
+                .filter(|entity| selected.contains(&entity.id))
+                .map(entity_bounds)
+                .reduce(WorldRect::union)
+            {
+                let frame = SelectionFrame::from_world_rect(bounds);
+                let corners = [
+                    CanvasPoint::new(-0.5, -0.5),
+                    CanvasPoint::new(0.5, -0.5),
+                    CanvasPoint::new(0.5, 0.5),
+                    CanvasPoint::new(-0.5, 0.5),
+                ]
+                .map(|point| editor.world_to_screen(frame.point(point), rect));
+                painter.add(egui::Shape::closed_line(
+                    corners.to_vec(),
+                    Stroke::new(1.5_f32, rgb),
+                ));
+            }
+        }
+        if let Some(pointer) = cursor.pointer {
+            let tip = editor.world_to_screen(pointer, rect);
+            painter.add(arrowhead(tip, Vec2::new(0.4, 1.0).normalized(), 16.0, rgb));
+        }
+    }
+}
+
 pub(super) fn paint_selection(
     editor: &InfiniteCanvasEditor,
     painter: &egui::Painter,

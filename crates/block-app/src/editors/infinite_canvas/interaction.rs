@@ -235,6 +235,12 @@ impl InfiniteCanvasEditor {
         direct_editor_rects: &[Rect],
         viewport: &mut DirectEditorViewport,
     ) -> (Option<CanvasLayerMove>, Option<EditorAction>) {
+        self.pointer_world = response
+            .hovered()
+            .then(|| response.ctx.pointer_hover_pos())
+            .flatten()
+            .map(|point| self.screen_to_world(point, canvas_rect));
+
         let escape_pressed = response
             .ctx
             .input(|input| input.key_pressed(egui::Key::Escape));
@@ -1112,6 +1118,8 @@ impl InfiniteCanvasEditor {
                     && self.selection_allows_rotation(entities, editors),
             );
         }
+
+        paint_remote_presence(self, editors.client(), painter, rect, entities);
 
         let tool_icon = match self.tool {
             Tool::Select => None,

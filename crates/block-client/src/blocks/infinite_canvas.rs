@@ -7,6 +7,10 @@ use block::{Block, BlockHistory, HistoryDirection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod presence;
+
+pub use presence::CanvasCursor;
+
 const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]

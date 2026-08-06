@@ -24,6 +24,7 @@ impl InfiniteCanvasEditor {
             clipboard_image_paste: ClipboardImagePaste::default(),
             focused_editor: None,
             viewport_center: CanvasPoint::default(),
+            pointer_world: None,
             fit_selection_requested: false,
             fit_preview_region_requested: false,
             grouped_inspector_edit_active: false,

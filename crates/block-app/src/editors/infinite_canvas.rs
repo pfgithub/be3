@@ -10,16 +10,17 @@ use painting::*;
 
 use std::collections::{HashMap, HashSet};
 
-use block::{BlockParent, BlockReferenceList};
+use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
     blocks::{
         image::Image as ImageBlock,
         infinite_canvas::{
-            CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasLayerMove,
-            CanvasPoint, CanvasPreviewRegion, CanvasTextAlign, CanvasTextStyle, CanvasTextWeight,
-            CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
+            CanvasColor, CanvasCursor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle,
+            CanvasLayerMove, CanvasPoint, CanvasPreviewRegion, CanvasTextAlign, CanvasTextStyle,
+            CanvasTextWeight, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
         },
     },
+    presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
@@ -34,7 +35,7 @@ use egui_material_icons::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::block_picker::BlockPicker;
+use crate::{block_picker::BlockPicker, presence_color_rgb};
 
 use super::{
     cached_display_name,
@@ -303,6 +304,9 @@ pub(super) struct InfiniteCanvasEditor {
     clipboard_image_paste: ClipboardImagePaste,
     focused_editor: Option<Uuid>,
     viewport_center: CanvasPoint,
+    /// The pointer's world-space position while it's hovering the canvas,
+    /// broadcast as [`CanvasCursor`] presence so other clients can see it.
+    pointer_world: Option<CanvasPoint>,
     fit_selection_requested: bool,
     fit_preview_region_requested: bool,
     grouped_inspector_edit_active: bool,
