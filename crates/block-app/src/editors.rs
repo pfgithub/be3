@@ -18,6 +18,7 @@ mod map;
 mod pixel_art;
 mod pixel_ray_tracer;
 mod presentation;
+mod settings;
 mod text;
 mod unsupported;
 mod video;
@@ -317,6 +318,7 @@ pub struct EditorAccess<'a> {
     active: Vec<Uuid>,
     access: BlockAccess,
     client: &'a BlockClient,
+    client_id: Uuid,
     registry: &'a EditorRegistry,
     editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
 }
@@ -348,10 +350,12 @@ pub fn embedded_editor_ui(
 }
 
 impl<'a> EditorAccess<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         active: Uuid,
         access: BlockAccess,
         client: &'a BlockClient,
+        client_id: Uuid,
         registry: &'a EditorRegistry,
         editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
     ) -> Self {
@@ -359,6 +363,7 @@ impl<'a> EditorAccess<'a> {
             active: vec![active],
             access,
             client,
+            client_id,
             registry,
             editors,
         }
@@ -377,6 +382,12 @@ impl<'a> EditorAccess<'a> {
 
     pub fn client(&self) -> &BlockClient {
         self.client
+    }
+
+    /// This installation's identity, used to pick out per-client settings
+    /// entries.
+    pub fn client_id(&self) -> Uuid {
+        self.client_id
     }
 
     pub fn registry(&self) -> &EditorRegistry {

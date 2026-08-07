@@ -7,6 +7,7 @@ use super::{AppStateError, SavedAccount};
 /// equivalent to the SQLite file the native build keeps beside the app.
 const ACCOUNTS_KEY: &str = "block.accounts";
 const ACTIVE_KEY: &str = "block.active-account";
+const CLIENT_ID_KEY: &str = "block.client-id";
 
 pub struct AppStateStore {
     storage: web_sys::Storage,
@@ -104,6 +105,17 @@ impl AppStateStore {
         };
         account.last_workspace_id = workspace_id;
         self.write(ACCOUNTS_KEY, &accounts)
+    }
+
+    /// This device's identity, used to pick out per-client settings entries.
+    /// Generated once and reused for as long as browser storage keeps it.
+    pub fn client_id(&self) -> Result<Uuid, AppStateError> {
+        if let Some(id) = self.read(CLIENT_ID_KEY)? {
+            return Ok(id);
+        }
+        let id = Uuid::new_v4();
+        self.write(CLIENT_ID_KEY, &id)?;
+        Ok(id)
     }
 
     fn read<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>, AppStateError> {

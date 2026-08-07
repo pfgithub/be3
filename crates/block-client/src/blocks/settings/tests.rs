@@ -1,0 +1,7 @@
+use uuid::Uuid;
+
+use super::{ActivationCondition, Settings, SettingsOperation};
+
+mod settings_resolve_falls_back_when_no_client_entry_exists;
+mod settings_resolve_prefers_client_specific_entry_over_fallback;
+mod settings_set_entry_replaces_existing_entry_for_same_activation;

@@ -13,6 +13,7 @@ pub mod map;
 pub mod pixel_art;
 pub mod pixel_ray_tracer;
 pub mod presentation;
+pub mod settings;
 pub mod text;
 pub mod video;
 pub mod web_browser_tab;

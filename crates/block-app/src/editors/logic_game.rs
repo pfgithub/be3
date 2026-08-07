@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use self::binary_addition::BinaryAdditionQuiz;
 use super::{
-    hotbar::RootHotbar, BlockEditor, CreatableEditor, DirectEditorCapabilities,
+    settings::RootSetting, BlockEditor, CreatableEditor, DirectEditorCapabilities,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
@@ -39,7 +39,7 @@ pub(super) struct LogicGameEditor {
     /// The palette the game's grids are built from. The game does not own it:
     /// it is the hotbar at the root of the block tree, offered here so it can
     /// be opened without finding a grid first.
-    hotbar: Option<RootHotbar>,
+    hotbar: Option<RootSetting<Hotbar>>,
     quiz: BinaryAdditionQuiz,
 }
 
@@ -96,10 +96,10 @@ impl LogicGameEditor {
     /// Keeps a handle on every listed solution and carries each level's
     /// progress over from the grids that passed it, and looks for the shared
     /// hotbar so it can be offered once the block tree has one.
-    fn sync(&mut self, client: &BlockClient) {
+    fn sync(&mut self, client: &BlockClient, client_id: Uuid) {
         self.hotbar
-            .get_or_insert_with(|| RootHotbar::new(client))
-            .find(client);
+            .get_or_insert_with(|| RootSetting::new(client))
+            .find(client, client_id);
         let Some(game) = self.block.read() else {
             return;
         };
@@ -183,7 +183,7 @@ impl BlockEditor for LogicGameEditor {
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let client = editors.client();
-        self.sync(client);
+        self.sync(client, editors.client_id());
         let Some(game) = self.block.read() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -199,7 +199,7 @@ impl BlockEditor for LogicGameEditor {
         let hotbar = self
             .hotbar
             .as_ref()
-            .and_then(RootHotbar::block)
+            .and_then(RootSetting::block)
             .map(BlockHandle::id);
 
         let mut action = None;

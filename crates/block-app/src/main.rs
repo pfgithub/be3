@@ -145,6 +145,9 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
 
 struct BlockApp {
     app_state: AppStateStore,
+    /// This installation's identity, used to pick out per-client settings
+    /// entries. Generated once and persisted by `app_state`.
+    client_id: Uuid,
     local_server_url: String,
     accounts: Vec<Account>,
     signed_in: bool,
@@ -445,6 +448,7 @@ impl BlockApp {
         app_state: AppStateStore,
         url: String,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let client_id = app_state.client_id()?;
         let accounts = app_state.accounts()?;
         let active = app_state.active_account()?;
         let account = active
@@ -471,6 +475,7 @@ impl BlockApp {
         let roots = client.watch_references(BlockReferenceList::Roots);
         Ok(Self {
             app_state,
+            client_id,
             local_server_url: url,
             accounts,
             signed_in,
@@ -1386,6 +1391,7 @@ impl BlockApp {
                 active,
                 access,
                 &self.client,
+                self.client_id,
                 &self.registry,
                 &mut self.editors,
             );
@@ -1813,6 +1819,7 @@ impl BlockApp {
             active,
             access,
             &self.client,
+            self.client_id,
             &self.registry,
             &mut self.editors,
         );

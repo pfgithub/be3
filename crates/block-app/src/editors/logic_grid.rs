@@ -16,7 +16,7 @@ use block::Block;
 use block_client::{
     blocks::{
         compiled_logic::CompiledLogic,
-        hotbar::{HotbarOperation, HotbarSlot as BlockHotbarSlot},
+        hotbar::{Hotbar, HotbarOperation, HotbarSlot as BlockHotbarSlot},
         logic_grid::{LogicGrid, LogicGridOperation},
     },
     BlockClient, BlockHandle,
@@ -42,7 +42,7 @@ use self::renderer::{
     WireValue,
 };
 use super::{
-    hotbar::RootHotbar, BlockEditor, CreatableEditor, DirectEditorCapabilities,
+    settings::RootSetting, BlockEditor, CreatableEditor, DirectEditorCapabilities,
     DirectEditorViewport, DynamicArtifactSupport, EditorAccess, EditorAction, EditorKind,
 };
 
@@ -544,7 +544,7 @@ pub(super) struct LogicGridEditor {
     /// The hotbar block backing the palette: the one at the root of the block
     /// tree, which every grid shares. It is `None` until the editor has a
     /// client to look it up with.
-    hotbar_block: Option<RootHotbar>,
+    hotbar_block: Option<RootSetting<Hotbar>>,
     /// Set when the palette changed before the hotbar block was there, so the
     /// change is written - creating the hotbar if the tree has none - as soon
     /// as the root listing arrives.
@@ -638,7 +638,7 @@ impl LogicGridEditor {
     fn edit(&mut self, operation: LogicGridOperation) {
         self.block.operate(operation);
         self.observed_revision = None;
-        self.sync(None);
+        self.sync(None, Uuid::nil());
     }
 
     fn edit_all(&mut self, operations: impl IntoIterator<Item = LogicGridOperation>) {
@@ -648,7 +648,7 @@ impl LogicGridEditor {
         }
         self.block.operate_grouped(operations);
         self.observed_revision = None;
-        self.sync(None);
+        self.sync(None, Uuid::nil());
     }
 
     /// Adds a component under a freshly allocated ID, and hands the ID back so
@@ -689,10 +689,10 @@ impl LogicGridEditor {
     /// Refreshes everything read out of the block: the circuit, the level it
     /// belongs to, and the compiled components it can reach. The palette comes
     /// from the shared hotbar instead, which `sync_hotbar` finds on its own.
-    fn sync(&mut self, client: Option<&BlockClient>) {
+    fn sync(&mut self, client: Option<&BlockClient>, client_id: Uuid) {
         let revision = self.block.revision();
         if self.observed_revision == Some(revision) {
-            self.sync_hotbar(client);
+            self.sync_hotbar(client, client_id);
             return;
         }
         let Some(block) = self.block.read() else {
@@ -717,7 +717,7 @@ impl LogicGridEditor {
                 self.ensure_compiled(client, compiled);
             }
         }
-        self.sync_hotbar(client);
+        self.sync_hotbar(client, client_id);
     }
 
     /// Keeps a handle on `compiled` and on everything it calls, so a circuit
@@ -876,7 +876,7 @@ impl BlockEditor for LogicGridEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
-        self.sync(Some(editors.client()));
+        self.sync(Some(editors.client()), editors.client_id());
         ui.set_min_width(HOTBAR_WIDTH);
         let settings_height = 190.0;
         let hotbar_height = (ui.available_height() - settings_height).max(160.0);
@@ -899,7 +899,7 @@ impl BlockEditor for LogicGridEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.sync(Some(editors.client()));
+        self.sync(Some(editors.client()), editors.client_id());
         let mut action = None;
         ui.horizontal(|ui| {
             if ui
@@ -936,7 +936,7 @@ impl BlockEditor for LogicGridEditor {
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.sync(Some(editors.client()));
+        self.sync(Some(editors.client()), editors.client_id());
         // Passing the level is recorded on the grid, which is where the game
         // reads each level's progress back from.
         if self.take_challenge_passed() {
@@ -965,7 +965,7 @@ impl LogicGridEditor {
         }
         let mut editor = Self::new(client.create_block(block));
         editor.test_client = Some(client);
-        editor.sync(None);
+        editor.sync(None, Uuid::nil());
         editor
     }
 
@@ -976,7 +976,7 @@ impl LogicGridEditor {
         let result = build(&mut grid);
         self.block.replace(LogicGrid::from_grid(grid));
         self.observed_revision = None;
-        self.sync(None);
+        self.sync(None, Uuid::nil());
         result
     }
 }

@@ -109,16 +109,16 @@ impl LogicGridEditor {
     /// each pinned component places now that its compiled block has loaded. An
     /// empty block keeps the default tree, so a fresh hotbar needs no eager
     /// write.
-    pub(super) fn sync_hotbar(&mut self, client: Option<&BlockClient>) {
+    pub(super) fn sync_hotbar(&mut self, client: Option<&BlockClient>, client_id: Uuid) {
         if let Some(client) = client {
             let pending = self.hotbar_needs_write;
             let root = self
                 .hotbar_block
-                .get_or_insert_with(|| RootHotbar::new(client));
+                .get_or_insert_with(|| RootSetting::new(client));
             if pending {
-                root.ensure(client);
+                root.ensure(client, client_id);
             } else {
-                root.find(client);
+                root.find(client, client_id);
             }
         }
         if self.hotbar_needs_write {
@@ -128,7 +128,7 @@ impl LogicGridEditor {
         let Some(hotbar) = self
             .hotbar_block
             .as_ref()
-            .and_then(RootHotbar::block)
+            .and_then(RootSetting::block)
             .and_then(BlockHandle::read)
         else {
             return;
@@ -255,7 +255,7 @@ impl LogicGridEditor {
     /// because it is running without a client - notes the change instead, and
     /// the next sync writes it to the hotbar it finds or creates.
     pub(super) fn persist_hotbar(&mut self) {
-        let Some(block) = self.hotbar_block.as_ref().and_then(RootHotbar::block) else {
+        let Some(block) = self.hotbar_block.as_ref().and_then(RootSetting::block) else {
             self.hotbar_needs_write = true;
             return;
         };

@@ -141,6 +141,17 @@ impl AppStateStore {
         Ok(())
     }
 
+    /// This device's identity, used to pick out per-client settings entries.
+    /// Generated once and reused for as long as this database lives.
+    pub fn client_id(&self) -> Result<Uuid, AppStateError> {
+        if let Some(existing) = self.setting("client_id")? {
+            return Ok(parse_uuid(existing)?);
+        }
+        let id = Uuid::new_v4();
+        self.set_setting("client_id", &id.to_string())?;
+        Ok(id)
+    }
+
     fn setting(&self, key: &str) -> Result<Option<String>, AppStateError> {
         let value = self
             .connection
