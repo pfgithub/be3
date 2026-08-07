@@ -258,6 +258,10 @@ struct GlyphKey {
     pixel_size: u32,
     bold: bool,
     italic: bool,
+    /// `pixels_per_point`, quantized to thousandths so equal scale factors
+    /// hash identically. Glyphs are rasterized at this resolution, not at
+    /// `pixel_size`, so each distinct screen scale needs its own cache entry.
+    dpi_milli: u32,
 }
 
 struct RasterizedGlyph {
@@ -615,6 +619,7 @@ impl TextRenderer {
                 pixel_size: glyph.pixel_size,
                 bold: glyph.style.bold && !self.fonts[glyph.font_index].bold,
                 italic: glyph.style.italic && !self.fonts[glyph.font_index].italic,
+                dpi_milli: dpi_milli(context.pixels_per_point()),
             };
             if !self.glyphs.contains_key(&key) {
                 profile.cache_misses += 1;
@@ -689,8 +694,13 @@ impl TextRenderer {
             size: Vec2::ZERO,
             bearing: Vec2::ZERO,
         };
+        // Glyphs are laid out in logical points (`key.pixel_size`), but must be
+        // rasterized at the screen's native resolution or they render blurry
+        // once egui scales them back up to physical pixels on hidpi displays.
+        let pixels_per_point = key.dpi_milli as f32 / 1000.0;
+        let raster_pixel_size = ((key.pixel_size as f32 * pixels_per_point).round() as u32).max(1);
         unsafe {
-            if ft::FT_Set_Pixel_Sizes(face, 0, key.pixel_size) == 0
+            if ft::FT_Set_Pixel_Sizes(face, 0, raster_pixel_size) == 0
                 && ft::FT_Load_Glyph(face, key.id, ft::FT_LOAD_DEFAULT as i32) == 0
             {
                 let slot = (*face).glyph;
@@ -722,16 +732,22 @@ impl TextRenderer {
                         let image = egui::ColorImage::from_rgba_unmultiplied([width, rows], &rgba);
                         result.texture = Some(context.load_texture(
                             format!(
-                                "editor-glyph-{}-{}-{}-{}-{}",
-                                key.font_index, key.id, key.pixel_size, key.bold, key.italic
+                                "editor-glyph-{}-{}-{}-{}-{}-{}",
+                                key.font_index,
+                                key.id,
+                                key.pixel_size,
+                                key.bold,
+                                key.italic,
+                                key.dpi_milli
                             ),
                             image,
                             egui::TextureOptions::LINEAR,
                         ));
-                        result.size = Vec2::new(width as f32, rows as f32);
+                        result.size = Vec2::new(width as f32, rows as f32) / pixels_per_point;
                     }
                     result.bearing =
-                        Vec2::new((*slot).bitmap_left as f32, (*slot).bitmap_top as f32);
+                        Vec2::new((*slot).bitmap_left as f32, (*slot).bitmap_top as f32)
+                            / pixels_per_point;
                 }
             }
         }
@@ -1079,6 +1095,12 @@ fn split_font_runs<'a>(
         });
     }
     runs
+}
+
+/// Quantizes `pixels_per_point` to thousandths for use as a glyph cache key,
+/// so equal scale factors collapse to the same cache entry.
+fn dpi_milli(pixels_per_point: f32) -> u32 {
+    (pixels_per_point * 1000.0).round() as u32
 }
 
 fn style_pixel_size(style: SynHlStyle) -> u32 {
