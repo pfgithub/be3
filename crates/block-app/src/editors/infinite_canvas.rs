@@ -286,12 +286,23 @@ enum Gesture {
     },
 }
 
+/// Tracks an in-progress multi-touch gesture so that a quick, still
+/// two-finger tap can be told apart from a pinch/pan and treated as undo.
+#[derive(Clone, Copy, Debug)]
+struct TwoFingerTouch {
+    start_time: f64,
+    start_pos: Pos2,
+    last_center: Pos2,
+    max_touches: usize,
+}
+
 pub(super) struct InfiniteCanvasEditor {
     block: BlockHandle<InfiniteCanvas>,
     tool: Tool,
     render_scale: f32,
     selection: HashSet<Uuid>,
     gesture: Option<Gesture>,
+    two_finger_touch: Option<TwoFingerTouch>,
     picker: BlockPicker,
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,

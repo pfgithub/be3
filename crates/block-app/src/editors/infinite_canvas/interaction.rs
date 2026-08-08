@@ -128,16 +128,35 @@ impl InfiniteCanvasEditor {
         self.add_imported_image(editors, image, center);
     }
 
+    /// A two-finger tap must land and lift within this long to count as a
+    /// tap rather than a held pinch/pan gesture.
+    const TWO_FINGER_TAP_MAX_DURATION: f64 = 0.3;
+    /// A two-finger tap must not drift further than this (in screen points)
+    /// or it's treated as a pan instead.
+    const TWO_FINGER_TAP_MAX_DRIFT: f32 = 24.0;
+
     pub(super) fn handle_zoom_and_pan(
         &mut self,
         response: &egui::Response,
         viewport: &mut DirectEditorViewport,
     ) -> bool {
+        let touch = response.ctx.input(|input| input.multi_touch());
+        if touch.is_none() {
+            self.finish_two_finger_touch(response);
+        }
         if response.hovered() {
-            if let Some(touch) = response.ctx.input(|input| input.multi_touch()) {
+            if let Some(touch) = touch {
                 // A second finger landing should immediately take over from
                 // whatever the first finger was doing (selecting, dragging, …).
                 self.gesture = None;
+                self.two_finger_touch = Some(TwoFingerTouch {
+                    start_time: touch.start_time,
+                    start_pos: touch.start_pos,
+                    last_center: touch.center_pos,
+                    max_touches: self.two_finger_touch.map_or(touch.num_touches, |state| {
+                        state.max_touches.max(touch.num_touches)
+                    }),
+                });
                 if (touch.zoom_delta - 1.0).abs() > f32::EPSILON {
                     viewport.change_zoom(touch.zoom_delta, Some(touch.center_pos));
                 }
@@ -177,6 +196,25 @@ impl InfiniteCanvasEditor {
             return true;
         }
         false
+    }
+
+    /// Called once a two-finger touch has fully lifted. Undoes the last
+    /// change if the gesture was a quick, still tap rather than a
+    /// pinch/pan.
+    fn finish_two_finger_touch(&mut self, response: &egui::Response) {
+        let Some(touch) = self.two_finger_touch.take() else {
+            return;
+        };
+        if touch.max_touches != 2 {
+            return;
+        }
+        let now = response.ctx.input(|input| input.time);
+        let drift = touch.start_pos.distance(touch.last_center);
+        if now - touch.start_time <= Self::TWO_FINGER_TAP_MAX_DURATION
+            && drift <= Self::TWO_FINGER_TAP_MAX_DRIFT
+        {
+            self.block.undo();
+        }
     }
 
     pub(super) fn update_cursor(
