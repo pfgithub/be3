@@ -713,7 +713,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
-        editors: &mut EditorAccess<'_>,
+        _editors: &mut EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) {
         ui.horizontal_wrapped(|ui| {
@@ -732,13 +732,10 @@ impl InfiniteCanvasEditor {
                     self.tool = tool;
                 }
             }
-            ui.menu_button(ICON_DATA_OBJECT, |ui| {
+            if ui.button(ICON_DATA_OBJECT).on_hover_text("Block").clicked() {
                 self.pending_block_center = Some(self.viewport_center);
-                self.picker
-                    .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
-            })
-            .response
-            .on_hover_text("Block");
+                self.picker.open([self.block.id()]);
+            }
 
             ui.menu_button("Actions", |ui| {
                 let has_selection = !self.selection.is_empty();

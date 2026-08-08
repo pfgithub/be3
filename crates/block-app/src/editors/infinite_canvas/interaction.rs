@@ -614,11 +614,11 @@ impl InfiniteCanvasEditor {
                         }
                         ui.close();
                     }
-                    ui.menu_button("Block", |ui| {
+                    if ui.button("Block…").clicked() {
                         self.pending_block_center = self.context_menu_position;
-                        self.picker
-                            .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
-                    });
+                        self.picker.open([self.block.id()]);
+                        ui.close();
+                    }
                 });
                 ui.separator();
                 if ui.button("Paste").clicked() {

@@ -565,11 +565,14 @@ impl MapEditor {
         let mut remove = None;
         let block_id = self.block.id();
         let picker = &mut self.picker;
-        let registry = editors.registry();
         response.context_menu(|ui| {
-            ui.menu_button(format!("{} Add here", ICON_ADD.codepoint), |ui| {
-                picker.show_menu_excluding(ui, registry, [block_id]);
-            });
+            if ui
+                .button(format!("{} Add here", ICON_ADD.codepoint))
+                .clicked()
+            {
+                picker.open([block_id]);
+                ui.close();
+            }
             if ui
                 .add_enabled(
                     selected.is_some(),
@@ -813,17 +816,18 @@ impl BlockEditor for MapEditor {
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
+        _editors: &mut EditorAccess<'_>,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         ui.horizontal(|ui| {
-            ui.menu_button(ICON_ADD, |ui| {
+            if ui
+                .button(ICON_ADD)
+                .on_hover_text("Add a point of interest at the centre of the view")
+                .clicked()
+            {
                 self.pending_position = None;
-                self.picker
-                    .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
-            })
-            .response
-            .on_hover_text("Add a point of interest at the centre of the view");
+                self.picker.open([self.block.id()]);
+            }
             ui.separator();
             if ui.button(ICON_ZOOM_OUT).on_hover_text("Zoom out").clicked() {
                 viewport.change_zoom(1.0 / ZOOM_STEP, None);

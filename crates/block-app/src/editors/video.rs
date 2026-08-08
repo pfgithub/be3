@@ -301,27 +301,29 @@ impl VideoEditor {
         .on_hover_text(format!("Frame {} of {duration}", self.playhead));
     }
 
-    fn clip_menu(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>, video: &Video) {
-        ui.menu_button(format!("{} Add clip", ICON_ADD.codepoint), |ui| {
+    fn clip_menu(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>, video: &Video) {
+        if ui
+            .button(format!("{} Add clip", ICON_ADD.codepoint))
+            .on_hover_text("Add a clip to the end of the base track")
+            .clicked()
+        {
             self.picker_attachment = None;
-            self.picker
-                .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
-        })
-        .response
-        .on_hover_text("Add a clip to the end of the base track");
+            self.picker.open([self.block.id()]);
+        }
 
         let selected = self.selected;
         ui.add_enabled_ui(selected.is_some(), |ui| {
-            ui.menu_button(ICON_SUBDIRECTORY_ARROW_RIGHT, |ui| {
+            if ui
+                .button(ICON_SUBDIRECTORY_ARROW_RIGHT)
+                .on_hover_text(
+                    "Attach a clip to the selected clip at the playhead\n\
+                     You can also drag any clip onto another clip's row to attach it there.",
+                )
+                .clicked()
+            {
                 self.picker_attachment = selected;
-                self.picker
-                    .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
-            })
-            .response
-            .on_hover_text(
-                "Attach a clip to the selected clip at the playhead\n\
-                 You can also drag any clip onto another clip's row to attach it there.",
-            );
+                self.picker.open([self.block.id()]);
+            }
         });
         if ui
             .add_enabled(selected.is_some(), egui::Button::new(ICON_CONTENT_CUT))

@@ -314,9 +314,11 @@ impl PresentationEditor {
                     ui.close();
                 }
                 ui.separator();
-                self.picker_insert_index = Some(index);
-                self.picker
-                    .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
+                if ui.button("Block…").clicked() {
+                    self.picker_insert_index = Some(index);
+                    self.picker.open([self.block.id()]);
+                    ui.close();
+                }
             })
             .response
             .on_hover_text("More slide options");

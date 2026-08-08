@@ -2673,10 +2673,11 @@ fn block_context_menu(
 ) -> Option<BlockContextMenuAction> {
     let mut action = None;
     ui.add_enabled_ui(permissions.add, |ui| {
-        ui.menu_button("Add", |ui| {
-            picker.show_menu_excluding(ui, registry, excluded);
+        if ui.button("Add").clicked() {
+            picker.open(excluded);
             action = Some(BlockContextMenuAction::Picker);
-        });
+            ui.close();
+        }
     })
     .response
     .on_disabled_hover_text(NO_EDIT_ACCESS);

@@ -6,14 +6,18 @@ use block_client::{
     BlockClient, CachedBlock,
 };
 use eframe::egui;
+use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
 use crate::editors::{
     cached_display_name, BlockCreation, BlockEditor, EditorAccess, EditorRegistry, PendingCreation,
 };
 
-enum BlockPickerMenuAction {
-    New(Uuid),
+const ADD_TILE_SIZE: egui::Vec2 = egui::vec2(132.0, 124.0);
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum BlockPickerTab {
+    Add,
     LinkExisting,
 }
 
@@ -33,9 +37,9 @@ pub struct BlockPickerResult {
 pub struct BlockPicker {
     id: Uuid,
     open: bool,
+    tab: BlockPickerTab,
     search: String,
     excluded: HashSet<Uuid>,
-    pending_action: Option<BlockPickerMenuAction>,
     pending_block: Option<PendingBlock>,
     error: Option<String>,
 }
@@ -45,9 +49,9 @@ impl Default for BlockPicker {
         Self {
             id: Uuid::new_v4(),
             open: false,
+            tab: BlockPickerTab::Add,
             search: String::new(),
             excluded: HashSet::new(),
-            pending_action: None,
             pending_block: None,
             error: None,
         }
@@ -55,108 +59,86 @@ impl Default for BlockPicker {
 }
 
 impl BlockPicker {
-    pub fn show_menu(&mut self, ui: &mut egui::Ui, registry: &EditorRegistry) {
-        self.show_menu_excluding(ui, registry, []);
-    }
-
-    pub fn show_menu_excluding(
-        &mut self,
-        ui: &mut egui::Ui,
-        registry: &EditorRegistry,
-        excluded: impl IntoIterator<Item = Uuid>,
-    ) {
-        let mut action = None;
-        ui.menu_button("New block", |ui| {
-            for &(label, block_type) in registry.new_block_actions() {
-                if ui.button(label).clicked() {
-                    action = Some(BlockPickerMenuAction::New(block_type));
-                    ui.close();
-                }
-            }
-        });
-        if ui.button("Link existing block").clicked() {
-            action = Some(BlockPickerMenuAction::LinkExisting);
-            ui.close();
-        }
-        if let Some(action) = action {
-            self.pending_action = Some(action);
-            self.excluded = excluded.into_iter().collect();
-        }
+    /// Opens the picker modal, starting on the Add tab.
+    pub fn open(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
+        self.open = true;
+        self.tab = BlockPickerTab::Add;
+        self.search.clear();
+        self.excluded = excluded.into_iter().collect();
     }
 
     pub fn close(&mut self) {
         self.open = false;
     }
 
-    fn show_link_picker(
+    /// The modal itself: a tab list on the left to switch between adding a
+    /// new block and linking an existing one, and that tab's content on the
+    /// right. Returns the block type to create or the block to link, if the
+    /// user picked one this frame.
+    fn show_modal(
         &mut self,
         context: &egui::Context,
         client: &BlockClient,
         registry: &EditorRegistry,
-    ) -> Option<CachedBlock> {
-        if !self.open {
-            return None;
-        }
-
-        let search = self.search.trim().to_lowercase();
-        let blocks: Vec<_> = client
-            .cached_blocks()
-            .into_iter()
-            .filter(|block| !self.excluded.contains(&block.id))
-            .filter(|block| {
-                search.is_empty()
-                    || cached_display_name(registry, block)
-                        .to_lowercase()
-                        .contains(&search)
-                    || block.id.to_string().contains(&search)
-            })
-            .collect();
-        let mut selected = None;
-        let mut cancel = false;
-        let mut open = self.open;
-        egui::Window::new("Link existing block")
-            .collapsible(false)
-            .resizable(true)
-            .default_width(420.0)
-            .open(&mut open)
-            .show(context, |ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.search)
-                        .hint_text("Search by name or UUID"),
-                )
-                .request_focus();
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .max_height(320.0)
-                    .show(ui, |ui| {
-                        if blocks.is_empty() {
-                            ui.weak(if search.is_empty() {
-                                "No blocks are available to link."
-                            } else {
-                                "No matching blocks."
-                            });
+    ) -> (Option<Uuid>, Option<CachedBlock>) {
+        let mut new_type = None;
+        let mut linked = None;
+        let mut close = false;
+        let response =
+            egui::Modal::new(egui::Id::new(("block-picker", self.id))).show(context, |ui| {
+                ui.set_min_size(egui::vec2(560.0, 420.0));
+                ui.heading("Add block");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(140.0);
+                        if ui
+                            .selectable_label(self.tab == BlockPickerTab::Add, "Add")
+                            .clicked()
+                        {
+                            self.tab = BlockPickerTab::Add;
                         }
-                        for block in &blocks {
-                            let label = cached_display_name(registry, block);
-                            if ui
-                                .button(label)
-                                .on_hover_text(block.id.to_string())
-                                .clicked()
-                            {
-                                selected = Some(block.clone());
+                        if ui
+                            .selectable_label(
+                                self.tab == BlockPickerTab::LinkExisting,
+                                "Link existing",
+                            )
+                            .clicked()
+                        {
+                            self.tab = BlockPickerTab::LinkExisting;
+                        }
+                    });
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        ui.set_min_width(380.0);
+                        match self.tab {
+                            BlockPickerTab::Add => new_type = show_add_grid(ui, registry),
+                            BlockPickerTab::LinkExisting => {
+                                linked = show_link_content(
+                                    ui,
+                                    &mut self.search,
+                                    &self.excluded,
+                                    client,
+                                    registry,
+                                );
                             }
                         }
                     });
+                });
+                ui.add_space(8.0);
                 ui.separator();
-                if ui.button("Cancel").clicked() {
-                    cancel = true;
-                }
+                egui::Sides::new().show(
+                    ui,
+                    |_ui| {},
+                    |ui| {
+                        close = ui.button("Close").clicked();
+                    },
+                );
             });
-        if selected.is_some() || cancel {
-            open = false;
+        if close || new_type.is_some() || linked.is_some() || response.should_close() {
+            self.open = false;
         }
-        self.open = open;
-        selected
+        (new_type, linked)
     }
 
     pub fn handle(
@@ -165,24 +147,12 @@ impl BlockPicker {
         editors: &mut EditorAccess<'_>,
         created_parent: BlockParent,
     ) -> Option<BlockPickerResult> {
-        let mut result = match self.pending_action.take() {
-            Some(BlockPickerMenuAction::New(block_type)) => {
-                self.create_registered_block(editors, block_type, created_parent)
-            }
-            Some(BlockPickerMenuAction::LinkExisting) => {
-                self.open = true;
-                self.search.clear();
-                None
-            }
-            None => None,
-        };
-        if result.is_none() {
-            result = self.show_creation_options(context, editors, created_parent);
-        }
-        if result.is_none() {
-            if let Some(block) =
-                self.show_link_picker(context, editors.client(), editors.registry())
-            {
+        let mut result = self.show_creation_options(context, editors, created_parent);
+        if result.is_none() && self.open {
+            let (new_type, linked) = self.show_modal(context, editors.client(), editors.registry());
+            if let Some(block_type) = new_type {
+                result = self.create_registered_block(editors, block_type, created_parent);
+            } else if let Some(block) = linked {
                 editors.ensure(block.id, block.block_type);
                 result = Some(BlockPickerResult {
                     id: block.id,
@@ -236,13 +206,11 @@ impl BlockPicker {
             .unwrap_or("block");
         let mut create = false;
         let mut cancel = false;
-        let mut open = true;
-        egui::Window::new(format!("New {title}"))
-            .id(egui::Id::new(("block-picker-create", self.id)))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(context, |ui| {
+        let response =
+            egui::Modal::new(egui::Id::new(("block-picker-create", self.id))).show(context, |ui| {
+                ui.set_min_width(320.0);
+                ui.heading(format!("New {title}"));
+                ui.add_space(8.0);
                 let ready = pending.creation.ui(ui);
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -253,7 +221,7 @@ impl BlockPicker {
                     cancel = ui.button("Cancel").clicked();
                 });
             });
-        if cancel || !open {
+        if cancel || response.should_close() {
             return None;
         }
         if !create {
@@ -305,15 +273,123 @@ impl BlockPicker {
         let Some(error) = self.error.clone() else {
             return;
         };
-        egui::Window::new("Block picker error")
-            .id(egui::Id::new(("block-picker-error", self.id)))
-            .collapsible(false)
-            .resizable(false)
-            .show(context, |ui| {
+        let response =
+            egui::Modal::new(egui::Id::new(("block-picker-error", self.id))).show(context, |ui| {
+                ui.set_min_width(280.0);
+                ui.heading("Block picker error");
+                ui.add_space(8.0);
                 ui.colored_label(ui.visuals().error_fg_color, error);
-                if ui.button("Dismiss").clicked() {
-                    self.error = None;
+                ui.add_space(8.0);
+                ui.button("Dismiss").clicked()
+            });
+        if response.inner || response.should_close() {
+            self.error = None;
+        }
+    }
+}
+
+/// The Add tab: a preview tile per creatable block type. A single click both
+/// chooses and creates that type.
+fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry) -> Option<Uuid> {
+    let mut selected = None;
+    egui::ScrollArea::vertical()
+        .max_height(360.0)
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for &(label, block_type) in registry.new_block_actions() {
+                    let response =
+                        show_add_tile(ui, registry.icon(block_type), label).on_hover_text(label);
+                    if response.clicked() {
+                        selected = Some(block_type);
+                    }
                 }
             });
+        });
+    selected
+}
+
+/// A single preview tile: the block type's icon large in the preview area,
+/// with the icon and name again as a caption underneath.
+fn show_add_tile(ui: &mut egui::Ui, icon: Option<MaterialIcon>, label: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(ADD_TILE_SIZE, egui::Sense::click());
+    let visuals = ui.style().interact(&response);
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        5.0,
+        visuals.bg_fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let preview_center = egui::pos2(rect.center().x, rect.top() + (rect.height() - 28.0) / 2.0);
+    if let Some(icon) = icon {
+        painter.text(
+            preview_center,
+            egui::Align2::CENTER_CENTER,
+            icon.codepoint,
+            egui::FontId::new(40.0, icon.font_family()),
+            visuals.text_color(),
+        );
     }
+    let caption = icon.map_or_else(
+        || label.to_owned(),
+        |icon| format!("{} {label}", icon.codepoint),
+    );
+    painter.text(
+        egui::pos2(rect.center().x, rect.bottom() - 14.0),
+        egui::Align2::CENTER_CENTER,
+        caption,
+        egui::FontId::proportional(13.0),
+        visuals.text_color(),
+    );
+    response
+}
+
+/// The Link Existing tab: search by name or UUID, then pick from the
+/// matching blocks that are not excluded.
+fn show_link_content(
+    ui: &mut egui::Ui,
+    search: &mut String,
+    excluded: &HashSet<Uuid>,
+    client: &BlockClient,
+    registry: &EditorRegistry,
+) -> Option<CachedBlock> {
+    ui.add(egui::TextEdit::singleline(search).hint_text("Search by name or UUID"));
+    ui.separator();
+    let query = search.trim().to_lowercase();
+    let blocks: Vec<_> = client
+        .cached_blocks()
+        .into_iter()
+        .filter(|block| !excluded.contains(&block.id))
+        .filter(|block| {
+            query.is_empty()
+                || cached_display_name(registry, block)
+                    .to_lowercase()
+                    .contains(&query)
+                || block.id.to_string().contains(&query)
+        })
+        .collect();
+    let mut selected = None;
+    egui::ScrollArea::vertical()
+        .max_height(320.0)
+        .show(ui, |ui| {
+            if blocks.is_empty() {
+                ui.weak(if query.is_empty() {
+                    "No blocks are available to link."
+                } else {
+                    "No matching blocks."
+                });
+            }
+            for block in &blocks {
+                let label = cached_display_name(registry, block);
+                if ui
+                    .button(label)
+                    .on_hover_text(block.id.to_string())
+                    .clicked()
+                {
+                    selected = Some(block.clone());
+                }
+            }
+        });
+    selected
 }

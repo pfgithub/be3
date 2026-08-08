@@ -353,14 +353,10 @@ impl BlockApp {
             row_response = Some(response);
             if can_add_child {
                 ui.add_enabled_ui(can_add_here, |ui| {
-                    ui.menu_button(ICON_ADD, |ui| {
+                    if ui.button(ICON_ADD).clicked() {
                         self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
-                        self.block_picker.show_menu_excluding(
-                            ui,
-                            &self.registry,
-                            picker_excluded.clone(),
-                        );
-                    })
+                        self.block_picker.open(picker_excluded.clone());
+                    }
                 })
                 .response
                 .on_hover_text("Add a child")
@@ -460,12 +456,10 @@ impl BlockApp {
         ui.horizontal(|ui| {
             ui.heading("Blocks");
             ui.add_space(ui.available_width() - 28.0);
-            ui.menu_button(ICON_ADD, |ui| {
+            if ui.button(ICON_ADD).on_hover_text("Create block").clicked() {
                 self.block_picker_target = Some(BlockPickerTarget::Root);
-                self.block_picker.show_menu(ui, &self.registry);
-            })
-            .response
-            .on_hover_text("Create block");
+                self.block_picker.open([]);
+            }
         });
         ui.separator();
 

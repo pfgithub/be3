@@ -184,7 +184,7 @@ impl TextEditor {
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
+    fn toolbar(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) {
         let previous = self.core.language();
         let mut language = previous;
         ui.horizontal_wrapped(|ui| {
@@ -268,10 +268,10 @@ impl TextEditor {
                 }
             }
             ui.menu_button("Insert", |ui| {
-                ui.menu_button("Block", |ui| {
-                    self.picker
-                        .show_menu_excluding(ui, editors.registry(), [self.block.id()]);
-                });
+                if ui.button("Block").clicked() {
+                    self.picker.open([self.block.id()]);
+                    ui.close();
+                }
             });
         });
         if language != previous {
