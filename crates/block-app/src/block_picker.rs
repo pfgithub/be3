@@ -288,22 +288,33 @@ impl BlockPicker {
     }
 }
 
-/// The Add tab: a preview tile per creatable block type. A single click both
-/// chooses and creates that type.
+/// The Add tab: a preview tile per creatable block type, common types shown
+/// in a main section above the rest. A single click both chooses and creates
+/// that type.
 fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry) -> Option<Uuid> {
     let mut selected = None;
     egui::ScrollArea::vertical()
         .max_height(360.0)
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for &(label, block_type) in registry.new_block_actions() {
-                    let response =
-                        show_add_tile(ui, registry.icon(block_type), label).on_hover_text(label);
-                    if response.clicked() {
-                        selected = Some(block_type);
+            let mut show_section = |ui: &mut egui::Ui, default: bool| {
+                ui.horizontal_wrapped(|ui| {
+                    for &(label, block_type, is_default) in registry.new_block_actions() {
+                        if is_default != default {
+                            continue;
+                        }
+                        let response = show_add_tile(ui, registry.icon(block_type), label)
+                            .on_hover_text(label);
+                        if response.clicked() {
+                            selected = Some(block_type);
+                        }
                     }
-                }
-            });
+                });
+            };
+            show_section(ui, true);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            show_section(ui, false);
         });
     selected
 }

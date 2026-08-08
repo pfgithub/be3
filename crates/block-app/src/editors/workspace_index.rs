@@ -69,6 +69,7 @@ impl EditorKind for WorkspaceIndexEditor {
     const ICON: MaterialIcon = ICON_FOLDER;
     const CAN_ADD_CHILD: bool = true;
     const CAN_DELETE_CHILD: bool = true;
+    const DEFAULT_ADD: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<WorkspaceIndex>) -> Self {
         Self::new(client, block)

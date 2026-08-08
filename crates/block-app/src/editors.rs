@@ -1112,6 +1112,9 @@ pub(super) trait EditorKind: BlockEditor + Sized + 'static {
     /// Set these only alongside the matching `BlockEditor` method.
     const CAN_ADD_CHILD: bool = false;
     const CAN_DELETE_CHILD: bool = false;
+    /// Whether this editor is common enough to show in the main section of
+    /// the add-block picker, rather than below it.
+    const DEFAULT_ADD: bool = false;
 
     fn open(client: &BlockClient, block: BlockHandle<Self::Block>) -> Self;
 
@@ -1189,6 +1192,7 @@ struct EditorRegistration {
     open: OpenEditor,
     can_add_child: bool,
     can_delete_child: bool,
+    default_add: bool,
     dynamic_artifact: Option<DynamicArtifactSupport>,
 }
 
@@ -1202,6 +1206,7 @@ impl EditorRegistration {
             open: |client, id| Box::new(E::open(client, client.get_block::<E::Block>(id))),
             can_add_child: E::CAN_ADD_CHILD,
             can_delete_child: E::CAN_DELETE_CHILD,
+            default_add: E::DEFAULT_ADD,
             dynamic_artifact: E::dynamic_artifact(),
         }
     }
@@ -1209,7 +1214,7 @@ impl EditorRegistration {
 
 pub struct EditorRegistry {
     registrations: HashMap<Uuid, EditorRegistration>,
-    new_block_actions: Vec<(&'static str, Uuid)>,
+    new_block_actions: Vec<(&'static str, Uuid, bool)>,
 }
 
 impl EditorRegistry {
@@ -1265,14 +1270,19 @@ impl EditorRegistry {
 
     fn insert(&mut self, registration: EditorRegistration) {
         if registration.create.is_some() {
-            self.new_block_actions
-                .push((registration.display_name, registration.block_type));
+            self.new_block_actions.push((
+                registration.display_name,
+                registration.block_type,
+                registration.default_add,
+            ));
         }
         self.registrations
             .insert(registration.block_type, registration);
     }
 
-    pub fn new_block_actions(&self) -> &[(&'static str, Uuid)] {
+    /// Creatable block types, with whether each belongs in the picker's main
+    /// section.
+    pub fn new_block_actions(&self) -> &[(&'static str, Uuid, bool)] {
         &self.new_block_actions
     }
 
