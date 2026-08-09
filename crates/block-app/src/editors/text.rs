@@ -56,6 +56,8 @@ const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const DIRECT_EDITOR_WIDTH: f32 = 600.0;
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
+const TOUCH_HANDLE_RADIUS: f32 = 6.0;
+const TOUCH_HANDLE_HIT_RADIUS: f32 = 18.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ParsedEmbed {
@@ -69,6 +71,12 @@ struct MarkdownCheckbox {
     line_start: usize,
     marker: Range<usize>,
     checked: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectionHandle {
+    Start,
+    End,
 }
 
 impl EditorKind for TextEditor {
@@ -97,6 +105,10 @@ pub(super) struct TextEditor {
     selecting: bool,
     click_count: u8,
     last_click: Option<(f64, Pos2)>,
+    touch_mode: bool,
+    dragging_handle: Option<SelectionHandle>,
+    touch_menu_open: bool,
+    touch_menu_pos: Pos2,
     toolbar_profile: Duration,
     layout_cache: Option<CachedLayout>,
     picker: BlockPicker,
@@ -174,6 +186,10 @@ impl TextEditor {
             selecting: false,
             click_count: 0,
             last_click: None,
+            touch_mode: false,
+            dragging_handle: None,
+            touch_menu_open: false,
+            touch_menu_pos: Pos2::ZERO,
             toolbar_profile: Duration::default(),
             layout_cache: None,
             picker: BlockPicker::default(),
@@ -819,13 +835,32 @@ impl TextEditor {
                 input.any_touches(),
             )
         });
+        if pressed {
+            self.touch_mode = touch_screen;
+        }
         let Some(pointer) = response.interact_pointer_pos() else {
             if !down {
                 self.selecting = false;
+                self.dragging_handle = None;
             }
             return false;
         };
         let local_pointer = pointer - origin;
+        if self.touch_mode {
+            if self.dragging_handle.is_some() {
+                if down {
+                    self.drag_selection_handle(layout, local_pointer);
+                    return true;
+                }
+                self.dragging_handle = None;
+            } else if pressed {
+                if let Some(handle) = self.selection_handle_at(layout, local_pointer) {
+                    self.begin_selection_handle_drag(handle, layout, local_pointer);
+                    self.touch_menu_open = false;
+                    return true;
+                }
+            }
+        }
         if layout.embeds.iter().any(|embed| {
             embed.large && embed.available && embed.rect.contains(local_pointer.to_pos2())
         }) {
@@ -845,6 +880,14 @@ impl TextEditor {
         let target = hit_test(layout, local_pointer);
         if pressed && response.contains_pointer() {
             response.request_focus();
+            if self.touch_mode && self.selection_contains_byte(target) {
+                self.touch_menu_pos = pointer;
+                self.touch_menu_open = true;
+                self.selecting = false;
+                self.click_count = 0;
+                self.last_click = None;
+                return true;
+            }
             if let Some(checkbox) = checkbox_at(layout, checkboxes, local_pointer.to_pos2()) {
                 self.core.execute_command(EditorCommand::Markdown(
                     MarkdownCommand::ToggleCheckbox(self.core.position(checkbox.line_start)),
@@ -906,6 +949,131 @@ impl TextEditor {
             self.selecting = false;
         }
         false
+    }
+
+    fn selection_contains_byte(&self, byte: usize) -> bool {
+        let Some(cursor) = self.core.cursor_positions().first() else {
+            return false;
+        };
+        let Some(range) = self.core.selection_range(cursor) else {
+            return false;
+        };
+        range.start < range.end && byte >= range.start && byte < range.end
+    }
+
+    fn selection_handle_at(
+        &self,
+        layout: &DocumentLayout,
+        local_pointer: Vec2,
+    ) -> Option<SelectionHandle> {
+        let cursor = self.core.cursor_positions().first()?;
+        let range = self.core.selection_range(cursor)?;
+        if range.start == range.end {
+            return None;
+        }
+        let start = handle_grab_point(layout, range.start)?;
+        let end = handle_grab_point(layout, range.end)?;
+        if (local_pointer - start).length() <= TOUCH_HANDLE_HIT_RADIUS {
+            Some(SelectionHandle::Start)
+        } else if (local_pointer - end).length() <= TOUCH_HANDLE_HIT_RADIUS {
+            Some(SelectionHandle::End)
+        } else {
+            None
+        }
+    }
+
+    fn begin_selection_handle_drag(
+        &mut self,
+        handle: SelectionHandle,
+        layout: &DocumentLayout,
+        local_pointer: Vec2,
+    ) {
+        let Some(cursor) = self.core.cursor_positions().first() else {
+            return;
+        };
+        let Some(range) = self.core.selection_range(cursor) else {
+            return;
+        };
+        let fixed_byte = match handle {
+            SelectionHandle::Start => range.end,
+            SelectionHandle::End => range.start,
+        };
+        let fixed = self.core.position(fixed_byte);
+        self.core.execute_command(EditorCommand::Click {
+            position: fixed,
+            mode: DragSelectionMode::default(),
+            extend: false,
+            select_syntax_node: false,
+        });
+        self.dragging_handle = Some(handle);
+        self.selecting = false;
+        self.drag_selection_handle(layout, local_pointer);
+    }
+
+    fn drag_selection_handle(&mut self, layout: &DocumentLayout, local_pointer: Vec2) {
+        let target = hit_test(layout, local_pointer);
+        self.core
+            .execute_command(EditorCommand::Drag(self.core.position(target)));
+    }
+
+    fn paint_touch_handles(
+        &self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        origin: Pos2,
+        layout: &DocumentLayout,
+    ) {
+        if !self.touch_mode {
+            return;
+        }
+        let Some(cursor) = self.core.cursor_positions().first() else {
+            return;
+        };
+        let Some(range) = self.core.selection_range(cursor) else {
+            return;
+        };
+        if range.start == range.end {
+            return;
+        }
+        let color = ui.visuals().selection.stroke.color;
+        for byte in [range.start, range.end] {
+            let Some(point) = handle_grab_point(layout, byte) else {
+                continue;
+            };
+            painter.circle_filled(origin + point, TOUCH_HANDLE_RADIUS, color);
+        }
+    }
+
+    fn touch_selection_menu(&mut self, response: &egui::Response) {
+        if !self.touch_menu_open {
+            return;
+        }
+        let mut open = true;
+        egui::Popup::from_response(response)
+            .id(egui::Id::new((self.block.id(), "touch-selection-menu")))
+            .at_position(self.touch_menu_pos)
+            .open_bool(&mut open)
+            .show(|ui| {
+                if ui.button("Copy").clicked() {
+                    let text = self.core.copy_utf8(CopyMode::Copy);
+                    if !text.is_empty() {
+                        ui.ctx().copy_text(text);
+                    }
+                    ui.close();
+                }
+                if ui.button("Cut").clicked() {
+                    let text = self.core.copy_utf8(CopyMode::Cut);
+                    if !text.is_empty() {
+                        ui.ctx().copy_text(text);
+                    }
+                    ui.close();
+                }
+                if ui.button("Select All").clicked() {
+                    self.core.execute_command(EditorCommand::SelectAll);
+                    ui.close();
+                }
+            });
+        self.touch_menu_open = open;
     }
 
     fn paint(
@@ -1657,6 +1825,8 @@ impl BlockEditor for TextEditor {
         for rect in caret_rects {
             painter.rect_filled(rect, 0.0, cursor_color);
         }
+        self.paint_touch_handles(ui, &painter, origin, &layout);
+        self.touch_selection_menu(&response);
         if response.has_focus() {
             report_ime_area(ui, response.rect, cursor);
         }
@@ -1843,6 +2013,12 @@ fn markdown_image_range(bytes: &[u8], url: &Range<usize>) -> Option<Range<usize>
     (bytes[line_start..image_start].iter().all(whitespace)
         && bytes[image_end..line_end].iter().all(whitespace))
     .then_some(image_start..image_end)
+}
+
+fn handle_grab_point(layout: &DocumentLayout, byte: usize) -> Option<Vec2> {
+    let position = layout.positions.get(byte).and_then(|position| *position)?;
+    let line = layout.lines.get(position.line)?;
+    Some(Vec2::new(position.x, line.y + line.height))
 }
 
 fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
