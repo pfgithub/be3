@@ -38,7 +38,7 @@ use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabVi
 use egui_material_icons::{
     icons::{
         ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_AUTO_AWESOME, ICON_CHEVRON_RIGHT,
-        ICON_CLOUD, ICON_COMPUTER, ICON_DATA_OBJECT, ICON_EDIT, ICON_GROUP_ADD,
+        ICON_CLOUD, ICON_COMPUTER, ICON_CONTENT_COPY, ICON_DATA_OBJECT, ICON_EDIT, ICON_GROUP_ADD,
         ICON_KEYBOARD_ARROW_DOWN, ICON_LINK, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT,
         ICON_MORE_HORIZ, ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT,
         ICON_UNDO, ICON_VISIBILITY, ICON_WORKSPACES,
@@ -211,6 +211,7 @@ struct BlockApp {
     /// falling back to the block's canonical ancestor chain.
     opened_via: HashMap<Uuid, Uuid>,
     pending_transfers: Vec<PendingTransfer>,
+    pending_copies: Vec<PendingCopy>,
     rename: Option<RenameState>,
     share: ShareDialog,
     client_debug_open: bool,
@@ -414,6 +415,23 @@ enum TransferStage {
     AddDestination,
 }
 
+/// Duplicates the block being viewed via a reference and swaps the specific
+/// occurrence being viewed (in `container`) to point at the copy, without
+/// touching the original block or its other referrers.
+#[derive(Clone)]
+struct PendingCopy {
+    source: Uuid,
+    container: Uuid,
+    tab_id: Uuid,
+    stage: CopyStage,
+}
+
+#[derive(Clone, Copy)]
+enum CopyStage {
+    Duplicate,
+    Replace { copy_id: Uuid, block_type: Uuid },
+}
+
 struct RenameState {
     id: Uuid,
     name: String,
@@ -527,6 +545,7 @@ impl BlockApp {
             sidebar_reveal: None,
             opened_via: HashMap::new(),
             pending_transfers: Vec::new(),
+            pending_copies: Vec::new(),
             rename: None,
             share: ShareDialog::default(),
             client_debug_open: false,
@@ -1555,6 +1574,77 @@ impl BlockApp {
         }
     }
 
+    /// Queues duplicating `source` and swapping the occurrence viewed through
+    /// `container` (the tab identified by `tab_id`) to point at the copy.
+    fn queue_copy(&mut self, source: Uuid, container: Uuid, tab_id: Uuid) {
+        if self
+            .pending_copies
+            .iter()
+            .any(|pending| pending.tab_id == tab_id)
+        {
+            return;
+        }
+        self.ensure_editor(container);
+        self.pending_copies.push(PendingCopy {
+            source,
+            container,
+            tab_id,
+            stage: CopyStage::Duplicate,
+        });
+    }
+
+    fn process_pending_copies(&mut self) {
+        let pending = std::mem::take(&mut self.pending_copies);
+        for mut copy in pending {
+            if let CopyStage::Duplicate = copy.stage {
+                let Some((copy_id, block_type)) =
+                    self.editors.get(&copy.source).and_then(|editor| {
+                        editor
+                            .block()
+                            .duplicate(&self.client)
+                            .map(|copy_id| (copy_id, editor.block_type()))
+                    })
+                else {
+                    self.pending_copies.push(copy);
+                    continue;
+                };
+                copy.stage = CopyStage::Replace {
+                    copy_id,
+                    block_type,
+                };
+            }
+            let CopyStage::Replace {
+                copy_id,
+                block_type,
+            } = copy.stage
+            else {
+                unreachable!("copy stage was just set to Replace")
+            };
+
+            if !self.ensure_editor(copy.container) {
+                self.pending_copies.push(copy);
+                continue;
+            }
+            let replaced = self
+                .editors
+                .get(&copy.container)
+                .and_then(|editor| editor.replace_child(copy.source, BlockEntry { id: copy_id }));
+            if replaced != Some(true) {
+                self.pending_copies.push(copy);
+                continue;
+            }
+
+            self.set_block_parent(copy_id, BlockParent::Uuid(copy.container));
+            self.navigate_tab(
+                copy.tab_id,
+                TabNavigation::Open(BlockTabHistoryItem {
+                    id: copy_id,
+                    block_type,
+                }),
+            );
+        }
+    }
+
     fn open_tab(&mut self, id: Uuid, block_type: Uuid) {
         self.ensure_block_open(id, block_type);
         let existing_tab = self.dock_state.iter_all_tabs().find_map(|(path, tab)| {
@@ -1679,6 +1769,7 @@ impl BlockApp {
     fn show_content(
         &mut self,
         ui: &mut egui::Ui,
+        tab_id: Uuid,
         active: Uuid,
         can_go_back: bool,
         can_go_forward: bool,
@@ -1697,7 +1788,7 @@ impl BlockApp {
         let shared_navigation = if denied {
             None
         } else {
-            self.show_shared_block_bar(ui, active, relationships.as_ref())
+            self.show_shared_block_bar(ui, tab_id, active, relationships.as_ref())
         };
         let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
         let redo_shortcut = egui::KeyboardShortcut::new(
@@ -2075,6 +2166,7 @@ impl BlockApp {
     fn show_shared_block_bar(
         &mut self,
         ui: &mut egui::Ui,
+        tab_id: Uuid,
         active: Uuid,
         relationships: Option<&block_client::BlockRelationships>,
     ) -> Option<BlockTabHistoryItem> {
@@ -2106,9 +2198,23 @@ impl BlockApp {
             .backrefs
             .get(&active)
             .map(|list| (list.is_loaded(), list.read()));
+        let container_block_type =
+            container.and_then(|container| self.block_types.get(&container).copied());
+        let copy_disabled_hover = match (container, container_block_type) {
+            (Some(_), Some(block_type)) if !self.registry.can_replace_child(block_type) => {
+                Some("This container doesn't support replacing a reference")
+            }
+            (Some(container), Some(_)) if !self.client.block_access(container).can_edit() => {
+                Some("You don't have permission to edit this container")
+            }
+            (Some(_), Some(_)) => None,
+            _ => Some("Loading…"),
+        };
+        let copy_enabled = copy_disabled_hover.is_none();
         let mut navigate = None;
         let mut context_action = None;
         let mut go_to_original = false;
+        let mut make_copy = false;
         egui::Frame::new()
             .fill(ui.visuals().faint_bg_color)
             .inner_margin(egui::Margin::symmetric(8, 5))
@@ -2128,6 +2234,18 @@ impl BlockApp {
                             )
                             .on_disabled_hover_text("Loading…")
                             .clicked();
+                        let copy_button = ui.add_enabled(
+                            copy_enabled,
+                            egui::Button::new(format!(
+                                "{} Make a copy",
+                                ICON_CONTENT_COPY.codepoint
+                            )),
+                        );
+                        make_copy = if let Some(hover) = copy_disabled_hover {
+                            copy_button.on_disabled_hover_text(hover).clicked()
+                        } else {
+                            copy_button.clicked()
+                        };
                     } else {
                         ui.weak(format!(
                             "This block appears in {count} places. Editing it here changes it everywhere."
@@ -2179,6 +2297,11 @@ impl BlockApp {
             if let (Some(parent_id), Some(block_type)) = (parent_id, parent_block_type) {
                 self.opened_via.remove(&parent_id);
                 navigate = Some((parent_id, block_type));
+            }
+        }
+        if make_copy {
+            if let Some(container) = container {
+                self.queue_copy(active, container, tab_id);
             }
         }
         navigate.map(|(id, block_type)| BlockTabHistoryItem { id, block_type })
@@ -2732,9 +2855,13 @@ impl TabViewer for BlockTabViewer<'_> {
                 if let Some(item) = status_navigation {
                     self.navigations.push((tab.id, TabNavigation::Open(item)));
                 }
-                let (action, navigation) =
-                    self.app
-                        .show_content(ui, current.id, tab.can_go_back(), tab.can_go_forward());
+                let (action, navigation) = self.app.show_content(
+                    ui,
+                    tab.id,
+                    current.id,
+                    tab.can_go_back(),
+                    tab.can_go_forward(),
+                );
                 if let Some(action) = action {
                     self.actions.push((tab.id, current.id, action));
                 }
@@ -3176,6 +3303,7 @@ impl eframe::App for BlockApp {
         self.poll_workspace_request();
         self.intercept_close(ui.ctx());
         self.process_pending_transfers();
+        self.process_pending_copies();
         self.show_block_picker(ui.ctx());
         self.show_rename(ui);
         self.share.show(ui.ctx(), &self.client);
