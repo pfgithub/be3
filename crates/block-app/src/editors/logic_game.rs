@@ -37,8 +37,8 @@ pub(super) struct LogicGameEditor {
     /// The level whose solutions are shown, if any.
     expanded: Option<ChallengeId>,
     /// The palette the game's grids are built from. The game does not own it:
-    /// it is the hotbar at the root of the block tree, offered here so it can
-    /// be opened without finding a grid first.
+    /// it is the hotbar registered under the workspace's root `Settings`
+    /// block, offered here so it can be opened without finding a grid first.
     hotbar: Option<RootSetting<Hotbar>>,
     quiz: BinaryAdditionQuiz,
 }

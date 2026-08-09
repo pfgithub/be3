@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 /// One circuit: the components placed on the grid and the wires between them.
 /// The palette it is edited with is not part of it: the editor finds the shared
-/// hotbar at the root of the block tree instead.
+/// hotbar registered under the workspace's root `Settings` block instead.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct LogicGrid {
     grid: Grid,

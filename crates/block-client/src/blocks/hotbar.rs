@@ -34,9 +34,9 @@ impl HotbarSlot {
     }
 }
 
-/// The tool palette shared by the grids of one game. It sits at the root of the
-/// block tree rather than inside a grid, so pinning a component once offers it
-/// in every circuit built afterwards.
+/// The tool palette shared by the grids of one game. It is registered under the
+/// workspace's root `Settings` block rather than living inside a grid, so
+/// pinning a component once offers it in every circuit built afterwards.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Hotbar {
     slots: Vec<HotbarSlot>,

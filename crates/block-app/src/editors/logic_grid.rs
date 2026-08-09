@@ -541,9 +541,9 @@ pub(super) struct LogicGridEditor {
     /// changes, including from this editor's own edits.
     grid: Grid,
     observed_revision: Option<u64>,
-    /// The hotbar block backing the palette: the one at the root of the block
-    /// tree, which every grid shares. It is `None` until the editor has a
-    /// client to look it up with.
+    /// The hotbar block backing the palette: the one registered under the
+    /// workspace's root `Settings` block, which every grid shares. It is
+    /// `None` until the editor has a client to look it up with.
     hotbar_block: Option<RootSetting<Hotbar>>,
     /// Set when the palette changed before the hotbar block was there, so the
     /// change is written - creating the hotbar if the tree has none - as soon
