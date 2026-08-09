@@ -732,6 +732,9 @@ pub trait BlockEditor {
     fn delete_child(&self, _entry: BlockEntry) -> Option<bool> {
         None
     }
+    fn replace_child(&self, _old: Uuid, _new: BlockEntry) -> Option<bool> {
+        None
+    }
     fn update(&mut self, _frame: &eframe::Frame) {}
     fn finish_frame(&mut self) {}
     fn set_tab_active(&mut self, _active: bool) {}
@@ -1211,6 +1214,7 @@ pub(super) trait EditorKind: BlockEditor + Sized + 'static {
     /// Set these only alongside the matching `BlockEditor` method.
     const CAN_ADD_CHILD: bool = false;
     const CAN_DELETE_CHILD: bool = false;
+    const CAN_REPLACE_CHILD: bool = false;
     /// Whether this editor is common enough to show in the main section of
     /// the add-block picker, rather than below it.
     const DEFAULT_ADD: bool = false;
@@ -1291,6 +1295,7 @@ struct EditorRegistration {
     open: OpenEditor,
     can_add_child: bool,
     can_delete_child: bool,
+    can_replace_child: bool,
     default_add: bool,
     dynamic_artifact: Option<DynamicArtifactSupport>,
 }
@@ -1305,6 +1310,7 @@ impl EditorRegistration {
             open: |client, id| Box::new(E::open(client, client.get_block::<E::Block>(id))),
             can_add_child: E::CAN_ADD_CHILD,
             can_delete_child: E::CAN_DELETE_CHILD,
+            can_replace_child: E::CAN_REPLACE_CHILD,
             default_add: E::DEFAULT_ADD,
             dynamic_artifact: E::dynamic_artifact(),
         }
@@ -1415,6 +1421,12 @@ impl EditorRegistry {
         self.registrations
             .get(&block_type)
             .is_some_and(|registration| registration.can_delete_child)
+    }
+
+    pub fn can_replace_child(&self, block_type: Uuid) -> bool {
+        self.registrations
+            .get(&block_type)
+            .is_some_and(|registration| registration.can_replace_child)
     }
 
     /// The functions that describe and rebuild artifacts made by `source_type`.

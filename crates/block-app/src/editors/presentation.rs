@@ -151,6 +151,7 @@ impl EditorKind for PresentationEditor {
     const ICON: MaterialIcon = ICON_SLIDESHOW;
     const CAN_ADD_CHILD: bool = true;
     const CAN_DELETE_CHILD: bool = true;
+    const CAN_REPLACE_CHILD: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<Presentation>) -> Self {
         Self::new(block, client)
@@ -657,6 +658,22 @@ impl BlockEditor for PresentationEditor {
             .iter()
             .filter(|slide| slide.block_id == entry.id)
             .map(|slide| PresentationOperation::Remove { slide_id: slide.id })
+            .collect::<Vec<_>>();
+        if !operations.is_empty() {
+            self.block.operate_grouped(operations);
+        }
+        Some(true)
+    }
+
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let slides = self.block.read()?.slides().to_vec();
+        let operations = slides
+            .iter()
+            .filter(|slide| slide.block_id == old)
+            .map(|slide| PresentationOperation::SetBlockId {
+                slide_id: slide.id,
+                block_id: new.id,
+            })
             .collect::<Vec<_>>();
         if !operations.is_empty() {
             self.block.operate_grouped(operations);

@@ -68,6 +68,7 @@ impl EditorKind for MapEditor {
     const ICON: MaterialIcon = ICON_MAP;
     const CAN_ADD_CHILD: bool = true;
     const CAN_DELETE_CHILD: bool = true;
+    const CAN_REPLACE_CHILD: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<Map>) -> Self {
         Self::new(block, client)
@@ -746,6 +747,25 @@ impl BlockEditor for MapEditor {
         if !ids.is_empty() {
             self.block.finish_history_group();
             self.block.operate(MapOperation::RemovePoints { ids });
+        }
+        Some(true)
+    }
+
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let map = self.block.read()?;
+        let points = map
+            .points()
+            .iter()
+            .filter(|point| point.block_id == old)
+            .map(|point| MapPoint {
+                block_id: new.id,
+                ..*point
+            })
+            .collect::<Vec<_>>();
+        drop(map);
+        if !points.is_empty() {
+            self.block.finish_history_group();
+            self.block.operate(MapOperation::UpdatePoints { points });
         }
         Some(true)
     }

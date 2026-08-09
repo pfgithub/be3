@@ -2,9 +2,11 @@ use super::*;
 
 mod presentation_allows_repeated_block_references;
 mod presentation_clamps_insert_indices;
+mod presentation_history_undoes_and_redoes_a_block_id_change;
 mod presentation_history_undoes_and_redoes_changes;
 mod presentation_history_undoes_grouped_removal;
 mod presentation_ignores_duplicate_occurrence_ids;
 mod presentation_inserts_removes_and_moves_slides;
 mod presentation_references_are_deduplicated;
 mod presentation_serialization_round_trips;
+mod presentation_sets_slide_block_id;

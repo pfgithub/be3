@@ -52,6 +52,7 @@ impl EditorKind for VideoEditor {
     const ICON: MaterialIcon = ICON_MOVIE;
     const CAN_ADD_CHILD: bool = true;
     const CAN_DELETE_CHILD: bool = true;
+    const CAN_REPLACE_CHILD: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<Video>) -> Self {
         Self::new(block, client)
@@ -434,6 +435,24 @@ impl BlockEditor for VideoEditor {
             .collect::<Vec<_>>();
         if !ids.is_empty() {
             self.block.operate(VideoOperation::RemoveClips { ids });
+        }
+        Some(true)
+    }
+
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let clips = self
+            .block
+            .read()?
+            .clips()
+            .iter()
+            .filter(|clip| clip.block_id == old)
+            .map(|clip| VideoClip {
+                block_id: new.id,
+                ..clip.clone()
+            })
+            .collect::<Vec<_>>();
+        if !clips.is_empty() {
+            self.block.operate(VideoOperation::UpdateClips { clips });
         }
         Some(true)
     }

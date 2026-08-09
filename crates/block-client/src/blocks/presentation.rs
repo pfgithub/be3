@@ -29,6 +29,10 @@ pub enum PresentationOperation {
         slide_id: Uuid,
         index: usize,
     },
+    SetBlockId {
+        slide_id: Uuid,
+        block_id: Uuid,
+    },
 }
 
 pub struct PresentationHistory;
@@ -50,6 +54,11 @@ enum PresentationHistoryChange {
         slide_id: Uuid,
         before: usize,
         after: usize,
+    },
+    SetBlockId {
+        slide_id: Uuid,
+        before: Uuid,
+        after: Uuid,
     },
 }
 
@@ -97,6 +106,15 @@ impl Block for Presentation {
                 let slide = presentation.slides.remove(current);
                 let index = (*index).min(presentation.slides.len());
                 presentation.slides.insert(index, slide);
+            }
+            PresentationOperation::SetBlockId { slide_id, block_id } => {
+                if let Some(slide) = presentation
+                    .slides
+                    .iter_mut()
+                    .find(|slide| slide.id == *slide_id)
+                {
+                    slide.block_id = *block_id;
+                }
             }
         }
     }
@@ -168,6 +186,19 @@ impl BlockHistory<Presentation> for PresentationHistory {
                         }
                     }
                 }
+                PresentationOperation::SetBlockId { slide_id, block_id } => {
+                    if let Some(slide) = current
+                        .slides
+                        .iter()
+                        .find(|slide| slide.id == *slide_id && slide.block_id != *block_id)
+                    {
+                        changes.push(PresentationHistoryChange::SetBlockId {
+                            slide_id: *slide_id,
+                            before: slide.block_id,
+                            after: *block_id,
+                        });
+                    }
+                }
                 PresentationOperation::Insert { .. } => {}
             }
             Presentation::apply_operation(&mut current, operation);
@@ -227,6 +258,24 @@ impl BlockHistory<Presentation> for PresentationHistory {
                 ) => PresentationOperation::Move {
                     slide_id: *slide_id,
                     index: *after,
+                },
+                (
+                    HistoryDirection::Undo,
+                    PresentationHistoryChange::SetBlockId {
+                        slide_id, before, ..
+                    },
+                ) => PresentationOperation::SetBlockId {
+                    slide_id: *slide_id,
+                    block_id: *before,
+                },
+                (
+                    HistoryDirection::Redo,
+                    PresentationHistoryChange::SetBlockId {
+                        slide_id, after, ..
+                    },
+                ) => PresentationOperation::SetBlockId {
+                    slide_id: *slide_id,
+                    block_id: *after,
                 },
             })
             .collect()
