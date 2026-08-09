@@ -103,6 +103,7 @@ impl BlockPicker {
                     ui.add_space(4.0);
                     ui.separator();
                 }
+                let content_height = (ui.available_height() - FOOTER_RESERVE).max(120.0);
                 ui.horizontal(|ui| {
                     if !stacked_tabs {
                         ui.vertical(|ui| {
@@ -113,7 +114,6 @@ impl BlockPicker {
                     }
                     ui.vertical(|ui| {
                         ui.set_min_width(ui.available_width());
-                        let content_height = (ui.available_height() - FOOTER_RESERVE).max(120.0);
                         match self.tab {
                             BlockPickerTab::Add => {
                                 new_type = show_add_grid(ui, registry, content_height);
