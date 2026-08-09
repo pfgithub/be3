@@ -750,6 +750,12 @@ impl InfiniteCanvasEditor {
                             let duplicate = response.ctx.input(|input| input.modifiers.alt);
                             self.begin_move_gesture(entities, world, duplicate);
                         }
+                    } else if !self.selection.is_empty()
+                        && !response.ctx.input(|input| input.modifiers.shift)
+                        && selected_frame.is_some_and(|frame| frame.contains(world))
+                    {
+                        let duplicate = response.ctx.input(|input| input.modifiers.alt);
+                        self.begin_move_gesture(entities, world, duplicate);
                     } else {
                         let additive = response.ctx.input(|input| input.modifiers.shift);
                         self.gesture = Some(Gesture::SelectBox {
