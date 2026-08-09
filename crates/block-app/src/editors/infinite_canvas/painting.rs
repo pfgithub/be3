@@ -73,7 +73,13 @@ pub(super) fn paint_entity(
             };
             job.sections[0].format.line_height = Some(font_size * text_style.line_height.max(0.5));
             let galley = painter.layout_job(job);
-            let position = center - galley.size() * 0.5;
+            let box_half_width = entity.transform.size.x * editor.render_scale * 0.5;
+            let text_x = match text_style.alignment {
+                CanvasTextAlign::Left => center.x - box_half_width,
+                CanvasTextAlign::Center => center.x,
+                CanvasTextAlign::Right => center.x + box_half_width,
+            };
+            let position = Pos2::new(text_x, center.y - galley.size().y * 0.5);
             if text_style.weight == CanvasTextWeight::Bold {
                 painter.add(
                     egui::epaint::TextShape::new(
