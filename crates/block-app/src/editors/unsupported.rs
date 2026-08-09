@@ -1,6 +1,6 @@
 use block::BlockParent;
 use block_client::{
-    properties::BlockName, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
+    properties::BlockName, BlockClient, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -49,6 +49,10 @@ impl BlockHandleAccess for UnsupportedEditor {
     fn set_parent(&self, _parent: BlockParent) {}
 
     fn history(&self) -> Option<&dyn BlockHistoryHandle> {
+        None
+    }
+
+    fn duplicate(&self, _client: &BlockClient) -> Option<Uuid> {
         None
     }
 }

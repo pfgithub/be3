@@ -1294,6 +1294,10 @@ pub trait BlockHandleAccess {
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
     fn history(&self) -> Option<&dyn BlockHistoryHandle>;
+    /// Creates a brand-new, independent block of the same type, seeded with
+    /// this block's current live value. The copy starts unparented with its
+    /// own operation log; `None` if this block isn't currently readable.
+    fn duplicate(&self, client: &BlockClient) -> Option<Uuid>;
 }
 
 impl<B: Block> BlockHandleAccess for BlockHandle<B> {
@@ -1315,6 +1319,17 @@ impl<B: Block> BlockHandleAccess for BlockHandle<B> {
 
     fn relationships(&self) -> Option<BlockRelationships> {
         self.read().map(|_| BlockHandle::relationships(self))
+    }
+
+    fn duplicate(&self, client: &BlockClient) -> Option<Uuid> {
+        let value = self.read()?.clone();
+        let copy = client.create_block(value);
+        if let Some(name) = BlockHandle::block_name(self) {
+            if name.manual {
+                copy.set_property(properties::NAME, properties::encode_name(&name));
+            }
+        }
+        Some(BlockHandle::id(&copy))
     }
 
     fn set_parent(&self, parent: BlockParent) {
