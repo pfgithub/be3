@@ -7,6 +7,7 @@ mod panic_guard;
 mod performance;
 mod platform;
 mod share;
+mod slide_templates;
 
 use std::{
     collections::{HashMap, HashSet},

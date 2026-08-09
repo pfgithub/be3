@@ -3,11 +3,7 @@ use std::collections::HashMap;
 use block::{Block, BlockParent, BlockReference, BlockReferenceList};
 use block_client::{
     blocks::{
-        infinite_canvas::{
-            CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasPreviewRegion,
-            CanvasTextAlign, CanvasTextStyle, CanvasTextWeight, CanvasTransform, InfiniteCanvas,
-            InfiniteCanvasOperation,
-        },
+        infinite_canvas::InfiniteCanvas,
         presentation::{Presentation, PresentationOperation, PresentationSlide},
         workspace_index::BlockEntry,
     },
@@ -23,126 +19,18 @@ use egui_material_icons::{
 };
 use uuid::Uuid;
 
-use crate::block_picker::BlockPicker;
+use crate::{block_picker::BlockPicker, slide_templates::SlideTemplate};
 
 use super::{
-    fit_rect, infinite_canvas::InfiniteCanvasEditor, paint_block_fallback, rect_corners,
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind,
+    fit_rect, paint_block_fallback, rect_corners, BlockEditor, BlockRenderContext, CreatableEditor,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorKind,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
 const THUMBNAIL_SIZE: Vec2 = egui::vec2(176.0, 104.0);
-const DEFAULT_SLIDE_SIZE: Vec2 = egui::vec2(960.0, 540.0);
+const DEFAULT_SLIDE_SIZE: Vec2 = crate::slide_templates::DEFAULT_SLIDE_SIZE;
 const PLAYBACK_CONTROLS_HEIGHT: f32 = 48.0;
-
-const TITLE_FONT_SIZE: f32 = 54.0;
-const SUBTITLE_FONT_SIZE: f32 = 26.0;
-const HEADER_FONT_SIZE: f32 = 40.0;
-const BODY_FONT_SIZE: f32 = 24.0;
-
-#[derive(Clone, Copy)]
-enum SlideTemplate {
-    Title,
-    Regular,
-    Blank,
-}
-
-fn template_text_entity(
-    center: CanvasPoint,
-    size: CanvasPoint,
-    placeholder: &str,
-    text_style: CanvasTextStyle,
-) -> CanvasEntity {
-    CanvasEntity {
-        id: Uuid::new_v4(),
-        transform: CanvasTransform::new(center, size, 0.0),
-        kind: CanvasEntityKind::Text {
-            text: String::new(),
-            text_style,
-            placeholder: placeholder.into(),
-        },
-        style: CanvasEntityStyle::default(),
-        group_id: None,
-        locked: false,
-    }
-}
-
-fn template_entities(template: SlideTemplate) -> Vec<CanvasEntity> {
-    match template {
-        SlideTemplate::Blank => Vec::new(),
-        SlideTemplate::Title => vec![
-            template_text_entity(
-                CanvasPoint::new(0.0, -40.0),
-                CanvasPoint::new(820.0, 110.0),
-                "Title",
-                CanvasTextStyle {
-                    font_size: TITLE_FONT_SIZE,
-                    weight: CanvasTextWeight::Bold,
-                    alignment: CanvasTextAlign::Center,
-                    line_height: 1.2,
-                    wrap: false,
-                },
-            ),
-            template_text_entity(
-                CanvasPoint::new(0.0, 70.0),
-                CanvasPoint::new(700.0, 60.0),
-                "Subtitle",
-                CanvasTextStyle {
-                    font_size: SUBTITLE_FONT_SIZE,
-                    weight: CanvasTextWeight::Regular,
-                    alignment: CanvasTextAlign::Center,
-                    line_height: 1.2,
-                    wrap: false,
-                },
-            ),
-        ],
-        SlideTemplate::Regular => vec![
-            template_text_entity(
-                CanvasPoint::new(0.0, -220.0),
-                CanvasPoint::new(860.0, 80.0),
-                "Header",
-                CanvasTextStyle {
-                    font_size: HEADER_FONT_SIZE,
-                    weight: CanvasTextWeight::Bold,
-                    alignment: CanvasTextAlign::Left,
-                    line_height: 1.2,
-                    wrap: false,
-                },
-            ),
-            template_text_entity(
-                CanvasPoint::new(0.0, 40.0),
-                CanvasPoint::new(860.0, 380.0),
-                "Body",
-                CanvasTextStyle {
-                    font_size: BODY_FONT_SIZE,
-                    weight: CanvasTextWeight::Regular,
-                    alignment: CanvasTextAlign::Left,
-                    line_height: 1.3,
-                    wrap: true,
-                },
-            ),
-        ],
-    }
-}
-
-fn build_template_canvas(template: SlideTemplate) -> InfiniteCanvas {
-    let mut canvas = InfiniteCanvas::new();
-    InfiniteCanvas::apply_operation(
-        &mut canvas,
-        &InfiniteCanvasOperation::SetPreviewRegion {
-            region: Some(CanvasPreviewRegion::new(
-                CanvasPoint::default(),
-                CanvasPoint::new(DEFAULT_SLIDE_SIZE.x, DEFAULT_SLIDE_SIZE.y),
-            )),
-        },
-    );
-    for entity in template_entities(template) {
-        InfiniteCanvas::apply_operation(&mut canvas, &InfiniteCanvasOperation::Add { entity });
-    }
-    canvas
-}
 
 impl EditorKind for PresentationEditor {
     type Block = Presentation;
@@ -265,11 +153,9 @@ impl PresentationEditor {
         template: SlideTemplate,
         index: usize,
     ) {
-        let canvas = build_template_canvas(template);
-        let block = editors.client().create_block(canvas);
-        let id = block.id();
-        block.set_parent(BlockParent::Uuid(self.block.id()));
-        let editor = Box::new(InfiniteCanvasEditor::new(block, editors.client()));
+        let editor = super::infinite_canvas::create_from_template(editors.client(), template);
+        let id = editor.id();
+        editor.set_parent(BlockParent::Uuid(self.block.id()));
         editors.insert(editor);
         self.insert_slide(id, index);
     }
@@ -300,29 +186,15 @@ impl PresentationEditor {
                 let index = self.slides().map_or(0, |slides| slides.len());
                 self.insert_template_slide(editors, SlideTemplate::Regular, index);
             }
-            ui.menu_button(ICON_KEYBOARD_ARROW_DOWN, |ui| {
+            if ui
+                .button(ICON_KEYBOARD_ARROW_DOWN)
+                .on_hover_text("More slide options")
+                .clicked()
+            {
                 let index = self.slides().map_or(0, |slides| slides.len());
-                if ui.button("Title page").clicked() {
-                    self.insert_template_slide(editors, SlideTemplate::Title, index);
-                    ui.close();
-                }
-                if ui.button("Regular page").clicked() {
-                    self.insert_template_slide(editors, SlideTemplate::Regular, index);
-                    ui.close();
-                }
-                if ui.button("Blank page").clicked() {
-                    self.insert_template_slide(editors, SlideTemplate::Blank, index);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Block…").clicked() {
-                    self.picker_insert_index = Some(index);
-                    self.picker.open([self.block.id()]);
-                    ui.close();
-                }
-            })
-            .response
-            .on_hover_text("More slide options");
+                self.picker_insert_index = Some(index);
+                self.picker.open_on_templates([self.block.id()]);
+            }
         });
     }
 

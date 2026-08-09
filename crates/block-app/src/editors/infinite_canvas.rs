@@ -65,6 +65,17 @@ impl CreatableEditor for InfiniteCanvasEditor {
     }
 }
 
+pub(crate) fn create_from_template(
+    client: &BlockClient,
+    template: crate::slide_templates::SlideTemplate,
+) -> Box<dyn BlockEditor> {
+    let canvas = crate::slide_templates::build_template_canvas(template);
+    Box::new(InfiniteCanvasEditor::new(
+        client.create_block(canvas),
+        client,
+    ))
+}
+
 const MIN_SIZE: f32 = 4.0;
 const HIT_RADIUS: f32 = 7.0;
 const HANDLE_RADIUS: f32 = 5.0;

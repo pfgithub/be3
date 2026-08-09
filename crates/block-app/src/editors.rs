@@ -12,7 +12,7 @@ mod database_view;
 mod gui_builder;
 mod hotbar;
 pub(crate) mod image;
-mod infinite_canvas;
+pub(crate) mod infinite_canvas;
 mod logic_game;
 mod logic_grid;
 mod map;

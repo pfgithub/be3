@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashSet};
 
-use block::BlockParent;
+use block::{Block, BlockParent};
 use block_client::{
+    blocks::infinite_canvas::InfiniteCanvas,
     properties::{self, BlockName},
     BlockClient, CachedBlock,
 };
@@ -9,8 +10,12 @@ use eframe::egui;
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
-use crate::editors::{
-    BlockCreation, BlockEditor, BlockLabel, EditorAccess, EditorRegistry, PendingCreation,
+use crate::{
+    editors::{
+        infinite_canvas, BlockCreation, BlockEditor, BlockLabel, EditorAccess, EditorRegistry,
+        PendingCreation,
+    },
+    slide_templates::SlideTemplate,
 };
 
 const ADD_TILE_SIZE: egui::Vec2 = egui::vec2(132.0, 124.0);
@@ -18,6 +23,7 @@ const ADD_TILE_SIZE: egui::Vec2 = egui::vec2(132.0, 124.0);
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum BlockPickerTab {
     Add,
+    Templates,
     LinkExisting,
 }
 
@@ -61,8 +67,17 @@ impl Default for BlockPicker {
 impl BlockPicker {
     /// Opens the picker modal, starting on the Add tab.
     pub fn open(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
+        self.open_on_tab(excluded, BlockPickerTab::Add);
+    }
+
+    /// Opens the picker modal, starting on the slide Templates tab.
+    pub fn open_on_templates(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
+        self.open_on_tab(excluded, BlockPickerTab::Templates);
+    }
+
+    fn open_on_tab(&mut self, excluded: impl IntoIterator<Item = Uuid>, tab: BlockPickerTab) {
         self.open = true;
-        self.tab = BlockPickerTab::Add;
+        self.tab = tab;
         self.search.clear();
         self.excluded = excluded.into_iter().collect();
     }
@@ -82,10 +97,11 @@ impl BlockPicker {
         context: &egui::Context,
         client: &BlockClient,
         registry: &EditorRegistry,
-    ) -> (Option<Uuid>, Option<CachedBlock>) {
+    ) -> (Option<Uuid>, Option<SlideTemplate>, Option<CachedBlock>) {
         const FOOTER_RESERVE: f32 = 44.0;
 
         let mut new_type = None;
+        let mut template = None;
         let mut linked = None;
         let mut close = false;
         let screen = context.content_rect();
@@ -118,6 +134,9 @@ impl BlockPicker {
                             BlockPickerTab::Add => {
                                 new_type = show_add_grid(ui, registry, content_height);
                             }
+                            BlockPickerTab::Templates => {
+                                template = show_templates_grid(ui, content_height);
+                            }
                             BlockPickerTab::LinkExisting => {
                                 linked = show_link_content(
                                     ui,
@@ -141,10 +160,15 @@ impl BlockPicker {
                     },
                 );
             });
-        if close || new_type.is_some() || linked.is_some() || response.should_close() {
+        if close
+            || new_type.is_some()
+            || template.is_some()
+            || linked.is_some()
+            || response.should_close()
+        {
             self.open = false;
         }
-        (new_type, linked)
+        (new_type, template, linked)
     }
 
     pub fn handle(
@@ -155,9 +179,18 @@ impl BlockPicker {
     ) -> Option<BlockPickerResult> {
         let mut result = self.show_creation_options(context, editors, created_parent);
         if result.is_none() && self.open {
-            let (new_type, linked) = self.show_modal(context, editors.client(), editors.registry());
+            let (new_type, template, linked) =
+                self.show_modal(context, editors.client(), editors.registry());
             if let Some(block_type) = new_type {
                 result = self.create_registered_block(editors, block_type, created_parent);
+            } else if let Some(template) = template {
+                let editor = infinite_canvas::create_from_template(editors.client(), template);
+                result = Some(Self::finish_creation(
+                    editors,
+                    editor,
+                    InfiniteCanvas::TYPE_ID,
+                    created_parent,
+                ));
             } else if let Some(block) = linked {
                 editors.ensure(block.id, block.block_type);
                 result = Some(BlockPickerResult {
@@ -304,11 +337,40 @@ fn show_tabs(ui: &mut egui::Ui, tab: &mut BlockPickerTab) {
         *tab = BlockPickerTab::Add;
     }
     if ui
+        .selectable_label(*tab == BlockPickerTab::Templates, "Templates")
+        .clicked()
+    {
+        *tab = BlockPickerTab::Templates;
+    }
+    if ui
         .selectable_label(*tab == BlockPickerTab::LinkExisting, "Link existing")
         .clicked()
     {
         *tab = BlockPickerTab::LinkExisting;
     }
+}
+
+/// The Templates tab: a preview tile per slide template, in the same tile
+/// format as the Add tab's block types. A single click both chooses and
+/// creates a slide from that template.
+fn show_templates_grid(ui: &mut egui::Ui, max_height: f32) -> Option<SlideTemplate> {
+    let mut selected = None;
+    egui::ScrollArea::vertical()
+        .max_height(max_height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for template in SlideTemplate::ALL {
+                    let label = template.label();
+                    let response =
+                        show_add_tile(ui, Some(template.icon()), label).on_hover_text(label);
+                    if response.clicked() {
+                        selected = Some(template);
+                    }
+                }
+            });
+        });
+    selected
 }
 
 /// The Add tab: a preview tile per creatable block type, common types shown
