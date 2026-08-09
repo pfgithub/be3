@@ -31,6 +31,8 @@ struct SidebarHighlight {
     collapsed: bool,
 }
 
+const MAX_OPENED_VIA_HOPS: usize = 64;
+
 #[derive(Default)]
 struct SidebarRenderState {
     highlight: Option<SidebarHighlight>,
@@ -38,32 +40,56 @@ struct SidebarRenderState {
 }
 
 impl BlockApp {
-    fn sidebar_active_location(&self) -> Option<SidebarActiveLocation> {
+    fn root_via_roots_list(&self, id: Uuid) -> Option<BlockParent> {
+        if !self.roots.is_loaded() {
+            return None;
+        }
+        Some(if self.roots.read().iter().any(|root| root.id == id) {
+            BlockParent::Root
+        } else {
+            BlockParent::Orphaned
+        })
+    }
+
+    fn sidebar_active_location(&mut self) -> Option<SidebarActiveLocation> {
         let id = self.active_tab?;
         let editor = self.editors.get(&id)?;
-        let parents = self.parents.get(&id)?;
+
+        let mut hops = Vec::new();
+        let mut visited = HashSet::new();
+        visited.insert(id);
+        let mut current = id;
+        while let Some(&container) = self.opened_via.get(&current) {
+            if hops.len() >= MAX_OPENED_VIA_HOPS || !visited.insert(container) {
+                break;
+            }
+            hops.push(container);
+            current = container;
+        }
+
+        self.parents
+            .entry(current)
+            .or_insert_with(|| self.client.watch_parents(current));
+        let parents = self.parents.get(&current)?;
         if !parents.is_loaded() {
             return None;
         }
         let parents = parents.read();
         let root = if let Some(parent) = parents.first() {
             parent.parent
-        } else if let Some(relationships) = editor.relationships() {
-            relationships.parent
+        } else if current == id {
+            match editor.relationships() {
+                Some(relationships) => relationships.parent,
+                None => self.root_via_roots_list(current)?,
+            }
         } else {
-            if !self.roots.is_loaded() {
-                return None;
-            }
-            if self.roots.read().iter().any(|root| root.id == id) {
-                BlockParent::Root
-            } else {
-                BlockParent::Orphaned
-            }
+            self.root_via_roots_list(current)?
         };
         if matches!(root, BlockParent::Uuid(_)) {
             return None;
         }
         let mut path = parents.iter().map(|parent| parent.id).collect::<Vec<_>>();
+        path.extend(hops.iter().rev().copied());
         path.push(id);
         Some(SidebarActiveLocation {
             id,
@@ -144,6 +170,7 @@ impl BlockApp {
         containing_id: Option<Uuid>,
         path: &mut HashSet<Uuid>,
         active: Option<&SidebarActiveLocation>,
+        active_path_index: Option<usize>,
         sidebar: &mut SidebarRenderState,
     ) {
         self.block_types.insert(reference.id, reference.block_type);
@@ -166,12 +193,17 @@ impl BlockApp {
             && self.can_move_out_of(source, reference.id, is_reference);
         let can_expand = !is_reference && reference.references > 0;
         let was_expanded = self.expanded.contains_key(&reference.id);
-        let is_active = !is_reference && active.is_some_and(|active| active.id == reference.id);
-        let is_closed_active_ancestor = !is_reference
-            && !was_expanded
-            && active.is_some_and(|active| {
-                active.id != reference.id && active.path.contains(&reference.id)
-            });
+        // Matched by position, not just id: the same block can appear both at
+        // its canonical row and at unrelated reference rows elsewhere, and
+        // only the one actually on the route should highlight.
+        let on_active_path = active.is_some_and(|active| {
+            active_path_index.is_some_and(|index| active.path.get(index) == Some(&reference.id))
+        });
+        let is_final_active_path_element =
+            active.is_some_and(|active| active_path_index == Some(active.path.len() - 1));
+        let is_active = on_active_path && is_final_active_path_element;
+        let is_closed_active_ancestor =
+            !is_reference && !was_expanded && on_active_path && !is_final_active_path_element;
         let mut toggle = false;
         let mut open = false;
         let mut delete = false;
@@ -415,9 +447,22 @@ impl BlockApp {
             }
         }
         if open {
+            match containing_id {
+                Some(container) => {
+                    self.opened_via.insert(reference.id, container);
+                }
+                None => {
+                    self.opened_via.remove(&reference.id);
+                }
+            }
             self.open_tab(reference.id, reference.block_type);
         }
 
+        let child_active_path_index = if on_active_path {
+            active_path_index.map(|index| index + 1)
+        } else {
+            None
+        };
         let is_expanded = can_expand && self.expanded.contains_key(&reference.id);
         if !is_expanded || !path.insert(reference.id) {
             return;
@@ -437,6 +482,7 @@ impl BlockApp {
                 Some(reference.id),
                 path,
                 active,
+                child_active_path_index,
                 sidebar,
             );
         }
@@ -476,6 +522,7 @@ impl BlockApp {
                     None,
                     &mut HashSet::new(),
                     active.as_ref(),
+                    Some(0),
                     &mut sidebar,
                 );
             }
@@ -598,7 +645,16 @@ impl BlockApp {
             });
         }
         for block in blocks {
-            self.show_reference(ui, block, 1, None, &mut HashSet::new(), active, sidebar);
+            self.show_reference(
+                ui,
+                block,
+                1,
+                None,
+                &mut HashSet::new(),
+                active,
+                Some(0),
+                sidebar,
+            );
         }
     }
 

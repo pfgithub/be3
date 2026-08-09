@@ -205,6 +205,11 @@ struct BlockApp {
     /// [`BlockApp::update_active_presence`].
     active_presence: HashSet<Uuid>,
     sidebar_reveal: Option<Uuid>,
+    /// The immediate container a block was last opened through via an
+    /// explicit sidebar tree click, keyed by the block id. Not persisted;
+    /// used only to reveal the exact row a click came from instead of always
+    /// falling back to the block's canonical ancestor chain.
+    opened_via: HashMap<Uuid, Uuid>,
     pending_transfers: Vec<PendingTransfer>,
     rename: Option<RenameState>,
     share: ShareDialog,
@@ -520,6 +525,7 @@ impl BlockApp {
             active_tab: None,
             active_presence: HashSet::new(),
             sidebar_reveal: None,
+            opened_via: HashMap::new(),
             pending_transfers: Vec::new(),
             rename: None,
             share: ShareDialog::default(),
@@ -901,6 +907,7 @@ impl BlockApp {
         self.references.clear();
         self.backrefs.clear();
         self.block_types.clear();
+        self.opened_via.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
         self.dynamic_artifact_regenerations.clear();
@@ -1243,6 +1250,7 @@ impl BlockApp {
         self.references.clear();
         self.backrefs.clear();
         self.block_types.clear();
+        self.opened_via.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
         self.dynamic_artifact_regenerations.clear();
