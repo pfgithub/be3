@@ -283,6 +283,10 @@ pub enum EditorCommand<'a> {
         select_syntax_node: bool,
     },
     Drag(Position),
+    DragSelectionHandle {
+        fixed: Position,
+        position: Position,
+    },
     ReplaceWholeFile(&'a [u8]),
     Markdown(MarkdownCommand),
     /// Changes the document's language, rebuilding the syntax highlighter to
@@ -743,6 +747,9 @@ impl Core {
                 select_syntax_node,
             } => self.click(position, mode, extend, select_syntax_node),
             EditorCommand::Drag(position) => self.drag(position),
+            EditorCommand::DragSelectionHandle { fixed, position } => {
+                self.select(Selection::range(fixed, position));
+            }
             EditorCommand::ReplaceWholeFile(bytes) => self.replace_whole_file(bytes),
             EditorCommand::Markdown(command) => self.markdown(command),
             EditorCommand::SetLanguage(language) => self.set_language(language),

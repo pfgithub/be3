@@ -33,8 +33,8 @@ use egui_material_icons::{
 use text_editor_core::{
     markdown_checkbox_marker, CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop,
     CursorPosition, DragSelectionMode, EditorCommand, FindDirection, LRDirection, MarkdownCommand,
-    MoveMode, SynHlColorScope, SyntaxHighlight, SyntaxNodeDirection, TextCursor, UDDirection,
-    VerticalMoveMode,
+    MoveMode, Position, SynHlColorScope, SyntaxHighlight, SyntaxNodeDirection, TextCursor,
+    UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
@@ -106,7 +106,7 @@ pub(super) struct TextEditor {
     click_count: u8,
     last_click: Option<(f64, Pos2)>,
     touch_mode: bool,
-    dragging_handle: Option<SelectionHandle>,
+    dragging_handle: Option<Position>,
     touch_menu_open: bool,
     touch_menu_pos: Pos2,
     toolbar_profile: Duration,
@@ -998,22 +998,21 @@ impl TextEditor {
             SelectionHandle::Start => range.end,
             SelectionHandle::End => range.start,
         };
-        let fixed = self.core.position(fixed_byte);
-        self.core.execute_command(EditorCommand::Click {
-            position: fixed,
-            mode: DragSelectionMode::default(),
-            extend: false,
-            select_syntax_node: false,
-        });
-        self.dragging_handle = Some(handle);
+        self.dragging_handle = Some(self.core.position(fixed_byte));
         self.selecting = false;
         self.drag_selection_handle(layout, local_pointer);
     }
 
     fn drag_selection_handle(&mut self, layout: &DocumentLayout, local_pointer: Vec2) {
+        let Some(fixed) = self.dragging_handle else {
+            return;
+        };
         let target = hit_test(layout, local_pointer);
         self.core
-            .execute_command(EditorCommand::Drag(self.core.position(target)));
+            .execute_command(EditorCommand::DragSelectionHandle {
+                fixed,
+                position: self.core.position(target),
+            });
     }
 
     fn paint_touch_handles(
