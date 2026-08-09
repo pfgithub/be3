@@ -149,9 +149,15 @@ impl InfiniteCanvasEditor {
                 // A second finger landing should immediately take over from
                 // whatever the first finger was doing (selecting, dragging, …).
                 self.gesture = None;
+                // egui's `touch.start_pos` is the emulated mouse pointer's
+                // position from before the gesture began, not where the
+                // fingers landed, so track our own starting center instead.
+                let start_center = self
+                    .two_finger_touch
+                    .map_or(touch.center_pos, |state| state.start_center);
                 self.two_finger_touch = Some(TwoFingerTouch {
                     start_time: touch.start_time,
-                    start_pos: touch.start_pos,
+                    start_center,
                     last_center: touch.center_pos,
                     max_touches: self.two_finger_touch.map_or(touch.num_touches, |state| {
                         state.max_touches.max(touch.num_touches)
@@ -209,7 +215,7 @@ impl InfiniteCanvasEditor {
             return;
         }
         let now = response.ctx.input(|input| input.time);
-        let drift = touch.start_pos.distance(touch.last_center);
+        let drift = touch.start_center.distance(touch.last_center);
         if now - touch.start_time <= Self::TWO_FINGER_TAP_MAX_DURATION
             && drift <= Self::TWO_FINGER_TAP_MAX_DRIFT
         {

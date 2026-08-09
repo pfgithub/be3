@@ -292,7 +292,7 @@ enum Gesture {
 #[derive(Clone, Copy, Debug)]
 struct TwoFingerTouch {
     start_time: f64,
-    start_pos: Pos2,
+    start_center: Pos2,
     last_center: Pos2,
     max_touches: usize,
 }
