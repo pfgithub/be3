@@ -158,9 +158,11 @@ fn show_install_button(ui: &mut egui::Ui, run: &WorkflowRun, state: &mut State) 
         "Install"
     };
     let response = ui.add_enabled(succeeded && !installing, egui::Button::new(label));
-    if !succeeded {
-        response.on_disabled_hover_text("This run did not finish successfully.");
-    }
+    let response = if !succeeded {
+        response.on_disabled_hover_text("This run did not finish successfully.")
+    } else {
+        response
+    };
     if response.clicked() {
         state.install = Some(install::Install::start(run.id, short_sha(&run.head_sha)));
     }
