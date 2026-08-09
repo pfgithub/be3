@@ -15,7 +15,7 @@ use block_client::{
 };
 use eframe::egui;
 use egui_material_icons::{
-    icons::{ICON_DATABASE, ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_VIEW_KANBAN},
+    icons::{ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_TABLE_VIEW, ICON_VIEW_KANBAN},
     MaterialIcon,
 };
 use uuid::Uuid;
@@ -41,18 +41,18 @@ struct DatabaseViewData {
     scatter_y_field_id: Option<Uuid>,
 }
 
-impl EditorKind for DatabaseEditor {
+impl EditorKind for DatabaseViewEditor {
     type Block = DatabaseView;
 
-    const DISPLAY_NAME: &'static str = "Database";
-    const ICON: MaterialIcon = ICON_DATABASE;
+    const DISPLAY_NAME: &'static str = "Database View";
+    const ICON: MaterialIcon = ICON_TABLE_VIEW;
 
     fn open(_client: &BlockClient, block: BlockHandle<DatabaseView>) -> Self {
         Self::new(block, None, None)
     }
 }
 
-impl CreatableEditor for DatabaseEditor {
+impl CreatableEditor for DatabaseViewEditor {
     fn create(client: &BlockClient) -> Self {
         let schema = client.create_block(DatabaseSchema::new());
         schema.operate(DatabaseSchemaOperation::AddField {
@@ -71,7 +71,7 @@ impl CreatableEditor for DatabaseEditor {
     }
 }
 
-pub(super) struct DatabaseEditor {
+pub(super) struct DatabaseViewEditor {
     block: BlockHandle<DatabaseView>,
     database: Option<BlockHandle<Database>>,
     schema: Option<BlockHandle<DatabaseSchema>>,
@@ -81,7 +81,7 @@ pub(super) struct DatabaseEditor {
     row_editor: RowEditor,
 }
 
-impl DatabaseEditor {
+impl DatabaseViewEditor {
     fn new(
         block: BlockHandle<DatabaseView>,
         database: Option<BlockHandle<Database>>,
@@ -209,7 +209,7 @@ impl DatabaseEditor {
     }
 }
 
-impl BlockEditor for DatabaseEditor {
+impl BlockEditor for DatabaseViewEditor {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
     }

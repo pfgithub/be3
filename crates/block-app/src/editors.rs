@@ -6,6 +6,7 @@ mod browser_tab;
 mod calendar;
 mod clipboard;
 mod compiled_logic;
+mod database;
 mod database_schema;
 mod database_view;
 mod gui_builder;
@@ -1323,8 +1324,9 @@ impl EditorRegistry {
         };
         registry.register_configurable::<audio::AudioEditor>();
         registry.register_creatable::<calendar::CalendarEditor>();
+        registry.register::<database::DatabaseEditor>();
         registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
-        registry.register_creatable::<database_view::DatabaseEditor>();
+        registry.register_creatable::<database_view::DatabaseViewEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
