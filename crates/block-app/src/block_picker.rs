@@ -120,7 +120,7 @@ impl BlockPicker {
                     ui.separator();
                 }
                 let content_height = (ui.available_height() - FOOTER_RESERVE).max(120.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_top(|ui| {
                     if !stacked_tabs {
                         ui.vertical(|ui| {
                             ui.set_width(140.0);
