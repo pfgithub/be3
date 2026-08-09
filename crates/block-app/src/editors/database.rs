@@ -1,23 +1,28 @@
-use block::{Block, BlockReferenceList};
+use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
-    blocks::{database::Database, database_view::DatabaseView},
+    blocks::{
+        database::Database,
+        database_schema::{
+            DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
+        },
+        database_view::DatabaseView,
+    },
     BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui;
 use egui_material_icons::{icons::ICON_DATABASE, MaterialIcon};
+use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockLabel, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    BlockEditor, BlockLabel, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 400.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 24.0;
 const DIRECT_EDITOR_CHROME_HEIGHT: f32 = 90.0;
 
-/// A database is normally reached through one of its views, so this is mainly
-/// a hub for the views themselves: what exists, and a way to add another one
-/// beyond the view the database was created alongside.
+/// A hub for a database's views: what exists, and a way to add another one.
 pub(super) struct DatabaseEditor {
     block: BlockHandle<Database>,
     views: ReferenceList,
@@ -31,6 +36,23 @@ impl EditorKind for DatabaseEditor {
 
     fn open(client: &BlockClient, block: BlockHandle<Database>) -> Self {
         Self::new(client, block)
+    }
+}
+
+impl CreatableEditor for DatabaseEditor {
+    fn create(client: &BlockClient) -> Self {
+        let schema = client.create_block(DatabaseSchema::new());
+        schema.operate(DatabaseSchemaOperation::AddField {
+            field: DatabaseField {
+                id: Uuid::new_v4(),
+                name: "Name".into(),
+                field_type: DatabaseFieldType::String,
+                options: Vec::new(),
+            },
+        });
+        let database = client.create_block(Database::new(schema.id()));
+        schema.set_parent(BlockParent::Uuid(database.id()));
+        Self::new(client, database)
     }
 }
 

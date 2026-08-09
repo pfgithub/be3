@@ -1324,7 +1324,7 @@ impl EditorRegistry {
         };
         registry.register_configurable::<audio::AudioEditor>();
         registry.register_creatable::<calendar::CalendarEditor>();
-        registry.register::<database::DatabaseEditor>();
+        registry.register_creatable::<database::DatabaseEditor>();
         registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
         registry.register_creatable::<database_view::DatabaseViewEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
