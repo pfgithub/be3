@@ -24,9 +24,9 @@ use eframe::egui::{
 use egui_material_icons::{
     icons::{
         ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DESCRIPTION,
-        ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED,
-        ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_UP,
-        ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH, ICON_TITLE,
+        ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED,
+        ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN,
+        ICON_KEYBOARD_ARROW_UP, ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH, ICON_TITLE,
     },
     MaterialIcon,
 };
@@ -274,6 +274,14 @@ impl TextEditor {
                     ui.close();
                 }
             });
+            ui.separator();
+            if ui
+                .button(ICON_FIND_REPLACE)
+                .on_hover_text("Find and replace")
+                .clicked()
+            {
+                self.open_find(true);
+            }
         });
         if language != previous {
             self.core
