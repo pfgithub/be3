@@ -353,11 +353,20 @@ impl TextRenderer {
                 .iter()
                 .filter(|embed| embed.range.start >= start && embed.range.end <= end)
                 .collect::<Vec<_>>();
-            let display_start = Instant::now();
-            let display = display_line(&bytes[start..end], start, newline.is_some(), &line_embeds);
-            timings.display_lines += display_start.elapsed();
-            let (glyphs, width, line_positions, baseline, height, line_timings) =
-                self.layout_line(bytes, &display, highlight);
+            let line_checkboxes = checkboxes
+                .iter()
+                .filter(|checkbox| checkbox.start >= start && checkbox.end <= end)
+                .collect::<Vec<_>>();
+            let (glyphs, width, line_positions, baseline, height, line_timings) = self.layout_line(
+                bytes,
+                start,
+                end,
+                newline.is_some(),
+                &line_embeds,
+                &line_checkboxes,
+                highlight,
+            );
+            timings.display_lines += line_timings.display_lines;
             timings.font_runs += line_timings.font_runs;
             timings.shape += line_timings.shape;
             timings.line_finalize += line_timings.line_finalize;
@@ -431,7 +440,6 @@ impl TextRenderer {
             line_index += 1;
         }
 
-        apply_checkbox_widths(&mut lines, &mut positions, checkboxes);
         let tables_start = Instant::now();
         align_markdown_tables(&mut lines, &mut positions, highlight.markdown_tables());
         timings.tables = tables_start.elapsed();
@@ -451,20 +459,107 @@ impl TextRenderer {
         )
     }
 
-    /// See [`LaidOutLine`].
+    /// Lays out one display line, split at each checkbox marker it contains
+    /// (e.g. the `- [ ]` in `- [ ] task`). A checkbox's bytes are excluded
+    /// from shaping entirely rather than shaped and discarded: the text
+    /// before and after it are shaped as their own independent segments, and
+    /// the checkbox itself is a fixed-width, glyph-free gap between them
+    /// whose interior byte positions are spread at even increments across
+    /// [`CHECKBOX_WIDTH`]. See [`LaidOutLine`].
+    #[allow(clippy::too_many_arguments)]
     fn layout_line(
         &self,
         document: &[u8],
-        display: &DisplayLine,
+        start: usize,
+        end: usize,
+        has_newline: bool,
+        embeds: &[&ResolvedEmbed],
+        checkboxes: &[&Range<usize>],
         highlight: &SyntaxHighlight,
     ) -> LaidOutLine {
         let mut timings = LayoutTimings::default();
         let mut glyphs = Vec::new();
         let mut positions = Vec::new();
         let mut pen_x: f32 = 0.0;
+        let mut cursor = start;
 
+        let mut boundaries = checkboxes
+            .iter()
+            .map(|checkbox| (checkbox.start, checkbox.end))
+            .collect::<Vec<_>>();
+        boundaries.push((end, end));
+
+        for (checkbox_start, checkbox_end) in boundaries {
+            let segment_embeds = embeds
+                .iter()
+                .copied()
+                .filter(|embed| embed.range.start >= cursor && embed.range.end <= checkbox_start)
+                .collect::<Vec<_>>();
+            let segment_has_newline = has_newline && checkbox_start == end;
+            let (segment_glyphs, segment_width, segment_positions, segment_timings) = self
+                .shape_segment(
+                    document,
+                    cursor,
+                    checkbox_start,
+                    segment_has_newline,
+                    &segment_embeds,
+                    highlight,
+                );
+            timings.display_lines += segment_timings.display_lines;
+            timings.font_runs += segment_timings.font_runs;
+            timings.shape += segment_timings.shape;
+            timings.line_finalize += segment_timings.line_finalize;
+            glyphs.extend(segment_glyphs.into_iter().map(|mut glyph| {
+                glyph.x += pen_x;
+                glyph
+            }));
+            positions.extend(
+                segment_positions
+                    .into_iter()
+                    .map(|(byte, x)| (byte, x + pen_x)),
+            );
+            pen_x += segment_width;
+
+            if checkbox_start == checkbox_end {
+                continue;
+            }
+            let len = checkbox_end - checkbox_start;
+            for offset in 0..=len {
+                let amount = offset as f32 / len as f32;
+                positions.push((checkbox_start + offset, pen_x + CHECKBOX_WIDTH * amount));
+            }
+            pen_x += CHECKBOX_WIDTH;
+            cursor = checkbox_end;
+        }
+
+        let finalize_start = Instant::now();
+        let (baseline, height) = self.line_metrics(&glyphs);
+        timings.line_finalize += finalize_start.elapsed();
+        (glyphs, pen_x, positions, baseline, height, timings)
+    }
+
+    /// Shapes one contiguous stretch of a display line (a gap between
+    /// checkbox markers, or the whole line when it has none), producing
+    /// glyphs and byte positions in local coordinates starting at `x: 0.0`.
+    fn shape_segment(
+        &self,
+        document: &[u8],
+        start: usize,
+        end: usize,
+        has_newline: bool,
+        embeds: &[&ResolvedEmbed],
+        highlight: &SyntaxHighlight,
+    ) -> (Vec<PositionedGlyph>, f32, Vec<(usize, f32)>, LayoutTimings) {
+        let mut timings = LayoutTimings::default();
+        let mut glyphs = Vec::new();
+        let mut positions = Vec::new();
+        let mut pen_x: f32 = 0.0;
+
+        let display_start = Instant::now();
+        let display = display_line(&document[start..end], start, has_newline, embeds);
+        timings.display_lines += display_start.elapsed();
         let font_runs_start = Instant::now();
-        let font_runs = self.font_runs(&display.text, display, highlight);
+        let font_runs = self.font_runs(&display.text, &display, highlight);
         timings.font_runs = font_runs_start.elapsed();
         for run in font_runs {
             let shape_start = Instant::now();
@@ -503,7 +598,7 @@ impl TextRenderer {
                         bounds.1 = bounds.1.max(right);
                     })
                     .or_insert((left, right));
-                let doc_byte = map_display_byte(display, cluster);
+                let doc_byte = map_display_byte(&display, cluster);
                 glyphs.push(PositionedGlyph {
                     font_index: run.font_index,
                     id: info.codepoint,
@@ -529,8 +624,8 @@ impl TextRenderer {
                     .unwrap_or(run.start + run.value.len());
                 let (left, right) = clusters[&cluster];
                 let (leading, trailing) = if rtl { (right, left) } else { (left, right) };
-                let doc_start = map_display_byte(display, cluster);
-                let doc_end = map_display_byte(display, next);
+                let doc_start = map_display_byte(&display, cluster);
+                let doc_end = map_display_byte(&display, next);
                 let count = doc_end.saturating_sub(doc_start).max(1);
                 for offset in 0..=count {
                     let amount = offset as f32 / count as f32;
@@ -538,7 +633,7 @@ impl TextRenderer {
                 }
             }
             if clusters.is_empty() {
-                positions.push((map_display_byte(display, run.start), run_start_x));
+                positions.push((map_display_byte(&display, run.start), run_start_x));
             }
             timings.line_finalize += finalize_start.elapsed();
         }
@@ -547,9 +642,8 @@ impl TextRenderer {
         if display.text.is_empty() {
             positions.push((display.display_to_document[0], 0.0));
         }
-        let (baseline, height) = self.line_metrics(&glyphs);
         timings.line_finalize += finalize_start.elapsed();
-        (glyphs, pen_x, positions, baseline, height, timings)
+        (glyphs, pen_x, positions, timings)
     }
 
     fn font_runs<'a>(
@@ -763,61 +857,6 @@ impl TextRenderer {
             }
         }
         self.glyphs.insert(key, result);
-    }
-}
-
-/// Replaces the naturally-shaped glyphs and byte positions of each checkbox
-/// marker (e.g. the `- [ ]` in `- [ ] task`) with a fixed-width reservation:
-/// its glyphs are dropped so nothing but the checkbox widget itself is
-/// painted there, its interior byte positions are spread at even increments
-/// across [`CHECKBOX_WIDTH`], and everything after it on the line is shifted
-/// to make room, so the checkbox widget can never overlap following text.
-fn apply_checkbox_widths(
-    lines: &mut [LineLayout],
-    positions: &mut [Option<BytePosition>],
-    checkboxes: &[Range<usize>],
-) {
-    for checkbox in checkboxes {
-        let Some(left) = positions.get(checkbox.start).copied().flatten() else {
-            continue;
-        };
-        let Some(right) = positions.get(checkbox.end).copied().flatten() else {
-            continue;
-        };
-        if left.line != right.line {
-            continue;
-        }
-        let line_index = left.line;
-        let delta = CHECKBOX_WIDTH - (right.x - left.x);
-        let len = checkbox.end - checkbox.start;
-        for offset in 0..=len {
-            if let Some(position) = positions
-                .get_mut(checkbox.start + offset)
-                .and_then(|position| position.as_mut())
-            {
-                position.x = left.x + CHECKBOX_WIDTH * offset as f32 / len as f32;
-            }
-        }
-        let line_end = lines[line_index].end;
-        for byte in checkbox.end + 1..=line_end {
-            if let Some(position) = positions
-                .get_mut(byte)
-                .and_then(|position| position.as_mut())
-            {
-                if position.line == line_index {
-                    position.x += delta;
-                }
-            }
-        }
-        let line = &mut lines[line_index];
-        line.glyphs
-            .retain(|glyph| glyph.doc_byte < checkbox.start || glyph.doc_byte >= checkbox.end);
-        for glyph in &mut line.glyphs {
-            if glyph.doc_byte >= checkbox.end {
-                glyph.x += delta;
-            }
-        }
-        line.width += delta;
     }
 }
 
