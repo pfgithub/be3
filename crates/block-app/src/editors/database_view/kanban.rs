@@ -74,7 +74,6 @@ impl KanbanView {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn column(
         &mut self,
         ui: &mut egui::Ui,

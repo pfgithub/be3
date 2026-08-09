@@ -12,3 +12,6 @@ block-server = { path = "../block-server" }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "time"] }
 uuid = { version = "1", features = ["v4"] }
+
+[lints]
+workspace = true

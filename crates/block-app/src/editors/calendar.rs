@@ -323,7 +323,6 @@ impl CalendarEditor {
             });
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn month_cell(
         &mut self,
         ui: &mut egui::Ui,

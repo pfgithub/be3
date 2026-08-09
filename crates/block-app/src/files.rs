@@ -161,7 +161,6 @@ impl BlockApp {
         self.expanded.remove(&id);
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_reference(
         &mut self,
         ui: &mut egui::Ui,

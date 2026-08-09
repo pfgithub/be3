@@ -191,7 +191,6 @@ fn base_target(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn drop_target_at(
     video: &Video,
     rows: &[ClipRow],
@@ -302,7 +301,6 @@ impl VideoEditor {
             });
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn draw_timeline(
         &mut self,
         ui: &mut egui::Ui,
@@ -550,7 +548,6 @@ impl VideoEditor {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn paint_clip(
         &self,
         painter: &egui::Painter,

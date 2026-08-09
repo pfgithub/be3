@@ -1738,7 +1738,6 @@ impl BlockStore {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn create_block_unlocked(
         &self,
         workspace_id: Uuid,
@@ -1806,7 +1805,6 @@ impl BlockStore {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn update_block_unlocked(
         &self,
         workspace_id: Uuid,

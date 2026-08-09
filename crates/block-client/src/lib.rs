@@ -1513,7 +1513,6 @@ enum WorkerCommand {
     ResumeSending,
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn worker_main(
     mut commands: mpsc::UnboundedReceiver<WorkerCommand>,
     shutdown: Shutdown,

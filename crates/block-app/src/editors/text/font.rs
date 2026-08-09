@@ -472,7 +472,6 @@ impl TextRenderer {
     /// the checkbox itself is a fixed-width, glyph-free gap between them
     /// whose interior byte positions are spread at even increments across
     /// [`CHECKBOX_WIDTH`]. See [`LaidOutLine`].
-    #[allow(clippy::too_many_arguments)]
     fn layout_line(
         &self,
         document: &[u8],
@@ -702,7 +701,6 @@ impl TextRenderer {
             .or_else(|| self.fonts.iter().position(|font| font.supports(character)))
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn paint_line(
         &mut self,
         context: &egui::Context,

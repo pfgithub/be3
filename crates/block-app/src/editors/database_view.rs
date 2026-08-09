@@ -601,7 +601,6 @@ fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn paint_preview_cell(
     painter: &egui::Painter,
     rect: egui::Rect,

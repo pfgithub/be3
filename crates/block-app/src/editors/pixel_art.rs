@@ -1365,7 +1365,6 @@ fn color_swatch(ui: &mut egui::Ui, color: PixelColor, selected: bool) -> egui::R
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn rasterize_drawing(
     drawing: &ActiveDrawing,
     width: u16,

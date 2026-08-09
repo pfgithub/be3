@@ -45,3 +45,6 @@ web-sys = { version = "0.3", features = [
 
 [dev-dependencies]
 block-server = { path = "../block-server" }
+
+[lints]
+workspace = true

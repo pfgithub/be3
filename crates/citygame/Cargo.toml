@@ -13,3 +13,6 @@ rand = "0.9"
 rand_chacha = "0.9"
 wgpu = "29"
 winit = "0.30"
+
+[lints]
+workspace = true

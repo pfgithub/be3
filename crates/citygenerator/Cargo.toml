@@ -8,3 +8,6 @@ license = "LGPL-3.0-or-later"
 glam = "0.30"
 rand = "0.9"
 rand_chacha = "0.9"
+
+[lints]
+workspace = true

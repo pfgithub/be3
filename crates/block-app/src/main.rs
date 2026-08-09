@@ -2686,7 +2686,6 @@ impl BlockApp {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn status_reference_list(
         &mut self,
         ui: &mut egui::Ui,
@@ -2908,7 +2907,6 @@ struct BlockMenuPermissions {
     delete: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn block_context_menu(
     ui: &mut egui::Ui,
     registry: &EditorRegistry,

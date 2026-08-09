@@ -422,7 +422,6 @@ pub struct EditorAccess<'a> {
     editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn embedded_editor_ui(
     ui: &mut egui::Ui,
     editors: &mut EditorAccess<'_>,
@@ -449,7 +448,6 @@ pub fn embedded_editor_ui(
 }
 
 impl<'a> EditorAccess<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         active: Uuid,
         access: BlockAccess,
