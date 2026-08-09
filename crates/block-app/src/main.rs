@@ -39,9 +39,9 @@ use egui_material_icons::{
     icons::{
         ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_AUTO_AWESOME, ICON_CHEVRON_RIGHT,
         ICON_CLOUD, ICON_COMPUTER, ICON_DATA_OBJECT, ICON_EDIT, ICON_GROUP_ADD,
-        ICON_KEYBOARD_ARROW_DOWN, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT, ICON_MORE_HORIZ,
-        ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT, ICON_UNDO,
-        ICON_VISIBILITY, ICON_WORKSPACES,
+        ICON_KEYBOARD_ARROW_DOWN, ICON_LINK, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT,
+        ICON_MORE_HORIZ, ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT,
+        ICON_UNDO, ICON_VISIBILITY, ICON_WORKSPACES,
     },
     MaterialIcon,
 };
@@ -1688,10 +1688,16 @@ impl BlockApp {
         };
         let access = self.editor_access(active);
         let denied = !access.can_view();
+        let relationships = editor.relationships();
         let artifact_navigation = if denied {
             None
         } else {
             self.show_dynamic_artifact_bar(ui, active, editor.block_type())
+        };
+        let shared_navigation = if denied {
+            None
+        } else {
+            self.show_shared_block_bar(ui, active, relationships.as_ref())
         };
         let undo_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
         let redo_shortcut = egui::KeyboardShortcut::new(
@@ -1711,8 +1717,9 @@ impl BlockApp {
                 .ctx()
                 .input_mut(|input| input.consume_shortcut(&undo_shortcut));
         let current_name = BlockLabel::for_handle(&self.registry, editor.block());
-        let relationships = editor.relationships();
-        let mut navigation = artifact_navigation.map(TabNavigation::Open);
+        let mut navigation = artifact_navigation
+            .or(shared_navigation)
+            .map(TabNavigation::Open);
         let mut share = false;
         let can_share = self.client.block_access(active).can_edit();
         let ceiling = self.editor_access_ceiling(active);
@@ -2060,6 +2067,121 @@ impl BlockApp {
             ui.ctx().request_repaint();
         }
         navigate
+    }
+
+    /// The bar above the editor of a block that is referenced from more than
+    /// one place, warning that editing it here affects every place it
+    /// appears.
+    fn show_shared_block_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        active: Uuid,
+        relationships: Option<&block_client::BlockRelationships>,
+    ) -> Option<BlockTabHistoryItem> {
+        let relationships = relationships?;
+        if relationships.backrefs.len() <= 1 {
+            return None;
+        }
+        let count = relationships.backrefs.len();
+        let container = self.opened_via.get(&active).copied();
+        let via_reference =
+            container.is_some_and(|container| relationships.parent != BlockParent::Uuid(container));
+        let parent_id = match relationships.parent {
+            BlockParent::Uuid(parent) => Some(parent),
+            BlockParent::Root | BlockParent::Orphaned => None,
+        };
+        let parent_block_type = parent_id.and_then(|parent_id| {
+            self.parents
+                .get(&active)
+                .map(ReferenceList::read)
+                .and_then(|parents| {
+                    parents
+                        .last()
+                        .filter(|parent| parent.id == parent_id)
+                        .map(|parent| parent.block_type)
+                })
+                .or_else(|| self.block_types.get(&parent_id).copied())
+        });
+        let backrefs = self
+            .backrefs
+            .get(&active)
+            .map(|list| (list.is_loaded(), list.read()));
+        let mut navigate = None;
+        let mut context_action = None;
+        let mut go_to_original = false;
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .inner_margin(egui::Margin::symmetric(8, 5))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(format!("{} Shared block", ICON_LINK.codepoint));
+                    if via_reference && parent_id.is_some() {
+                        let others = count - 1;
+                        ui.weak(format!(
+                            "This block also appears in {others} other place{}. Editing it here changes it everywhere it appears.",
+                            if others == 1 { "" } else { "s" }
+                        ));
+                        go_to_original = ui
+                            .add_enabled(
+                                parent_block_type.is_some(),
+                                egui::Button::new("Go to original"),
+                            )
+                            .on_disabled_hover_text("Loading…")
+                            .clicked();
+                    } else {
+                        ui.weak(format!(
+                            "This block appears in {count} places. Editing it here changes it everywhere."
+                        ));
+                        ui.menu_button("Show references", |ui| {
+                            let Some((loaded, backrefs)) = &backrefs else {
+                                ui.weak("Loading…");
+                                return;
+                            };
+                            self.status_reference_list(
+                                ui,
+                                backrefs,
+                                *loaded,
+                                "No backrefs",
+                                None,
+                                &mut navigate,
+                                &mut context_action,
+                            );
+                        });
+                    }
+                });
+            });
+        ui.separator();
+        if let Some((reference, source, is_reference, action)) = context_action {
+            match action {
+                BlockContextMenuAction::Picker => {
+                    self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
+                }
+                BlockContextMenuAction::SetParent(parent) => {
+                    self.set_block_parent(reference.id, parent);
+                }
+                BlockContextMenuAction::Rename => {
+                    let name = BlockLabel::for_reference(&self.registry, &reference).name;
+                    self.rename = Some(RenameState {
+                        id: reference.id,
+                        name,
+                    });
+                }
+                BlockContextMenuAction::Share => {
+                    let label = BlockLabel::for_reference(&self.registry, &reference);
+                    self.share.open(&self.client, reference.id, label);
+                }
+                BlockContextMenuAction::Delete => {
+                    self.queue_delete(reference, source, is_reference);
+                }
+            }
+        }
+        if go_to_original {
+            if let (Some(parent_id), Some(block_type)) = (parent_id, parent_block_type) {
+                self.opened_via.remove(&parent_id);
+                navigate = Some((parent_id, block_type));
+            }
+        }
+        navigate.map(|(id, block_type)| BlockTabHistoryItem { id, block_type })
     }
 
     /// A link to the block the artifact was generated from.
