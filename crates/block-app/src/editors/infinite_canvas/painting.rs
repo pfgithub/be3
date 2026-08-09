@@ -6,7 +6,7 @@ pub(super) fn paint_entity(
     painter: &egui::Painter,
     rect: Rect,
     entity: &CanvasEntity,
-    dependency_details: &HashMap<Uuid, (String, Uuid)>,
+    dependency_details: &HashMap<Uuid, BlockLabel>,
     editors: &mut EditorAccess<'_>,
     live_editor_overlay: bool,
     parent_opacity: f32,
@@ -119,14 +119,16 @@ pub(super) fn paint_entity(
                 Stroke::NONE,
             ));
             let center = editor.world_to_screen(entity.transform.center, rect);
-            let title = dependency_details
+            let (title, automatic) = dependency_details
                 .get(block_id)
-                .map(|(title, _)| title.clone())
-                .unwrap_or_else(|| "Loading…".into());
-            let title_galley = painter.layout_no_wrap(
-                title,
+                .map(|label| (label.name.clone(), label.automatic))
+                .unwrap_or_else(|| ("Loading…".to_owned(), false));
+            let title_galley = name_galley(
+                painter,
+                &title,
                 egui::FontId::proportional((18.0 * editor.render_scale).clamp(8.0, 42.0)),
                 color,
+                automatic,
             );
             let preview_galley = painter.layout_no_wrap(
                 "(TODO: preview)".into(),
@@ -205,17 +207,15 @@ pub(super) fn paint_entity(
                 painter.rect_filled(content, 0.0, with_opacity(Color32::from_gray(35), opacity));
             }
 
-            let (title, block_type) = dependency_details
-                .get(block_id)
-                .map(|(title, block_type)| (title.as_str(), Some(*block_type)))
-                .unwrap_or(("Loading...", None));
+            let label = dependency_details.get(block_id);
+            let (title, icon, automatic) = label.map_or(("Loading...", None, false), |label| {
+                (label.name.as_str(), label.icon, label.automatic)
+            });
             let font_size = (16.0 * scale * editor.render_scale).clamp(8.0, 32.0);
             let left_padding = (6.0 * scale * editor.render_scale).clamp(3.0, 12.0);
             let title_painter = painter.with_clip_rect(title_bar);
             let mut title_x = title_bar.left() + left_padding;
-            if let Some(icon) =
-                block_type.and_then(|block_type| editors.registry().icon(block_type))
-            {
+            if let Some(icon) = icon {
                 title_painter.text(
                     Pos2::new(title_x, title_bar.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -225,12 +225,14 @@ pub(super) fn paint_entity(
                 );
                 title_x += font_size + left_padding;
             }
-            title_painter.text(
+            paint_name(
+                &title_painter,
                 Pos2::new(title_x, title_bar.center().y),
                 egui::Align2::LEFT_CENTER,
                 title,
                 egui::FontId::proportional(font_size),
                 color,
+                automatic,
             );
         }
     }

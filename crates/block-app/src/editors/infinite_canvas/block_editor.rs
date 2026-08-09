@@ -39,10 +39,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             .map(|dependency| {
                 (
                     dependency.id,
-                    (
-                        super::reference_display_name(editors.registry(), dependency),
-                        dependency.block_type,
-                    ),
+                    BlockLabel::for_reference(editors.registry(), dependency),
                 )
             })
             .collect();
@@ -266,10 +263,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             .map(|dependency| {
                 (
                     dependency.id,
-                    (
-                        super::reference_display_name(editors.registry(), dependency),
-                        dependency.block_type,
-                    ),
+                    BlockLabel::for_reference(editors.registry(), dependency),
                 )
             })
             .collect();

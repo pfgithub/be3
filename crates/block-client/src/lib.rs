@@ -1221,6 +1221,12 @@ impl<B: Block> BlockHandle<B> {
         properties::read_name(&self.block.properties.read()).map(|name| name.value)
     }
 
+    /// The block's `NAME` property in full, including whether it was
+    /// manually chosen rather than auto-derived.
+    pub fn block_name(&self) -> Option<properties::BlockName> {
+        properties::read_name(&self.block.properties.read())
+    }
+
     pub fn set_name(&self, name: impl Into<String>) {
         let name = properties::BlockName {
             manual: true,
@@ -1284,6 +1290,7 @@ pub trait BlockHandleAccess {
     fn id(&self) -> Uuid;
     fn block_type(&self) -> Uuid;
     fn name(&self) -> Option<String>;
+    fn block_name(&self) -> Option<properties::BlockName>;
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
     fn history(&self) -> Option<&dyn BlockHistoryHandle>;
@@ -1296,6 +1303,10 @@ impl<B: Block> BlockHandleAccess for BlockHandle<B> {
 
     fn block_type(&self) -> Uuid {
         B::TYPE_ID
+    }
+
+    fn block_name(&self) -> Option<properties::BlockName> {
+        BlockHandle::block_name(self)
     }
 
     fn name(&self) -> Option<String> {

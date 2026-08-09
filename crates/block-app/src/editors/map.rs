@@ -169,7 +169,7 @@ impl MapEditor {
             .read()
             .into_iter()
             .map(|reference| {
-                let name = super::reference_display_name(editors.registry(), &reference);
+                let name = super::BlockLabel::for_reference(editors.registry(), &reference).name;
                 (reference.id, (name, reference.block_type))
             })
             .collect()

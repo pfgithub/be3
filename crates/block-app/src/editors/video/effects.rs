@@ -6,7 +6,7 @@ use eframe::egui;
 use egui_material_icons::icons::ICON_LINK_OFF;
 use uuid::Uuid;
 
-use crate::editors::{reference_display_name, EditorAccess};
+use crate::editors::{BlockLabel, EditorAccess};
 
 use super::VideoEditor;
 
@@ -30,13 +30,13 @@ impl VideoEditor {
         ui.horizontal(|ui| {
             let reference = dependencies.get(&clip.block_id);
             let label = reference.map_or_else(
-                || "Loading…".to_owned(),
+                || egui::RichText::new("Loading…").strong().into(),
                 |reference| {
-                    let name = reference_display_name(editors.registry(), reference);
-                    editors.registry().icon_label(reference.block_type, &name)
+                    BlockLabel::for_reference(editors.registry(), reference)
+                        .styled_widget_text(ui.style(), egui::RichText::strong)
                 },
             );
-            ui.add(egui::Label::new(egui::RichText::new(label).strong()).truncate());
+            ui.add(egui::Label::new(label).truncate());
         });
         ui.add_space(4.0);
 
@@ -101,8 +101,10 @@ impl VideoEditor {
                         .clip(attachment.clip_id)
                         .and_then(|parent| dependencies.get(&parent.block_id))
                         .map_or_else(
-                            || "Loading…".to_owned(),
-                            |reference| reference_display_name(editors.registry(), reference),
+                            || egui::RichText::new("Loading…"),
+                            |reference| {
+                                BlockLabel::for_reference(editors.registry(), reference).rich_text()
+                            },
                         );
                     ui.add(egui::Label::new(name).truncate());
                     if ui

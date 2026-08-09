@@ -1024,7 +1024,7 @@ impl InfiniteCanvasEditor {
         painter: &egui::Painter,
         rect: Rect,
         entities: &[CanvasEntity],
-        dependency_details: &HashMap<Uuid, (String, Uuid)>,
+        dependency_details: &HashMap<Uuid, BlockLabel>,
         editors: &mut EditorAccess<'_>,
     ) {
         let preview = self
@@ -1249,14 +1249,14 @@ impl InfiniteCanvasEditor {
         let bounds = entity_bounds(entity);
         let position =
             self.world_to_screen(CanvasPoint::new(bounds.center().x, bounds.max.y), rect);
-        let (label, cached, enters_editor) = match entity.kind {
+        let (label, cached, enters_editor): (egui::WidgetText, _, _) = match entity.kind {
             CanvasEntityKind::Block { block_id } => {
                 let cached = editors.client().cached_block(block_id);
                 let label = cached.as_ref().map_or_else(
-                    || "Loading…".to_owned(),
+                    || egui::RichText::new("Loading…").into(),
                     |block| {
-                        let name = cached_display_name(editors.registry(), block);
-                        editors.registry().icon_label(block.block_type, &name)
+                        BlockLabel::for_cached(editors.registry(), block)
+                            .widget_text(&egui::Style::default())
                     },
                 );
                 (label, cached, false)
@@ -1266,13 +1266,13 @@ impl InfiniteCanvasEditor {
                     == Some(DirectEditorInteraction::Playback) =>
             {
                 let cached = editors.client().cached_block(block_id);
-                ("Open presentation".to_owned(), cached, false)
+                ("Open presentation".into(), cached, false)
             }
             CanvasEntityKind::DirectEditor { block_id, .. }
                 if editors.direct_editor_interaction(block_id)
                     == Some(DirectEditorInteraction::Preview) =>
             {
-                ("Edit".to_owned(), None, true)
+                ("Edit".into(), None, true)
             }
             _ => return None,
         };

@@ -19,10 +19,9 @@ use crate::{
     PendingDestructiveAction, RenameState, ICON_DYNAMIC_ARTIFACT, NO_EDIT_ACCESS,
 };
 
-#[derive(Clone)]
 struct SidebarActiveLocation {
     id: Uuid,
-    name: String,
+    label: crate::editors::BlockLabel,
     root: BlockParent,
     path: Vec<Uuid>,
 }
@@ -68,15 +67,9 @@ impl BlockApp {
         path.push(id);
         Some(SidebarActiveLocation {
             id,
-            name: self.client.cached_block(id).map_or_else(
-                || {
-                    crate::editors::display_name(
-                        &self.registry,
-                        editor.block_type(),
-                        editor.name().as_deref(),
-                    )
-                },
-                |block| crate::editors::cached_display_name(&self.registry, &block),
+            label: self.client.cached_block(id).map_or_else(
+                || crate::editors::BlockLabel::for_handle(&self.registry, editor.block()),
+                |block| crate::editors::BlockLabel::for_cached(&self.registry, &block),
             ),
             root,
             path,
@@ -101,9 +94,8 @@ impl BlockApp {
         self.sidebar_reveal = Some(location.id);
     }
 
-    fn reference_label(&self, reference: &BlockReference) -> String {
-        let name = crate::editors::reference_display_name(&self.registry, reference);
-        self.registry.icon_label(reference.block_type, &name)
+    fn reference_label(&self, ui: &egui::Ui, reference: &BlockReference) -> egui::WidgetText {
+        crate::editors::BlockLabel::for_reference(&self.registry, reference).widget_text(ui.style())
     }
 
     /// Whether the account may change a block. Blocks the sidebar has listed
@@ -235,7 +227,7 @@ impl BlockApp {
                 0.0
             };
             let label_width = (ui.available_width() - trailing_width).max(0.0);
-            let label = egui::Button::selectable(is_active, self.reference_label(&reference))
+            let label = egui::Button::selectable(is_active, self.reference_label(ui, &reference))
                 .truncate()
                 .sense(egui::Sense::click_and_drag());
             // Generated blocks are marked as such, and editable blocks are the
@@ -336,14 +328,18 @@ impl BlockApp {
                         self.set_block_parent(reference.id, parent);
                     }
                     Some(BlockContextMenuAction::Rename) => {
-                        let name = crate::editors::reference_display_name(&self.registry, &reference);
+                        let name =
+                            crate::editors::BlockLabel::for_reference(&self.registry, &reference)
+                                .name;
                         self.rename = Some(RenameState {
                             id: reference.id,
                             name,
                         });
                     }
                     Some(BlockContextMenuAction::Share) => {
-                        let name = crate::editors::reference_display_name(&self.registry, &reference);
+                        let name =
+                            crate::editors::BlockLabel::for_reference(&self.registry, &reference)
+                                .name;
                         self.share.open(&self.client, reference.id, name);
                     }
                     Some(BlockContextMenuAction::Delete) => delete = true,
@@ -518,13 +514,26 @@ impl BlockApp {
             egui::pos2(viewport.left(), y),
             egui::vec2(viewport.width(), ui.spacing().interact_size.y),
         );
-        if ui
-            .put(
-                rect,
-                egui::Button::new(format!("{} ({})", arrow.codepoint, active.name)),
-            )
-            .clicked()
-        {
+        let mut job = egui::text::LayoutJob::default();
+        egui::RichText::new(format!("{} (", arrow.codepoint)).append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Style(egui::TextStyle::Button),
+            egui::Align::Center,
+        );
+        active.label.rich_text().append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Style(egui::TextStyle::Button),
+            egui::Align::Center,
+        );
+        egui::RichText::new(")").append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Style(egui::TextStyle::Button),
+            egui::Align::Center,
+        );
+        if ui.put(rect, egui::Button::new(job)).clicked() {
             self.reveal_sidebar_location(&active);
         }
     }

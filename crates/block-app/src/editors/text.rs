@@ -44,12 +44,12 @@ use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
 use self::timings::{FrameProfile, PaintTimings};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    display_name, embedded_editor_frame_size, embedded_editor_ui,
+    embedded_editor_frame_size, embedded_editor_ui,
     image::create_image_block,
-    property_name, BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
-    EMBEDDED_EDITOR_TITLE_HEIGHT,
+    paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING,
+    EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -334,11 +334,9 @@ impl TextEditor {
             return;
         };
         editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
-        let name = display_name(
-            editors.registry(),
-            result.block_type,
-            property_name(&result.properties).as_deref(),
-        );
+        let name =
+            BlockLabel::for_properties(editors.registry(), result.block_type, &result.properties)
+                .name;
         self.insert_image_embed(result.id, &name);
     }
 
@@ -354,7 +352,10 @@ impl TextEditor {
             .map(|reference| {
                 (
                     reference.id,
-                    (reference.block_type, property_name(&reference.properties)),
+                    (
+                        reference.block_type,
+                        block_client::properties::read_name(&reference.properties),
+                    ),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -363,10 +364,12 @@ impl TextEditor {
             .filter(|embed| embed.id != self.block.id())
             .map(|embed| {
                 let metadata = referenced.get(&embed.id).cloned().or_else(|| {
-                    editors
-                        .client()
-                        .cached_block(embed.id)
-                        .map(|block| (block.block_type, property_name(&block.properties)))
+                    editors.client().cached_block(embed.id).map(|block| {
+                        (
+                            block.block_type,
+                            block_client::properties::read_name(&block.properties),
+                        )
+                    })
                 });
                 if embed.large {
                     if let Some((block_type, _)) = &metadata {
@@ -379,19 +382,21 @@ impl TextEditor {
                     .flatten()
                     .map(|intrinsic| embedded_editor_frame_size(intrinsic, 1.0));
                 let label = metadata.as_ref().map_or_else(
-                    || embed.id.to_string(),
+                    || BlockLabel {
+                        icon: None,
+                        name: embed.id.to_string(),
+                        automatic: true,
+                    },
                     |(block_type, name)| {
-                        display_name(editors.registry(), *block_type, name.as_deref())
+                        BlockLabel::new(editors.registry(), *block_type, name.as_ref())
                     },
                 );
                 ResolvedEmbed {
                     range: embed.range,
                     id: embed.id,
-                    label,
-                    icon: metadata
-                        .as_ref()
-                        .and_then(|(block_type, _)| editors.registry().icon(*block_type))
-                        .map(|icon| icon.codepoint),
+                    label: label.name,
+                    icon: label.icon.map(|icon| icon.codepoint),
+                    automatic: label.automatic,
                     large: embed.large,
                     available: metadata.is_some(),
                     frame_size,
@@ -1147,12 +1152,14 @@ impl TextEditor {
                     );
                     title_x += 22.0;
                 }
-                painter.with_clip_rect(title_bar).text(
+                paint_name(
+                    &painter.with_clip_rect(title_bar),
                     Pos2::new(title_x, title_bar.center().y),
                     egui::Align2::LEFT_CENTER,
                     &embed.label,
                     egui::FontId::proportional(16.0),
                     ui.visuals().text_color(),
+                    embed.automatic,
                 );
 
                 let key = FocusedEmbed {
@@ -1626,11 +1633,8 @@ impl BlockEditor for TextEditor {
                         anchor: position,
                         focus: position,
                     });
-                    let name = display_name(
-                        editors.registry(),
-                        dragged.reference.block_type,
-                        property_name(&dragged.reference.properties).as_deref(),
-                    );
+                    let name =
+                        BlockLabel::for_reference(editors.registry(), &dragged.reference).name;
                     self.insert_image_embed(dragged.reference.id, &name);
                     reveal_cursor = true;
                 }

@@ -56,6 +56,9 @@ pub(super) struct ResolvedEmbed {
     pub id: Uuid,
     pub label: String,
     pub icon: Option<&'static str>,
+    /// Whether `label` was auto-derived from the block's content rather
+    /// than chosen by the user - shown italicized either way it's painted.
+    pub automatic: bool,
     pub large: bool,
     pub available: bool,
     pub frame_size: Option<Vec2>,
@@ -66,6 +69,7 @@ pub(super) struct EmbedLayout {
     pub id: Uuid,
     pub label: String,
     pub icon: Option<&'static str>,
+    pub automatic: bool,
     pub large: bool,
     pub available: bool,
     pub rect: Rect,
@@ -407,6 +411,7 @@ impl TextRenderer {
                     id: embed.id,
                     label: embed.label.clone(),
                     icon: embed.icon,
+                    automatic: embed.automatic,
                     large: false,
                     available: embed.available,
                     rect: Rect::from_min_max(
@@ -426,6 +431,7 @@ impl TextRenderer {
                     id: embed.id,
                     label: embed.label.clone(),
                     icon: embed.icon,
+                    automatic: embed.automatic,
                     large: true,
                     available: embed.available,
                     rect: Rect::from_min_size(Pos2::new(0.0, y), frame_size),
@@ -599,6 +605,13 @@ impl TextRenderer {
                     })
                     .or_insert((left, right));
                 let doc_byte = map_display_byte(&display, cluster);
+                let mut style = highlight.style_at(doc_byte);
+                if embeds
+                    .iter()
+                    .any(|embed| embed.automatic && embed.range.contains(&doc_byte))
+                {
+                    style.italic = true;
+                }
                 glyphs.push(PositionedGlyph {
                     font_index: run.font_index,
                     id: info.codepoint,
@@ -609,7 +622,7 @@ impl TextRenderer {
                     invisible: document
                         .get(doc_byte)
                         .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r')),
-                    style: highlight.style_at(doc_byte),
+                    style,
                     pixel_size,
                     advance,
                 });

@@ -29,9 +29,9 @@ use block_client::{
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
-    cached_display_name, direct_editor_tab_ui, display_name, reference_display_name, BlockEditor,
-    DynamicArtifactRegeneration, DynamicArtifactSupport, EditorAccess, EditorAction,
-    EditorRegistry, SidebarDragPayload, SidebarDragSource,
+    direct_editor_tab_ui, BlockEditor, BlockLabel, DynamicArtifactRegeneration,
+    DynamicArtifactSupport, EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload,
+    SidebarDragSource,
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
@@ -1702,8 +1702,7 @@ impl BlockApp {
             && ui
                 .ctx()
                 .input_mut(|input| input.consume_shortcut(&undo_shortcut));
-        let block_type = editor.block_type();
-        let current_name = display_name(&self.registry, block_type, editor.name().as_deref());
+        let current_name = BlockLabel::for_handle(&self.registry, editor.block());
         let relationships = editor.relationships();
         let mut navigation = artifact_navigation.map(TabNavigation::Open);
         let mut share = false;
@@ -1764,13 +1763,9 @@ impl BlockApp {
                         }
                     }
                     ui.separator();
-                    if let Some(item) = self.show_breadcrumbs(
-                        ui,
-                        active,
-                        block_type,
-                        &current_name,
-                        relationships.as_ref(),
-                    ) {
+                    if let Some(item) =
+                        self.show_breadcrumbs(ui, active, &current_name, relationships.as_ref())
+                    {
                         navigation = Some(TabNavigation::Open(item));
                     }
                 });
@@ -1788,7 +1783,8 @@ impl BlockApp {
             },
         );
         if share {
-            self.share.open(&self.client, active, current_name.clone());
+            self.share
+                .open(&self.client, active, current_name.name.clone());
         }
         match mode {
             TabMode::Access(chosen_access) => {
@@ -1851,8 +1847,7 @@ impl BlockApp {
         &mut self,
         ui: &mut egui::Ui,
         active: Uuid,
-        block_type: Uuid,
-        current_name: &str,
+        current_name: &BlockLabel,
         relationships: Option<&block_client::BlockRelationships>,
     ) -> Option<BlockTabHistoryItem> {
         let mut navigate = None;
@@ -1871,9 +1866,10 @@ impl BlockApp {
             for parent in parents {
                 self.record_reference_types(&parent);
                 ui.label(ICON_CHEVRON_RIGHT);
-                let parent_name = reference_display_name(&self.registry, &parent);
+                let parent_label =
+                    BlockLabel::for_reference(&self.registry, &parent).widget_text(ui.style());
                 if ui
-                    .button(self.registry.icon_label(parent.block_type, &parent_name))
+                    .button(parent_label)
                     .on_hover_text(parent.id.to_string())
                     .clicked()
                 {
@@ -1885,7 +1881,7 @@ impl BlockApp {
             }
         }
         ui.label(ICON_CHEVRON_RIGHT);
-        ui.label(self.registry.icon_label(block_type, current_name));
+        ui.label(current_name.widget_text(ui.style()));
         navigate
     }
 
@@ -2074,16 +2070,19 @@ impl BlockApp {
             }
         };
         ui.weak("Generated from");
-        let name = self.client.cached_block(source).map_or_else(
-            || {
-                self.registry
+        let label = self.client.cached_block(source).map_or_else(
+            || BlockLabel {
+                icon: self.registry.icon(descriptor.source_type),
+                name: self
+                    .registry
                     .display_name(descriptor.source_type)
                     .unwrap_or("source block")
-                    .to_owned()
+                    .to_owned(),
+                automatic: true,
             },
-            |block| cached_display_name(&self.registry, &block),
+            |block| BlockLabel::for_cached(&self.registry, &block),
         );
-        ui.button(self.registry.icon_label(descriptor.source_type, &name))
+        ui.button(label.widget_text(ui.style()))
             .on_hover_text(format!("Open the source block\n{source}"))
             .clicked()
             .then_some(BlockTabHistoryItem {
@@ -2407,14 +2406,14 @@ impl BlockApp {
                     self.set_block_parent(reference.id, parent);
                 }
                 BlockContextMenuAction::Rename => {
-                    let name = reference_display_name(&self.registry, &reference);
+                    let name = BlockLabel::for_reference(&self.registry, &reference).name;
                     self.rename = Some(RenameState {
                         id: reference.id,
                         name,
                     });
                 }
                 BlockContextMenuAction::Share => {
-                    let name = reference_display_name(&self.registry, &reference);
+                    let name = BlockLabel::for_reference(&self.registry, &reference).name;
                     self.share.open(&self.client, reference.id, name);
                 }
                 BlockContextMenuAction::Delete => {
@@ -2461,10 +2460,9 @@ impl BlockApp {
             );
             let is_reference =
                 containing_id.is_some_and(|id| reference.parent != BlockParent::Uuid(id));
-            let name = reference_display_name(&self.registry, reference);
-            let response = ui
-                .button(self.registry.icon_label(reference.block_type, &name))
-                .on_hover_text(reference.id.to_string());
+            let label =
+                BlockLabel::for_reference(&self.registry, reference).widget_text(ui.style());
+            let response = ui.button(label).on_hover_text(reference.id.to_string());
             if response.clicked() {
                 *navigate = Some((reference.id, reference.block_type));
                 ui.close();
@@ -2552,14 +2550,8 @@ impl TabViewer for BlockTabViewer<'_> {
                 .editors
                 .get(&tab.current().id)
                 .map_or_else(
-                    || tab.current().id.to_string(),
-                    |editor| {
-                        display_name(
-                            &self.app.registry,
-                            editor.block_type(),
-                            editor.name().as_deref(),
-                        )
-                    },
+                    || egui::RichText::new(tab.current().id.to_string()),
+                    |editor| BlockLabel::for_handle(&self.app.registry, editor.block()).rich_text(),
                 )
                 .into(),
         }
@@ -2717,12 +2709,9 @@ fn block_context_menu(
             }
             for backref in listed {
                 let is_current = current_parent == BlockParent::Uuid(backref.id);
-                let name = reference_display_name(registry, &backref);
+                let label = BlockLabel::for_reference(registry, &backref).widget_text(ui.style());
                 if ui
-                    .add_enabled(
-                        !is_current,
-                        egui::Button::new(registry.icon_label(backref.block_type, &name)),
-                    )
+                    .add_enabled(!is_current, egui::Button::new(label))
                     .clicked()
                 {
                     action = Some(BlockContextMenuAction::SetParent(BlockParent::Uuid(

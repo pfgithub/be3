@@ -38,11 +38,10 @@ use uuid::Uuid;
 use crate::{block_picker::BlockPicker, presence_color_rgb};
 
 use super::{
-    cached_display_name,
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
     image::{create_image_block, pick_image_file},
-    reference_display_name, BlockEditor, BlockRenderContext, CreatableEditor,
+    name_galley, paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
     DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
     EditorAccess, EditorAction, EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING,
     EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,

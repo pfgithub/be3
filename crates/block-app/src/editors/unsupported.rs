@@ -1,5 +1,7 @@
 use block::BlockParent;
-use block_client::{BlockHandleAccess, BlockHistoryHandle, BlockRelationships};
+use block_client::{
+    properties::BlockName, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
+};
 use eframe::egui;
 use uuid::Uuid;
 
@@ -31,6 +33,13 @@ impl BlockHandleAccess for UnsupportedEditor {
 
     fn name(&self) -> Option<String> {
         Some(self.id.to_string())
+    }
+
+    fn block_name(&self) -> Option<BlockName> {
+        Some(BlockName {
+            manual: true,
+            value: self.id.to_string(),
+        })
     }
 
     fn relationships(&self) -> Option<BlockRelationships> {

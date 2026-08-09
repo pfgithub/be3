@@ -234,11 +234,16 @@ impl WorkspaceIndexEditor {
         let mut action = None;
         for entry in entries {
             let (label, block_type) = entry.reference.as_ref().map_or_else(
-                || (format!("Loading…  {}", entry.id), "Loading…".to_owned()),
-                |reference| {
-                    let name = super::reference_display_name(editors.registry(), reference);
+                || {
                     (
-                        editors.registry().icon_label(reference.block_type, &name),
+                        format!("Loading…  {}", entry.id).into(),
+                        "Loading…".to_owned(),
+                    )
+                },
+                |reference| {
+                    (
+                        super::BlockLabel::for_reference(editors.registry(), reference)
+                            .widget_text(ui.style()),
                         editors
                             .registry()
                             .display_name(reference.block_type)
@@ -303,7 +308,9 @@ impl WorkspaceIndexEditor {
 fn compare_name(left: &BrowserEntry, right: &BrowserEntry, editors: &EditorAccess<'_>) -> Ordering {
     let name = |entry: &BrowserEntry| {
         entry.reference.as_ref().map(|reference| {
-            super::reference_display_name(editors.registry(), reference).to_lowercase()
+            super::BlockLabel::for_reference(editors.registry(), reference)
+                .name
+                .to_lowercase()
         })
     };
     name(left).cmp(&name(right))
@@ -349,15 +356,21 @@ fn grid_tile(
 
     let icon_size = if size == LARGE_TILE_SIZE { 52.0 } else { 34.0 };
     let name_size = if size == LARGE_TILE_SIZE { 15.0 } else { 13.0 };
-    let (icon, name, block_type) = entry.reference.as_ref().map_or_else(
-        || (ICON_FOLDER, "Loading…".to_owned(), entry.id.to_string()),
-        |reference| {
+    let (icon, name, automatic, block_type) = entry.reference.as_ref().map_or_else(
+        || {
             (
-                editors
-                    .registry()
-                    .icon(reference.block_type)
-                    .unwrap_or(ICON_FOLDER),
-                super::reference_display_name(editors.registry(), reference),
+                ICON_FOLDER,
+                "Loading…".to_owned(),
+                false,
+                entry.id.to_string(),
+            )
+        },
+        |reference| {
+            let label = super::BlockLabel::for_reference(editors.registry(), reference);
+            (
+                label.icon.unwrap_or(ICON_FOLDER),
+                label.name,
+                label.automatic,
                 editors
                     .registry()
                     .display_name(reference.block_type)
@@ -374,12 +387,14 @@ fn grid_tile(
         egui::FontId::new(icon_size, icon.font_family()),
         visuals.text_color(),
     );
-    ui.painter().text(
+    super::paint_name(
+        ui.painter(),
         egui::pos2(center.x, rect.bottom() - 34.0),
         egui::Align2::CENTER_BOTTOM,
-        name,
+        &name,
         egui::FontId::proportional(name_size),
         visuals.text_color(),
+        automatic,
     );
     ui.painter().text(
         egui::pos2(center.x, rect.bottom() - 10.0),

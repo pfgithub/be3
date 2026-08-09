@@ -10,7 +10,7 @@ use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
 use crate::editors::{
-    cached_display_name, BlockCreation, BlockEditor, EditorAccess, EditorRegistry, PendingCreation,
+    BlockCreation, BlockEditor, BlockLabel, EditorAccess, EditorRegistry, PendingCreation,
 };
 
 const ADD_TILE_SIZE: egui::Vec2 = egui::vec2(132.0, 124.0);
@@ -399,7 +399,8 @@ fn show_link_content(
         .filter(|block| !excluded.contains(&block.id))
         .filter(|block| {
             query.is_empty()
-                || cached_display_name(registry, block)
+                || BlockLabel::for_cached(registry, block)
+                    .name
                     .to_lowercase()
                     .contains(&query)
                 || block.id.to_string().contains(&query)
@@ -418,7 +419,7 @@ fn show_link_content(
                 });
             }
             for block in &blocks {
-                let label = cached_display_name(registry, block);
+                let label = BlockLabel::for_cached(registry, block).widget_text(ui.style());
                 if ui
                     .button(label)
                     .on_hover_text(block.id.to_string())

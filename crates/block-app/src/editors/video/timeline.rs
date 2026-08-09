@@ -8,7 +8,7 @@ use eframe::egui::{self, Color32, Rect, Sense, Stroke, Vec2};
 use uuid::Uuid;
 
 use crate::editors::{
-    rect_corners, reference_display_name, BlockRenderContext, EditorAccess, SidebarDragPayload,
+    paint_name, rect_corners, BlockLabel, BlockRenderContext, EditorAccess, SidebarDragPayload,
 };
 
 use super::{ClipDrag, VideoEditor, DEFAULT_CLIP_SECONDS};
@@ -583,16 +583,21 @@ impl VideoEditor {
                     opacity: 1.0,
                 },
             );
-            let name = dependencies.get(&clip.block_id).map_or_else(
-                || "Loading…".to_owned(),
-                |reference| reference_display_name(editors.registry(), reference),
+            let (name, automatic) = dependencies.get(&clip.block_id).map_or_else(
+                || ("Loading…".to_owned(), false),
+                |reference| {
+                    let label = BlockLabel::for_reference(editors.registry(), reference);
+                    (label.name, label.automatic)
+                },
             );
-            painter.text(
+            paint_name(
+                &painter,
                 egui::pos2(thumbnail.right() + 5.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                name,
+                &name,
                 egui::FontId::proportional(11.0),
                 visuals.strong_text_color(),
+                automatic,
             );
         }
         painter.rect_stroke(

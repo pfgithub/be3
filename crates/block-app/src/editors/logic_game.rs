@@ -249,15 +249,12 @@ impl BlockEditor for LogicGameEditor {
                 }
                 for solution in solutions {
                     ui.horizontal(|ui| {
-                        let name = self.solutions.get(solution).map_or_else(
-                            || "Loading…".to_owned(),
-                            |handle| {
-                                super::display_name(
-                                    editors.registry(),
-                                    LogicGrid::TYPE_ID,
-                                    handle.name().as_deref(),
-                                )
-                            },
+                        let label = self.solutions.get(solution).map(|handle| {
+                            super::BlockLabel::for_handle(editors.registry(), handle)
+                        });
+                        let name = label.as_ref().map_or_else(
+                            || egui::RichText::new("Loading…"),
+                            super::BlockLabel::rich_text,
                         );
                         if ui.link(name).clicked() {
                             action = Some(EditorAction::OpenBlock {

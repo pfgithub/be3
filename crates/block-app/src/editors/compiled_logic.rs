@@ -104,15 +104,13 @@ impl BlockEditor for CompiledLogicEditor {
 
         ui.horizontal(|ui| {
             ui.strong("Compiled from");
-            let name = self.source.as_ref().map_or_else(
-                || "Loading…".to_owned(),
-                |source| {
-                    super::display_name(
-                        editors.registry(),
-                        LogicGrid::TYPE_ID,
-                        source.name().as_deref(),
-                    )
-                },
+            let label = self
+                .source
+                .as_ref()
+                .map(|source| super::BlockLabel::for_handle(editors.registry(), source));
+            let name = label.as_ref().map_or_else(
+                || egui::RichText::new("Loading…"),
+                super::BlockLabel::rich_text,
             );
             if ui.link(name).clicked() {
                 action = Some(EditorAction::OpenBlock {
@@ -157,15 +155,13 @@ impl BlockEditor for CompiledLogicEditor {
             ui.weak("This component calls nothing else.");
         }
         for called in &calls {
-            let name = self.calls.get(called).map_or_else(
-                || "Loading…".to_owned(),
-                |handle| {
-                    super::display_name(
-                        editors.registry(),
-                        CompiledLogic::TYPE_ID,
-                        handle.name().as_deref(),
-                    )
-                },
+            let label = self
+                .calls
+                .get(called)
+                .map(|handle| super::BlockLabel::for_handle(editors.registry(), handle));
+            let name = label.as_ref().map_or_else(
+                || egui::RichText::new("Loading…"),
+                super::BlockLabel::rich_text,
             );
             if ui.link(name).clicked() {
                 action = Some(EditorAction::OpenBlock {

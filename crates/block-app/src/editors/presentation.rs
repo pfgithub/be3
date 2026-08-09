@@ -381,9 +381,10 @@ impl PresentationEditor {
                         ui.horizontal(|ui| {
                             ui.small(format!("{}", index + 1));
                             let name = dependencies.get(&slide.block_id).map_or_else(
-                                || "Loading…".to_owned(),
+                                || egui::RichText::new("Loading…"),
                                 |reference| {
-                                    super::reference_display_name(editors.registry(), reference)
+                                    super::BlockLabel::for_reference(editors.registry(), reference)
+                                        .rich_text()
                                 },
                             );
                             ui.add(
