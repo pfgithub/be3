@@ -1,73 +1,29 @@
-use block::{Block, BlockParent};
 use block_client::{
     blocks::{
-        database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue},
-        database_schema::{
-            DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
-        },
+        database::{DatabaseOperation, DatabaseRow, DatabaseValue},
+        database_schema::{DatabaseField, DatabaseFieldType},
         database_view::{DatabaseView, DatabaseViewOperation, DatabaseViewSort, SortDirection},
     },
-    BlockClient, BlockHandle,
+    BlockHandle,
 };
 use eframe::egui;
-use egui_material_icons::{
-    icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_DATABASE, ICON_SCHEMA},
-    MaterialIcon,
-};
+use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD};
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, EditorAction, EditorKind,
+    cell_text, database_value_text, field_type_label, paint_preview_cell, parse_cell_value,
+    preview_color, BlockRenderContext,
 };
-
-/// Schema ID, rows in storage order, fields, and the sort applied to them.
-type DatabaseViewData = (
-    Uuid,
-    Vec<DatabaseRow>,
-    Vec<DatabaseField>,
-    Option<DatabaseViewSort>,
-);
-
-/// A row as displayed: its storage index (used to address operations) paired
-/// with its data. Beyond the real rows this includes trailing virtual empty
-/// rows, and the list may be reordered by the active sort.
-type DisplayRows = Vec<(usize, DatabaseRow)>;
 
 const ROW_HEADER_WIDTH: f32 = 44.0;
 const ROW_HEIGHT: f32 = 28.0;
 const STRING_COLUMN_WIDTH: f32 = 180.0;
 const NUMBER_COLUMN_WIDTH: f32 = 120.0;
 
-impl EditorKind for DatabaseEditor {
-    type Block = DatabaseView;
-
-    const DISPLAY_NAME: &'static str = "Database";
-    const ICON: MaterialIcon = ICON_DATABASE;
-
-    fn open(_client: &BlockClient, block: BlockHandle<DatabaseView>) -> Self {
-        Self::new(block, None, None)
-    }
-}
-
-impl CreatableEditor for DatabaseEditor {
-    fn create(client: &BlockClient) -> Self {
-        let schema = client.create_block(DatabaseSchema::new());
-        schema.operate(DatabaseSchemaOperation::AddField {
-            field: DatabaseField {
-                id: Uuid::new_v4(),
-                name: "Name".into(),
-                field_type: DatabaseFieldType::String,
-                options: Vec::new(),
-            },
-        });
-        let database = client.create_block(Database::new(schema.id()));
-        schema.set_parent(BlockParent::Uuid(database.id()));
-        let view = client.create_block(DatabaseView::new(database.id()));
-        database.set_parent(BlockParent::Uuid(view.id()));
-        Self::new(view, Some(database), Some(schema))
-    }
-}
+/// A row as displayed: its storage index (used to address operations) paired
+/// with its data. Beyond the real rows this includes trailing virtual empty
+/// rows, and the list may be reordered by the active sort.
+type DisplayRows = Vec<(usize, DatabaseRow)>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct CellAddress {
@@ -75,10 +31,10 @@ struct CellAddress {
     field_id: Uuid,
 }
 
-pub(super) struct DatabaseEditor {
-    block: BlockHandle<DatabaseView>,
-    database: Option<BlockHandle<Database>>,
-    schema: Option<BlockHandle<DatabaseSchema>>,
+/// Grid selection, in-place cell editing, and formula-bar state for the
+/// spreadsheet view of a database.
+#[derive(Default)]
+pub(super) struct SpreadsheetView {
     selected: Option<CellAddress>,
     editing: Option<CellAddress>,
     edit_buffer: String,
@@ -86,67 +42,21 @@ pub(super) struct DatabaseEditor {
     request_edit_focus: bool,
 }
 
-impl DatabaseEditor {
-    fn new(
-        block: BlockHandle<DatabaseView>,
-        database: Option<BlockHandle<Database>>,
-        schema: Option<BlockHandle<DatabaseSchema>>,
-    ) -> Self {
-        Self {
-            block,
-            database,
-            schema,
-            selected: None,
-            editing: None,
-            edit_buffer: String::new(),
-            edit_original: None,
-            request_edit_focus: false,
-        }
+impl SpreadsheetView {
+    pub(super) fn selected_row(&self) -> Option<usize> {
+        self.selected.map(|address| address.row_index)
     }
 
-    fn ensure_database(&mut self, client: &BlockClient, database_id: Uuid) {
-        if self
-            .database
-            .as_ref()
-            .is_none_or(|database| database.id() != database_id)
-        {
-            self.database = Some(client.get_block::<Database>(database_id));
-        }
-    }
-
-    fn ensure_schema(&mut self, client: &BlockClient, schema_id: Uuid) {
-        if self
-            .schema
-            .as_ref()
-            .is_none_or(|schema| schema.id() != schema_id)
-        {
-            self.schema = Some(client.get_block::<DatabaseSchema>(schema_id));
-        }
-    }
-
-    fn data(&mut self, client: &BlockClient) -> Option<DatabaseViewData> {
-        let view = self.block.read()?;
-        let database_id = view.database_id();
-        let sort = view.sort();
-        drop(view);
-        self.ensure_database(client, database_id);
-        let database = self.database.as_ref()?.read()?;
-        let schema_id = database.schema_id();
-        let rows = database.rows().to_vec();
-        drop(database);
-        self.ensure_schema(client, schema_id);
-        let fields = self.schema.as_ref()?.read()?.fields().to_vec();
-        Some((schema_id, rows, fields, sort))
-    }
-
-    /// Applies operations to the underlying database, not the view itself.
-    fn operate_database(&self, operations: Vec<DatabaseOperation>) {
-        let Some(database) = self.database.as_ref() else {
-            return;
-        };
-        for operation in operations {
-            database.operate(operation);
-        }
+    pub(super) fn intrinsic_size(&self, row_count: usize, fields: &[DatabaseField]) -> egui::Vec2 {
+        let total_rows = display_row_total(row_count, self.selected);
+        egui::vec2(
+            ROW_HEADER_WIDTH
+                + fields
+                    .iter()
+                    .map(|field| column_width(field.field_type))
+                    .sum::<f32>(),
+            ROW_HEIGHT * (total_rows + 1) as f32,
+        )
     }
 
     fn begin_edit(
@@ -224,6 +134,7 @@ impl DatabaseEditor {
     fn handle_keyboard(
         &mut self,
         ui: &mut egui::Ui,
+        view: &BlockHandle<DatabaseView>,
         display: &DisplayRows,
         fields: &[DatabaseField],
         operations: &mut Vec<DatabaseOperation>,
@@ -231,7 +142,7 @@ impl DatabaseEditor {
         if fields.is_empty() || self.editing.is_some() {
             return;
         }
-        let focus_id = grid_focus_id(self.block.id());
+        let focus_id = grid_focus_id(view.id());
         ui.interact(
             egui::Rect::from_min_size(ui.next_widget_position(), egui::Vec2::ZERO),
             focus_id,
@@ -315,13 +226,16 @@ impl DatabaseEditor {
         }
     }
 
-    fn formula_bar(
+    pub(super) fn formula_bar(
         &mut self,
         ui: &mut egui::Ui,
-        display: &DisplayRows,
+        view: &BlockHandle<DatabaseView>,
+        rows: &[DatabaseRow],
         fields: &[DatabaseField],
+        sort: Option<DatabaseViewSort>,
         operations: &mut Vec<DatabaseOperation>,
     ) {
+        let display = display_rows(rows, self.selected, sort, fields);
         let selection = self.selected.and_then(|selected| {
             let display_position = display
                 .iter()
@@ -335,7 +249,7 @@ impl DatabaseEditor {
             selection.map_or_else(String::new, |(_, display_position, field_index)| {
                 format!("{}{}", column_name(field_index), display_position + 1)
             });
-        let formula_id = formula_input_id(self.block.id());
+        let formula_id = formula_input_id(view.id());
         if self.request_edit_focus {
             ui.memory_mut(|memory| memory.request_focus(formula_id));
             self.request_edit_focus = false;
@@ -393,20 +307,20 @@ impl DatabaseEditor {
                     .as_ref()
                     .map_or_else(String::new, |value| database_value_text(value, field));
                 self.finish_edit();
-                ui.memory_mut(|memory| memory.request_focus(grid_focus_id(self.block.id())));
+                ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
             } else if self.editing == Some(address)
                 && ui.input(|input| input.key_pressed(egui::Key::Enter))
             {
                 self.finish_edit();
-                self.move_selection(display, fields, 0, 1);
-                ui.memory_mut(|memory| memory.request_focus(grid_focus_id(self.block.id())));
+                self.move_selection(&display, fields, 0, 1);
+                ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
             } else if self.editing == Some(address)
                 && ui.input(|input| input.key_pressed(egui::Key::Tab))
             {
                 let backwards = ui.input(|input| input.modifiers.shift);
                 self.finish_edit();
-                self.move_selection(display, fields, if backwards { -1 } else { 1 }, 0);
-                ui.memory_mut(|memory| memory.request_focus(grid_focus_id(self.block.id())));
+                self.move_selection(&display, fields, if backwards { -1 } else { 1 }, 0);
+                ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
             }
         });
     }
@@ -414,6 +328,7 @@ impl DatabaseEditor {
     fn cell_editor(
         &mut self,
         ui: &mut egui::Ui,
+        view: &BlockHandle<DatabaseView>,
         row_index: usize,
         row: &DatabaseRow,
         field: &DatabaseField,
@@ -430,52 +345,27 @@ impl DatabaseEditor {
         paint_cell_text(ui, rect, &cell_text(row, field), field.field_type, scale);
         if response.clicked() {
             self.select_cell(row_index, row, field);
-            ui.memory_mut(|memory| memory.request_focus(grid_focus_id(self.block.id())));
+            ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
         }
         if response.double_clicked() {
             self.begin_edit(row_index, row, field, None);
         }
     }
 
-    fn controls(
+    pub(super) fn grid(
         &mut self,
         ui: &mut egui::Ui,
-        schema_id: Uuid,
-        display: &DisplayRows,
-        fields: &[DatabaseField],
-    ) -> Option<EditorAction> {
-        let mut action = None;
-        let mut operations = Vec::new();
-        ui.horizontal(|ui| {
-            if ui
-                .button(format!("{} Columns", ICON_SCHEMA.codepoint))
-                .on_hover_text("Edit columns and data types")
-                .clicked()
-            {
-                action = Some(EditorAction::OpenBlock {
-                    id: schema_id,
-                    block_type: DatabaseSchema::TYPE_ID,
-                });
-            }
-        });
-        ui.separator();
-        self.formula_bar(ui, display, fields, &mut operations);
-        self.operate_database(operations);
-        action
-    }
-
-    fn grid(
-        &mut self,
-        ui: &mut egui::Ui,
-        display: &DisplayRows,
+        view: &BlockHandle<DatabaseView>,
+        rows: &[DatabaseRow],
         fields: &[DatabaseField],
         sort: Option<DatabaseViewSort>,
         scale: f32,
+        operations: &mut Vec<DatabaseOperation>,
     ) {
-        let mut operations = Vec::new();
-        self.handle_keyboard(ui, display, fields, &mut operations);
+        let display = display_rows(rows, self.selected, sort, fields);
+        self.handle_keyboard(ui, view, &display, fields, operations);
         let mut sort_operation = None;
-        egui::Grid::new(("database-grid", self.block.id()))
+        egui::Grid::new(("database-grid", view.id()))
             .num_columns(fields.len() + 1)
             .spacing(egui::Vec2::ZERO)
             .show(ui, |ui| {
@@ -516,113 +406,14 @@ impl DatabaseEditor {
                         .is_some_and(|cell| cell.row_index == *row_index);
                     spreadsheet_row_header(ui, display_position + 1, selected, scale);
                     for field in fields {
-                        self.cell_editor(ui, *row_index, row, field, scale);
+                        self.cell_editor(ui, view, *row_index, row, field, scale);
                     }
                     ui.end_row();
                 }
             });
-        self.operate_database(operations);
         if let Some(operation) = sort_operation {
-            self.block.operate(operation);
+            view.operate(operation);
         }
-    }
-}
-
-impl BlockEditor for DatabaseEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
-    }
-
-    fn render(
-        &mut self,
-        context: BlockRenderContext<'_>,
-        editors: &mut super::EditorAccess<'_>,
-    ) -> bool {
-        let Some(view) = self.block.read() else {
-            return false;
-        };
-        let database_id = view.database_id();
-        let sort = view.sort();
-        drop(view);
-        self.ensure_database(editors.client(), database_id);
-        let Some(database) = self.database.as_ref().and_then(|database| database.read()) else {
-            return false;
-        };
-        let schema_id = database.schema_id();
-        let mut rows = database.rows().to_vec();
-        drop(database);
-        self.ensure_schema(editors.client(), schema_id);
-        let Some(fields) = self
-            .schema
-            .as_ref()
-            .and_then(|schema| schema.read())
-            .map(|schema| schema.fields().to_vec())
-        else {
-            return false;
-        };
-        if let Some(sort) = sort {
-            sort_rows(&mut rows, sort, &fields);
-        }
-        paint_database_preview(context, &rows, &fields);
-        true
-    }
-
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: true,
-            supports_pan_and_zoom: false,
-        }
-    }
-
-    fn direct_editor_interaction(&self) -> DirectEditorInteraction {
-        DirectEditorInteraction::Live
-    }
-
-    fn direct_editor_intrinsic_size(
-        &mut self,
-        editors: &mut super::EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
-        let (_, rows, fields, _) = self.data(editors.client())?;
-        let total_rows = display_row_total(rows.len(), self.selected);
-        Some(egui::vec2(
-            ROW_HEADER_WIDTH
-                + fields
-                    .iter()
-                    .map(|field| column_width(field.field_type))
-                    .sum::<f32>(),
-            ROW_HEIGHT * (total_rows + 1) as f32,
-        ))
-    }
-
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut super::EditorAccess<'_>,
-        _viewport: &mut super::DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let (schema_id, rows, fields, sort) = self.data(editors.client())?;
-        let display = display_rows(&rows, self.selected, sort, &fields);
-        self.controls(ui, schema_id, &display, &fields)
-    }
-
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut super::EditorAccess<'_>,
-        scale: f32,
-        _viewport: &mut super::DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let (_, rows, fields, sort) = self.data(editors.client())?;
-        if fields.is_empty() {
-            let rect = ui.available_rect_before_wrap();
-            ui.painter()
-                .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
-            return None;
-        }
-        let display = display_rows(&rows, self.selected, sort, &fields);
-        self.grid(ui, &display, &fields, sort, scale);
-        None
     }
 }
 
@@ -666,7 +457,11 @@ fn compare_sorted_rows(
     }
 }
 
-fn sort_rows(rows: &mut [DatabaseRow], sort: DatabaseViewSort, fields: &[DatabaseField]) {
+pub(super) fn sort_rows(
+    rows: &mut [DatabaseRow],
+    sort: DatabaseViewSort,
+    fields: &[DatabaseField],
+) {
     let Some(field) = fields.iter().find(|field| field.id == sort.field_id) else {
         return;
     };
@@ -852,7 +647,7 @@ fn paint_cell_text(
     );
 }
 
-fn paint_database_preview(
+pub(super) fn paint_preview(
     context: BlockRenderContext<'_>,
     rows: &[DatabaseRow],
     fields: &[DatabaseField],
@@ -952,39 +747,6 @@ fn paint_database_preview(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn paint_preview_cell(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    fill: egui::Color32,
-    stroke: egui::Stroke,
-    text: &str,
-    alignment: egui::Align2,
-    text_color: egui::Color32,
-    font: egui::FontId,
-    inset: f32,
-) {
-    painter.rect(rect, 0.0, fill, stroke, egui::StrokeKind::Inside);
-    let position = match alignment {
-        egui::Align2::LEFT_CENTER => rect.left_center() + egui::vec2(inset, 0.0),
-        egui::Align2::RIGHT_CENTER => rect.right_center() - egui::vec2(inset, 0.0),
-        _ => rect.center(),
-    };
-    painter
-        .with_clip_rect(rect.shrink(1.0))
-        .text(position, alignment, text, font, text_color);
-}
-
-fn preview_color(color: egui::Color32, opacity: f32) -> egui::Color32 {
-    let [red, green, blue, alpha] = color.to_srgba_unmultiplied();
-    egui::Color32::from_rgba_unmultiplied(
-        red,
-        green,
-        blue,
-        (alpha as f32 * opacity.clamp(0.0, 1.0)).round() as u8,
-    )
-}
-
 fn take_typed_text(ui: &mut egui::Ui) -> Option<String> {
     ui.input_mut(|input| {
         let index = input.events.iter().position(|event| {
@@ -996,37 +758,6 @@ fn take_typed_text(ui: &mut egui::Ui) -> Option<String> {
             _ => None,
         }
     })
-}
-
-fn cell_text(row: &DatabaseRow, field: &DatabaseField) -> String {
-    match row.value(field.id) {
-        Some(value) => database_value_text(value, field),
-        None => String::new(),
-    }
-}
-
-fn database_value_text(value: &DatabaseValue, field: &DatabaseField) -> String {
-    match value {
-        DatabaseValue::String(value) => value.clone(),
-        DatabaseValue::Number(value) => value.to_string(),
-        DatabaseValue::Enum(id) => field
-            .options
-            .iter()
-            .find(|option| option.id == *id)
-            .map_or_else(String::new, |option| option.name.clone()),
-    }
-}
-
-fn parse_cell_value(value: &str, field: &DatabaseField) -> Option<DatabaseValue> {
-    match field.field_type {
-        DatabaseFieldType::String => Some(DatabaseValue::String(value.to_owned())),
-        DatabaseFieldType::Number => value.parse().ok().map(DatabaseValue::Number),
-        DatabaseFieldType::Enum => field
-            .options
-            .iter()
-            .find(|option| option.name == value)
-            .map(|option| DatabaseValue::Enum(option.id)),
-    }
 }
 
 fn column_width(field_type: DatabaseFieldType) -> f32 {
@@ -1052,13 +783,5 @@ fn column_name(mut index: usize) -> String {
             return name;
         }
         index = index / 26 - 1;
-    }
-}
-
-fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
-    match field_type {
-        DatabaseFieldType::String => "Text",
-        DatabaseFieldType::Number => "Number",
-        DatabaseFieldType::Enum => "Enum",
     }
 }

@@ -15,10 +15,21 @@ pub struct DatabaseViewSort {
     pub direction: SortDirection,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseViewKind {
+    #[default]
+    Spreadsheet,
+    Kanban,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DatabaseView {
     database_id: Uuid,
     sort: Option<DatabaseViewSort>,
+    kind: DatabaseViewKind,
+    /// The enum field whose options become the kanban board's columns.
+    kanban_field_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -31,6 +42,12 @@ pub enum DatabaseViewOperation {
     SetSort {
         sort: Option<DatabaseViewSort>,
     },
+    SetKind {
+        kind: DatabaseViewKind,
+    },
+    SetKanbanField {
+        field_id: Option<Uuid>,
+    },
 }
 
 impl DatabaseView {
@@ -38,6 +55,8 @@ impl DatabaseView {
         Self {
             database_id,
             sort: None,
+            kind: DatabaseViewKind::default(),
+            kanban_field_id: None,
         }
     }
 
@@ -47,6 +66,14 @@ impl DatabaseView {
 
     pub fn sort(&self) -> Option<DatabaseViewSort> {
         self.sort
+    }
+
+    pub fn kind(&self) -> DatabaseViewKind {
+        self.kind
+    }
+
+    pub fn kanban_field_id(&self) -> Option<Uuid> {
+        self.kanban_field_id
     }
 }
 
@@ -63,6 +90,10 @@ impl Block for DatabaseView {
                 view.database_id = *database_id;
             }
             DatabaseViewOperation::SetSort { sort } => view.sort = *sort,
+            DatabaseViewOperation::SetKind { kind } => view.kind = *kind,
+            DatabaseViewOperation::SetKanbanField { field_id } => {
+                view.kanban_field_id = *field_id;
+            }
         }
     }
 
