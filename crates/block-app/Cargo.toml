@@ -85,6 +85,11 @@ portable-pty = "0.9.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { version = "0.30.13", features = ["android-native-activity"] }
+# Used by the version-switching debug window to build the ContentResolver /
+# Intent calls that download and install a GitHub Actions build.
+jni = "0.22"
+ndk-context = "0.1"
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
@@ -95,9 +100,13 @@ web-sys = { version = "0.3", features = [
     "BlobPropertyBag",
     "Document",
     "Element",
+    "Headers",
     "HtmlAudioElement",
     "HtmlCanvasElement",
     "HtmlMediaElement",
+    "Request",
+    "RequestInit",
+    "Response",
     "Storage",
     "Url",
     "Window",

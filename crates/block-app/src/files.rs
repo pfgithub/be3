@@ -684,6 +684,10 @@ impl BlockApp {
                         performance::open();
                         ui.close();
                     }
+                    if ui.button("Version").clicked() {
+                        crate::debug::version::open();
+                        ui.close();
+                    }
                     #[cfg(not(any(
                         target_os = "android",
                         target_os = "windows",

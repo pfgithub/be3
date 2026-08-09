@@ -56,7 +56,7 @@ const NO_EDIT_ACCESS: &str = "You do not have permission to change this block";
 const ICON_DYNAMIC_ARTIFACT: MaterialIcon = ICON_AUTO_AWESOME;
 const ONBOARDING_WIDTH: f32 = 460.0;
 /// The commit this build came from, stamped in by the build script.
-const COMMIT: &str = env!("BLOCK_APP_COMMIT");
+pub(crate) const COMMIT: &str = env!("BLOCK_APP_COMMIT");
 #[cfg(not(target_arch = "wasm32"))]
 fn native_options() -> eframe::NativeOptions {
     eframe::NativeOptions {
@@ -3314,6 +3314,7 @@ impl eframe::App for BlockApp {
             target_arch = "wasm32"
         )))]
         debug::terminal::show(ui.ctx());
+        debug::version::show(ui.ctx());
         self.show_invite(ui.ctx());
         self.show_about(ui.ctx());
 
