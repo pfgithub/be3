@@ -4,7 +4,6 @@ use std::{
     fmt,
     ops::Deref,
     ops::Range,
-    process,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, OnceLock, Weak,
@@ -3786,10 +3785,5 @@ fn reference_delta(before: &[Uuid], after: &[Uuid]) -> ReferenceDelta {
 }
 
 fn fatal(message: impl AsRef<str>) -> ! {
-    let message = message.as_ref();
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::error_1(&format!("fatal block client error: {message}").into());
-    #[cfg(not(target_arch = "wasm32"))]
-    eprintln!("fatal block client error: {message}");
-    process::abort()
+    panic!("fatal block client error: {}", message.as_ref())
 }

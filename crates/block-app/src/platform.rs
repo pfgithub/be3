@@ -13,7 +13,7 @@ mod native;
 mod web;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use native::{spawn_request, start_embedded_server};
+pub(crate) use native::{spawn_request, start_embedded_server, EmbeddedServer};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::spawn_request;
 

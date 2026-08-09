@@ -11,7 +11,15 @@ pub struct AppStateStore {
 
 impl AppStateStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, AppStateError> {
-        let connection = Connection::open(path)?;
+        Self::with_connection(Connection::open(path)?)
+    }
+
+    pub(crate) fn placeholder() -> Self {
+        Self::with_connection(Connection::open_in_memory().expect("in-memory sqlite always opens"))
+            .expect("in-memory sqlite always initializes")
+    }
+
+    fn with_connection(connection: Connection) -> Result<Self, AppStateError> {
         connection.pragma_update(None, "foreign_keys", true)?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS saved_accounts (

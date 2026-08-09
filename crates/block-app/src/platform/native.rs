@@ -29,14 +29,32 @@ where
     receiver
 }
 
-/// Starts a block server inside this process and returns the URL it listens on.
+pub(crate) struct EmbeddedServer {
+    pub(crate) url: String,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for EmbeddedServer {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Starts a block server inside this process and returns a handle to it.
 pub(crate) fn start_embedded_server(
     data_dir: PathBuf,
-) -> Result<String, Box<dyn Error + Send + Sync>> {
+) -> Result<EmbeddedServer, Box<dyn Error + Send + Sync>> {
     let listener = StdTcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
     let address = listener.local_addr()?;
-    thread::Builder::new()
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
+    let thread = thread::Builder::new()
         .name("block-app-server".into())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -46,10 +64,24 @@ pub(crate) fn start_embedded_server(
             runtime.block_on(async move {
                 let listener = TcpListener::from_std(listener)
                     .expect("failed to initialize embedded block server listener");
-                if let Err(error) = block_server::serve(listener, data_dir).await {
-                    eprintln!("embedded block server stopped: {error}");
+                let shutdown = async {
+                    let _ = shutdown_receiver.await;
+                };
+                if let Err(error) = block_server::serve_until_shutdown(
+                    listener,
+                    data_dir,
+                    block_server::ServerConfig::default(),
+                    shutdown,
+                )
+                .await
+                {
+                    panic!("embedded block server stopped: {error}");
                 }
             });
         })?;
-    Ok(format!("http://{address}"))
+    Ok(EmbeddedServer {
+        url: format!("http://{address}"),
+        shutdown: Some(shutdown_sender),
+        thread: Some(thread),
+    })
 }

@@ -86,6 +86,15 @@ impl AppStateStore {
             .map_err(|_| AppStateError::from("failed to clear the active account".to_owned()))
     }
 
+    pub fn clear(&self) -> Result<(), AppStateError> {
+        for key in [ACCOUNTS_KEY, ACTIVE_KEY, CLIENT_ID_KEY] {
+            self.storage
+                .remove_item(key)
+                .map_err(|_| AppStateError::from(format!("failed to clear {key}")))?;
+        }
+        Ok(())
+    }
+
     pub fn active_account(&self) -> Result<Option<(String, Uuid)>, AppStateError> {
         let active: Option<ActiveAccount> = self.read(ACTIVE_KEY)?;
         Ok(active.map(|active| (active.server, active.id)))

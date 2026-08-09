@@ -3,6 +3,7 @@ mod block_picker;
 mod debug;
 mod editors;
 mod files;
+mod panic_guard;
 mod performance;
 mod platform;
 mod share;
@@ -70,6 +71,7 @@ fn native_options() -> eframe::NativeOptions {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> eframe::Result {
+    panic_guard::install();
     eframe::run_native(
         APP_ID,
         options,
@@ -94,10 +96,7 @@ pub fn run() -> eframe::Result {
 pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
     use wasm_bindgen::JsCast;
 
-    // Panics otherwise reach only the WASI stderr shim, which is easy to miss.
-    std::panic::set_hook(Box::new(|info| {
-        web_sys::console::error_1(&format!("Block panicked: {info}").into());
-    }));
+    panic_guard::install();
 
     let document = web_sys::window()
         .and_then(|window| window.document())
@@ -222,6 +221,19 @@ struct BlockApp {
     pending_destructive_action: Option<PendingDestructiveAction>,
     scheduled_account_switch: Option<Account>,
     allow_close: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    data_dir: PathBuf,
+    #[cfg(not(target_arch = "wasm32"))]
+    embedded_server: Option<platform::EmbeddedServer>,
+    error: Option<String>,
+    pending_error_action: Option<ErrorAction>,
+}
+
+#[derive(Clone)]
+enum ErrorAction {
+    DeleteClientDatabase,
+    #[cfg(not(target_arch = "wasm32"))]
+    DeleteServerDatabase,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -452,9 +464,13 @@ impl BlockApp {
             .or_else(|| eframe::storage_dir(APP_ID))
             .ok_or_else(|| io::Error::other("application-data directory is unavailable"))?;
         std::fs::create_dir_all(&data_dir)?;
-        let url = platform::start_embedded_server(data_dir.join("server"))?;
+        let embedded_server = platform::start_embedded_server(data_dir.join("server"))?;
+        let url = embedded_server.url.clone();
         let app_state = AppStateStore::open(data_dir.join("app.sqlite3"))?;
-        Self::with_state(app_state, url)
+        let mut app = Self::with_state(app_state, url)?;
+        app.data_dir = data_dir;
+        app.embedded_server = Some(embedded_server);
+        Ok(app)
     }
 
     /// Opens the app state in browser storage. There is no local server to
@@ -556,6 +572,12 @@ impl BlockApp {
             pending_destructive_action: None,
             scheduled_account_switch: None,
             allow_close: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            data_dir: PathBuf::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            embedded_server: None,
+            error: None,
+            pending_error_action: None,
         })
     }
 
@@ -3275,6 +3297,25 @@ fn sidebar_source(parent: BlockParent) -> SidebarDragSource {
 
 impl eframe::App for BlockApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if self.error.is_none() {
+            self.error = panic_guard::take();
+        }
+        if let Some(message) = self.error.clone() {
+            self.show_error_window(ui, &message);
+            return;
+        }
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.run_frame(ui, frame);
+        }));
+        if caught.is_err() {
+            self.error =
+                Some(panic_guard::take().unwrap_or_else(|| "The app stopped responding.".into()));
+        }
+    }
+}
+
+impl BlockApp {
+    fn run_frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         performance::begin_frame();
         if !self.signed_in {
             self.show_account_onboarding(ui);
@@ -3323,5 +3364,137 @@ impl eframe::App for BlockApp {
         performance::show(ui.ctx());
         performance::end_frame();
         ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
+
+    fn show_error_window(&mut self, ui: &mut egui::Ui, message: &str) {
+        let mut restart = false;
+        let mut delete_client_database = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut delete_server_database = false;
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(40.0);
+                ui.heading("Something went wrong");
+                ui.add_space(12.0);
+                egui::ScrollArea::vertical()
+                    .max_height(240.0)
+                    .show(ui, |ui| {
+                        ui.label(message);
+                    });
+                ui.add_space(20.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Restart").clicked() {
+                        restart = true;
+                    }
+                    if ui.button("Delete client database...").clicked() {
+                        self.pending_error_action = Some(ErrorAction::DeleteClientDatabase);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if ui.button("Delete local server database...").clicked() {
+                        self.pending_error_action = Some(ErrorAction::DeleteServerDatabase);
+                    }
+                    if ui.button("Exit").clicked() {
+                        std::process::exit(1);
+                    }
+                });
+            });
+        });
+        if let Some(action) = self.pending_error_action.clone() {
+            let (title, confirmation) = match action {
+                ErrorAction::DeleteClientDatabase => (
+                    "Delete client database?",
+                    "This removes every saved account on this device. You will need to sign in again.",
+                ),
+                #[cfg(not(target_arch = "wasm32"))]
+                ErrorAction::DeleteServerDatabase => (
+                    "Delete local server database?",
+                    "This permanently deletes every workspace and block stored on this device's local server.",
+                ),
+            };
+            egui::Window::new(title)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ui.ctx(), |ui| {
+                    ui.label(confirmation);
+                    ui.horizontal(|ui| {
+                        if ui.button("Delete").clicked() {
+                            self.pending_error_action = None;
+                            match action {
+                                ErrorAction::DeleteClientDatabase => {
+                                    delete_client_database = true;
+                                }
+                                #[cfg(not(target_arch = "wasm32"))]
+                                ErrorAction::DeleteServerDatabase => {
+                                    delete_server_database = true;
+                                }
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.pending_error_action = None;
+                        }
+                    });
+                });
+        }
+        if delete_client_database {
+            self.delete_client_database();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if delete_server_database {
+            self.delete_server_database();
+        }
+        if restart {
+            self.restart();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn restart(&mut self) {
+        match Self::new(Some(self.data_dir.clone())) {
+            Ok(fresh) => *self = fresh,
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn restart(&mut self) {
+        match Self::new() {
+            Ok(fresh) => *self = fresh,
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn delete_client_database(&mut self) {
+        let path = self.data_dir.join("app.sqlite3");
+        let _ = std::mem::replace(&mut self.app_state, AppStateStore::placeholder());
+        if let Err(error) = std::fs::remove_file(&path) {
+            if error.kind() != io::ErrorKind::NotFound {
+                self.error = Some(format!("failed to delete {}: {error}", path.display()));
+                return;
+            }
+        }
+        self.restart();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn delete_client_database(&mut self) {
+        match AppStateStore::open().and_then(|store| store.clear()) {
+            Ok(()) => self.restart(),
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn delete_server_database(&mut self) {
+        self.embedded_server = None;
+        let path = self.data_dir.join("server");
+        if let Err(error) = std::fs::remove_dir_all(&path) {
+            if error.kind() != io::ErrorKind::NotFound {
+                self.error = Some(format!("failed to delete {}: {error}", path.display()));
+                return;
+            }
+        }
+        self.restart();
     }
 }

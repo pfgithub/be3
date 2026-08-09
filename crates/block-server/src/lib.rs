@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
+    future::Future,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -80,14 +81,25 @@ pub async fn serve_with_config(
     data_dir: impl Into<PathBuf>,
     config: ServerConfig,
 ) -> Result<(), ServerError> {
+    serve_until_shutdown(listener, data_dir, config, std::future::pending()).await
+}
+
+pub async fn serve_until_shutdown(
+    listener: TcpListener,
+    data_dir: impl Into<PathBuf>,
+    config: ServerConfig,
+    shutdown: impl Future<Output = ()>,
+) -> Result<(), ServerError> {
     let root = data_dir.into();
     fs::create_dir_all(&root).await?;
     let store = Arc::new(BlockStore::open_with_config(root, config).await?);
     let watch_hub = Arc::new(WatchHub::new());
     let mut connections = JoinSet::new();
+    tokio::pin!(shutdown);
 
     loop {
         tokio::select! {
+            _ = &mut shutdown => break,
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let store = Arc::clone(&store);
@@ -105,6 +117,8 @@ pub async fn serve_with_config(
             }
         }
     }
+    connections.shutdown().await;
+    Ok(())
 }
 
 /// Creates an account directly against the database at `data_dir`, bypassing
