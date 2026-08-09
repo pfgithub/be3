@@ -235,6 +235,7 @@ fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
 /// Shared by every place in the app that shows a block's name, so an
 /// automatic name can be marked as such (e.g. italicized) consistently.
 pub(super) struct BlockLabel {
+    pub block_type: Uuid,
     pub icon: Option<MaterialIcon>,
     pub name: String,
     pub automatic: bool,
@@ -257,6 +258,7 @@ impl BlockLabel {
             ),
         };
         Self {
+            block_type,
             icon: registry.icon(block_type),
             name,
             automatic,

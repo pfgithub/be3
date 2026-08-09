@@ -7,6 +7,8 @@ use egui_material_icons::icons::{
 };
 use uuid::Uuid;
 
+use crate::editors::BlockLabel;
+
 /// The permissions a block can be granted with, in the order they are offered.
 const GRANTABLE: [BlockAccess; 3] = [
     BlockAccess::Edit,
@@ -25,7 +27,7 @@ pub struct ShareDialog {
 
 struct ShareState {
     id: Uuid,
-    name: String,
+    label: BlockLabel,
     request: Option<BlockAccessRequest>,
     entries: Vec<BlockAccessEntry>,
     loaded: bool,
@@ -40,10 +42,10 @@ struct ShareState {
 
 impl ShareDialog {
     /// Opens the dialog for `id` and starts loading who can currently reach it.
-    pub fn open(&mut self, client: &BlockClient, id: Uuid, name: String) {
+    pub fn open(&mut self, client: &BlockClient, id: Uuid, label: BlockLabel) {
         self.open = Some(ShareState {
             id,
-            name,
+            label,
             request: Some(client.request_block_access(id)),
             entries: Vec::new(),
             loaded: false,
@@ -64,7 +66,30 @@ impl ShareDialog {
         let mut reload = false;
         let mut grants = Vec::new();
         let mut open = true;
-        egui::Window::new(format!("Share \u{201c}{}\u{201d}", state.name))
+        let style = ctx.global_style();
+        let title_font = egui::TextStyle::Heading.resolve(&style);
+        let mut title = egui::text::LayoutJob::default();
+        title.append(
+            "Share \u{201c}",
+            0.0,
+            egui::TextFormat::simple(title_font.clone(), egui::Color32::PLACEHOLDER),
+        );
+        let mut name = egui::RichText::new(&state.label.name).font(title_font.clone());
+        if state.label.automatic {
+            name = name.italics();
+        }
+        name.append_to(
+            &mut title,
+            &style,
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+        title.append(
+            "\u{201d}",
+            0.0,
+            egui::TextFormat::simple(title_font, egui::Color32::PLACEHOLDER),
+        );
+        egui::Window::new(title)
             .id(egui::Id::new("share-block"))
             .open(&mut open)
             .collapsible(false)

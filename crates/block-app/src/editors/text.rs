@@ -383,6 +383,7 @@ impl TextEditor {
                     .map(|intrinsic| embedded_editor_frame_size(intrinsic, 1.0));
                 let label = metadata.as_ref().map_or_else(
                     || BlockLabel {
+                        block_type: Uuid::nil(),
                         icon: None,
                         name: embed.id.to_string(),
                         automatic: true,

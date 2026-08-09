@@ -1,10 +1,11 @@
 //! Drawing and hit testing of the blocks pinned to the map.
 
 use block_client::blocks::map::{MapColor, MapPoint};
-use eframe::egui::{Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2};
+use eframe::egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 use uuid::Uuid;
 
 use super::geo::MapView;
+use crate::editors::name_galley;
 
 const HEAD_RADIUS: f32 = 7.0;
 const HEIGHT: f32 = 18.0;
@@ -33,7 +34,7 @@ pub(super) fn draw_points(
     view: MapView,
     clip: Rect,
     points: &[MapPoint],
-    label: impl Fn(Uuid) -> Option<String>,
+    label: impl Fn(Uuid) -> Option<(String, bool)>,
     selected: Option<Uuid>,
     opacity: f32,
 ) {
@@ -49,8 +50,8 @@ pub(super) fn draw_points(
             selected == Some(point.id),
             opacity,
         );
-        if let Some(label) = label(point.block_id) {
-            draw_label(painter, tip, &label, opacity);
+        if let Some((label, automatic)) = label(point.block_id) {
+            draw_label(painter, tip, &label, automatic, opacity);
         }
     }
 }
@@ -82,31 +83,24 @@ fn draw_marker(painter: &Painter, tip: Pos2, color: Color32, selected: bool, opa
     }
 }
 
-fn draw_label(painter: &Painter, tip: Pos2, label: &str, opacity: f32) {
+fn draw_label(painter: &Painter, tip: Pos2, label: &str, automatic: bool, opacity: f32) {
     let position = tip + Vec2::new(0.0, 3.0);
     let font = FontId::proportional(LABEL_SIZE);
     let halo = Color32::from_rgba_unmultiplied(255, 255, 255, 190).gamma_multiply(opacity);
+    let text_color = Color32::from_gray(30).gamma_multiply(opacity);
+    let halo_galley = name_galley(painter, label, font.clone(), halo, automatic);
     for offset in [
         Vec2::new(-1.0, 0.0),
         Vec2::new(1.0, 0.0),
         Vec2::new(0.0, -1.0),
         Vec2::new(0.0, 1.0),
     ] {
-        painter.text(
-            position + offset,
-            eframe::egui::Align2::CENTER_TOP,
-            label,
-            font.clone(),
-            halo,
-        );
+        let anchor = Align2::CENTER_TOP.anchor_size(position + offset, halo_galley.size());
+        painter.galley(anchor.min, halo_galley.clone(), halo);
     }
-    painter.text(
-        position,
-        eframe::egui::Align2::CENTER_TOP,
-        label,
-        font,
-        Color32::from_gray(30).gamma_multiply(opacity),
-    );
+    let text_galley = name_galley(painter, label, font, text_color, automatic);
+    let anchor = Align2::CENTER_TOP.anchor_size(position, text_galley.size());
+    painter.galley(anchor.min, text_galley, text_color);
 }
 
 /// The topmost marker under `position`, matching the order markers are drawn.

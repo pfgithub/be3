@@ -1783,8 +1783,7 @@ impl BlockApp {
             },
         );
         if share {
-            self.share
-                .open(&self.client, active, current_name.name.clone());
+            self.share.open(&self.client, active, current_name);
         }
         match mode {
             TabMode::Access(chosen_access) => {
@@ -2072,6 +2071,7 @@ impl BlockApp {
         ui.weak("Generated from");
         let label = self.client.cached_block(source).map_or_else(
             || BlockLabel {
+                block_type: descriptor.source_type,
                 icon: self.registry.icon(descriptor.source_type),
                 name: self
                     .registry
@@ -2413,8 +2413,8 @@ impl BlockApp {
                     });
                 }
                 BlockContextMenuAction::Share => {
-                    let name = BlockLabel::for_reference(&self.registry, &reference).name;
-                    self.share.open(&self.client, reference.id, name);
+                    let label = BlockLabel::for_reference(&self.registry, &reference);
+                    self.share.open(&self.client, reference.id, label);
                 }
                 BlockContextMenuAction::Delete => {
                     self.queue_delete(reference, source, is_reference);

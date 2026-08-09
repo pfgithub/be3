@@ -163,14 +163,16 @@ impl MapEditor {
             .map_or(MapRegion::WORLD, |map| map.displayed_region())
     }
 
-    /// Names of the blocks the map points at, for marker labels and lists.
-    fn dependency_labels(&self, editors: &EditorAccess<'_>) -> HashMap<Uuid, (String, Uuid)> {
+    /// Labels of the blocks the map points at, for marker labels and lists.
+    fn dependency_labels(&self, editors: &EditorAccess<'_>) -> HashMap<Uuid, super::BlockLabel> {
         self.dependencies
             .read()
             .into_iter()
             .map(|reference| {
-                let name = super::BlockLabel::for_reference(editors.registry(), &reference).name;
-                (reference.id, (name, reference.block_type))
+                (
+                    reference.id,
+                    super::BlockLabel::for_reference(editors.registry(), &reference),
+                )
             })
             .collect()
     }
@@ -630,7 +632,11 @@ impl MapEditor {
             view,
             rect,
             &points,
-            |id| labels.get(&id).map(|(name, _)| name.clone()),
+            |id| {
+                labels
+                    .get(&id)
+                    .map(|label| (label.name.clone(), label.automatic))
+            },
             None,
             opacity,
         );
@@ -920,7 +926,11 @@ impl BlockEditor for MapEditor {
             view,
             clip,
             &points,
-            |id| labels.get(&id).map(|(name, _)| name.clone()),
+            |id| {
+                labels
+                    .get(&id)
+                    .map(|label| (label.name.clone(), label.automatic))
+            },
             self.selected,
             1.0,
         );

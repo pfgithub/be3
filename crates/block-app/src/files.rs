@@ -337,10 +337,9 @@ impl BlockApp {
                         });
                     }
                     Some(BlockContextMenuAction::Share) => {
-                        let name =
-                            crate::editors::BlockLabel::for_reference(&self.registry, &reference)
-                                .name;
-                        self.share.open(&self.client, reference.id, name);
+                        let label =
+                            crate::editors::BlockLabel::for_reference(&self.registry, &reference);
+                        self.share.open(&self.client, reference.id, label);
                     }
                     Some(BlockContextMenuAction::Delete) => delete = true,
                     None => {}

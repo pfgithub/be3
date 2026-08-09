@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 use block_client::blocks::map::MapColor;
 
 use super::*;
+use crate::editors::{paint_name, BlockLabel};
 
 const COLOR_PRESETS: [(&str, MapColor); 5] = [
     ("Default", MapColor::Default),
@@ -132,7 +133,7 @@ impl MapEditor {
             .selected
             .and_then(|id| points.iter().copied().find(|point| point.id == id));
         let Some(point) = selected else {
-            return self.show_point_list(ui, editors, &points, &labels);
+            return self.show_point_list(ui, &points, &labels);
         };
         self.show_point_details(ui, editors, point, labels.get(&point.block_id))
     }
@@ -140,9 +141,8 @@ impl MapEditor {
     fn show_point_list(
         &mut self,
         ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
         points: &[MapPoint],
-        labels: &HashMap<Uuid, (String, Uuid)>,
+        labels: &HashMap<Uuid, BlockLabel>,
     ) -> Option<EditorAction> {
         ui.strong("Points of interest");
         if points.is_empty() {
@@ -158,8 +158,8 @@ impl MapEditor {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for point in points {
                 let label = labels.get(&point.block_id).map_or_else(
-                    || "Loading…".to_owned(),
-                    |(name, block_type)| editors.registry().icon_label(*block_type, name),
+                    || egui::RichText::new("Loading…").into(),
+                    |label| label.widget_text(ui.style()),
                 );
                 if ui
                     .add(
@@ -189,7 +189,7 @@ impl MapEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
         point: MapPoint,
-        label: Option<&(String, Uuid)>,
+        label: Option<&BlockLabel>,
     ) -> Option<EditorAction> {
         let mut action = None;
         ui.horizontal(|ui| {
@@ -200,17 +200,11 @@ impl MapEditor {
             {
                 self.selected = None;
             }
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(
-                        label
-                            .map_or("Loading…", |(name, _)| name.as_str())
-                            .to_owned(),
-                    )
-                    .strong(),
-                )
-                .truncate(),
+            let name = label.map_or_else(
+                || egui::RichText::new("Loading…").strong().into(),
+                |label| label.styled_widget_text(ui.style(), egui::RichText::strong),
             );
+            ui.add(egui::Label::new(name).truncate());
         });
         ui.add_space(6.0);
         show_block_preview(ui, editors, point.block_id, label);
@@ -221,10 +215,10 @@ impl MapEditor {
                 .on_disabled_hover_text("Waiting for block metadata")
                 .clicked()
             {
-                if let Some((_, block_type)) = label {
+                if let Some(label) = label {
                     action = Some(EditorAction::OpenBlock {
                         id: point.block_id,
-                        block_type: *block_type,
+                        block_type: label.block_type,
                     });
                 }
             }
@@ -305,7 +299,7 @@ fn show_block_preview(
     ui: &mut egui::Ui,
     editors: &mut EditorAccess<'_>,
     block_id: Uuid,
-    label: Option<&(String, Uuid)>,
+    label: Option<&BlockLabel>,
 ) {
     let (response, painter) = ui.allocate_painter(
         Vec2::new(ui.available_width(), PREVIEW_HEIGHT),
@@ -329,16 +323,23 @@ fn show_block_preview(
         },
     );
     if !rendered {
-        let text = label.map_or_else(
-            || "Loading…".to_owned(),
-            |(name, block_type)| editors.registry().icon_label(*block_type, name),
+        let (text, automatic) = label.map_or_else(
+            || ("Loading…".to_owned(), false),
+            |label| {
+                (
+                    editors.registry().icon_label(label.block_type, &label.name),
+                    label.automatic,
+                )
+            },
         );
-        painter.text(
+        paint_name(
+            &painter,
             frame.center(),
             egui::Align2::CENTER_CENTER,
-            text,
+            &text,
             FontId::proportional(13.0),
             ui.visuals().weak_text_color(),
+            automatic,
         );
     }
     painter.rect_stroke(
