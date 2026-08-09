@@ -21,6 +21,7 @@ pub enum DatabaseViewKind {
     #[default]
     Spreadsheet,
     Kanban,
+    Scatter,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -30,6 +31,9 @@ pub struct DatabaseView {
     kind: DatabaseViewKind,
     /// The enum field whose options become the kanban board's columns.
     kanban_field_id: Option<Uuid>,
+    /// The number fields plotted on the scatter chart's axes.
+    scatter_x_field_id: Option<Uuid>,
+    scatter_y_field_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -48,6 +52,12 @@ pub enum DatabaseViewOperation {
     SetKanbanField {
         field_id: Option<Uuid>,
     },
+    SetScatterXField {
+        field_id: Option<Uuid>,
+    },
+    SetScatterYField {
+        field_id: Option<Uuid>,
+    },
 }
 
 impl DatabaseView {
@@ -57,6 +67,8 @@ impl DatabaseView {
             sort: None,
             kind: DatabaseViewKind::default(),
             kanban_field_id: None,
+            scatter_x_field_id: None,
+            scatter_y_field_id: None,
         }
     }
 
@@ -74,6 +86,14 @@ impl DatabaseView {
 
     pub fn kanban_field_id(&self) -> Option<Uuid> {
         self.kanban_field_id
+    }
+
+    pub fn scatter_x_field_id(&self) -> Option<Uuid> {
+        self.scatter_x_field_id
+    }
+
+    pub fn scatter_y_field_id(&self) -> Option<Uuid> {
+        self.scatter_y_field_id
     }
 }
 
@@ -93,6 +113,12 @@ impl Block for DatabaseView {
             DatabaseViewOperation::SetKind { kind } => view.kind = *kind,
             DatabaseViewOperation::SetKanbanField { field_id } => {
                 view.kanban_field_id = *field_id;
+            }
+            DatabaseViewOperation::SetScatterXField { field_id } => {
+                view.scatter_x_field_id = *field_id;
+            }
+            DatabaseViewOperation::SetScatterYField { field_id } => {
+                view.scatter_y_field_id = *field_id;
             }
         }
     }
