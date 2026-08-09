@@ -106,6 +106,7 @@ pub(super) struct TextEditor {
     focused_embed: Option<FocusedEmbed>,
     find: Option<FindState>,
     find_reveal: bool,
+    last_cursor_positions: Vec<CursorPosition>,
 }
 
 /// UI-only state for the find/replace bar: what's typed and which panel is
@@ -182,6 +183,7 @@ impl TextEditor {
             focused_embed: None,
             find: None,
             find_reveal: false,
+            last_cursor_positions: Vec::new(),
         }
     }
 
@@ -1659,11 +1661,13 @@ impl BlockEditor for TextEditor {
             report_ime_area(ui, response.rect, cursor);
         }
         profile.paint = paint;
-        if reveal_cursor {
+        let cursor_positions = self.core.cursor_positions().to_vec();
+        if reveal_cursor && cursor_positions != self.last_cursor_positions {
             if let Some(cursor) = cursor {
                 ui.scroll_to_rect(cursor.expand2(Vec2::new(8.0, 3.0)), None);
             }
         }
+        self.last_cursor_positions = cursor_positions;
         profile.total = frame_start.elapsed() + profile.toolbar;
         record_profile(profile);
         edit_block.or(embedded_action)
