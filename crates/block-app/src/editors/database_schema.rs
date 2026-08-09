@@ -78,96 +78,93 @@ impl BlockEditor for DatabaseSchemaEditor {
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let Some(schema) = self.block.read() else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        };
-        let fields = schema.fields().to_vec();
-        drop(schema);
-
         ui.heading("Fields");
         ui.add_space(8.0);
-        let mut operations = Vec::new();
-        egui::Grid::new(("database-schema", self.block.id()))
-            .num_columns(4)
-            .striped(true)
-            .spacing([12.0, 8.0])
-            .show(ui, |ui| {
-                ui.strong("Name");
-                ui.strong("Type");
-                ui.strong("Options");
-                ui.end_row();
-
-                for field in fields {
-                    let mut name = field.name.clone();
-                    if ui.text_edit_singleline(&mut name).changed() {
-                        operations.push(DatabaseSchemaOperation::RenameField {
-                            field_id: field.id,
-                            name,
-                        });
-                    }
-
-                    let mut field_type = field.field_type;
-                    egui::ComboBox::from_id_salt(("field-type", field.id))
-                        .selected_text(field_type_label(field_type))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut field_type,
-                                DatabaseFieldType::String,
-                                "String",
-                            );
-                            ui.selectable_value(
-                                &mut field_type,
-                                DatabaseFieldType::Number,
-                                "Number",
-                            );
-                            ui.selectable_value(&mut field_type, DatabaseFieldType::Enum, "Enum");
-                        });
-                    if field_type != field.field_type {
-                        operations.push(DatabaseSchemaOperation::SetFieldType {
-                            field_id: field.id,
-                            field_type,
-                        });
-                    }
-
-                    if field.field_type == DatabaseFieldType::Enum {
-                        enum_options_ui(ui, &field, &mut operations);
-                    } else {
-                        ui.label("");
-                    }
-
-                    if ui
-                        .small_button(ICON_DELETE)
-                        .on_hover_text("Delete field")
-                        .clicked()
-                    {
-                        operations
-                            .push(DatabaseSchemaOperation::RemoveField { field_id: field.id });
-                    }
-                    ui.end_row();
-                }
-            });
-
-        ui.add_space(8.0);
-        if ui
-            .button(format!("{} Add field", ICON_ADD.codepoint))
-            .clicked()
-        {
-            operations.push(DatabaseSchemaOperation::AddField {
-                field: DatabaseField {
-                    id: Uuid::new_v4(),
-                    name: "Field".into(),
-                    field_type: DatabaseFieldType::String,
-                    options: Vec::new(),
-                },
-            });
-        }
-        for operation in operations {
-            self.block.operate(operation);
-        }
+        fields_ui(ui, &self.block);
         None
+    }
+}
+
+/// Editing grid for a schema's fields, shared between `DatabaseSchemaEditor`
+/// and the database editor's sidebar.
+pub(super) fn fields_ui(ui: &mut egui::Ui, block: &BlockHandle<DatabaseSchema>) {
+    let Some(schema) = block.read() else {
+        ui.centered_and_justified(|ui| {
+            ui.spinner();
+        });
+        return;
+    };
+    let fields = schema.fields().to_vec();
+    drop(schema);
+
+    let mut operations = Vec::new();
+    egui::Grid::new(("database-schema", block.id()))
+        .num_columns(4)
+        .striped(true)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.strong("Name");
+            ui.strong("Type");
+            ui.strong("Options");
+            ui.end_row();
+
+            for field in fields {
+                let mut name = field.name.clone();
+                if ui.text_edit_singleline(&mut name).changed() {
+                    operations.push(DatabaseSchemaOperation::RenameField {
+                        field_id: field.id,
+                        name,
+                    });
+                }
+
+                let mut field_type = field.field_type;
+                egui::ComboBox::from_id_salt(("field-type", field.id))
+                    .selected_text(field_type_label(field_type))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut field_type, DatabaseFieldType::String, "String");
+                        ui.selectable_value(&mut field_type, DatabaseFieldType::Number, "Number");
+                        ui.selectable_value(&mut field_type, DatabaseFieldType::Enum, "Enum");
+                    });
+                if field_type != field.field_type {
+                    operations.push(DatabaseSchemaOperation::SetFieldType {
+                        field_id: field.id,
+                        field_type,
+                    });
+                }
+
+                if field.field_type == DatabaseFieldType::Enum {
+                    enum_options_ui(ui, &field, &mut operations);
+                } else {
+                    ui.label("");
+                }
+
+                if ui
+                    .small_button(ICON_DELETE)
+                    .on_hover_text("Delete field")
+                    .clicked()
+                {
+                    operations.push(DatabaseSchemaOperation::RemoveField { field_id: field.id });
+                }
+                ui.end_row();
+            }
+        });
+
+    ui.add_space(8.0);
+    if ui
+        .button(format!("{} Add field", ICON_ADD.codepoint))
+        .clicked()
+    {
+        operations.push(DatabaseSchemaOperation::AddField {
+            field: DatabaseField {
+                id: Uuid::new_v4(),
+                name: "Field".into(),
+                field_type: DatabaseFieldType::String,
+                options: Vec::new(),
+            },
+        });
+    }
+    for operation in operations {
+        block.operate(operation);
     }
 }
 

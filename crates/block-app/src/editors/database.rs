@@ -14,8 +14,8 @@ use egui_material_icons::{icons::ICON_DATABASE, MaterialIcon};
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, BlockLabel, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorKind,
+    database_schema, BlockEditor, BlockLabel, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 400.0;
@@ -26,6 +26,7 @@ const DIRECT_EDITOR_CHROME_HEIGHT: f32 = 90.0;
 pub(super) struct DatabaseEditor {
     block: BlockHandle<Database>,
     views: ReferenceList,
+    schema: Option<BlockHandle<DatabaseSchema>>,
 }
 
 impl EditorKind for DatabaseEditor {
@@ -59,7 +60,11 @@ impl CreatableEditor for DatabaseEditor {
 impl DatabaseEditor {
     fn new(client: &BlockClient, block: BlockHandle<Database>) -> Self {
         let views = client.watch_references(BlockReferenceList::Backrefs(block.id()));
-        Self { block, views }
+        Self {
+            block,
+            views,
+            schema: None,
+        }
     }
 
     fn views(&self) -> Vec<block::BlockReference> {
@@ -68,6 +73,18 @@ impl DatabaseEditor {
             .into_iter()
             .filter(|reference| reference.block_type == DatabaseView::TYPE_ID)
             .collect()
+    }
+
+    fn ensure_schema(&mut self, client: &BlockClient) -> Option<&BlockHandle<DatabaseSchema>> {
+        let schema_id = self.block.read()?.schema_id();
+        if self
+            .schema
+            .as_ref()
+            .is_none_or(|schema| schema.id() != schema_id)
+        {
+            self.schema = Some(client.get_block::<DatabaseSchema>(schema_id));
+        }
+        self.schema.as_ref()
     }
 }
 
@@ -92,6 +109,24 @@ impl BlockEditor for DatabaseEditor {
             DIRECT_EDITOR_WIDTH,
             DIRECT_EDITOR_CHROME_HEIGHT + DIRECT_EDITOR_ROW_HEIGHT * self.views().len() as f32,
         ))
+    }
+
+    fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
+        true
+    }
+
+    fn direct_editor_right_sidebar(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        let schema = self.ensure_schema(editors.client())?;
+        egui::CollapsingHeader::new("Fields")
+            .default_open(true)
+            .show(ui, |ui| {
+                database_schema::fields_ui(ui, schema);
+            });
+        None
     }
 
     fn direct_editor_ui(
