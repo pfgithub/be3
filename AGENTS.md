@@ -71,13 +71,6 @@ Editor types (the view, in `crates/block-app/src/editors/<name>.rs`; each reads 
 Tooling:
 - The codebase-memory-mcp knowledge graph indexes this repo under the project key `home-exedev-be3`, not `be3` — pass that key to `search_graph`/`query_graph`/`get_code_snippet`/etc.
 
-CI (`.github/workflows/ci.yml`, repo `pfgithub/be3`, workflow file `ci.yml`):
-- `check` — clippy/fmt/tests on Linux, i.e. what `verify.sh` runs locally.
-- `web` — builds the wasm/WASI browser bundle, uploads it as artifact `block-web`, and deploys it to GitHub Pages from `main`.
-- `android` — builds the APK via `cargo apk`, uploaded as artifact `block-app-android-aarch64` (a zip containing `block-app.apk`).
-- `native` — builds `block-server`/`block-app` per platform (linux/windows/macos, x86_64/aarch64), uploaded as `block-<platform-name>`.
-- `crates/block-app/src/debug/version` (the "Version" debug window) reads this workflow's run/artifact list from the GitHub Actions API to show recent builds and, on Android, download and install the `block-app-android-aarch64` artifact — the owner/repo/workflow/artifact names above are hardcoded there and need to stay in sync with this file.
-
 Functionality:
 - When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
 
@@ -101,5 +94,5 @@ Verification:
 - Use commit message format `type: message` where type is fix/feat/docs/...
 - Do not perform any verification beyond running the verify script. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work — the verify script is the only verification step.
 - Do not use the browser tool.
-
-If the VM runs out of space, delete build/debug/incremental.
+- This VM has limited disk space and no Android NDK or wasm/WASI clang toolchain installed. Only build/check the native (host) target, which is what the verify script does; do not run `cargo build`/`cargo check` against `aarch64-linux-android` or `wasm32-wasip1` yourself. CI (see `.github/workflows/ci.yml`) builds and checks those targets separately — when changing Android- or web-only code, note in your final output that it's unverified locally and relies on CI.
+- If the VM runs out of space, delete `target/debug/incremental`.
