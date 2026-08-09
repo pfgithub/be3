@@ -58,6 +58,7 @@ impl CreatableEditor for DatabaseEditor {
                 id: Uuid::new_v4(),
                 name: "Name".into(),
                 field_type: DatabaseFieldType::String,
+                options: Vec::new(),
             },
         });
         let database = client.create_block(Database::new(schema.id()));
@@ -303,7 +304,7 @@ impl DatabaseEditor {
                 value: None,
             });
         } else if let Some(text) = take_typed_text(ui) {
-            if let Some(value) = parse_cell_value(&text, field.field_type) {
+            if let Some(value) = parse_cell_value(&text, field) {
                 operations.push(DatabaseOperation::SetCell {
                     row_index: selected.row_index,
                     field_id: field.id,
@@ -369,7 +370,7 @@ impl DatabaseEditor {
                 {
                     Some(None)
                 } else {
-                    parse_cell_value(&self.edit_buffer, field.field_type).map(Some)
+                    parse_cell_value(&self.edit_buffer, field).map(Some)
                 };
                 if let Some(value) = value {
                     operations.push(DatabaseOperation::SetCell {
@@ -390,7 +391,7 @@ impl DatabaseEditor {
                 self.edit_buffer = self
                     .edit_original
                     .as_ref()
-                    .map_or_else(String::new, database_value_text);
+                    .map_or_else(String::new, |value| database_value_text(value, field));
                 self.finish_edit();
                 ui.memory_mut(|memory| memory.request_focus(grid_focus_id(self.block.id())));
             } else if self.editing == Some(address)
@@ -560,7 +561,7 @@ impl BlockEditor for DatabaseEditor {
             return false;
         };
         if let Some(sort) = sort {
-            sort_rows(&mut rows, sort);
+            sort_rows(&mut rows, sort, &fields);
         }
         paint_database_preview(context, &rows, &fields);
         true
@@ -601,7 +602,7 @@ impl BlockEditor for DatabaseEditor {
         _viewport: &mut super::DirectEditorViewport,
     ) -> Option<EditorAction> {
         let (schema_id, rows, fields, sort) = self.data(editors.client())?;
-        let display = display_rows(&rows, self.selected, sort);
+        let display = display_rows(&rows, self.selected, sort, &fields);
         self.controls(ui, schema_id, &display, &fields)
     }
 
@@ -619,7 +620,7 @@ impl BlockEditor for DatabaseEditor {
                 .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
             return None;
         }
-        let display = display_rows(&rows, self.selected, sort);
+        let display = display_rows(&rows, self.selected, sort, &fields);
         self.grid(ui, &display, &fields, sort, scale);
         None
     }
@@ -651,9 +652,10 @@ fn compare_sorted_rows(
     a: &DatabaseRow,
     b: &DatabaseRow,
     sort: DatabaseViewSort,
+    field: &DatabaseField,
 ) -> std::cmp::Ordering {
     let ordering = match (a.value(sort.field_id), b.value(sort.field_id)) {
-        (Some(a), Some(b)) => compare_database_values(a, b),
+        (Some(a), Some(b)) => compare_database_values(a, b, field),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
@@ -664,19 +666,40 @@ fn compare_sorted_rows(
     }
 }
 
-fn sort_rows(rows: &mut [DatabaseRow], sort: DatabaseViewSort) {
-    rows.sort_by(|a, b| compare_sorted_rows(a, b, sort));
+fn sort_rows(rows: &mut [DatabaseRow], sort: DatabaseViewSort, fields: &[DatabaseField]) {
+    let Some(field) = fields.iter().find(|field| field.id == sort.field_id) else {
+        return;
+    };
+    rows.sort_by(|a, b| compare_sorted_rows(a, b, sort, field));
 }
 
-fn sort_row_pairs(rows: &mut DisplayRows, sort: DatabaseViewSort) {
-    rows.sort_by(|(_, a), (_, b)| compare_sorted_rows(a, b, sort));
+fn sort_row_pairs(rows: &mut DisplayRows, sort: DatabaseViewSort, fields: &[DatabaseField]) {
+    let Some(field) = fields.iter().find(|field| field.id == sort.field_id) else {
+        return;
+    };
+    rows.sort_by(|(_, a), (_, b)| compare_sorted_rows(a, b, sort, field));
 }
 
-fn compare_database_values(a: &DatabaseValue, b: &DatabaseValue) -> std::cmp::Ordering {
+/// Enum values sort by the declared order of their options; a value whose
+/// option was since deleted sorts after all present options.
+fn compare_database_values(
+    a: &DatabaseValue,
+    b: &DatabaseValue,
+    field: &DatabaseField,
+) -> std::cmp::Ordering {
     match (a, b) {
         (DatabaseValue::String(a), DatabaseValue::String(b)) => a.cmp(b),
         (DatabaseValue::Number(a), DatabaseValue::Number(b)) => {
             a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        }
+        (DatabaseValue::Enum(a), DatabaseValue::Enum(b)) => {
+            let index = |id: Uuid| field.options.iter().position(|option| option.id == id);
+            match (index(*a), index(*b)) {
+                (Some(a), Some(b)) => a.cmp(&b),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
         }
         _ => std::cmp::Ordering::Equal,
     }
@@ -705,6 +728,7 @@ fn display_rows(
     rows: &[DatabaseRow],
     selected: Option<CellAddress>,
     sort: Option<DatabaseViewSort>,
+    fields: &[DatabaseField],
 ) -> DisplayRows {
     let extra = extra_row_count(rows.len(), selected);
     let mut display: DisplayRows = rows
@@ -714,7 +738,7 @@ fn display_rows(
         .enumerate()
         .collect();
     if let Some(sort) = sort {
-        sort_row_pairs(&mut display, sort);
+        sort_row_pairs(&mut display, sort, fields);
     }
     display
 }
@@ -810,7 +834,7 @@ fn paint_cell_text(
     scale: f32,
 ) {
     let (position, alignment) = match field_type {
-        DatabaseFieldType::String => (
+        DatabaseFieldType::String | DatabaseFieldType::Enum => (
             rect.left_center() + egui::vec2(6.0 * scale, 0.0),
             egui::Align2::LEFT_CENTER,
         ),
@@ -909,7 +933,7 @@ fn paint_database_preview(
         for field in fields {
             let width = column_width(field.field_type) * scale;
             let alignment = match field.field_type {
-                DatabaseFieldType::String => egui::Align2::LEFT_CENTER,
+                DatabaseFieldType::String | DatabaseFieldType::Enum => egui::Align2::LEFT_CENTER,
                 DatabaseFieldType::Number => egui::Align2::RIGHT_CENTER,
             };
             paint_preview_cell(
@@ -976,28 +1000,38 @@ fn take_typed_text(ui: &mut egui::Ui) -> Option<String> {
 
 fn cell_text(row: &DatabaseRow, field: &DatabaseField) -> String {
     match row.value(field.id) {
-        Some(value) => database_value_text(value),
+        Some(value) => database_value_text(value, field),
         None => String::new(),
     }
 }
 
-fn database_value_text(value: &DatabaseValue) -> String {
+fn database_value_text(value: &DatabaseValue, field: &DatabaseField) -> String {
     match value {
         DatabaseValue::String(value) => value.clone(),
         DatabaseValue::Number(value) => value.to_string(),
+        DatabaseValue::Enum(id) => field
+            .options
+            .iter()
+            .find(|option| option.id == *id)
+            .map_or_else(String::new, |option| option.name.clone()),
     }
 }
 
-fn parse_cell_value(value: &str, field_type: DatabaseFieldType) -> Option<DatabaseValue> {
-    match field_type {
+fn parse_cell_value(value: &str, field: &DatabaseField) -> Option<DatabaseValue> {
+    match field.field_type {
         DatabaseFieldType::String => Some(DatabaseValue::String(value.to_owned())),
         DatabaseFieldType::Number => value.parse().ok().map(DatabaseValue::Number),
+        DatabaseFieldType::Enum => field
+            .options
+            .iter()
+            .find(|option| option.name == value)
+            .map(|option| DatabaseValue::Enum(option.id)),
     }
 }
 
 fn column_width(field_type: DatabaseFieldType) -> f32 {
     match field_type {
-        DatabaseFieldType::String => STRING_COLUMN_WIDTH,
+        DatabaseFieldType::String | DatabaseFieldType::Enum => STRING_COLUMN_WIDTH,
         DatabaseFieldType::Number => NUMBER_COLUMN_WIDTH,
     }
 }
@@ -1025,5 +1059,6 @@ fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
     match field_type {
         DatabaseFieldType::String => "Text",
         DatabaseFieldType::Number => "Number",
+        DatabaseFieldType::Enum => "Enum",
     }
 }

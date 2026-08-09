@@ -7,6 +7,16 @@ use uuid::Uuid;
 pub enum DatabaseFieldType {
     String,
     Number,
+    Enum,
+}
+
+/// A named choice for an [`DatabaseFieldType::Enum`] field. Stored values
+/// reference options by `id`, so renaming an option does not affect rows
+/// that already hold it.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct DatabaseEnumOption {
+    pub id: Uuid,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -14,6 +24,7 @@ pub struct DatabaseField {
     pub id: Uuid,
     pub name: String,
     pub field_type: DatabaseFieldType,
+    pub options: Vec<DatabaseEnumOption>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -37,6 +48,19 @@ pub enum DatabaseSchemaOperation {
     SetFieldType {
         field_id: Uuid,
         field_type: DatabaseFieldType,
+    },
+    AddEnumOption {
+        field_id: Uuid,
+        option: DatabaseEnumOption,
+    },
+    RemoveEnumOption {
+        field_id: Uuid,
+        option_id: Uuid,
+    },
+    RenameEnumOption {
+        field_id: Uuid,
+        option_id: Uuid,
+        name: String,
     },
 }
 
@@ -78,6 +102,40 @@ impl Block for DatabaseSchema {
             } => {
                 if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
                     field.field_type = *field_type;
+                }
+            }
+            DatabaseSchemaOperation::AddEnumOption { field_id, option } => {
+                if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
+                    if !field
+                        .options
+                        .iter()
+                        .any(|existing| existing.id == option.id)
+                    {
+                        field.options.push(option.clone());
+                    }
+                }
+            }
+            DatabaseSchemaOperation::RemoveEnumOption {
+                field_id,
+                option_id,
+            } => {
+                if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
+                    field.options.retain(|option| option.id != *option_id);
+                }
+            }
+            DatabaseSchemaOperation::RenameEnumOption {
+                field_id,
+                option_id,
+                name,
+            } => {
+                if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
+                    if let Some(option) = field
+                        .options
+                        .iter_mut()
+                        .find(|option| option.id == *option_id)
+                    {
+                        option.name.clone_from(name);
+                    }
                 }
             }
         }

@@ -6,11 +6,13 @@ fn schema_adds_and_removes_fields_by_uuid() {
         id: Uuid::new_v4(),
         name: "Retained".into(),
         field_type: DatabaseFieldType::String,
+        options: Vec::new(),
     };
     let removed = DatabaseField {
         id: Uuid::new_v4(),
         name: "Removed".into(),
         field_type: DatabaseFieldType::Number,
+        options: Vec::new(),
     };
     let mut schema = DatabaseSchema::new();
     for field in [retained.clone(), removed.clone()] {

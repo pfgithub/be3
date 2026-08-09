@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub enum DatabaseValue {
     String(String),
     Number(f64),
+    Enum(Uuid),
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

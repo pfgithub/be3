@@ -1,6 +1,7 @@
 use block_client::{
     blocks::database_schema::{
-        DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
+        DatabaseEnumOption, DatabaseField, DatabaseFieldType, DatabaseSchema,
+        DatabaseSchemaOperation,
     },
     BlockClient, BlockHandle,
 };
@@ -90,12 +91,13 @@ impl BlockEditor for DatabaseSchemaEditor {
         ui.add_space(8.0);
         let mut operations = Vec::new();
         egui::Grid::new(("database-schema", self.block.id()))
-            .num_columns(3)
+            .num_columns(4)
             .striped(true)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
                 ui.strong("Name");
                 ui.strong("Type");
+                ui.strong("Options");
                 ui.end_row();
 
                 for field in fields {
@@ -121,12 +123,19 @@ impl BlockEditor for DatabaseSchemaEditor {
                                 DatabaseFieldType::Number,
                                 "Number",
                             );
+                            ui.selectable_value(&mut field_type, DatabaseFieldType::Enum, "Enum");
                         });
                     if field_type != field.field_type {
                         operations.push(DatabaseSchemaOperation::SetFieldType {
                             field_id: field.id,
                             field_type,
                         });
+                    }
+
+                    if field.field_type == DatabaseFieldType::Enum {
+                        enum_options_ui(ui, &field, &mut operations);
+                    } else {
+                        ui.label("");
                     }
 
                     if ui
@@ -151,6 +160,7 @@ impl BlockEditor for DatabaseSchemaEditor {
                     id: Uuid::new_v4(),
                     name: "Field".into(),
                     field_type: DatabaseFieldType::String,
+                    options: Vec::new(),
                 },
             });
         }
@@ -161,9 +171,55 @@ impl BlockEditor for DatabaseSchemaEditor {
     }
 }
 
+fn enum_options_ui(
+    ui: &mut egui::Ui,
+    field: &DatabaseField,
+    operations: &mut Vec<DatabaseSchemaOperation>,
+) {
+    ui.horizontal(|ui| {
+        for option in &field.options {
+            let mut name = option.name.clone();
+            if ui
+                .add(egui::TextEdit::singleline(&mut name).desired_width(80.0))
+                .changed()
+            {
+                operations.push(DatabaseSchemaOperation::RenameEnumOption {
+                    field_id: field.id,
+                    option_id: option.id,
+                    name,
+                });
+            }
+            if ui
+                .small_button(ICON_DELETE)
+                .on_hover_text("Delete option")
+                .clicked()
+            {
+                operations.push(DatabaseSchemaOperation::RemoveEnumOption {
+                    field_id: field.id,
+                    option_id: option.id,
+                });
+            }
+        }
+        if ui
+            .small_button(ICON_ADD)
+            .on_hover_text("Add option")
+            .clicked()
+        {
+            operations.push(DatabaseSchemaOperation::AddEnumOption {
+                field_id: field.id,
+                option: DatabaseEnumOption {
+                    id: Uuid::new_v4(),
+                    name: "Option".into(),
+                },
+            });
+        }
+    });
+}
+
 fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
     match field_type {
         DatabaseFieldType::String => "String",
         DatabaseFieldType::Number => "Number",
+        DatabaseFieldType::Enum => "Enum",
     }
 }
