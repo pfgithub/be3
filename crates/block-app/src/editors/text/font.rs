@@ -35,6 +35,7 @@ const BODY_PIXEL_SIZE: u32 = 12;
 const CODE_PIXEL_SIZE: u32 = 12;
 const INLINE_EMBED_HEIGHT: f32 = 24.0;
 const UNAVAILABLE_EMBED_SIZE: Vec2 = Vec2::new(320.0, 120.0);
+const CHECKBOX_WIDTH: f32 = 18.0;
 
 pub(super) struct TextRenderer {
     library: ft::FT_Library,
@@ -332,6 +333,7 @@ impl TextRenderer {
         bytes: &[u8],
         highlight: &SyntaxHighlight,
         embeds: &[ResolvedEmbed],
+        checkboxes: &[Range<usize>],
     ) -> (DocumentLayout, LayoutTimings) {
         let mut timings = LayoutTimings::default();
         let mut lines = Vec::new();
@@ -429,6 +431,7 @@ impl TextRenderer {
             line_index += 1;
         }
 
+        apply_checkbox_widths(&mut lines, &mut positions, checkboxes);
         let tables_start = Instant::now();
         align_markdown_tables(&mut lines, &mut positions, highlight.markdown_tables());
         timings.tables = tables_start.elapsed();
@@ -760,6 +763,61 @@ impl TextRenderer {
             }
         }
         self.glyphs.insert(key, result);
+    }
+}
+
+/// Replaces the naturally-shaped glyphs and byte positions of each checkbox
+/// marker (e.g. the `- [ ]` in `- [ ] task`) with a fixed-width reservation:
+/// its glyphs are dropped so nothing but the checkbox widget itself is
+/// painted there, its interior byte positions are spread at even increments
+/// across [`CHECKBOX_WIDTH`], and everything after it on the line is shifted
+/// to make room, so the checkbox widget can never overlap following text.
+fn apply_checkbox_widths(
+    lines: &mut [LineLayout],
+    positions: &mut [Option<BytePosition>],
+    checkboxes: &[Range<usize>],
+) {
+    for checkbox in checkboxes {
+        let Some(left) = positions.get(checkbox.start).copied().flatten() else {
+            continue;
+        };
+        let Some(right) = positions.get(checkbox.end).copied().flatten() else {
+            continue;
+        };
+        if left.line != right.line {
+            continue;
+        }
+        let line_index = left.line;
+        let delta = CHECKBOX_WIDTH - (right.x - left.x);
+        let len = checkbox.end - checkbox.start;
+        for offset in 0..=len {
+            if let Some(position) = positions
+                .get_mut(checkbox.start + offset)
+                .and_then(|position| position.as_mut())
+            {
+                position.x = left.x + CHECKBOX_WIDTH * offset as f32 / len as f32;
+            }
+        }
+        let line_end = lines[line_index].end;
+        for byte in checkbox.end + 1..=line_end {
+            if let Some(position) = positions
+                .get_mut(byte)
+                .and_then(|position| position.as_mut())
+            {
+                if position.line == line_index {
+                    position.x += delta;
+                }
+            }
+        }
+        let line = &mut lines[line_index];
+        line.glyphs
+            .retain(|glyph| glyph.doc_byte < checkbox.start || glyph.doc_byte >= checkbox.end);
+        for glyph in &mut line.glyphs {
+            if glyph.doc_byte >= checkbox.end {
+                glyph.x += delta;
+            }
+        }
+        line.width += delta;
     }
 }
 

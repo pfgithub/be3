@@ -1270,7 +1270,7 @@ impl Core {
             return;
         };
         let state = if marker.checked { b' ' } else { b'x' };
-        let state_position = Position::at(&document, marker.marker.start + 1);
+        let state_position = Position::at(&document, marker.marker.start + 3);
         drop(document);
         self.apply_replacements(
             vec![(state_position, 1, vec![state])],
@@ -2024,7 +2024,7 @@ fn measure_indent(bytes: &[u8], start: usize, width: usize) -> (usize, usize) {
 /// of a line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkdownCheckboxMarker {
-    /// Byte range of the bracketed marker, e.g. the `[x]` in `- [x] `.
+    /// Byte range of the whole marker, e.g. the `- [x]` in `- [x] `.
     pub marker: Range<usize>,
     pub checked: bool,
 }
@@ -2044,7 +2044,7 @@ pub fn markdown_checkbox_marker(bytes: &[u8], line_start: usize) -> Option<Markd
         && matches!(marker[3], b' ' | b'x' | b'X')
         && marker[4..6] == *b"] ")
         .then(|| MarkdownCheckboxMarker {
-            marker: start + 2..start + 5,
+            marker: start..start + 5,
             checked: matches!(marker[3], b'x' | b'X'),
         })
 }

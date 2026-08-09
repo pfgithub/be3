@@ -1261,15 +1261,6 @@ impl TextEditor {
         action
     }
 
-    fn checkbox_selected(&self, checkbox: &MarkdownCheckbox) -> bool {
-        self.core.cursor_positions().iter().any(|cursor| {
-            let Some(Range { start, end }) = self.core.selection_range(cursor) else {
-                return false;
-            };
-            start < checkbox.marker.end && end > checkbox.marker.start
-        })
-    }
-
     fn paint_checkboxes(
         &self,
         ui: &egui::Ui,
@@ -1279,20 +1270,10 @@ impl TextEditor {
         checkboxes: &[MarkdownCheckbox],
     ) {
         for checkbox in checkboxes {
-            let Some(marker_rect) = checkbox_marker_rect(layout, checkbox) else {
-                continue;
-            };
             let Some(rect) = checkbox_rect(layout, checkbox) else {
                 continue;
             };
-            let marker_rect = marker_rect.translate(origin.to_vec2());
             let rect = rect.translate(origin.to_vec2());
-            let marker_background = if self.checkbox_selected(checkbox) {
-                ui.visuals().selection.bg_fill
-            } else {
-                Color32::from_rgb(29, 37, 44)
-            };
-            painter.rect_filled(marker_rect, 0.0, marker_background);
             painter.rect(
                 rect,
                 3.0,
@@ -1368,10 +1349,18 @@ impl TextEditor {
         let bytes = self.block.read()?.bytes().to_vec();
         let highlight = self.core.highlight();
         let embeds = self.resolve_embeds(&bytes, editors);
+        let checkboxes = if self.core.language() == TextLanguage::Markdown {
+            parse_markdown_checkboxes(&bytes)
+                .iter()
+                .map(|checkbox| checkbox.marker.clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let height = match &self.renderer {
             Ok(renderer) => {
                 renderer
-                    .layout_profiled(&bytes, &highlight, &embeds)
+                    .layout_profiled(&bytes, &highlight, &embeds, &checkboxes)
                     .0
                     .size
                     .y
@@ -1518,7 +1507,7 @@ impl BlockEditor for TextEditor {
         profile.keyboard = keyboard_start.elapsed();
         self.handle_picker(ui.ctx(), editors);
         let document_start = Instant::now();
-        let Some(mut bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
+        let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
@@ -1535,14 +1524,10 @@ impl BlockEditor for TextEditor {
         } else {
             Vec::new()
         };
-        // Checkboxes are painted as custom widgets over the raw "[ ]"/"[x]"
-        // text, but that text still feeds the glyph layout pass. Normalize
-        // the state character so toggling a checkbox never reflows the line.
-        for checkbox in &checkboxes {
-            if let Some(byte) = bytes.get_mut(checkbox.marker.start + 1) {
-                *byte = b' ';
-            }
-        }
+        let checkbox_marker_ranges = checkboxes
+            .iter()
+            .map(|checkbox| checkbox.marker.clone())
+            .collect::<Vec<_>>();
         let highlight_start = Instant::now();
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
@@ -1555,7 +1540,12 @@ impl BlockEditor for TextEditor {
         } else {
             let layout = match &self.renderer {
                 Ok(renderer) => {
-                    let (layout, detail) = renderer.layout_profiled(&bytes, &highlight, &embeds);
+                    let (layout, detail) = renderer.layout_profiled(
+                        &bytes,
+                        &highlight,
+                        &embeds,
+                        &checkbox_marker_ranges,
+                    );
                     profile.layout_detail = Some(detail);
                     Arc::new(layout)
                 }
@@ -1780,6 +1770,9 @@ fn parse_markdown_checkboxes(bytes: &[u8]) -> Vec<MarkdownCheckbox> {
     result
 }
 
+/// The full reserved layout column for a checkbox marker (the whole
+/// `- [ ]`), used as the click/hover target so the checkbox covers that
+/// entire span rather than just the drawn box.
 fn checkbox_marker_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) -> Option<Rect> {
     let left = layout
         .positions
@@ -1795,18 +1788,16 @@ fn checkbox_marker_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) ->
         let line = &layout.lines[left.line];
         Rect::from_min_max(
             Pos2::new(left.x, line.y),
-            Pos2::new(right.x.max(left.x + 18.0), line.y + line.height),
+            Pos2::new(right.x, line.y + line.height),
         )
     })
 }
 
+/// The drawn checkbox box: a square centered in [`checkbox_marker_rect`].
 fn checkbox_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) -> Option<Rect> {
     let marker = checkbox_marker_rect(layout, checkbox)?;
-    let size = marker.height().min(18.0);
-    Some(Rect::from_center_size(
-        Pos2::new(marker.left() + size * 0.5, marker.center().y),
-        Vec2::splat(size),
-    ))
+    let size = marker.width().min(marker.height());
+    Some(Rect::from_center_size(marker.center(), Vec2::splat(size)))
 }
 
 fn checkbox_at<'a>(
@@ -1814,9 +1805,9 @@ fn checkbox_at<'a>(
     checkboxes: &'a [MarkdownCheckbox],
     point: Pos2,
 ) -> Option<&'a MarkdownCheckbox> {
-    checkboxes
-        .iter()
-        .find(|checkbox| checkbox_rect(layout, checkbox).is_some_and(|rect| rect.contains(point)))
+    checkboxes.iter().find(|checkbox| {
+        checkbox_marker_rect(layout, checkbox).is_some_and(|rect| rect.contains(point))
+    })
 }
 
 fn markdown_image_range(bytes: &[u8], url: &Range<usize>) -> Option<Range<usize>> {
