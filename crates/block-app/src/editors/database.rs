@@ -5,12 +5,15 @@ use block_client::{
         database_schema::{
             DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
         },
+        database_view::{DatabaseView, DatabaseViewOperation, DatabaseViewSort, SortDirection},
     },
     BlockClient, BlockHandle,
 };
 use eframe::egui;
 use egui_material_icons::{
-    icons::{ICON_ADD, ICON_DATABASE, ICON_DELETE, ICON_SCHEMA},
+    icons::{
+        ICON_ADD, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_DATABASE, ICON_DELETE, ICON_SCHEMA,
+    },
     MaterialIcon,
 };
 use uuid::Uuid;
@@ -20,19 +23,27 @@ use super::{
     DirectEditorInteraction, EditorAction, EditorKind,
 };
 
+/// Schema ID, sorted rows, fields, and the sort applied to them.
+type DatabaseViewData = (
+    Uuid,
+    Vec<DatabaseRow>,
+    Vec<DatabaseField>,
+    Option<DatabaseViewSort>,
+);
+
 const ROW_HEADER_WIDTH: f32 = 44.0;
 const ROW_HEIGHT: f32 = 28.0;
 const STRING_COLUMN_WIDTH: f32 = 180.0;
 const NUMBER_COLUMN_WIDTH: f32 = 120.0;
 
 impl EditorKind for DatabaseEditor {
-    type Block = Database;
+    type Block = DatabaseView;
 
     const DISPLAY_NAME: &'static str = "Database";
     const ICON: MaterialIcon = ICON_DATABASE;
 
-    fn open(_client: &BlockClient, block: BlockHandle<Database>) -> Self {
-        Self::new(block, None)
+    fn open(_client: &BlockClient, block: BlockHandle<DatabaseView>) -> Self {
+        Self::new(block, None, None)
     }
 }
 
@@ -48,7 +59,9 @@ impl CreatableEditor for DatabaseEditor {
         });
         let database = client.create_block(Database::new(schema.id()));
         schema.set_parent(BlockParent::Uuid(database.id()));
-        Self::new(database, Some(schema))
+        let view = client.create_block(DatabaseView::new(database.id()));
+        database.set_parent(BlockParent::Uuid(view.id()));
+        Self::new(view, Some(database), Some(schema))
     }
 }
 
@@ -59,7 +72,8 @@ struct CellAddress {
 }
 
 pub(super) struct DatabaseEditor {
-    block: BlockHandle<Database>,
+    block: BlockHandle<DatabaseView>,
+    database: Option<BlockHandle<Database>>,
     schema: Option<BlockHandle<DatabaseSchema>>,
     selected: Option<CellAddress>,
     editing: Option<CellAddress>,
@@ -69,15 +83,30 @@ pub(super) struct DatabaseEditor {
 }
 
 impl DatabaseEditor {
-    fn new(block: BlockHandle<Database>, schema: Option<BlockHandle<DatabaseSchema>>) -> Self {
+    fn new(
+        block: BlockHandle<DatabaseView>,
+        database: Option<BlockHandle<Database>>,
+        schema: Option<BlockHandle<DatabaseSchema>>,
+    ) -> Self {
         Self {
             block,
+            database,
             schema,
             selected: None,
             editing: None,
             edit_buffer: String::new(),
             edit_original: None,
             request_edit_focus: false,
+        }
+    }
+
+    fn ensure_database(&mut self, client: &BlockClient, database_id: Uuid) {
+        if self
+            .database
+            .as_ref()
+            .is_none_or(|database| database.id() != database_id)
+        {
+            self.database = Some(client.get_block::<Database>(database_id));
         }
     }
 
@@ -91,17 +120,32 @@ impl DatabaseEditor {
         }
     }
 
-    fn data(
-        &mut self,
-        client: &BlockClient,
-    ) -> Option<(Uuid, Vec<DatabaseRow>, Vec<DatabaseField>)> {
-        let database = self.block.read()?;
+    fn data(&mut self, client: &BlockClient) -> Option<DatabaseViewData> {
+        let view = self.block.read()?;
+        let database_id = view.database_id();
+        let sort = view.sort();
+        drop(view);
+        self.ensure_database(client, database_id);
+        let database = self.database.as_ref()?.read()?;
         let schema_id = database.schema_id();
-        let rows = database.rows().to_vec();
+        let mut rows = database.rows().to_vec();
         drop(database);
         self.ensure_schema(client, schema_id);
         let fields = self.schema.as_ref()?.read()?.fields().to_vec();
-        Some((schema_id, rows, fields))
+        if let Some(sort) = sort {
+            sort_rows(&mut rows, sort);
+        }
+        Some((schema_id, rows, fields, sort))
+    }
+
+    /// Applies operations to the underlying database, not the view itself.
+    fn operate_database(&self, operations: Vec<DatabaseOperation>) {
+        let Some(database) = self.database.as_ref() else {
+            return;
+        };
+        for operation in operations {
+            database.operate(operation);
+        }
     }
 
     fn begin_edit(
@@ -430,9 +474,7 @@ impl DatabaseEditor {
         });
         ui.separator();
         self.formula_bar(ui, rows, fields, &mut operations);
-        for operation in operations {
-            self.block.operate(operation);
-        }
+        self.operate_database(operations);
         action
     }
 
@@ -441,10 +483,12 @@ impl DatabaseEditor {
         ui: &mut egui::Ui,
         rows: &[DatabaseRow],
         fields: &[DatabaseField],
+        sort: Option<DatabaseViewSort>,
         scale: f32,
     ) {
         let mut operations = Vec::new();
         self.handle_keyboard(ui, rows, fields, &mut operations);
+        let mut sort_operation = None;
         egui::Grid::new(("database-grid", self.block.id()))
             .num_columns(fields.len() + 1)
             .spacing(egui::Vec2::ZERO)
@@ -453,20 +497,30 @@ impl DatabaseEditor {
                     ui,
                     egui::vec2(ROW_HEADER_WIDTH, ROW_HEIGHT) * scale,
                     "",
+                    None,
                     scale,
                 );
                 for (column_index, field) in fields.iter().enumerate() {
+                    let direction = sort
+                        .filter(|sort| sort.field_id == field.id)
+                        .map(|sort| sort.direction);
                     let response = spreadsheet_header(
                         ui,
                         egui::vec2(column_width(field.field_type), ROW_HEIGHT) * scale,
                         &field.name,
+                        direction,
                         scale,
-                    );
-                    response.on_hover_text(format!(
+                    )
+                    .on_hover_text(format!(
                         "Column {} · {}",
                         column_name(column_index),
                         field_type_label(field.field_type),
                     ));
+                    if response.clicked() {
+                        sort_operation = Some(DatabaseViewOperation::SetSort {
+                            sort: next_sort(sort, field.id),
+                        });
+                    }
                 }
                 ui.end_row();
 
@@ -479,7 +533,8 @@ impl DatabaseEditor {
                     ui.end_row();
                 }
             });
-        for operation in operations {
+        self.operate_database(operations);
+        if let Some(operation) = sort_operation {
             self.block.operate(operation);
         }
     }
@@ -493,13 +548,22 @@ impl BlockEditor for DatabaseEditor {
     fn render(
         &mut self,
         context: BlockRenderContext<'_>,
-        _editors: &mut super::EditorAccess<'_>,
+        editors: &mut super::EditorAccess<'_>,
     ) -> bool {
-        let Some(database) = self.block.read() else {
+        let Some(view) = self.block.read() else {
             return false;
         };
-        let rows = database.rows().to_vec();
+        let database_id = view.database_id();
+        let sort = view.sort();
+        drop(view);
+        self.ensure_database(editors.client(), database_id);
+        let Some(database) = self.database.as_ref().and_then(|database| database.read()) else {
+            return false;
+        };
+        let schema_id = database.schema_id();
+        let mut rows = database.rows().to_vec();
         drop(database);
+        self.ensure_schema(editors.client(), schema_id);
         let Some(fields) = self
             .schema
             .as_ref()
@@ -508,6 +572,9 @@ impl BlockEditor for DatabaseEditor {
         else {
             return false;
         };
+        if let Some(sort) = sort {
+            sort_rows(&mut rows, sort);
+        }
         paint_database_preview(context, &rows, &fields);
         true
     }
@@ -528,7 +595,7 @@ impl BlockEditor for DatabaseEditor {
         &mut self,
         editors: &mut super::EditorAccess<'_>,
     ) -> Option<egui::Vec2> {
-        let (_, rows, fields) = self.data(editors.client())?;
+        let (_, rows, fields, _) = self.data(editors.client())?;
         Some(egui::vec2(
             ROW_HEADER_WIDTH
                 + fields
@@ -545,7 +612,7 @@ impl BlockEditor for DatabaseEditor {
         editors: &mut super::EditorAccess<'_>,
         _viewport: &mut super::DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let (schema_id, rows, fields) = self.data(editors.client())?;
+        let (schema_id, rows, fields, _) = self.data(editors.client())?;
         self.controls(ui, schema_id, &rows, &fields)
     }
 
@@ -556,15 +623,62 @@ impl BlockEditor for DatabaseEditor {
         scale: f32,
         _viewport: &mut super::DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let (_, rows, fields) = self.data(editors.client())?;
+        let (_, rows, fields, sort) = self.data(editors.client())?;
         if fields.is_empty() {
             let rect = ui.available_rect_before_wrap();
             ui.painter()
                 .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
             return None;
         }
-        self.grid(ui, &rows, &fields, scale);
+        self.grid(ui, &rows, &fields, sort, scale);
         None
+    }
+}
+
+/// The sort a header click produces: unsorted columns start ascending, an
+/// ascending column becomes descending, and a descending column clears the
+/// sort back to intrinsic row order. Clicking a different column always
+/// replaces the current sort, since a view sorts by at most one field.
+fn next_sort(current: Option<DatabaseViewSort>, field_id: Uuid) -> Option<DatabaseViewSort> {
+    match current {
+        Some(sort) if sort.field_id == field_id => match sort.direction {
+            SortDirection::Ascending => Some(DatabaseViewSort {
+                field_id,
+                direction: SortDirection::Descending,
+            }),
+            SortDirection::Descending => None,
+        },
+        _ => Some(DatabaseViewSort {
+            field_id,
+            direction: SortDirection::Ascending,
+        }),
+    }
+}
+
+/// Rows without a value for the sort field sort after those with one,
+/// regardless of direction.
+fn sort_rows(rows: &mut [DatabaseRow], sort: DatabaseViewSort) {
+    rows.sort_by(|a, b| {
+        let ordering = match (a.value(sort.field_id), b.value(sort.field_id)) {
+            (Some(a), Some(b)) => compare_database_values(a, b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        match sort.direction {
+            SortDirection::Ascending => ordering,
+            SortDirection::Descending => ordering.reverse(),
+        }
+    });
+}
+
+fn compare_database_values(a: &DatabaseValue, b: &DatabaseValue) -> std::cmp::Ordering {
+    match (a, b) {
+        (DatabaseValue::String(a), DatabaseValue::String(b)) => a.cmp(b),
+        (DatabaseValue::Number(a), DatabaseValue::Number(b)) => {
+            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        }
+        _ => std::cmp::Ordering::Equal,
     }
 }
 
@@ -572,9 +686,10 @@ fn spreadsheet_header(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     text: &str,
+    sort: Option<SortDirection>,
     scale: f32,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let visuals = ui.visuals();
     ui.painter().rect(
         rect,
@@ -590,6 +705,19 @@ fn spreadsheet_header(
         egui::FontId::proportional((14.0 * scale).max(6.0)),
         visuals.strong_text_color(),
     );
+    if let Some(direction) = sort {
+        let icon = match direction {
+            SortDirection::Ascending => ICON_ARROW_UPWARD,
+            SortDirection::Descending => ICON_ARROW_DOWNWARD,
+        };
+        ui.painter().with_clip_rect(rect).text(
+            rect.right_center() - egui::vec2(8.0 * scale, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            icon.codepoint,
+            egui::FontId::new((14.0 * scale).max(6.0), icon.font_family()),
+            visuals.strong_text_color(),
+        );
+    }
     response
 }
 
@@ -837,12 +965,12 @@ fn column_width(field_type: DatabaseFieldType) -> f32 {
     }
 }
 
-fn grid_focus_id(database_id: Uuid) -> egui::Id {
-    egui::Id::new(("database-grid-focus", database_id))
+fn grid_focus_id(view_id: Uuid) -> egui::Id {
+    egui::Id::new(("database-grid-focus", view_id))
 }
 
-fn formula_input_id(database_id: Uuid) -> egui::Id {
-    egui::Id::new(("database-formula-input", database_id))
+fn formula_input_id(view_id: Uuid) -> egui::Id {
+    egui::Id::new(("database-formula-input", view_id))
 }
 
 fn column_name(mut index: usize) -> String {

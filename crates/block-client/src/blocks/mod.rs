@@ -3,6 +3,7 @@ pub mod calendar;
 pub mod compiled_logic;
 pub mod database;
 pub mod database_schema;
+pub mod database_view;
 pub mod gui_builder;
 pub mod hotbar;
 pub mod image;
