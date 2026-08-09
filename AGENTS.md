@@ -27,7 +27,7 @@ Block types (the core, in `crates/block-client/src/blocks/<name>.rs`; each is de
 - `compiled_logic` — a `logic_grid` circuit compiled into a reusable component (shape, ports) that can be placed inside other circuits.
 - `database` — a database's rows, each a map of field ID to value, against a schema defined by `database_schema`.
 - `database_schema` — the field definitions (name, type, enum options) shared by a `database` and its `database_view`s.
-- `database_view` — a saved view over a `database`: spreadsheet or kanban, its sort order, and, for kanban, which enum field defines the columns.
+- `database_view` — a saved view over a `database`: spreadsheet, kanban, or scatter, its sort order, and, for kanban/scatter, which field(s) drive the layout.
 - `gui_builder` — a design-only layout of nested widgets (headings, labels, buttons, text fields, containers).
 - `hotbar` — the tool/component palette shared by a game's logic grids, registered under the workspace's root `Settings` block so a pinned component is offered in every circuit.
 - `image` — an uploaded raster image (dimensions, media type, raw bytes). No undo/redo history.
@@ -50,7 +50,7 @@ Editor types (the view, in `crates/block-app/src/editors/<name>.rs`; each reads 
 - `calendar` — day/week/month view over a `Calendar` block's events.
 - `compiled_logic` — read-only inspector for a compiled logic component's metadata.
 - `database_schema` — add, remove, and rename fields and enum options on a `DatabaseSchema`.
-- `database_view` — the `spreadsheet` and `kanban` layouts over a `Database` through a `DatabaseView`.
+- `database_view` — the `spreadsheet`, `kanban`, and `scatter` layouts over a `Database` through a `DatabaseView`.
 - `gui_builder` — the drag-and-drop widget surface (`surface.rs`) and property inspector (`inspector.rs`) for a `GuiBuilder` layout; `dynamic_artifact/` exports it as generated Rust UI code.
 - `hotbar` — editor for the shared tool palette: add, remove, and reorder slots and folders.
 - `image` — viewer and import UI for an `Image` block.
@@ -67,6 +67,9 @@ Editor types (the view, in `crates/block-app/src/editors/<name>.rs`; each reads 
 - `workspace_index` — folder-style listing UI over a `WorkspaceIndex`.
 - `clipboard` — not a block editor: a shared helper for pasting images from the OS clipboard into editors such as `infinite_canvas`.
 - `unsupported` — fallback editor shown for a block type this build has no editor registered for.
+
+Tooling:
+- The codebase-memory-mcp knowledge graph indexes this repo under the project key `home-exedev-be3`, not `be3` — pass that key to `search_graph`/`query_graph`/`get_code_snippet`/etc.
 
 Functionality:
 - When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
