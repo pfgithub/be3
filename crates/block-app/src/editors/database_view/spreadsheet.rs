@@ -517,8 +517,9 @@ fn display_row_total(len: usize, selected: Option<CellAddress>) -> usize {
     len + extra_row_count(len, selected)
 }
 
-/// Pairs each row with its storage index (used to address operations) and
-/// appends trailing virtual empty rows, then applies the active sort.
+/// Pairs each row with its storage index (used to address operations),
+/// applies the active sort to the real rows, then appends trailing virtual
+/// empty rows so they always stay at the bottom regardless of sort.
 fn display_rows(
     rows: &[DatabaseRow],
     selected: Option<CellAddress>,
@@ -526,15 +527,16 @@ fn display_rows(
     fields: &[DatabaseField],
 ) -> DisplayRows {
     let extra = extra_row_count(rows.len(), selected);
-    let mut display: DisplayRows = rows
-        .iter()
-        .cloned()
-        .chain(std::iter::repeat_with(DatabaseRow::default).take(extra))
-        .enumerate()
-        .collect();
+    let mut display: DisplayRows = rows.iter().cloned().enumerate().collect();
     if let Some(sort) = sort {
         sort_row_pairs(&mut display, sort, fields);
     }
+    display.extend(
+        std::iter::repeat_with(DatabaseRow::default)
+            .take(extra)
+            .enumerate()
+            .map(|(i, row)| (rows.len() + i, row)),
+    );
     display
 }
 
