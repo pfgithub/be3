@@ -30,10 +30,9 @@ impl VideoEditor {
         ui.horizontal(|ui| {
             let reference = dependencies.get(&clip.block_id);
             let label = reference.map_or_else(
-                || egui::RichText::new("Loading…").strong().into(),
+                || egui::RichText::new("Loading…").into(),
                 |reference| {
-                    BlockLabel::for_reference(editors.registry(), reference)
-                        .styled_widget_text(ui.style(), egui::RichText::strong)
+                    BlockLabel::for_reference(editors.registry(), reference).widget_text(ui.style())
                 },
             );
             ui.add(egui::Label::new(label).truncate());

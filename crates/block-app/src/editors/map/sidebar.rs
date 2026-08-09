@@ -201,8 +201,8 @@ impl MapEditor {
                 self.selected = None;
             }
             let name = label.map_or_else(
-                || egui::RichText::new("Loading…").strong().into(),
-                |label| label.styled_widget_text(ui.style(), egui::RichText::strong),
+                || egui::RichText::new("Loading…").into(),
+                |label| label.widget_text(ui.style()),
             );
             ui.add(egui::Label::new(name).truncate());
         });

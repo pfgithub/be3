@@ -311,27 +311,17 @@ impl BlockLabel {
     /// Icon and name combined for a widget (button, label, ...), the name
     /// italicized if automatic.
     pub(super) fn widget_text(&self, style: &egui::Style) -> egui::WidgetText {
-        self.styled_widget_text(style, |text| text)
-    }
-
-    /// [`Self::widget_text`], with `modify` additionally applied to both the
-    /// icon and the name (e.g. `RichText::strong`).
-    pub(super) fn styled_widget_text(
-        &self,
-        style: &egui::Style,
-        modify: impl Fn(egui::RichText) -> egui::RichText,
-    ) -> egui::WidgetText {
         let Some(icon) = self.icon else {
-            return modify(self.rich_text()).into();
+            return self.rich_text().into();
         };
         let mut job = egui::text::LayoutJob::default();
-        modify(egui::RichText::new(format!("{} ", icon.codepoint))).append_to(
+        egui::RichText::new(format!("{} ", icon.codepoint)).append_to(
             &mut job,
             style,
             egui::FontSelection::Style(egui::TextStyle::Button),
             egui::Align::Center,
         );
-        modify(self.rich_text()).append_to(
+        self.rich_text().append_to(
             &mut job,
             style,
             egui::FontSelection::Style(egui::TextStyle::Button),
