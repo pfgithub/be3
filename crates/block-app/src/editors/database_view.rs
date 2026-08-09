@@ -29,18 +29,17 @@ use super::{
     DirectEditorInteraction, DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
-/// Schema ID, rows in storage order, fields, and the view's own settings:
-/// sort, kind, kanban field, and scatter X/Y fields.
-type DatabaseViewData = (
-    Uuid,
-    Vec<DatabaseRow>,
-    Vec<DatabaseField>,
-    Option<DatabaseViewSort>,
-    DatabaseViewKind,
-    Option<Uuid>,
-    Option<Uuid>,
-    Option<Uuid>,
-);
+/// The database's schema, rows, and fields, plus the view's own settings.
+struct DatabaseViewData {
+    schema_id: Uuid,
+    rows: Vec<DatabaseRow>,
+    fields: Vec<DatabaseField>,
+    sort: Option<DatabaseViewSort>,
+    kind: DatabaseViewKind,
+    kanban_field_id: Option<Uuid>,
+    scatter_x_field_id: Option<Uuid>,
+    scatter_y_field_id: Option<Uuid>,
+}
 
 impl EditorKind for DatabaseEditor {
     type Block = DatabaseView;
@@ -135,7 +134,7 @@ impl DatabaseEditor {
         drop(database);
         self.ensure_schema(client, schema_id);
         let fields = self.schema.as_ref()?.read()?.fields().to_vec();
-        Some((
+        Some(DatabaseViewData {
             schema_id,
             rows,
             fields,
@@ -144,7 +143,7 @@ impl DatabaseEditor {
             kanban_field_id,
             scatter_x_field_id,
             scatter_y_field_id,
-        ))
+        })
     }
 
     /// Applies operations to the underlying database, not the view itself.
@@ -281,11 +280,12 @@ impl BlockEditor for DatabaseEditor {
         &mut self,
         editors: &mut EditorAccess<'_>,
     ) -> Option<egui::Vec2> {
-        let (_, rows, fields, _, kind, _, _, _) = self.data(editors.client())?;
-        match kind {
-            DatabaseViewKind::Spreadsheet => {
-                Some(self.spreadsheet.intrinsic_size(rows.len(), &fields))
-            }
+        let data = self.data(editors.client())?;
+        match data.kind {
+            DatabaseViewKind::Spreadsheet => Some(
+                self.spreadsheet
+                    .intrinsic_size(data.rows.len(), &data.fields),
+            ),
             DatabaseViewKind::Kanban | DatabaseViewKind::Scatter => None,
         }
     }
@@ -296,16 +296,7 @@ impl BlockEditor for DatabaseEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let (
-            schema_id,
-            rows,
-            fields,
-            sort,
-            kind,
-            kanban_field_id,
-            scatter_x_field_id,
-            scatter_y_field_id,
-        ) = self.data(editors.client())?;
+        let data = self.data(editors.client())?;
         let mut action = None;
         ui.horizontal(|ui| {
             if ui
@@ -314,36 +305,36 @@ impl BlockEditor for DatabaseEditor {
                 .clicked()
             {
                 action = Some(EditorAction::OpenBlock {
-                    id: schema_id,
+                    id: data.schema_id,
                     block_type: DatabaseSchema::TYPE_ID,
                 });
             }
             ui.separator();
-            self.view_switch(ui, kind);
+            self.view_switch(ui, data.kind);
         });
         ui.separator();
         let mut operations = Vec::new();
-        match kind {
+        match data.kind {
             DatabaseViewKind::Spreadsheet => {
                 self.spreadsheet.formula_bar(
                     ui,
                     &self.block,
-                    &rows,
-                    &fields,
-                    sort,
+                    &data.rows,
+                    &data.fields,
+                    data.sort,
                     &mut operations,
                 );
             }
             DatabaseViewKind::Kanban => {
-                kanban::status_field_picker(ui, &self.block, &fields, kanban_field_id);
+                kanban::status_field_picker(ui, &self.block, &data.fields, data.kanban_field_id);
             }
             DatabaseViewKind::Scatter => {
                 scatter::axis_field_pickers(
                     ui,
                     &self.block,
-                    &fields,
-                    scatter_x_field_id,
-                    scatter_y_field_id,
+                    &data.fields,
+                    data.scatter_x_field_id,
+                    data.scatter_y_field_id,
                 );
             }
         }
@@ -360,9 +351,11 @@ impl BlockEditor for DatabaseEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
-        let (_, rows, fields, _, kind, _, _, _) = self.data(editors.client())?;
-        let selected_row = self.selected_row(kind);
-        let operations = self.row_editor.ui(ui, &rows, &fields, selected_row);
+        let data = self.data(editors.client())?;
+        let selected_row = self.selected_row(data.kind);
+        let operations = self
+            .row_editor
+            .ui(ui, &data.rows, &data.fields, selected_row);
         self.operate_database(operations);
         None
     }
@@ -374,12 +367,11 @@ impl BlockEditor for DatabaseEditor {
         scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let (_, rows, fields, sort, kind, kanban_field_id, scatter_x_field_id, scatter_y_field_id) =
-            self.data(editors.client())?;
+        let data = self.data(editors.client())?;
         let mut operations = Vec::new();
-        match kind {
+        match data.kind {
             DatabaseViewKind::Spreadsheet => {
-                if fields.is_empty() {
+                if data.fields.is_empty() {
                     let rect = ui.available_rect_before_wrap();
                     ui.painter()
                         .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
@@ -388,16 +380,17 @@ impl BlockEditor for DatabaseEditor {
                 self.spreadsheet.grid(
                     ui,
                     &self.block,
-                    &rows,
-                    &fields,
-                    sort,
+                    &data.rows,
+                    &data.fields,
+                    data.sort,
                     scale,
                     &mut operations,
                 );
             }
             DatabaseViewKind::Kanban => {
-                let status_field = kanban_field_id
-                    .and_then(|id| fields.iter().find(|field| field.id == id).cloned());
+                let status_field = data
+                    .kanban_field_id
+                    .and_then(|id| data.fields.iter().find(|field| field.id == id).cloned());
                 let Some(status_field) = status_field else {
                     ui.centered_and_justified(|ui| {
                         ui.weak("Choose a status field above to use the kanban view.");
@@ -407,17 +400,18 @@ impl BlockEditor for DatabaseEditor {
                 self.kanban.board(
                     ui,
                     &self.block,
-                    &rows,
-                    &fields,
+                    &data.rows,
+                    &data.fields,
                     &status_field,
                     &mut operations,
                 );
             }
             DatabaseViewKind::Scatter => {
-                let axis_fields = scatter_x_field_id.and_then(|x_id| {
-                    let x_field = fields.iter().find(|field| field.id == x_id)?;
-                    let y_field = scatter_y_field_id
-                        .and_then(|y_id| fields.iter().find(|field| field.id == y_id))?;
+                let axis_fields = data.scatter_x_field_id.and_then(|x_id| {
+                    let x_field = data.fields.iter().find(|field| field.id == x_id)?;
+                    let y_field = data
+                        .scatter_y_field_id
+                        .and_then(|y_id| data.fields.iter().find(|field| field.id == y_id))?;
                     Some((x_field.clone(), y_field.clone()))
                 });
                 let Some((x_field, y_field)) = axis_fields else {
@@ -426,7 +420,7 @@ impl BlockEditor for DatabaseEditor {
                     });
                     return None;
                 };
-                self.scatter.plot(ui, &rows, &x_field, &y_field);
+                self.scatter.plot(ui, &data.rows, &x_field, &y_field);
             }
         }
         self.operate_database(operations);
