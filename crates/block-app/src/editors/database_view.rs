@@ -297,49 +297,19 @@ impl BlockEditor for DatabaseEditor {
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let data = self.data(editors.client())?;
-        let mut action = None;
-        ui.horizontal(|ui| {
-            if ui
-                .button(format!("{} Columns", ICON_SCHEMA.codepoint))
-                .on_hover_text("Edit columns and data types")
-                .clicked()
-            {
-                action = Some(EditorAction::OpenBlock {
-                    id: data.schema_id,
-                    block_type: DatabaseSchema::TYPE_ID,
-                });
-            }
-            ui.separator();
-            self.view_switch(ui, data.kind);
-        });
-        ui.separator();
-        let mut operations = Vec::new();
-        match data.kind {
-            DatabaseViewKind::Spreadsheet => {
-                self.spreadsheet.formula_bar(
-                    ui,
-                    &self.block,
-                    &data.rows,
-                    &data.fields,
-                    data.sort,
-                    &mut operations,
-                );
-            }
-            DatabaseViewKind::Kanban => {
-                kanban::status_field_picker(ui, &self.block, &data.fields, data.kanban_field_id);
-            }
-            DatabaseViewKind::Scatter => {
-                scatter::axis_field_pickers(
-                    ui,
-                    &self.block,
-                    &data.fields,
-                    data.scatter_x_field_id,
-                    data.scatter_y_field_id,
-                );
-            }
+        if data.kind == DatabaseViewKind::Spreadsheet {
+            let mut operations = Vec::new();
+            self.spreadsheet.formula_bar(
+                ui,
+                &self.block,
+                &data.rows,
+                &data.fields,
+                data.sort,
+                &mut operations,
+            );
+            self.operate_database(operations);
         }
-        self.operate_database(operations);
-        action
+        None
     }
 
     fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
@@ -352,12 +322,59 @@ impl BlockEditor for DatabaseEditor {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let data = self.data(editors.client())?;
-        let selected_row = self.selected_row(data.kind);
-        let operations = self
-            .row_editor
-            .ui(ui, &data.rows, &data.fields, selected_row);
+        let mut action = None;
+        egui::CollapsingHeader::new("Column settings")
+            .default_open(false)
+            .show(ui, |ui| {
+                if ui
+                    .button(format!("{} Columns", ICON_SCHEMA.codepoint))
+                    .on_hover_text("Edit columns and data types")
+                    .clicked()
+                {
+                    action = Some(EditorAction::OpenBlock {
+                        id: data.schema_id,
+                        block_type: DatabaseSchema::TYPE_ID,
+                    });
+                }
+            });
+        ui.separator();
+        let mut operations = Vec::new();
+        egui::CollapsingHeader::new("View settings")
+            .default_open(true)
+            .show(ui, |ui| {
+                self.view_switch(ui, data.kind);
+                match data.kind {
+                    DatabaseViewKind::Spreadsheet => {}
+                    DatabaseViewKind::Kanban => {
+                        kanban::status_field_picker(
+                            ui,
+                            &self.block,
+                            &data.fields,
+                            data.kanban_field_id,
+                        );
+                    }
+                    DatabaseViewKind::Scatter => {
+                        scatter::axis_field_pickers(
+                            ui,
+                            &self.block,
+                            &data.fields,
+                            data.scatter_x_field_id,
+                            data.scatter_y_field_id,
+                        );
+                    }
+                }
+            });
+        ui.separator();
+        egui::CollapsingHeader::new("Selected item")
+            .default_open(true)
+            .show(ui, |ui| {
+                let selected_row = self.selected_row(data.kind);
+                operations = self
+                    .row_editor
+                    .ui(ui, &data.rows, &data.fields, selected_row);
+            });
         self.operate_database(operations);
-        None
+        action
     }
 
     fn direct_editor_ui(
