@@ -633,13 +633,21 @@ impl TextRenderer {
             let Some(texture) = &rasterized.texture else {
                 continue;
             };
+            // Snap in physical-pixel space, not logical points: on fractional
+            // hidpi scale factors (e.g. 1.5x, 1.25x) rounding logical coordinates
+            // doesn't land on a physical pixel boundary, so glyph textures end up
+            // jittering by a physical pixel relative to their neighbors.
+            let pixels_per_point = context.pixels_per_point();
             let position = Pos2::new(
-                origin.x + glyph.x + glyph.x_offset + rasterized.bearing.x,
-                baseline - glyph.y_offset - rasterized.bearing.y,
+                ((origin.x + glyph.x + glyph.x_offset + rasterized.bearing.x) * pixels_per_point)
+                    .round()
+                    / pixels_per_point,
+                ((baseline - glyph.y_offset - rasterized.bearing.y) * pixels_per_point).round()
+                    / pixels_per_point,
             );
             painter.image(
                 texture.id(),
-                Rect::from_min_size(position.round(), rasterized.size),
+                Rect::from_min_size(position, rasterized.size),
                 Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                 if glyph.invisible {
                     invisible_color
