@@ -71,48 +71,53 @@ impl BlockPicker {
         self.open = false;
     }
 
-    /// The modal itself: a tab list on the left to switch between adding a
-    /// new block and linking an existing one, and that tab's content on the
-    /// right. Returns the block type to create or the block to link, if the
-    /// user picked one this frame.
+    /// The modal itself: a tab list to switch between adding a new block and
+    /// linking an existing one, and that tab's content. Sized off the screen
+    /// so it neither overflows a thin viewport nor stays cramped on a tall
+    /// one, and stacks the tabs above the content instead of beside it once
+    /// there isn't room for both side by side. Returns the block type to
+    /// create or the block to link, if the user picked one this frame.
     fn show_modal(
         &mut self,
         context: &egui::Context,
         client: &BlockClient,
         registry: &EditorRegistry,
     ) -> (Option<Uuid>, Option<CachedBlock>) {
+        const FOOTER_RESERVE: f32 = 44.0;
+
         let mut new_type = None;
         let mut linked = None;
         let mut close = false;
+        let screen = context.content_rect();
+        let modal_width = (screen.width() - 32.0).clamp(280.0, 640.0);
+        let modal_height = (screen.height() - 32.0).clamp(320.0, 720.0);
+        let stacked_tabs = modal_width < 480.0;
         let response =
             egui::Modal::new(egui::Id::new(("block-picker", self.id))).show(context, |ui| {
-                ui.set_min_size(egui::vec2(560.0, 420.0));
+                ui.set_width(modal_width);
+                ui.set_height(modal_height);
                 ui.heading("Add block");
                 ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(140.0);
-                        if ui
-                            .selectable_label(self.tab == BlockPickerTab::Add, "Add")
-                            .clicked()
-                        {
-                            self.tab = BlockPickerTab::Add;
-                        }
-                        if ui
-                            .selectable_label(
-                                self.tab == BlockPickerTab::LinkExisting,
-                                "Link existing",
-                            )
-                            .clicked()
-                        {
-                            self.tab = BlockPickerTab::LinkExisting;
-                        }
-                    });
+                if stacked_tabs {
+                    ui.horizontal(|ui| show_tabs(ui, &mut self.tab));
+                    ui.add_space(4.0);
                     ui.separator();
+                }
+                ui.horizontal(|ui| {
+                    if !stacked_tabs {
+                        ui.vertical(|ui| {
+                            ui.set_width(140.0);
+                            show_tabs(ui, &mut self.tab);
+                        });
+                        ui.separator();
+                    }
                     ui.vertical(|ui| {
-                        ui.set_min_width(380.0);
+                        ui.set_min_width(ui.available_width());
+                        let content_height = (ui.available_height() - FOOTER_RESERVE).max(120.0);
                         match self.tab {
-                            BlockPickerTab::Add => new_type = show_add_grid(ui, registry),
+                            BlockPickerTab::Add => {
+                                new_type = show_add_grid(ui, registry, content_height);
+                            }
                             BlockPickerTab::LinkExisting => {
                                 linked = show_link_content(
                                     ui,
@@ -120,6 +125,7 @@ impl BlockPicker {
                                     &self.excluded,
                                     client,
                                     registry,
+                                    content_height,
                                 );
                             }
                         }
@@ -288,13 +294,30 @@ impl BlockPicker {
     }
 }
 
+/// The Add / Link existing tab selector, shared between the stacked and
+/// side-by-side layouts.
+fn show_tabs(ui: &mut egui::Ui, tab: &mut BlockPickerTab) {
+    if ui
+        .selectable_label(*tab == BlockPickerTab::Add, "Add")
+        .clicked()
+    {
+        *tab = BlockPickerTab::Add;
+    }
+    if ui
+        .selectable_label(*tab == BlockPickerTab::LinkExisting, "Link existing")
+        .clicked()
+    {
+        *tab = BlockPickerTab::LinkExisting;
+    }
+}
+
 /// The Add tab: a preview tile per creatable block type, common types shown
 /// in a main section above the rest. A single click both chooses and creates
 /// that type.
-fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry) -> Option<Uuid> {
+fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry, max_height: f32) -> Option<Uuid> {
     let mut selected = None;
     egui::ScrollArea::vertical()
-        .max_height(360.0)
+        .max_height(max_height)
         .show(ui, |ui| {
             let mut show_section = |ui: &mut egui::Ui, default: bool| {
                 ui.horizontal_wrapped(|ui| {
@@ -364,6 +387,7 @@ fn show_link_content(
     excluded: &HashSet<Uuid>,
     client: &BlockClient,
     registry: &EditorRegistry,
+    max_height: f32,
 ) -> Option<CachedBlock> {
     ui.add(egui::TextEdit::singleline(search).hint_text("Search by name or UUID"));
     ui.separator();
@@ -382,7 +406,7 @@ fn show_link_content(
         .collect();
     let mut selected = None;
     egui::ScrollArea::vertical()
-        .max_height(320.0)
+        .max_height(max_height)
         .show(ui, |ui| {
             if blocks.is_empty() {
                 ui.weak(if query.is_empty() {
