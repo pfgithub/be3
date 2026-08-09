@@ -318,6 +318,7 @@ fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry, max_height: f32) 
     let mut selected = None;
     egui::ScrollArea::vertical()
         .max_height(max_height)
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             let mut show_section = |ui: &mut egui::Ui, default: bool| {
                 ui.horizontal_wrapped(|ui| {
@@ -407,6 +408,7 @@ fn show_link_content(
     let mut selected = None;
     egui::ScrollArea::vertical()
         .max_height(max_height)
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             if blocks.is_empty() {
                 ui.weak(if query.is_empty() {
