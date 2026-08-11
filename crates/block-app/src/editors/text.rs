@@ -54,6 +54,9 @@ use super::{
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const DIRECT_EDITOR_WIDTH: f32 = 600.0;
+const GUTTER_TEXT_SIZE: f32 = 12.0;
+const GUTTER_PADDING_LEFT: f32 = 10.0;
+const GUTTER_PADDING_RIGHT: f32 = 10.0;
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
 const TOUCH_HANDLE_RADIUS: f32 = 9.0;
@@ -1802,14 +1805,17 @@ impl BlockEditor for TextEditor {
         profile.layout = layout_start.elapsed();
         profile.line_count = layout.lines.len();
 
-        let desired = layout.size.max(ui.available_size());
+        let gutter_width = gutter_width(ui, layout.lines.len());
+        let desired =
+            Vec2::new(layout.size.x + gutter_width, layout.size.y).max(ui.available_size());
         let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
         let response = ui.interact(rect, id, Sense::click_and_drag());
         let painter = ui.painter_at(rect);
         let response = response.on_hover_cursor(egui::CursorIcon::Text);
         ui.painter()
             .rect_filled(response.rect, 0.0, Color32::from_rgb(29, 37, 44));
-        let origin = response.rect.min + PADDING;
+        let origin = response.rect.min + Vec2::new(gutter_width, 0.0) + PADDING;
+        paint_gutter(&painter, response.rect, gutter_width, origin.y, &layout);
         let edit_block = self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
         let pointer_start = Instant::now();
         reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
@@ -2197,6 +2203,49 @@ fn paint_code_backgrounds(
                 fill,
             );
         }
+    }
+}
+
+fn gutter_digits(line_count: usize) -> usize {
+    let mut digits = 1;
+    let mut value = line_count.max(1);
+    while value >= 10 {
+        value /= 10;
+        digits += 1;
+    }
+    digits
+}
+
+fn gutter_width(ui: &egui::Ui, line_count: usize) -> f32 {
+    let font_id = egui::FontId::monospace(GUTTER_TEXT_SIZE);
+    let digit_width = ui.fonts_mut(|fonts| fonts.glyph_width(&font_id, '0'));
+    GUTTER_PADDING_LEFT + digit_width * gutter_digits(line_count) as f32 + GUTTER_PADDING_RIGHT
+}
+
+fn paint_gutter(
+    painter: &egui::Painter,
+    rect: Rect,
+    gutter_width: f32,
+    text_top: f32,
+    layout: &DocumentLayout,
+) {
+    let gutter_rect = Rect::from_min_size(rect.min, Vec2::new(gutter_width, rect.height()));
+    painter.rect_filled(gutter_rect, 0.0, Color32::from_rgb(24, 31, 37));
+    painter.line_segment(
+        [gutter_rect.right_top(), gutter_rect.right_bottom()],
+        egui::Stroke::new(1.0_f32, Color32::from_rgb(40, 51, 60)),
+    );
+    let font_id = egui::FontId::monospace(GUTTER_TEXT_SIZE);
+    let color = Color32::from_rgb(0x71, 0x8c, 0xa1);
+    let number_x = gutter_rect.right() - GUTTER_PADDING_RIGHT;
+    for (index, line) in layout.lines.iter().enumerate() {
+        painter.text(
+            Pos2::new(number_x, text_top + line.y + line.height / 2.0),
+            egui::Align2::RIGHT_CENTER,
+            index + 1,
+            font_id.clone(),
+            color,
+        );
     }
 }
 
