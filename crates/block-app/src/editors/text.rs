@@ -18,8 +18,8 @@ use block_client::{
     BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui::{
-    self, output::IMEOutput, Color32, Event, EventFilter, ImeEvent, Key, Modifiers, PointerButton,
-    Pos2, Rect, Sense, Vec2,
+    self, output::IMEOutput, Color32, CornerRadius, Event, EventFilter, ImeEvent, Key, Modifiers,
+    PointerButton, Pos2, Rect, Sense, Vec2,
 };
 use egui_material_icons::{
     icons::{
@@ -56,8 +56,9 @@ const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const DIRECT_EDITOR_WIDTH: f32 = 600.0;
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
-const TOUCH_HANDLE_RADIUS: f32 = 6.0;
-const TOUCH_HANDLE_HIT_RADIUS: f32 = 18.0;
+const TOUCH_HANDLE_RADIUS: f32 = 9.0;
+const TOUCH_HANDLE_GAP: f32 = 4.0;
+const TOUCH_HANDLE_HIT_RADIUS: f32 = 24.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ParsedEmbed {
@@ -107,6 +108,7 @@ pub(super) struct TextEditor {
     last_click: Option<(f64, Pos2)>,
     touch_mode: bool,
     dragging_handle: Option<Position>,
+    dragging_handle_offset: Vec2,
     touch_menu_open: bool,
     touch_menu_pos: Pos2,
     toolbar_profile: Duration,
@@ -189,6 +191,7 @@ impl TextEditor {
             last_click: None,
             touch_mode: false,
             dragging_handle: None,
+            dragging_handle_offset: Vec2::ZERO,
             touch_menu_open: false,
             touch_menu_pos: Pos2::ZERO,
             toolbar_profile: Duration::default(),
@@ -844,6 +847,7 @@ impl TextEditor {
             if !down {
                 self.selecting = false;
                 self.dragging_handle = None;
+                self.dragging_handle_offset = Vec2::ZERO;
             }
             return false;
         };
@@ -855,6 +859,7 @@ impl TextEditor {
                     return true;
                 }
                 self.dragging_handle = None;
+                self.dragging_handle_offset = Vec2::ZERO;
             } else if pressed {
                 if let Some(handle) = self.selection_handle_at(layout, local_pointer) {
                     self.begin_selection_handle_drag(handle, layout, local_pointer);
@@ -978,8 +983,14 @@ impl TextEditor {
         if range.start == range.end {
             return None;
         }
-        let start = handle_grab_point(layout, range.start)?;
-        let end = handle_grab_point(layout, range.end)?;
+        let start = touch_handle_center(
+            touch_handle_anchor(layout, range.start)?,
+            SelectionHandle::Start,
+        );
+        let end = touch_handle_center(
+            touch_handle_anchor(layout, range.end)?,
+            SelectionHandle::End,
+        );
         if (local_pointer - start).length() <= TOUCH_HANDLE_HIT_RADIUS {
             Some(SelectionHandle::Start)
         } else if (local_pointer - end).length() <= TOUCH_HANDLE_HIT_RADIUS {
@@ -1001,11 +1012,13 @@ impl TextEditor {
         let Some(range) = self.core.selection_range(cursor) else {
             return;
         };
-        let fixed_byte = match handle {
-            SelectionHandle::Start => range.end,
-            SelectionHandle::End => range.start,
+        let (fixed_byte, moving_byte) = match handle {
+            SelectionHandle::Start => (range.end, range.start),
+            SelectionHandle::End => (range.start, range.end),
         };
         self.dragging_handle = Some(self.core.position(fixed_byte));
+        self.dragging_handle_offset = touch_handle_anchor(layout, moving_byte)
+            .map_or(Vec2::ZERO, |anchor| local_pointer - anchor);
         self.selecting = false;
         self.drag_selection_handle(layout, local_pointer);
     }
@@ -1014,7 +1027,7 @@ impl TextEditor {
         let Some(fixed) = self.dragging_handle else {
             return;
         };
-        let target = hit_test(layout, local_pointer);
+        let target = hit_test(layout, local_pointer - self.dragging_handle_offset);
         self.core
             .execute_command(EditorCommand::DragSelectionHandle {
                 fixed,
@@ -1042,11 +1055,15 @@ impl TextEditor {
             return;
         }
         let color = ui.visuals().selection.stroke.color;
-        for byte in [range.start, range.end] {
-            let Some(point) = handle_grab_point(layout, byte) else {
+        for (byte, handle) in [
+            (range.start, SelectionHandle::Start),
+            (range.end, SelectionHandle::End),
+        ] {
+            let Some(anchor) = touch_handle_anchor(layout, byte) else {
                 continue;
             };
-            painter.circle_filled(origin + point, TOUCH_HANDLE_RADIUS, color);
+            let (rect, corner_radius) = touch_handle_shape(anchor, handle);
+            painter.rect_filled(rect.translate(origin.to_vec2()), corner_radius, color);
         }
     }
 
@@ -2059,10 +2076,50 @@ fn markdown_image_range(bytes: &[u8], url: &Range<usize>) -> Option<Range<usize>
     .then_some(image_start..image_end)
 }
 
-fn handle_grab_point(layout: &DocumentLayout, byte: usize) -> Option<Vec2> {
+fn touch_handle_anchor(layout: &DocumentLayout, byte: usize) -> Option<Vec2> {
     let position = layout.positions.get(byte).and_then(|position| *position)?;
     let line = layout.lines.get(position.line)?;
-    Some(Vec2::new(position.x, line.y + line.height))
+    Some(Vec2::new(
+        position.x,
+        line.y + line.height + TOUCH_HANDLE_GAP,
+    ))
+}
+
+fn touch_handle_shape(anchor: Vec2, handle: SelectionHandle) -> (Rect, CornerRadius) {
+    let diameter = TOUCH_HANDLE_RADIUS * 2.0;
+    let radius = TOUCH_HANDLE_RADIUS.round() as u8;
+    let rect = match handle {
+        SelectionHandle::Start => Rect::from_min_max(
+            Pos2::new(anchor.x - diameter, anchor.y),
+            Pos2::new(anchor.x, anchor.y + diameter),
+        ),
+        SelectionHandle::End => Rect::from_min_max(
+            Pos2::new(anchor.x, anchor.y),
+            Pos2::new(anchor.x + diameter, anchor.y + diameter),
+        ),
+    };
+    let corner_radius = match handle {
+        SelectionHandle::Start => CornerRadius {
+            nw: radius,
+            ne: 0,
+            sw: radius,
+            se: radius,
+        },
+        SelectionHandle::End => CornerRadius {
+            nw: 0,
+            ne: radius,
+            sw: radius,
+            se: radius,
+        },
+    };
+    (rect, corner_radius)
+}
+
+fn touch_handle_center(anchor: Vec2, handle: SelectionHandle) -> Vec2 {
+    match handle {
+        SelectionHandle::Start => anchor + Vec2::new(-TOUCH_HANDLE_RADIUS, TOUCH_HANDLE_RADIUS),
+        SelectionHandle::End => anchor + Vec2::new(TOUCH_HANDLE_RADIUS, TOUCH_HANDLE_RADIUS),
+    }
 }
 
 fn hit_test(layout: &DocumentLayout, point: Vec2) -> usize {
