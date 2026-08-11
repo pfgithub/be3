@@ -2864,10 +2864,13 @@ impl TabViewer for BlockTabViewer<'_> {
             }
             DockTab::Block(tab) => {
                 let current = tab.current();
-                if let Some(editor) = self.app.editors.get_mut(&current.id) {
+                let wants_presence = self.app.editors.get_mut(&current.id).is_none_or(|editor| {
                     editor.set_tab_active(true);
+                    editor.wants_presence()
+                });
+                if wants_presence {
+                    self.active_blocks.insert(current.id);
                 }
-                self.active_blocks.insert(current.id);
                 let mut status_navigation = None;
                 egui::Panel::bottom(egui::Id::new(("block-statusbar", tab.id)))
                     .resizable(false)

@@ -737,6 +737,14 @@ pub trait BlockEditor {
     fn finish_frame(&mut self) {}
     fn set_tab_active(&mut self, _active: bool) {}
     fn tab_closed(&mut self) {}
+    /// Whether `UserActive` presence may be posted for this editor's block
+    /// while its tab is visible. Presence requires the block to be watched
+    /// on the server, which every real editor establishes by calling
+    /// `get_block` when it opens; the unsupported fallback never does, so it
+    /// overrides this to `false` to avoid a `NotWatching` error.
+    fn wants_presence(&self) -> bool {
+        true
+    }
     /// Posts (or clears) presence describing where this editor's cursor or
     /// selection currently is, if it has one. Called every frame with the
     /// same on-screen signal that drives `UserActive` presence, so a cursor
