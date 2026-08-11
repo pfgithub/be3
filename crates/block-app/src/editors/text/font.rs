@@ -48,6 +48,10 @@ pub(super) struct DocumentLayout {
     pub lines: Vec<LineLayout>,
     pub positions: Vec<Option<BytePosition>>,
     pub embeds: Vec<EmbedLayout>,
+    /// Total document line count, including lines hidden inside a collapsed
+    /// section (which have no entry in `lines`). Used to size the gutter so
+    /// its width doesn't change as sections fold/unfold.
+    pub total_lines: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -81,6 +85,10 @@ pub(super) struct LineLayout {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    /// The document's own line index, counting lines hidden inside a
+    /// collapsed section — unlike this entry's position in
+    /// [`DocumentLayout::lines`], which skips them.
+    pub document_line: usize,
     baseline: f32,
     glyphs: Vec<PositionedGlyph>,
 }
@@ -338,13 +346,14 @@ impl TextRenderer {
         highlight: &SyntaxHighlight,
         embeds: &[ResolvedEmbed],
         checkboxes: &[Range<usize>],
+        hidden: &[Range<usize>],
     ) -> (DocumentLayout, LayoutTimings) {
         let mut timings = LayoutTimings::default();
         let mut lines = Vec::new();
         let mut embed_layouts = Vec::new();
         let mut positions = vec![None; bytes.len() + 1];
         let mut start = 0;
-        let mut line_index = 0;
+        let mut document_line = 0;
         let mut y = 0.0;
 
         loop {
@@ -353,6 +362,15 @@ impl TextRenderer {
                 .position(|byte| *byte == b'\n')
                 .map(|offset| start + offset);
             let end = newline.unwrap_or(bytes.len());
+            if hidden.iter().any(|range| range.contains(&start)) {
+                let Some(newline) = newline else {
+                    break;
+                };
+                start = newline + 1;
+                document_line += 1;
+                continue;
+            }
+            let line_index = lines.len();
             let line_embeds = embeds
                 .iter()
                 .filter(|embed| embed.range.start >= start && embed.range.end <= end)
@@ -396,6 +414,7 @@ impl TextRenderer {
                 y,
                 width,
                 height,
+                document_line,
                 baseline,
                 glyphs,
             });
@@ -443,7 +462,7 @@ impl TextRenderer {
                 break;
             };
             start = newline + 1;
-            line_index += 1;
+            document_line += 1;
         }
 
         let tables_start = Instant::now();
@@ -457,6 +476,7 @@ impl TextRenderer {
         (
             DocumentLayout {
                 size: Vec2::new(width + 24.0, y + 16.0),
+                total_lines: document_line + 1,
                 lines,
                 positions,
                 embeds: embed_layouts,

@@ -26,21 +26,22 @@ use egui_material_icons::{
         ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DESCRIPTION,
         ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED,
         ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN,
-        ICON_KEYBOARD_ARROW_UP, ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH, ICON_TITLE,
+        ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP, ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH,
+        ICON_TITLE,
     },
     MaterialIcon,
 };
 use text_editor_core::{
-    markdown_checkbox_marker, CopyMode, Core, CursorHorizontalPositionMetric, CursorLeftRightStop,
-    CursorPosition, DragSelectionMode, EditorCommand, FindDirection, LRDirection, MarkdownCommand,
-    MoveMode, Position, SynHlColorScope, SyntaxHighlight, SyntaxNodeDirection, TextCursor,
-    UDDirection, VerticalMoveMode,
+    markdown_checkbox_marker, CollapsibleSection, CopyMode, Core, CursorHorizontalPositionMetric,
+    CursorLeftRightStop, CursorPosition, DragSelectionMode, EditorCommand, FindDirection,
+    LRDirection, MarkdownCommand, MoveMode, Position, SynHlColorScope, SyntaxHighlight,
+    SyntaxNodeDirection, TextCursor, UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
 use crate::{block_picker::BlockPicker, performance, presence_color_rgb};
 
-use self::font::{BytePosition, DocumentLayout, ResolvedEmbed, TextRenderer};
+use self::font::{BytePosition, DocumentLayout, LineLayout, ResolvedEmbed, TextRenderer};
 use self::timings::{FrameProfile, PaintTimings};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
@@ -57,6 +58,8 @@ const DIRECT_EDITOR_WIDTH: f32 = 600.0;
 const GUTTER_TEXT_SIZE: f32 = 12.0;
 const GUTTER_PADDING_LEFT: f32 = 10.0;
 const GUTTER_PADDING_RIGHT: f32 = 10.0;
+const GUTTER_ARROW_SIZE: f32 = 14.0;
+const COLLAPSED_ELLIPSIS_GAP: f32 = 6.0;
 const MULTI_CLICK_DELAY: f64 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
 const TOUCH_HANDLE_RADIUS: f32 = 9.0;
@@ -172,6 +175,7 @@ struct CachedLayout {
     bytes: Vec<u8>,
     language: TextLanguage,
     embeds: Vec<ResolvedEmbed>,
+    hidden: Vec<Range<usize>>,
     layout: Arc<DocumentLayout>,
 }
 
@@ -430,6 +434,22 @@ impl TextEditor {
                 }
             })
             .collect()
+    }
+
+    /// Whether the primary cursor sits on a currently-collapsed line, to
+    /// decide which way [`Key::OpenBracket`] should toggle.
+    fn cursor_line_collapsed(&self) -> bool {
+        let Some(cursor) = self.core.cursor_positions().first() else {
+            return false;
+        };
+        let line_start = self.core.get_line_start(cursor.pos.focus);
+        let Some(line_start) = self.core.position_index(line_start) else {
+            return false;
+        };
+        self.core
+            .collapsible_sections()
+            .iter()
+            .any(|section| section.line_start == line_start && section.collapsed)
     }
 
     /// Opens the find bar (or the find/replace bar, if `show_replace`),
@@ -821,6 +841,13 @@ impl TextEditor {
             Key::D if modifiers.command => self
                 .core
                 .execute_command(EditorCommand::DuplicateCursor(LRDirection::Right)),
+            Key::OpenBracket if modifiers.command && modifiers.shift => {
+                self.core.execute_command(if self.cursor_line_collapsed() {
+                    EditorCommand::Uncollapse
+                } else {
+                    EditorCommand::Collapse
+                });
+            }
             _ => return false,
         }
         true
@@ -1588,10 +1615,11 @@ impl TextEditor {
         } else {
             Vec::new()
         };
+        let hidden = hidden_ranges_from_sections(&self.core.collapsible_sections());
         let height = match &self.renderer {
             Ok(renderer) => {
                 renderer
-                    .layout_profiled(&bytes, &highlight, &embeds, &checkboxes)
+                    .layout_profiled(&bytes, &highlight, &embeds, &checkboxes, &hidden)
                     .0
                     .size
                     .y
@@ -1600,6 +1628,16 @@ impl TextEditor {
         };
         Some(Vec2::new(width, height))
     }
+}
+
+/// The byte ranges hidden by the document's currently-collapsed sections,
+/// for [`font::TextRenderer::layout_profiled`] to skip over.
+fn hidden_ranges_from_sections(sections: &[CollapsibleSection]) -> Vec<Range<usize>> {
+    sections
+        .iter()
+        .filter(|section| section.collapsed)
+        .map(|section| section.line_end + 1..section.content_end + 1)
+        .collect()
 }
 
 impl BlockEditor for TextEditor {
@@ -1763,13 +1801,18 @@ impl BlockEditor for TextEditor {
             .iter()
             .map(|checkbox| checkbox.marker.clone())
             .collect::<Vec<_>>();
+        let sections = self.core.collapsible_sections();
+        let hidden = hidden_ranges_from_sections(&sections);
         let highlight_start = Instant::now();
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
         let layout_start = Instant::now();
         let embeds = self.resolve_embeds(&bytes, editors);
         let layout = if let Some(cached) = self.layout_cache.as_ref().filter(|cached| {
-            cached.language == language && cached.bytes == bytes && cached.embeds == embeds
+            cached.language == language
+                && cached.bytes == bytes
+                && cached.embeds == embeds
+                && cached.hidden == hidden
         }) {
             Arc::clone(&cached.layout)
         } else {
@@ -1780,6 +1823,7 @@ impl BlockEditor for TextEditor {
                         &highlight,
                         &embeds,
                         &checkbox_marker_ranges,
+                        &hidden,
                     );
                     profile.layout_detail = Some(detail);
                     Arc::new(layout)
@@ -1798,6 +1842,7 @@ impl BlockEditor for TextEditor {
                 bytes,
                 language,
                 embeds,
+                hidden,
                 layout: Arc::clone(&layout),
             });
             layout
@@ -1805,7 +1850,7 @@ impl BlockEditor for TextEditor {
         profile.layout = layout_start.elapsed();
         profile.line_count = layout.lines.len();
 
-        let gutter_width = gutter_width(ui, layout.lines.len());
+        let gutter_width = gutter_width(ui, layout.total_lines);
         let desired =
             Vec2::new(layout.size.x + gutter_width, layout.size.y).max(ui.available_size());
         let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
@@ -1815,13 +1860,50 @@ impl BlockEditor for TextEditor {
         ui.painter()
             .rect_filled(response.rect, 0.0, Color32::from_rgb(29, 37, 44));
         let origin = response.rect.min + Vec2::new(gutter_width, 0.0) + PADDING;
-        paint_gutter(&painter, response.rect, gutter_width, origin.y, &layout);
+        paint_gutter(
+            &painter,
+            response.rect,
+            gutter_width,
+            origin.y,
+            &layout,
+            &sections,
+        );
         let edit_block = self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
         let pointer_start = Instant::now();
-        reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
+        let gutter_arrow_click = ui
+            .input(|input| input.pointer.button_pressed(PointerButton::Primary))
+            .then(|| response.interact_pointer_pos())
+            .flatten()
+            .and_then(|pointer| {
+                gutter_arrow_at(
+                    response.rect,
+                    gutter_width,
+                    origin.y,
+                    &layout,
+                    &sections,
+                    pointer,
+                )
+            });
+        if let Some(line_start) = gutter_arrow_click {
+            self.core.execute_command(EditorCommand::ToggleCollapseAt(
+                self.core.position(line_start),
+            ));
+        } else {
+            reveal_cursor |= self.pointer_input(ui, &response, origin, &layout, &checkboxes);
+        }
         profile.pointer = pointer_start.elapsed();
         if let Some(hover) = response.hover_pos() {
-            if checkbox_at(&layout, &checkboxes, (hover - origin).to_pos2()).is_some() {
+            if checkbox_at(&layout, &checkboxes, (hover - origin).to_pos2()).is_some()
+                || gutter_arrow_at(
+                    response.rect,
+                    gutter_width,
+                    origin.y,
+                    &layout,
+                    &sections,
+                    hover,
+                )
+                .is_some()
+            {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
         }
@@ -1888,6 +1970,7 @@ impl BlockEditor for TextEditor {
             }
         }
         self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
+        paint_collapsed_ellipsis(&painter, origin, &layout, &sections);
         let cursor_color = ui.visuals().selection.stroke.color;
         for rect in caret_rects {
             painter.rect_filled(rect, 0.0, cursor_color);
@@ -2219,7 +2302,53 @@ fn gutter_digits(line_count: usize) -> usize {
 fn gutter_width(ui: &egui::Ui, line_count: usize) -> f32 {
     let font_id = egui::FontId::monospace(GUTTER_TEXT_SIZE);
     let digit_width = ui.fonts_mut(|fonts| fonts.glyph_width(&font_id, '0'));
-    GUTTER_PADDING_LEFT + digit_width * gutter_digits(line_count) as f32 + GUTTER_PADDING_RIGHT
+    GUTTER_PADDING_LEFT
+        + GUTTER_ARROW_SIZE
+        + digit_width * gutter_digits(line_count) as f32
+        + GUTTER_PADDING_RIGHT
+}
+
+/// The collapsible section, if any, whose fold arrow is painted on `line`.
+fn line_section<'a>(
+    line: &LineLayout,
+    sections: &'a [CollapsibleSection],
+) -> Option<&'a CollapsibleSection> {
+    sections
+        .iter()
+        .find(|section| section.line_start == line.start)
+}
+
+/// The fold-arrow hit rect for `line`, in the same coordinate space as
+/// `rect` (the whole editor rect, gutter included).
+fn gutter_arrow_rect(rect: Rect, text_top: f32, line: &LineLayout) -> Rect {
+    let top = text_top + line.y;
+    Rect::from_min_size(
+        Pos2::new(
+            rect.left() + GUTTER_PADDING_LEFT,
+            top + (line.height - GUTTER_ARROW_SIZE) / 2.0,
+        ),
+        Vec2::splat(GUTTER_ARROW_SIZE),
+    )
+}
+
+/// The collapsible line whose gutter fold arrow contains `pointer`, if any.
+fn gutter_arrow_at(
+    rect: Rect,
+    gutter_width: f32,
+    text_top: f32,
+    layout: &DocumentLayout,
+    sections: &[CollapsibleSection],
+    pointer: Pos2,
+) -> Option<usize> {
+    if pointer.x < rect.left() || pointer.x > rect.left() + gutter_width {
+        return None;
+    }
+    layout.lines.iter().find_map(|line| {
+        let section = line_section(line, sections)?;
+        gutter_arrow_rect(rect, text_top, line)
+            .contains(pointer)
+            .then_some(section.line_start)
+    })
 }
 
 fn paint_gutter(
@@ -2228,6 +2357,7 @@ fn paint_gutter(
     gutter_width: f32,
     text_top: f32,
     layout: &DocumentLayout,
+    sections: &[CollapsibleSection],
 ) {
     let gutter_rect = Rect::from_min_size(rect.min, Vec2::new(gutter_width, rect.height()));
     painter.rect_filled(gutter_rect, 0.0, Color32::from_rgb(24, 31, 37));
@@ -2237,12 +2367,57 @@ fn paint_gutter(
     );
     let font_id = egui::FontId::monospace(GUTTER_TEXT_SIZE);
     let color = Color32::from_rgb(0x71, 0x8c, 0xa1);
+    let arrow_color = Color32::from_rgb(0x8f, 0xa8, 0xba);
     let number_x = gutter_rect.right() - GUTTER_PADDING_RIGHT;
-    for (index, line) in layout.lines.iter().enumerate() {
+    for line in &layout.lines {
         painter.text(
             Pos2::new(number_x, text_top + line.y + line.height / 2.0),
             egui::Align2::RIGHT_CENTER,
-            index + 1,
+            line.document_line + 1,
+            font_id.clone(),
+            color,
+        );
+        if let Some(section) = line_section(line, sections) {
+            let icon = if section.collapsed {
+                ICON_KEYBOARD_ARROW_RIGHT
+            } else {
+                ICON_KEYBOARD_ARROW_DOWN
+            };
+            painter.text(
+                gutter_arrow_rect(rect, text_top, line).center(),
+                egui::Align2::CENTER_CENTER,
+                icon.codepoint,
+                egui::FontId::new(GUTTER_ARROW_SIZE, icon.font_family()),
+                arrow_color,
+            );
+        }
+    }
+}
+
+/// Paints a `...` right after the content of each collapsed line.
+fn paint_collapsed_ellipsis(
+    painter: &egui::Painter,
+    origin: Pos2,
+    layout: &DocumentLayout,
+    sections: &[CollapsibleSection],
+) {
+    let font_id = egui::FontId::monospace(GUTTER_TEXT_SIZE);
+    let color = Color32::from_rgb(0x8f, 0xa8, 0xba);
+    for section in sections.iter().filter(|section| section.collapsed) {
+        let Some(line) = layout
+            .lines
+            .iter()
+            .find(|line| line.start == section.line_start)
+        else {
+            continue;
+        };
+        painter.text(
+            Pos2::new(
+                origin.x + line.width + COLLAPSED_ELLIPSIS_GAP,
+                origin.y + line.y + line.height / 2.0,
+            ),
+            egui::Align2::LEFT_CENTER,
+            "...",
             font_id.clone(),
             color,
         );
