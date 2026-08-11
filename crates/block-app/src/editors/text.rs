@@ -880,7 +880,12 @@ impl TextEditor {
             return true;
         }
         let target = hit_test(layout, local_pointer);
-        if pressed && response.contains_pointer() {
+        let tapped = if self.touch_mode {
+            response.clicked()
+        } else {
+            pressed
+        };
+        if tapped && response.contains_pointer() {
             response.request_focus();
             if self.touch_mode && self.selection_contains_byte(target) {
                 self.touch_menu_pos = pointer;
