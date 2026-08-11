@@ -292,6 +292,15 @@ pub enum EditorCommand<'a> {
     /// Changes the document's language, rebuilding the syntax highlighter to
     /// match. Does nothing if `language` is already the document's language.
     SetLanguage(TextLanguage),
+    /// Collapses every collapsible line touched by the current selection(s).
+    Collapse,
+    /// Uncollapses every collapsible line touched by the current
+    /// selection(s).
+    Uncollapse,
+    /// Toggles the collapsed state of the collapsible line at `position`,
+    /// independent of the current selection. For the gutter fold arrow,
+    /// which can target a line the cursor isn't on.
+    ToggleCollapseAt(Position),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,6 +316,23 @@ pub enum FindDirection {
 pub struct FindStatus {
     pub total: usize,
     pub current: Option<usize>,
+}
+
+/// A collapsible line and the section it would fold, per
+/// [`Core::collapsible_sections`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CollapsibleSection {
+    /// Byte offset of the start of the collapsible line itself, always
+    /// visible even when `collapsed`.
+    pub line_start: usize,
+    /// Byte offset of the end of the collapsible line (before its newline).
+    pub line_end: usize,
+    /// Byte offset of the end of the section's last line (before its
+    /// newline), i.e. the end of the content hidden when `collapsed`.
+    pub content_end: usize,
+    /// Whether this section is currently folded: marked collapsed, and not
+    /// temporarily revealed by a cursor sitting inside it.
+    pub collapsed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -362,6 +388,12 @@ pub struct Core {
     /// The document language `highlighter` was built for, so that a language
     /// change made here or by another editor rebuilds it.
     highlighter_language: Option<TextLanguage>,
+    /// Anchored line-start positions of the collapsed sections, ephemeral
+    /// (not part of the document/CRDT) and local to this editor instance.
+    /// If an edit removes the line-start a position anchored to, that entry
+    /// simply stops matching anything in [`Self::collapsible_sections_in`]
+    /// and has no further effect.
+    collapse_state: Vec<Position>,
 }
 
 impl Core {
@@ -374,6 +406,7 @@ impl Core {
             last_undo_classification: UndoClassification::AlwaysSplit,
             highlighter: None,
             highlighter_language: None,
+            collapse_state: Vec::new(),
         }
     }
 
@@ -643,6 +676,46 @@ impl Core {
         )
     }
 
+    /// Every collapsible line in the document and the section it would fold,
+    /// in document order.
+    pub fn collapsible_sections(&self) -> Vec<CollapsibleSection> {
+        let Some(document) = self.document.read() else {
+            return Vec::new();
+        };
+        self.collapsible_sections_in(&document)
+    }
+
+    fn collapsible_sections_in(&self, document: &TextDocument) -> Vec<CollapsibleSection> {
+        let bytes = document.bytes();
+        let language = document.language();
+        let mut sections = Vec::new();
+        let mut start = 0;
+        while start < bytes.len() {
+            if let Some(content_end) = collapsible_section_end(bytes, language, start) {
+                let hidden_start = next_line_start(bytes, start);
+                let stored = self
+                    .collapse_state
+                    .iter()
+                    .any(|position| position.resolve(document) == start);
+                let revealed = stored
+                    && self.cursor_positions.iter().any(|cursor| {
+                        let anchor = cursor.pos.anchor.resolve(document);
+                        let focus = cursor.pos.focus.resolve(document);
+                        (hidden_start..=content_end).contains(&anchor)
+                            || (hidden_start..=content_end).contains(&focus)
+                    });
+                sections.push(CollapsibleSection {
+                    line_start: start,
+                    line_end: line_end(bytes, start),
+                    content_end,
+                    collapsed: stored && !revealed,
+                });
+            }
+            start = next_line_start(bytes, start);
+        }
+        sections
+    }
+
     pub fn normalize_cursors(&mut self) {
         let Some(document) = self.document.read() else {
             self.cursor_positions.clear();
@@ -753,6 +826,9 @@ impl Core {
             EditorCommand::ReplaceWholeFile(bytes) => self.replace_whole_file(bytes),
             EditorCommand::Markdown(command) => self.markdown(command),
             EditorCommand::SetLanguage(language) => self.set_language(language),
+            EditorCommand::Collapse => self.collapse(),
+            EditorCommand::Uncollapse => self.uncollapse(),
+            EditorCommand::ToggleCollapseAt(position) => self.toggle_collapse_at(position),
         }
         self.normalize_cursors();
     }
@@ -800,6 +876,8 @@ impl Core {
             return;
         };
         let soft_tab_width = self.soft_tab_width();
+        let sections = self.collapsible_sections_in(&document);
+        let mut opened = Vec::new();
         for cursor in &mut self.cursor_positions {
             let current = resolve_selection(&document, cursor.pos);
             if current.left != current.right && mode == MoveMode::Move {
@@ -811,6 +889,15 @@ impl Core {
                 continue;
             }
             let focus = cursor.pos.focus.resolve(&document);
+            if direction == LRDirection::Right {
+                if let Some(section) = sections
+                    .iter()
+                    .find(|section| section.collapsed && section.line_end == focus)
+                {
+                    opened.push(section.line_start);
+                    continue;
+                }
+            }
             let moved = to_boundary(
                 document.bytes(),
                 focus,
@@ -827,6 +914,8 @@ impl Core {
                 }
             };
         }
+        self.collapse_state
+            .retain(|position| !opened.contains(&position.resolve(&document)));
     }
 
     fn delete(&mut self, direction: LRDirection, stop: CursorLeftRightStop) {
@@ -889,6 +978,7 @@ impl Core {
         let Some(document) = self.document.read() else {
             return;
         };
+        let sections = self.collapsible_sections_in(&document);
         let original_len = self.cursor_positions.len();
         for index in 0..original_len {
             let cursor = self.cursor_positions[index];
@@ -907,6 +997,8 @@ impl Core {
                 }
                 UDDirection::Down => next_line_start(document.bytes(), current_line_start),
             };
+            let new_line_start =
+                skip_hidden_line(document.bytes(), &sections, new_line_start, direction);
             let new_line_end = line_end(document.bytes(), new_line_start);
             let stopped = if direction == UDDirection::Up && current_line_start == 0 {
                 0
@@ -1502,6 +1594,81 @@ impl Core {
         }
     }
 
+    /// The start of every collapsible line touched by the current
+    /// selection(s), in document order.
+    fn touched_collapsible_line_starts(&self, document: &TextDocument) -> Vec<usize> {
+        let bytes = document.bytes();
+        let language = document.language();
+        let mut starts = Vec::new();
+        for cursor in &self.cursor_positions {
+            let range = resolve_selection(document, cursor.pos);
+            let mut line = line_start(bytes, range.left);
+            loop {
+                if collapsible_section_end(bytes, language, line).is_some()
+                    && !starts.contains(&line)
+                {
+                    starts.push(line);
+                }
+                let next = next_line_start(bytes, line);
+                if next >= range.right || next == bytes.len() {
+                    break;
+                }
+                line = next;
+            }
+        }
+        starts
+    }
+
+    fn collapse(&mut self) {
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let additions = self
+            .touched_collapsible_line_starts(&document)
+            .into_iter()
+            .filter(|start| {
+                !self
+                    .collapse_state
+                    .iter()
+                    .any(|position| position.resolve(&document) == *start)
+            })
+            .map(|start| Position::at(&document, start))
+            .collect::<Vec<_>>();
+        self.collapse_state.extend(additions);
+    }
+
+    fn uncollapse(&mut self) {
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let starts = self.touched_collapsible_line_starts(&document);
+        self.collapse_state
+            .retain(|position| !starts.contains(&position.resolve(&document)));
+    }
+
+    fn toggle_collapse_at(&mut self, position: Position) {
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let start = line_start(document.bytes(), position.resolve(&document));
+        if collapsible_section_end(document.bytes(), document.language(), start).is_none() {
+            return;
+        }
+        match self
+            .collapse_state
+            .iter()
+            .position(|stored| stored.resolve(&document) == start)
+        {
+            Some(index) => {
+                self.collapse_state.remove(index);
+            }
+            None => {
+                let anchored = Position::at(&document, start);
+                self.collapse_state.push(anchored);
+            }
+        }
+    }
+
     fn click(
         &mut self,
         position: Position,
@@ -2011,6 +2178,105 @@ fn line_end(bytes: &[u8], index: usize) -> usize {
     } else {
         next - 1
     }
+}
+
+/// The heading level (1-6) of the ATX markdown heading starting at `start`,
+/// if the line begins with one (`#` through `######`, followed by a space).
+fn heading_level(bytes: &[u8], start: usize) -> Option<u8> {
+    let rest = bytes.get(start..)?;
+    let hashes = rest.iter().take_while(|&&byte| byte == b'#').count();
+    ((1..=6).contains(&hashes) && rest.get(hashes) == Some(&b' ')).then_some(hashes as u8)
+}
+
+/// The indentation width (in columns, tabs counted as 4) of the line starting
+/// at `start`, or `None` if the line is blank (all whitespace, including
+/// empty).
+fn indent_columns(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut columns = 0;
+    let mut index = start;
+    loop {
+        match bytes.get(index) {
+            Some(b' ') => columns += 1,
+            Some(b'\t') => columns += 4 - columns % 4,
+            Some(b'\n') | None => return None,
+            Some(_) => return Some(columns),
+        }
+        index += 1;
+    }
+}
+
+/// For a markdown heading line starting at `start`, the byte offset of the
+/// end of its section: everything up to (but not including) the next heading
+/// of the same or higher level, or the document end. `None` if `start` isn't
+/// a heading, or the heading has no following content to fold.
+fn markdown_section_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let level = heading_level(bytes, start)?;
+    let mut cursor = next_line_start(bytes, start);
+    let mut end = None;
+    while cursor < bytes.len() {
+        if heading_level(bytes, cursor).is_some_and(|next| next <= level) {
+            break;
+        }
+        if indent_columns(bytes, cursor).is_some() {
+            end = Some(line_end(bytes, cursor));
+        }
+        cursor = next_line_start(bytes, cursor);
+    }
+    end
+}
+
+/// For a line starting at `start`, the byte offset of the end of its
+/// indent-delimited section: every following line more indented than it,
+/// including blank lines in between, up to the first line back at its
+/// indentation or less. `None` if `start` is blank, or has no more-indented
+/// following line to fold.
+fn indent_section_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let indent = indent_columns(bytes, start)?;
+    let mut cursor = next_line_start(bytes, start);
+    let mut end = None;
+    while cursor < bytes.len() {
+        match indent_columns(bytes, cursor) {
+            Some(next) if next <= indent => break,
+            Some(_) => end = Some(line_end(bytes, cursor)),
+            None => {}
+        }
+        cursor = next_line_start(bytes, cursor);
+    }
+    end
+}
+
+/// The byte offset of the end of the section the collapsible line starting
+/// at `start` would fold, or `None` if that line isn't collapsible. Markdown
+/// headings fold by heading level; every other language folds by
+/// indentation.
+fn collapsible_section_end(bytes: &[u8], language: TextLanguage, start: usize) -> Option<usize> {
+    match language {
+        TextLanguage::Markdown => markdown_section_end(bytes, start),
+        _ => indent_section_end(bytes, start),
+    }
+}
+
+/// If `line_start_idx` is the start of a line hidden inside a collapsed
+/// section, the line to land on instead: the line after the section when
+/// moving down into it, or the section's own (visible) start line when
+/// moving up into it. Otherwise `line_start_idx` unchanged.
+fn skip_hidden_line(
+    bytes: &[u8],
+    sections: &[CollapsibleSection],
+    line_start_idx: usize,
+    direction: UDDirection,
+) -> usize {
+    sections
+        .iter()
+        .find(|section| {
+            section.collapsed
+                && line_start_idx > section.line_start
+                && line_start_idx <= section.content_end
+        })
+        .map_or(line_start_idx, |section| match direction {
+            UDDirection::Down => next_line_start(bytes, section.content_end),
+            UDDirection::Up => section.line_start,
+        })
 }
 
 fn measure_indent(bytes: &[u8], start: usize, width: usize) -> (usize, usize) {

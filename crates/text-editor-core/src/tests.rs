@@ -7,8 +7,13 @@ use uuid::Uuid;
 use super::*;
 
 mod block_urls_are_single_cursor_units;
+mod collapse_and_uncollapse_affect_touched_lines;
+mod collapsed_section_reveals_temporarily_around_the_cursor;
+mod collapsible_sections_detects_indentation_blocks;
+mod collapsible_sections_detects_markdown_headings;
 mod core;
 mod ctrl_d;
+mod down_arrow_skips_past_a_collapsed_section;
 mod find_matches_is_case_insensitive_by_default;
 mod find_matches_matches_are_non_overlapping;
 mod find_matches_respects_case_sensitive_flag;
@@ -35,7 +40,10 @@ mod replace_all_matches_does_nothing_when_there_are_no_matches;
 mod replace_all_matches_replaces_every_match;
 mod replace_match_does_nothing_when_selection_is_not_on_a_match;
 mod replace_match_replaces_current_and_advances_to_next_match;
+mod right_arrow_opens_a_collapsed_line;
 mod rust_syn_hl;
+mod toggle_collapse_at_is_independent_of_the_cursor;
+mod up_arrow_skips_past_a_collapsed_section;
 mod zig_syn_hl;
 
 /// Renders the document with `<scope>` markers wherever the colour scope
