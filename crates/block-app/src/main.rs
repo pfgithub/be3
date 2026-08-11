@@ -2592,12 +2592,19 @@ impl BlockApp {
             if !active_users.is_empty() {
                 ui.separator();
                 ui.label("Also viewing:");
-                for (_, user) in &active_users {
+                for (client_id, user) in &active_users {
                     let (rect, response) =
-                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::click());
                     ui.painter()
                         .rect_filled(rect, 2.0, presence_color_rgb(user.color));
-                    response.on_hover_text("Someone else is viewing this document");
+                    let response = response.on_hover_text(
+                        "Someone else is viewing this document\nClick to jump to their cursor",
+                    );
+                    if response.clicked() {
+                        if let Some(editor) = self.editors.get_mut(&active) {
+                            editor.reveal_presence_cursor(*client_id);
+                        }
+                    }
                 }
             }
             ui.separator();

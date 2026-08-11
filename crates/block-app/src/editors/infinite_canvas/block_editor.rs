@@ -72,6 +72,10 @@ impl BlockEditor for InfiniteCanvasEditor {
         );
     }
 
+    fn reveal_presence_cursor(&mut self, client_id: ClientId) {
+        self.pending_presence_reveal = Some(client_id);
+    }
+
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,
@@ -298,6 +302,27 @@ impl BlockEditor for InfiniteCanvasEditor {
                 viewport.change_zoom(factor, Some(preview.center()));
                 viewport.pan(canvas_clip_rect.center() - preview.center());
                 viewport.resume_auto_fit();
+            }
+        }
+        if let Some(client_id) = std::mem::take(&mut self.pending_presence_reveal) {
+            if let Some((_, cursor)) = editors
+                .client()
+                .presence::<CanvasCursor>(self.block.id())
+                .into_iter()
+                .find(|(id, _)| *id == client_id)
+            {
+                let target = cursor.pointer.or_else(|| {
+                    entities
+                        .iter()
+                        .filter(|entity| cursor.selection.contains(&entity.id))
+                        .map(entity_bounds)
+                        .reduce(WorldRect::union)
+                        .map(|bounds| bounds.center())
+                });
+                if let Some(target) = target {
+                    let screen = self.world_to_screen(target, canvas_rect);
+                    viewport.pan(canvas_clip_rect.center() - screen);
+                }
             }
         }
         if self.focused_editor.is_none() {

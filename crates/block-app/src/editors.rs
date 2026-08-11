@@ -750,6 +750,9 @@ pub trait BlockEditor {
     /// same on-screen signal that drives `UserActive` presence, so a cursor
     /// is announced for exactly as long as its block is visible.
     fn sync_cursor_presence(&mut self, _client: &BlockClient, _visible: bool) {}
+    /// Requests that the editor scroll its view to the given client's cursor
+    /// or selection, if it tracks one, the next time it draws.
+    fn reveal_presence_cursor(&mut self, _client_id: block::ClientId) {}
     fn history(&self) -> Option<&dyn BlockHistoryHandle> {
         self.block().history()
     }

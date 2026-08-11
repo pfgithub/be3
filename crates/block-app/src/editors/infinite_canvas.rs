@@ -331,6 +331,7 @@ pub(super) struct InfiniteCanvasEditor {
     pointer_world: Option<CanvasPoint>,
     fit_selection_requested: bool,
     fit_preview_region_requested: bool,
+    pending_presence_reveal: Option<ClientId>,
     grouped_inspector_edit_active: bool,
     last_foreground: CanvasColor,
     last_fill: Option<CanvasColor>,

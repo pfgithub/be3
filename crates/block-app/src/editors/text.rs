@@ -119,6 +119,7 @@ pub(super) struct TextEditor {
     find: Option<FindState>,
     find_reveal: bool,
     last_cursor_positions: Vec<CursorPosition>,
+    pending_presence_reveal: Option<ClientId>,
 }
 
 /// UI-only state for the find/replace bar: what's typed and which panel is
@@ -200,6 +201,7 @@ impl TextEditor {
             find: None,
             find_reveal: false,
             last_cursor_positions: Vec::new(),
+            pending_presence_reveal: None,
         }
     }
 
@@ -1270,6 +1272,33 @@ impl TextEditor {
         }
     }
 
+    /// Screen-space rect of the given client's cursor, for scrolling it into
+    /// view when its presence indicator is clicked. Mirrors the caret
+    /// geometry painted by [`Self::paint_remote_cursors`].
+    fn presence_cursor_rect(
+        &self,
+        client: &BlockClient,
+        client_id: ClientId,
+        origin: Pos2,
+        layout: &DocumentLayout,
+    ) -> Option<Rect> {
+        let cursor = client
+            .presence::<TextCursor>(self.block.id())
+            .into_iter()
+            .find(|(id, _)| *id == client_id)?
+            .1;
+        let focus = self.core.position_index(cursor.focus)?;
+        let position = layout.positions.get(focus).and_then(|position| *position)?;
+        let top = Pos2::new(
+            origin.x + position.x,
+            origin.y + layout.lines[position.line].y,
+        );
+        Some(Rect::from_min_size(
+            top,
+            Vec2::new(2.0, layout.lines[position.line].height),
+        ))
+    }
+
     fn paint_embeds(
         &mut self,
         ui: &mut egui::Ui,
@@ -1570,6 +1599,10 @@ impl BlockEditor for TextEditor {
         );
     }
 
+    fn reveal_presence_cursor(&mut self, client_id: ClientId) {
+        self.pending_presence_reveal = Some(client_id);
+    }
+
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: false,
@@ -1819,6 +1852,13 @@ impl BlockEditor for TextEditor {
             response.has_focus(),
         );
         self.paint_remote_cursors(editors.client(), &painter, origin, &layout);
+        if let Some(client_id) = std::mem::take(&mut self.pending_presence_reveal) {
+            if let Some(rect) =
+                self.presence_cursor_rect(editors.client(), client_id, origin, &layout)
+            {
+                ui.scroll_to_rect(rect.expand2(Vec2::new(8.0, 3.0)), Some(egui::Align::Center));
+            }
+        }
         self.paint_checkboxes(ui, &painter, origin, &layout, &checkboxes);
         let cursor_color = ui.visuals().selection.stroke.color;
         for rect in caret_rects {
