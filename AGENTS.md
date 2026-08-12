@@ -88,7 +88,7 @@ Tests:
 - Do not add irrelevant or useless tests. If a change needs manual testing, note what needs testing in your final output.
 
 Verification:
-- After making changes, always run: on Windows, `powershell -File ./scripts/verify.ps1`; on other OSes, `./scripts/verify.sh`. It runs clippy (applying the fixes it can), rustfmt and the tests, and fails if any clippy warning is left. This should take less than 2 minutes including compilation time. Then, commit changes to git. Do not push.
+- After making changes, always run: on Windows, `powershell -File ./scripts/verify.ps1`; on other OSes, `./scripts/verify.sh`. It runs clippy (applying the fixes it can), rustfmt and the tests, and fails if any clippy warning is left. This should take less than 2 minutes including compilation time. Then, commit changes to git and push using `git push`.
 - Commit using `git add --all` and `git commit`. Don't check the status. Don't worry about it if the wrong file ends up in a commit unless it is supposed to be gitignored.
 - When there are multiple or large changes, split them up into tasks and test & commit to git after each one.
 - Use commit message format `type: message` where type is fix/feat/docs/...
