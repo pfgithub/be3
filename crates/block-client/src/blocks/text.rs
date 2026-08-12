@@ -74,6 +74,7 @@ pub struct TextDocument {
     sequence: eips::Eips<Uuid>,
     bytes: Vec<u8>,
     language: TextLanguage,
+    #[serde(default)]
     indentation: TextIndentation,
 }
 
