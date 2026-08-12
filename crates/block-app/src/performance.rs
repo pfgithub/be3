@@ -32,6 +32,7 @@ struct PerformanceState {
     open: bool,
     frame: u64,
     frame_start: Option<Instant>,
+    last_frame: Option<(u64, Duration)>,
     frame_times: VecDeque<Duration>,
     groups: BTreeMap<String, Group>,
 }
@@ -61,12 +62,18 @@ pub fn begin_frame() {
 }
 
 pub fn end_frame() {
-    let elapsed = state().frame_start.take().map(|start| start.elapsed());
+    let mut state = state();
+    let elapsed = state.frame_start.take().map(|start| start.elapsed());
     if let Some(elapsed) = elapsed {
-        let mut state = state();
+        state.last_frame = Some((state.frame, elapsed));
         push_sample(&mut state.frame_times, elapsed);
     }
+    drop(state);
     ACTIVE.with(|active| active.borrow_mut().clear());
+}
+
+pub fn last_frame() -> Option<(u64, Duration)> {
+    state().last_frame
 }
 
 pub fn open() {

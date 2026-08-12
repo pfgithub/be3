@@ -680,6 +680,13 @@ impl BlockApp {
                 ui.spinner();
                 ui.small("Submitting changes\u{2026}");
             }
+            if let Some((frame, duration)) = performance::last_frame() {
+                ui.separator();
+                ui.small(format!(
+                    "Frame {frame}: {:.3} ms",
+                    duration.as_secs_f64() * 1_000.0
+                ));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button("More", |ui| {
                     if ui.button("Client").clicked() {
