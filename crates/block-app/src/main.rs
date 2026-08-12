@@ -2444,7 +2444,7 @@ impl BlockApp {
             .inner_margin(egui::Margin::symmetric(8, 5))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.strong(format!("{} Shared block", ICON_LINK.codepoint));
+                    ui.strong(format!("{} Linked block", ICON_LINK.codepoint));
                     if via_reference {
                         let others = count - 1;
                         ui.weak(format!(
