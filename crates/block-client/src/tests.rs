@@ -25,6 +25,7 @@ mod manual_name_survives_a_subsequent_automatic_rename;
 mod matching_broadcast_before_acknowledgement_is_applied_once;
 mod new_history_action_clears_redo;
 mod no_history_policy_disables_undo;
+mod post_presence_ignores_unchanged_values;
 mod remote_operations_rebuild_all_pending_optimistic_operations;
 mod replace_preserves_dynamic_artifact_descriptor;
 mod set_dynamic_artifact_updates_the_descriptor;

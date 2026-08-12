@@ -37,6 +37,8 @@ mod transport;
 /// cleared.
 type PresenceStore = HashMap<Uuid, HashMap<(ClientId, Uuid), Vec<u8>>>;
 
+type PostedPresence = HashMap<(Uuid, Uuid), Vec<u8>>;
+
 use transport::{Socket, SocketMessage};
 
 /// Sends commands to the worker. Sending never blocks, so the UI thread can
@@ -1658,6 +1660,7 @@ struct WorkerState {
     cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
     block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
     presence: Arc<RwLock<PresenceStore>>,
+    posted_presence: PostedPresence,
 }
 
 impl WorkerState {
@@ -1685,6 +1688,7 @@ impl WorkerState {
             cached_blocks,
             block_access,
             presence,
+            posted_presence: HashMap::new(),
         }
     }
 
@@ -1769,6 +1773,11 @@ impl WorkerState {
                 presence_id,
                 data,
             } => {
+                let key = (id, presence_id);
+                if self.posted_presence.get(&key) == Some(&data) {
+                    return;
+                }
+                self.posted_presence.insert(key, data.clone());
                 self.deferred.push_back(DeferredRequest::PostPresence {
                     id,
                     presence_id,
@@ -1776,6 +1785,7 @@ impl WorkerState {
                 });
             }
             WorkerCommand::ClearPresence { id, presence_id } => {
+                self.posted_presence.remove(&(id, presence_id));
                 self.deferred
                     .push_back(DeferredRequest::ClearPresence { id, presence_id });
             }
