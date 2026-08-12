@@ -39,12 +39,42 @@ impl TextLanguage {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextIndentation {
+    Tabs,
+    Spaces { width: u8 },
+}
+
+impl Default for TextIndentation {
+    fn default() -> Self {
+        Self::Spaces { width: 2 }
+    }
+}
+
+impl TextIndentation {
+    pub const fn byte(self) -> u8 {
+        match self {
+            Self::Tabs => b'\t',
+            Self::Spaces { .. } => b' ',
+        }
+    }
+
+    pub const fn width(self) -> u8 {
+        match self {
+            Self::Tabs => 1,
+            Self::Spaces { width: 0 } => 1,
+            Self::Spaces { width } => width,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TextDocument {
     sequence: eips::Eips<Uuid>,
     bytes: Vec<u8>,
     language: TextLanguage,
-    indent_width: u8,
+    indentation: TextIndentation,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,8 +86,8 @@ pub enum TextOperation {
     SetLanguage {
         language: TextLanguage,
     },
-    SetIndentWidth {
-        width: u8,
+    SetIndentation {
+        indentation: TextIndentation,
     },
 }
 
@@ -91,7 +121,7 @@ impl TextDocument {
             sequence: eips::Eips::new(),
             bytes: Vec::new(),
             language: TextLanguage::default(),
-            indent_width: 2,
+            indentation: TextIndentation::Spaces { width: 2 },
         }
     }
 
@@ -135,12 +165,12 @@ impl TextDocument {
         TextOperation::SetLanguage { language }
     }
 
-    pub const fn indent_width(&self) -> u8 {
-        self.indent_width
+    pub const fn indentation(&self) -> TextIndentation {
+        self.indentation
     }
 
-    pub const fn set_indent_width_operation(width: u8) -> TextOperation {
-        TextOperation::SetIndentWidth { width }
+    pub const fn set_indentation_operation(indentation: TextIndentation) -> TextOperation {
+        TextOperation::SetIndentation { indentation }
     }
 
     pub fn insert_operation(
@@ -210,8 +240,13 @@ impl Block for TextDocument {
                 block.language = *language;
                 return;
             }
-            TextOperation::SetIndentWidth { width } => {
-                block.indent_width = (*width).max(1);
+            TextOperation::SetIndentation { indentation } => {
+                block.indentation = match indentation {
+                    TextIndentation::Tabs => TextIndentation::Tabs,
+                    TextIndentation::Spaces { width } => TextIndentation::Spaces {
+                        width: (*width).max(1),
+                    },
+                };
                 return;
             }
         };

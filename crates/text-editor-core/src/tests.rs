@@ -1,5 +1,5 @@
 use block_client::{
-    blocks::text::{TextDocument, TextLanguage},
+    blocks::text::{TextDocument, TextIndentation, TextLanguage},
     BlockClient,
 };
 use uuid::Uuid;
@@ -44,6 +44,7 @@ mod replace_match_does_nothing_when_selection_is_not_on_a_match;
 mod replace_match_replaces_current_and_advances_to_next_match;
 mod right_arrow_opens_a_collapsed_line;
 mod rust_syn_hl;
+mod tabs_are_used_for_automatic_indentation;
 mod toggle_collapse_at_is_independent_of_the_cursor;
 mod toggle_collapse_at_leaves_a_cursor_outside_the_section_untouched;
 mod toggle_collapse_at_moves_the_cursor_out_of_a_newly_hidden_section;

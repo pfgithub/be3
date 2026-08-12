@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, mem::size_of, ops::Range};
 
 use block_client::{
-    blocks::text::{TextDocument, TextLanguage},
+    blocks::text::{TextDocument, TextIndentation, TextLanguage},
     parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_BYTES,
 };
 use serde::{Deserialize, Serialize};
@@ -272,7 +272,7 @@ pub enum EditorCommand<'a> {
     /// Changes the document's language, rebuilding the syntax highlighter to
     /// match. Does nothing if `language` is already the document's language.
     SetLanguage(TextLanguage),
-    SetIndentWidth(u8),
+    SetIndentation(TextIndentation),
     /// Collapses every collapsible line touched by the current selection(s).
     Collapse,
     /// Uncollapses every collapsible line touched by the current
@@ -616,10 +616,10 @@ impl Core {
             .map_or_else(TextLanguage::default, |document| document.language())
     }
 
-    pub fn indent_width(&self) -> u8 {
+    pub fn indentation(&self) -> TextIndentation {
         self.document
             .read()
-            .map_or(2, |document| document.indent_width())
+            .map_or_else(TextIndentation::default, |document| document.indentation())
     }
 
     pub(crate) fn set_language(&mut self, language: TextLanguage) {
@@ -631,12 +631,12 @@ impl Core {
         self.sync_highlighter();
     }
 
-    pub fn set_indent_width(&mut self, width: u8) {
-        if self.indent_width() == width.max(1) {
+    pub fn set_indentation(&mut self, indentation: TextIndentation) {
+        if self.indentation() == indentation {
             return;
         }
         self.document
-            .operate(TextDocument::set_indent_width_operation(width));
+            .operate(TextDocument::set_indentation_operation(indentation));
     }
 
     /// Rebuilds the highlighter when the document's language differs from the
@@ -859,7 +859,7 @@ impl Core {
             EditorCommand::ReplaceWholeFile(bytes) => self.replace_whole_file(bytes),
             EditorCommand::Markdown(command) => self.markdown(command),
             EditorCommand::SetLanguage(language) => self.set_language(language),
-            EditorCommand::SetIndentWidth(width) => self.set_indent_width(width),
+            EditorCommand::SetIndentation(indentation) => self.set_indentation(indentation),
             EditorCommand::Collapse => self.collapse(),
             EditorCommand::Uncollapse => self.uncollapse(),
             EditorCommand::ToggleCollapseAt(position) => self.toggle_collapse_at(position),
@@ -1106,16 +1106,19 @@ impl Core {
         for cursor in &self.cursor_positions {
             let range = resolve_selection(&document, cursor.pos);
             let start = line_start(document.bytes(), range.left);
-            let (indent_count, indent_bytes) =
-                measure_indent(document.bytes(), start, usize::from(self.indent_width()));
+            let (indent_count, indent_bytes) = measure_indent(
+                document.bytes(),
+                start,
+                usize::from(self.indentation().width()),
+            );
             let after_indent = indent_bytes <= range.left - start;
             let mut insertion = Vec::new();
             if after_indent {
                 insertion.push(b'\n');
             }
             insertion.extend(std::iter::repeat_n(
-                b' ',
-                indent_count * usize::from(self.indent_width()),
+                self.indentation().byte(),
+                indent_count * usize::from(self.indentation().width()),
             ));
             if after_indent {
                 let content_start = start + indent_bytes;
@@ -1364,16 +1367,22 @@ impl Core {
         }
         starts.sort_unstable();
         let all_prefixed = starts.iter().all(|start| {
-            let (_, indent) =
-                measure_indent(document.bytes(), *start, usize::from(self.indent_width()));
+            let (_, indent) = measure_indent(
+                document.bytes(),
+                *start,
+                usize::from(self.indentation().width()),
+            );
             kind.matches(document.bytes(), *start + indent)
         });
         let replacements = starts
             .into_iter()
             .enumerate()
             .map(|(index, start)| {
-                let (_, indent) =
-                    measure_indent(document.bytes(), start, usize::from(self.indent_width()));
+                let (_, indent) = measure_indent(
+                    document.bytes(),
+                    start,
+                    usize::from(self.indentation().width()),
+                );
                 let content_start = start + indent;
                 let remove = markdown_block_prefix_len(document.bytes(), content_start);
                 let insert = if all_prefixed {
@@ -1459,8 +1468,11 @@ impl Core {
         let replacements = starts
             .into_iter()
             .map(|start| {
-                let (indent_count, indent_bytes) =
-                    measure_indent(document.bytes(), start, usize::from(self.indent_width()));
+                let (indent_count, indent_bytes) = measure_indent(
+                    document.bytes(),
+                    start,
+                    usize::from(self.indentation().width()),
+                );
                 let new_count = match direction {
                     LRDirection::Left => indent_count.saturating_sub(1),
                     LRDirection::Right => indent_count + 1,
@@ -1468,7 +1480,10 @@ impl Core {
                 (
                     Position::at(&document, start),
                     indent_bytes,
-                    vec![b' '; new_count * usize::from(self.indent_width())],
+                    vec![
+                        self.indentation().byte();
+                        new_count * usize::from(self.indentation().width())
+                    ],
                 )
             })
             .collect();
@@ -2073,7 +2088,10 @@ impl Core {
 
     fn soft_tab_width(&self) -> usize {
         if self.config.count_soft_tab_as_grapheme_cluster {
-            usize::from(self.indent_width())
+            match self.indentation() {
+                TextIndentation::Tabs => 0,
+                TextIndentation::Spaces { width } => usize::from(width.max(1)),
+            }
         } else {
             0
         }

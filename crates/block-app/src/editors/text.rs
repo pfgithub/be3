@@ -12,7 +12,7 @@ use std::{
 use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
     block_url,
-    blocks::text::{TextDocument, TextLanguage},
+    blocks::text::{TextDocument, TextIndentation, TextLanguage},
     blocks::workspace_index::BlockEntry,
     parse_block_urls,
     presence::{PresenceColor, UserActive},
@@ -221,7 +221,7 @@ impl TextEditor {
     fn toolbar(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) {
         let previous = self.core.language();
         let mut language = previous;
-        let mut indent_width = self.core.indent_width();
+        let mut indentation = self.core.indentation();
         ui.horizontal_wrapped(|ui| {
             ui.label("Language:");
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
@@ -232,11 +232,26 @@ impl TextEditor {
                     }
                 });
             ui.label("Indentation:");
-            ui.add(
-                egui::DragValue::new(&mut indent_width)
-                    .range(1..=8)
-                    .suffix(" spaces"),
-            );
+            egui::ComboBox::from_id_salt(("text-editor-indentation", self.block.id()))
+                .selected_text(match indentation {
+                    TextIndentation::Tabs => "Tabs",
+                    TextIndentation::Spaces { .. } => "Spaces",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut indentation, TextIndentation::Tabs, "Tabs");
+                    if ui
+                        .selectable_label(
+                            matches!(indentation, TextIndentation::Spaces { .. }),
+                            "Spaces",
+                        )
+                        .clicked()
+                    {
+                        indentation = TextIndentation::Spaces { width: 2 };
+                    }
+                });
+            if let TextIndentation::Spaces { width } = &mut indentation {
+                ui.add(egui::DragValue::new(width).range(1..=8).suffix(" spaces"));
+            }
             if previous == TextLanguage::Markdown {
                 ui.separator();
                 if ui.button(ICON_FORMAT_BOLD).on_hover_text("Bold").clicked() {
@@ -327,9 +342,9 @@ impl TextEditor {
             self.core
                 .execute_command(EditorCommand::SetLanguage(language));
         }
-        if indent_width != self.core.indent_width() {
+        if indentation != self.core.indentation() {
             self.core
-                .execute_command(EditorCommand::SetIndentWidth(indent_width));
+                .execute_command(EditorCommand::SetIndentation(indentation));
         }
     }
 

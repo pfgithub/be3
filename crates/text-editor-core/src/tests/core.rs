@@ -3,7 +3,9 @@ use super::*;
 #[test]
 fn core() {
     let mut tester = EditorTester::new(b"hello!");
-    tester.execute(EditorCommand::SetIndentWidth(4));
+    tester.execute(EditorCommand::SetIndentation(TextIndentation::Spaces {
+        width: 4,
+    }));
 
     tester.expect_content(b"hello!");
     tester.set_cursor(tester.pos(0));
