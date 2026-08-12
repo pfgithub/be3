@@ -2395,6 +2395,23 @@ impl BlockApp {
         navigate
     }
 
+    /// Whether the occurrence of a block inside `container` may be replaced
+    /// with an independent copy, and why not if it can't.
+    fn copy_permission(&self, container: Option<Uuid>) -> Result<(), &'static str> {
+        let container_block_type =
+            container.and_then(|container| self.block_types.get(&container).copied());
+        match (container, container_block_type) {
+            (Some(_), Some(block_type)) if !self.registry.can_replace_child(block_type) => {
+                Err("This container doesn't support replacing a reference")
+            }
+            (Some(container), Some(_)) if !self.client.block_access(container).can_edit() => {
+                Err("You don't have permission to edit this container")
+            }
+            (Some(_), Some(_)) => Ok(()),
+            _ => Err("Loading…"),
+        }
+    }
+
     /// The bar above the editor of a block that is referenced from more than
     /// one place, warning that editing it here affects every place it
     /// appears.
@@ -2433,19 +2450,7 @@ impl BlockApp {
             .backrefs
             .get(&active)
             .map(|list| (list.is_loaded(), list.read()));
-        let container_block_type =
-            container.and_then(|container| self.block_types.get(&container).copied());
-        let copy_disabled_hover = match (container, container_block_type) {
-            (Some(_), Some(block_type)) if !self.registry.can_replace_child(block_type) => {
-                Some("This container doesn't support replacing a reference")
-            }
-            (Some(container), Some(_)) if !self.client.block_access(container).can_edit() => {
-                Some("You don't have permission to edit this container")
-            }
-            (Some(_), Some(_)) => None,
-            _ => Some("Loading…"),
-        };
-        let copy_enabled = copy_disabled_hover.is_none();
+        let copy_permission = self.copy_permission(container);
         let mut navigate = None;
         let mut context_action = None;
         let mut go_to_original = false;
@@ -2470,15 +2475,16 @@ impl BlockApp {
                             .on_disabled_hover_text("Loading…")
                             .clicked();
                         let copy_button = ui.add_enabled(
-                            copy_enabled,
+                            copy_permission.is_ok(),
                             egui::Button::new(format!("{} Unlink", ICON_LINK_OFF.codepoint)),
                         );
-                        let copy_button = copy_button
-                            .on_hover_text("Replace this occurrence with its own copy, unaffected by the original");
-                        make_copy = if let Some(hover) = copy_disabled_hover {
-                            copy_button.on_disabled_hover_text(hover).clicked()
-                        } else {
-                            copy_button.clicked()
+                        make_copy = match copy_permission {
+                            Ok(()) => copy_button
+                                .on_hover_text(
+                                    "Replace this occurrence with its own copy, unaffected by the original",
+                                )
+                                .clicked(),
+                            Err(hover) => copy_button.on_disabled_hover_text(hover).clicked(),
                         };
                     } else {
                         ui.weak(format!(
@@ -2521,6 +2527,11 @@ impl BlockApp {
                 BlockContextMenuAction::Share => {
                     let label = BlockLabel::for_reference(&self.registry, &reference);
                     self.share.open(&self.client, reference.id, label);
+                }
+                BlockContextMenuAction::Copy => {
+                    if let SidebarDragSource::Block(container) = source {
+                        self.queue_copy(reference.id, container, Uuid::new_v4());
+                    }
                 }
                 BlockContextMenuAction::Delete => {
                     self.queue_delete(reference, source, is_reference);
@@ -2910,6 +2921,11 @@ impl BlockApp {
                     let label = BlockLabel::for_reference(&self.registry, &reference);
                     self.share.open(&self.client, reference.id, label);
                 }
+                BlockContextMenuAction::Copy => {
+                    if let SidebarDragSource::Block(container) = source {
+                        self.queue_copy(reference.id, container, Uuid::new_v4());
+                    }
+                }
                 BlockContextMenuAction::Delete => {
                     self.queue_delete(reference, source, is_reference);
                 }
@@ -2966,6 +2982,7 @@ impl BlockApp {
                 edit: can_edit,
                 delete: source != SidebarDragSource::Orphaned
                     && self.can_move_out_of(source, reference.id, is_reference),
+                copy: self.copy_permission(containing_id),
             };
             response.context_menu(|ui| {
                 if let Some(action) = block_context_menu(
@@ -3140,6 +3157,7 @@ enum BlockContextMenuAction {
     SetParent(BlockParent),
     Rename,
     Share,
+    Copy,
     Delete,
 }
 
@@ -3150,6 +3168,10 @@ struct BlockMenuPermissions {
     add: bool,
     edit: bool,
     delete: bool,
+    /// Whether a reference row's occurrence may be replaced with an
+    /// independent copy, and why not if it can't. Unused for rows that
+    /// aren't references.
+    copy: Result<(), &'static str>,
 }
 
 fn block_context_menu(
@@ -3244,7 +3266,29 @@ fn block_context_menu(
         action = Some(BlockContextMenuAction::Share);
         ui.close();
     }
-    let delete_label = if is_reference { "Unlink" } else { "Delete" };
+    if is_reference {
+        let copy_button = ui.add_enabled(
+            permissions.copy.is_ok(),
+            egui::Button::new(format!("{} Unlink", ICON_LINK_OFF.codepoint)),
+        );
+        let clicked = match permissions.copy {
+            Ok(()) => copy_button
+                .on_hover_text(
+                    "Replace this occurrence with its own copy, unaffected by the original",
+                )
+                .clicked(),
+            Err(hover) => copy_button.on_disabled_hover_text(hover).clicked(),
+        };
+        if clicked {
+            action = Some(BlockContextMenuAction::Copy);
+            ui.close();
+        }
+    }
+    let delete_label = if is_reference {
+        "Remove link"
+    } else {
+        "Delete"
+    };
     let delete_text = egui::RichText::new(delete_label);
     let delete_text = if permissions.delete {
         delete_text.color(ui.visuals().error_fg_color)
@@ -3253,7 +3297,9 @@ fn block_context_menu(
     };
     let delete_response = ui.add_enabled(permissions.delete, egui::Button::new(delete_text));
     let delete_response = if is_reference {
-        delete_response.on_hover_text("Removes this link only. The original block is not deleted.")
+        delete_response.on_hover_text(
+            "Removes this link only, without creating a copy. The original block is not deleted.",
+        )
     } else {
         delete_response
     };

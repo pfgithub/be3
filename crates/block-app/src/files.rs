@@ -190,6 +190,7 @@ impl BlockApp {
         let can_add_here = can_add_child && can_edit;
         let can_delete_child = source != SidebarDragSource::Orphaned
             && self.can_move_out_of(source, reference.id, is_reference);
+        let copy_permission = self.copy_permission(containing_id);
         let can_expand = !is_reference && reference.references > 0;
         let was_expanded = self.expanded.contains_key(&reference.id);
         // Matched by position, not just id: the same block can appear both at
@@ -206,6 +207,7 @@ impl BlockApp {
         let mut toggle = false;
         let mut open = false;
         let mut delete = false;
+        let mut make_copy = false;
         let mut picker_excluded = path.clone();
         picker_excluded.insert(reference.id);
         let mut row_response = None;
@@ -349,6 +351,7 @@ impl BlockApp {
                         add: can_add_here,
                         edit: can_edit,
                         delete: can_delete_child,
+                        copy: copy_permission,
                     },
                     is_reference,
                 ) {
@@ -373,6 +376,7 @@ impl BlockApp {
                             crate::editors::BlockLabel::for_reference(&self.registry, &reference);
                         self.share.open(&self.client, reference.id, label);
                     }
+                    Some(BlockContextMenuAction::Copy) => make_copy = true,
                     Some(BlockContextMenuAction::Delete) => delete = true,
                     None => {}
                 }
@@ -393,6 +397,11 @@ impl BlockApp {
 
         if delete {
             self.queue_delete(reference.clone(), source, is_reference);
+        }
+        if make_copy {
+            if let Some(container) = containing_id {
+                self.queue_copy(reference.id, container, Uuid::new_v4());
+            }
         }
         if can_add_child {
             if let Some(response) = row_response {
