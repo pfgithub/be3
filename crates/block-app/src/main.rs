@@ -2839,15 +2839,14 @@ impl BlockApp {
             ui.menu_button(
                 format!(
                     "Backrefs: {}",
-                    backrefs
-                        .as_ref()
-                        .map_or(relationships.backrefs.len(), |(loaded, backrefs)| {
-                            if *loaded {
-                                backrefs.len()
-                            } else {
-                                relationships.backrefs.len()
-                            }
-                        })
+                    backrefs.as_ref().map_or_else(
+                        || "…".to_string(),
+                        |(loaded, backrefs)| if *loaded {
+                            backrefs.len().to_string()
+                        } else {
+                            "…".to_string()
+                        }
+                    )
                 ),
                 |ui| {
                     let Some((loaded, backrefs)) = &backrefs else {

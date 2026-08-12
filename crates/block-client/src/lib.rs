@@ -1062,7 +1062,6 @@ impl HistoryMetadata {
 pub struct BlockRelationships {
     pub parent: BlockParent,
     pub references: Vec<Uuid>,
-    pub backrefs: Vec<Uuid>,
 }
 
 impl<B: Block> Clone for BlockHandle<B> {
@@ -1202,12 +1201,6 @@ impl<B: Block> BlockHandle<B> {
     }
 
     pub fn set_parent(&self, parent: BlockParent) {
-        if let BlockParent::Uuid(id) = parent {
-            let mut relationships = self.block.relationships.write();
-            if !relationships.backrefs.contains(&id) {
-                relationships.backrefs.push(id);
-            }
-        }
         self.commands
             .send(WorkerCommand::SetBlockParent {
                 id: self.id,
@@ -3116,7 +3109,6 @@ impl<B: Block> TypedBlock<B> {
             relationships: RwLock::new(BlockRelationships {
                 parent: BlockParent::Orphaned,
                 references,
-                backrefs: Vec::new(),
             }),
             properties: RwLock::new(properties),
             dynamic_artifact: RwLock::new(dynamic_artifact),
@@ -3146,7 +3138,6 @@ impl<B: Block> TypedBlock<B> {
             relationships: RwLock::new(BlockRelationships {
                 parent: BlockParent::Orphaned,
                 references: Vec::new(),
-                backrefs: Vec::new(),
             }),
             properties: RwLock::new(BTreeMap::new()),
             dynamic_artifact: RwLock::new(None),
