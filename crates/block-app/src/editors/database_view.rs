@@ -15,7 +15,10 @@ use block_client::{
 };
 use eframe::egui;
 use egui_material_icons::{
-    icons::{ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_TABLE_VIEW, ICON_VIEW_KANBAN},
+    icons::{
+        ICON_DESELECT, ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_TABLE_VIEW,
+        ICON_VIEW_KANBAN,
+    },
     MaterialIcon,
 };
 use uuid::Uuid;
@@ -164,6 +167,15 @@ impl DatabaseViewEditor {
             DatabaseViewKind::Spreadsheet => self.spreadsheet.selected_row(),
             DatabaseViewKind::Kanban => self.kanban.selected_row(),
             DatabaseViewKind::Scatter => self.scatter.selected_row(),
+        }
+    }
+
+    /// Clears the selection in whichever view kind is active.
+    fn deselect(&mut self, kind: DatabaseViewKind) {
+        match kind {
+            DatabaseViewKind::Spreadsheet => self.spreadsheet.deselect(),
+            DatabaseViewKind::Kanban => self.kanban.deselect(),
+            DatabaseViewKind::Scatter => self.scatter.deselect(),
         }
     }
 
@@ -368,7 +380,15 @@ impl BlockEditor for DatabaseViewEditor {
         egui::CollapsingHeader::new("Selected item")
             .default_open(true)
             .show(ui, |ui| {
-                let selected_row = self.selected_row(data.kind);
+                let mut selected_row = self.selected_row(data.kind);
+                if selected_row.is_some()
+                    && ui
+                        .button(format!("{} Deselect", ICON_DESELECT.codepoint))
+                        .clicked()
+                {
+                    self.deselect(data.kind);
+                    selected_row = None;
+                }
                 operations = self
                     .row_editor
                     .ui(ui, &data.rows, &data.fields, selected_row);

@@ -31,6 +31,10 @@ impl KanbanView {
         self.selected
     }
 
+    pub(super) fn deselect(&mut self) {
+        self.selected = None;
+    }
+
     pub(super) fn board(
         &mut self,
         ui: &mut egui::Ui,
@@ -40,6 +44,11 @@ impl KanbanView {
         status_field: &DatabaseField,
         operations: &mut Vec<DatabaseOperation>,
     ) {
+        let background = ui.interact(
+            ui.available_rect_before_wrap(),
+            ui.id().with(("database-kanban-background", view.id())),
+            egui::Sense::click(),
+        );
         egui::ScrollArea::horizontal()
             .id_salt(("database-kanban-scroll", view.id()))
             .auto_shrink([false, false])
@@ -71,6 +80,9 @@ impl KanbanView {
             });
         if ui.input(|input| input.pointer.any_released()) {
             self.dragging = None;
+        }
+        if background.clicked() {
+            self.deselect();
         }
     }
 

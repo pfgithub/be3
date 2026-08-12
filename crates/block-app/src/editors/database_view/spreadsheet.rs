@@ -47,6 +47,11 @@ impl SpreadsheetView {
         self.selected.map(|address| address.row_index)
     }
 
+    pub(super) fn deselect(&mut self) {
+        self.finish_edit();
+        self.selected = None;
+    }
+
     pub(super) fn intrinsic_size(&self, row_count: usize, fields: &[DatabaseField]) -> egui::Vec2 {
         let total_rows = display_row_total(row_count, self.selected);
         egui::vec2(
@@ -364,6 +369,11 @@ impl SpreadsheetView {
     ) {
         let display = display_rows(rows, self.selected, sort, fields);
         self.handle_keyboard(ui, view, &display, fields, operations);
+        let background = ui.interact(
+            ui.available_rect_before_wrap(),
+            ui.id().with(("database-grid-background", view.id())),
+            egui::Sense::click(),
+        );
         let mut sort_operation = None;
         egui::Grid::new(("database-grid", view.id()))
             .num_columns(fields.len() + 1)
@@ -411,6 +421,9 @@ impl SpreadsheetView {
                     ui.end_row();
                 }
             });
+        if background.clicked() {
+            self.deselect();
+        }
         if let Some(operation) = sort_operation {
             view.operate(operation);
         }

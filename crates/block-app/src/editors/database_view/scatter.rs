@@ -31,6 +31,10 @@ impl ScatterView {
         self.selected
     }
 
+    pub(super) fn deselect(&mut self) {
+        self.selected = None;
+    }
+
     pub(super) fn plot(
         &mut self,
         ui: &mut egui::Ui,
