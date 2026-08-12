@@ -1,5 +1,6 @@
 use super::*;
 
+mod grouped_text_edits_are_sent_as_one_crdt_update;
 mod text_history_restores_bytes_after_later_ids_change;
 mod text_history_undoes_and_redoes_grouped_edits;
 mod text_implicit_name_stops_at_newline_and_a_utf8_boundary;

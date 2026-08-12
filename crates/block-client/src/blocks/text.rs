@@ -80,16 +80,15 @@ pub struct TextDocument {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TextOperation {
-    Edit {
-        change: RemoteChange<Uuid>,
-        item: Option<u8>,
-    },
-    SetLanguage {
-        language: TextLanguage,
-    },
-    SetIndentation {
-        indentation: TextIndentation,
-    },
+    Edit { edits: Vec<TextEdit> },
+    SetLanguage { language: TextLanguage },
+    SetIndentation { indentation: TextIndentation },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TextEdit {
+    change: RemoteChange<Uuid>,
+    item: Option<u8>,
 }
 
 pub struct TextHistory;
@@ -189,15 +188,19 @@ impl TextDocument {
         byte: u8,
     ) -> Result<TextOperation, eips::error::IndexError> {
         Ok(TextOperation::Edit {
-            change: self.sequence.insert(index, id)?,
-            item: Some(byte),
+            edits: vec![TextEdit {
+                change: self.sequence.insert(index, id)?,
+                item: Some(byte),
+            }],
         })
     }
 
     pub fn remove_operation(&self, index: usize) -> Result<TextOperation, eips::error::IndexError> {
         Ok(TextOperation::Edit {
-            change: self.sequence.remove(index)?,
-            item: None,
+            edits: vec![TextEdit {
+                change: self.sequence.remove(index)?,
+                item: None,
+            }],
         })
     }
 
@@ -212,6 +215,22 @@ impl TextDocument {
     pub fn remove_item_operation(&self, id: Uuid) -> Option<TextOperation> {
         self.item_index(id)
             .and_then(|index| self.remove_operation(index).ok())
+    }
+
+    pub fn group_edit_operations(
+        operations: impl IntoIterator<Item = TextOperation>,
+    ) -> TextOperation {
+        let mut edits = Vec::new();
+        for operation in operations {
+            let TextOperation::Edit {
+                edits: operation_edits,
+            } = operation
+            else {
+                panic!("cannot group a non-edit text operation");
+            };
+            edits.extend(operation_edits);
+        }
+        TextOperation::Edit { edits }
     }
 }
 
@@ -235,8 +254,8 @@ impl Block for TextDocument {
     const CRDT: bool = true;
 
     fn apply_operation(block: &mut Self, operation: &Self::Operation) {
-        let (change, item) = match operation {
-            TextOperation::Edit { change, item } => (*change, *item),
+        let edits = match operation {
+            TextOperation::Edit { edits } => edits,
             TextOperation::SetLanguage { language } => {
                 block.language = *language;
                 return;
@@ -251,24 +270,27 @@ impl Block for TextDocument {
                 return;
             }
         };
-        let local = block
-            .sequence
-            .apply_change(change)
-            .unwrap_or_else(|error| panic!("invalid eips text operation: {error}"));
-        match local {
-            LocalChange::AlreadyApplied | LocalChange::None => {}
-            LocalChange::Insert(index) => {
-                block.bytes.insert(
-                    index,
-                    item.expect("eips insertion operation omitted its byte"),
-                );
-            }
-            LocalChange::Remove(index) => {
-                block.bytes.remove(index);
-            }
-            LocalChange::Move { old, new } => {
-                let byte = block.bytes.remove(old);
-                block.bytes.insert(new, byte);
+        for edit in edits {
+            let local = block
+                .sequence
+                .apply_change(edit.change)
+                .unwrap_or_else(|error| panic!("invalid eips text operation: {error}"));
+            match local {
+                LocalChange::AlreadyApplied | LocalChange::None => {}
+                LocalChange::Insert(index) => {
+                    block.bytes.insert(
+                        index,
+                        edit.item
+                            .expect("eips insertion operation omitted its byte"),
+                    );
+                }
+                LocalChange::Remove(index) => {
+                    block.bytes.remove(index);
+                }
+                LocalChange::Move { old, new } => {
+                    let byte = block.bytes.remove(old);
+                    block.bytes.insert(new, byte);
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, mem::size_of, ops::Range};
 
+use block::Block;
 use block_client::{
     blocks::text::{TextDocument, TextIndentation, TextLanguage},
     parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_BYTES,
@@ -2051,24 +2052,29 @@ impl Core {
             Some(HistoryMetadata::new(history_cursors, metadata_bytes)),
             |transaction| {
                 let mut result_positions = Vec::new();
+                let mut document = transaction.current().clone();
+                let mut operations = Vec::new();
                 for (position, delete_len, insert) in replacements {
-                    let index = position.resolve(transaction.current());
-                    for _ in 0..delete_len.min(transaction.current().len().saturating_sub(index)) {
-                        let Ok(operation) = transaction.current().remove_operation(index) else {
+                    let index = position.resolve(&document);
+                    for _ in 0..delete_len.min(document.len().saturating_sub(index)) {
+                        let Ok(operation) = document.remove_operation(index) else {
                             break;
                         };
-                        transaction.apply(operation);
+                        TextDocument::apply_operation(&mut document, &operation);
+                        operations.push(operation);
                     }
                     let insert_len = insert.len();
                     for (offset, byte) in insert.into_iter().enumerate() {
-                        let Ok(operation) =
-                            transaction.current().insert_operation(index + offset, byte)
-                        else {
+                        let Ok(operation) = document.insert_operation(index + offset, byte) else {
                             break;
                         };
-                        transaction.apply(operation);
+                        TextDocument::apply_operation(&mut document, &operation);
+                        operations.push(operation);
                     }
-                    result_positions.push(Position::at(transaction.current(), index + insert_len));
+                    result_positions.push(Position::at(&document, index + insert_len));
+                }
+                if !operations.is_empty() {
+                    transaction.apply(TextDocument::group_edit_operations(operations));
                 }
                 result_positions
             },
