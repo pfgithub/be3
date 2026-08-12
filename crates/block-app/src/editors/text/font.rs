@@ -261,6 +261,7 @@ struct PositionedGlyph {
     x_offset: f32,
     y_offset: f32,
     invisible: bool,
+    show_invisible: bool,
     style: SynHlStyle,
     pixel_size: u32,
     advance: f32,
@@ -687,6 +688,10 @@ impl TextRenderer {
 
         let display_start = Instant::now();
         let display = display_line(&document[start..end], start, has_newline, embeds);
+        let trailing_invisible_start = document[start..end]
+            .iter()
+            .rposition(|byte| !matches!(*byte, b' ' | b'\t' | b'\r'))
+            .map_or(start, |index| start + index + 1);
         timings.display_lines += display_start.elapsed();
         let font_runs_start = Instant::now();
         let font_runs = self.font_runs(&display.text, &display, highlight);
@@ -746,6 +751,10 @@ impl TextRenderer {
                     invisible: document
                         .get(doc_byte)
                         .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r')),
+                    show_invisible: doc_byte >= trailing_invisible_start
+                        && document
+                            .get(doc_byte)
+                            .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\r')),
                     style,
                     pixel_size,
                     advance,
@@ -843,7 +852,7 @@ impl TextRenderer {
         };
         let baseline = origin.y + line.y + line.baseline;
         for glyph in &line.glyphs {
-            if glyph.invisible && !byte_is_selected(glyph.doc_byte) {
+            if glyph.invisible && !glyph.show_invisible && !byte_is_selected(glyph.doc_byte) {
                 continue;
             }
             let key = GlyphKey {
