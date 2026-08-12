@@ -488,7 +488,9 @@ impl MapEditor {
         else {
             return;
         };
-        editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
+        if !result.linked {
+            editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
+        }
         let position = self
             .pending_position
             .take()

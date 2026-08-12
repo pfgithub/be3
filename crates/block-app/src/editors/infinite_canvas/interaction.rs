@@ -15,7 +15,9 @@ impl InfiniteCanvasEditor {
                 .take()
                 .unwrap_or(self.viewport_center);
             self.add_direct_editor(block.id, center);
-            editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
+            if !block.linked {
+                editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
+            }
             self.tool = Tool::Select;
         }
     }

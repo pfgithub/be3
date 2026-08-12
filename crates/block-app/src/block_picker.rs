@@ -38,6 +38,7 @@ pub struct BlockPickerResult {
     pub block_type: Uuid,
     pub author: Uuid,
     pub properties: BTreeMap<Uuid, Vec<u8>>,
+    pub linked: bool,
 }
 
 pub struct BlockPicker {
@@ -198,6 +199,7 @@ impl BlockPicker {
                     block_type: block.block_type,
                     author: block.author,
                     properties: block.properties,
+                    linked: true,
                 });
             }
         }
@@ -305,6 +307,7 @@ impl BlockPicker {
             block_type,
             author: editors.client().account_id(),
             properties: result_properties,
+            linked: false,
         }
     }
 

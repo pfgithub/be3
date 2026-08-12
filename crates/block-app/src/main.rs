@@ -1626,12 +1626,12 @@ impl BlockApp {
                     properties: result.properties,
                     parent: BlockParent::Orphaned,
                     references: 0,
-                    // The picker only creates blocks from scratch.
                     dynamic_artifact: false,
-                    // The account just made the block, so it is theirs.
+                    // The account just made or linked the block, so it is theirs.
                     access: BlockAccess::Edit,
                 },
                 parent,
+                result.linked,
             ),
         }
     }
@@ -1678,7 +1678,7 @@ impl BlockApp {
         true
     }
 
-    fn queue_placement(&mut self, child: BlockReference, parent: Uuid) {
+    fn queue_placement(&mut self, child: BlockReference, parent: Uuid, linked: bool) {
         if child.id == parent
             || self
                 .pending_transfers
@@ -1695,7 +1695,7 @@ impl BlockApp {
             child,
             source: None,
             destination: Some(parent),
-            parent_after: Some(BlockParent::Uuid(parent)),
+            parent_after: (!linked).then_some(BlockParent::Uuid(parent)),
             stage: TransferStage::AddDestination,
         });
     }

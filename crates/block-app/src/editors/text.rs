@@ -363,7 +363,9 @@ impl TextEditor {
         else {
             return;
         };
-        editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
+        if !result.linked {
+            editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
+        }
         let name =
             BlockLabel::for_properties(editors.registry(), result.block_type, &result.properties)
                 .name;
