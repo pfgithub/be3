@@ -11,6 +11,7 @@ impl BlockApp {
         if !self.network_debug_open {
             return;
         }
+        self.client.enable_network_traffic_logging();
         let debug = self.client.network_debug_snapshot();
         let mut open = self.network_debug_open;
         egui::Window::new("Network Traffic")
@@ -41,6 +42,9 @@ impl BlockApp {
                         .clicked()
                     {
                         self.client.resume_sending();
+                    }
+                    if ui.button("Clear").clicked() {
+                        self.client.clear_network_traffic();
                     }
                     ui.separator();
                     ui.small(if debug.sending_paused {

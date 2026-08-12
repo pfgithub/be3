@@ -497,6 +497,7 @@ pub struct NetworkDebugSnapshot {
     pub sending_paused: bool,
     pub queued_messages: usize,
     pub changes_saved: bool,
+    pub traffic_logging_enabled: bool,
     pub traffic: Vec<NetworkTrafficEntry>,
 }
 
@@ -937,6 +938,14 @@ impl BlockClient {
 
     pub fn network_debug_snapshot(&self) -> NetworkDebugSnapshot {
         self.debug.read().clone()
+    }
+
+    pub fn enable_network_traffic_logging(&self) {
+        self.debug.write().traffic_logging_enabled = true;
+    }
+
+    pub fn clear_network_traffic(&self) {
+        self.debug.write().traffic.clear();
     }
 
     pub fn client_debug_snapshot(&self) -> ClientDebugSnapshot {
@@ -1849,7 +1858,11 @@ impl WorkerState {
     }
 
     fn record_traffic(&self, direction: NetworkDirection, payload: String) {
-        self.debug.write().traffic.push(NetworkTrafficEntry {
+        let mut debug = self.debug.write();
+        if !debug.traffic_logging_enabled {
+            return;
+        }
+        debug.traffic.push(NetworkTrafficEntry {
             timestamp_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
