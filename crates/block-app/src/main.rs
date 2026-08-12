@@ -2434,22 +2434,6 @@ impl BlockApp {
         let container = self.opened_via.get(&active).copied();
         let via_reference =
             container.is_some_and(|container| relationships.parent != BlockParent::Uuid(container));
-        let parent_id = match relationships.parent {
-            BlockParent::Uuid(parent) => Some(parent),
-            BlockParent::Root | BlockParent::Orphaned => None,
-        };
-        let parent_block_type = parent_id.and_then(|parent_id| {
-            self.parents
-                .get(&active)
-                .map(ReferenceList::read)
-                .and_then(|parents| {
-                    parents
-                        .last()
-                        .filter(|parent| parent.id == parent_id)
-                        .map(|parent| parent.block_type)
-                })
-                .or_else(|| self.block_types.get(&parent_id).copied())
-        });
         let copy_permission = self.copy_permission(container);
         let mut navigate = None;
         let mut context_action = None;
@@ -2461,18 +2445,14 @@ impl BlockApp {
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.strong(format!("{} Shared block", ICON_LINK.codepoint));
-                    if via_reference && parent_id.is_some() {
+                    if via_reference {
                         let others = count - 1;
                         ui.weak(format!(
                             "This block also appears in {others} other place{}. Editing it here changes it everywhere it appears.",
                             if others == 1 { "" } else { "s" }
                         ));
                         go_to_original = ui
-                            .add_enabled(
-                                parent_block_type.is_some(),
-                                egui::Button::new("Go to original"),
-                            )
-                            .on_disabled_hover_text("Loading…")
+                            .button("Go to original")
                             .clicked();
                         let copy_button = ui.add_enabled(
                             copy_permission.is_ok(),
@@ -2535,10 +2515,7 @@ impl BlockApp {
             }
         }
         if go_to_original {
-            if let (Some(parent_id), Some(block_type)) = (parent_id, parent_block_type) {
-                self.opened_via.remove(&parent_id);
-                navigate = Some((parent_id, block_type));
-            }
+            self.opened_via.remove(&active);
         }
         if make_copy {
             if let Some(container) = container {
