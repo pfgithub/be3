@@ -56,13 +56,14 @@ impl BlockApp {
                     });
                 });
                 ui.separator();
+                let row_height = ui.text_style_height(&egui::TextStyle::Monospace) * 8.0;
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
-                    .show(ui, |ui| {
+                    .show_rows(ui, row_height, debug.traffic.len(), |ui, rows| {
                         if debug.traffic.is_empty() {
                             ui.weak("No network traffic yet");
                         }
-                        for entry in &debug.traffic {
+                        for entry in &debug.traffic[rows] {
                             show_traffic_entry(ui, entry);
                         }
                     });
