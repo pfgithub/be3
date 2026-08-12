@@ -94,5 +94,3 @@ Verification:
 - Use commit message format `type: message` where type is fix/feat/docs/...
 - Do not perform any verification beyond running the verify script. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work — the verify script is the only verification step.
 - Do not use the browser tool.
-- This VM has limited disk space and no Android NDK or wasm/WASI clang toolchain installed. Only build/check the native (host) target, which is what the verify script does; do not run `cargo build`/`cargo check` against `aarch64-linux-android` or `wasm32-wasip1` yourself. CI (see `.github/workflows/ci.yml`) builds and checks those targets separately — when changing Android- or web-only code, note in your final output that it's unverified locally and relies on CI.
-- If the VM runs out of space, delete `target/debug/incremental`.
