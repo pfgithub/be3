@@ -3611,7 +3611,6 @@ impl BlockApp {
         self.show_discard_confirmation(ui.ctx());
         performance::show(ui.ctx());
         performance::end_frame();
-        ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
 
     fn show_error_window(&mut self, ui: &mut egui::Ui, message: &str) {
