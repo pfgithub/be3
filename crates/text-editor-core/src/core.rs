@@ -189,37 +189,13 @@ pub enum SyntaxNodeDirection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IndentMode {
-    Tabs,
-    Spaces(u8),
-}
-
-impl IndentMode {
-    fn byte(self) -> u8 {
-        match self {
-            Self::Tabs => b'\t',
-            Self::Spaces(_) => b' ',
-        }
-    }
-
-    fn count(self) -> usize {
-        match self {
-            Self::Tabs => 1,
-            Self::Spaces(count) => usize::from(count.max(1)),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EditorConfig {
-    pub indent_with: IndentMode,
     pub count_soft_tab_as_grapheme_cluster: bool,
 }
 
 impl Default for EditorConfig {
     fn default() -> Self {
         Self {
-            indent_with: IndentMode::Spaces(4),
             count_soft_tab_as_grapheme_cluster: true,
         }
     }
@@ -296,6 +272,7 @@ pub enum EditorCommand<'a> {
     /// Changes the document's language, rebuilding the syntax highlighter to
     /// match. Does nothing if `language` is already the document's language.
     SetLanguage(TextLanguage),
+    SetIndentWidth(u8),
     /// Collapses every collapsible line touched by the current selection(s).
     Collapse,
     /// Uncollapses every collapsible line touched by the current
@@ -599,11 +576,14 @@ impl Core {
             .collect::<Vec<_>>();
         drop(document);
         if !replacements.is_empty() {
-            self.apply_replacements(
+            let positions = self.apply_replacements(
                 replacements,
                 UndoClassification::AlwaysSplit,
                 history_cursors,
             );
+            if let Some(position) = positions.first() {
+                self.select(Selection::at(*position));
+            }
         }
     }
 
@@ -636,6 +616,12 @@ impl Core {
             .map_or_else(TextLanguage::default, |document| document.language())
     }
 
+    pub fn indent_width(&self) -> u8 {
+        self.document
+            .read()
+            .map_or(2, |document| document.indent_width())
+    }
+
     pub(crate) fn set_language(&mut self, language: TextLanguage) {
         if self.language() == language {
             return;
@@ -643,6 +629,14 @@ impl Core {
         self.document
             .operate(TextDocument::set_language_operation(language));
         self.sync_highlighter();
+    }
+
+    pub fn set_indent_width(&mut self, width: u8) {
+        if self.indent_width() == width.max(1) {
+            return;
+        }
+        self.document
+            .operate(TextDocument::set_indent_width_operation(width));
     }
 
     /// Rebuilds the highlighter when the document's language differs from the
@@ -865,6 +859,7 @@ impl Core {
             EditorCommand::ReplaceWholeFile(bytes) => self.replace_whole_file(bytes),
             EditorCommand::Markdown(command) => self.markdown(command),
             EditorCommand::SetLanguage(language) => self.set_language(language),
+            EditorCommand::SetIndentWidth(width) => self.set_indent_width(width),
             EditorCommand::Collapse => self.collapse(),
             EditorCommand::Uncollapse => self.uncollapse(),
             EditorCommand::ToggleCollapseAt(position) => self.toggle_collapse_at(position),
@@ -1112,15 +1107,15 @@ impl Core {
             let range = resolve_selection(&document, cursor.pos);
             let start = line_start(document.bytes(), range.left);
             let (indent_count, indent_bytes) =
-                measure_indent(document.bytes(), start, self.config.indent_with.count());
+                measure_indent(document.bytes(), start, usize::from(self.indent_width()));
             let after_indent = indent_bytes <= range.left - start;
             let mut insertion = Vec::new();
             if after_indent {
                 insertion.push(b'\n');
             }
             insertion.extend(std::iter::repeat_n(
-                self.config.indent_with.byte(),
-                indent_count * self.config.indent_with.count(),
+                b' ',
+                indent_count * usize::from(self.indent_width()),
             ));
             if after_indent {
                 let content_start = start + indent_bytes;
@@ -1370,7 +1365,7 @@ impl Core {
         starts.sort_unstable();
         let all_prefixed = starts.iter().all(|start| {
             let (_, indent) =
-                measure_indent(document.bytes(), *start, self.config.indent_with.count());
+                measure_indent(document.bytes(), *start, usize::from(self.indent_width()));
             kind.matches(document.bytes(), *start + indent)
         });
         let replacements = starts
@@ -1378,7 +1373,7 @@ impl Core {
             .enumerate()
             .map(|(index, start)| {
                 let (_, indent) =
-                    measure_indent(document.bytes(), start, self.config.indent_with.count());
+                    measure_indent(document.bytes(), start, usize::from(self.indent_width()));
                 let content_start = start + indent;
                 let remove = markdown_block_prefix_len(document.bytes(), content_start);
                 let insert = if all_prefixed {
@@ -1465,7 +1460,7 @@ impl Core {
             .into_iter()
             .map(|start| {
                 let (indent_count, indent_bytes) =
-                    measure_indent(document.bytes(), start, self.config.indent_with.count());
+                    measure_indent(document.bytes(), start, usize::from(self.indent_width()));
                 let new_count = match direction {
                     LRDirection::Left => indent_count.saturating_sub(1),
                     LRDirection::Right => indent_count + 1,
@@ -1473,10 +1468,7 @@ impl Core {
                 (
                     Position::at(&document, start),
                     indent_bytes,
-                    vec![
-                        self.config.indent_with.byte();
-                        new_count * self.config.indent_with.count()
-                    ],
+                    vec![b' '; new_count * usize::from(self.indent_width())],
                 )
             })
             .collect();
@@ -2081,10 +2073,7 @@ impl Core {
 
     fn soft_tab_width(&self) -> usize {
         if self.config.count_soft_tab_as_grapheme_cluster {
-            match self.config.indent_with {
-                IndentMode::Spaces(count) => usize::from(count),
-                IndentMode::Tabs => 0,
-            }
+            usize::from(self.indent_width())
         } else {
             0
         }

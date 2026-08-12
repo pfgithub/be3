@@ -22,6 +22,7 @@ mod find_next_cycles_through_matches_and_wraps;
 mod find_previous_cycles_through_matches_and_wraps;
 mod find_status_reports_current_match_index;
 mod has_stop;
+mod indentation_width_is_configured_through_operations;
 mod markdown_block_styles;
 mod markdown_checkbox_toggle;
 mod markdown_formatting;

@@ -44,6 +44,7 @@ pub struct TextDocument {
     sequence: eips::Eips<Uuid>,
     bytes: Vec<u8>,
     language: TextLanguage,
+    indent_width: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,6 +55,9 @@ pub enum TextOperation {
     },
     SetLanguage {
         language: TextLanguage,
+    },
+    SetIndentWidth {
+        width: u8,
     },
 }
 
@@ -87,6 +91,7 @@ impl TextDocument {
             sequence: eips::Eips::new(),
             bytes: Vec::new(),
             language: TextLanguage::default(),
+            indent_width: 2,
         }
     }
 
@@ -128,6 +133,14 @@ impl TextDocument {
 
     pub const fn set_language_operation(language: TextLanguage) -> TextOperation {
         TextOperation::SetLanguage { language }
+    }
+
+    pub const fn indent_width(&self) -> u8 {
+        self.indent_width
+    }
+
+    pub const fn set_indent_width_operation(width: u8) -> TextOperation {
+        TextOperation::SetIndentWidth { width }
     }
 
     pub fn insert_operation(
@@ -195,6 +208,10 @@ impl Block for TextDocument {
             TextOperation::Edit { change, item } => (*change, *item),
             TextOperation::SetLanguage { language } => {
                 block.language = *language;
+                return;
+            }
+            TextOperation::SetIndentWidth { width } => {
+                block.indent_width = (*width).max(1);
                 return;
             }
         };

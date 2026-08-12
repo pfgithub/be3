@@ -221,6 +221,7 @@ impl TextEditor {
     fn toolbar(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) {
         let previous = self.core.language();
         let mut language = previous;
+        let mut indent_width = self.core.indent_width();
         ui.horizontal_wrapped(|ui| {
             ui.label("Language:");
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
@@ -230,6 +231,12 @@ impl TextEditor {
                         ui.selectable_value(&mut language, choice, choice.label());
                     }
                 });
+            ui.label("Indentation:");
+            ui.add(
+                egui::DragValue::new(&mut indent_width)
+                    .range(1..=8)
+                    .suffix(" spaces"),
+            );
             if previous == TextLanguage::Markdown {
                 ui.separator();
                 if ui.button(ICON_FORMAT_BOLD).on_hover_text("Bold").clicked() {
@@ -319,6 +326,10 @@ impl TextEditor {
         if language != previous {
             self.core
                 .execute_command(EditorCommand::SetLanguage(language));
+        }
+        if indent_width != self.core.indent_width() {
+            self.core
+                .execute_command(EditorCommand::SetIndentWidth(indent_width));
         }
     }
 
