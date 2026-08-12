@@ -20,14 +20,15 @@ use std::{io, path::PathBuf};
 
 use app_state::{AppStateStore, SavedAccount, ServerLocation};
 use block::{
-    BlockAccess, BlockParent, BlockReference, BlockReferenceList, Workspace, WorkspaceInvitation,
-    WorkspaceRole,
+    BlockAccess, BlockParent, BlockReference, BlockReferenceList, ManagementErrorCode, Workspace,
+    WorkspaceInvitation, WorkspaceRole,
 };
 use block_client::{
     blocks::workspace_index::BlockEntry,
     presence::{pick_free_color, PresenceColor, UserActive},
     properties::MAX_NAME_BYTES,
-    BlockClient, DynamicArtifactDescriptor, ManagementClient, ReferenceList, Session,
+    BlockClient, DynamicArtifactDescriptor, ManagementClient, ManagementClientError, ReferenceList,
+    Session,
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
@@ -159,9 +160,13 @@ struct BlockApp {
     workspaces: Vec<Workspace>,
     invitations: Vec<WorkspaceInvitation>,
     workspaces_loaded: bool,
-    pending_workspace_request: Option<platform::RequestResult<Result<WorkspaceResult, String>>>,
+    pending_workspace_request:
+        Option<platform::RequestResult<Result<WorkspaceResult, WorkspaceRequestError>>>,
     workspace_name: String,
     workspace_error: Option<String>,
+    /// Set while an account's session token has been rejected by the server
+    /// and the user is being asked to reauthenticate.
+    reauth: Option<ReauthState>,
     invite_open: bool,
     invite_email: String,
     invite_role: WorkspaceRole,
@@ -406,6 +411,41 @@ enum WorkspaceResult {
     Invited,
 }
 
+/// A failed workspace/management request, keeping track of whether it failed
+/// because the account's session token is no longer valid, which is handled
+/// by prompting to reauthenticate rather than shown as a plain error.
+struct WorkspaceRequestError {
+    message: String,
+    invalid_token: bool,
+}
+
+impl From<ManagementClientError> for WorkspaceRequestError {
+    fn from(error: ManagementClientError) -> Self {
+        let invalid_token = matches!(
+            error,
+            ManagementClientError::Server {
+                code: ManagementErrorCode::InvalidToken,
+                ..
+            }
+        );
+        Self {
+            message: error.to_string(),
+            invalid_token,
+        }
+    }
+}
+
+/// State for reauthenticating an account whose session token the server has
+/// rejected. The account's existing token is left in storage untouched until
+/// a fresh one is obtained, so a cancelled or failed reauthentication does
+/// not lose access beyond the failure that prompted it.
+struct ReauthState {
+    account: Account,
+    password: String,
+    pending: Option<platform::RequestResult<Result<Session, String>>>,
+    error: Option<String>,
+}
+
 #[derive(Clone)]
 enum PendingDestructiveAction {
     Switch(Account),
@@ -530,6 +570,7 @@ impl BlockApp {
             pending_workspace_request: None,
             workspace_name: String::new(),
             workspace_error: None,
+            reauth: None,
             invite_open: false,
             invite_email: String::new(),
             invite_role: WorkspaceRole::Editor,
@@ -868,28 +909,28 @@ impl BlockApp {
                     let workspaces = client
                         .list_workspaces(&token)
                         .await
-                        .map_err(|error| error.to_string())?;
+                        .map_err(WorkspaceRequestError::from)?;
                     let invitations = client
                         .list_invitations(&token)
                         .await
-                        .map_err(|error| error.to_string())?;
+                        .map_err(WorkspaceRequestError::from)?;
                     Ok(WorkspaceResult::Loaded(workspaces, invitations))
                 }
                 WorkspaceOperation::Create(name) => client
                     .create_workspace(&token, name)
                     .await
                     .map(WorkspaceResult::Created)
-                    .map_err(|error| error.to_string()),
+                    .map_err(WorkspaceRequestError::from),
                 WorkspaceOperation::Respond(invitation_id, accept) => client
                     .respond_invitation(&token, invitation_id, accept)
                     .await
                     .map(|()| WorkspaceResult::Responded)
-                    .map_err(|error| error.to_string()),
+                    .map_err(WorkspaceRequestError::from),
                 WorkspaceOperation::Invite(workspace_id, email, role) => client
                     .invite(&token, workspace_id, email, role)
                     .await
                     .map(|_| WorkspaceResult::Invited)
-                    .map_err(|error| error.to_string()),
+                    .map_err(WorkspaceRequestError::from),
             }
         });
         self.workspace_error = None;
@@ -934,7 +975,157 @@ impl BlockApp {
                 self.invite_email.clear();
                 self.invite_open = false;
             }
-            Err(error) => self.workspace_error = Some(error),
+            Err(error) if error.invalid_token => self.begin_reauth(),
+            Err(error) => self.workspace_error = Some(error.message),
+        }
+    }
+
+    fn begin_reauth(&mut self) {
+        if self.reauth.is_some() {
+            return;
+        }
+        self.reauth = Some(ReauthState {
+            account: self.account.clone(),
+            password: String::new(),
+            pending: None,
+            error: None,
+        });
+    }
+
+    fn begin_reauth_request(&mut self) {
+        let Some(reauth) = &self.reauth else {
+            return;
+        };
+        if reauth.pending.is_some() {
+            return;
+        }
+        let url = match &reauth.account.server {
+            ServerLocation::Local => self.local_server_url.clone(),
+            ServerLocation::Remote(url) => url.clone(),
+        };
+        let email = reauth.account.email.clone();
+        let password = reauth.password.clone();
+        let client = match ManagementClient::new(url) {
+            Ok(client) => client,
+            Err(error) => {
+                self.reauth.as_mut().unwrap().error = Some(error.to_string());
+                return;
+            }
+        };
+        let receiver = platform::spawn_request(async move {
+            client
+                .login(email, password)
+                .await
+                .map_err(|error| error.to_string())
+        });
+        let reauth = self.reauth.as_mut().unwrap();
+        reauth.error = None;
+        reauth.pending = Some(receiver);
+    }
+
+    fn poll_reauth_request(&mut self) {
+        let result = self
+            .reauth
+            .as_ref()
+            .and_then(|reauth| reauth.pending.as_ref())
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some(result) = result else {
+            return;
+        };
+        let Some(mut reauth) = self.reauth.take() else {
+            return;
+        };
+        reauth.pending = None;
+        match result {
+            Ok(session) => {
+                let mut updated = reauth.account.clone();
+                updated.id = session.account.id;
+                updated.email = session.account.email;
+                updated.name = session.account.display_name;
+                updated.token = session.token;
+                if let Err(error) = self.app_state.save_account(&updated) {
+                    reauth.error = Some(error.to_string());
+                    self.reauth = Some(reauth);
+                    return;
+                }
+                if let Some(saved) = self
+                    .accounts
+                    .iter_mut()
+                    .find(|saved| saved.server == updated.server && saved.id == updated.id)
+                {
+                    *saved = updated.clone();
+                }
+                if self.account.server == updated.server && self.account.id == updated.id {
+                    self.account.token = updated.token;
+                }
+                self.workspace_error = None;
+                self.workspaces_loaded = false;
+                self.begin_workspace_request(WorkspaceOperation::Load);
+            }
+            Err(error) => {
+                reauth.error = Some(error);
+                self.reauth = Some(reauth);
+            }
+        }
+    }
+
+    fn show_reauth(&mut self, ctx: &egui::Context) {
+        self.poll_reauth_request();
+        let Some(reauth) = &mut self.reauth else {
+            return;
+        };
+        let busy = reauth.pending.is_some();
+        let ready = !busy && !reauth.password.is_empty();
+        let mut submit = false;
+        let mut log_out = false;
+        egui::Modal::new(egui::Id::new("reauth")).show(ctx, |ui| {
+            ui.set_width(320.0);
+            ui.heading("Session expired");
+            ui.add_space(8.0);
+            ui.label(format!(
+                "Your session for {} is no longer valid. Enter your password to sign in again.",
+                reauth.account.email
+            ));
+            ui.add_space(12.0);
+            ui.label("Password");
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut reauth.password)
+                    .password(true)
+                    .desired_width(f32::INFINITY),
+            );
+            let submitted_via_enter =
+                response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if let Some(error) = &reauth.error {
+                ui.add_space(8.0);
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            }
+            ui.add_space(16.0);
+            egui::Sides::new().show(
+                ui,
+                |ui| {
+                    if busy {
+                        ui.spinner();
+                        ui.weak("Signing in\u{2026}");
+                    }
+                },
+                |ui| {
+                    submit = ui
+                        .add_enabled(ready, egui::Button::new("Sign in").selected(ready))
+                        .clicked()
+                        || (ready && submitted_via_enter);
+                    log_out = ui
+                        .add_enabled(!busy, egui::Button::new("Log out"))
+                        .clicked();
+                },
+            );
+        });
+        if submit {
+            self.begin_reauth_request();
+        }
+        if log_out {
+            if let Some(account) = self.reauth.take().map(|reauth| reauth.account) {
+                self.log_out_account(&account);
+            }
         }
     }
 
@@ -980,7 +1171,10 @@ impl BlockApp {
     }
 
     fn show_workspace_onboarding(&mut self, ui: &mut egui::Ui) {
-        if !self.workspaces_loaded && self.pending_workspace_request.is_none() {
+        if !self.workspaces_loaded
+            && self.pending_workspace_request.is_none()
+            && self.reauth.is_none()
+        {
             self.begin_workspace_request(WorkspaceOperation::Load);
         }
         self.poll_workspace_request();
@@ -1321,6 +1515,7 @@ impl BlockApp {
         self.workspaces_loaded = false;
         self.pending_workspace_request = None;
         self.workspace_error = None;
+        self.reauth = None;
         self.invite_open = false;
         self.roots = roots;
         self.client = client;
@@ -3346,11 +3541,13 @@ impl BlockApp {
         }
         if self.workspace.is_none() {
             self.show_workspace_onboarding(ui);
+            self.show_reauth(ui.ctx());
             performance::end_frame();
             ui.ctx().request_repaint_after(Duration::from_millis(100));
             return;
         }
         self.poll_workspace_request();
+        self.show_reauth(ui.ctx());
         self.intercept_close(ui.ctx());
         self.process_pending_transfers();
         self.process_pending_copies();
