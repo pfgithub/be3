@@ -36,6 +36,7 @@ const CODE_PIXEL_SIZE: u32 = 12;
 const INLINE_EMBED_HEIGHT: f32 = 24.0;
 const UNAVAILABLE_EMBED_SIZE: Vec2 = Vec2::new(320.0, 120.0);
 const CHECKBOX_WIDTH: f32 = 18.0;
+const WRAP_FALLBACK_REMAINING_WIDTH: f32 = 0.15;
 
 pub(super) struct TextRenderer {
     library: ft::FT_Library,
@@ -347,6 +348,7 @@ impl TextRenderer {
         embeds: &[ResolvedEmbed],
         checkboxes: &[Range<usize>],
         hidden: &[Range<usize>],
+        wrap_width: f32,
     ) -> (DocumentLayout, LayoutTimings) {
         let mut timings = LayoutTimings::default();
         let mut lines = Vec::new();
@@ -370,7 +372,6 @@ impl TextRenderer {
                 document_line += 1;
                 continue;
             }
-            let line_index = lines.len();
             let line_embeds = embeds
                 .iter()
                 .filter(|embed| embed.range.start >= start && embed.range.end <= end)
@@ -379,45 +380,71 @@ impl TextRenderer {
                 .iter()
                 .filter(|checkbox| checkbox.start >= start && checkbox.end <= end)
                 .collect::<Vec<_>>();
-            let (glyphs, width, line_positions, baseline, height, line_timings) = self.layout_line(
+            let line_ranges = self.wrap_line_ranges(
                 bytes,
                 start,
                 end,
-                newline.is_some(),
                 &line_embeds,
                 &line_checkboxes,
                 highlight,
+                wrap_width,
             );
-            timings.display_lines += line_timings.display_lines;
-            timings.font_runs += line_timings.font_runs;
-            timings.shape += line_timings.shape;
-            timings.line_finalize += line_timings.line_finalize;
-            for (doc_byte, x) in line_positions {
-                if let Some(position) = positions.get_mut(doc_byte) {
-                    *position = Some(BytePosition {
-                        line: line_index,
-                        x,
-                    });
+            for range in line_ranges {
+                let line_index = lines.len();
+                let line_embeds = line_embeds
+                    .iter()
+                    .copied()
+                    .filter(|embed| {
+                        embed.range.start >= range.start && embed.range.end <= range.end
+                    })
+                    .collect::<Vec<_>>();
+                let line_checkboxes = line_checkboxes
+                    .iter()
+                    .copied()
+                    .filter(|checkbox| checkbox.start >= range.start && checkbox.end <= range.end)
+                    .collect::<Vec<_>>();
+                let (glyphs, width, line_positions, baseline, height, line_timings) = self
+                    .layout_line(
+                        bytes,
+                        range.start,
+                        range.end,
+                        newline.is_some() && range.end == end,
+                        &line_embeds,
+                        &line_checkboxes,
+                        highlight,
+                    );
+                timings.display_lines += line_timings.display_lines;
+                timings.font_runs += line_timings.font_runs;
+                timings.shape += line_timings.shape;
+                timings.line_finalize += line_timings.line_finalize;
+                for (doc_byte, x) in line_positions {
+                    if let Some(position) = positions.get_mut(doc_byte) {
+                        position.get_or_insert(BytePosition {
+                            line: line_index,
+                            x,
+                        });
+                    }
                 }
+                positions[range.start].get_or_insert(BytePosition {
+                    line: line_index,
+                    x: 0.0,
+                });
+                positions[range.end].get_or_insert(BytePosition {
+                    line: line_index,
+                    x: width,
+                });
+                lines.push(LineLayout {
+                    start: range.start,
+                    end: range.end,
+                    y,
+                    width,
+                    height,
+                    document_line,
+                    baseline,
+                    glyphs,
+                });
+                y += height;
             }
-            positions[start].get_or_insert(BytePosition {
-                line: line_index,
-                x: 0.0,
-            });
-            positions[end].get_or_insert(BytePosition {
-                line: line_index,
-                x: width,
-            });
-            lines.push(LineLayout {
-                start,
-                end,
-                y,
-                width,
-                height,
-                document_line,
-                baseline,
-                glyphs,
-            });
             for embed in &line_embeds {
                 let Some(left) = positions[embed.range.start] else {
                     continue;
@@ -425,6 +452,12 @@ impl TextRenderer {
                 let Some(right) = positions[embed.range.end] else {
                     continue;
                 };
+                let Some(line) = lines.get(left.line) else {
+                    continue;
+                };
+                if right.line != left.line {
+                    continue;
+                }
                 embed_layouts.push(EmbedLayout {
                     range: embed.range.clone(),
                     id: embed.id,
@@ -434,15 +467,14 @@ impl TextRenderer {
                     large: false,
                     available: embed.available,
                     rect: Rect::from_min_max(
-                        Pos2::new(left.x, y + (height - INLINE_EMBED_HEIGHT) * 0.5),
+                        Pos2::new(left.x, line.y + (line.height - INLINE_EMBED_HEIGHT) * 0.5),
                         Pos2::new(
                             right.x.max(left.x + 1.0),
-                            y + (height + INLINE_EMBED_HEIGHT) * 0.5,
+                            line.y + (line.height + INLINE_EMBED_HEIGHT) * 0.5,
                         ),
                     ),
                 });
             }
-            y += height;
             if let Some(embed) = line_embeds.iter().find(|embed| embed.large) {
                 let frame_size = embed.frame_size.unwrap_or(UNAVAILABLE_EMBED_SIZE);
                 embed_layouts.push(EmbedLayout {
@@ -483,6 +515,77 @@ impl TextRenderer {
             },
             timings,
         )
+    }
+
+    fn wrap_line_ranges(
+        &self,
+        document: &[u8],
+        start: usize,
+        end: usize,
+        embeds: &[&ResolvedEmbed],
+        checkboxes: &[&Range<usize>],
+        highlight: &SyntaxHighlight,
+        wrap_width: f32,
+    ) -> Vec<Range<usize>> {
+        let mut ranges = Vec::new();
+        let mut range_start = start;
+        loop {
+            if range_start == end {
+                ranges.push(range_start..end);
+                break;
+            }
+            let range_embeds = embeds
+                .iter()
+                .copied()
+                .filter(|embed| embed.range.start >= range_start && embed.range.end <= end)
+                .collect::<Vec<_>>();
+            let range_checkboxes = checkboxes
+                .iter()
+                .copied()
+                .filter(|checkbox| checkbox.start >= range_start && checkbox.end <= end)
+                .collect::<Vec<_>>();
+            let (_, width, positions, _, _, _) = self.layout_line(
+                document,
+                range_start,
+                end,
+                false,
+                &range_embeds,
+                &range_checkboxes,
+                highlight,
+            );
+            if width <= wrap_width {
+                ranges.push(range_start..end);
+                break;
+            }
+            let mut breakpoints = positions
+                .into_iter()
+                .filter(|(byte, x)| {
+                    *byte > range_start
+                        && *byte < end
+                        && *x <= wrap_width
+                        && utf8_boundary(document, *byte)
+                        && !embeds.iter().any(|embed| embed.range.contains(byte))
+                        && !checkboxes.iter().any(|checkbox| checkbox.contains(byte))
+                })
+                .collect::<Vec<_>>();
+            breakpoints.sort_unstable_by_key(|(byte, _)| *byte);
+            let good_breakpoint = breakpoints
+                .iter()
+                .rev()
+                .find(|(byte, _)| good_wrap_breakpoint(document, *byte))
+                .copied();
+            let fallback_breakpoint = breakpoints
+                .last()
+                .copied()
+                .filter(|(_, x)| wrap_width - *x < wrap_width * WRAP_FALLBACK_REMAINING_WIDTH);
+            let Some((breakpoint, _)) = good_breakpoint.or(fallback_breakpoint) else {
+                ranges.push(range_start..end);
+                break;
+            };
+            ranges.push(range_start..breakpoint);
+            range_start = breakpoint;
+        }
+        ranges
     }
 
     /// Lays out one display line, split at each checkbox marker it contains
@@ -889,6 +992,16 @@ impl TextRenderer {
         }
         self.glyphs.insert(key, result);
     }
+}
+
+fn good_wrap_breakpoint(document: &[u8], breakpoint: usize) -> bool {
+    document
+        .get(breakpoint.saturating_sub(1))
+        .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(*byte, b'-' | b'/' | b'\\'))
+}
+
+fn utf8_boundary(document: &[u8], byte: usize) -> bool {
+    byte == 0 || byte == document.len() || document[byte] & 0b1100_0000 != 0b1000_0000
 }
 
 fn align_markdown_tables(

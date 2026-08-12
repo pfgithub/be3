@@ -178,6 +178,7 @@ struct CachedLayout {
     language: TextLanguage,
     embeds: Vec<ResolvedEmbed>,
     hidden: Vec<Range<usize>>,
+    wrap_width: f32,
     layout: Arc<DocumentLayout>,
 }
 
@@ -1623,7 +1624,14 @@ impl TextEditor {
         let height = match &self.renderer {
             Ok(renderer) => {
                 renderer
-                    .layout_profiled(&bytes, &highlight, &embeds, &checkboxes, &hidden)
+                    .layout_profiled(
+                        &bytes,
+                        &highlight,
+                        &embeds,
+                        &checkboxes,
+                        &hidden,
+                        (width - PADDING.x * 2.0).max(1.0),
+                    )
                     .0
                     .size
                     .y
@@ -1813,6 +1821,10 @@ impl BlockEditor for TextEditor {
             .collect::<Vec<_>>();
         let sections = self.core.collapsible_sections();
         let hidden = hidden_ranges_from_sections(&sections);
+        let total_lines = bytes.iter().filter(|byte| **byte == b'\n').count() + 1;
+        let wrap_width = (ui.available_width() - gutter_width(ui, total_lines) - PADDING.x * 2.0)
+            .max(1.0)
+            .round();
         let highlight_start = Instant::now();
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
@@ -1823,6 +1835,7 @@ impl BlockEditor for TextEditor {
                 && cached.bytes == bytes
                 && cached.embeds == embeds
                 && cached.hidden == hidden
+                && cached.wrap_width == wrap_width
         }) {
             Arc::clone(&cached.layout)
         } else {
@@ -1834,6 +1847,7 @@ impl BlockEditor for TextEditor {
                         &embeds,
                         &checkbox_marker_ranges,
                         &hidden,
+                        wrap_width,
                     );
                     profile.layout_detail = Some(detail);
                     Arc::new(layout)
@@ -1853,6 +1867,7 @@ impl BlockEditor for TextEditor {
                 language,
                 embeds,
                 hidden,
+                wrap_width,
                 layout: Arc::clone(&layout),
             });
             layout
