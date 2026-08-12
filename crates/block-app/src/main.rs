@@ -2423,10 +2423,14 @@ impl BlockApp {
         relationships: Option<&block_client::BlockRelationships>,
     ) -> Option<BlockTabHistoryItem> {
         let relationships = relationships?;
-        if relationships.backrefs.len() <= 1 {
+        let backrefs = self
+            .backrefs
+            .get(&active)
+            .map(|list| (list.is_loaded(), list.read()))?;
+        if !backrefs.0 || backrefs.1.len() <= 1 {
             return None;
         }
-        let count = relationships.backrefs.len();
+        let count = backrefs.1.len();
         let container = self.opened_via.get(&active).copied();
         let via_reference =
             container.is_some_and(|container| relationships.parent != BlockParent::Uuid(container));
@@ -2446,10 +2450,6 @@ impl BlockApp {
                 })
                 .or_else(|| self.block_types.get(&parent_id).copied())
         });
-        let backrefs = self
-            .backrefs
-            .get(&active)
-            .map(|list| (list.is_loaded(), list.read()));
         let copy_permission = self.copy_permission(container);
         let mut navigate = None;
         let mut context_action = None;
@@ -2491,14 +2491,10 @@ impl BlockApp {
                             "This block appears in {count} places. Editing it here changes it everywhere."
                         ));
                         ui.menu_button("Show references", |ui| {
-                            let Some((loaded, backrefs)) = &backrefs else {
-                                ui.weak("Loading…");
-                                return;
-                            };
                             self.status_reference_list(
                                 ui,
-                                backrefs,
-                                *loaded,
+                                &backrefs.1,
+                                backrefs.0,
                                 "No backrefs",
                                 None,
                                 &mut navigate,
