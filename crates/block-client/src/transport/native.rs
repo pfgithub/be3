@@ -6,8 +6,8 @@ use futures_util::{
 };
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{client::IntoClientRequest, Message},
+    connect_async_with_config,
+    tungstenite::{client::IntoClientRequest, protocol::WebSocketConfig, Message},
     MaybeTlsStream, WebSocketStream,
 };
 
@@ -19,6 +19,7 @@ type Stream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// How long a management request may take. The web build has no equivalent:
 /// `fetch` runs until the browser gives up on it.
 const MANAGEMENT_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_WEBSOCKET_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
 /// Runs the block client worker on its own thread, since native builds have no
 /// event loop to borrow.
@@ -47,9 +48,16 @@ impl Socket {
         let request = url
             .into_client_request()
             .map_err(|error| format!("invalid block server URL {url}: {error}"))?;
-        let (socket, _) = connect_async(request)
-            .await
-            .map_err(|error| format!("failed to connect to {url}: {error}"))?;
+        let (socket, _) = connect_async_with_config(
+            request,
+            Some(WebSocketConfig {
+                max_frame_size: Some(MAX_WEBSOCKET_FRAME_BYTES),
+                ..WebSocketConfig::default()
+            }),
+            false,
+        )
+        .await
+        .map_err(|error| format!("failed to connect to {url}: {error}"))?;
         let (sink, source) = socket.split();
         Ok(Self { sink, source })
     }

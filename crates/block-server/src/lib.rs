@@ -33,7 +33,11 @@ use tokio::{
     sync::{mpsc, Mutex},
     task::JoinSet,
 };
-use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{
+    accept_async_with_config,
+    tungstenite::{protocol::WebSocketConfig, Message},
+    WebSocketStream,
+};
 use uuid::Uuid;
 
 mod http;
@@ -53,6 +57,7 @@ const DATABASE_FILE: &str = "server.sqlite3";
 const MIN_PASSWORD_BYTES: usize = 8;
 /// How many random bytes back a session token before it is hex-encoded.
 const TOKEN_BYTES: usize = 32;
+const MAX_WEBSOCKET_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
 /// Controls that only make sense to change for a standalone, publicly hosted
 /// server. The embedded server block-app starts for itself uses the default.
@@ -165,7 +170,14 @@ async fn handle_connection(
             return Err(ServerError::InvalidHandshake);
         }
     };
-    let socket = accept_async(PrefixedStream::new(request.buffered, stream)).await?;
+    let socket = accept_async_with_config(
+        PrefixedStream::new(request.buffered, stream),
+        Some(WebSocketConfig {
+            max_frame_size: Some(MAX_WEBSOCKET_FRAME_BYTES),
+            ..WebSocketConfig::default()
+        }),
+    )
+    .await?;
     handle_block_connection(socket, store, watch_hub, identity).await
 }
 
