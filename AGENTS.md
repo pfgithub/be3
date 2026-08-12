@@ -96,4 +96,4 @@ Verification:
 - Do not use the browser tool.
 
 Environment:
-- You are inside of an ubuntu VM. You can install & delete things as needed. You have sudo access.
+- You are inside of an ubuntu VM.
