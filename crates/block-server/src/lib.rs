@@ -771,7 +771,7 @@ async fn handle_text_message(
                 None,
             )
         }
-        ClientMessage::PostPresence {
+        ClientMessage::SetPresence {
             request_id,
             id,
             presence_id,
@@ -779,15 +779,18 @@ async fn handle_text_message(
         } => {
             if !store.access(identity).await.get(id).can_view() {
                 return (
-                    permission_denied(request_id, CommandKind::PostPresence, id),
+                    permission_denied(request_id, CommandKind::SetPresence, id),
                     None,
                 );
             }
-            if data.len() > MAX_PROPERTY_VALUE_BYTES {
+            if data
+                .as_ref()
+                .is_some_and(|data| data.len() > MAX_PROPERTY_VALUE_BYTES)
+            {
                 return (
                     ServerMessage::Error {
                         request_id: Some(request_id),
-                        command: Some(CommandKind::PostPresence),
+                        command: Some(CommandKind::SetPresence),
                         id: Some(id),
                         code: ErrorCode::InvalidMessage,
                         message: "presence value exceeds the maximum size".into(),
@@ -796,44 +799,28 @@ async fn handle_text_message(
                     None,
                 );
             }
-            let watching = watch_hub
-                .post_presence(store, workspace_id, id, client_id, presence_id, data)
-                .await;
+            let watching = match data {
+                Some(data) => {
+                    watch_hub
+                        .post_presence(store, workspace_id, id, client_id, presence_id, data)
+                        .await
+                }
+                None => {
+                    watch_hub
+                        .clear_presence(store, workspace_id, id, client_id, presence_id)
+                        .await
+                }
+            };
             if !watching {
                 return (
-                    not_watching(request_id, CommandKind::PostPresence, id),
+                    not_watching(request_id, CommandKind::SetPresence, id),
                     None,
                 );
             }
             (
                 ServerMessage::Ok {
                     request_id,
-                    command: CommandKind::PostPresence,
-                    id,
-                    seq: None,
-                    operation_id: None,
-                },
-                None,
-            )
-        }
-        ClientMessage::ClearPresence {
-            request_id,
-            id,
-            presence_id,
-        } => {
-            let watching = watch_hub
-                .clear_presence(store, workspace_id, id, client_id, presence_id)
-                .await;
-            if !watching {
-                return (
-                    not_watching(request_id, CommandKind::ClearPresence, id),
-                    None,
-                );
-            }
-            (
-                ServerMessage::Ok {
-                    request_id,
-                    command: CommandKind::ClearPresence,
+                    command: CommandKind::SetPresence,
                     id,
                     seq: None,
                     operation_id: None,

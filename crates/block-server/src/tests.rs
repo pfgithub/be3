@@ -536,11 +536,11 @@ mod support {
     ) -> ServerMessage {
         request(
             socket,
-            ClientMessage::PostPresence {
+            ClientMessage::SetPresence {
                 request_id: Uuid::new_v4(),
                 id,
                 presence_id,
-                data,
+                data: Some(data),
             },
         )
         .await
@@ -549,10 +549,11 @@ mod support {
     pub async fn clear_presence(socket: &mut Socket, id: Uuid, presence_id: Uuid) -> ServerMessage {
         request(
             socket,
-            ClientMessage::ClearPresence {
+            ClientMessage::SetPresence {
                 request_id: Uuid::new_v4(),
                 id,
                 presence_id,
+                data: None,
             },
         )
         .await

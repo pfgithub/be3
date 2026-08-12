@@ -403,8 +403,7 @@ pub enum CommandKind {
     UpdateBatch,
     ReadBlock,
     UnwatchBlock,
-    PostPresence,
-    ClearPresence,
+    SetPresence,
     SetBlockParent,
     ListReferences,
     UnwatchReferences,
@@ -469,21 +468,14 @@ pub enum ClientMessage {
         request_id: Uuid,
         id: Uuid,
     },
-    /// Posts a presence value for a block the client is currently watching.
-    /// The server keeps the latest value per `(client, presence_id)` and
-    /// broadcasts it to every other client watching the block.
-    PostPresence {
+    /// Sets or removes a presence value for a block the client is currently
+    /// watching. The server keeps the latest value per `(client, presence_id)`
+    /// and broadcasts changes to every other client watching the block.
+    SetPresence {
         request_id: Uuid,
         id: Uuid,
         presence_id: Uuid,
-        data: Vec<u8>,
-    },
-    /// Removes a presence value this client previously posted for `id`,
-    /// notifying every other client watching the block.
-    ClearPresence {
-        request_id: Uuid,
-        id: Uuid,
-        presence_id: Uuid,
+        data: Option<Vec<u8>>,
     },
     SetBlockParent {
         request_id: Uuid,
@@ -525,8 +517,7 @@ impl ClientMessage {
             | Self::UpdateBatch { request_id, .. }
             | Self::ReadBlock { request_id, .. }
             | Self::UnwatchBlock { request_id, .. }
-            | Self::PostPresence { request_id, .. }
-            | Self::ClearPresence { request_id, .. }
+            | Self::SetPresence { request_id, .. }
             | Self::SetBlockParent { request_id, .. }
             | Self::ListReferences { request_id, .. }
             | Self::UnwatchReferences { request_id, .. }

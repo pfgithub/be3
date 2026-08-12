@@ -909,19 +909,20 @@ impl BlockClient {
     pub fn post_presence<P: PresenceKind>(&self, id: Uuid, value: &P) {
         let data = serde_json::to_vec(value)
             .unwrap_or_else(|error| fatal(format!("failed to encode presence value: {error}")));
-        self.send(WorkerCommand::PostPresence {
+        self.send(WorkerCommand::SetPresence {
             id,
             presence_id: P::ID,
-            data,
+            data: Some(data),
         });
     }
 
     /// Clears a presence value of kind `P` this client previously posted for
     /// `id`, notifying every other client watching the block.
     pub fn clear_presence<P: PresenceKind>(&self, id: Uuid) {
-        self.send(WorkerCommand::ClearPresence {
+        self.send(WorkerCommand::SetPresence {
             id,
             presence_id: P::ID,
+            data: None,
         });
     }
 
@@ -1473,14 +1474,10 @@ enum WorkerCommand {
         key: Uuid,
         value: Vec<u8>,
     },
-    PostPresence {
+    SetPresence {
         id: Uuid,
         presence_id: Uuid,
-        data: Vec<u8>,
-    },
-    ClearPresence {
-        id: Uuid,
-        presence_id: Uuid,
+        data: Option<Vec<u8>>,
     },
     ListReferences {
         list: BlockReferenceList,
@@ -1768,26 +1765,31 @@ impl WorkerState {
                 self.deferred
                     .push_back(DeferredRequest::SetBlockProperty { id, key, value });
             }
-            WorkerCommand::PostPresence {
+            WorkerCommand::SetPresence {
                 id,
                 presence_id,
                 data,
             } => {
                 let key = (id, presence_id);
-                if self.posted_presence.get(&key) == Some(&data) {
+                if data
+                    .as_ref()
+                    .is_some_and(|data| self.posted_presence.get(&key) == Some(data))
+                {
                     return;
                 }
-                self.posted_presence.insert(key, data.clone());
-                self.deferred.push_back(DeferredRequest::PostPresence {
+                match &data {
+                    Some(data) => {
+                        self.posted_presence.insert(key, data.clone());
+                    }
+                    None => {
+                        self.posted_presence.remove(&key);
+                    }
+                }
+                self.deferred.push_back(DeferredRequest::SetPresence {
                     id,
                     presence_id,
                     data,
                 });
-            }
-            WorkerCommand::ClearPresence { id, presence_id } => {
-                self.posted_presence.remove(&(id, presence_id));
-                self.deferred
-                    .push_back(DeferredRequest::ClearPresence { id, presence_id });
             }
             WorkerCommand::ListReferences { list, completed } => {
                 self.deferred
@@ -2088,8 +2090,7 @@ impl WorkerState {
                             block.properties.insert(key, value);
                         }
                     }
-                    (PendingRequest::PostPresence { .. }, CommandKind::PostPresence) => {}
-                    (PendingRequest::ClearPresence { .. }, CommandKind::ClearPresence) => {}
+                    (PendingRequest::SetPresence { .. }, CommandKind::SetPresence) => {}
                     (PendingRequest::UnwatchReferences, CommandKind::UnwatchReferences)
                         if id.is_nil() => {}
                     (
@@ -2425,29 +2426,18 @@ impl WorkerState {
                     value,
                 });
             }
-            DeferredRequest::PostPresence {
+            DeferredRequest::SetPresence {
                 id,
                 presence_id,
                 data,
             } => {
                 self.requests
-                    .insert(request_id, PendingRequest::PostPresence { id, presence_id });
-                self.outbound.push_back(ClientMessage::PostPresence {
+                    .insert(request_id, PendingRequest::SetPresence { id, presence_id });
+                self.outbound.push_back(ClientMessage::SetPresence {
                     request_id,
                     id,
                     presence_id,
                     data,
-                });
-            }
-            DeferredRequest::ClearPresence { id, presence_id } => {
-                self.requests.insert(
-                    request_id,
-                    PendingRequest::ClearPresence { id, presence_id },
-                );
-                self.outbound.push_back(ClientMessage::ClearPresence {
-                    request_id,
-                    id,
-                    presence_id,
                 });
             }
             DeferredRequest::ListReferences { list, completed } => {
@@ -2534,11 +2524,7 @@ enum PendingRequest {
         key: Uuid,
         value: Vec<u8>,
     },
-    PostPresence {
-        id: Uuid,
-        presence_id: Uuid,
-    },
-    ClearPresence {
+    SetPresence {
         id: Uuid,
         presence_id: Uuid,
     },
@@ -2582,12 +2568,8 @@ impl PendingRequest {
                 "Set block property",
                 format!("block {id}, property {key}, {} bytes", value.len()),
             ),
-            Self::PostPresence { id, presence_id } => (
-                "Post presence",
-                format!("block {id}, presence {presence_id}"),
-            ),
-            Self::ClearPresence { id, presence_id } => (
-                "Clear presence",
+            Self::SetPresence { id, presence_id } => (
+                "Set presence",
                 format!("block {id}, presence {presence_id}"),
             ),
             Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
@@ -2627,14 +2609,10 @@ enum DeferredRequest {
         key: Uuid,
         value: Vec<u8>,
     },
-    PostPresence {
+    SetPresence {
         id: Uuid,
         presence_id: Uuid,
-        data: Vec<u8>,
-    },
-    ClearPresence {
-        id: Uuid,
-        presence_id: Uuid,
+        data: Option<Vec<u8>>,
     },
     ListReferences {
         list: BlockReferenceList,
@@ -2670,17 +2648,17 @@ impl DeferredRequest {
                 "Set block property",
                 format!("block {id}, property {key}, {} bytes", value.len()),
             ),
-            Self::PostPresence {
+            Self::SetPresence {
                 id,
                 presence_id,
                 data,
             } => (
-                "Post presence",
-                format!("block {id}, presence {presence_id}, {} bytes", data.len()),
-            ),
-            Self::ClearPresence { id, presence_id } => (
-                "Clear presence",
-                format!("block {id}, presence {presence_id}"),
+                "Set presence",
+                format!(
+                    "block {id}, presence {presence_id}, {}",
+                    data.as_ref()
+                        .map_or_else(|| "cleared".into(), |data| format!("{} bytes", data.len()))
+                ),
             ),
             Self::ListReferences { list, .. } => ("List references", format!("list {list:?}")),
             Self::WatchReferences { list } => ("Watch references", format!("list {list:?}")),
@@ -2771,22 +2749,18 @@ fn client_message_debug_entry(message: &ClientMessage) -> ClientDebugEntry {
         ClientMessage::UnwatchBlock { request_id, id } => {
             ("Unwatch block", format!("request {request_id}, block {id}"))
         }
-        ClientMessage::PostPresence {
+        ClientMessage::SetPresence {
             request_id,
             id,
             presence_id,
-            ..
+            data,
         } => (
-            "Post presence",
-            format!("request {request_id}, block {id}, presence {presence_id}"),
-        ),
-        ClientMessage::ClearPresence {
-            request_id,
-            id,
-            presence_id,
-        } => (
-            "Clear presence",
-            format!("request {request_id}, block {id}, presence {presence_id}"),
+            "Set presence",
+            format!(
+                "request {request_id}, block {id}, presence {presence_id}, {}",
+                data.as_ref()
+                    .map_or_else(|| "cleared".into(), |data| format!("{} bytes", data.len()))
+            ),
         ),
         ClientMessage::SetBlockParent {
             request_id,

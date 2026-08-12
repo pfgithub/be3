@@ -28,35 +28,39 @@ fn post_presence_ignores_unchanged_values() {
     let id = Uuid::from_u128(1);
     let presence_id = Uuid::from_u128(2);
 
-    state.handle_command(WorkerCommand::PostPresence {
+    state.handle_command(WorkerCommand::SetPresence {
         id,
         presence_id,
-        data: vec![1],
+        data: Some(vec![1]),
     });
-    state.handle_command(WorkerCommand::PostPresence {
+    state.handle_command(WorkerCommand::SetPresence {
         id,
         presence_id,
-        data: vec![1],
+        data: Some(vec![1]),
     });
-    state.handle_command(WorkerCommand::PostPresence {
+    state.handle_command(WorkerCommand::SetPresence {
         id,
         presence_id,
-        data: vec![2],
+        data: Some(vec![2]),
     });
-    state.handle_command(WorkerCommand::ClearPresence { id, presence_id });
-    state.handle_command(WorkerCommand::PostPresence {
+    state.handle_command(WorkerCommand::SetPresence {
         id,
         presence_id,
-        data: vec![2],
+        data: None,
+    });
+    state.handle_command(WorkerCommand::SetPresence {
+        id,
+        presence_id,
+        data: Some(vec![2]),
     });
 
     assert!(matches!(
         state.deferred.make_contiguous(),
         [
-            DeferredRequest::PostPresence { data, .. },
-            DeferredRequest::PostPresence { data: changed_data, .. },
-            DeferredRequest::ClearPresence { .. },
-            DeferredRequest::PostPresence { data: reposted_data, .. },
+            DeferredRequest::SetPresence { data: Some(data), .. },
+            DeferredRequest::SetPresence { data: Some(changed_data), .. },
+            DeferredRequest::SetPresence { data: None, .. },
+            DeferredRequest::SetPresence { data: Some(reposted_data), .. },
         ] if *data == [1] && *changed_data == [2] && *reposted_data == [2]
     ));
 }
