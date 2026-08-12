@@ -11,6 +11,7 @@ members = [
     "crates/citygame",
     "crates/citygenerator",
     "crates/logicgame",
+    "crates/cvl2",
 ]
 resolver = "2"
 
