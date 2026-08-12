@@ -41,8 +41,8 @@ use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabVi
 use egui_material_icons::{
     icons::{
         ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_AUTO_AWESOME, ICON_CHEVRON_RIGHT,
-        ICON_CLOSE, ICON_CLOUD, ICON_COMPUTER, ICON_CONTENT_COPY, ICON_DATA_OBJECT, ICON_EDIT,
-        ICON_GROUP_ADD, ICON_KEYBOARD_ARROW_DOWN, ICON_LINK, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT,
+        ICON_CLOSE, ICON_CLOUD, ICON_COMPUTER, ICON_DATA_OBJECT, ICON_EDIT, ICON_GROUP_ADD,
+        ICON_KEYBOARD_ARROW_DOWN, ICON_LINK, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT,
         ICON_MORE_HORIZ, ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT,
         ICON_UNDO, ICON_VISIBILITY, ICON_WORKSPACES,
     },
@@ -2471,11 +2471,10 @@ impl BlockApp {
                             .clicked();
                         let copy_button = ui.add_enabled(
                             copy_enabled,
-                            egui::Button::new(format!(
-                                "{} Make a copy",
-                                ICON_CONTENT_COPY.codepoint
-                            )),
+                            egui::Button::new(format!("{} Unlink", ICON_LINK_OFF.codepoint)),
                         );
+                        let copy_button = copy_button
+                            .on_hover_text("Replace this occurrence with its own copy, unaffected by the original");
                         make_copy = if let Some(hover) = copy_disabled_hover {
                             copy_button.on_disabled_hover_text(hover).clicked()
                         } else {
@@ -2979,6 +2978,7 @@ impl BlockApp {
                     reference.parent,
                     [reference.id],
                     permissions,
+                    is_reference,
                 ) {
                     *context_action = Some((reference.clone(), source, is_reference, action));
                 }
@@ -3162,6 +3162,7 @@ fn block_context_menu(
     current_parent: BlockParent,
     excluded: impl IntoIterator<Item = Uuid>,
     permissions: BlockMenuPermissions,
+    is_reference: bool,
 ) -> Option<BlockContextMenuAction> {
     let mut action = None;
     ui.add_enabled_ui(permissions.add, |ui| {
@@ -3243,16 +3244,20 @@ fn block_context_menu(
         action = Some(BlockContextMenuAction::Share);
         ui.close();
     }
-    let delete_text = egui::RichText::new("Delete");
+    let delete_label = if is_reference { "Unlink" } else { "Delete" };
+    let delete_text = egui::RichText::new(delete_label);
     let delete_text = if permissions.delete {
         delete_text.color(ui.visuals().error_fg_color)
     } else {
         delete_text
     };
-    if ui
-        .add_enabled(permissions.delete, egui::Button::new(delete_text))
-        .clicked()
-    {
+    let delete_response = ui.add_enabled(permissions.delete, egui::Button::new(delete_text));
+    let delete_response = if is_reference {
+        delete_response.on_hover_text("Removes this link only. The original block is not deleted.")
+    } else {
+        delete_response
+    };
+    if delete_response.clicked() {
         action = Some(BlockContextMenuAction::Delete);
         ui.close();
     }

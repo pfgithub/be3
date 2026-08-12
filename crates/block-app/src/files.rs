@@ -350,6 +350,7 @@ impl BlockApp {
                         edit: can_edit,
                         delete: can_delete_child,
                     },
+                    is_reference,
                 ) {
                     Some(BlockContextMenuAction::Picker) => {
                         self.block_picker_target =
