@@ -94,3 +94,6 @@ Verification:
 - Use commit message format `type: message` where type is fix/feat/docs/...
 - Do not perform any verification beyond running the verify script. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work — the verify script is the only verification step.
 - Do not use the browser tool.
+
+Environment:
+- You are inside of an ubuntu VM. You can install & delete things as needed. You have sudo access.
