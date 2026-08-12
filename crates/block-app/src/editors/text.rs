@@ -2396,13 +2396,15 @@ fn paint_gutter(
     let arrow_color = Color32::from_rgb(0x8f, 0xa8, 0xba);
     let number_x = gutter_rect.right() - GUTTER_PADDING_RIGHT;
     for line in &layout.lines {
-        painter.text(
-            Pos2::new(number_x, text_top + line.y + line.height / 2.0),
-            egui::Align2::RIGHT_CENTER,
-            line.document_line + 1,
-            font_id.clone(),
-            color,
-        );
+        if line.show_line_number {
+            painter.text(
+                Pos2::new(number_x, text_top + line.y + line.height / 2.0),
+                egui::Align2::RIGHT_CENTER,
+                line.document_line + 1,
+                font_id.clone(),
+                color,
+            );
+        }
         if let Some(section) = line_section(line, sections) {
             let icon = if section.collapsed || section.revealed {
                 ICON_KEYBOARD_ARROW_RIGHT

@@ -90,6 +90,7 @@ pub(super) struct LineLayout {
     /// collapsed section — unlike this entry's position in
     /// [`DocumentLayout::lines`], which skips them.
     pub document_line: usize,
+    pub show_line_number: bool,
     baseline: f32,
     glyphs: Vec<PositionedGlyph>,
 }
@@ -425,7 +426,7 @@ impl TextRenderer {
                         });
                     }
                 }
-                positions[range.start].get_or_insert(BytePosition {
+                positions[range.start] = Some(BytePosition {
                     line: line_index,
                     x: 0.0,
                 });
@@ -440,6 +441,7 @@ impl TextRenderer {
                     width,
                     height,
                     document_line,
+                    show_line_number: range.start == start,
                     baseline,
                     glyphs,
                 });
