@@ -1691,18 +1691,18 @@ impl BlockEditor for TextEditor {
 
     fn sync_cursor_presence(&mut self, client: &BlockClient, visible: bool) {
         if !visible {
-            client.clear_presence::<TextCursor>(self.block.id());
+            client.set_presence::<TextCursor>(self.block.id(), None);
             return;
         }
         let Some(cursor) = self.core.cursor_positions().first() else {
             return;
         };
-        client.post_presence(
+        client.set_presence(
             self.block.id(),
-            &TextCursor {
+            Some(&TextCursor {
                 anchor: cursor.pos.anchor,
                 focus: cursor.pos.focus,
-            },
+            }),
         );
     }
 

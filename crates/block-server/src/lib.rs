@@ -812,10 +812,7 @@ async fn handle_text_message(
                 }
             };
             if !watching {
-                return (
-                    not_watching(request_id, CommandKind::SetPresence, id),
-                    None,
-                );
+                return (not_watching(request_id, CommandKind::SetPresence, id), None);
             }
             (
                 ServerMessage::Ok {

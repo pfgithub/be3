@@ -89,15 +89,15 @@ impl BlockEditor for InfiniteCanvasEditor {
 
     fn sync_cursor_presence(&mut self, client: &BlockClient, visible: bool) {
         if !visible {
-            client.clear_presence::<CanvasCursor>(self.block.id());
+            client.set_presence::<CanvasCursor>(self.block.id(), None);
             return;
         }
-        client.post_presence(
+        client.set_presence(
             self.block.id(),
-            &CanvasCursor {
+            Some(&CanvasCursor {
                 pointer: self.pointer_world,
                 selection: self.selection.iter().copied().collect(),
-            },
+            }),
         );
     }
 

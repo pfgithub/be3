@@ -902,27 +902,18 @@ impl BlockClient {
             .unwrap_or(BlockAccess::Edit)
     }
 
-    /// Posts a presence value of kind `P` for `id`, which must currently be
-    /// watched (e.g. via [`get_block`](Self::get_block)). The server keeps
-    /// the latest value per client and presence kind, and broadcasts it to
-    /// every other client watching the block.
-    pub fn post_presence<P: PresenceKind>(&self, id: Uuid, value: &P) {
-        let data = serde_json::to_vec(value)
-            .unwrap_or_else(|error| fatal(format!("failed to encode presence value: {error}")));
+    /// Sets or clears a presence value of kind `P` for `id`, which must
+    /// currently be watched (e.g. via [`get_block`](Self::get_block)). The
+    /// server broadcasts the change to every other client watching the block.
+    pub fn set_presence<P: PresenceKind>(&self, id: Uuid, value: Option<&P>) {
         self.send(WorkerCommand::SetPresence {
             id,
             presence_id: P::ID,
-            data: Some(data),
-        });
-    }
-
-    /// Clears a presence value of kind `P` this client previously posted for
-    /// `id`, notifying every other client watching the block.
-    pub fn clear_presence<P: PresenceKind>(&self, id: Uuid) {
-        self.send(WorkerCommand::SetPresence {
-            id,
-            presence_id: P::ID,
-            data: None,
+            data: value.map(|value| {
+                serde_json::to_vec(value).unwrap_or_else(|error| {
+                    fatal(format!("failed to encode presence value: {error}"))
+                })
+            }),
         });
     }
 
