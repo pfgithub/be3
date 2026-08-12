@@ -41,8 +41,8 @@ use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabVi
 use egui_material_icons::{
     icons::{
         ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_AUTO_AWESOME, ICON_CHEVRON_RIGHT,
-        ICON_CLOUD, ICON_COMPUTER, ICON_CONTENT_COPY, ICON_DATA_OBJECT, ICON_EDIT, ICON_GROUP_ADD,
-        ICON_KEYBOARD_ARROW_DOWN, ICON_LINK, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT,
+        ICON_CLOSE, ICON_CLOUD, ICON_COMPUTER, ICON_CONTENT_COPY, ICON_DATA_OBJECT, ICON_EDIT,
+        ICON_GROUP_ADD, ICON_KEYBOARD_ARROW_DOWN, ICON_LINK, ICON_LINK_OFF, ICON_LOCK, ICON_LOGOUT,
         ICON_MORE_HORIZ, ICON_REDO, ICON_REFRESH, ICON_SETTINGS, ICON_SHARE, ICON_SWITCH_ACCOUNT,
         ICON_UNDO, ICON_VISIBILITY, ICON_WORKSPACES,
     },
@@ -1078,14 +1078,22 @@ impl BlockApp {
         let ready = !busy && !reauth.password.is_empty();
         let mut submit = false;
         let mut log_out = false;
-        let mut switch_account = false;
+        let mut close = false;
         let response = egui::Modal::new(egui::Id::new("reauth")).show(ctx, |ui| {
             ui.set_width(320.0);
-            ui.heading("Session expired");
+            egui::Sides::new().show(
+                ui,
+                |ui| {
+                    ui.heading("Session expired");
+                },
+                |ui| {
+                    close = ui.button(ICON_CLOSE).on_hover_text("Close").clicked();
+                },
+            );
             ui.add_space(8.0);
             ui.label(format!(
                 "Your session for {} is no longer valid. Enter your password to sign in again, \
-                 or dismiss this to switch accounts.",
+                 or close this to switch accounts.",
                 reauth.account.email
             ));
             ui.add_space(12.0);
@@ -1115,9 +1123,6 @@ impl BlockApp {
                         .add_enabled(ready, egui::Button::new("Sign in").selected(ready))
                         .clicked()
                         || (ready && submitted_via_enter);
-                    switch_account = ui
-                        .add_enabled(!busy, egui::Button::new("Switch account"))
-                        .clicked();
                     log_out = ui
                         .add_enabled(!busy, egui::Button::new("Log out"))
                         .clicked();
@@ -1132,10 +1137,8 @@ impl BlockApp {
                 self.log_out_account(&account);
             }
         }
-        if switch_account || response.should_close() {
+        if close || response.should_close() {
             self.reauth = None;
-        }
-        if switch_account {
             self.signed_in = false;
             if let Err(error) = self.app_state.clear_active_account() {
                 self.account_error = Some(error.to_string());
