@@ -1870,6 +1870,7 @@ impl BlockEditor for TextEditor {
             &layout,
             &sections,
         );
+        paint_revealed_backgrounds(&painter, response.rect, origin, &layout, &sections);
         let edit_block = self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
         let pointer_start = Instant::now();
         let gutter_arrow_click = ui
@@ -2380,7 +2381,7 @@ fn paint_gutter(
             color,
         );
         if let Some(section) = line_section(line, sections) {
-            let icon = if section.collapsed {
+            let icon = if section.collapsed || section.revealed {
                 ICON_KEYBOARD_ARROW_RIGHT
             } else {
                 ICON_KEYBOARD_ARROW_DOWN
@@ -2393,6 +2394,40 @@ fn paint_gutter(
                 arrow_color,
             );
         }
+    }
+}
+
+/// Paints a background over the body of each collapsed section that's
+/// temporarily revealed because a cursor sits inside it, so the lines that
+/// would normally be hidden read as visually distinct from ordinary text.
+fn paint_revealed_backgrounds(
+    painter: &egui::Painter,
+    rect: Rect,
+    origin: Pos2,
+    layout: &DocumentLayout,
+    sections: &[CollapsibleSection],
+) {
+    let fill = Color32::from_rgb(45, 33, 20);
+    for section in sections.iter().filter(|section| section.revealed) {
+        let hidden_lines = layout
+            .lines
+            .iter()
+            .filter(|line| line.start > section.line_end && line.start <= section.content_end);
+        let Some(top) = hidden_lines.clone().map(|line| line.y).reduce(f32::min) else {
+            continue;
+        };
+        let bottom = hidden_lines
+            .map(|line| line.y + line.height)
+            .reduce(f32::max)
+            .unwrap_or(top);
+        painter.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(rect.left(), origin.y + top),
+                Pos2::new(rect.right(), origin.y + bottom),
+            ),
+            0.0,
+            fill,
+        );
     }
 }
 

@@ -333,6 +333,9 @@ pub struct CollapsibleSection {
     /// Whether this section is currently folded: marked collapsed, and not
     /// temporarily revealed by a cursor sitting inside it.
     pub collapsed: bool,
+    /// Whether this section is marked collapsed but temporarily shown
+    /// because a cursor sits inside it. Mutually exclusive with `collapsed`.
+    pub revealed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -709,6 +712,7 @@ impl Core {
                     line_end: line_end(bytes, start),
                     content_end,
                     collapsed: stored && !revealed,
+                    revealed,
                 });
             }
             start = next_line_start(bytes, start);
@@ -1651,9 +1655,11 @@ impl Core {
             return;
         };
         let start = line_start(document.bytes(), position.resolve(&document));
-        if collapsible_section_end(document.bytes(), document.language(), start).is_none() {
+        let Some(content_end) =
+            collapsible_section_end(document.bytes(), document.language(), start)
+        else {
             return;
-        }
+        };
         match self
             .collapse_state
             .iter()
@@ -1663,8 +1669,18 @@ impl Core {
                 self.collapse_state.remove(index);
             }
             None => {
-                let anchored = Position::at(&document, start);
-                self.collapse_state.push(anchored);
+                let hidden_start = next_line_start(document.bytes(), start);
+                let header = Position::at(&document, start);
+                for cursor in &mut self.cursor_positions {
+                    let anchor = cursor.pos.anchor.resolve(&document);
+                    let focus = cursor.pos.focus.resolve(&document);
+                    if (hidden_start..=content_end).contains(&anchor)
+                        || (hidden_start..=content_end).contains(&focus)
+                    {
+                        *cursor = CursorPosition::at(header);
+                    }
+                }
+                self.collapse_state.push(header);
             }
         }
     }
