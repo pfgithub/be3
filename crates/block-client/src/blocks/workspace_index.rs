@@ -16,6 +16,7 @@ pub struct WorkspaceIndex {
 pub enum WorkspaceIndexOperation {
     Add(BlockEntry),
     Remove(BlockEntry),
+    Replace { old: Uuid, new: BlockEntry },
 }
 
 impl WorkspaceIndex {
@@ -40,6 +41,17 @@ impl Block for WorkspaceIndex {
             }
             WorkspaceIndexOperation::Remove(entry) => {
                 index.entries.retain(|existing| existing.id != entry.id);
+            }
+            WorkspaceIndexOperation::Replace { old, new } => {
+                if *old != new.id {
+                    if index.entries.iter().any(|existing| existing.id == new.id) {
+                        index.entries.retain(|existing| existing.id != *old);
+                    } else if let Some(entry) =
+                        index.entries.iter_mut().find(|entry| entry.id == *old)
+                    {
+                        *entry = new.clone();
+                    }
+                }
             }
         }
     }

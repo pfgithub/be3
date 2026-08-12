@@ -69,6 +69,7 @@ impl EditorKind for WorkspaceIndexEditor {
     const ICON: MaterialIcon = ICON_FOLDER;
     const CAN_ADD_CHILD: bool = true;
     const CAN_DELETE_CHILD: bool = true;
+    const CAN_REPLACE_CHILD: bool = true;
     const DEFAULT_ADD: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<WorkspaceIndex>) -> Self {
@@ -433,6 +434,17 @@ impl BlockEditor for WorkspaceIndexEditor {
         drop(index);
         if present {
             self.block.operate(WorkspaceIndexOperation::Remove(entry));
+        }
+        Some(true)
+    }
+
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let index = self.block.read()?;
+        let present = index.entries().iter().any(|entry| entry.id == old);
+        drop(index);
+        if present {
+            self.block
+                .operate(WorkspaceIndexOperation::Replace { old, new });
         }
         Some(true)
     }

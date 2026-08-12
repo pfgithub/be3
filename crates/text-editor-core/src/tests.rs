@@ -38,6 +38,7 @@ mod markdown_tables;
 mod raw_bytes;
 mod replace_all_matches_does_nothing_when_there_are_no_matches;
 mod replace_all_matches_replaces_every_match;
+mod replace_block_reference_replaces_every_matching_url;
 mod replace_match_does_nothing_when_selection_is_not_on_a_match;
 mod replace_match_replaces_current_and_advances_to_next_match;
 mod right_arrow_opens_a_collapsed_line;

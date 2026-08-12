@@ -5,6 +5,35 @@ impl BlockEditor for InfiniteCanvasEditor {
         &self.block
     }
 
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let canvas = self.block.read()?;
+        let entities = canvas
+            .entities()
+            .iter()
+            .filter_map(|entity| match &entity.kind {
+                CanvasEntityKind::Block { block_id }
+                | CanvasEntityKind::DirectEditor { block_id, .. }
+                    if *block_id == old =>
+                {
+                    let mut entity = entity.clone();
+                    match &mut entity.kind {
+                        CanvasEntityKind::Block { block_id }
+                        | CanvasEntityKind::DirectEditor { block_id, .. } => *block_id = new.id,
+                        _ => unreachable!(),
+                    }
+                    Some(entity)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        drop(canvas);
+        if !entities.is_empty() {
+            self.block
+                .operate(InfiniteCanvasOperation::Update { entities });
+        }
+        Some(true)
+    }
+
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
         let Some(canvas) = self.block.read() else {
             return false;

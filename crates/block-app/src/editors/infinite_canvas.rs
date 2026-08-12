@@ -19,6 +19,7 @@ use block_client::{
             CanvasLayerMove, CanvasPoint, CanvasPreviewRegion, CanvasTextAlign, CanvasTextStyle,
             CanvasTextWeight, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
         },
+        workspace_index::BlockEntry,
     },
     presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,
@@ -52,6 +53,7 @@ impl EditorKind for InfiniteCanvasEditor {
 
     const DISPLAY_NAME: &'static str = "Canvas";
     const ICON: MaterialIcon = ICON_DRAW;
+    const CAN_REPLACE_CHILD: bool = true;
     const DEFAULT_ADD: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<InfiniteCanvas>) -> Self {

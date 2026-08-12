@@ -13,6 +13,7 @@ use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
     block_url,
     blocks::text::{TextDocument, TextLanguage},
+    blocks::workspace_index::BlockEntry,
     parse_block_urls,
     presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,
@@ -91,6 +92,7 @@ impl EditorKind for TextEditor {
 
     const DISPLAY_NAME: &'static str = "Text";
     const ICON: MaterialIcon = ICON_DESCRIPTION;
+    const CAN_REPLACE_CHILD: bool = true;
     const DEFAULT_ADD: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<TextDocument>) -> Self {
@@ -1645,6 +1647,12 @@ fn hidden_ranges_from_sections(sections: &[CollapsibleSection]) -> Vec<Range<usi
 impl BlockEditor for TextEditor {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
+    }
+
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let mut core = Core::new(self.block.clone());
+        core.execute_command(EditorCommand::ReplaceBlockReference { old, new: new.id });
+        Some(true)
     }
 
     fn sync_cursor_presence(&mut self, client: &BlockClient, visible: bool) {

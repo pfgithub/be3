@@ -274,6 +274,10 @@ pub enum EditorCommand<'a> {
         case_sensitive: bool,
         replacement: &'a [u8],
     },
+    ReplaceBlockReference {
+        old: Uuid,
+        new: Uuid,
+    },
     DuplicateLine(UDDirection),
     DuplicateCursor(LRDirection),
     Click {
@@ -575,6 +579,34 @@ impl Core {
         }
     }
 
+    fn replace_block_reference(&mut self, old: Uuid, new: Uuid) {
+        let history_cursors = self.cursor_positions.clone();
+        let Some(document) = self.document.read() else {
+            return;
+        };
+        let old_length = old.to_string().len();
+        let replacement = new.to_string().into_bytes();
+        let replacements = parse_block_urls(document.bytes())
+            .into_iter()
+            .filter(|url| url.id == old)
+            .map(|url| {
+                (
+                    Position::at(&document, url.range.end - old_length),
+                    old_length,
+                    replacement.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        drop(document);
+        if !replacements.is_empty() {
+            self.apply_replacements(
+                replacements,
+                UndoClassification::AlwaysSplit,
+                history_cursors,
+            );
+        }
+    }
+
     pub fn cursor_stop(&self, byte_index: usize, stop: CursorLeftRightStop) -> Position {
         let Some(document) = self.document.read() else {
             return Position::END;
@@ -791,6 +823,9 @@ impl Core {
                 case_sensitive,
                 replacement,
             } => self.replace_all_matches(text, case_sensitive, replacement),
+            EditorCommand::ReplaceBlockReference { old, new } => {
+                self.replace_block_reference(old, new)
+            }
             EditorCommand::SelectAll => {
                 let start = self.position(0);
                 self.select(Selection::range(start, Position::END));
