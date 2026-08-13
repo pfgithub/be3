@@ -7,8 +7,7 @@ fn read_destructure_empty_input_reports_error() {
         panic!("expected an error");
     };
 
-    assert_eq!(
-        err.e.entries[0].message,
-        "Expected at least one item to destructure"
-    );
+    assert!(err.e.entries[0]
+        .message
+        .starts_with("Expected at least one item to destructure"));
 }

@@ -530,7 +530,7 @@ pub fn analyze_sub(
             format!(
                 "TODO analyzeSuffix: {}{}",
                 syntax_node_kind(expr),
-                dump_ast_node_list(std::slice::from_ref(expr), 2)
+                crate::comptime::dump_ast_node_list(std::slice::from_ref(expr), 2)
             ),
             None,
         ))
@@ -610,7 +610,7 @@ pub fn analyze_base(
         format!(
             "TODO analyzeBase: {}{}",
             syntax_node_kind(ast),
-            dump_ast_node_list(std::slice::from_ref(ast), 3)
+            crate::comptime::dump_ast_node_list(std::slice::from_ref(ast), 3)
         ),
         None,
     ))
@@ -724,7 +724,7 @@ pub fn read_destructure(
             Some(pos),
             format!(
                 "Expected at least one item to destructure{}",
-                dump_ast_node_list(src, 2)
+                crate::comptime::dump_ast_node_list(src, 2)
             ),
             None,
         ));
@@ -735,7 +735,7 @@ pub fn read_destructure(
             Some(syntax_node_pos(&lhs_items[1]).clone()),
             format!(
                 "Unexpected item for destructuring. TODO support eg 'name: type := value'{}",
-                dump_ast_node_list(src, 2)
+                crate::comptime::dump_ast_node_list(src, 2)
             ),
             None,
         ));
@@ -979,7 +979,7 @@ fn syntax_node_pos(node: &SyntaxNode) -> &TokenPosition {
     }
 }
 
-fn syntax_node_kind(node: &SyntaxNode) -> &'static str {
+pub(crate) fn syntax_node_kind(node: &SyntaxNode) -> &'static str {
     match node {
         SyntaxNode::Identifier(_) => "ident",
         SyntaxNode::Whitespace(_) => "ws",
@@ -1110,7 +1110,7 @@ pub fn analyze_namespace(
         |env, b2, block| analyze_namespace_bind(env, b2, block, arr_entry),
     )?;
 
-    let results = comptime_eval(env, &block);
+    let results = crate::comptime::comptime_eval(env, &block)?;
     let arr_value_box = results
         .into_iter()
         .nth(arr_entry.0)
@@ -1121,17 +1121,6 @@ pub fn analyze_namespace(
     arr_value.locked = true;
 
     Ok(Rc::new(NamespaceImpl { fields: arr_value }))
-}
-
-pub fn comptime_eval(_env: &mut Env, _block: &AnalysisBlock) -> Vec<Box<dyn Any>> {
-    todo!("port cte.ts comptimeEval")
-}
-
-// cte.ts's `printers.astNode.dumpList` isn't ported yet; callers only use this
-// to append a diagnostic dump to error messages, so an empty placeholder keeps
-// those (otherwise fully working) error paths from panicking in the meantime.
-fn dump_ast_node_list(_nodes: &[SyntaxNode], _depth: usize) -> String {
-    String::new()
 }
 
 pub fn throw_err(
@@ -1232,7 +1221,7 @@ fn import_file_body(
         },
         &mut block,
     )?;
-    comptime_eval(env, &block);
+    crate::comptime::comptime_eval(env, &block)?;
     Ok(())
 }
 

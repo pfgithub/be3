@@ -1128,9 +1128,10 @@ pub fn render_tokenized_output(
         0,
         true,
     );
-    // TODO(cte): the TS version also dumps `printers.astNode.dumpList(...)` from
-    // `./cte`, which hasn't been ported yet. Add that section back once cte.ts lands.
+    let adisp = crate::comptime::dump_ast_node_list(&tokenization_result.result, usize::MAX);
     let pretty_errors = pretty_print_errors(source, &tokenization_result.errors);
 
-    format!("// ugly\n{ugly_code}\n\n// formatted\n{formatted_code}\n\n// errors:\n{pretty_errors}")
+    format!(
+        "// adisp:{adisp}\n\n// ugly\n{ugly_code}\n\n// formatted\n{formatted_code}\n\n// errors:\n{pretty_errors}"
+    )
 }
