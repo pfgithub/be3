@@ -60,6 +60,7 @@ async fn registration_can_be_disabled() {
     .await;
     assert!(matches!(response, ManagementServerMessage::Account { .. }));
 
+    drop(store);
     task.abort();
     let _ = task.await;
     tokio::fs::remove_dir_all(root).await.unwrap();

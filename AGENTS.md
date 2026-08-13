@@ -19,7 +19,7 @@ Main folders:
 - `crates/text-editor-core` — the text editor's own logic, pulled out of `block-app` into its own crate: text diffing (`core.rs`), `tree-sitter`-based syntax highlighting for Markdown/Rust/Zig (`highlighter/`), and text-cursor presence. It sits on the editor/view side, not the block side — the `text` block itself (`block-client/src/blocks/text.rs`) stays minimal.
 - `crates/logicgame` — a standalone logic-circuit simulation engine (`grid` for the component graph, `execution` for running it, `challenges` for the built-in puzzle set), used by the logic_game/logic_grid/compiled_logic block types but with no dependency on `block`/`block-client` itself.
 - `scripts/` — verification (`verify.sh`/`verify.ps1`), platform build scripts, and the `web/` wasm/WASI host glue for the browser build.
-- `crates/citygame`, `crates/citygenerator`, `crates/reactive`, `crates/tablet` — separate, unrelated projects that happen to live in this workspace; ignore them for BE3 work.
+- `crates/citygame`, `crates/citygenerator`, `crates/reactive`, `crates/tablet`, `crates/cvl2` — separate, unrelated projects that happen to live in this workspace; ignore them for BE3 work.
 
 Block types (the core, in `crates/block-client/src/blocks/<name>.rs`; each is defined by a state struct, an operation enum, and `apply_operation`):
 - `audio` — an uploaded audio clip (source name, media type, raw bytes). No undo/redo history.
