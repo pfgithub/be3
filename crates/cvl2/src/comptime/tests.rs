@@ -1,12 +1,22 @@
 use super::*;
-use crate::compiler::{BlockIdx, ComptimeTypeVoid, DestructureExtract};
-use crate::parser::IdentifierToken;
+use crate::compiler::{
+    BlockIdx, ComptimeScopeMap, ComptimeValueError, ComptimeValueKey, ComptimeValueUint8Array,
+    ComptimeValueVoid, ConsumedErrorToken, PerComptimeScopeCache, Scope, Symbol,
+};
+use std::collections::HashMap;
+use std::rc::Rc;
 
 fn new_env() -> Env {
     Env {
         trace: Vec::new(),
         errors: Vec::new(),
-        comptime: HashMap::new(),
+        scope: Scope {
+            comptime: ComptimeScopeMap::root(HashMap::new()),
+            bindings: HashMap::new(),
+        },
+        fn_cache: Rc::new(PerComptimeScopeCache::new()),
+        decl_cache: Rc::new(PerComptimeScopeCache::new()),
+        builtin_cache: Rc::new(PerComptimeScopeCache::new()),
     }
 }
 
@@ -19,38 +29,14 @@ fn pos_at(idx: usize) -> TokenPosition {
     }
 }
 
-fn ident_node(name: &str, idx: usize) -> SyntaxNode {
-    SyntaxNode::Identifier(IdentifierToken {
-        pos: pos_at(idx),
-        str: name.to_string(),
-        ident_tag: IdentifierTag::Normal,
-        ident_tag_raw: String::new(),
-    })
-}
-
-fn comptime_ast(idx: usize) -> ComptimeValueAst {
-    ComptimeValueAst {
-        ast: vec![ident_node("a", idx)],
-        pos: pos_at(idx),
-    }
-}
-
-fn string_key(key: &str) -> ComptimeNarrowKey {
-    ComptimeNarrowKey::String {
-        key: key.to_string(),
-    }
-}
-
-fn void_type() -> ComptimeType {
-    ComptimeType::Void(ComptimeTypeVoid { pos: pos_at(0) })
-}
-
-mod comptime_eval_evaluates_comptime_ast_and_key_lines;
-mod comptime_eval_evaluates_void_and_comptime_only_lines;
-mod comptime_eval_ns_list_append_duplicate_reports_error;
-mod comptime_eval_ns_list_init_and_append_registers_field;
-mod comptime_eval_unhandled_line_panics;
-mod dump_ast_node_list_renders_identifier;
-mod dump_block_renders_line_index_and_tag;
-mod dump_destructure_renders_extract_and_type;
-mod dump_type_renders_void_type;
+mod comptime_eval_args_line_resolves_supplied_argument;
+mod comptime_eval_args_line_without_args_errors;
+mod comptime_eval_file_create_wraps_bytes_in_build_artifact;
+mod comptime_eval_kv_list_append_rejects_locked_fields;
+mod comptime_eval_kv_list_init_and_append_builds_fields;
+mod comptime_eval_runtime_value_from_other_block_errors;
+mod comptime_eval_unhandled_break_line_errors;
+mod get_comptime_consumes_error_value_when_kind_requested;
+mod get_comptime_reports_kind_mismatch;
+mod get_comptime_resolves_matching_comptime_value;
+mod get_comptime_runtime_value_outside_comptime_eval_errors;

@@ -25,7 +25,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(errors) => {
             let source = Source::new(filename.as_str(), contents.as_str());
-            println!("{}", pretty_print_errors(&source, &errors));
+            println!("{}", pretty_print_errors(&[&source], &errors));
             ExitCode::FAILURE
         }
     }

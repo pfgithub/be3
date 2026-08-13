@@ -8,9 +8,9 @@ fn read_binary2_wrong_length_errors() {
         vec![op_seg(vec![normal_ident("a", 0)], 0)],
         0,
     )];
-    let err = read_binary2(&mut env, pos_at(0), &src, OpTag::Def).unwrap_err();
-    assert_eq!(
-        err.e.entries[0].message,
-        "Expected LHS op RHS, found not that"
-    );
+    let err = read_binary2(&mut env, &src, OpTag::Def).unwrap_err();
+    let PositionedError::Fresh(e) = err else {
+        panic!("expected a fresh error");
+    };
+    assert_eq!(e.entries[0].message, "Expected LHS op RHS, found not that");
 }

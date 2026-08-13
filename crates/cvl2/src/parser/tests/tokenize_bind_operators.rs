@@ -20,6 +20,8 @@ fn tokenize_bind_operators() {
         };
         assert_eq!(binary.tag, tag);
         assert_eq!(binary.items.len(), 3);
-        assert!(matches!(&binary.items[1], SyntaxNode::Operator(o) if o.op == op));
+        assert!(
+            matches!(&binary.items[1], SyntaxNode::Operator(o) if o.op == op && o.op_tag == tag)
+        );
     }
 }

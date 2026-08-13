@@ -49,6 +49,8 @@ fn count_all(nodes: &[SyntaxNode], predicate: &dyn Fn(&SyntaxNode) -> bool) -> u
 }
 
 mod pretty_print_errors_renders_message_and_pointer;
+mod pretty_print_errors_renders_new_error_styles;
+mod pretty_print_errors_skips_line_for_ambiguous_duplicate_filename;
 mod source_cursor_tracks_position;
 mod source_indent_level_tracks_leading_spaces;
 mod source_revert_restores_position;
@@ -59,12 +61,16 @@ mod tokenize_bracket_blocks;
 mod tokenize_equals_assignment;
 mod tokenize_extra_close_bracket_reports_error;
 mod tokenize_identifier;
-mod tokenize_in_string_backslash_is_unimplemented;
+mod tokenize_identifier_number_and_discard_tags;
 mod tokenize_indent_based_auto_close;
+mod tokenize_inline_comment_captures_until_newline;
 mod tokenize_mismatched_bracket_reports_error;
 mod tokenize_mixing_bind_operators_reports_error;
 mod tokenize_raw_tokens;
 mod tokenize_sample_source_succeeds;
 mod tokenize_separators_build_binary_expressions;
-mod tokenize_string_produces_str_seg;
+mod tokenize_string_escaped_quote_is_included_in_raw_content;
+mod tokenize_string_interpolation_opens_list_block;
+mod tokenize_string_produces_raw_string_token;
 mod tokenize_whitespace_and_newline;
+mod unescape_string_handles_escape_sequences;

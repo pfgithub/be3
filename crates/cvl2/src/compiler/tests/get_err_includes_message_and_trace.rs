@@ -13,6 +13,7 @@ fn get_err_includes_message_and_trace() {
         Some(pos_at(5)),
         "something broke",
         Some(vec![(Some(pos_at(6)), "extra context".to_string())]),
+        None,
     );
 
     assert_eq!(err.entries.len(), 2);

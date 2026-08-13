@@ -12,6 +12,6 @@ fn read_binary2_returns_none_for_non_matching_tag() {
         ],
         0,
     )];
-    let result = read_binary2(&mut env, pos_at(0), &src, OpTag::Def).unwrap();
+    let result = read_binary2(&mut env, &src, OpTag::Def).unwrap();
     assert!(result.is_none());
 }

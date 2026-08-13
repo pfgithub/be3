@@ -12,9 +12,7 @@ fn read_binary2_extracts_matching_triplet() {
         ],
         0,
     )];
-    let (lhs, op, rhs) = read_binary2(&mut env, pos_at(0), &src, OpTag::Def)
-        .unwrap()
-        .unwrap();
+    let (lhs, op, rhs) = read_binary2(&mut env, &src, OpTag::Def).unwrap().unwrap();
     assert!(matches!(&lhs.items[0], SyntaxNode::Identifier(id) if id.str == "a"));
     assert_eq!(op.op, "::");
     assert!(matches!(&rhs.items[0], SyntaxNode::Identifier(id) if id.str == "b"));

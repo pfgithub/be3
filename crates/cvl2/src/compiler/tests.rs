@@ -1,11 +1,20 @@
 use super::*;
-use crate::parser::{BinaryExpressionToken, BlockToken, IdentifierToken, WhitespaceToken};
+use crate::parser::{
+    BinaryExpressionToken, BlockToken, ErrorStyle, IdentifierToken, WhitespaceToken,
+};
+use std::rc::Rc;
 
 fn new_env() -> Env {
     Env {
         trace: Vec::new(),
         errors: Vec::new(),
-        comptime: HashMap::new(),
+        scope: Scope {
+            comptime: ComptimeScopeMap::root(HashMap::new()),
+            bindings: HashMap::new(),
+        },
+        fn_cache: Rc::new(PerComptimeScopeCache::new()),
+        decl_cache: Rc::new(PerComptimeScopeCache::new()),
+        builtin_cache: Rc::new(PerComptimeScopeCache::new()),
     }
 }
 
@@ -54,6 +63,7 @@ fn op_node(op: &str, idx: usize) -> SyntaxNode {
     SyntaxNode::Operator(OperatorToken {
         pos: pos_at(idx),
         op: op.to_string(),
+        op_tag: OpTag::None,
     })
 }
 
@@ -88,11 +98,23 @@ fn def_binding(lhs_name: &str, rhs_name: &str, idx: usize) -> SyntaxNode {
     )
 }
 
+fn pub_binding(lhs: SyntaxNode, rhs: SyntaxNode, idx: usize) -> SyntaxNode {
+    binary_node(
+        OpTag::Pub,
+        vec![
+            op_seg(vec![lhs], idx),
+            op_node(".=", idx + 1),
+            op_seg(vec![rhs], idx + 2),
+        ],
+        idx,
+    )
+}
+
 mod add_err_pushes_error_into_env;
 mod analyze_access_builtin_main_resolves_key;
 mod analyze_base_builtin_resolves_to_namespace;
 mod analyze_call_not_supported_call_type_errors;
-mod analyze_namespace_bind_panics_on_non_key_result;
+mod analyze_namespace_errors_on_non_key_bind_target;
 mod block_append_returns_sequential_indices;
 mod get_err_includes_message_and_trace;
 mod ns_key_distinguishes_str_and_sym_variants;

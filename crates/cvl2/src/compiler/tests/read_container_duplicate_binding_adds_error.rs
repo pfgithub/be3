@@ -8,13 +8,13 @@ fn read_container_duplicate_binding_adds_error() {
     let line2 = op_seg(vec![def_binding("a", "y", 10)], 10);
     let src = vec![binary_node(OpTag::Sep, vec![line1, sep1, line2], 0)];
 
-    let container = read_container(&mut env, pos_at(0), &src).unwrap();
+    let _container = read_container(&mut env, pos_at(0), &src).unwrap();
 
     assert_eq!(env.errors.len(), 1);
     assert_eq!(env.errors[0].entries[0].message, "Duplicate binding name a");
-    assert_eq!(container.bindings.len(), 1);
+    assert_eq!(env.scope.bindings.len(), 1);
     assert!(matches!(
-        &container.bindings["a"].value[0],
-        SyntaxNode::Err(_)
+        env.scope.bindings.get("a"),
+        Some(Binding::Error { .. })
     ));
 }

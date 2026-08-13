@@ -11,5 +11,7 @@ fn tokenize_equals_assignment() {
     };
     assert_eq!(binary.tag, OpTag::Assign);
     assert_eq!(binary.items.len(), 3);
-    assert!(matches!(&binary.items[1], SyntaxNode::Operator(o) if o.op == "="));
+    assert!(
+        matches!(&binary.items[1], SyntaxNode::Operator(o) if o.op == "=" && o.op_tag == OpTag::Assign)
+    );
 }

@@ -1,5 +1,8 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
+
+use crate::compiler::{throw_err, Env, PositionedError};
 
 #[cfg(test)]
 mod tests;
@@ -30,6 +33,7 @@ pub enum BracketTag {
     ColonCall,
     ArrowFn,
     String,
+    InlineComment,
     None,
 }
 
@@ -37,6 +41,9 @@ pub enum BracketTag {
 pub enum RawTag {
     Return,
     Discard,
+    Void,
+    String,
+    Comment,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +51,8 @@ pub enum IdentifierTag {
     Normal,
     Access,
     Builtin,
+    Number,
+    Discard,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,6 +73,7 @@ pub struct WhitespaceToken {
 pub struct OperatorToken {
     pub pos: TokenPosition,
     pub op: String,
+    pub op_tag: OpTag,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,12 +100,6 @@ pub struct BinaryExpressionToken {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StrSegToken {
-    pub pos: TokenPosition,
-    pub str: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct RawToken {
     pub pos: TokenPosition,
     pub raw: String,
@@ -115,7 +119,6 @@ pub enum SyntaxNode {
     OperatorSegment(OperatorSegmentToken),
     Block(Box<BlockToken>),
     BinaryExpression(Box<BinaryExpressionToken>),
-    StrSeg(StrSegToken),
     Raw(RawToken),
     Err(ErrToken),
 }
@@ -124,6 +127,9 @@ pub enum SyntaxNode {
 pub enum ErrorStyle {
     Note,
     Error,
+    Todo,
+    Unreachable,
+    Warning,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -228,6 +234,7 @@ impl Source {
 enum TokenizerMode {
     Regular,
     InString,
+    InlineComment,
 }
 
 const IN_STRING_QUOTE: &str = "<in_string>\"";
@@ -245,7 +252,6 @@ struct ConfigEntry {
     prec: usize,
     close: Option<&'static str>,
     auto_open: bool,
-    set_mode: Option<TokenizerMode>,
     op_tag: Option<OpTag>,
     bracket_tag: Option<BracketTag>,
 }
@@ -253,13 +259,12 @@ struct ConfigEntry {
 // Mirrors the TS `mkconfig` table: entries are grouped, and every entry in a
 // group shares the group's precedence (the group's position in this list).
 fn lookup_config(token: &str) -> Option<ConfigEntry> {
-    let (style, prec, close, bracket_tag, op_tag, set_mode) = match token {
+    let (style, prec, close, bracket_tag, op_tag) = match token {
         "(" => (
             ConfigStyle::Open,
             0,
             Some(")"),
             Some(BracketTag::List),
-            None,
             None,
         ),
         "{" => (
@@ -268,48 +273,26 @@ fn lookup_config(token: &str) -> Option<ConfigEntry> {
             Some("}"),
             Some(BracketTag::Code),
             None,
-            None,
         ),
-        "[" => (
+        "[" => (ConfigStyle::Open, 0, Some("]"), Some(BracketTag::Map), None),
+        ")" => (ConfigStyle::Close, 0, None, Some(BracketTag::List), None),
+        "}" => (ConfigStyle::Close, 0, None, Some(BracketTag::Code), None),
+        "]" => (ConfigStyle::Close, 0, None, Some(BracketTag::Map), None),
+        "\\(" => (
             ConfigStyle::Open,
             0,
-            Some("]"),
-            Some(BracketTag::Map),
-            None,
-            None,
-        ),
-        ")" => (
-            ConfigStyle::Close,
-            0,
-            None,
+            Some(")"),
             Some(BracketTag::List),
             None,
-            None,
-        ),
-        "}" => (
-            ConfigStyle::Close,
-            0,
-            None,
-            Some(BracketTag::Code),
-            None,
-            None,
-        ),
-        "]" => (
-            ConfigStyle::Close,
-            0,
-            None,
-            Some(BracketTag::Map),
-            None,
-            None,
         ),
 
-        "," => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep), None),
-        ";" => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep), None),
-        "\n" => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep), None),
+        "," => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep)),
+        ";" => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep)),
+        "\n" => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep)),
 
-        "::" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Def), None),
-        ".=" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Pub), None),
-        ":=" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Var), None),
+        "::" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Def)),
+        ".=" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Pub)),
+        ":=" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Var)),
 
         ":" => (
             ConfigStyle::Open,
@@ -317,18 +300,10 @@ fn lookup_config(token: &str) -> Option<ConfigEntry> {
             None,
             Some(BracketTag::ColonCall),
             None,
-            None,
         ),
-        "=>" => (
-            ConfigStyle::Open,
-            3,
-            None,
-            Some(BracketTag::ArrowFn),
-            None,
-            None,
-        ),
+        "=>" => (ConfigStyle::Open, 3, None, Some(BracketTag::ArrowFn), None),
 
-        "=" => (ConfigStyle::Join, 4, None, None, Some(OpTag::Assign), None),
+        "=" => (ConfigStyle::Join, 4, None, None, Some(OpTag::Assign)),
 
         "\"" => (
             ConfigStyle::Open,
@@ -336,15 +311,14 @@ fn lookup_config(token: &str) -> Option<ConfigEntry> {
             Some(IN_STRING_QUOTE),
             Some(BracketTag::String),
             None,
-            Some(TokenizerMode::InString),
         ),
-        s if s == IN_STRING_QUOTE => (
-            ConfigStyle::Close,
+        s if s == IN_STRING_QUOTE => (ConfigStyle::Close, 5, None, Some(BracketTag::String), None),
+        "//" => (
+            ConfigStyle::Open,
             5,
             None,
-            Some(BracketTag::String),
+            Some(BracketTag::InlineComment),
             None,
-            Some(TokenizerMode::Regular),
         ),
 
         _ => return None,
@@ -354,10 +328,17 @@ fn lookup_config(token: &str) -> Option<ConfigEntry> {
         prec,
         close,
         auto_open: false,
-        set_mode,
         op_tag,
         bracket_tag,
     })
+}
+
+fn set_mode_for_bracket_tag(tag: BracketTag) -> Option<TokenizerMode> {
+    match tag {
+        BracketTag::String => Some(TokenizerMode::InString),
+        BracketTag::InlineComment => Some(TokenizerMode::InlineComment),
+        _ => None,
+    }
 }
 
 fn raw_tag_for(token: &str) -> Option<RawTag> {
@@ -377,7 +358,7 @@ fn ident_tag_for(c: char) -> Option<IdentifierTag> {
 }
 
 fn is_ident_char(c: char) -> bool {
-    c.is_ascii_alphanumeric()
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
 fn is_ws_char(c: char) -> bool {
@@ -385,15 +366,6 @@ fn is_ws_char(c: char) -> bool {
 }
 
 const OPERATOR_CHARS: &str = "~!@$%^&*-=+|/<>:.";
-
-// Mirrors JS `"...".includes(x)`, which is true when `x` is the empty string
-// (i.e. `source.peek()` at end of input) as well as when it contains a match.
-fn is_quote_backslash_or_eof(c: Option<char>) -> bool {
-    match c {
-        None => true,
-        Some(ch) => ch == '"' || ch == '\\',
-    }
-}
 
 type NodeList = Rc<RefCell<Vec<BuilderNode>>>;
 
@@ -427,7 +399,6 @@ enum BuilderNode {
         tag: OpTag,
         items: NodeList,
     },
-    StrSeg(StrSegToken),
     Raw(RawToken),
 }
 
@@ -470,7 +441,6 @@ fn freeze_node(node: BuilderNode) -> SyntaxNode {
             tag,
             items: freeze_list(&items),
         })),
-        BuilderNode::StrSeg(t) => SyntaxNode::StrSeg(t),
         BuilderNode::Raw(t) => SyntaxNode::Raw(t),
     }
 }
@@ -484,13 +454,13 @@ struct TokenizerStackItem {
     prec: usize,
     auto_close: bool,
     tag: Option<OpTag>,
+    bracket_tag: Option<BracketTag>,
 }
 
 pub fn tokenize(source: &mut Source) -> TokenizationResult {
     let mut current_syntax_nodes = new_node_list();
     let mut errors: Vec<TokenizationError> = Vec::new();
     let mut parse_stack: Vec<TokenizerStackItem> = Vec::new();
-    let mut mode = TokenizerMode::Regular;
 
     parse_stack.push(TokenizerStackItem {
         pos: source.get_position(),
@@ -501,28 +471,45 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
         prec: 0,
         auto_close: false,
         tag: None,
+        bracket_tag: None,
     });
 
     while source.peek().is_some() {
         let start = source.get_position();
-        let first_char = source
-            .take()
-            .expect("peek() confirmed a character is available");
+
+        let mode = parse_stack
+            .last()
+            .and_then(|item| item.bracket_tag)
+            .and_then(set_mode_for_bracket_tag)
+            .unwrap_or(TokenizerMode::Regular);
 
         let current_token: String;
         match mode {
             TokenizerMode::Regular => {
+                let first_char = source
+                    .take()
+                    .expect("peek() confirmed a character is available");
+
                 if is_ident_char(first_char) {
+                    let mut count = 1usize;
                     while source.peek().is_some_and(is_ident_char) {
                         source.take();
+                        count += 1;
                     }
                     let str_value = source.text_slice(start.idx, source.current_index);
+                    let ident_tag = if first_char.is_ascii_digit() {
+                        IdentifierTag::Number
+                    } else if first_char == '_' && count == 1 {
+                        IdentifierTag::Discard
+                    } else {
+                        IdentifierTag::Normal
+                    };
                     current_syntax_nodes
                         .borrow_mut()
                         .push(BuilderNode::Identifier(IdentifierToken {
                             pos: start,
                             str: str_value,
-                            ident_tag: IdentifierTag::Normal,
+                            ident_tag,
                             ident_tag_raw: String::new(),
                         }));
                     continue;
@@ -574,32 +561,68 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
                 }
             }
             TokenizerMode::InString => {
-                if first_char != '"' && first_char != '\\' {
-                    while !is_quote_backslash_or_eof(source.peek()) {
+                let (request, token_value) = loop {
+                    let peek = source.peek();
+                    if peek == Some('\\') {
+                        let revert = source.get_position();
+                        source.take();
+                        let esc_first = source.peek();
+                        if esc_first == Some('"') || esc_first == Some('\\') {
+                            source.take();
+                        } else if esc_first == Some('(') {
+                            source.take();
+                            let request = source.get_position();
+                            source.revert(&revert);
+                            break (request, "\\(".to_string());
+                        }
+                    } else if peek == Some('"') {
+                        let revert = source.get_position();
+                        source.take();
+                        let request = source.get_position();
+                        source.revert(&revert);
+                        break (request, IN_STRING_QUOTE.to_string());
+                    } else {
                         source.take();
                     }
-                    let str_value = source.text_slice(start.idx, source.current_index);
-                    current_syntax_nodes
-                        .borrow_mut()
-                        .push(BuilderNode::StrSeg(StrSegToken {
-                            pos: start,
-                            str: str_value,
-                        }));
-                    continue;
-                }
-
-                if first_char == '"' {
-                    current_token = IN_STRING_QUOTE.to_string();
-                } else {
-                    panic!("TODO impl in_string '\\' char");
-                }
+                };
+                let raw_value = source.text_slice(start.idx, source.current_index);
+                current_syntax_nodes
+                    .borrow_mut()
+                    .push(BuilderNode::Raw(RawToken {
+                        pos: start.clone(),
+                        raw: raw_value,
+                        tag: RawTag::String,
+                    }));
+                source.revert(&request);
+                current_token = token_value;
+            }
+            TokenizerMode::InlineComment => {
+                let request = loop {
+                    let peek = source.peek();
+                    if peek == Some('\n') {
+                        let revert = source.get_position();
+                        source.take();
+                        let request = source.get_position();
+                        source.revert(&revert);
+                        break request;
+                    } else {
+                        source.take();
+                    }
+                };
+                let raw_value = source.text_slice(start.idx, source.current_index);
+                current_syntax_nodes
+                    .borrow_mut()
+                    .push(BuilderNode::Raw(RawToken {
+                        pos: start.clone(),
+                        raw: raw_value,
+                        tag: RawTag::Comment,
+                    }));
+                source.revert(&request);
+                current_token = "\n".to_string();
             }
         }
 
         let cfg = lookup_config(&current_token);
-        if let Some(set_mode) = cfg.and_then(|c| c.set_mode) {
-            mode = set_mode;
-        }
 
         match cfg.map(|c| c.style) {
             Some(ConfigStyle::Open) => {
@@ -621,6 +644,7 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
                     prec: cfg.prec,
                     auto_close: cfg.close.is_none(),
                     tag: None,
+                    bracket_tag: Some(cfg.bracket_tag.unwrap_or(BracketTag::None)),
                 });
                 current_syntax_nodes = new_block_items;
             }
@@ -765,6 +789,7 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
                             prec: operator_precedence,
                             auto_close: true,
                             tag: Some(cfg.op_tag.unwrap_or(OpTag::None)),
+                            bracket_tag: None,
                         });
                         target_index = Some(parse_stack.len() - 1);
                         break;
@@ -803,6 +828,7 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
                         .push(BuilderNode::Operator(OperatorToken {
                             pos: start.clone(),
                             op: current_token.clone(),
+                            op_tag: parse_stack[target_index].tag.unwrap_or(OpTag::None),
                         }));
                     op_sup_val.borrow_mut().push(BuilderNode::OperatorSegment {
                         pos: start.clone(),
@@ -848,9 +874,281 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
     }
 }
 
+fn pos_add_col(pos: &TokenPosition, col: usize) -> TokenPosition {
+    TokenPosition {
+        fyl: pos.fyl.clone(),
+        lyn: pos.lyn,
+        col: pos.col + col,
+        idx: pos.col + col,
+    }
+}
+
+fn unescape_def(c: char) -> Option<char> {
+    match c {
+        'n' => Some('\n'),
+        'r' => Some('\r'),
+        '"' => Some('"'),
+        '\'' => Some('\''),
+        _ => None,
+    }
+}
+
+fn parse_hex_codepoint(
+    env: &Env,
+    inner: &str,
+    segment_pos: &TokenPosition,
+) -> Result<String, PositionedError> {
+    if let Some(bad) = inner.find(|c: char| !c.is_ascii_hexdigit()) {
+        return Err(throw_err(
+            env,
+            Some(pos_add_col(segment_pos, bad)),
+            "bad character in curly",
+            None,
+            None,
+        ));
+    }
+    let parsed = u32::from_str_radix(inner, 16).unwrap_or(0);
+    if parsed > 0x10FFFF {
+        return Err(throw_err(
+            env,
+            Some(segment_pos.clone()),
+            "number out of range",
+            None,
+            None,
+        ));
+    }
+    match char::from_u32(parsed) {
+        Some(ch) => Ok(ch.to_string()),
+        None => Err(throw_err(
+            env,
+            Some(segment_pos.clone()),
+            "number out of range",
+            None,
+            None,
+        )),
+    }
+}
+
+pub fn unescape_string(
+    env: &Env,
+    segment: &str,
+    segment_pos: TokenPosition,
+) -> Result<String, PositionedError> {
+    if !segment.contains('\\') {
+        return Ok(segment.to_string());
+    }
+    if let Some(newline_index) = segment.find('\n') {
+        return Err(throw_err(
+            env,
+            Some(pos_add_col(&segment_pos, newline_index)),
+            "newline is not allowed in escaped string",
+            None,
+            Some(ErrorStyle::Unreachable),
+        ));
+    }
+
+    let chars: Vec<char> = segment.chars().collect();
+    let mut result = String::new();
+    let mut idx = 0usize;
+    loop {
+        let next_escape = chars[idx..]
+            .iter()
+            .position(|&c| c == '\\')
+            .map(|p| idx + p)
+            .unwrap_or(chars.len());
+        result.extend(&chars[idx..next_escape]);
+        idx = next_escape;
+        if chars.get(idx) != Some(&'\\') {
+            break;
+        }
+        idx += 1;
+        let escaped = chars.get(idx).copied();
+        if let Some(def) = escaped.and_then(unescape_def) {
+            idx += 1;
+            result.push(def);
+        } else if escaped == Some('x') {
+            idx += 1;
+            let inner: String = chars
+                .get(idx..(idx + 2).min(chars.len()))
+                .unwrap_or(&[])
+                .iter()
+                .collect();
+            result.push_str(&parse_hex_codepoint(
+                env,
+                &inner,
+                &pos_add_col(&segment_pos, idx),
+            )?);
+            idx += 2;
+        } else if escaped == Some('u') {
+            idx += 1;
+            let ustart = idx;
+            if chars.get(idx) != Some(&'{') {
+                return Err(throw_err(
+                    env,
+                    Some(pos_add_col(&segment_pos, idx)),
+                    "expected \\u{ABCD}",
+                    None,
+                    None,
+                ));
+            }
+            idx += 1;
+            let istart = idx;
+            let iend = chars[istart..]
+                .iter()
+                .position(|&c| c == '}')
+                .map(|p| istart + p);
+            let Some(iend) = iend else {
+                return Err(throw_err(
+                    env,
+                    Some(pos_add_col(&segment_pos, ustart)),
+                    "missing close curly",
+                    Some(vec![(
+                        Some(pos_add_col(&segment_pos, chars.len())),
+                        "string ended here".to_string(),
+                    )]),
+                    None,
+                ));
+            };
+            // Mirrors upstream: this only advances past `{`, not past the
+            // whole `}`-terminated escape, so the trailing hex digits and
+            // `}` fall through and get appended again as plain text below.
+            idx += 1;
+            let inner: String = chars[istart..iend].iter().collect();
+            result.push_str(&parse_hex_codepoint(
+                env,
+                &inner,
+                &pos_add_col(&segment_pos, istart),
+            )?);
+        } else {
+            let shown = escaped
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "<eof>".to_string());
+            return Err(throw_err(
+                env,
+                Some(pos_add_col(&segment_pos, idx)),
+                format!("unexpected escape in string: {shown:?}"),
+                None,
+                None,
+            ));
+        }
+    }
+    Ok(result)
+}
+
 struct RenderConfig {
     indent: String,
     reveal: bool,
+    highlight: bool,
+}
+
+fn hl(config: &RenderConfig, s: &str, color: &str) -> String {
+    if config.highlight && !s.trim().is_empty() {
+        format!("{color}{s}{}", colors::RESET)
+    } else {
+        s.to_string()
+    }
+}
+
+fn highlight_string(config: &RenderConfig, segment: &str) -> String {
+    if !segment.contains('\\') {
+        return hl(config, segment, highlights::STRING);
+    }
+    let chars: Vec<char> = segment.chars().collect();
+    let mut result = String::new();
+    let mut idx = 0usize;
+    loop {
+        let next_escape = chars[idx..]
+            .iter()
+            .position(|&c| c == '\\')
+            .map(|p| idx + p)
+            .unwrap_or(chars.len());
+        let plain: String = chars[idx..next_escape].iter().collect();
+        result.push_str(&hl(config, &plain, highlights::STRING));
+        idx = next_escape;
+        if chars.get(idx) != Some(&'\\') {
+            break;
+        }
+        result.push_str(&hl(config, "\\", highlights::BRACKETS));
+        idx += 1;
+        let escaped = chars.get(idx).copied();
+        let escaped_str = escaped.map(|c| c.to_string()).unwrap_or_default();
+        if let Some(def) = escaped.and_then(unescape_def) {
+            let color = if Some(def) == escaped {
+                highlights::STRING
+            } else {
+                highlights::NUMBER
+            };
+            result.push_str(&hl(config, &escaped_str, color));
+            idx += 1;
+        } else if escaped == Some('x') {
+            result.push_str(&hl(config, "x", highlights::KEYWORD));
+            idx += 1;
+            let d1 = chars.get(idx).map(|c| c.to_string()).unwrap_or_default();
+            result.push_str(&hl(config, &d1, highlights::NUMBER));
+            idx += 1;
+            let d2 = chars.get(idx).map(|c| c.to_string()).unwrap_or_default();
+            result.push_str(&hl(config, &d2, highlights::NUMBER));
+        } else if escaped == Some('u') {
+            result.push_str(&hl(config, "u", highlights::KEYWORD));
+            idx += 1;
+        } else {
+            result.push_str(&hl(config, &escaped_str, highlights::ERROR));
+            idx += 1;
+        }
+    }
+    result
+}
+
+fn bracket_highlight(tag: BracketTag) -> Option<&'static str> {
+    match tag {
+        BracketTag::String => Some(highlights::BRACKETS),
+        BracketTag::ColonCall => Some(highlights::OPERATORS),
+        BracketTag::Map => Some(highlights::BRACKETS),
+        BracketTag::List => Some(highlights::BRACKETS),
+        BracketTag::Code => Some(highlights::BRACKETS),
+        BracketTag::ArrowFn => Some(highlights::KEYWORD),
+        BracketTag::InlineComment => Some(highlights::BRACKETS),
+        BracketTag::None => None,
+    }
+}
+
+fn op_highlight(tag: OpTag) -> Option<&'static str> {
+    match tag {
+        OpTag::Def => Some(highlights::KEYWORD),
+        OpTag::Pub => Some(highlights::KEYWORD),
+        OpTag::Assign => Some(highlights::KEYWORD),
+        OpTag::Sep => Some(highlights::OPERATORS),
+        OpTag::Var => Some(highlights::KEYWORD),
+        OpTag::None => None,
+    }
+}
+
+fn raw_highlight(tag: RawTag) -> Option<&'static str> {
+    match tag {
+        RawTag::Return => Some(highlights::KEYWORD),
+        RawTag::Discard => Some(highlights::KEYWORD),
+        RawTag::String => Some(highlights::STRING),
+        RawTag::Comment => Some(highlights::COMMENT),
+        RawTag::Void => None,
+    }
+}
+
+fn ident_prefix_highlight(tag: IdentifierTag) -> Option<&'static str> {
+    match tag {
+        IdentifierTag::Access => Some(highlights::OPERATORS),
+        IdentifierTag::Builtin => Some(highlights::BUILTIN),
+        IdentifierTag::Normal | IdentifierTag::Number | IdentifierTag::Discard => None,
+    }
+}
+
+fn ident_value_highlight(tag: IdentifierTag) -> Option<&'static str> {
+    match tag {
+        IdentifierTag::Normal => Some(highlights::IDENT),
+        IdentifierTag::Access => Some(highlights::IDENT),
+        IdentifierTag::Builtin => Some(highlights::BUILTIN),
+        IdentifierTag::Number => Some(highlights::NUMBER),
+        IdentifierTag::Discard => None,
+    }
 }
 
 fn flatten_op_segs(entities: &[SyntaxNode]) -> Vec<&SyntaxNode> {
@@ -947,12 +1245,15 @@ fn render_entity_pretty(
     is_top_level: bool,
 ) -> String {
     match entity {
-        SyntaxNode::Block(b) => format!(
-            "{}{}{}",
-            b.start,
-            render_entity_pretty_list(config, &b.items, indent, depth, false),
-            b.end.replace("<in_string>", "")
-        ),
+        SyntaxNode::Block(b) => {
+            let color = bracket_highlight(b.tag).unwrap_or(highlights::ERROR);
+            format!(
+                "{}{}{}",
+                hl(config, &b.start, color),
+                render_entity_pretty_list(config, &b.items, indent, depth, false),
+                hl(config, &b.end.replace("<in_string>", ""), color)
+            )
+        }
         SyntaxNode::BinaryExpression(b) => {
             render_entity_pretty_list(config, &b.items, indent, depth, is_top_level)
         }
@@ -963,19 +1264,40 @@ fn render_entity_pretty(
                 " ".to_string()
             }
         }
-        SyntaxNode::Identifier(t) => format!("{}{}", t.ident_tag_raw, t.str),
+        SyntaxNode::Identifier(t) => {
+            let prefix_color = ident_prefix_highlight(t.ident_tag).unwrap_or(highlights::ERROR);
+            let value_color = ident_value_highlight(t.ident_tag).unwrap_or(highlights::ERROR);
+            format!(
+                "{}{}",
+                hl(config, &t.ident_tag_raw, prefix_color),
+                hl(config, &t.str, value_color)
+            )
+        }
         SyntaxNode::Operator(o) => {
             if o.op == "\n" {
                 String::new()
             } else {
-                o.op.clone()
+                hl(
+                    config,
+                    &o.op,
+                    op_highlight(o.op_tag).unwrap_or(highlights::ERROR),
+                )
             }
         }
         SyntaxNode::OperatorSegment(_) => {
             unreachable!("opSeg should be handled by renderEntityPrettyList")
         }
-        SyntaxNode::StrSeg(s) => s.str.clone(),
-        SyntaxNode::Raw(r) => r.raw.clone(),
+        SyntaxNode::Raw(r) => {
+            if r.tag == RawTag::String && config.highlight {
+                highlight_string(config, &r.raw)
+            } else {
+                hl(
+                    config,
+                    &r.raw,
+                    raw_highlight(r.tag).unwrap_or(highlights::ERROR),
+                )
+            }
+        }
         SyntaxNode::Err(_) => "%TODO<err>%".to_string(),
     }
 }
@@ -1010,32 +1332,58 @@ pub mod colors {
     pub const STRIKETHROUGH: &str = "\x1b[9m";
 }
 
-pub fn pretty_print_errors(source: &Source, errors: &[TokenizationError]) -> String {
+pub mod highlights {
+    use super::colors;
+
+    pub const STRING: &str = colors::GREEN;
+    pub const KEYWORD: &str = colors::BLUE;
+    pub const BRACKETS: &str = colors::BRBLACK;
+    pub const OPERATORS: &str = colors::BRBLACK;
+    pub const BUILTIN: &str = colors::CYAN;
+    pub const COMMENT: &str = colors::YELLOW;
+    pub const NUMBER: &str = colors::MAGENTA;
+    pub const ERROR: &str = "\x1b[7m\x1b[31m";
+    pub const IDENT: &str = "";
+}
+
+pub fn pretty_print_errors(sources: &[&Source], errors: &[TokenizationError]) -> String {
     if errors.is_empty() {
         return String::new();
     }
 
-    let source_lines: Vec<&str> = source.text.split('\n').collect();
+    let mut source_map: HashMap<&str, Option<&Source>> = HashMap::new();
+    for source in sources {
+        if source_map.contains_key(source.filename.as_str()) {
+            source_map.insert(source.filename.as_str(), None);
+        } else {
+            source_map.insert(source.filename.as_str(), Some(source));
+        }
+    }
+
     let mut output = String::new();
 
     for error in errors {
         output.push('\n');
 
         for entry in &error.entries {
-            let color = if entry.style == ErrorStyle::Error {
-                colors::RED
-            } else {
-                colors::BLUE
+            let color = match entry.style {
+                ErrorStyle::Error => colors::RED,
+                ErrorStyle::Note => colors::CYAN,
+                ErrorStyle::Todo => colors::BLUE,
+                ErrorStyle::Warning => colors::YELLOW,
+                ErrorStyle::Unreachable => colors::BRBLACK,
             };
-            let bold = if entry.style == ErrorStyle::Error {
+            let bold = if entry.style != ErrorStyle::Note {
                 colors::BOLD
             } else {
                 ""
             };
-            let style_str = if entry.style == ErrorStyle::Error {
-                "error"
-            } else {
-                "note"
+            let style_str = match entry.style {
+                ErrorStyle::Error => "error",
+                ErrorStyle::Note => "note",
+                ErrorStyle::Todo => "todo",
+                ErrorStyle::Warning => "warning",
+                ErrorStyle::Unreachable => "unreachable",
             };
 
             let fyl = entry.pos.as_ref().map(|p| p.fyl.as_str()).unwrap_or("??");
@@ -1056,15 +1404,21 @@ pub fn pretty_print_errors(source: &Source, errors: &[TokenizationError]) -> Str
                 message = entry.message,
             ));
 
-            let line = match &entry.pos {
-                Some(pos) if pos.fyl == source.filename => {
-                    match pos.lyn.checked_sub(1).and_then(|i| source_lines.get(i)) {
-                        Some(l) => *l,
-                        None => continue,
-                    }
+            let source = entry.pos.as_ref().and_then(|p| {
+                if p.fyl.is_empty() {
+                    None
+                } else {
+                    source_map.get(p.fyl.as_str()).copied().flatten()
                 }
-                _ => "",
+            });
+            let source_lines: Option<Vec<&str>> = source.map(|s| s.text.split('\n').collect());
+            let line: Option<&str> = match (&source_lines, &entry.pos) {
+                (Some(lines), Some(pos)) => {
+                    pos.lyn.checked_sub(1).and_then(|i| lines.get(i)).copied()
+                }
+                _ => Some(""),
             };
+            let Some(line) = line else { continue };
 
             let gutter_width = lyn.len();
             let empty_gutter = format!(
@@ -1112,6 +1466,7 @@ pub fn render_tokenized_output(
         &RenderConfig {
             indent: "  ".to_string(),
             reveal: false,
+            highlight: true,
         },
         &tokenization_result.result,
         0,
@@ -1122,14 +1477,16 @@ pub fn render_tokenized_output(
         &RenderConfig {
             indent: "  ".to_string(),
             reveal: true,
+            highlight: false,
         },
         &tokenization_result.result,
         0,
         0,
         true,
     );
-    let adisp = crate::comptime::dump_ast_node_list(&tokenization_result.result, usize::MAX);
-    let pretty_errors = pretty_print_errors(source, &tokenization_result.errors);
+    let adisp =
+        crate::printers::printers::AST_NODE.dump_list(&tokenization_result.result, usize::MAX);
+    let pretty_errors = pretty_print_errors(&[source], &tokenization_result.errors);
 
     format!(
         "// adisp:{adisp}\n\n// ugly\n{ugly_code}\n\n// formatted\n{formatted_code}\n\n// errors:\n{pretty_errors}"

@@ -13,17 +13,24 @@ fn read_destructure_list_of_items() {
         0,
     );
     let src = vec![list_block(vec![comma_list], 0)];
+    let mut targets = Vec::new();
 
-    let result = read_destructure(&mut env, pos_at(0), &src).unwrap();
+    let result = read_destructure(&mut env, pos_at(0), &src, &mut targets).unwrap();
 
     let DestructureExtract::List { items, .. } = result.extract else {
         panic!("expected list extract");
     };
     assert_eq!(items.len(), 2);
-    assert!(matches!(&items[0], DestructureExtract::SingleItem { name, .. } if name == "a"));
-    assert!(matches!(&items[1], DestructureExtract::SingleItem { name, .. } if name == "b"));
+    let DestructureExtract::SingleItem { target: t0, .. } = &items[0] else {
+        panic!("expected single_item extract");
+    };
+    let DestructureExtract::SingleItem { target: t1, .. } = &items[1] else {
+        panic!("expected single_item extract");
+    };
+    assert_eq!(targets[*t0].name, "a");
+    assert_eq!(targets[*t1].name, "b");
 
-    let ComptimeType::Tuple(tuple) = result.ty else {
+    let Type::Tuple(tuple) = result.ty else {
         panic!("expected tuple type");
     };
     assert_eq!(tuple.children.len(), 2);

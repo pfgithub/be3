@@ -1,463 +1,297 @@
-use std::any::Any;
-use std::collections::HashMap;
-
 use crate::compiler::{
-    assert, syntax_node_kind, throw_err, AnalysisBlock, AnalysisLine, ComptimeNarrowKey,
-    ComptimeType, ComptimeValueAst, Destructure, DestructureExtract, Env, NsFields, NsKey,
-    PositionedError, RegisteredEntry,
+    analyze_function, throw_consumed_err, throw_err, AnalysisBlock, AnalysisLine, ComptimeFile,
+    ComptimeValue, ComptimeValueBuildArtifact, Env, NsFields, NsFieldsEntry, PositionedError,
+    RuntimeValue,
 };
-use crate::parser::{colors, BracketTag, IdentifierTag, OpTag, RawTag, SyntaxNode, TokenPosition};
+use crate::parser::{ErrorStyle, TokenPosition};
 
 #[cfg(test)]
 mod tests;
 
-fn analysis_line_tag(line: &AnalysisLine) -> &'static str {
-    match line {
-        AnalysisLine::ComptimeOnly { .. } => "comptime:only",
-        AnalysisLine::ComptimeNsListInit { .. } => "comptime:ns_list_init",
-        AnalysisLine::ComptimeKey { .. } => "comptime:key",
-        AnalysisLine::ComptimeAst { .. } => "comptime:ast",
-        AnalysisLine::ComptimeNsListAppend { .. } => "comptime:ns_list_append",
-        AnalysisLine::Void { .. } => "void",
-        AnalysisLine::Call { .. } => "call",
-        AnalysisLine::Break { .. } => "break",
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComptimeValueKind {
+    Key,
+    Namespace,
+    Type,
+    Ast,
+    Void,
+    KvFields,
+    Fn,
+    Optional,
+    BuildArtifact,
+    Uint8Array,
+    ExportList,
+    CExportName,
+    McIdentifier,
+    McResult,
+    McNbtRef,
+    Error,
+    Mc,
+}
+
+impl ComptimeValueKind {
+    fn of(value: &ComptimeValue) -> Self {
+        match value {
+            ComptimeValue::Key(_) => ComptimeValueKind::Key,
+            ComptimeValue::Namespace(_) => ComptimeValueKind::Namespace,
+            ComptimeValue::Type(_) => ComptimeValueKind::Type,
+            ComptimeValue::Ast(_) => ComptimeValueKind::Ast,
+            ComptimeValue::Void(_) => ComptimeValueKind::Void,
+            ComptimeValue::KvFields(_) => ComptimeValueKind::KvFields,
+            ComptimeValue::Fn(_) => ComptimeValueKind::Fn,
+            ComptimeValue::Optional(_) => ComptimeValueKind::Optional,
+            ComptimeValue::BuildArtifact(_) => ComptimeValueKind::BuildArtifact,
+            ComptimeValue::Uint8Array(_) => ComptimeValueKind::Uint8Array,
+            ComptimeValue::ExportList(_) => ComptimeValueKind::ExportList,
+            ComptimeValue::CExportName(_) => ComptimeValueKind::CExportName,
+            ComptimeValue::McIdentifier(_) => ComptimeValueKind::McIdentifier,
+            ComptimeValue::McResult(_) => ComptimeValueKind::McResult,
+            ComptimeValue::McNbtRef(_) => ComptimeValueKind::McNbtRef,
+            ComptimeValue::Error(_) => ComptimeValueKind::Error,
+            ComptimeValue::Mc(_) => ComptimeValueKind::Mc,
+        }
     }
+}
+
+struct RuntimeData<'a> {
+    block: &'a AnalysisBlock,
+    results: &'a [Option<ComptimeValue>],
+}
+
+fn narrow_mismatch(
+    env: &Env,
+    pos: TokenPosition,
+    expected: ComptimeValueKind,
+    actual: ComptimeValueKind,
+) -> PositionedError {
+    throw_err(
+        env,
+        Some(pos),
+        format!("Expected value of type {expected:?}, got {actual:?}"),
+        None,
+        None,
+    )
+}
+
+fn get_comptime_impl(
+    env: &mut Env,
+    k: Option<ComptimeValueKind>,
+    v: RuntimeValue,
+    pos: TokenPosition,
+    runtime: Option<&RuntimeData<'_>>,
+) -> Result<ComptimeValue, PositionedError> {
+    match v {
+        RuntimeValue::Runtime(idx) => {
+            let Some(runtime) = runtime else {
+                return Err(throw_err(
+                    env,
+                    Some(pos),
+                    "Value must be known at comptime.",
+                    None,
+                    None,
+                ));
+            };
+            if idx.1 != runtime.block.validate {
+                return Err(throw_err(
+                    env,
+                    Some(pos),
+                    "Assertion failure: Ex",
+                    None,
+                    None,
+                ));
+            }
+            let resolved = runtime.results[idx.0]
+                .clone()
+                .expect("runtime result must be populated before being referenced");
+            get_comptime_impl(env, k, RuntimeValue::Comptime(resolved), pos, None)
+        }
+        RuntimeValue::Comptime(ComptimeValue::Error(err))
+            if k.is_some_and(|k| k != ComptimeValueKind::Error) =>
+        {
+            Err(throw_consumed_err(err.etok))
+        }
+        RuntimeValue::Comptime(value) => match k {
+            None => Ok(value),
+            Some(k) if ComptimeValueKind::of(&value) == k => Ok(value),
+            Some(k) => Err(narrow_mismatch(env, pos, k, ComptimeValueKind::of(&value))),
+        },
+    }
+}
+
+pub fn get_comptime(
+    env: &mut Env,
+    k: Option<ComptimeValueKind>,
+    v: RuntimeValue,
+    pos: TokenPosition,
+) -> Result<ComptimeValue, PositionedError> {
+    get_comptime_impl(env, k, v, pos, None)
 }
 
 pub fn comptime_eval(
     env: &mut Env,
     block: &AnalysisBlock,
-) -> Result<Vec<Box<dyn Any>>, PositionedError> {
-    let mut results: Vec<Box<dyn Any>> = Vec::with_capacity(block.lines.len());
-    for instr in &block.lines {
-        let result: Box<dyn Any> = match instr {
-            AnalysisLine::Void { .. } => Box::new(()),
-            AnalysisLine::ComptimeOnly { .. } => Box::new(()),
-            AnalysisLine::ComptimeAst { narrow, .. } => Box::new(narrow.clone()),
-            AnalysisLine::ComptimeKey { narrow, .. } => Box::new(narrow.clone()),
-            AnalysisLine::ComptimeNsListInit { .. } => Box::new(NsFields {
-                locked: false,
-                registered: HashMap::new(),
-            }),
-            AnalysisLine::ComptimeNsListAppend {
-                key, list, value, ..
-            } => {
-                let ast = results[value.0]
-                    .downcast_ref::<ComptimeValueAst>()
-                    .expect("comptime:ns_list_append value must be ComptimeValueAst")
-                    .clone();
-                let key_narrow = results[key.0]
-                    .downcast_ref::<ComptimeNarrowKey>()
-                    .expect("comptime:ns_list_append key must be ComptimeNarrowKey")
-                    .clone();
-                let ns_key = match &key_narrow {
-                    ComptimeNarrowKey::String { key } => NsKey::Str(key.clone()),
-                    ComptimeNarrowKey::Symbol { key, .. } => NsKey::Sym(*key),
-                };
+    result: RuntimeValue,
+    pos: TokenPosition,
+) -> Result<ComptimeValue, PositionedError> {
+    comptime_eval_with_args(env, block, result, pos, None)
+}
 
-                let fields = results[list.0]
-                    .downcast_mut::<NsFields>()
-                    .expect("comptime:ns_list_append list must be NsFields");
-                assert(!fields.locked);
+fn comptime_eval_with_args(
+    env: &mut Env,
+    block: &AnalysisBlock,
+    result: RuntimeValue,
+    pos: TokenPosition,
+    args: Option<RuntimeValue>,
+) -> Result<ComptimeValue, PositionedError> {
+    let mut results: Vec<Option<ComptimeValue>> = block.lines.iter().map(|_| None).collect();
 
-                if let Some(prevdef) = fields.registered.get(&ns_key) {
-                    return Err(throw_err(
-                        env,
-                        Some(ast.pos.clone()),
-                        "already declared",
-                        Some(vec![(
-                            Some(prevdef.ast.pos.clone()),
-                            "previous definition here".to_string(),
-                        )]),
-                    ));
-                }
-                fields.registered.insert(
-                    ns_key,
-                    RegisteredEntry {
-                        key: key_narrow,
-                        ast,
-                    },
-                );
-
-                Box::new(())
+    for (i, instr) in block.lines.iter().enumerate() {
+        match instr {
+            AnalysisLine::ComptimeKvListInit { .. } => {
+                results[i] = Some(ComptimeValue::KvFields(NsFields {
+                    locked: false,
+                    entries: Vec::new(),
+                }));
             }
-            AnalysisLine::Call { .. } | AnalysisLine::Break { .. } => {
-                panic!("todo: comptime eval expr: {}", analysis_line_tag(instr))
-            }
-        };
-        results.push(result);
-    }
-    Ok(results)
-}
-
-struct PrintCfg {
-    indent: String,
-}
-
-struct Adisp {
-    cfg: PrintCfg,
-    indent_count: usize,
-    depth: usize,
-    res: Vec<String>,
-}
-
-impl Adisp {
-    fn new(depth: usize) -> Self {
-        Adisp {
-            cfg: PrintCfg {
-                indent: "\u{2502} ".to_string(),
-            },
-            indent_count: 0,
-            depth,
-            res: Vec::new(),
-        }
-    }
-
-    fn end(self) -> String {
-        self.res.concat()
-    }
-
-    fn put(&mut self, msg: &str, color: Option<&str>) {
-        if let Some(c) = color {
-            self.res.push(c.to_string());
-        }
-        self.res.push(msg.to_string());
-        if color.is_some() {
-            self.res.push(colors::RESET.to_string());
-        }
-    }
-
-    fn put_newline(&mut self) {
-        self.put("\n", None);
-        let indent = self.cfg.indent.repeat(self.indent_count);
-        self.put(&indent, Some(colors::BLACK));
-    }
-
-    fn put_src(&mut self, pos: &TokenPosition) {
-        let msg = format!(" \u{b7} {}:{}:{}", pos.fyl, pos.lyn, pos.col);
-        self.put(&msg, Some(colors::BLACK));
-    }
-
-    fn put_check_depth(&mut self, n: Option<usize>) -> bool {
-        if self.indent_count > self.depth {
-            self.put_newline();
-            self.put("...", Some(colors::BLACK));
-            if let Some(n) = n {
-                if n > 0 {
-                    let msg = format!(" {n} item{}", if n == 1 { "" } else { "s" });
-                    self.put(&msg, Some(colors::BLACK));
-                }
-            }
-            return true;
-        }
-        false
-    }
-
-    fn put_single<T>(&mut self, printer: fn(&mut Adisp, &T), value: &T) {
-        self.indent_count += 1;
-        if self.put_check_depth(None) {
-            self.indent_count -= 1;
-            return;
-        }
-        self.put_newline();
-        printer(self, value);
-        self.indent_count -= 1;
-    }
-
-    fn put_multi<T>(&mut self, printer: fn(&mut Adisp, &T), value: &T) {
-        self.indent_count += 1;
-        if self.put_check_depth(None) {
-            self.indent_count -= 1;
-            return;
-        }
-        printer(self, value);
-        self.indent_count -= 1;
-    }
-
-    fn put_list<T>(&mut self, printer: fn(&mut Adisp, &T), children: &[T]) {
-        self.indent_count += 1;
-        if children.is_empty() {
-            self.put_newline();
-            self.put("*no children*", Some(colors::BLACK));
-            self.indent_count -= 1;
-            return;
-        }
-        if self.put_check_depth(Some(children.len())) {
-            self.indent_count -= 1;
-            return;
-        }
-        for child in children {
-            self.put_newline();
-            printer(self, child);
-        }
-        self.indent_count -= 1;
-    }
-}
-
-// Rust's `{:?}` string formatting doesn't match JS's `JSON.stringify` escaping
-// rules, so this hand-rolls the subset that matters for this toy language's
-// identifiers/strings: quotes, backslashes, the common short escapes, and a
-// `\u00XX` fallback for other control characters. It doesn't reproduce
-// JSON.stringify's UTF-16 surrogate-pair splitting for astral characters,
-// which isn't meaningful for Rust's `char` and doesn't come up in practice
-// here.
-fn json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-fn is_simple_ident(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-fn op_tag_str(tag: OpTag) -> &'static str {
-    match tag {
-        OpTag::Sep => "sep",
-        OpTag::Def => "def",
-        OpTag::Pub => "pub",
-        OpTag::Var => "var",
-        OpTag::Assign => "assign",
-        OpTag::None => "",
-    }
-}
-
-fn bracket_tag_str(tag: BracketTag) -> &'static str {
-    match tag {
-        BracketTag::Map => "map",
-        BracketTag::List => "list",
-        BracketTag::Code => "code",
-        BracketTag::ColonCall => "colon_call",
-        BracketTag::ArrowFn => "arrow_fn",
-        BracketTag::String => "string",
-        BracketTag::None => "",
-    }
-}
-
-fn ident_tag_str(tag: IdentifierTag) -> &'static str {
-    match tag {
-        IdentifierTag::Normal => "normal",
-        IdentifierTag::Access => "access",
-        IdentifierTag::Builtin => "builtin",
-    }
-}
-
-fn raw_tag_str(tag: RawTag) -> &'static str {
-    match tag {
-        RawTag::Return => "return",
-        RawTag::Discard => "discard",
-    }
-}
-
-fn put_block(adisp: &mut Adisp, block: &AnalysisBlock) {
-    if adisp.put_check_depth(None) {
-        return;
-    }
-    for (i, expr) in block.lines.iter().enumerate() {
-        adisp.put_newline();
-        adisp.put(&format!("{i} = "), None);
-        adisp.put(analysis_line_tag(expr), Some(colors::MAGENTA));
-        match expr {
-            AnalysisLine::Call { pos, method, arg } => {
-                adisp.put(&format!(" method={} arg={}", method.0, arg.0), None);
-                adisp.put_src(pos);
-            }
-            AnalysisLine::ComptimeOnly { pos } => {
-                adisp.put_src(pos);
-            }
-            AnalysisLine::ComptimeNsListInit { pos } => {
-                adisp.put_src(pos);
-            }
-            AnalysisLine::ComptimeKey { pos, narrow } => match narrow {
-                ComptimeNarrowKey::String { key } => {
-                    adisp.put(&format!(" str={}", json_string(key)), None);
-                    adisp.put_src(pos);
-                }
-                ComptimeNarrowKey::Symbol { child, .. } => {
-                    // `Symbol` in this port carries no description string (see
-                    // module docs on `Env`/`Symbol` in compiler.rs), so this
-                    // always prints "(unnamed)" like the TS fallback does for
-                    // every symbol actually created in this codebase today.
-                    adisp.put(&format!(" str={}, type=", json_string("(unnamed)")), None);
-                    adisp.put_src(pos);
-                    adisp.put_single(put_type, child);
-                }
-            },
-            AnalysisLine::ComptimeAst { pos, narrow } => {
-                adisp.put(" ast:", None);
-                adisp.put_src(pos);
-                adisp.put_list(put_ast_node, &narrow.ast);
-            }
-            AnalysisLine::ComptimeNsListAppend {
-                pos,
+            AnalysisLine::ComptimeKvListAppend {
+                pos: ipos,
                 key,
                 list,
                 value,
             } => {
-                adisp.put(
-                    &format!(" key={} list={} value={}", key.0, list.0, value.0),
+                let runtime = RuntimeData {
+                    block,
+                    results: &results,
+                };
+                let fields_check = get_comptime_impl(
+                    env,
+                    Some(ComptimeValueKind::KvFields),
+                    list.clone(),
+                    ipos.clone(),
+                    Some(&runtime),
+                )?;
+                let ComptimeValue::KvFields(fields_check) = fields_check else {
+                    unreachable!("get_comptime guarantees a matching kind")
+                };
+                if fields_check.locked {
+                    return Err(throw_err(
+                        env,
+                        Some(ipos.clone()),
+                        "assertion failed",
+                        None,
+                        None,
+                    ));
+                }
+                let key_val =
+                    get_comptime_impl(env, None, key.clone(), ipos.clone(), Some(&runtime))?;
+                let value_val =
+                    get_comptime_impl(env, None, value.clone(), ipos.clone(), Some(&runtime))?;
+
+                let RuntimeValue::Runtime(list_idx) = list else {
+                    unreachable!("get_comptime already validated this resolves to a runtime slot")
+                };
+                let Some(ComptimeValue::KvFields(fields)) = &mut results[list_idx.0] else {
+                    unreachable!("validated above via get_comptime")
+                };
+                fields.entries.push(NsFieldsEntry {
+                    pos: ipos.clone(),
+                    key: key_val,
+                    value: value_val,
+                });
+            }
+            AnalysisLine::Call {
+                pos: ipos,
+                method,
+                arg,
+            } => {
+                let runtime = RuntimeData {
+                    block,
+                    results: &results,
+                };
+                let method_val = get_comptime_impl(
+                    env,
+                    Some(ComptimeValueKind::Fn),
+                    method.clone(),
+                    ipos.clone(),
+                    Some(&runtime),
+                )?;
+                let ComptimeValue::Fn(method_val) = method_val else {
+                    unreachable!("get_comptime guarantees a matching kind")
+                };
+                let arg_val =
+                    get_comptime_impl(env, None, arg.clone(), ipos.clone(), Some(&runtime))?;
+                let body = analyze_function(env, &method_val)?;
+                let value = comptime_eval_with_args(
+                    env,
+                    &body.block,
+                    body.value,
+                    ipos.clone(),
+                    Some(RuntimeValue::Comptime(arg_val)),
+                )?;
+                results[i] = Some(value);
+            }
+            AnalysisLine::Args { pos: ipos } => {
+                let Some(args_val) = args.clone() else {
+                    return Err(throw_err(
+                        env,
+                        Some(ipos.clone()),
+                        "cannot get args when executing without args",
+                        Some(vec![(Some(pos.clone()), "called here".to_string())]),
+                        Some(ErrorStyle::Unreachable),
+                    ));
+                };
+                let runtime = RuntimeData {
+                    block,
+                    results: &results,
+                };
+                let value = get_comptime_impl(env, None, args_val, ipos.clone(), Some(&runtime))?;
+                results[i] = Some(value);
+            }
+            AnalysisLine::ComptimeFileCreate { pos: ipos, value } => {
+                let runtime = RuntimeData {
+                    block,
+                    results: &results,
+                };
+                let arg_val = get_comptime_impl(
+                    env,
+                    Some(ComptimeValueKind::Uint8Array),
+                    value.clone(),
+                    ipos.clone(),
+                    Some(&runtime),
+                )?;
+                let ComptimeValue::Uint8Array(arg_val) = arg_val else {
+                    unreachable!("get_comptime guarantees a matching kind")
+                };
+                results[i] = Some(ComptimeValue::BuildArtifact(
+                    ComptimeValueBuildArtifact::File(ComptimeFile {
+                        value: arg_val.value,
+                    }),
+                ));
+            }
+            AnalysisLine::Break { pos: ipos, .. } => {
+                return Err(throw_err(
+                    env,
+                    Some(ipos.clone()),
+                    "todo: comptime eval expr: break",
                     None,
-                );
-                adisp.put_src(pos);
+                    None,
+                ));
             }
-            AnalysisLine::Void { pos } | AnalysisLine::Break { pos, .. } => {
-                adisp.put(" %%TODO%%", None);
-                adisp.put_src(pos);
+            AnalysisLine::McExecRaw { pos: ipos, .. } => {
+                return Err(throw_err(
+                    env,
+                    Some(ipos.clone()),
+                    "todo: comptime eval expr: mc:exec_raw",
+                    None,
+                    None,
+                ));
             }
         }
     }
-}
 
-fn put_destructure(adisp: &mut Adisp, destructure: &Destructure) {
-    adisp.put_newline();
-    adisp.put("extract=", None);
-    adisp.put_single(put_destructure_extract, &destructure.extract);
-    adisp.put_newline();
-    adisp.put("type=", None);
-    adisp.put_single(put_type, &destructure.ty);
-}
-
-fn put_destructure_extract(adisp: &mut Adisp, extract: &DestructureExtract) {
-    adisp.put(extract.tag(), Some(colors::CYAN));
-    match extract {
-        DestructureExtract::SingleItem { name, pos } => {
-            adisp.put(&format!(" {}", json_string(name)), Some(colors::GREEN));
-            adisp.put_src(pos);
-        }
-        DestructureExtract::List { items, pos } => {
-            adisp.put_src(pos);
-            adisp.put_list(put_destructure_extract, items);
-        }
-        DestructureExtract::Map { pos, .. } => {
-            adisp.put(" %%TODO%%", None);
-            adisp.put_src(pos);
-        }
-    }
-}
-
-fn put_type(adisp: &mut Adisp, ty: &ComptimeType) {
-    adisp.put(ty.tag(), Some(colors::YELLOW));
-    match ty {
-        ComptimeType::Fn(f) => {
-            adisp.put_src(&f.pos);
-            adisp.indent_count += 1;
-            adisp.put_newline();
-            adisp.put("arg=", None);
-            adisp.put_single(put_type, f.arg.as_ref());
-            adisp.put_newline();
-            adisp.put("ret=", None);
-            adisp.put_single(put_type, f.ret.as_ref());
-            adisp.indent_count -= 1;
-        }
-        ComptimeType::Void(t) => adisp.put_src(&t.pos),
-        ComptimeType::FolderOrFile(t) => adisp.put_src(&t.pos),
-        ComptimeType::Tuple(t) => {
-            adisp.put_src(&t.pos);
-            adisp.put_list(put_type, &t.children);
-        }
-        _ => {
-            adisp.put(" %%TODO%%", None);
-            adisp.put_src(ty.pos());
-        }
-    }
-}
-
-fn put_ast_node(adisp: &mut Adisp, node: &SyntaxNode) {
-    adisp.put(syntax_node_kind(node), Some(colors::CYAN));
-    match node {
-        SyntaxNode::Block(b) => {
-            adisp.put(&format!(" {}", bracket_tag_str(b.tag)), None);
-            adisp.put_src(&b.pos);
-            adisp.put_list(put_ast_node, &b.items);
-        }
-        SyntaxNode::BinaryExpression(b) => {
-            adisp.put(&format!(" {}", op_tag_str(b.tag)), None);
-            adisp.put_src(&b.pos);
-            adisp.put_list(put_ast_node, &b.items);
-        }
-        SyntaxNode::Operator(o) => {
-            adisp.put(&format!(" {}", json_string(&o.op)), Some(colors::YELLOW));
-            adisp.put_src(&o.pos);
-        }
-        SyntaxNode::OperatorSegment(seg) => {
-            adisp.put_src(&seg.pos);
-            adisp.put_list(put_ast_node, &seg.items);
-        }
-        SyntaxNode::Whitespace(w) => {
-            let s = if w.nl { "\n" } else { " " };
-            adisp.put(&format!(" {}", json_string(s)), None);
-            adisp.put_src(&w.pos);
-        }
-        SyntaxNode::Identifier(id) => {
-            adisp.put(&format!(" {}", ident_tag_str(id.ident_tag)), None);
-            let display = if is_simple_ident(&id.str) {
-                id.str.clone()
-            } else {
-                format!("#{}", json_string(&id.str))
-            };
-            adisp.put(&format!(" {display}"), Some(colors::BLUE));
-            adisp.put_src(&id.pos);
-        }
-        SyntaxNode::StrSeg(s) => {
-            adisp.put(&format!(" {}", json_string(&s.str)), Some(colors::GREEN));
-            adisp.put_src(&s.pos);
-        }
-        SyntaxNode::Raw(r) => {
-            adisp.put(&format!(" {}", raw_tag_str(r.tag)), None);
-            adisp.put_src(&r.pos);
-        }
-        SyntaxNode::Err(e) => {
-            adisp.put(" %%TODO%%", None);
-            adisp.put_src(&e.pos);
-        }
-    }
-}
-
-pub fn dump_ast_node_list(nodes: &[SyntaxNode], depth: usize) -> String {
-    let mut adisp = Adisp::new(depth);
-    adisp.put_list(put_ast_node, nodes);
-    adisp.end()
-}
-
-pub fn dump_ast_node(node: &SyntaxNode, depth: usize) -> String {
-    let mut adisp = Adisp::new(depth);
-    adisp.put_single(put_ast_node, node);
-    adisp.end()
-}
-
-pub fn dump_type(ty: &ComptimeType, depth: usize) -> String {
-    let mut adisp = Adisp::new(depth);
-    adisp.put_single(put_type, ty);
-    adisp.end()
-}
-
-pub fn dump_destructure(d: &Destructure, depth: usize) -> String {
-    let mut adisp = Adisp::new(depth);
-    adisp.put_multi(put_destructure, d);
-    adisp.end()
-}
-
-pub fn dump_block(block: &AnalysisBlock, depth: usize) -> String {
-    let mut adisp = Adisp::new(depth);
-    adisp.put_multi(put_block, block);
-    adisp.end()
+    let runtime = RuntimeData {
+        block,
+        results: &results,
+    };
+    get_comptime_impl(env, None, result, pos, Some(&runtime))
 }

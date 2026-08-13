@@ -24,7 +24,9 @@ fn assert_two_item_separator(src: &str, expected_op: &str) {
         }
         other => panic!("expected opSeg, got {other:?}"),
     }
-    assert!(matches!(&binary.items[1], SyntaxNode::Operator(o) if o.op == expected_op));
+    assert!(
+        matches!(&binary.items[1], SyntaxNode::Operator(o) if o.op == expected_op && o.op_tag == OpTag::Sep)
+    );
     match &binary.items[2] {
         SyntaxNode::OperatorSegment(seg) => {
             assert!(matches!(&seg.items[..], [SyntaxNode::Identifier(t)] if t.str == "b"));
