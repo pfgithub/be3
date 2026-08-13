@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod compiler;
 pub mod comptime;
 pub mod parser;
