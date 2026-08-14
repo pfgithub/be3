@@ -28,7 +28,7 @@ use egui_material_icons::{
         ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED,
         ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN,
         ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP, ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH,
-        ICON_TERMINAL, ICON_TITLE,
+        ICON_TITLE,
     },
     MaterialIcon,
 };
@@ -128,206 +128,8 @@ pub(super) struct TextEditor {
     focused_embed: Option<FocusedEmbed>,
     find: Option<FindState>,
     find_reveal: bool,
-    palette: Option<PaletteState>,
     last_cursor_positions: Vec<CursorPosition>,
     pending_presence_reveal: Option<ClientId>,
-}
-
-/// UI-only state for the command palette: what's typed and which entry is
-/// highlighted. Reuses the same [`EditorCommand`]/[`MarkdownCommand`]
-/// variants the toolbar buttons already construct (see
-/// [`TextEditor::toolbar`]) rather than modeling a separate command set.
-struct PaletteState {
-    query: String,
-    selected: usize,
-    focus_query: bool,
-}
-
-impl Default for PaletteState {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            selected: 0,
-            focus_query: true,
-        }
-    }
-}
-
-struct PaletteEntry {
-    label: &'static str,
-    action: PaletteAction,
-}
-
-enum PaletteAction {
-    Command(EditorCommand<'static>),
-    OpenFind { replace: bool },
-    InsertBlock,
-}
-
-fn palette_entries(language: TextLanguage) -> Vec<PaletteEntry> {
-    let mut entries = vec![
-        PaletteEntry {
-            label: "Undo",
-            action: PaletteAction::Command(EditorCommand::Undo),
-        },
-        PaletteEntry {
-            label: "Redo",
-            action: PaletteAction::Command(EditorCommand::Redo),
-        },
-        PaletteEntry {
-            label: "Select All",
-            action: PaletteAction::Command(EditorCommand::SelectAll),
-        },
-        PaletteEntry {
-            label: "Duplicate Line Up",
-            action: PaletteAction::Command(EditorCommand::DuplicateLine(UDDirection::Up)),
-        },
-        PaletteEntry {
-            label: "Duplicate Line Down",
-            action: PaletteAction::Command(EditorCommand::DuplicateLine(UDDirection::Down)),
-        },
-        PaletteEntry {
-            label: "Insert Line Above",
-            action: PaletteAction::Command(EditorCommand::InsertLine(UDDirection::Up)),
-        },
-        PaletteEntry {
-            label: "Insert Line Below",
-            action: PaletteAction::Command(EditorCommand::InsertLine(UDDirection::Down)),
-        },
-        PaletteEntry {
-            label: "Indent",
-            action: PaletteAction::Command(EditorCommand::IndentSelection(LRDirection::Right)),
-        },
-        PaletteEntry {
-            label: "Outdent",
-            action: PaletteAction::Command(EditorCommand::IndentSelection(LRDirection::Left)),
-        },
-        PaletteEntry {
-            label: "Select Parent Node",
-            action: PaletteAction::Command(EditorCommand::SelectSyntaxNode(
-                SyntaxNodeDirection::Parent,
-            )),
-        },
-        PaletteEntry {
-            label: "Select Child Node",
-            action: PaletteAction::Command(EditorCommand::SelectSyntaxNode(
-                SyntaxNodeDirection::Child,
-            )),
-        },
-        PaletteEntry {
-            label: "Add Cursor at Next Occurrence",
-            action: PaletteAction::Command(EditorCommand::DuplicateCursor(LRDirection::Right)),
-        },
-        PaletteEntry {
-            label: "Add Cursor at Previous Occurrence",
-            action: PaletteAction::Command(EditorCommand::DuplicateCursor(LRDirection::Left)),
-        },
-        PaletteEntry {
-            label: "Collapse",
-            action: PaletteAction::Command(EditorCommand::Collapse),
-        },
-        PaletteEntry {
-            label: "Uncollapse",
-            action: PaletteAction::Command(EditorCommand::Uncollapse),
-        },
-        PaletteEntry {
-            label: "Find",
-            action: PaletteAction::OpenFind { replace: false },
-        },
-        PaletteEntry {
-            label: "Find and Replace",
-            action: PaletteAction::OpenFind { replace: true },
-        },
-        PaletteEntry {
-            label: "Insert Block",
-            action: PaletteAction::InsertBlock,
-        },
-        PaletteEntry {
-            label: "Indentation: Tabs",
-            action: PaletteAction::Command(EditorCommand::SetIndentation(TextIndentation::Tabs)),
-        },
-        PaletteEntry {
-            label: "Indentation: Spaces",
-            action: PaletteAction::Command(EditorCommand::SetIndentation(
-                TextIndentation::Spaces { width: 2 },
-            )),
-        },
-    ];
-    for choice in TextLanguage::ALL {
-        entries.push(PaletteEntry {
-            label: match choice {
-                TextLanguage::Markdown => "Set Language: Markdown",
-                TextLanguage::PlainText => "Set Language: Plain text",
-                TextLanguage::Rust => "Set Language: Rust",
-                TextLanguage::Zig => "Set Language: Zig",
-            },
-            action: PaletteAction::Command(EditorCommand::SetLanguage(choice)),
-        });
-    }
-    if language == TextLanguage::Markdown {
-        entries.extend([
-            PaletteEntry {
-                label: "Bold",
-                action: PaletteAction::Command(EditorCommand::Markdown(MarkdownCommand::Bold)),
-            },
-            PaletteEntry {
-                label: "Italic",
-                action: PaletteAction::Command(EditorCommand::Markdown(MarkdownCommand::Italic)),
-            },
-            PaletteEntry {
-                label: "Strikethrough",
-                action: PaletteAction::Command(EditorCommand::Markdown(
-                    MarkdownCommand::Strikethrough,
-                )),
-            },
-            PaletteEntry {
-                label: "Inline Code",
-                action: PaletteAction::Command(EditorCommand::Markdown(
-                    MarkdownCommand::InlineCode,
-                )),
-            },
-            PaletteEntry {
-                label: "Link",
-                action: PaletteAction::Command(EditorCommand::Markdown(MarkdownCommand::Link)),
-            },
-            PaletteEntry {
-                label: "Image",
-                action: PaletteAction::Command(EditorCommand::Markdown(MarkdownCommand::Image)),
-            },
-            PaletteEntry {
-                label: "Bulleted List",
-                action: PaletteAction::Command(EditorCommand::Markdown(
-                    MarkdownCommand::BulletedList,
-                )),
-            },
-            PaletteEntry {
-                label: "Numbered List",
-                action: PaletteAction::Command(EditorCommand::Markdown(
-                    MarkdownCommand::NumberedList,
-                )),
-            },
-            PaletteEntry {
-                label: "Checklist",
-                action: PaletteAction::Command(EditorCommand::Markdown(MarkdownCommand::Checklist)),
-            },
-        ]);
-        for level in 1..=6u8 {
-            entries.push(PaletteEntry {
-                label: match level {
-                    1 => "Heading 1",
-                    2 => "Heading 2",
-                    3 => "Heading 3",
-                    4 => "Heading 4",
-                    5 => "Heading 5",
-                    _ => "Heading 6",
-                },
-                action: PaletteAction::Command(EditorCommand::Markdown(MarkdownCommand::Heading(
-                    level,
-                ))),
-            });
-        }
-    }
-    entries
 }
 
 /// UI-only state for the find/replace bar: what's typed and which panel is
@@ -411,7 +213,6 @@ impl TextEditor {
             focused_embed: None,
             find: None,
             find_reveal: false,
-            palette: None,
             last_cursor_positions: Vec::new(),
             pending_presence_reveal: None,
         }
@@ -535,13 +336,6 @@ impl TextEditor {
                 .clicked()
             {
                 self.open_find(true);
-            }
-            if ui
-                .button(ICON_TERMINAL)
-                .on_hover_text("Command palette (Ctrl+Shift+P)")
-                .clicked()
-            {
-                self.open_palette();
             }
         });
         if language != previous {
@@ -714,99 +508,6 @@ impl TextEditor {
 
     fn close_find(&mut self) {
         self.find = None;
-    }
-
-    fn open_palette(&mut self) {
-        self.palette = Some(PaletteState::default());
-    }
-
-    fn run_palette_action(&mut self, action: PaletteAction) {
-        match action {
-            PaletteAction::Command(command) => self.core.execute_command(command),
-            PaletteAction::OpenFind { replace } => self.open_find(replace),
-            PaletteAction::InsertBlock => self.picker.open([self.block.id()]),
-        }
-    }
-
-    /// Renders the command palette as a modal overlay and dispatches the
-    /// selected entry. See [`palette_entries`] for the list of commands and
-    /// [`PaletteState`] for why this is UI-only state.
-    fn command_palette(&mut self, ctx: &egui::Context) {
-        if self.palette.is_none() {
-            return;
-        }
-        let mut entries = palette_entries(self.core.language());
-        let query_lower = self.palette.as_ref().unwrap().query.to_lowercase();
-        let filtered: Vec<usize> = entries
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| {
-                query_lower.is_empty() || entry.label.to_lowercase().contains(&query_lower)
-            })
-            .map(|(index, _)| index)
-            .collect();
-        let palette = self.palette.as_mut().unwrap();
-        palette.selected = if filtered.is_empty() {
-            0
-        } else {
-            palette.selected.min(filtered.len() - 1)
-        };
-        let mut run_index = None;
-        let response = egui::Modal::new(egui::Id::new((
-            "text-editor-command-palette",
-            self.block.id(),
-        )))
-        .show(ctx, |ui| {
-            ui.set_width(420.0);
-            let query_response = ui.add(
-                egui::TextEdit::singleline(&mut palette.query)
-                    .desired_width(ui.available_width())
-                    .hint_text("Type a command..."),
-            );
-            if palette.focus_query {
-                query_response.request_focus();
-                palette.focus_query = false;
-            }
-            if query_response.changed() {
-                palette.selected = 0;
-            }
-            if ui.input(|input| input.key_pressed(Key::ArrowDown)) {
-                palette.selected = (palette.selected + 1).min(filtered.len().saturating_sub(1));
-            }
-            if ui.input(|input| input.key_pressed(Key::ArrowUp)) {
-                palette.selected = palette.selected.saturating_sub(1);
-            }
-            if query_response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
-                run_index = filtered.get(palette.selected).copied();
-            }
-            ui.separator();
-            egui::ScrollArea::vertical()
-                .max_height(320.0)
-                .show(ui, |ui| {
-                    if filtered.is_empty() {
-                        ui.weak("No matching commands");
-                    }
-                    for (position, &index) in filtered.iter().enumerate() {
-                        let selected = position == palette.selected;
-                        let button = ui.selectable_label(selected, entries[index].label);
-                        if button.clicked() {
-                            run_index = Some(index);
-                        }
-                        if selected {
-                            button.scroll_to_me(Some(egui::Align::Center));
-                        }
-                    }
-                });
-        });
-        let mut close = response.should_close();
-        if let Some(index) = run_index {
-            let action = entries.swap_remove(index).action;
-            self.run_palette_action(action);
-            close = true;
-        }
-        if close {
-            self.palette = None;
-        }
     }
 
     /// Moves the selection onto a match only if it isn't sitting on one
@@ -1165,7 +866,6 @@ impl TextEditor {
             Key::Y if modifiers.command => self.core.execute_command(EditorCommand::Redo),
             Key::F if modifiers.command => self.open_find(false),
             Key::H if modifiers.command => self.open_find(true),
-            Key::P if modifiers.command && modifiers.shift => self.open_palette(),
             Key::D if modifiers.command && modifiers.shift => self
                 .core
                 .execute_command(EditorCommand::DuplicateLine(UDDirection::Down)),
@@ -2122,7 +1822,6 @@ impl BlockEditor for TextEditor {
         let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
         reveal_cursor |= std::mem::take(&mut self.find_reveal);
         profile.keyboard = keyboard_start.elapsed();
-        self.command_palette(ui.ctx());
         self.handle_picker(ui.ctx(), editors);
         let document_start = Instant::now();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
