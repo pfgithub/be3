@@ -1287,7 +1287,7 @@ fn ident_value_highlight(tag: IdentifierTag) -> Option<&'static str> {
         IdentifierTag::Access => Some(highlights::IDENT),
         IdentifierTag::Builtin => Some(highlights::BUILTIN),
         IdentifierTag::Number => Some(highlights::NUMBER),
-        IdentifierTag::Discard => None,
+        IdentifierTag::Discard => Some(highlights::OPERATORS),
     }
 }
 
