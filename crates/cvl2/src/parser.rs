@@ -257,186 +257,160 @@ struct ConfigEntry {
     bracket_tag: Option<BracketTag>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ConfigSpec {
+    token: &'static str,
+    style: ConfigStyle,
+    close: Option<&'static str>,
+    op_tag: Option<OpTag>,
+    bracket_tag: Option<BracketTag>,
+}
+
+const fn spec(
+    token: &'static str,
+    style: ConfigStyle,
+    close: Option<&'static str>,
+    op_tag: Option<OpTag>,
+    bracket_tag: Option<BracketTag>,
+) -> ConfigSpec {
+    ConfigSpec {
+        token,
+        style,
+        close,
+        op_tag,
+        bracket_tag,
+    }
+}
+
 // Mirrors the TS `mkconfig` table: entries are grouped, and every entry in a
-// group shares the group's precedence (the group's position in this list).
-fn lookup_config(token: &str) -> Option<ConfigEntry> {
-    Some(match token {
-        "(" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 0,
-            close: Some(")"),
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::List),
-        },
-        "{" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 0,
-            close: Some("}"),
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::Code),
-        },
-        "[" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 0,
-            close: Some("]"),
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::Map),
-        },
-        ")" => ConfigEntry {
-            style: ConfigStyle::Close,
-            prec: 0,
-            close: None,
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::List),
-        },
-        "}" => ConfigEntry {
-            style: ConfigStyle::Close,
-            prec: 0,
-            close: None,
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::Code),
-        },
-        "]" => ConfigEntry {
-            style: ConfigStyle::Close,
-            prec: 0,
-            close: None,
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::Map),
-        },
-        "\\(" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 0,
-            close: Some(")"),
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::List),
-        },
+// group shares the group's precedence (the group's position in this list),
+// so precedence never has to be spelled out per entry.
+const CONFIG_GROUPS: &[&[ConfigSpec]] = &[
+    &[
+        spec(
+            "(",
+            ConfigStyle::Open,
+            Some(")"),
+            None,
+            Some(BracketTag::List),
+        ),
+        spec(
+            "{",
+            ConfigStyle::Open,
+            Some("}"),
+            None,
+            Some(BracketTag::Code),
+        ),
+        spec(
+            "[",
+            ConfigStyle::Open,
+            Some("]"),
+            None,
+            Some(BracketTag::Map),
+        ),
+        spec(")", ConfigStyle::Close, None, None, Some(BracketTag::List)),
+        spec("}", ConfigStyle::Close, None, None, Some(BracketTag::Code)),
+        spec("]", ConfigStyle::Close, None, None, Some(BracketTag::Map)),
+        spec(
+            "\\(",
+            ConfigStyle::Open,
+            Some(")"),
+            None,
+            Some(BracketTag::List),
+        ),
+    ],
+    &[
+        spec(",", ConfigStyle::Join, None, Some(OpTag::Sep), None),
+        spec(";", ConfigStyle::Join, None, Some(OpTag::Sep), None),
+        spec("\n", ConfigStyle::Join, None, Some(OpTag::Sep), None),
+        spec("\n\n", ConfigStyle::Join, None, Some(OpTag::Sep), None),
+    ],
+    &[
+        spec("::", ConfigStyle::Join, None, Some(OpTag::Def), None),
+        spec(".=", ConfigStyle::Join, None, Some(OpTag::Pub), None),
+        spec(":=", ConfigStyle::Join, None, Some(OpTag::Var), None),
+    ],
+    &[
+        spec(
+            ":",
+            ConfigStyle::Open,
+            None,
+            None,
+            Some(BracketTag::ColonCall),
+        ),
+        spec(
+            "=>",
+            ConfigStyle::Open,
+            None,
+            None,
+            Some(BracketTag::ArrowFn),
+        ),
+    ],
+    &[spec(
+        "=",
+        ConfigStyle::Join,
+        None,
+        Some(OpTag::Assign),
+        None,
+    )],
+    &[
+        spec(
+            "\"",
+            ConfigStyle::Open,
+            Some(IN_STRING_QUOTE),
+            None,
+            Some(BracketTag::String),
+        ),
+        spec(
+            IN_STRING_QUOTE,
+            ConfigStyle::Close,
+            None,
+            None,
+            Some(BracketTag::String),
+        ),
+        spec(
+            "//",
+            ConfigStyle::Open,
+            Some(IN_INLINE_COMMENT_END),
+            None,
+            Some(BracketTag::InlineComment),
+        ),
+        spec(
+            IN_INLINE_COMMENT_END,
+            ConfigStyle::Close,
+            None,
+            None,
+            Some(BracketTag::InlineComment),
+        ),
+    ],
+];
 
-        "," => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 1,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Sep),
-            bracket_tag: None,
-        },
-        ";" => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 1,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Sep),
-            bracket_tag: None,
-        },
-        "\n" => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 1,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Sep),
-            bracket_tag: None,
-        },
-        "\n\n" => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 1,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Sep),
-            bracket_tag: None,
-        },
-
-        "::" => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 2,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Def),
-            bracket_tag: None,
-        },
-        ".=" => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 2,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Pub),
-            bracket_tag: None,
-        },
-        ":=" => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 2,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Var),
-            bracket_tag: None,
-        },
-
-        ":" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 3,
-            close: None,
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::ColonCall),
-        },
-        "=>" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 3,
-            close: None,
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::ArrowFn),
-        },
-
-        "=" => ConfigEntry {
-            style: ConfigStyle::Join,
-            prec: 4,
-            close: None,
-            auto_open: false,
-            op_tag: Some(OpTag::Assign),
-            bracket_tag: None,
-        },
-
-        "\"" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 5,
-            close: Some(IN_STRING_QUOTE),
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::String),
-        },
-        s if s == IN_STRING_QUOTE => ConfigEntry {
-            style: ConfigStyle::Close,
-            prec: 5,
-            close: None,
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::String),
-        },
-        "//" => ConfigEntry {
-            style: ConfigStyle::Open,
-            prec: 5,
-            close: Some(IN_INLINE_COMMENT_END),
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::InlineComment),
-        },
-        s if s == IN_INLINE_COMMENT_END => ConfigEntry {
-            style: ConfigStyle::Close,
-            prec: 5,
-            close: None,
-            auto_open: false,
-            op_tag: None,
-            bracket_tag: Some(BracketTag::InlineComment),
-        },
-
-        _ => return None,
+fn config_map() -> &'static HashMap<&'static str, ConfigEntry> {
+    static MAP: std::sync::OnceLock<HashMap<&'static str, ConfigEntry>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(|| {
+        let mut map = HashMap::new();
+        for (prec, group) in CONFIG_GROUPS.iter().enumerate() {
+            for s in *group {
+                map.insert(
+                    s.token,
+                    ConfigEntry {
+                        style: s.style,
+                        prec,
+                        close: s.close,
+                        auto_open: false,
+                        op_tag: s.op_tag,
+                        bracket_tag: s.bracket_tag,
+                    },
+                );
+            }
+        }
+        map
     })
+}
+
+fn lookup_config(token: &str) -> Option<ConfigEntry> {
+    config_map().get(token).copied()
 }
 
 fn set_mode_for_bracket_tag(tag: BracketTag) -> Option<TokenizerMode> {
