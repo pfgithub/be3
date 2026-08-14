@@ -70,6 +70,7 @@ Editor types (the view, in `crates/block-app/src/editors/<name>.rs`; each reads 
 
 Tooling:
 - The codebase-memory-mcp knowledge graph indexes this repo under the project key `home-exedev-be3`, not `be3` — pass that key to `search_graph`/`query_graph`/`get_code_snippet`/etc.
+- Remember that subagents also read AGENTS.md automatically, so there is no need to reiterate information in here when spawning a subagent.
 
 Functionality:
 - When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
