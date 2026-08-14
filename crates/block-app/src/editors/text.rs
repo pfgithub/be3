@@ -323,12 +323,9 @@ impl TextEditor {
                         .execute_command(EditorCommand::Markdown(MarkdownCommand::Image));
                 }
             }
-            ui.menu_button("Insert", |ui| {
-                if ui.button("Block").clicked() {
-                    self.picker.open([self.block.id()]);
-                    ui.close();
-                }
-            });
+            if ui.button("Insert").clicked() {
+                self.picker.open([self.block.id()]);
+            }
             ui.separator();
             if ui
                 .button(ICON_FIND_REPLACE)
