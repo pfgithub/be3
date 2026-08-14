@@ -18,6 +18,7 @@ pub mod settings;
 pub mod text;
 pub mod version_control_data;
 pub mod version_control_object;
+pub mod version_control_worktree;
 pub mod video;
 pub mod web_browser_tab;
 pub mod workspace_index;
