@@ -15,6 +15,7 @@ mod tests;
 #[derive(Debug)]
 pub struct McCodegenCtx {
     pub fns: HashMap<ComptimeValueFn, ComptimeValueMcIdentifier>,
+    pub fn_order: Vec<ComptimeValueFn>,
     pub gid: u64,
     pub internal_ns: String,
 }
@@ -29,6 +30,7 @@ fn get_fn_name(ctx: &mut McCodegenCtx, fn_val: &ComptimeValueFn) -> ComptimeValu
     };
     ctx.gid += 1;
     ctx.fns.insert(fn_val.clone(), res.clone());
+    ctx.fn_order.push(fn_val.clone());
     res
 }
 

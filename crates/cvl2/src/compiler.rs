@@ -181,7 +181,7 @@ fn binding_pos(binding: &Binding) -> &TokenPosition {
 #[derive(Debug, Clone)]
 pub struct Scope {
     pub comptime: Rc<ComptimeScopeMap>,
-    pub bindings: HashMap<String, Binding>,
+    pub bindings: Rc<RefCell<HashMap<String, Binding>>>,
 }
 
 pub trait CacheKey {
@@ -461,7 +461,7 @@ pub struct ComptimeFile {
 
 #[derive(Debug, Clone)]
 pub struct ComptimeFolder {
-    pub value: HashMap<String, ComptimeValueBuildArtifact>,
+    pub value: Vec<(String, ComptimeValueBuildArtifact)>,
 }
 
 #[derive(Debug, Clone)]
@@ -1075,8 +1075,13 @@ fn read_container_line(
             ));
         }
         for target in &destructure.targets {
-            if let Some(prev) = env.scope.bindings.get(&target.name) {
-                let prev_pos = binding_pos(prev).clone();
+            let prev_pos = env
+                .scope
+                .bindings
+                .borrow()
+                .get(&target.name)
+                .map(|prev| binding_pos(prev).clone());
+            if let Some(prev_pos) = prev_pos {
                 let tok = add_err(
                     env,
                     Some(destructure_extract_pos(&destructure.extract).clone()),
@@ -1086,7 +1091,7 @@ fn read_container_line(
                         "Previous definition here".to_string(),
                     )]),
                 );
-                env.scope.bindings.insert(
+                env.scope.bindings.borrow_mut().insert(
                     target.name.clone(),
                     Binding::Error {
                         pos: prev_pos,
@@ -1103,7 +1108,7 @@ fn read_container_line(
                         scope,
                     },
                 );
-                env.scope.bindings.insert(
+                env.scope.bindings.borrow_mut().insert(
                     target.name.clone(),
                     Binding::Valid {
                         pos: op.pos.clone(),
@@ -1146,6 +1151,7 @@ pub fn analyze_block(
     ) -> Result<AnalysisResult, PositionedError>,
 ) -> Result<AnalysisResult, PositionedError> {
     let saved_bindings = env.scope.bindings.clone();
+    env.scope.bindings = Rc::new(RefCell::new(saved_bindings.borrow().clone()));
     let result = analyze_block_body(env, slot, pos, src, block, &mut analyze_bind);
     env.scope.bindings = saved_bindings;
     result
@@ -1195,8 +1201,9 @@ fn analyze_block_body(
                     block,
                 )?;
                 let destructured = analyze_destructure(env, &destructure, rhs_analyzed, block)?;
+                let mut new_bindings = env.scope.bindings.borrow().clone();
                 for (target, value) in destructure.targets.iter().zip(destructured) {
-                    env.scope.bindings.insert(
+                    new_bindings.insert(
                         target.name.clone(),
                         Binding::Runtime {
                             pos: target.pos.clone(),
@@ -1204,6 +1211,7 @@ fn analyze_block_body(
                         },
                     );
                 }
+                env.scope.bindings = Rc::new(RefCell::new(new_bindings));
             } else {
                 let trimmed = trim_ws(&line.items);
                 if let Some(SyntaxNode::Raw(r)) = trimmed.first() {
@@ -1655,7 +1663,7 @@ pub fn analyze_base(
             }
         }
         SyntaxNode::Identifier(id) if id.ident_tag == IdentifierTag::Normal => {
-            let Some(value) = env.scope.bindings.get(&id.str).cloned() else {
+            let Some(value) = env.scope.bindings.borrow().get(&id.str).cloned() else {
                 return Err(throw_err(
                     env,
                     Some(id.pos.clone()),
@@ -1992,6 +2000,7 @@ fn builtin_mc_datapack_compile_call(
 
         let mut ctx = crate::backend::mc::McCodegenCtx {
             fns: HashMap::new(),
+            fn_order: Vec::new(),
             gid: 0,
             internal_ns: "_0".to_string(),
         };
@@ -2032,7 +2041,8 @@ fn builtin_mc_datapack_compile_call(
                         None,
                     ));
                 }
-                ctx.fns.insert(content, ident);
+                ctx.fns.insert(content.clone(), ident);
+                ctx.fn_order.push(content);
             } else {
                 return Err(throw_err(
                     env,
@@ -2053,8 +2063,16 @@ fn builtin_mc_datapack_compile_call(
             }
         }
 
-        let mut res_files: HashMap<String, Vec<u8>> = HashMap::new();
-        for (content, ident) in ctx.fns.clone() {
+        let mut res_files: Vec<(String, ComptimeValueBuildArtifact)> = Vec::new();
+        let mut idx = 0;
+        while idx < ctx.fn_order.len() {
+            let content = ctx.fn_order[idx].clone();
+            idx += 1;
+            let ident = ctx
+                .fns
+                .get(&content)
+                .expect("registered in ctx.fns when added to fn_order")
+                .clone();
             let compiled = analyze_function(env, &content)?;
             let result = crate::backend::mc::codegen_mcfunction(
                 env,
@@ -2062,13 +2080,15 @@ fn builtin_mc_datapack_compile_call(
                 &compiled.block,
                 compiled.value,
             )?;
-            res_files.insert(
+            res_files.push((
                 format!(
                     "data/{}/functions/{}.mcfunction",
                     ident.namespace, ident.path
                 ),
-                result.into_bytes(),
-            );
+                ComptimeValueBuildArtifact::File(ComptimeFile {
+                    value: result.into_bytes(),
+                }),
+            ));
         }
 
         Ok(AnalysisResult {
@@ -2076,17 +2096,7 @@ fn builtin_mc_datapack_compile_call(
                 narrow: Some(CtBuildArtifactNarrow::Folder),
             }),
             value: RuntimeValue::Comptime(ComptimeValue::BuildArtifact(
-                ComptimeValueBuildArtifact::Folder(ComptimeFolder {
-                    value: res_files
-                        .into_iter()
-                        .map(|(k, v)| {
-                            (
-                                k,
-                                ComptimeValueBuildArtifact::File(ComptimeFile { value: v }),
-                            )
-                        })
-                        .collect(),
-                }),
+                ComptimeValueBuildArtifact::Folder(ComptimeFolder { value: res_files }),
             )),
         })
     })
@@ -2241,7 +2251,7 @@ fn import_file_body(
     filename: &str,
     root_pos: TokenPosition,
     tokenized_result: &[SyntaxNode],
-) -> Result<(), PositionedError> {
+) -> Result<ComptimeValueBuildArtifact, PositionedError> {
     let mut block = empty_block();
     let ns = analyze_namespace(
         env,
@@ -2287,13 +2297,16 @@ fn import_file_body(
     )?;
     let evaluated =
         crate::comptime::comptime_eval(env, &block, call_result.value, root_pos.clone())?;
-    crate::comptime::get_comptime(
+    let result = crate::comptime::get_comptime(
         env,
         Some(crate::comptime::ComptimeValueKind::BuildArtifact),
         RuntimeValue::Comptime(evaluated),
         root_pos,
     )?;
-    Ok(())
+    let ComptimeValue::BuildArtifact(result) = result else {
+        unreachable!("get_comptime guarantees a matching kind")
+    };
+    Ok(result)
 }
 
 pub fn import_file(filename: &str, contents: &str) -> Result<(), Vec<TokenizationError>> {
@@ -2313,15 +2326,22 @@ pub fn import_file(filename: &str, contents: &str) -> Result<(), Vec<Tokenizatio
         errors: tokenized.errors.clone(),
         scope: Scope {
             comptime: ComptimeScopeMap::root(changes),
-            bindings: HashMap::new(),
+            bindings: Rc::new(RefCell::new(HashMap::new())),
         },
         fn_cache: Rc::new(PerComptimeScopeCache::new()),
         decl_cache: Rc::new(PerComptimeScopeCache::new()),
         builtin_cache: Rc::new(PerComptimeScopeCache::new()),
     };
 
-    if let Err(e) = import_file_body(&mut env, filename, root_pos, &tokenized.result) {
-        handle_err(&mut env, e);
+    match import_file_body(&mut env, filename, root_pos, &tokenized.result) {
+        Ok(result) => {
+            println!(
+                "got result{}",
+                crate::printers::printers::FOLDER_OR_FILE
+                    .dump(&result, crate::printers::UNLIMITED_DEPTH)
+            );
+        }
+        Err(e) => handle_err(&mut env, e),
     }
 
     if env.errors.is_empty() {

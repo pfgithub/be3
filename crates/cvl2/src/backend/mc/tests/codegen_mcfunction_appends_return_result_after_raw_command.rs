@@ -16,6 +16,7 @@ fn codegen_mcfunction_appends_return_result_after_raw_command() {
     let mut env = new_env();
     let mut ctx = McCodegenCtx {
         fns: HashMap::new(),
+        fn_order: Vec::new(),
         gid: 0,
         internal_ns: "ns".to_string(),
     };

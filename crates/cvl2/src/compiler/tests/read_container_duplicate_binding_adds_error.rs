@@ -12,9 +12,9 @@ fn read_container_duplicate_binding_adds_error() {
 
     assert_eq!(env.errors.len(), 1);
     assert_eq!(env.errors[0].entries[0].message, "Duplicate binding name a");
-    assert_eq!(env.scope.bindings.len(), 1);
+    assert_eq!(env.scope.bindings.borrow().len(), 1);
     assert!(matches!(
-        env.scope.bindings.get("a"),
+        env.scope.bindings.borrow().get("a"),
         Some(Binding::Error { .. })
     ));
 }

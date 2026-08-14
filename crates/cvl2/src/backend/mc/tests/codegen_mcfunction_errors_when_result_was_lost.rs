@@ -24,6 +24,7 @@ fn codegen_mcfunction_errors_when_result_was_lost() {
     let mut env = new_env();
     let mut ctx = McCodegenCtx {
         fns: HashMap::new(),
+        fn_order: Vec::new(),
         gid: 0,
         internal_ns: "ns".to_string(),
     };

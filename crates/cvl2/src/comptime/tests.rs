@@ -3,6 +3,7 @@ use crate::compiler::{
     BlockIdx, ComptimeScopeMap, ComptimeValueError, ComptimeValueKey, ComptimeValueUint8Array,
     ComptimeValueVoid, ConsumedErrorToken, PerComptimeScopeCache, Scope, Symbol,
 };
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -12,7 +13,7 @@ fn new_env() -> Env {
         errors: Vec::new(),
         scope: Scope {
             comptime: ComptimeScopeMap::root(HashMap::new()),
-            bindings: HashMap::new(),
+            bindings: Rc::new(RefCell::new(HashMap::new())),
         },
         fn_cache: Rc::new(PerComptimeScopeCache::new()),
         decl_cache: Rc::new(PerComptimeScopeCache::new()),

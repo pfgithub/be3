@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler::{ComptimeScopeMap, Env, PerComptimeScopeCache, Scope};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -9,7 +10,7 @@ fn empty_env() -> Env {
         errors: Vec::new(),
         scope: Scope {
             comptime: ComptimeScopeMap::root(HashMap::new()),
-            bindings: HashMap::new(),
+            bindings: Rc::new(RefCell::new(HashMap::new())),
         },
         fn_cache: Rc::new(PerComptimeScopeCache::new()),
         decl_cache: Rc::new(PerComptimeScopeCache::new()),

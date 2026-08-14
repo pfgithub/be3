@@ -607,7 +607,7 @@ impl CtBuildArtifact {
         };
         arr_value.locked = true;
 
-        let mut registered: HashMap<String, FolderRegisteredEntry> = HashMap::new();
+        let mut registered: Vec<(String, FolderRegisteredEntry)> = Vec::new();
         for entry in arr_value.entries {
             let raw_key = get_comptime(
                 env,
@@ -628,7 +628,7 @@ impl CtBuildArtifact {
                 unreachable!("get_comptime guarantees a matching kind")
             };
             let key = String::from_utf8_lossy(&raw_key.value).into_owned();
-            if let Some(prev) = registered.get(&key) {
+            if let Some((_, prev)) = registered.iter_mut().find(|(k, _)| *k == key) {
                 let prev_pos = match prev {
                     FolderRegisteredEntry::Ok { pos, .. } => pos.clone(),
                     FolderRegisteredEntry::Error { pos, .. } => pos.clone(),
@@ -642,25 +642,22 @@ impl CtBuildArtifact {
                         "previous definition here".to_string(),
                     )]),
                 );
-                registered.insert(
-                    key,
-                    FolderRegisteredEntry::Error {
-                        etok,
-                        pos: prev_pos,
-                    },
-                );
+                *prev = FolderRegisteredEntry::Error {
+                    etok,
+                    pos: prev_pos,
+                };
                 continue;
             }
-            registered.insert(
+            registered.push((
                 key,
                 FolderRegisteredEntry::Ok {
                     decl: create_declaration(env, value),
                     pos: entry.pos.clone(),
                 },
-            );
+            ));
         }
 
-        let mut result = HashMap::new();
+        let mut result = Vec::new();
         for (key, entry) in registered {
             match entry {
                 FolderRegisteredEntry::Ok { decl, pos } => {
@@ -674,7 +671,7 @@ impl CtBuildArtifact {
                     let ComptimeValue::BuildArtifact(subitm) = subitm else {
                         unreachable!("get_comptime guarantees a matching kind")
                     };
-                    result.insert(key, subitm);
+                    result.push((key, subitm));
                 }
                 FolderRegisteredEntry::Error { etok, .. } => {
                     return Err(throw_consumed_err(etok));

@@ -14,6 +14,7 @@ fn codegen_mcfunction_errors_on_unsupported_line_kind() {
     let mut env = new_env();
     let mut ctx = McCodegenCtx {
         fns: HashMap::new(),
+        fn_order: Vec::new(),
         gid: 0,
         internal_ns: "ns".to_string(),
     };

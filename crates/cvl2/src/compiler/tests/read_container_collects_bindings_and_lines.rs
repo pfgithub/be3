@@ -17,12 +17,13 @@ fn read_container_collects_bindings_and_lines() {
     let container = read_container(&mut env, pos_at(0), &src).unwrap();
 
     assert!(env.errors.is_empty());
-    assert_eq!(env.scope.bindings.len(), 2);
-    let Some(Binding::Valid { decl: a_decl, .. }) = env.scope.bindings.get("a") else {
+    assert_eq!(env.scope.bindings.borrow().len(), 2);
+    let bindings = env.scope.bindings.borrow();
+    let Some(Binding::Valid { decl: a_decl, .. }) = bindings.get("a") else {
         panic!("expected binding a");
     };
     assert!(matches!(&a_decl.ast().ast[0], SyntaxNode::Identifier(id) if id.str == "x"));
-    let Some(Binding::Valid { decl: b_decl, .. }) = env.scope.bindings.get("b") else {
+    let Some(Binding::Valid { decl: b_decl, .. }) = bindings.get("b") else {
         panic!("expected binding b");
     };
     assert!(matches!(&b_decl.ast().ast[0], SyntaxNode::Identifier(id) if id.str == "y"));
