@@ -27,6 +27,7 @@ mod workspace_index;
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::Arc;
 
 use block::{Block, BlockAccess, BlockParent, BlockReference};
 use block_client::{
@@ -416,7 +417,7 @@ fn paint_block_fallback(
 pub struct EditorAccess<'a> {
     active: Vec<Uuid>,
     access: BlockAccess,
-    client: &'a BlockClient,
+    client: &'a Arc<BlockClient>,
     client_id: Uuid,
     registry: &'a EditorRegistry,
     editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
@@ -451,7 +452,7 @@ impl<'a> EditorAccess<'a> {
     pub fn new(
         active: Uuid,
         access: BlockAccess,
-        client: &'a BlockClient,
+        client: &'a Arc<BlockClient>,
         client_id: Uuid,
         registry: &'a EditorRegistry,
         editors: &'a mut HashMap<Uuid, Box<dyn BlockEditor>>,
@@ -479,6 +480,10 @@ impl<'a> EditorAccess<'a> {
 
     pub fn client(&self) -> &BlockClient {
         self.client
+    }
+
+    pub fn client_handle(&self) -> Arc<BlockClient> {
+        Arc::clone(self.client)
     }
 
     /// This installation's identity, used to pick out per-client settings

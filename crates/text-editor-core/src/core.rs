@@ -2,8 +2,9 @@ use std::{cmp::Ordering, mem::size_of, ops::Range};
 
 use block::Block;
 use block_client::{
+    block_ref::BlockRef,
     blocks::text::{TextDocument, TextIndentation, TextLanguage},
-    parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_BYTES,
+    parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_MAX_BYTES,
 };
 use serde::{Deserialize, Serialize};
 use similar::{capture_diff_slices, Algorithm, DiffTag};
@@ -566,7 +567,7 @@ impl Core {
         let replacement = new.to_string().into_bytes();
         let replacements = parse_block_urls(document.bytes())
             .into_iter()
-            .filter(|url| url.id == old)
+            .filter(|url| url.reference == BlockRef::Direct(old))
             .map(|url| {
                 (
                     Position::at(&document, url.range.end - old_length),
@@ -2549,7 +2550,7 @@ fn has_stop(
     if index == 0 || index >= bytes.len() {
         return Some(BetweenCharsStop::Both);
     }
-    let url_length = BLOCK_URL_BYTES;
+    let url_length = BLOCK_URL_MAX_BYTES;
     let search_start = index.saturating_sub(url_length);
     let search_end = (index + url_length).min(bytes.len());
     if parse_block_urls(&bytes[search_start..search_end])

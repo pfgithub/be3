@@ -1,4 +1,4 @@
-use block_client::block_url;
+use block_client::{block_ref::BlockRef, block_url};
 use uuid::Uuid;
 
 use super::{image_embed_directive, parse_embeds};

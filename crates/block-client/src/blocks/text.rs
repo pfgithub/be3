@@ -324,8 +324,13 @@ fn embedded_block_references(bytes: &[u8], workspace_id: Option<Uuid>) -> Vec<Uu
     let mut seen = HashSet::new();
     parse_block_urls(bytes)
         .into_iter()
-        .filter(|url| workspace_id.is_none_or(|workspace_id| url.workspace_id == workspace_id))
-        .map(|url| url.id)
+        .filter_map(|url| {
+            let id = url.reference.as_direct()?;
+            let url_workspace_id = url.workspace_id?;
+            workspace_id
+                .is_none_or(|workspace_id| url_workspace_id == workspace_id)
+                .then_some(id)
+        })
         .filter(|id| seen.insert(*id))
         .collect()
 }

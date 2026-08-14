@@ -12,6 +12,7 @@ mod slide_templates;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
+    sync::Arc,
     time::Duration,
 };
 
@@ -173,7 +174,7 @@ struct BlockApp {
     scheduled_workspace_list: bool,
     server_url: String,
     account: Account,
-    client: BlockClient,
+    client: Arc<BlockClient>,
     roots: ReferenceList,
     orphaned: Option<ReferenceList>,
     orphaned_expanded: bool,
@@ -551,7 +552,7 @@ impl BlockApp {
             ServerLocation::Local => url.clone(),
             ServerLocation::Remote(remote) => remote.clone(),
         };
-        let client = BlockClient::new(account.id, Uuid::nil());
+        let client = Arc::new(BlockClient::new(account.id, Uuid::nil()));
         let roots = client.watch_references(BlockReferenceList::Roots);
         Ok(Self {
             app_state,
@@ -1147,7 +1148,7 @@ impl BlockApp {
     }
 
     fn open_workspace(&mut self, workspace: Workspace) {
-        let client = BlockClient::new(self.account.id, workspace.id);
+        let client = Arc::new(BlockClient::new(self.account.id, workspace.id));
         client.connect(self.server_url.clone(), self.account.token.clone());
         let roots = client.watch_references(BlockReferenceList::Roots);
         self.orphaned = None;
@@ -1493,7 +1494,7 @@ impl BlockApp {
             ServerLocation::Local => self.local_server_url.clone(),
             ServerLocation::Remote(url) => url.clone(),
         };
-        let client = BlockClient::new(account.id, Uuid::nil());
+        let client = Arc::new(BlockClient::new(account.id, Uuid::nil()));
         let roots = client.watch_references(BlockReferenceList::Roots);
 
         self.orphaned = None;

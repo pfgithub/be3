@@ -11,8 +11,10 @@ use std::{
 
 use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
-    block_url,
+    block_ref::BlockRef,
+    block_ref_url,
     blocks::text::{TextDocument, TextIndentation, TextLanguage},
+    blocks::version_control_worktree::VersionControlWorktreeMembership,
     blocks::workspace_index::BlockEntry,
     parse_block_urls,
     presence::{PresenceColor, UserActive},
@@ -40,7 +42,7 @@ use text_editor_core::{
 };
 use uuid::Uuid;
 
-use crate::{block_picker::BlockPicker, performance, presence_color_rgb};
+use crate::{block_picker::BlockPicker, performance, platform, presence_color_rgb};
 
 use self::font::{BytePosition, DocumentLayout, LineLayout, ResolvedEmbed, TextRenderer};
 use self::timings::{FrameProfile, PaintTimings};
@@ -70,7 +72,7 @@ const TOUCH_HANDLE_HIT_RADIUS: f32 = 24.0;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ParsedEmbed {
     range: Range<usize>,
-    id: Uuid,
+    reference: BlockRef,
     large: bool,
 }
 
@@ -130,6 +132,70 @@ pub(super) struct TextEditor {
     find_reveal: bool,
     last_cursor_positions: Vec<CursorPosition>,
     pending_presence_reveal: Option<ClientId>,
+    reference_cache: EmbedReferenceCache,
+    pending_embeds: Vec<PendingEmbed>,
+}
+
+struct PendingEmbed {
+    receiver: platform::RequestResult<BlockRef>,
+    source_name: String,
+    markdown: bool,
+}
+
+#[derive(Default)]
+struct EmbedReferenceCache {
+    resolved: HashMap<BlockRef, Option<Uuid>>,
+    pending: Vec<(BlockRef, platform::RequestResult<Option<Uuid>>)>,
+}
+
+impl EmbedReferenceCache {
+    fn poll(&mut self) {
+        let mut finished = Vec::new();
+        self.pending
+            .retain(|(reference, receiver)| match receiver.try_recv() {
+                Ok(resolved) => {
+                    finished.push((*reference, resolved));
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+            });
+        for (reference, resolved) in finished {
+            self.resolved.insert(reference, resolved);
+        }
+    }
+
+    fn resolve(
+        &mut self,
+        client: &Arc<BlockClient>,
+        referencing_id: Uuid,
+        reference: BlockRef,
+    ) -> Option<Uuid> {
+        if let Some(id) = reference.as_direct() {
+            return Some(id);
+        }
+        if let Some(resolved) = self.resolved.get(&reference) {
+            return *resolved;
+        }
+        if !self
+            .pending
+            .iter()
+            .any(|(pending, _)| *pending == reference)
+        {
+            let client = Arc::clone(client);
+            let receiver = platform::spawn_request(async move {
+                client
+                    .resolve_reference(
+                        referencing_id,
+                        &reference,
+                        &VersionControlWorktreeMembership,
+                    )
+                    .await
+            });
+            self.pending.push((reference, receiver));
+        }
+        None
+    }
 }
 
 /// UI-only state for the find/replace bar: what's typed and which panel is
@@ -215,6 +281,8 @@ impl TextEditor {
             find_reveal: false,
             last_cursor_positions: Vec::new(),
             pending_presence_reveal: None,
+            reference_cache: EmbedReferenceCache::default(),
+            pending_embeds: Vec::new(),
         }
     }
 
@@ -345,15 +413,38 @@ impl TextEditor {
         }
     }
 
-    fn insert_image_embed(&mut self, id: Uuid, source_name: &str) {
-        let directive = image_embed_directive(
-            self.workspace_id,
-            id,
-            source_name,
-            self.core.language() == TextLanguage::Markdown,
-        );
-        self.core
-            .execute_command(EditorCommand::InsertText(directive.as_bytes()));
+    fn insert_image_embed(&mut self, editors: &mut EditorAccess<'_>, id: Uuid, source_name: &str) {
+        let client = editors.client_handle();
+        let referencing_id = self.block.id();
+        let receiver = platform::spawn_request(async move {
+            client
+                .classify_reference(referencing_id, id, &VersionControlWorktreeMembership)
+                .await
+        });
+        self.pending_embeds.push(PendingEmbed {
+            receiver,
+            source_name: source_name.to_owned(),
+            markdown: self.core.language() == TextLanguage::Markdown,
+        });
+    }
+
+    fn poll_pending_embeds(&mut self) {
+        let mut finished = Vec::new();
+        self.pending_embeds
+            .retain(|pending| match pending.receiver.try_recv() {
+                Ok(reference) => {
+                    finished.push((reference, pending.source_name.clone(), pending.markdown));
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+            });
+        for (reference, source_name, markdown) in finished {
+            let directive =
+                image_embed_directive(self.workspace_id, &reference, &source_name, markdown);
+            self.core
+                .execute_command(EditorCommand::InsertText(directive.as_bytes()));
+        }
     }
 
     fn paste_clipboard_image(
@@ -375,7 +466,7 @@ impl TextEditor {
             ClipboardImagePasteResult::Image(image) => {
                 let source_name = image.source_name().to_owned();
                 let image_id = create_image_block(editors, image, self.block.id());
-                self.insert_image_embed(image_id, &source_name);
+                self.insert_image_embed(editors, image_id, &source_name);
                 self.image_import_error = None;
                 true
             }
@@ -395,10 +486,15 @@ impl TextEditor {
         let name =
             BlockLabel::for_properties(editors.registry(), result.block_type, &result.properties)
                 .name;
-        self.insert_image_embed(result.id, &name);
+        self.insert_image_embed(editors, result.id, &name);
     }
 
-    fn resolve_embeds(&self, bytes: &[u8], editors: &mut EditorAccess<'_>) -> Vec<ResolvedEmbed> {
+    fn resolve_embeds(
+        &mut self,
+        bytes: &[u8],
+        editors: &mut EditorAccess<'_>,
+    ) -> Vec<ResolvedEmbed> {
+        self.reference_cache.poll();
         let parsed = parse_embeds(
             bytes,
             self.workspace_id,
@@ -417,12 +513,20 @@ impl TextEditor {
                 )
             })
             .collect::<HashMap<_, _>>();
+        let block_id = self.block.id();
+        let client = editors.client_handle();
+        let reference_cache = &mut self.reference_cache;
         parsed
             .into_iter()
-            .filter(|embed| embed.id != self.block.id())
-            .map(|embed| {
-                let metadata = referenced.get(&embed.id).cloned().or_else(|| {
-                    editors.client().cached_block(embed.id).map(|block| {
+            .filter_map(|embed| {
+                let id = reference_cache
+                    .resolve(&client, block_id, embed.reference)
+                    .unwrap_or(Uuid::nil());
+                (id != block_id).then_some((embed, id))
+            })
+            .map(|(embed, id)| {
+                let metadata = referenced.get(&id).cloned().or_else(|| {
+                    editors.client().cached_block(id).map(|block| {
                         (
                             block.block_type,
                             block_client::properties::read_name(&block.properties),
@@ -431,19 +535,19 @@ impl TextEditor {
                 });
                 if embed.large {
                     if let Some((block_type, _)) = &metadata {
-                        editors.ensure(embed.id, *block_type);
+                        editors.ensure(id, *block_type);
                     }
                 }
                 let frame_size = embed
                     .large
-                    .then(|| editors.direct_editor_intrinsic_size(embed.id))
+                    .then(|| editors.direct_editor_intrinsic_size(id))
                     .flatten()
                     .map(|intrinsic| embedded_editor_frame_size(intrinsic, 1.0));
                 let label = metadata.as_ref().map_or_else(
                     || BlockLabel {
                         block_type: Uuid::nil(),
                         icon: None,
-                        name: embed.id.to_string(),
+                        name: "Broken link".to_owned(),
                         automatic: true,
                     },
                     |(block_type, name)| {
@@ -452,7 +556,7 @@ impl TextEditor {
                 );
                 ResolvedEmbed {
                     range: embed.range,
-                    id: embed.id,
+                    id,
                     label: label.name,
                     icon: label.icon.map(|icon| icon.codepoint),
                     automatic: label.automatic,
@@ -1814,6 +1918,7 @@ impl BlockEditor for TextEditor {
             ..FrameProfile::default()
         };
         let id = egui::Id::new(("text-editor", self.block.id()));
+        self.poll_pending_embeds();
         let keyboard_start = Instant::now();
         let pasted_image = self.paste_clipboard_image(ui, id, editors);
         let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
@@ -1997,7 +2102,7 @@ impl BlockEditor for TextEditor {
                     });
                     let name =
                         BlockLabel::for_reference(editors.registry(), &dragged.reference).name;
-                    self.insert_image_embed(dragged.reference.id, &name);
+                    self.insert_image_embed(editors, dragged.reference.id, &name);
                     reveal_cursor = true;
                 }
             }
@@ -2096,11 +2201,11 @@ fn record_profile(profile: FrameProfile) {
 
 fn image_embed_directive(
     workspace_id: Uuid,
-    id: Uuid,
+    reference: &BlockRef,
     source_name: &str,
     markdown: bool,
 ) -> String {
-    let url = block_url(workspace_id, id);
+    let url = block_ref_url(workspace_id, reference);
     if markdown {
         format!("![{source_name}]({url})")
     } else {
@@ -2111,14 +2216,17 @@ fn image_embed_directive(
 fn parse_embeds(bytes: &[u8], workspace_id: Uuid, markdown: bool) -> Vec<ParsedEmbed> {
     parse_block_urls(bytes)
         .into_iter()
-        .filter(|url| url.workspace_id == workspace_id)
+        .filter(|url| {
+            url.workspace_id
+                .is_none_or(|url_workspace| url_workspace == workspace_id)
+        })
         .map(|url| {
             let image_range = markdown
                 .then(|| markdown_image_range(bytes, &url.range))
                 .flatten();
             ParsedEmbed {
                 range: url.range,
-                id: url.id,
+                reference: url.reference,
                 large: image_range.is_some(),
             }
         })
