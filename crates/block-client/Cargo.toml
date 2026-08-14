@@ -15,6 +15,7 @@ logicgame = { path = "../logicgame" }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 # Only the synchronisation primitives are shared with the web build; they carry
 # no runtime of their own and compile for wasm32.
 tokio = { version = "1", features = ["sync"] }

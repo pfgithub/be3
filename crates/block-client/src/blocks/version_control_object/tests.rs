@@ -1,0 +1,8 @@
+use super::*;
+
+mod version_control_object_blob_round_trips_state;
+mod version_control_object_differing_blobs_hash_differently;
+mod version_control_object_identical_blobs_hash_equal;
+mod version_control_object_identical_trees_hash_equal;
+mod version_control_object_tree_round_trips_entries;
+mod version_control_object_trees_with_different_entries_hash_differently;
