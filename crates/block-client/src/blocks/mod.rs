@@ -16,6 +16,7 @@ pub mod pixel_ray_tracer;
 pub mod presentation;
 pub mod settings;
 pub mod text;
+pub mod version_control_data;
 pub mod version_control_object;
 pub mod video;
 pub mod web_browser_tab;
