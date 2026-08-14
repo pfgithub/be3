@@ -6,11 +6,6 @@ async fn version_control_worktree_classify_and_resolve_reference_between_sibling
     let (account_id, token, workspace_id) = identity(&server.url).await;
     let client = BlockClient::new(account_id, workspace_id);
 
-    // Blocks are created after `connect` (rather than the more common
-    // create-then-connect order) because pending pre-connect creates flush
-    // in an unordered batch; only a create issued while already connected is
-    // guaranteed to reach the server before the next one, which matters here
-    // since the worktree's own `references()` includes its `repo`.
     client.connect(server.url.clone(), token);
     let data_value = VersionControlData::new(account_id, 1_000);
     let data = client.create_block(data_value.clone());

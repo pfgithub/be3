@@ -858,10 +858,6 @@ impl BlockClient {
         self.watch_references(BlockReferenceList::Parents(id))
     }
 
-    /// The nearest ancestor of `id` whose block type is
-    /// `worktrees.worktree_type_id()`, if `id` sits inside one. Walks the
-    /// full `BlockParent` ancestry chain the server already computes for
-    /// [`BlockReferenceList::Parents`], from `id`'s immediate parent outward.
     async fn nearest_worktree_ancestor(
         &self,
         id: Uuid,
@@ -875,12 +871,6 @@ impl BlockClient {
             .map(|ancestor| ancestor.id)
     }
 
-    /// Decides how `referencing_id` should refer to `target_id`:
-    /// [`BlockRef::Direct`] unless both blocks are members of the same
-    /// worktree, in which case a [`BlockRef::RepoRelative`] reference is
-    /// minted (or reused, if `target_id` already has an eternal id there)
-    /// instead. Call this whenever a reference-bearing block type picks up a
-    /// new reference, e.g. the user chooses a target block in the UI.
     pub async fn classify_reference(
         &self,
         referencing_id: Uuid,
@@ -905,13 +895,6 @@ impl BlockClient {
         BlockRef::RepoRelative { repo, eternal_id }
     }
 
-    /// Resolves `reference`, as held by `referencing_id`, to the live block id
-    /// it currently points at. A [`BlockRef::Direct`] resolves for free; a
-    /// [`BlockRef::RepoRelative`] walks `referencing_id`'s ancestry to find
-    /// its worktree and looks up the eternal id there. `None` means a broken
-    /// link (e.g. the worktree's ancestry no longer matches `repo`, or the
-    /// member was removed) and should be rendered the same as a deleted
-    /// block.
     pub async fn resolve_reference(
         &self,
         referencing_id: Uuid,

@@ -31,9 +31,6 @@ fn version_control_data_set_branch_rejected_when_moved() {
     );
     assert_eq!(data.branch_head(MAIN_BRANCH), Some(&someone_elses_head));
 
-    // A second commit, built against the now-stale `initial` head, loses the
-    // race: applying its `SetBranch` must not move main off the commit that
-    // already won.
     apply(
         &mut data,
         VersionControlDataOperation::AppendCommit {

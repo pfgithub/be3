@@ -26,7 +26,6 @@ fn version_control_data_append_commit_adds_to_history() {
     assert_eq!(commit.parent, parent);
     assert_eq!(commit.message, "second commit");
 
-    // Re-applying the same commit is a harmless no-op, not a duplicate.
     let before = data.commits().len();
     apply(
         &mut data,

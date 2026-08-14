@@ -17,8 +17,6 @@ fn version_control_data_set_branch_creates_new_branch() {
     assert_eq!(data.branch_head("feature"), Some(&initial));
     assert_eq!(data.branches().len(), 2);
 
-    // A second attempt to create the same branch, once it already exists,
-    // loses the CAS race just like advancing an existing branch would.
     apply(
         &mut data,
         VersionControlDataOperation::SetBranch {
