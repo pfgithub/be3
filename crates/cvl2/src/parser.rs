@@ -238,6 +238,7 @@ enum TokenizerMode {
 }
 
 const IN_STRING_QUOTE: &str = "<in_string>\"";
+const IN_INLINE_COMMENT_END: &str = "<in_inline_comment>end";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConfigStyle {
@@ -289,6 +290,7 @@ fn lookup_config(token: &str) -> Option<ConfigEntry> {
         "," => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep)),
         ";" => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep)),
         "\n" => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep)),
+        "\n\n" => (ConfigStyle::Join, 1, None, None, Some(OpTag::Sep)),
 
         "::" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Def)),
         ".=" => (ConfigStyle::Join, 2, None, None, Some(OpTag::Pub)),
@@ -315,6 +317,13 @@ fn lookup_config(token: &str) -> Option<ConfigEntry> {
         s if s == IN_STRING_QUOTE => (ConfigStyle::Close, 5, None, Some(BracketTag::String), None),
         "//" => (
             ConfigStyle::Open,
+            5,
+            Some(IN_INLINE_COMMENT_END),
+            Some(BracketTag::InlineComment),
+            None,
+        ),
+        s if s == IN_INLINE_COMMENT_END => (
+            ConfigStyle::Close,
             5,
             None,
             Some(BracketTag::InlineComment),
@@ -542,7 +551,10 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
                         source.take();
                     }
                     let consumed = source.text_slice(start.idx, source.current_index);
-                    current_token = if consumed.contains('\n') {
+                    let nl_count = consumed.matches('\n').count();
+                    current_token = if nl_count > 1 {
+                        "\n\n".to_string()
+                    } else if nl_count == 1 {
                         "\n".to_string()
                     } else {
                         " ".to_string()
@@ -600,11 +612,7 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
                 let request = loop {
                     let peek = source.peek();
                     if peek == Some('\n') {
-                        let revert = source.get_position();
-                        source.take();
-                        let request = source.get_position();
-                        source.revert(&revert);
-                        break request;
+                        break source.get_position();
                     } else {
                         source.take();
                     }
@@ -618,7 +626,7 @@ pub fn tokenize(source: &mut Source) -> TokenizationResult {
                         tag: RawTag::Comment,
                     }));
                 source.revert(&request);
-                current_token = "\n".to_string();
+                current_token = IN_INLINE_COMMENT_END.to_string();
             }
         }
 
@@ -1214,8 +1222,6 @@ fn render_entity_pretty_list(
                 result.push('\n');
                 let depth_indent = indent + if needs_deeper_indent { 1 } else { 0 };
                 result.push_str(&config.indent.repeat(depth_indent));
-            } else {
-                result.push(' ');
             }
         } else {
             did_insert_newline = false;
@@ -1237,6 +1243,16 @@ fn render_entity_pretty_list(
     result
 }
 
+fn render_end_pretty(end: &str) -> &str {
+    if end == IN_STRING_QUOTE {
+        "\""
+    } else if end == IN_INLINE_COMMENT_END {
+        ""
+    } else {
+        end
+    }
+}
+
 fn render_entity_pretty(
     config: &RenderConfig,
     entity: &SyntaxNode,
@@ -1251,7 +1267,7 @@ fn render_entity_pretty(
                 "{}{}{}",
                 hl(config, &b.start, color),
                 render_entity_pretty_list(config, &b.items, indent, depth, false),
-                hl(config, &b.end.replace("<in_string>", ""), color)
+                hl(config, render_end_pretty(&b.end), color)
             )
         }
         SyntaxNode::BinaryExpression(b) => {
