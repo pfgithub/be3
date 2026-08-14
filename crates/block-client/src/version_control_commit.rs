@@ -42,6 +42,44 @@ pub struct CommitOutcome {
     pub branch_advanced: bool,
 }
 
+pub(crate) struct LiveEntry {
+    pub eternal_id: Uuid,
+    pub name: String,
+    pub blob: VersionControlObject,
+}
+
+pub(crate) async fn live_blobs(
+    client: &BlockClient,
+    worktree_id: Uuid,
+    members: &[(Uuid, Uuid)],
+) -> Vec<LiveEntry> {
+    let mut reference_by_id: BTreeMap<_, _> = client
+        .list_references(BlockReferenceList::References(worktree_id))
+        .await
+        .into_iter()
+        .map(|reference| (reference.id, reference))
+        .collect();
+
+    let mut result = Vec::with_capacity(members.len());
+    for (eternal_id, live_id) in members {
+        let Some(reference) = reference_by_id.remove(live_id) else {
+            continue;
+        };
+        let Some(state) = snapshot_state(client, reference.block_type, *live_id).await else {
+            continue;
+        };
+        let name = properties::read_name(&reference.properties)
+            .map(|name| name.value)
+            .unwrap_or_default();
+        result.push(LiveEntry {
+            eternal_id: *eternal_id,
+            name,
+            blob: VersionControlObject::blob(reference.block_type, state),
+        });
+    }
+    result
+}
+
 pub async fn commit_worktree(
     client: &BlockClient,
     worktree_id: Uuid,
@@ -63,34 +101,15 @@ pub async fn commit_worktree(
     let data = client.get_block::<VersionControlData>(repo_id);
     data.loaded().await;
 
-    let mut reference_by_id: BTreeMap<_, _> = client
-        .list_references(BlockReferenceList::References(worktree_id))
-        .await
-        .into_iter()
-        .map(|reference| (reference.id, reference))
-        .collect();
-
-    let mut entries = Vec::with_capacity(members.len());
-    for (eternal_id, live_id) in members {
-        let Some(reference) = reference_by_id.remove(&live_id) else {
-            continue;
-        };
-        let Some(state) = snapshot_state(client, reference.block_type, live_id).await else {
-            continue;
-        };
-        let name = properties::read_name(&reference.properties)
-            .map(|name| name.value)
-            .unwrap_or_default();
-        let hash = register_object(
-            client,
-            &data,
-            VersionControlObject::blob(reference.block_type, state),
-        );
+    let live = live_blobs(client, worktree_id, &members).await;
+    let mut entries = Vec::with_capacity(live.len());
+    for entry in live {
+        let hash = register_object(client, &data, entry.blob);
         entries.push(TreeEntry {
-            eternal_id,
+            eternal_id: entry.eternal_id,
             kind: TreeEntryKind::Blob,
             content_hash: hash,
-            name,
+            name: entry.name,
         });
     }
 
@@ -132,7 +151,7 @@ pub async fn commit_worktree(
     })
 }
 
-fn register_object(
+pub(crate) fn register_object(
     client: &BlockClient,
     data: &BlockHandle<VersionControlData>,
     object: VersionControlObject,
@@ -159,92 +178,60 @@ async fn snapshot_state(client: &BlockClient, block_type: Uuid, id: Uuid) -> Opt
     client.block_state_bytes(id)
 }
 
+macro_rules! for_each_source_block_type {
+    ($apply:ident) => {
+        $apply!(Audio);
+        $apply!(Calendar);
+        $apply!(CompiledLogic);
+        $apply!(Database);
+        $apply!(DatabaseSchema);
+        $apply!(DatabaseView);
+        $apply!(GuiBuilder);
+        $apply!(Hotbar);
+        $apply!(Image);
+        $apply!(InfiniteCanvas);
+        $apply!(LogicGame);
+        $apply!(LogicGrid);
+        $apply!(Map);
+        $apply!(PixelArt);
+        $apply!(PixelRayTracer);
+        $apply!(Presentation);
+        $apply!(Settings);
+        $apply!(TextDocument);
+        $apply!(Video);
+        $apply!(WebBrowserTab);
+        $apply!(WorkspaceIndex);
+    };
+}
+
 async fn load_by_type(client: &BlockClient, block_type: Uuid, id: Uuid) -> bool {
-    if block_type == Audio::TYPE_ID {
-        client.get_block::<Audio>(id).loaded().await;
-        return true;
+    macro_rules! check {
+        ($ty:ident) => {
+            if block_type == $ty::TYPE_ID {
+                client.get_block::<$ty>(id).loaded().await;
+                return true;
+            }
+        };
     }
-    if block_type == Calendar::TYPE_ID {
-        client.get_block::<Calendar>(id).loaded().await;
-        return true;
-    }
-    if block_type == CompiledLogic::TYPE_ID {
-        client.get_block::<CompiledLogic>(id).loaded().await;
-        return true;
-    }
-    if block_type == Database::TYPE_ID {
-        client.get_block::<Database>(id).loaded().await;
-        return true;
-    }
-    if block_type == DatabaseSchema::TYPE_ID {
-        client.get_block::<DatabaseSchema>(id).loaded().await;
-        return true;
-    }
-    if block_type == DatabaseView::TYPE_ID {
-        client.get_block::<DatabaseView>(id).loaded().await;
-        return true;
-    }
-    if block_type == GuiBuilder::TYPE_ID {
-        client.get_block::<GuiBuilder>(id).loaded().await;
-        return true;
-    }
-    if block_type == Hotbar::TYPE_ID {
-        client.get_block::<Hotbar>(id).loaded().await;
-        return true;
-    }
-    if block_type == Image::TYPE_ID {
-        client.get_block::<Image>(id).loaded().await;
-        return true;
-    }
-    if block_type == InfiniteCanvas::TYPE_ID {
-        client.get_block::<InfiniteCanvas>(id).loaded().await;
-        return true;
-    }
-    if block_type == LogicGame::TYPE_ID {
-        client.get_block::<LogicGame>(id).loaded().await;
-        return true;
-    }
-    if block_type == LogicGrid::TYPE_ID {
-        client.get_block::<LogicGrid>(id).loaded().await;
-        return true;
-    }
-    if block_type == Map::TYPE_ID {
-        client.get_block::<Map>(id).loaded().await;
-        return true;
-    }
-    if block_type == PixelArt::TYPE_ID {
-        client.get_block::<PixelArt>(id).loaded().await;
-        return true;
-    }
-    if block_type == PixelRayTracer::TYPE_ID {
-        client.get_block::<PixelRayTracer>(id).loaded().await;
-        return true;
-    }
-    if block_type == Presentation::TYPE_ID {
-        client.get_block::<Presentation>(id).loaded().await;
-        return true;
-    }
-    if block_type == Settings::TYPE_ID {
-        client.get_block::<Settings>(id).loaded().await;
-        return true;
-    }
-    if block_type == TextDocument::TYPE_ID {
-        client.get_block::<TextDocument>(id).loaded().await;
-        return true;
-    }
-    if block_type == Video::TYPE_ID {
-        client.get_block::<Video>(id).loaded().await;
-        return true;
-    }
-    if block_type == WebBrowserTab::TYPE_ID {
-        client.get_block::<WebBrowserTab>(id).loaded().await;
-        return true;
-    }
-    if block_type == WorkspaceIndex::TYPE_ID {
-        client.get_block::<WorkspaceIndex>(id).loaded().await;
-        return true;
-    }
+    for_each_source_block_type!(check);
     false
+}
+
+pub(crate) fn create_block_from_state(
+    client: &BlockClient,
+    block_type: Uuid,
+    state: &[u8],
+) -> Option<Uuid> {
+    macro_rules! check {
+        ($ty:ident) => {
+            if block_type == $ty::TYPE_ID {
+                let stored: crate::StoredBlock<$ty> = serde_json::from_slice(state).ok()?;
+                return Some(client.create_block(stored.value).id());
+            }
+        };
+    }
+    for_each_source_block_type!(check);
+    None
 }
 
 #[cfg(test)]

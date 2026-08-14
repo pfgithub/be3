@@ -32,6 +32,7 @@ pub mod blocks;
 pub mod presence;
 pub mod properties;
 mod transport;
+pub mod version_control_checkout;
 pub mod version_control_commit;
 
 /// Presence values received from the server for blocks this client is
