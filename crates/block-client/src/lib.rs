@@ -18,6 +18,7 @@ use block::{
     ManagementErrorCode, ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage,
     Workspace, WorkspaceInvitation, WorkspaceRole,
 };
+use block_ref::{BlockRef, WorktreeMembership};
 use futures_channel::mpsc;
 use futures_util::{FutureExt, StreamExt};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -26,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
 use uuid::Uuid;
 
+pub mod block_ref;
 pub mod blocks;
 pub mod presence;
 pub mod properties;
@@ -854,6 +856,78 @@ impl BlockClient {
 
     pub fn watch_parents(&self, id: Uuid) -> ReferenceList {
         self.watch_references(BlockReferenceList::Parents(id))
+    }
+
+    /// The nearest ancestor of `id` whose block type is
+    /// `worktrees.worktree_type_id()`, if `id` sits inside one. Walks the
+    /// full `BlockParent` ancestry chain the server already computes for
+    /// [`BlockReferenceList::Parents`], from `id`'s immediate parent outward.
+    async fn nearest_worktree_ancestor(
+        &self,
+        id: Uuid,
+        worktrees: &dyn WorktreeMembership,
+    ) -> Option<Uuid> {
+        self.list_references(BlockReferenceList::Parents(id))
+            .await
+            .into_iter()
+            .rev()
+            .find(|ancestor| ancestor.block_type == worktrees.worktree_type_id())
+            .map(|ancestor| ancestor.id)
+    }
+
+    /// Decides how `referencing_id` should refer to `target_id`:
+    /// [`BlockRef::Direct`] unless both blocks are members of the same
+    /// worktree, in which case a [`BlockRef::RepoRelative`] reference is
+    /// minted (or reused, if `target_id` already has an eternal id there)
+    /// instead. Call this whenever a reference-bearing block type picks up a
+    /// new reference, e.g. the user chooses a target block in the UI.
+    pub async fn classify_reference(
+        &self,
+        referencing_id: Uuid,
+        target_id: Uuid,
+        worktrees: &dyn WorktreeMembership,
+    ) -> BlockRef {
+        let Some(worktree_id) = self
+            .nearest_worktree_ancestor(referencing_id, worktrees)
+            .await
+        else {
+            return BlockRef::Direct(target_id);
+        };
+        if self.nearest_worktree_ancestor(target_id, worktrees).await != Some(worktree_id) {
+            return BlockRef::Direct(target_id);
+        }
+        let Some(repo) = worktrees.repo_id(self, worktree_id) else {
+            return BlockRef::Direct(target_id);
+        };
+        let eternal_id = worktrees
+            .eternal_id_for_member(self, worktree_id, target_id)
+            .unwrap_or_else(|| worktrees.mint_eternal_id(self, worktree_id, target_id));
+        BlockRef::RepoRelative { repo, eternal_id }
+    }
+
+    /// Resolves `reference`, as held by `referencing_id`, to the live block id
+    /// it currently points at. A [`BlockRef::Direct`] resolves for free; a
+    /// [`BlockRef::RepoRelative`] walks `referencing_id`'s ancestry to find
+    /// its worktree and looks up the eternal id there. `None` means a broken
+    /// link (e.g. the worktree's ancestry no longer matches `repo`, or the
+    /// member was removed) and should be rendered the same as a deleted
+    /// block.
+    pub async fn resolve_reference(
+        &self,
+        referencing_id: Uuid,
+        reference: &BlockRef,
+        worktrees: &dyn WorktreeMembership,
+    ) -> Option<Uuid> {
+        let BlockRef::RepoRelative { repo, eternal_id } = reference else {
+            return reference.as_direct();
+        };
+        let worktree_id = self
+            .nearest_worktree_ancestor(referencing_id, worktrees)
+            .await?;
+        if worktrees.repo_id(self, worktree_id).as_ref() != Some(repo) {
+            return None;
+        }
+        worktrees.resolve_eternal_id(self, worktree_id, *eternal_id)
     }
 
     pub fn set_block_name(&self, id: Uuid, name: impl Into<String>) {
