@@ -24,11 +24,20 @@ bolt-on system. High-level design only — no code.
 
 ## Core model
 
-- **Object store** (`version_control_object`): one block per unique
-  content hash — a *blob* (`{source block type, serialized state}`) or a
-  *tree* (`{entries: [(eternal_id, kind, content_hash, name)]}`). Immutable,
-  content-addressed, deduped across commit history. `NoHistory`,
-  `CRDT = true` (creation is idempotent).
+- **Object store** (`version_control_object`): a *blob* (`{source block
+  type, serialized state}`) or a *tree* (`{entries: [(eternal_id, kind,
+  content_hash, name)]}`), immutable once created. `NoHistory`, `CRDT =
+  true` (a commit can fire off many object creates without waiting on a
+  round-trip ack per one). Objects get ordinary, randomly-generated live
+  IDs — `content_hash` is only a lookup key, not a deterministic ID.
+  Before creating a new object, a commit checks *this repo's own* hash →
+  object index, built by walking this `version_control_data`'s own commit
+  history (dedup is per-repo; a commit never looks at another repo's
+  objects, so there's no cross-workspace access question). Two commits
+  racing on identical new content can each end up creating an object for
+  the same hash — harmless: the loser is simply never pointed at by any
+  tree, ends up with no backrefs, and sits orphaned (no block-deletion
+  primitive exists to reclaim it, same as everywhere else in BE3 today).
 - **Commit**: `{parent, tree hash, author, time, message}`, stored on
   `version_control_data`. Pure additive/content-addressed, so trivially
   conflict-free.
@@ -41,7 +50,10 @@ bolt-on system. High-level design only — no code.
   by a worktree the moment a block becomes a member (created in it, or
   dragged in) — not derived from name/position, so renames don't lose
   identity. Each worktree keeps its own `eternal_id ↔ live_id` map as part
-  of its state.
+  of its state. A member's real `BlockParent` (a live id pointing at its
+  container) is never itself stored in the vcs — containment is expressed
+  purely by tree nesting via `eternal_id`s, and re-derived as a live
+  `BlockParent` on materialization.
 - **No dedicated folder block needed** — `WorkspaceIndex` (`editors/
   workspace_index.rs`, `DISPLAY_NAME: "Folder"`) already is the generic
   container block used everywhere else in the app; worktree content just
@@ -86,10 +98,12 @@ creation):
 - Requires a clean worktree first (live tree hashes match
   `checked_out_commit`'s tree); if dirty, block the switch and require an
   explicit "discard uncommitted changes" confirmation.
-- Per entry: unchanged hash → leave the live block alone; changed/missing
-  → delete the stale live block (if any) and recreate verbatim from the
-  target blob with a fresh live ID; live entry absent from target → detach
-  it.
+- Per entry: unchanged hash → leave the live block alone; changed →
+  detach the stale live block (set its `BlockParent` to `Orphaned` — BE3
+  has no block-deletion primitive yet, so this is the closest analog, and
+  a natural precursor to one) and recreate verbatim from the target blob
+  with a fresh live ID; entry newly present in target → create it; live
+  entry absent from target → detach it the same way.
 - A changed entry's live block ID does *not* survive the checkout — same
   as git not preserving file identity across checkouts. Everything that
   references it (Repo-relative, resolved live) picks up the new ID
