@@ -32,6 +32,7 @@ pub mod blocks;
 pub mod presence;
 pub mod properties;
 mod transport;
+pub mod version_control_commit;
 
 /// Presence values received from the server for blocks this client is
 /// watching, keyed by block, then by which client posted it and under which
@@ -745,6 +746,13 @@ impl BlockClient {
             .read()
             .get(&id)
             .and_then(|registered| registered.erased.debug_data())
+    }
+
+    pub fn block_state_bytes(&self, id: Uuid) -> Option<Vec<u8>> {
+        self.registered_blocks
+            .read()
+            .get(&id)
+            .and_then(|registered| registered.erased.current_data())
     }
 
     /// Stores new artifact settings on a block that is already open. Blocks
@@ -2905,6 +2913,7 @@ trait ErasedBlock: Send + Sync {
     fn set_dynamic_artifact(&self, descriptor: Option<DynamicArtifactDescriptor>);
     fn debug_snapshot(&self) -> BlockDebugSnapshot;
     fn debug_data(&self) -> Option<String>;
+    fn current_data(&self) -> Option<Vec<u8>>;
     fn initial_data(&self) -> Option<Vec<u8>>;
     fn initial_properties(&self) -> BTreeMap<Uuid, Vec<u8>>;
     fn initial_dynamic_artifact(&self) -> bool;
@@ -3524,6 +3533,16 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
     fn debug_data(&self) -> Option<String> {
         self.shared.value.read().as_ref().map(|value| {
             serde_json::to_string_pretty(&StoredBlock {
+                value,
+                dynamic_artifact: self.dynamic_artifact.read().clone(),
+            })
+            .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
+        })
+    }
+
+    fn current_data(&self) -> Option<Vec<u8>> {
+        self.shared.value.read().as_ref().map(|value| {
+            serde_json::to_vec(&StoredBlock {
                 value,
                 dynamic_artifact: self.dynamic_artifact.read().clone(),
             })
