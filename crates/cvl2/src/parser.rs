@@ -251,6 +251,8 @@ enum ConfigStyle {
 struct ConfigEntry {
     style: ConfigStyle,
     prec: usize,
+    #[allow(dead_code)]
+    prec_str: &'static str,
     close: Option<&'static str>,
     auto_open: bool,
     op_tag: Option<OpTag>,
@@ -266,123 +268,181 @@ struct ConfigSpec {
     bracket_tag: Option<BracketTag>,
 }
 
-const fn spec(
-    token: &'static str,
-    style: ConfigStyle,
-    close: Option<&'static str>,
-    op_tag: Option<OpTag>,
-    bracket_tag: Option<BracketTag>,
-) -> ConfigSpec {
-    ConfigSpec {
-        token,
-        style,
-        close,
-        op_tag,
-        bracket_tag,
-    }
+impl ConfigSpec {
+    const DEFAULT: ConfigSpec = ConfigSpec {
+        token: "",
+        style: ConfigStyle::Join,
+        close: None,
+        op_tag: None,
+        bracket_tag: None,
+    };
 }
 
-// Mirrors the TS `mkconfig` table: entries are grouped, and every entry in a
-// group shares the group's precedence (the group's position in this list),
-// so precedence never has to be spelled out per entry.
-const CONFIG_GROUPS: &[&[ConfigSpec]] = &[
-    &[
-        spec(
-            "(",
-            ConfigStyle::Open,
-            Some(")"),
-            None,
-            Some(BracketTag::List),
-        ),
-        spec(
-            "{",
-            ConfigStyle::Open,
-            Some("}"),
-            None,
-            Some(BracketTag::Code),
-        ),
-        spec(
-            "[",
-            ConfigStyle::Open,
-            Some("]"),
-            None,
-            Some(BracketTag::Map),
-        ),
-        spec(")", ConfigStyle::Close, None, None, Some(BracketTag::List)),
-        spec("}", ConfigStyle::Close, None, None, Some(BracketTag::Code)),
-        spec("]", ConfigStyle::Close, None, None, Some(BracketTag::Map)),
-        spec(
-            "\\(",
-            ConfigStyle::Open,
-            Some(")"),
-            None,
-            Some(BracketTag::List),
-        ),
-    ],
-    &[
-        spec(",", ConfigStyle::Join, None, Some(OpTag::Sep), None),
-        spec(";", ConfigStyle::Join, None, Some(OpTag::Sep), None),
-        spec("\n", ConfigStyle::Join, None, Some(OpTag::Sep), None),
-        spec("\n\n", ConfigStyle::Join, None, Some(OpTag::Sep), None),
-    ],
-    &[
-        spec("::", ConfigStyle::Join, None, Some(OpTag::Def), None),
-        spec(".=", ConfigStyle::Join, None, Some(OpTag::Pub), None),
-        spec(":=", ConfigStyle::Join, None, Some(OpTag::Var), None),
-    ],
-    &[
-        spec(
-            ":",
-            ConfigStyle::Open,
-            None,
-            None,
-            Some(BracketTag::ColonCall),
-        ),
-        spec(
-            "=>",
-            ConfigStyle::Open,
-            None,
-            None,
-            Some(BracketTag::ArrowFn),
-        ),
-    ],
-    &[spec(
-        "=",
-        ConfigStyle::Join,
-        None,
-        Some(OpTag::Assign),
-        None,
-    )],
-    &[
-        spec(
-            "\"",
-            ConfigStyle::Open,
-            Some(IN_STRING_QUOTE),
-            None,
-            Some(BracketTag::String),
-        ),
-        spec(
-            IN_STRING_QUOTE,
-            ConfigStyle::Close,
-            None,
-            None,
-            Some(BracketTag::String),
-        ),
-        spec(
-            "//",
-            ConfigStyle::Open,
-            Some(IN_INLINE_COMMENT_END),
-            None,
-            Some(BracketTag::InlineComment),
-        ),
-        spec(
-            IN_INLINE_COMMENT_END,
-            ConfigStyle::Close,
-            None,
-            None,
-            Some(BracketTag::InlineComment),
-        ),
-    ],
+// Mirrors the TS `mkconfig` table: entries are grouped under a name, and
+// every entry in a group shares the group's precedence (its position in
+// this list) and precedence label, so neither has to be spelled out per
+// entry.
+const CONFIG_GROUPS: &[(&str, &[ConfigSpec])] = &[
+    (
+        "paren",
+        &[
+            ConfigSpec {
+                token: "(",
+                style: ConfigStyle::Open,
+                close: Some(")"),
+                bracket_tag: Some(BracketTag::List),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "{",
+                style: ConfigStyle::Open,
+                close: Some("}"),
+                bracket_tag: Some(BracketTag::Code),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "[",
+                style: ConfigStyle::Open,
+                close: Some("]"),
+                bracket_tag: Some(BracketTag::Map),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: ")",
+                style: ConfigStyle::Close,
+                bracket_tag: Some(BracketTag::List),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "}",
+                style: ConfigStyle::Close,
+                bracket_tag: Some(BracketTag::Code),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "]",
+                style: ConfigStyle::Close,
+                bracket_tag: Some(BracketTag::Map),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "\\(",
+                style: ConfigStyle::Open,
+                close: Some(")"),
+                bracket_tag: Some(BracketTag::List),
+                ..ConfigSpec::DEFAULT
+            },
+        ],
+    ),
+    (
+        "sep",
+        &[
+            ConfigSpec {
+                token: ",",
+                style: ConfigStyle::Join,
+                op_tag: Some(OpTag::Sep),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: ";",
+                style: ConfigStyle::Join,
+                op_tag: Some(OpTag::Sep),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "\n",
+                style: ConfigStyle::Join,
+                op_tag: Some(OpTag::Sep),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "\n\n",
+                style: ConfigStyle::Join,
+                op_tag: Some(OpTag::Sep),
+                ..ConfigSpec::DEFAULT
+            },
+        ],
+    ),
+    (
+        "bind",
+        &[
+            ConfigSpec {
+                token: "::",
+                style: ConfigStyle::Join,
+                op_tag: Some(OpTag::Def),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: ".=",
+                style: ConfigStyle::Join,
+                op_tag: Some(OpTag::Pub),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: ":=",
+                style: ConfigStyle::Join,
+                op_tag: Some(OpTag::Var),
+                ..ConfigSpec::DEFAULT
+            },
+        ],
+    ),
+    (
+        "right_associative",
+        &[
+            ConfigSpec {
+                token: ":",
+                style: ConfigStyle::Open,
+                bracket_tag: Some(BracketTag::ColonCall),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "=>",
+                style: ConfigStyle::Open,
+                bracket_tag: Some(BracketTag::ArrowFn),
+                ..ConfigSpec::DEFAULT
+            },
+        ],
+    ),
+    (
+        "equals",
+        &[ConfigSpec {
+            token: "=",
+            style: ConfigStyle::Join,
+            op_tag: Some(OpTag::Assign),
+            ..ConfigSpec::DEFAULT
+        }],
+    ),
+    (
+        "string",
+        &[
+            ConfigSpec {
+                token: "\"",
+                style: ConfigStyle::Open,
+                close: Some(IN_STRING_QUOTE),
+                bracket_tag: Some(BracketTag::String),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: IN_STRING_QUOTE,
+                style: ConfigStyle::Close,
+                bracket_tag: Some(BracketTag::String),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: "//",
+                style: ConfigStyle::Open,
+                close: Some(IN_INLINE_COMMENT_END),
+                bracket_tag: Some(BracketTag::InlineComment),
+                ..ConfigSpec::DEFAULT
+            },
+            ConfigSpec {
+                token: IN_INLINE_COMMENT_END,
+                style: ConfigStyle::Close,
+                bracket_tag: Some(BracketTag::InlineComment),
+                ..ConfigSpec::DEFAULT
+            },
+        ],
+    ),
 ];
 
 fn config_map() -> &'static HashMap<&'static str, ConfigEntry> {
@@ -390,13 +450,14 @@ fn config_map() -> &'static HashMap<&'static str, ConfigEntry> {
         std::sync::OnceLock::new();
     MAP.get_or_init(|| {
         let mut map = HashMap::new();
-        for (prec, group) in CONFIG_GROUPS.iter().enumerate() {
-            for s in *group {
+        for (prec, (prec_str, group)) in CONFIG_GROUPS.iter().copied().enumerate() {
+            for s in group {
                 map.insert(
                     s.token,
                     ConfigEntry {
                         style: s.style,
                         prec,
+                        prec_str,
                         close: s.close,
                         auto_open: false,
                         op_tag: s.op_tag,
