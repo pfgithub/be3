@@ -2,6 +2,8 @@ use block::Block;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BlockEntry {
     pub id: Uuid,
@@ -9,18 +11,18 @@ pub struct BlockEntry {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct WorkspaceIndex {
-    entries: Vec<BlockEntry>,
+    entries: Vec<BlockRef>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum WorkspaceIndexOperation {
-    Add(BlockEntry),
-    Remove(BlockEntry),
-    Replace { old: Uuid, new: BlockEntry },
+    Add(BlockRef),
+    Remove(BlockRef),
+    Replace { old: BlockRef, new: BlockRef },
 }
 
 impl WorkspaceIndex {
-    pub fn entries(&self) -> &[BlockEntry] {
+    pub fn entries(&self) -> &[BlockRef] {
         &self.entries
     }
 }
@@ -35,21 +37,20 @@ impl Block for WorkspaceIndex {
     fn apply_operation(index: &mut Self, operation: &Self::Operation) {
         match operation {
             WorkspaceIndexOperation::Add(entry) => {
-                if !index.entries.iter().any(|existing| existing.id == entry.id) {
-                    index.entries.push(entry.clone());
+                if !index.entries.contains(entry) {
+                    index.entries.push(*entry);
                 }
             }
             WorkspaceIndexOperation::Remove(entry) => {
-                index.entries.retain(|existing| existing.id != entry.id);
+                index.entries.retain(|existing| existing != entry);
             }
             WorkspaceIndexOperation::Replace { old, new } => {
-                if *old != new.id {
-                    if index.entries.iter().any(|existing| existing.id == new.id) {
-                        index.entries.retain(|existing| existing.id != *old);
-                    } else if let Some(entry) =
-                        index.entries.iter_mut().find(|entry| entry.id == *old)
+                if old != new {
+                    if index.entries.contains(new) {
+                        index.entries.retain(|existing| existing != old);
+                    } else if let Some(entry) = index.entries.iter_mut().find(|entry| *entry == old)
                     {
-                        *entry = new.clone();
+                        *entry = *new;
                     }
                 }
             }
@@ -57,7 +58,10 @@ impl Block for WorkspaceIndex {
     }
 
     fn references(&self) -> Vec<Uuid> {
-        self.entries.iter().map(|entry| entry.id).collect()
+        self.entries
+            .iter()
+            .filter_map(BlockRef::as_direct)
+            .collect()
     }
 }
 

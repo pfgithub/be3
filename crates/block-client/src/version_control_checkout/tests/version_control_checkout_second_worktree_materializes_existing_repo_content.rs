@@ -1,8 +1,9 @@
 use block::BlockParent;
 
+use crate::block_ref::BlockRef;
 use crate::blocks::version_control_data::VersionControlData;
 use crate::blocks::version_control_worktree::VersionControlWorktree;
-use crate::blocks::workspace_index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation};
+use crate::blocks::workspace_index::{WorkspaceIndex, WorkspaceIndexOperation};
 
 use super::{materialize_worktree, CheckoutOutcome, Fixture};
 
@@ -16,7 +17,7 @@ async fn version_control_checkout_second_worktree_materializes_existing_repo_con
     fixture
         .client
         .get_block::<WorkspaceIndex>(member_id)
-        .operate(WorkspaceIndexOperation::Add(BlockEntry { id: nested.id() }));
+        .operate(WorkspaceIndexOperation::Add(BlockRef::Direct(nested.id())));
     fixture.client.synchronized().await;
     fixture.commit("first").await;
 
@@ -52,18 +53,14 @@ async fn version_control_checkout_second_worktree_materializes_existing_repo_con
         .read()
         .unwrap()
         .entries()
-        .iter()
-        .map(|entry| entry.id)
-        .collect::<Vec<_>>();
+        .to_vec();
     let materialized = fixture
         .client
         .get_block::<WorkspaceIndex>(materialized_id)
         .read()
         .unwrap()
         .entries()
-        .iter()
-        .map(|entry| entry.id)
-        .collect::<Vec<_>>();
+        .to_vec();
     assert_eq!(original, materialized);
 
     fixture.tear_down().await;

@@ -1,6 +1,7 @@
 use uuid::Uuid;
 
 use super::{sample, starts, Video, VideoClip, VideoOperation};
+use crate::block_ref::BlockRef;
 use block::Block;
 
 #[test]
@@ -12,7 +13,7 @@ fn video_attached_clips_start_at_their_offset() {
     );
 
     // An attachment of an attachment offsets from the clip it hangs off.
-    let nested = VideoClip::new(Uuid::new_v4(), 4).attached_to(attached, 3);
+    let nested = VideoClip::new(BlockRef::Direct(Uuid::new_v4()), 4).attached_to(attached, 3);
     let nested_id = nested.id;
     Video::apply_operation(
         &mut video,

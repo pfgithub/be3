@@ -2,6 +2,7 @@ use super::{
     CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
     InfiniteCanvas, InfiniteCanvasOperation,
 };
+use crate::block_ref::BlockRef;
 use block::Block;
 use uuid::Uuid;
 
@@ -9,7 +10,9 @@ fn block_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
     CanvasEntity {
         id,
         transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
-        kind: CanvasEntityKind::Block { block_id },
+        kind: CanvasEntityKind::Block {
+            block_id: BlockRef::Direct(block_id),
+        },
         style: CanvasEntityStyle::default(),
         group_id: None,
         locked: false,
@@ -21,7 +24,7 @@ fn direct_editor_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
         id,
         transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
         kind: CanvasEntityKind::DirectEditor {
-            block_id,
+            block_id: BlockRef::Direct(block_id),
             scale: 1.0,
         },
         style: CanvasEntityStyle::default(),

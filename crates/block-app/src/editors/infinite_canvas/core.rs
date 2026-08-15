@@ -32,6 +32,40 @@ impl InfiniteCanvasEditor {
             grouped_inspector_edit_active: false,
             last_foreground: CanvasEntityStyle::default().foreground,
             last_fill: CanvasEntityStyle::default().fill,
+            reference_cache: reference_cache::ReferenceResolutionCache::default(),
+            pending_entities: reference_cache::ReferenceClassificationQueue::default(),
+        }
+    }
+
+    pub(super) fn peek_block_id(&self, reference: BlockRef) -> Option<Uuid> {
+        self.reference_cache.peek(&reference)
+    }
+
+    pub(super) fn resolve_block_id(
+        &mut self,
+        editors: &EditorAccess<'_>,
+        reference: BlockRef,
+    ) -> Option<Uuid> {
+        let client = editors.client_handle();
+        self.reference_cache
+            .resolve(&client, self.block.id(), reference)
+    }
+
+    pub(super) fn poll_references(&mut self) {
+        self.reference_cache.poll();
+        for (reference, (entity_id, transform)) in self.pending_entities.poll() {
+            let entity = CanvasEntity {
+                id: entity_id,
+                transform,
+                kind: CanvasEntityKind::DirectEditor {
+                    block_id: reference,
+                    scale: 1.0,
+                },
+                style: CanvasEntityStyle::default(),
+                group_id: None,
+                locked: false,
+            };
+            self.record_action(InfiniteCanvasOperation::Add { entity });
         }
     }
 
@@ -532,20 +566,22 @@ impl InfiniteCanvasEditor {
     pub(super) fn edit_selected(
         &mut self,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         if self.selection.len() != 1 {
             return None;
         }
         let entity = entities
             .iter()
-            .find(|entity| self.selection.contains(&entity.id))?;
+            .find(|entity| self.selection.contains(&entity.id))?
+            .clone();
         match entity.kind {
             CanvasEntityKind::DirectEditor { block_id, .. } => {
-                if editors.direct_editor_interaction(block_id)
+                let resolved_id = self.resolve_block_id(editors, block_id);
+                if resolved_id.and_then(|id| editors.direct_editor_interaction(id))
                     == Some(DirectEditorInteraction::Playback)
                 {
-                    let cached = editors.client().cached_block(block_id)?;
+                    let cached = editors.client().cached_block(resolved_id?)?;
                     Some(EditorAction::OpenBlock {
                         id: cached.id,
                         block_type: cached.block_type,
@@ -561,7 +597,8 @@ impl InfiniteCanvasEditor {
                 None
             }
             CanvasEntityKind::Block { block_id } => {
-                let cached = editors.client().cached_block(block_id)?;
+                let resolved_id = self.resolve_block_id(editors, block_id)?;
+                let cached = editors.client().cached_block(resolved_id)?;
                 Some(EditorAction::OpenBlock {
                     id: cached.id,
                     block_type: cached.block_type,
@@ -593,8 +630,9 @@ impl InfiniteCanvasEditor {
                 }
                 direct_editor_to_preview(&entity, block_id)
             }
-            CanvasEntityKind::Block { block_id } => editors
-                .direct_editor_intrinsic_size(block_id)
+            CanvasEntityKind::Block { block_id } => self
+                .resolve_block_id(editors, block_id)
+                .and_then(|id| editors.direct_editor_intrinsic_size(id))
                 .map(|intrinsic| preview_to_direct_editor(&entity, block_id, intrinsic)),
             _ => None,
         };
@@ -603,28 +641,31 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    pub(super) fn add_direct_editor(&mut self, block_id: Uuid, center: CanvasPoint) {
-        self.add_direct_editor_sized(block_id, center, CanvasPoint::new(180.0, 100.0));
+    pub(super) fn add_direct_editor(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+        block_id: Uuid,
+        center: CanvasPoint,
+    ) {
+        self.add_direct_editor_sized(editors, block_id, center, CanvasPoint::new(180.0, 100.0));
     }
 
     pub(super) fn add_direct_editor_sized(
         &mut self,
+        editors: &mut EditorAccess<'_>,
         block_id: Uuid,
         center: CanvasPoint,
         content_size: CanvasPoint,
     ) {
         let size = direct_editor_entity_size(Vec2::new(content_size.x, content_size.y), 1.0);
-        self.add_entity(CanvasEntity {
-            id: Uuid::new_v4(),
-            transform: CanvasTransform::new(center, size, 0.0),
-            kind: CanvasEntityKind::DirectEditor {
-                block_id,
-                scale: 1.0,
-            },
-            style: CanvasEntityStyle::default(),
-            group_id: None,
-            locked: false,
-        });
+        let entity_id = Uuid::new_v4();
+        let transform = CanvasTransform::new(center, size, 0.0);
+        self.selection.clear();
+        self.selection.insert(entity_id);
+        let client = editors.client_handle();
+        let referencing_id = self.block.id();
+        self.pending_entities
+            .push(&client, referencing_id, block_id, (entity_id, transform));
     }
 
     pub(super) fn add_imported_image(
@@ -634,10 +675,11 @@ impl InfiniteCanvasEditor {
         center: CanvasPoint,
     ) {
         let id = create_image_block(editors, image, self.block.id());
-        self.add_direct_editor(id, center);
+        self.add_direct_editor(editors, id, center);
     }
 
     pub(super) fn ensure_dependency_editors(
+        &mut self,
         entities: &[CanvasEntity],
         dependencies: &[block::BlockReference],
         editors: &mut EditorAccess<'_>,
@@ -646,7 +688,9 @@ impl InfiniteCanvasEditor {
             .iter()
             .filter_map(|entity| match entity.kind {
                 CanvasEntityKind::Block { block_id }
-                | CanvasEntityKind::DirectEditor { block_id, .. } => Some(block_id),
+                | CanvasEntityKind::DirectEditor { block_id, .. } => {
+                    self.resolve_block_id(editors, block_id)
+                }
                 _ => None,
             })
             .collect::<HashSet<_>>();
@@ -666,11 +710,12 @@ impl InfiniteCanvasEditor {
             .iter()
             .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
             .any(|entity| match entity.kind {
-                CanvasEntityKind::Block { block_id } => {
-                    editors.default_preserve_aspect_ratio(block_id)
-                }
-                CanvasEntityKind::DirectEditor { block_id, .. } => editors
-                    .direct_editor_capabilities(block_id)
+                CanvasEntityKind::Block { block_id } => self
+                    .peek_block_id(block_id)
+                    .is_some_and(|id| editors.default_preserve_aspect_ratio(id)),
+                CanvasEntityKind::DirectEditor { block_id, .. } => self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.direct_editor_capabilities(id))
                     .is_some_and(|capabilities| capabilities.preserve_aspect_ratio),
                 _ => false,
             })
@@ -685,8 +730,9 @@ impl InfiniteCanvasEditor {
             .iter()
             .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
             .all(|entity| match entity.kind {
-                CanvasEntityKind::DirectEditor { block_id, .. } => editors
-                    .direct_editor_capabilities(block_id)
+                CanvasEntityKind::DirectEditor { block_id, .. } => self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.direct_editor_capabilities(id))
                     .is_none_or(|capabilities| capabilities.allow_rotation),
                 _ => true,
             })
@@ -708,8 +754,9 @@ impl InfiniteCanvasEditor {
         let mut vertical = true;
         for entity in selected {
             let resize = match entity.kind {
-                CanvasEntityKind::DirectEditor { block_id, .. } => editors
-                    .direct_editor_resize(block_id)
+                CanvasEntityKind::DirectEditor { block_id, .. } => self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.direct_editor_resize(id))
                     .unwrap_or(DirectEditorResize::None),
                 _ => DirectEditorResize::Both,
             };
@@ -733,8 +780,9 @@ impl InfiniteCanvasEditor {
             .iter()
             .filter(|entity| self.selection.contains(&entity.id) && !entity.locked)
             .any(|entity| match entity.kind {
-                CanvasEntityKind::DirectEditor { block_id, .. } => editors
-                    .direct_editor_capabilities(block_id)
+                CanvasEntityKind::DirectEditor { block_id, .. } => self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.direct_editor_capabilities(id))
                     .is_some_and(|capabilities| capabilities.preserve_aspect_ratio),
                 _ => false,
             })
@@ -749,6 +797,9 @@ impl InfiniteCanvasEditor {
         let mut after = Vec::new();
         for entity in entities {
             let CanvasEntityKind::DirectEditor { block_id, scale } = entity.kind else {
+                continue;
+            };
+            let Some(block_id) = self.resolve_block_id(editors, block_id) else {
                 continue;
             };
             let resize = editors

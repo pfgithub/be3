@@ -128,14 +128,17 @@ impl MapEditor {
     ) -> Option<EditorAction> {
         let points = self.points();
         let labels = self.dependency_labels(editors);
-        self.ensure_point_editors(&points, editors);
+        let resolved = self.resolve_points(editors, &points);
+        self.ensure_point_editors(&points, &resolved, editors);
         let selected = self
             .selected
             .and_then(|id| points.iter().copied().find(|point| point.id == id));
         let Some(point) = selected else {
-            return self.show_point_list(ui, &points, &labels);
+            return self.show_point_list(ui, &points, &labels, &resolved);
         };
-        self.show_point_details(ui, editors, point, labels.get(&point.block_id))
+        let resolved_id = resolved.get(&point.block_id).copied().flatten();
+        let label = resolved_id.and_then(|id| labels.get(&id));
+        self.show_point_details(ui, editors, point, resolved_id, label)
     }
 
     fn show_point_list(
@@ -143,6 +146,7 @@ impl MapEditor {
         ui: &mut egui::Ui,
         points: &[MapPoint],
         labels: &HashMap<Uuid, BlockLabel>,
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
     ) -> Option<EditorAction> {
         ui.strong("Points of interest");
         if points.is_empty() {
@@ -157,8 +161,16 @@ impl MapEditor {
         let mut selected = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for point in points {
-                let label = labels.get(&point.block_id).map_or_else(
-                    || egui::RichText::new("Loading…").into(),
+                let resolved_id = resolved.get(&point.block_id).copied().flatten();
+                let label = resolved_id.and_then(|id| labels.get(&id)).map_or_else(
+                    || {
+                        egui::RichText::new(if resolved_id.is_some() {
+                            "Loading…"
+                        } else {
+                            "Broken link"
+                        })
+                        .into()
+                    },
                     |label| label.widget_text(ui.style()),
                 );
                 if ui
@@ -189,6 +201,7 @@ impl MapEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
         point: MapPoint,
+        resolved_id: Option<Uuid>,
         label: Option<&BlockLabel>,
     ) -> Option<EditorAction> {
         let mut action = None;
@@ -201,13 +214,22 @@ impl MapEditor {
                 self.selected = None;
             }
             let name = label.map_or_else(
-                || egui::RichText::new("Loading…").into(),
+                || {
+                    egui::RichText::new(if resolved_id.is_some() {
+                        "Loading…"
+                    } else {
+                        "Broken link"
+                    })
+                    .into()
+                },
                 |label| label.widget_text(ui.style()),
             );
             ui.add(egui::Label::new(name).truncate());
         });
         ui.add_space(6.0);
-        show_block_preview(ui, editors, point.block_id, label);
+        if let Some(id) = resolved_id {
+            show_block_preview(ui, editors, id, label);
+        }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui
@@ -215,9 +237,9 @@ impl MapEditor {
                 .on_disabled_hover_text("Waiting for block metadata")
                 .clicked()
             {
-                if let Some(label) = label {
+                if let (Some(id), Some(label)) = (resolved_id, label) {
                     action = Some(EditorAction::OpenBlock {
-                        id: point.block_id,
+                        id,
                         block_type: label.block_type,
                     });
                 }

@@ -1,13 +1,14 @@
 use uuid::Uuid;
 
 use super::{Presentation, PresentationOperation, PresentationSlide};
+use crate::block_ref::BlockRef;
 use block::Block;
 
 #[test]
 fn presentation_sets_slide_block_id() {
     let slide = PresentationSlide {
         id: Uuid::new_v4(),
-        block_id: Uuid::new_v4(),
+        block_id: BlockRef::Direct(Uuid::new_v4()),
     };
     let mut presentation = Presentation::new();
     Presentation::apply_operation(
@@ -18,7 +19,7 @@ fn presentation_sets_slide_block_id() {
         },
     );
 
-    let new_block_id = Uuid::new_v4();
+    let new_block_id = BlockRef::Direct(Uuid::new_v4());
     Presentation::apply_operation(
         &mut presentation,
         &PresentationOperation::SetBlockId {
@@ -38,7 +39,7 @@ fn presentation_sets_slide_block_id() {
         &mut presentation,
         &PresentationOperation::SetBlockId {
             slide_id: Uuid::new_v4(),
-            block_id: Uuid::new_v4(),
+            block_id: BlockRef::Direct(Uuid::new_v4()),
         },
     );
     assert_eq!(presentation.slides().len(), 1);

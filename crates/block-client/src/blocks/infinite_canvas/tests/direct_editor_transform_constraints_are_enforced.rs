@@ -2,6 +2,7 @@ use super::{
     CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
     InfiniteCanvas, InfiniteCanvasOperation,
 };
+use crate::block_ref::BlockRef;
 use block::Block;
 use uuid::Uuid;
 
@@ -17,7 +18,7 @@ fn direct_editor_transform_constraints_are_enforced() {
             1.5,
         ),
         kind: CanvasEntityKind::DirectEditor {
-            block_id: Uuid::new_v4(),
+            block_id: BlockRef::Direct(Uuid::new_v4()),
             scale: -2.0,
         },
         style: CanvasEntityStyle::default(),

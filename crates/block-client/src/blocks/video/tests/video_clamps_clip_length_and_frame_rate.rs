@@ -1,6 +1,7 @@
 use uuid::Uuid;
 
 use super::{Video, VideoClip, VideoFrameRate, VideoOperation, MAX_CLIP_LENGTH};
+use crate::block_ref::BlockRef;
 use block::Block;
 
 #[test]
@@ -8,7 +9,7 @@ fn video_clamps_clip_length_and_frame_rate() {
     let mut video = Video::new();
     assert_eq!(video.frame_rate(), VideoFrameRate::DEFAULT);
 
-    let empty = VideoClip::new(Uuid::new_v4(), 0);
+    let empty = VideoClip::new(BlockRef::Direct(Uuid::new_v4()), 0);
     let id = empty.id;
     Video::apply_operation(
         &mut video,

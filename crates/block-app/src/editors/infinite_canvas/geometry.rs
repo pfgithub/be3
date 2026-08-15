@@ -26,7 +26,7 @@ pub(super) fn duplicate_entities(
 pub(super) fn focused_direct_editor(
     focused: Option<Uuid>,
     entities: &[CanvasEntity],
-) -> Option<(Uuid, Uuid, f32)> {
+) -> Option<(Uuid, BlockRef, f32)> {
     let focused = focused?;
     entities.iter().find_map(|entity| match entity.kind {
         CanvasEntityKind::DirectEditor {
@@ -320,7 +320,7 @@ pub(super) fn direct_editor_entity_size(intrinsic: Vec2, scale: f32) -> CanvasPo
 
 pub(super) fn direct_editor_to_preview(
     entity: &CanvasEntity,
-    block_id: Uuid,
+    block_id: BlockRef,
 ) -> Option<CanvasEntity> {
     let content = direct_editor_layout(entity)?.content;
     let content_size = content.size();
@@ -335,7 +335,7 @@ pub(super) fn direct_editor_to_preview(
 
 pub(super) fn preview_to_direct_editor(
     entity: &CanvasEntity,
-    block_id: Uuid,
+    block_id: BlockRef,
     intrinsic: Vec2,
 ) -> CanvasEntity {
     let content = entity_bounds(entity);

@@ -1,5 +1,6 @@
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
+    block_ref::BlockRef,
     blocks::settings::{ActivationCondition, Settings, SettingsOperation},
     BlockClient, BlockHandle, ReferenceList,
 };
@@ -82,7 +83,7 @@ impl<T: Block + Default> RootSetting<T> {
         if self.block.is_none() {
             let id = {
                 let settings = self.settings.find(client)?.read()?;
-                settings.resolve(T::TYPE_ID, client_id)?
+                settings.resolve(T::TYPE_ID, client_id)?.as_direct()?
             };
             self.block = Some(client.get_block::<T>(id));
         }
@@ -105,7 +106,7 @@ impl<T: Block + Default> RootSetting<T> {
         settings.operate(SettingsOperation::SetEntry {
             block_type: T::TYPE_ID,
             activation: ActivationCondition::Fallback,
-            block: block.id(),
+            block: BlockRef::Direct(block.id()),
         });
         block.set_parent(BlockParent::Uuid(settings.id()));
         self.block = Some(block);

@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         image::Image as ImageBlock,
         infinite_canvas::{
@@ -42,10 +43,10 @@ use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
     image::{create_image_block, pick_image_file},
-    name_galley, paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
-    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING,
-    EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
+    name_galley, paint_name, reference_cache, BlockEditor, BlockLabel, BlockRenderContext,
+    CreatableEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
+    EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 impl EditorKind for InfiniteCanvasEditor {
@@ -337,4 +338,6 @@ pub(super) struct InfiniteCanvasEditor {
     grouped_inspector_edit_active: bool,
     last_foreground: CanvasColor,
     last_fill: Option<CanvasColor>,
+    reference_cache: reference_cache::ReferenceResolutionCache,
+    pending_entities: reference_cache::ReferenceClassificationQueue<(Uuid, CanvasTransform)>,
 }

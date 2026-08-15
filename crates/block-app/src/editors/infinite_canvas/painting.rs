@@ -107,15 +107,18 @@ pub(super) fn paint_entity(
             ));
         }
         CanvasEntityKind::Block { block_id } => {
+            let resolved_id = editor.peek_block_id(*block_id);
             let corners = entity_corners(entity).map(|point| editor.world_to_screen(point, rect));
-            if editors.render(
-                *block_id,
-                BlockRenderContext {
-                    painter,
-                    corners,
-                    opacity,
-                },
-            ) {
+            if resolved_id.is_some_and(|id| {
+                editors.render(
+                    id,
+                    BlockRenderContext {
+                        painter,
+                        corners,
+                        opacity,
+                    },
+                )
+            }) {
                 return;
             }
             painter.add(egui::Shape::convex_polygon(
@@ -124,10 +127,19 @@ pub(super) fn paint_entity(
                 Stroke::NONE,
             ));
             let center = editor.world_to_screen(entity.transform.center, rect);
-            let (title, automatic) = dependency_details
-                .get(block_id)
+            let (title, automatic) = resolved_id
+                .and_then(|id| dependency_details.get(&id))
                 .map(|label| (label.name.clone(), label.automatic))
-                .unwrap_or_else(|| ("Loading…".to_owned(), false));
+                .unwrap_or_else(|| {
+                    (
+                        if resolved_id.is_some() {
+                            "Loading…".to_owned()
+                        } else {
+                            "Broken link".to_owned()
+                        },
+                        false,
+                    )
+                });
             let title_galley = name_galley(
                 painter,
                 &title,
@@ -195,24 +207,26 @@ pub(super) fn paint_entity(
                 content.right_bottom(),
                 content.left_bottom(),
             ];
+            let resolved_id = editor.peek_block_id(*block_id);
             let preview = !live_editor_overlay
-                || (editors.direct_editor_interaction(*block_id)
+                || (resolved_id.and_then(|id| editors.direct_editor_interaction(id))
                     == Some(DirectEditorInteraction::Preview)
                     && editor.focused_editor != Some(entity.id));
-            if preview
-                && !editors.render(
-                    *block_id,
+            let rendered = resolved_id.is_some_and(|id| {
+                editors.render(
+                    id,
                     BlockRenderContext {
                         painter,
                         corners: content_corners,
                         opacity,
                     },
                 )
-            {
+            });
+            if preview && !rendered {
                 painter.rect_filled(content, 0.0, with_opacity(Color32::from_gray(35), opacity));
             }
 
-            let label = dependency_details.get(block_id);
+            let label = resolved_id.and_then(|id| dependency_details.get(&id));
             let (title, icon, automatic) = label.map_or(("Loading...", None, false), |label| {
                 (label.name.as_str(), label.icon, label.automatic)
             });

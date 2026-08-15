@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use block::{BlockParent, BlockReference};
-use block_client::blocks::video::{
-    Video, VideoAttachment, VideoClip, VideoClipTiming, VideoFrameRate, VideoOperation,
+use block_client::{
+    block_ref::BlockRef,
+    blocks::video::{
+        Video, VideoAttachment, VideoClip, VideoClipTiming, VideoFrameRate, VideoOperation,
+    },
 };
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, Vec2};
 use uuid::Uuid;
@@ -275,6 +278,7 @@ impl VideoEditor {
         &mut self,
         ui: &mut egui::Ui,
         video: &Video,
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &mut EditorAccess<'_>,
     ) {
@@ -297,7 +301,16 @@ impl VideoEditor {
             .id_salt(("video-timeline", block_id))
             .show(ui, |ui| {
                 let (rect, background) = ui.allocate_exact_size(content, Sense::click_and_drag());
-                self.draw_timeline(ui, rect, &background, &rows, video, dependencies, editors);
+                self.draw_timeline(
+                    ui,
+                    rect,
+                    &background,
+                    &rows,
+                    video,
+                    resolved,
+                    dependencies,
+                    editors,
+                );
             });
     }
 
@@ -308,6 +321,7 @@ impl VideoEditor {
         background: &egui::Response,
         rows: &[ClipRow],
         video: &Video,
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &mut EditorAccess<'_>,
     ) {
@@ -388,6 +402,7 @@ impl VideoEditor {
                 &clip,
                 selected,
                 parent_of_selected == Some(clip.id),
+                resolved,
                 dependencies,
                 editors,
                 &visuals,
@@ -462,6 +477,7 @@ impl VideoEditor {
                     match target {
                         TimelineDropTarget::Attach { parent, start, .. } => {
                             self.insert_clip(
+                                editors,
                                 video,
                                 dragged.reference.id,
                                 Some(parent),
@@ -470,7 +486,14 @@ impl VideoEditor {
                             );
                         }
                         TimelineDropTarget::Base { index, .. } => {
-                            self.insert_clip(video, dragged.reference.id, None, 0, Some(index));
+                            self.insert_clip(
+                                editors,
+                                video,
+                                dragged.reference.id,
+                                None,
+                                0,
+                                Some(index),
+                            );
                         }
                         TimelineDropTarget::Offset { .. } => {}
                     }
@@ -555,6 +578,7 @@ impl VideoEditor {
         clip: &VideoClip,
         selected: bool,
         is_parent_of_selected: bool,
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &mut EditorAccess<'_>,
         visuals: &egui::Visuals,
@@ -571,22 +595,36 @@ impl VideoEditor {
             rect.left_top() + Vec2::splat(3.0),
             Vec2::new((rect.height() - 6.0) * 1.4, rect.height() - 6.0),
         );
+        let resolved_id = resolved.get(&clip.block_id).copied().flatten();
         if rect.width() > thumbnail.width() + 8.0 {
-            editors.render(
-                clip.block_id,
-                BlockRenderContext {
-                    painter: &painter,
-                    corners: rect_corners(thumbnail),
-                    opacity: 1.0,
-                },
-            );
-            let (name, automatic) = dependencies.get(&clip.block_id).map_or_else(
-                || ("Loading…".to_owned(), false),
-                |reference| {
-                    let label = BlockLabel::for_reference(editors.registry(), reference);
-                    (label.name, label.automatic)
-                },
-            );
+            if let Some(id) = resolved_id {
+                editors.render(
+                    id,
+                    BlockRenderContext {
+                        painter: &painter,
+                        corners: rect_corners(thumbnail),
+                        opacity: 1.0,
+                    },
+                );
+            }
+            let (name, automatic) = resolved_id
+                .and_then(|id| dependencies.get(&id))
+                .map_or_else(
+                    || {
+                        (
+                            if resolved_id.is_some() {
+                                "Loading…".to_owned()
+                            } else {
+                                "Broken link".to_owned()
+                            },
+                            false,
+                        )
+                    },
+                    |reference| {
+                        let label = BlockLabel::for_reference(editors.registry(), reference);
+                        (label.name, label.automatic)
+                    },
+                );
             paint_name(
                 &painter,
                 egui::pos2(thumbnail.right() + 5.0, rect.center().y),

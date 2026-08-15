@@ -5,12 +5,12 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::block_ref::WorktreeMembership;
+use crate::block_ref::{BlockRef, WorktreeMembership};
 use crate::blocks::version_control_data::{VersionControlData, MAIN_BRANCH};
 use crate::blocks::version_control_worktree::{
     VersionControlWorktree, VersionControlWorktreeMembership,
 };
-use crate::blocks::workspace_index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation};
+use crate::blocks::workspace_index::{WorkspaceIndex, WorkspaceIndexOperation};
 use crate::{BlockClient, ManagementClient};
 
 use super::commit_worktree;
@@ -121,7 +121,7 @@ impl Fixture {
         nested.loaded().await;
         nested.set_parent(BlockParent::Uuid(member_id));
         let member = self.client.get_block::<WorkspaceIndex>(member_id);
-        member.operate(WorkspaceIndexOperation::Add(BlockEntry { id: nested.id() }));
+        member.operate(WorkspaceIndexOperation::Add(BlockRef::Direct(nested.id())));
     }
 
     fn objects_len(&self) -> usize {

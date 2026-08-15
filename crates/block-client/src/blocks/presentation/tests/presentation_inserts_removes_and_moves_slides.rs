@@ -1,17 +1,18 @@
 use uuid::Uuid;
 
 use super::{Presentation, PresentationOperation, PresentationSlide};
+use crate::block_ref::BlockRef;
 use block::Block;
 
 #[test]
 fn presentation_inserts_removes_and_moves_slides() {
     let first = PresentationSlide {
         id: Uuid::new_v4(),
-        block_id: Uuid::new_v4(),
+        block_id: BlockRef::Direct(Uuid::new_v4()),
     };
     let second = PresentationSlide {
         id: Uuid::new_v4(),
-        block_id: Uuid::new_v4(),
+        block_id: BlockRef::Direct(Uuid::new_v4()),
     };
     let mut presentation = Presentation::new();
     Presentation::apply_operation(

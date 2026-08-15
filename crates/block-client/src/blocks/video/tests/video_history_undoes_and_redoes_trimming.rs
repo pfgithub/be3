@@ -1,13 +1,14 @@
 use uuid::Uuid;
 
 use super::{Video, VideoClip, VideoOperation};
+use crate::block_ref::BlockRef;
 use crate::BlockClient;
 
 #[test]
 fn video_history_undoes_and_redoes_trimming() {
     let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(Video::new());
-    let clip = VideoClip::new(Uuid::new_v4(), 10);
+    let clip = VideoClip::new(BlockRef::Direct(Uuid::new_v4()), 10);
     let id = clip.id;
     block.operate(VideoOperation::InsertClip { clip, index: 0 });
 

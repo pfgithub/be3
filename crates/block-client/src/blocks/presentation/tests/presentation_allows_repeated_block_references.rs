@@ -1,11 +1,12 @@
 use uuid::Uuid;
 
 use super::{Presentation, PresentationOperation, PresentationSlide};
+use crate::block_ref::BlockRef;
 use block::Block;
 
 #[test]
 fn presentation_allows_repeated_block_references() {
-    let block_id = Uuid::new_v4();
+    let block_id = BlockRef::Direct(Uuid::new_v4());
     let mut presentation = Presentation::new();
     for index in 0..2 {
         Presentation::apply_operation(

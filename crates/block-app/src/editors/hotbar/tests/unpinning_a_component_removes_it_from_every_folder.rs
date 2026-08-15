@@ -3,7 +3,7 @@ use super::*;
 fn component(name: &str, compiled: Uuid) -> HotbarSlot {
     HotbarSlot::Component {
         name: name.to_owned(),
-        compiled,
+        compiled: BlockRef::Direct(compiled),
     }
 }
 
@@ -19,7 +19,7 @@ fn unpinning_a_component_removes_it_from_every_folder() {
         },
     ];
 
-    let remaining = without_component(&slots, adder);
+    let remaining = without_component(&slots, BlockRef::Direct(adder));
 
     assert_eq!(
         remaining,

@@ -15,9 +15,10 @@ use std::collections::HashMap;
 
 use block::{BlockParent, BlockReferenceList};
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         image::Image as ImageBlock,
-        map::{Map, MapCoordinate, MapOperation, MapPoint, MapRegion, MAX_LATITUDE},
+        map::{Map, MapColor, MapCoordinate, MapOperation, MapPoint, MapRegion, MAX_LATITUDE},
         workspace_index::BlockEntry,
     },
     BlockClient, BlockHandle, ReferenceList,
@@ -41,6 +42,7 @@ use self::tiles::{TileId, TileWorker, SOURCE_MAX_ZOOM};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::create_image_block,
+    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
     BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
 };
@@ -121,6 +123,8 @@ pub(super) struct MapEditor {
     visible_region: MapRegion,
     /// The centre of that area, readable from the shared `add_child` path.
     view_center: Cell<MapCoordinate>,
+    reference_cache: ReferenceResolutionCache,
+    pending_points: ReferenceClassificationQueue<(Uuid, MapCoordinate)>,
 }
 
 impl MapEditor {
@@ -144,6 +148,8 @@ impl MapEditor {
             grouped_edit_active: false,
             visible_region: MapRegion::WORLD,
             view_center: Cell::new(MapCoordinate::default()),
+            reference_cache: ReferenceResolutionCache::default(),
+            pending_points: ReferenceClassificationQueue::default(),
         }
     }
 
@@ -178,9 +184,37 @@ impl MapEditor {
             .collect()
     }
 
-    fn ensure_point_editors(&self, points: &[MapPoint], editors: &mut EditorAccess<'_>) {
+    fn resolve_points(
+        &mut self,
+        editors: &EditorAccess<'_>,
+        points: &[MapPoint],
+    ) -> HashMap<BlockRef, Option<Uuid>> {
+        self.reference_cache.poll();
+        let client = editors.client_handle();
+        let referencing_id = self.block.id();
+        points
+            .iter()
+            .map(|point| {
+                (
+                    point.block_id,
+                    self.reference_cache
+                        .resolve(&client, referencing_id, point.block_id),
+                )
+            })
+            .collect()
+    }
+
+    fn ensure_point_editors(
+        &self,
+        points: &[MapPoint],
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
+        editors: &mut EditorAccess<'_>,
+    ) {
         for reference in self.dependencies.read() {
-            if points.iter().any(|point| point.block_id == reference.id) {
+            let referenced = points.iter().any(|point| {
+                resolved.get(&point.block_id).copied().flatten() == Some(reference.id)
+            });
+            if referenced {
                 editors.ensure(reference.id, reference.block_type);
             }
         }
@@ -197,10 +231,30 @@ impl MapEditor {
         self.block.operate_grouped([operation]);
     }
 
-    fn add_point(&mut self, block_id: Uuid, position: MapCoordinate) {
-        let point = MapPoint::new(block_id, position);
-        self.record(MapOperation::AddPoint { point });
-        self.selected = Some(point.id);
+    fn poll_pending_points(&mut self) {
+        for (reference, (point_id, position)) in self.pending_points.poll() {
+            let point = MapPoint {
+                id: point_id,
+                block_id: reference,
+                position,
+                color: MapColor::Default,
+            };
+            self.record(MapOperation::AddPoint { point });
+        }
+    }
+
+    fn add_point(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+        block_id: Uuid,
+        position: MapCoordinate,
+    ) {
+        let point_id = Uuid::new_v4();
+        let client = editors.client_handle();
+        let referencing_id = self.block.id();
+        self.pending_points
+            .push(&client, referencing_id, block_id, (point_id, position));
+        self.selected = Some(point_id);
     }
 
     fn remove_point(&mut self, id: Uuid) {
@@ -211,6 +265,7 @@ impl MapEditor {
     }
 
     fn poll(&mut self, context: &egui::Context) {
+        self.poll_pending_points();
         let worker = self
             .worker
             .get_or_insert_with(|| TileWorker::spawn(context.clone()));
@@ -478,7 +533,7 @@ impl MapEditor {
         position: MapCoordinate,
     ) {
         let id = create_image_block(editors, image, self.block.id());
-        self.add_point(id, position);
+        self.add_point(editors, id, position);
     }
 
     fn handle_picker(&mut self, context: &egui::Context, editors: &mut EditorAccess<'_>) {
@@ -495,7 +550,7 @@ impl MapEditor {
             .pending_position
             .take()
             .unwrap_or_else(|| self.view_center.get());
-        self.add_point(result.id, position);
+        self.add_point(editors, result.id, position);
     }
 
     fn handle_input(
@@ -514,7 +569,7 @@ impl MapEditor {
         if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
             if dragged.reference.id != self.block.id() {
                 let position = self.drop_position(response, view);
-                self.add_point(dragged.reference.id, position);
+                self.add_point(editors, dragged.reference.id, position);
                 editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
             }
         }
@@ -628,16 +683,20 @@ impl MapEditor {
         let view = MapView::covering(self.displayed_region(), rect, MAX_PREVIEW_WORLD);
         let points = self.points();
         let labels = self.dependency_labels(editors);
-        self.ensure_point_editors(&points, editors);
+        let resolved = self.resolve_points(editors, &points);
+        self.ensure_point_editors(&points, &resolved, editors);
         self.draw_map(painter, view.world_rect(), rect, opacity);
         points::draw_points(
             painter,
             view,
             rect,
             &points,
-            |id| {
-                labels
-                    .get(&id)
+            |block_id| {
+                resolved
+                    .get(&block_id)
+                    .copied()
+                    .flatten()
+                    .and_then(|id| labels.get(&id))
                     .map(|label| (label.name.clone(), label.automatic))
             },
             None,
@@ -725,24 +784,26 @@ impl BlockEditor for MapEditor {
     }
 
     fn add_child(&self, entry: BlockEntry) -> Option<bool> {
+        let reference = BlockRef::Direct(entry.id);
         let map = self.block.read()?;
-        let already_placed = map.points().iter().any(|point| point.block_id == entry.id);
+        let already_placed = map.points().iter().any(|point| point.block_id == reference);
         drop(map);
         if !already_placed {
             self.block.finish_history_group();
             self.block.operate(MapOperation::AddPoint {
-                point: MapPoint::new(entry.id, self.view_center.get()),
+                point: MapPoint::new(reference, self.view_center.get()),
             });
         }
         Some(true)
     }
 
     fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
+        let reference = BlockRef::Direct(entry.id);
         let map = self.block.read()?;
         let ids = map
             .points()
             .iter()
-            .filter(|point| point.block_id == entry.id)
+            .filter(|point| point.block_id == reference)
             .map(|point| point.id)
             .collect::<Vec<_>>();
         drop(map);
@@ -754,13 +815,15 @@ impl BlockEditor for MapEditor {
     }
 
     fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let old = BlockRef::Direct(old);
+        let new_reference = BlockRef::Direct(new.id);
         let map = self.block.read()?;
         let points = map
             .points()
             .iter()
             .filter(|point| point.block_id == old)
             .map(|point| MapPoint {
-                block_id: new.id,
+                block_id: new_reference,
                 ..*point
             })
             .collect::<Vec<_>>();
@@ -939,7 +1002,8 @@ impl BlockEditor for MapEditor {
 
         let points = self.points();
         let labels = self.dependency_labels(editors);
-        self.ensure_point_editors(&points, editors);
+        let resolved = self.resolve_points(editors, &points);
+        self.ensure_point_editors(&points, &resolved, editors);
         if let Some(region) = self.preview_region() {
             draw_region_outline(&painter, view.region_rect(region));
         }
@@ -948,9 +1012,12 @@ impl BlockEditor for MapEditor {
             view,
             clip,
             &points,
-            |id| {
-                labels
-                    .get(&id)
+            |block_id| {
+                resolved
+                    .get(&block_id)
+                    .copied()
+                    .flatten()
+                    .and_then(|id| labels.get(&id))
                     .map(|label| (label.name.clone(), label.automatic))
             },
             self.selected,

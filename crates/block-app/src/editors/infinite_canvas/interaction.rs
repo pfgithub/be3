@@ -14,7 +14,7 @@ impl InfiniteCanvasEditor {
                 .pending_block_center
                 .take()
                 .unwrap_or(self.viewport_center);
-            self.add_direct_editor(block.id, center);
+            self.add_direct_editor(editors, block.id, center);
             if !block.linked {
                 editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
             }
@@ -434,7 +434,7 @@ impl InfiniteCanvasEditor {
         if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
             if dragged.reference.id != self.block.id() {
                 if let Some(world) = world {
-                    self.add_direct_editor(dragged.reference.id, world);
+                    self.add_direct_editor(editors, dragged.reference.id, world);
                     editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
                 }
             }
@@ -728,7 +728,9 @@ impl InfiniteCanvasEditor {
                         if let CanvasEntityKind::DirectEditor { block_id, .. } = entity.kind {
                             let content = direct_editor_layout(entity)
                                 .is_some_and(|layout| layout.content.contains(world));
-                            let live = editors.direct_editor_interaction(block_id)
+                            let live = self
+                                .resolve_block_id(editors, block_id)
+                                .and_then(|id| editors.direct_editor_interaction(id))
                                 == Some(DirectEditorInteraction::Live);
                             if content && live {
                                 self.focused_editor = Some(id);
@@ -1253,7 +1255,9 @@ impl InfiniteCanvasEditor {
             self.world_to_screen(CanvasPoint::new(bounds.center().x, bounds.max.y), rect);
         let (label, cached, enters_editor): (egui::WidgetText, _, _) = match entity.kind {
             CanvasEntityKind::Block { block_id } => {
-                let cached = editors.client().cached_block(block_id);
+                let cached = self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.client().cached_block(id));
                 let label = cached.as_ref().map_or_else(
                     || egui::RichText::new("Loading…").into(),
                     |block| {
@@ -1264,14 +1268,20 @@ impl InfiniteCanvasEditor {
                 (label, cached, false)
             }
             CanvasEntityKind::DirectEditor { block_id, .. }
-                if editors.direct_editor_interaction(block_id)
+                if self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.direct_editor_interaction(id))
                     == Some(DirectEditorInteraction::Playback) =>
             {
-                let cached = editors.client().cached_block(block_id);
+                let cached = self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.client().cached_block(id));
                 ("Open presentation".into(), cached, false)
             }
             CanvasEntityKind::DirectEditor { block_id, .. }
-                if editors.direct_editor_interaction(block_id)
+                if self
+                    .peek_block_id(block_id)
+                    .and_then(|id| editors.direct_editor_interaction(id))
                     == Some(DirectEditorInteraction::Preview) =>
             {
                 ("Edit".into(), None, true)

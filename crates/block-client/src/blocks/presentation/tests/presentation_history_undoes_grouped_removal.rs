@@ -1,14 +1,15 @@
 use uuid::Uuid;
 
 use super::{Presentation, PresentationOperation, PresentationSlide};
+use crate::block_ref::BlockRef;
 use crate::BlockClient;
 
 #[test]
 fn presentation_history_undoes_grouped_removal() {
     let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(Presentation::new());
-    let repeated = Uuid::new_v4();
-    let slides = [repeated, Uuid::new_v4(), repeated]
+    let repeated = BlockRef::Direct(Uuid::new_v4());
+    let slides = [repeated, BlockRef::Direct(Uuid::new_v4()), repeated]
         .into_iter()
         .map(|block_id| PresentationSlide {
             id: Uuid::new_v4(),

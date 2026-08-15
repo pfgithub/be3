@@ -7,6 +7,8 @@ use block::{Block, BlockHistory, HistoryDirection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
 /// Latitude beyond which the Web Mercator projection used by the map tiles is
 /// undefined.
@@ -78,13 +80,13 @@ pub enum MapColor {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MapPoint {
     pub id: Uuid,
-    pub block_id: Uuid,
+    pub block_id: BlockRef,
     pub position: MapCoordinate,
     pub color: MapColor,
 }
 
 impl MapPoint {
-    pub fn new(block_id: Uuid, position: MapCoordinate) -> Self {
+    pub fn new(block_id: BlockRef, position: MapCoordinate) -> Self {
         Self {
             id: Uuid::new_v4(),
             block_id,
@@ -189,7 +191,7 @@ impl Block for Map {
         let mut seen = HashSet::new();
         self.points
             .iter()
-            .map(|point| point.block_id)
+            .filter_map(|point| point.block_id.as_direct())
             .filter(|block_id| seen.insert(*block_id))
             .collect()
     }

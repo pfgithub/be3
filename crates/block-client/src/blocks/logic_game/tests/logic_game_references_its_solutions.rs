@@ -10,12 +10,12 @@ fn logic_game_references_its_solutions() {
 
     block.operate(LogicGameOperation::InsertSolution {
         challenge: ChallengeId::Nor,
-        solution: nor,
+        solution: BlockRef::Direct(nor),
         index: 0,
     });
     block.operate(LogicGameOperation::InsertSolution {
         challenge: ChallengeId::Xor,
-        solution: xor,
+        solution: BlockRef::Direct(xor),
         index: 0,
     });
 

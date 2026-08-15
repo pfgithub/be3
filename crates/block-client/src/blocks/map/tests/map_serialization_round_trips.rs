@@ -1,3 +1,4 @@
+use crate::block_ref::BlockRef;
 use block::Block;
 use uuid::Uuid;
 
@@ -6,7 +7,10 @@ use super::{Map, MapColor, MapCoordinate, MapOperation, MapPoint, MapRegion};
 #[test]
 fn map_serialization_round_trips() {
     let mut map = Map::new();
-    let mut point = MapPoint::new(Uuid::new_v4(), MapCoordinate::new(-73.98, 40.75));
+    let mut point = MapPoint::new(
+        BlockRef::Direct(Uuid::new_v4()),
+        MapCoordinate::new(-73.98, 40.75),
+    );
     point.color = MapColor::Rgb {
         red: 224,
         green: 49,

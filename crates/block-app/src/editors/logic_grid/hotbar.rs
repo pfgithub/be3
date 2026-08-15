@@ -145,7 +145,7 @@ impl LogicGridEditor {
         } else {
             slots
                 .iter()
-                .map(|slot| self.hotbar_slot_from_block(slot))
+                .filter_map(|slot| self.hotbar_slot_from_block(slot))
                 .collect()
         };
         if hotbar_slots_equal(&self.hotbar, &rebuilt) {
@@ -159,8 +159,8 @@ impl LogicGridEditor {
         self.active_hotbar_folder.clear();
     }
 
-    fn hotbar_slot_from_block(&self, slot: &BlockHotbarSlot) -> HotbarSlot {
-        match slot {
+    fn hotbar_slot_from_block(&self, slot: &BlockHotbarSlot) -> Option<HotbarSlot> {
+        Some(match slot {
             BlockHotbarSlot::Builtin { tool } => ToolKind::from_id(tool).map_or_else(
                 || HotbarSlot::Locked { name: tool.clone() },
                 HotbarSlot::Builtin,
@@ -170,15 +170,18 @@ impl LogicGridEditor {
                 name: name.clone(),
                 slots: slots
                     .iter()
-                    .map(|slot| self.hotbar_slot_from_block(slot))
+                    .filter_map(|slot| self.hotbar_slot_from_block(slot))
                     .collect(),
             },
-            BlockHotbarSlot::Component { name, compiled } => HotbarSlot::Component {
-                name: name.clone(),
-                compiled: *compiled,
-                kind: self.compiled_kind(*compiled, name),
-            },
-        }
+            BlockHotbarSlot::Component { name, compiled } => {
+                let compiled = compiled.as_direct()?;
+                HotbarSlot::Component {
+                    name: name.clone(),
+                    compiled,
+                    kind: self.compiled_kind(compiled, name),
+                }
+            }
+        })
     }
 
     /// Pins a compiled component to the hotbar. A component already pinned is
@@ -648,7 +651,7 @@ pub(super) fn hotbar_slot_to_block(slot: &HotbarSlot) -> BlockHotbarSlot {
         },
         HotbarSlot::Component { name, compiled, .. } => BlockHotbarSlot::Component {
             name: name.clone(),
-            compiled: *compiled,
+            compiled: BlockRef::Direct(*compiled),
         },
     }
 }
@@ -658,7 +661,7 @@ fn pinned_components(slots: &[BlockHotbarSlot]) -> Vec<Uuid> {
     let mut pinned = Vec::new();
     for slot in slots {
         match slot {
-            BlockHotbarSlot::Component { compiled, .. } => pinned.push(*compiled),
+            BlockHotbarSlot::Component { compiled, .. } => pinned.extend(compiled.as_direct()),
             BlockHotbarSlot::Folder { slots, .. } => pinned.extend(pinned_components(slots)),
             BlockHotbarSlot::Builtin { .. } | BlockHotbarSlot::Locked { .. } => {}
         }

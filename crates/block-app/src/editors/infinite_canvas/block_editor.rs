@@ -6,6 +6,8 @@ impl BlockEditor for InfiniteCanvasEditor {
     }
 
     fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let old = BlockRef::Direct(old);
+        let new_reference = BlockRef::Direct(new.id);
         let canvas = self.block.read()?;
         let entities = canvas
             .entities()
@@ -18,7 +20,9 @@ impl BlockEditor for InfiniteCanvasEditor {
                     let mut entity = entity.clone();
                     match &mut entity.kind {
                         CanvasEntityKind::Block { block_id }
-                        | CanvasEntityKind::DirectEditor { block_id, .. } => *block_id = new.id,
+                        | CanvasEntityKind::DirectEditor { block_id, .. } => {
+                            *block_id = new_reference;
+                        }
                         _ => unreachable!(),
                     }
                     Some(entity)
@@ -35,6 +39,7 @@ impl BlockEditor for InfiniteCanvasEditor {
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
+        self.reference_cache.poll();
         let Some(canvas) = self.block.read() else {
             return false;
         };
@@ -62,7 +67,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             Vec2::new(width, height),
         );
         let dependencies = self.dependencies.read();
-        Self::ensure_dependency_editors(&entities, &dependencies, editors);
+        self.ensure_dependency_editors(&entities, &dependencies, editors);
         let dependency_details = dependencies
             .iter()
             .map(|dependency| {
@@ -189,7 +194,9 @@ impl BlockEditor for InfiniteCanvasEditor {
                 }
             });
             if self.focused_editor.is_some() {
-                action = editors.direct_editor_top_bar(block_id, ui, viewport);
+                if let Some(id) = self.resolve_block_id(editors, block_id) {
+                    action = editors.direct_editor_top_bar(id, ui, viewport);
+                }
             }
         } else {
             self.show_toolbar(ui, &entities, editors, viewport);
@@ -209,8 +216,12 @@ impl BlockEditor for InfiniteCanvasEditor {
         let Some(canvas) = self.block.read() else {
             return false;
         };
-        focused_direct_editor(self.focused_editor, canvas.entities())
-            .is_some_and(|(_, block_id, _)| editors.direct_editor_has_left_sidebar(block_id))
+        focused_direct_editor(self.focused_editor, canvas.entities()).is_some_and(
+            |(_, block_id, _)| {
+                self.peek_block_id(block_id)
+                    .is_some_and(|id| editors.direct_editor_has_left_sidebar(id))
+            },
+        )
     }
 
     fn direct_editor_left_sidebar(
@@ -221,15 +232,19 @@ impl BlockEditor for InfiniteCanvasEditor {
         let canvas = self.block.read()?;
         let focused = focused_direct_editor(self.focused_editor, canvas.entities());
         drop(canvas);
-        focused.and_then(|(_, block_id, _)| editors.direct_editor_left_sidebar(block_id, ui))
+        let block_id = focused?.1;
+        let id = self.resolve_block_id(editors, block_id)?;
+        editors.direct_editor_left_sidebar(id, ui)
     }
 
     fn direct_editor_has_right_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
         let Some(canvas) = self.block.read() else {
             return false;
         };
-        focused_direct_editor(self.focused_editor, canvas.entities())
-            .is_none_or(|focused| editors.direct_editor_has_right_sidebar(focused.1))
+        focused_direct_editor(self.focused_editor, canvas.entities()).is_none_or(|focused| {
+            self.peek_block_id(focused.1)
+                .is_none_or(|id| editors.direct_editor_has_right_sidebar(id))
+        })
     }
 
     fn direct_editor_right_sidebar(
@@ -241,7 +256,8 @@ impl BlockEditor for InfiniteCanvasEditor {
         let entities = canvas.entities().to_vec();
         drop(canvas);
         if let Some((_, block_id, _)) = focused_direct_editor(self.focused_editor, &entities) {
-            return editors.direct_editor_right_sidebar(block_id, ui);
+            let id = self.resolve_block_id(editors, block_id)?;
+            return editors.direct_editor_right_sidebar(id, ui);
         }
         if let Some(movement) = self.show_inspector(ui, &entities, editors, true) {
             self.record_action(InfiniteCanvasOperation::Reorder {
@@ -276,6 +292,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        self.poll_references();
         self.render_scale = scale.max(f32::EPSILON);
         let Some(canvas) = self.block.read() else {
             ui.centered_and_justified(|ui| {
@@ -286,7 +303,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         let mut entities = canvas.entities().to_vec();
         drop(canvas);
         let dependencies = self.dependencies.read();
-        Self::ensure_dependency_editors(&entities, &dependencies, editors);
+        self.ensure_dependency_editors(&entities, &dependencies, editors);
         self.autosize_direct_editors(&entities, editors);
         if let Some(current) = self.block.read() {
             entities = current.entities().to_vec();
@@ -386,6 +403,9 @@ impl BlockEditor for InfiniteCanvasEditor {
             );
         for entity in displayed_entities {
             let CanvasEntityKind::DirectEditor { block_id, scale } = entity.kind else {
+                continue;
+            };
+            let Some(block_id) = self.resolve_block_id(editors, block_id) else {
                 continue;
             };
             let interaction = editors

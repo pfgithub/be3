@@ -4,6 +4,8 @@ use block::Block;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 /// Which client a [`SettingEntry`] applies to. `Client` lets different
 /// devices keep different settings for the same block type; `Fallback` is
 /// used when nothing more specific has been registered.
@@ -19,7 +21,7 @@ pub enum ActivationCondition {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SettingEntry {
     pub activation: ActivationCondition,
-    pub block: Uuid,
+    pub block: BlockRef,
 }
 
 /// The workspace's single root settings block. Rather than each block type
@@ -39,7 +41,7 @@ pub enum SettingsOperation {
     SetEntry {
         block_type: Uuid,
         activation: ActivationCondition,
-        block: Uuid,
+        block: BlockRef,
     },
 }
 
@@ -57,7 +59,7 @@ impl Settings {
     /// The block registered for `block_type` that applies to `client_id`,
     /// preferring an entry registered for that exact client over the
     /// fallback one.
-    pub fn resolve(&self, block_type: Uuid, client_id: Uuid) -> Option<Uuid> {
+    pub fn resolve(&self, block_type: Uuid, client_id: Uuid) -> Option<BlockRef> {
         let entries = self.entries(block_type);
         entries
             .iter()
@@ -98,7 +100,7 @@ impl Block for Settings {
         self.entries
             .values()
             .flatten()
-            .map(|entry| entry.block)
+            .filter_map(|entry| entry.block.as_direct())
             .collect()
     }
 }

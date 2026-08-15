@@ -1,6 +1,9 @@
 //! Drawing and hit testing of the blocks pinned to the map.
 
-use block_client::blocks::map::{MapColor, MapPoint};
+use block_client::{
+    block_ref::BlockRef,
+    blocks::map::{MapColor, MapPoint},
+};
 use eframe::egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 use uuid::Uuid;
 
@@ -34,7 +37,7 @@ pub(super) fn draw_points(
     view: MapView,
     clip: Rect,
     points: &[MapPoint],
-    label: impl Fn(Uuid) -> Option<(String, bool)>,
+    label: impl Fn(BlockRef) -> Option<(String, bool)>,
     selected: Option<Uuid>,
     opacity: f32,
 ) {

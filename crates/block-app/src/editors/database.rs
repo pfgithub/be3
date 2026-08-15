@@ -1,5 +1,6 @@
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         database::Database,
         database_schema::{
@@ -14,8 +15,9 @@ use egui_material_icons::{icons::ICON_DATABASE, MaterialIcon};
 use uuid::Uuid;
 
 use super::{
-    database_schema, BlockEditor, BlockLabel, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
+    database_schema, reference_cache::ReferenceResolutionCache, BlockEditor, BlockLabel,
+    CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 400.0;
@@ -27,6 +29,7 @@ pub(super) struct DatabaseEditor {
     block: BlockHandle<Database>,
     views: ReferenceList,
     schema: Option<BlockHandle<DatabaseSchema>>,
+    reference_cache: ReferenceResolutionCache,
 }
 
 impl EditorKind for DatabaseEditor {
@@ -51,7 +54,7 @@ impl CreatableEditor for DatabaseEditor {
                 options: Vec::new(),
             },
         });
-        let database = client.create_block(Database::new(schema.id()));
+        let database = client.create_block(Database::new(BlockRef::Direct(schema.id())));
         schema.set_parent(BlockParent::Uuid(database.id()));
         Self::new(client, database)
     }
@@ -64,6 +67,7 @@ impl DatabaseEditor {
             block,
             views,
             schema: None,
+            reference_cache: ReferenceResolutionCache::default(),
         }
     }
 
@@ -75,14 +79,23 @@ impl DatabaseEditor {
             .collect()
     }
 
-    fn ensure_schema(&mut self, client: &BlockClient) -> Option<&BlockHandle<DatabaseSchema>> {
-        let schema_id = self.block.read()?.schema_id();
+    fn ensure_schema(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<&BlockHandle<DatabaseSchema>> {
+        self.reference_cache.poll();
+        let schema_reference = self.block.read()?.schema_id();
+        let referencing_id = self.block.id();
+        let client = editors.client_handle();
+        let schema_id = self
+            .reference_cache
+            .resolve(&client, referencing_id, schema_reference)?;
         if self
             .schema
             .as_ref()
             .is_none_or(|schema| schema.id() != schema_id)
         {
-            self.schema = Some(client.get_block::<DatabaseSchema>(schema_id));
+            self.schema = Some(editors.client().get_block::<DatabaseSchema>(schema_id));
         }
         self.schema.as_ref()
     }
@@ -120,7 +133,7 @@ impl BlockEditor for DatabaseEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
-        let schema = self.ensure_schema(editors.client())?;
+        let schema = self.ensure_schema(editors)?;
         egui::CollapsingHeader::new("Fields")
             .default_open(true)
             .show(ui, |ui| {
@@ -161,7 +174,7 @@ impl BlockEditor for DatabaseEditor {
         if ui.button("New view").clicked() {
             editors
                 .client()
-                .create_block(DatabaseView::new(self.block.id()));
+                .create_block(DatabaseView::new(BlockRef::Direct(self.block.id())));
         }
 
         action

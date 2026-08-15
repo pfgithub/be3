@@ -4,10 +4,12 @@ use block::{Block, BlockHistory, HistoryDirection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct PresentationSlide {
     pub id: Uuid,
-    pub block_id: Uuid,
+    pub block_id: BlockRef,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -31,7 +33,7 @@ pub enum PresentationOperation {
     },
     SetBlockId {
         slide_id: Uuid,
-        block_id: Uuid,
+        block_id: BlockRef,
     },
 }
 
@@ -57,8 +59,8 @@ enum PresentationHistoryChange {
     },
     SetBlockId {
         slide_id: Uuid,
-        before: Uuid,
-        after: Uuid,
+        before: BlockRef,
+        after: BlockRef,
     },
 }
 
@@ -123,7 +125,7 @@ impl Block for Presentation {
         let mut seen = HashSet::new();
         self.slides
             .iter()
-            .map(|slide| slide.block_id)
+            .filter_map(|slide| slide.block_id.as_direct())
             .filter(|block_id| seen.insert(*block_id))
             .collect()
     }

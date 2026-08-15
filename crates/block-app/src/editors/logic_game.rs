@@ -21,8 +21,10 @@ use uuid::Uuid;
 
 use self::binary_addition::BinaryAdditionQuiz;
 use super::{
-    settings::RootSetting, BlockEditor, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
+    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
+    settings::RootSetting,
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 720.0;
@@ -41,6 +43,8 @@ pub(super) struct LogicGameEditor {
     /// block, offered here so it can be opened without finding a grid first.
     hotbar: Option<RootSetting<Hotbar>>,
     quiz: BinaryAdditionQuiz,
+    reference_cache: ReferenceResolutionCache,
+    pending_solutions: ReferenceClassificationQueue<(ChallengeId, usize)>,
 }
 
 impl EditorKind for LogicGameEditor {
@@ -68,25 +72,27 @@ impl LogicGameEditor {
             expanded: None,
             hotbar: None,
             quiz: BinaryAdditionQuiz::default(),
+            reference_cache: ReferenceResolutionCache::default(),
+            pending_solutions: ReferenceClassificationQueue::default(),
         }
     }
 
     fn start_solution(
         &mut self,
-        client: &BlockClient,
+        editors: &mut EditorAccess<'_>,
         challenge: ChallengeId,
         index: usize,
     ) -> EditorAction {
-        let solution = client.create_block(LogicGrid::for_challenge(challenge));
+        let solution = editors
+            .client()
+            .create_block(LogicGrid::for_challenge(challenge));
         solution.set_name(format!("{} {}", challenge.name(), index + 1));
         solution.set_parent(BlockParent::Uuid(self.block.id()));
         let id = solution.id();
         self.solutions.insert(id, solution);
-        self.block.operate(LogicGameOperation::InsertSolution {
-            challenge,
-            solution: id,
-            index,
-        });
+        let client = editors.client_handle();
+        self.pending_solutions
+            .push(&client, self.block.id(), id, (challenge, index));
         EditorAction::OpenBlock {
             id,
             block_type: LogicGrid::TYPE_ID,
@@ -96,10 +102,18 @@ impl LogicGameEditor {
     /// Keeps a handle on every listed solution and carries each level's
     /// progress over from the grids that passed it, and looks for the shared
     /// hotbar so it can be offered once the block tree has one.
-    fn sync(&mut self, client: &BlockClient, client_id: Uuid) {
+    fn sync(&mut self, editors: &mut EditorAccess<'_>) {
+        self.reference_cache.poll();
+        for (solution, (challenge, index)) in self.pending_solutions.poll() {
+            self.block.operate(LogicGameOperation::InsertSolution {
+                challenge,
+                solution,
+                index,
+            });
+        }
         self.hotbar
-            .get_or_insert_with(|| RootSetting::new(client))
-            .find(client, client_id);
+            .get_or_insert_with(|| RootSetting::new(editors.client()))
+            .find(editors.client(), editors.client_id());
         let Some(game) = self.block.read() else {
             return;
         };
@@ -110,21 +124,31 @@ impl LogicGameEditor {
             .collect::<Vec<_>>();
         drop(game);
 
-        let listed = levels
-            .iter()
-            .flat_map(|(_, solutions, _)| solutions.iter().copied())
-            .collect::<Vec<_>>();
+        let referencing_id = self.block.id();
+        let client = editors.client_handle();
+        let mut listed = Vec::new();
+        for (_, solutions, _) in &levels {
+            for solution in solutions {
+                if let Some(id) = self
+                    .reference_cache
+                    .resolve(&client, referencing_id, *solution)
+                {
+                    listed.push(id);
+                }
+            }
+        }
         self.solutions.retain(|id, _| listed.contains(id));
         for solution in &listed {
             self.solutions
                 .entry(*solution)
-                .or_insert_with(|| client.get_block::<LogicGrid>(*solution));
+                .or_insert_with(|| editors.client().get_block::<LogicGrid>(*solution));
         }
 
         for (challenge, solutions, completed) in levels {
             let passed = solutions.iter().any(|solution| {
-                self.solutions
-                    .get(solution)
+                self.reference_cache
+                    .resolve(&client, referencing_id, *solution)
+                    .and_then(|id| self.solutions.get(&id))
                     .and_then(BlockHandle::read)
                     .is_some_and(|grid| grid.completed())
             });
@@ -182,8 +206,7 @@ impl BlockEditor for LogicGameEditor {
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let client = editors.client();
-        self.sync(client, editors.client_id());
+        self.sync(editors);
         let Some(game) = self.block.read() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -219,6 +242,8 @@ impl BlockEditor for LogicGameEditor {
         });
         ui.add_space(8.0);
 
+        let referencing_id = self.block.id();
+        let client = editors.client_handle();
         let mut remove = None;
         let mut start = None;
         for (challenge, solutions, completed) in &levels {
@@ -249,22 +274,37 @@ impl BlockEditor for LogicGameEditor {
                 }
                 for solution in solutions {
                     ui.horizontal(|ui| {
-                        let label = self.solutions.get(solution).map(|handle| {
-                            super::BlockLabel::for_handle(editors.registry(), handle)
-                        });
+                        let resolved_id =
+                            self.reference_cache
+                                .resolve(&client, referencing_id, *solution);
+                        let label =
+                            resolved_id
+                                .and_then(|id| self.solutions.get(&id))
+                                .map(|handle| {
+                                    super::BlockLabel::for_handle(editors.registry(), handle)
+                                });
                         let name = label.as_ref().map_or_else(
-                            || egui::RichText::new("Loading…"),
+                            || {
+                                egui::RichText::new(if resolved_id.is_some() {
+                                    "Loading…"
+                                } else {
+                                    "Broken link"
+                                })
+                            },
                             super::BlockLabel::rich_text,
                         );
-                        if ui.link(name).clicked() {
-                            action = Some(EditorAction::OpenBlock {
-                                id: *solution,
-                                block_type: LogicGrid::TYPE_ID,
-                            });
+                        if let Some(id) = resolved_id {
+                            if ui.link(name).clicked() {
+                                action = Some(EditorAction::OpenBlock {
+                                    id,
+                                    block_type: LogicGrid::TYPE_ID,
+                                });
+                            }
+                        } else {
+                            ui.weak(name);
                         }
-                        if self
-                            .solutions
-                            .get(solution)
+                        if resolved_id
+                            .and_then(|id| self.solutions.get(&id))
                             .and_then(BlockHandle::read)
                             .is_some_and(|grid| grid.completed())
                         {
@@ -298,7 +338,7 @@ impl BlockEditor for LogicGameEditor {
             });
         }
         if let Some((challenge, index)) = start {
-            action = Some(self.start_solution(client, challenge, index));
+            action = Some(self.start_solution(editors, challenge, index));
         }
         action
     }

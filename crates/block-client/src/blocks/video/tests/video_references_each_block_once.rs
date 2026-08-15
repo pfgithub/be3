@@ -1,6 +1,7 @@
 use uuid::Uuid;
 
 use super::{Video, VideoClip, VideoOperation};
+use crate::block_ref::BlockRef;
 use block::Block;
 
 #[test]
@@ -12,7 +13,7 @@ fn video_references_each_block_once() {
         Video::apply_operation(
             &mut video,
             &VideoOperation::InsertClip {
-                clip: VideoClip::new(block, 5),
+                clip: VideoClip::new(BlockRef::Direct(block), 5),
                 index,
             },
         );

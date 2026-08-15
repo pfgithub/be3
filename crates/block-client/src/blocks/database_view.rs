@@ -2,6 +2,8 @@ use block::Block;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SortDirection {
@@ -26,7 +28,7 @@ pub enum DatabaseViewKind {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DatabaseView {
-    database_id: Uuid,
+    database_id: BlockRef,
     sort: Option<DatabaseViewSort>,
     kind: DatabaseViewKind,
     /// The enum field whose options become the kanban board's columns.
@@ -40,7 +42,7 @@ pub struct DatabaseView {
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum DatabaseViewOperation {
     SetDatabase {
-        database_id: Uuid,
+        database_id: BlockRef,
     },
     /// `None` clears the sort, leaving rows in their intrinsic (insertion) order.
     SetSort {
@@ -61,7 +63,7 @@ pub enum DatabaseViewOperation {
 }
 
 impl DatabaseView {
-    pub fn new(database_id: Uuid) -> Self {
+    pub fn new(database_id: BlockRef) -> Self {
         Self {
             database_id,
             sort: None,
@@ -72,7 +74,7 @@ impl DatabaseView {
         }
     }
 
-    pub fn database_id(&self) -> Uuid {
+    pub fn database_id(&self) -> BlockRef {
         self.database_id
     }
 
@@ -124,7 +126,7 @@ impl Block for DatabaseView {
     }
 
     fn references(&self) -> Vec<Uuid> {
-        vec![self.database_id]
+        self.database_id.as_direct().into_iter().collect()
     }
 }
 

@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn logic_game_history_restores_a_removed_solution_in_place() {
     let (_client, block) = client_with_game();
-    let first = Uuid::new_v4();
-    let second = Uuid::new_v4();
+    let first = BlockRef::Direct(Uuid::new_v4());
+    let second = BlockRef::Direct(Uuid::new_v4());
     for (index, solution) in [first, second].into_iter().enumerate() {
         block.operate(LogicGameOperation::InsertSolution {
             challenge: ChallengeId::Nor,

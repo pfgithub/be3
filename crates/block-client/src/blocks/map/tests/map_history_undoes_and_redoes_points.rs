@@ -1,13 +1,17 @@
 use uuid::Uuid;
 
 use super::{Map, MapCoordinate, MapOperation, MapPoint};
+use crate::block_ref::BlockRef;
 use crate::BlockClient;
 
 #[test]
 fn map_history_undoes_and_redoes_points() {
     let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(Map::new());
-    let point = MapPoint::new(Uuid::new_v4(), MapCoordinate::new(2.35, 48.85));
+    let point = MapPoint::new(
+        BlockRef::Direct(Uuid::new_v4()),
+        MapCoordinate::new(2.35, 48.85),
+    );
     block.operate(MapOperation::AddPoint { point });
 
     let mut moved = point;

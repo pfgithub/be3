@@ -4,6 +4,8 @@ use block::Block;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum DatabaseValue {
@@ -33,7 +35,7 @@ impl DatabaseRow {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Database {
-    schema_id: Uuid,
+    schema_id: BlockRef,
     rows: Vec<DatabaseRow>,
 }
 
@@ -41,7 +43,7 @@ pub struct Database {
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum DatabaseOperation {
     SetSchema {
-        schema_id: Uuid,
+        schema_id: BlockRef,
     },
     SetCell {
         row_index: usize,
@@ -51,14 +53,14 @@ pub enum DatabaseOperation {
 }
 
 impl Database {
-    pub fn new(schema_id: Uuid) -> Self {
+    pub fn new(schema_id: BlockRef) -> Self {
         Self {
             schema_id,
             rows: Vec::new(),
         }
     }
 
-    pub fn schema_id(&self) -> Uuid {
+    pub fn schema_id(&self) -> BlockRef {
         self.schema_id
     }
 
@@ -99,7 +101,7 @@ impl Block for Database {
     }
 
     fn references(&self) -> Vec<Uuid> {
-        vec![self.schema_id]
+        self.schema_id.as_direct().into_iter().collect()
     }
 }
 

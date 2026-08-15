@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use block::BlockReference;
-use block_client::blocks::video::{Video, VideoAttachment, VideoClip, MAX_CLIP_LENGTH};
+use block_client::{
+    block_ref::BlockRef,
+    blocks::video::{Video, VideoAttachment, VideoClip, MAX_CLIP_LENGTH},
+};
 use eframe::egui;
 use egui_material_icons::icons::ICON_LINK_OFF;
 use uuid::Uuid;
@@ -17,6 +20,7 @@ impl VideoEditor {
         &mut self,
         ui: &mut egui::Ui,
         video: &Video,
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &EditorAccess<'_>,
     ) {
@@ -28,7 +32,11 @@ impl VideoEditor {
         };
 
         ui.horizontal(|ui| {
-            let reference = dependencies.get(&clip.block_id);
+            let reference = resolved
+                .get(&clip.block_id)
+                .copied()
+                .flatten()
+                .and_then(|id| dependencies.get(&id));
             let label = reference.map_or_else(
                 || egui::RichText::new("Loading…").into(),
                 |reference| {
@@ -43,7 +51,7 @@ impl VideoEditor {
             .num_columns(2)
             .spacing([8.0, 6.0])
             .show(ui, |ui| {
-                self.placement_ui(ui, video, dependencies, &clip, editors)
+                self.placement_ui(ui, video, resolved, dependencies, &clip, editors)
             });
 
         ui.add_space(10.0);
@@ -65,6 +73,7 @@ impl VideoEditor {
         &mut self,
         ui: &mut egui::Ui,
         video: &Video,
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
         clip: &VideoClip,
         editors: &EditorAccess<'_>,
@@ -98,7 +107,8 @@ impl VideoEditor {
                 Some(attachment) => {
                     let name = video
                         .clip(attachment.clip_id)
-                        .and_then(|parent| dependencies.get(&parent.block_id))
+                        .and_then(|parent| resolved.get(&parent.block_id).copied().flatten())
+                        .and_then(|id| dependencies.get(&id))
                         .map_or_else(
                             || egui::RichText::new("Loading…"),
                             |reference| {

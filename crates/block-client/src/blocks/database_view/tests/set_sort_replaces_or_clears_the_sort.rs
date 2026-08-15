@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn set_sort_replaces_or_clears_the_sort() {
     let field_id = Uuid::new_v4();
-    let mut view = DatabaseView::new(Uuid::new_v4());
+    let mut view = DatabaseView::new(BlockRef::Direct(Uuid::new_v4()));
 
     let sort = DatabaseViewSort {
         field_id,

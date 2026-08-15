@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use block::{Block, BlockParent, BlockReference, BlockReferenceList};
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         infinite_canvas::InfiniteCanvas,
         presentation::{Presentation, PresentationOperation, PresentationSlide},
@@ -22,9 +23,11 @@ use uuid::Uuid;
 use crate::{block_picker::BlockPicker, slide_templates::SlideTemplate};
 
 use super::{
-    fit_rect, paint_block_fallback, rect_corners, BlockEditor, BlockRenderContext, CreatableEditor,
-    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorKind,
+    fit_rect, paint_block_fallback, rect_corners,
+    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind,
 };
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
@@ -66,6 +69,8 @@ pub(super) struct PresentationEditor {
     last_context: Option<egui::Context>,
     playback_controls_visible_until: f64,
     needs_default_slide: bool,
+    reference_cache: ReferenceResolutionCache,
+    pending_slides: ReferenceClassificationQueue<(Uuid, usize)>,
 }
 
 impl PresentationEditor {
@@ -83,7 +88,36 @@ impl PresentationEditor {
             last_context: None,
             playback_controls_visible_until: 0.0,
             needs_default_slide: false,
+            reference_cache: ReferenceResolutionCache::default(),
+            pending_slides: ReferenceClassificationQueue::default(),
         }
+    }
+
+    fn poll(&mut self) {
+        self.reference_cache.poll();
+        for (block_id, (slide_id, index)) in self.pending_slides.poll() {
+            self.block.operate(PresentationOperation::Insert {
+                slide: PresentationSlide {
+                    id: slide_id,
+                    block_id,
+                },
+                index,
+            });
+        }
+    }
+
+    fn resolve_block_id(
+        &mut self,
+        editors: &EditorAccess<'_>,
+        reference: BlockRef,
+    ) -> Option<Uuid> {
+        let client = editors.client_handle();
+        self.reference_cache
+            .resolve(&client, self.block.id(), reference)
+    }
+
+    fn peek_block_id(&self, reference: BlockRef) -> Option<Uuid> {
+        self.reference_cache.peek(&reference)
     }
 
     fn ensure_default_slide(&mut self, editors: &mut EditorAccess<'_>) {
@@ -123,28 +157,33 @@ impl PresentationEditor {
     }
 
     fn ensure_slide_editors(
+        &mut self,
         slides: &[PresentationSlide],
         dependencies: &HashMap<Uuid, BlockReference>,
         editors: &mut EditorAccess<'_>,
     ) {
         for slide in slides {
-            if let Some(reference) = dependencies.get(&slide.block_id) {
-                editors.ensure(reference.id, reference.block_type);
+            if let Some(id) = self.resolve_block_id(editors, slide.block_id) {
+                if let Some(reference) = dependencies.get(&id) {
+                    editors.ensure(reference.id, reference.block_type);
+                }
             }
         }
     }
 
-    fn insert_slide(&mut self, block_id: Uuid, index: usize) -> Uuid {
-        let slide = PresentationSlide {
-            id: Uuid::new_v4(),
-            block_id,
-        };
-        self.block.operate(PresentationOperation::Insert {
-            slide: slide.clone(),
-            index,
-        });
-        self.selected = Some(slide.id);
-        slide.id
+    fn insert_slide(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+        block_id: Uuid,
+        index: usize,
+    ) -> Uuid {
+        let slide_id = Uuid::new_v4();
+        let client = editors.client_handle();
+        let referencing_id = self.block.id();
+        self.pending_slides
+            .push(&client, referencing_id, block_id, (slide_id, index));
+        self.selected = Some(slide_id);
+        slide_id
     }
 
     fn insert_template_slide(
@@ -157,7 +196,7 @@ impl PresentationEditor {
         let id = editor.id();
         editor.set_parent(BlockParent::Uuid(self.block.id()));
         editors.insert(editor);
-        self.insert_slide(id, index);
+        self.insert_slide(editors, id, index);
     }
 
     fn remove_slide(&mut self, slide_id: Uuid) {
@@ -232,34 +271,48 @@ impl PresentationEditor {
                     .corner_radius(6.0)
                     .inner_margin(6.0)
                     .show(ui, |ui| {
+                        let resolved_id = self.resolve_block_id(editors, slide.block_id);
                         let (response, painter) =
                             ui.allocate_painter(THUMBNAIL_SIZE, Sense::click_and_drag());
                         let preview = response.rect.shrink(4.0);
-                        let rendered = editors.render(
-                            slide.block_id,
-                            BlockRenderContext {
-                                painter: &painter,
-                                corners: rect_corners(preview),
-                                opacity: 1.0,
-                            },
-                        );
+                        let rendered = resolved_id.is_some_and(|id| {
+                            editors.render(
+                                id,
+                                BlockRenderContext {
+                                    painter: &painter,
+                                    corners: rect_corners(preview),
+                                    opacity: 1.0,
+                                },
+                            )
+                        });
                         if !rendered {
                             paint_block_fallback(
                                 &painter,
                                 preview,
-                                dependencies.get(&slide.block_id),
+                                resolved_id.and_then(|id| dependencies.get(&id)),
                                 editors,
                             );
                         }
                         ui.horizontal(|ui| {
                             ui.small(format!("{}", index + 1));
-                            let name = dependencies.get(&slide.block_id).map_or_else(
-                                || egui::RichText::new("Loading…"),
-                                |reference| {
-                                    super::BlockLabel::for_reference(editors.registry(), reference)
+                            let name = resolved_id
+                                .and_then(|id| dependencies.get(&id))
+                                .map_or_else(
+                                    || {
+                                        egui::RichText::new(if resolved_id.is_some() {
+                                            "Loading…"
+                                        } else {
+                                            "Broken link"
+                                        })
+                                    },
+                                    |reference| {
+                                        super::BlockLabel::for_reference(
+                                            editors.registry(),
+                                            reference,
+                                        )
                                         .rich_text()
-                                },
-                            );
+                                    },
+                                );
                             ui.add(
                                 egui::Label::new(name)
                                     .truncate()
@@ -352,28 +405,33 @@ impl PresentationEditor {
             return false;
         };
 
-        let ratio = editors
-            .preview_aspect_ratio(slide.block_id)
-            .or_else(|| {
-                editors
-                    .direct_editor_intrinsic_size(slide.block_id)
-                    .filter(|size| size.x > 0.0 && size.y > 0.0)
-                    .map(|size| size.x / size.y)
+        let resolved_id = self.resolve_block_id(editors, slide.block_id);
+        let ratio = resolved_id
+            .and_then(|id| {
+                editors.preview_aspect_ratio(id).or_else(|| {
+                    editors
+                        .direct_editor_intrinsic_size(id)
+                        .filter(|size| size.x > 0.0 && size.y > 0.0)
+                        .map(|size| size.x / size.y)
+                })
             })
             .unwrap_or(DEFAULT_SLIDE_SIZE.x / DEFAULT_SLIDE_SIZE.y);
         let preview = fit_rect(rect, ratio);
-        if !editors.render(
-            slide.block_id,
-            BlockRenderContext {
-                painter: &painter,
-                corners: rect_corners(preview),
-                opacity: 1.0,
-            },
-        ) {
+        let rendered = resolved_id.is_some_and(|id| {
+            editors.render(
+                id,
+                BlockRenderContext {
+                    painter: &painter,
+                    corners: rect_corners(preview),
+                    opacity: 1.0,
+                },
+            )
+        });
+        if !rendered {
             paint_block_fallback(
                 &painter,
                 preview,
-                dependencies.get(&slide.block_id),
+                resolved_id.and_then(|id| dependencies.get(&id)),
                 editors,
             );
         }
@@ -517,7 +575,7 @@ impl BlockEditor for PresentationEditor {
         self.block.operate(PresentationOperation::Insert {
             slide: PresentationSlide {
                 id: Uuid::new_v4(),
-                block_id: entry.id,
+                block_id: BlockRef::Direct(entry.id),
             },
             index,
         });
@@ -525,10 +583,11 @@ impl BlockEditor for PresentationEditor {
     }
 
     fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
+        let reference = BlockRef::Direct(entry.id);
         let slides = self.block.read()?.slides().to_vec();
         let operations = slides
             .iter()
-            .filter(|slide| slide.block_id == entry.id)
+            .filter(|slide| slide.block_id == reference)
             .map(|slide| PresentationOperation::Remove { slide_id: slide.id })
             .collect::<Vec<_>>();
         if !operations.is_empty() {
@@ -538,13 +597,14 @@ impl BlockEditor for PresentationEditor {
     }
 
     fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let old = BlockRef::Direct(old);
         let slides = self.block.read()?.slides().to_vec();
         let operations = slides
             .iter()
             .filter(|slide| slide.block_id == old)
             .map(|slide| PresentationOperation::SetBlockId {
                 slide_id: slide.id,
-                block_id: new.id,
+                block_id: BlockRef::Direct(new.id),
             })
             .collect::<Vec<_>>();
         if !operations.is_empty() {
@@ -573,19 +633,20 @@ impl BlockEditor for PresentationEditor {
         let Some(slides) = self.slides() else {
             return false;
         };
-        let Some(slide) = slides.first() else {
+        let Some(slide) = slides.first().cloned() else {
             return false;
         };
         let dependencies = self.dependency_map();
-        Self::ensure_slide_editors(&slides, &dependencies, editors);
-        if editors.render(slide.block_id, BlockRenderContext { ..context }) {
+        self.ensure_slide_editors(&slides, &dependencies, editors);
+        let resolved_id = self.resolve_block_id(editors, slide.block_id);
+        if resolved_id.is_some_and(|id| editors.render(id, BlockRenderContext { ..context })) {
             return true;
         }
         let rect = Rect::from_min_max(context.corners[0], context.corners[2]);
         paint_block_fallback(
             context.painter,
             rect,
-            dependencies.get(&slide.block_id),
+            resolved_id.and_then(|id| dependencies.get(&id)),
             editors,
         );
         true
@@ -615,17 +676,21 @@ impl BlockEditor for PresentationEditor {
         let Some(slides) = self.slides() else {
             return false;
         };
-        self.selected_slide(&slides)
-            .is_some_and(|slide| editors.direct_editor_handles_viewport_input(slide.block_id))
+        self.selected_slide(&slides).is_some_and(|slide| {
+            self.peek_block_id(slide.block_id)
+                .is_some_and(|id| editors.direct_editor_handles_viewport_input(id))
+        })
     }
 
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {
         let slides = self.slides()?;
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
-        Self::ensure_slide_editors(&slides, &dependencies, editors);
-        self.selected_slide(&slides)
-            .and_then(|slide| editors.direct_editor_intrinsic_size(slide.block_id))
+        self.ensure_slide_editors(&slides, &dependencies, editors);
+        let block_id = self.selected_slide(&slides).map(|slide| slide.block_id);
+        block_id
+            .and_then(|reference| self.resolve_block_id(editors, reference))
+            .and_then(|id| editors.direct_editor_intrinsic_size(id))
             .or(Some(DEFAULT_SLIDE_SIZE))
     }
 
@@ -639,7 +704,7 @@ impl BlockEditor for PresentationEditor {
         let slides = self.slides()?;
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
-        Self::ensure_slide_editors(&slides, &dependencies, editors);
+        self.ensure_slide_editors(&slides, &dependencies, editors);
         self.open_add_menu(ui, editors);
         if ui
             .add_enabled(!slides.is_empty(), egui::Button::new(ICON_FULLSCREEN))
@@ -649,9 +714,12 @@ impl BlockEditor for PresentationEditor {
             self.enter_playback(ui.ctx());
         }
         let mut action = None;
-        if let Some(slide) = self.selected_slide(&slides) {
+        let block_id = self.selected_slide(&slides).map(|slide| slide.block_id);
+        if let Some(block_id) = block_id {
             ui.separator();
-            action = action.or_else(|| editors.direct_editor_top_bar(slide.block_id, ui, viewport));
+            if let Some(id) = self.resolve_block_id(editors, block_id) {
+                action = action.or_else(|| editors.direct_editor_top_bar(id, ui, viewport));
+            }
         }
         action
     }
@@ -672,7 +740,7 @@ impl BlockEditor for PresentationEditor {
         };
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
-        Self::ensure_slide_editors(&slides, &dependencies, editors);
+        self.ensure_slide_editors(&slides, &dependencies, editors);
         self.show_filmstrip(ui, &slides, &dependencies, editors)
     }
 
@@ -680,8 +748,10 @@ impl BlockEditor for PresentationEditor {
         let Some(slides) = self.slides() else {
             return false;
         };
-        self.selected_slide(&slides)
-            .is_some_and(|slide| editors.direct_editor_has_right_sidebar(slide.block_id))
+        self.selected_slide(&slides).is_some_and(|slide| {
+            self.peek_block_id(slide.block_id)
+                .is_some_and(|id| editors.direct_editor_has_right_sidebar(id))
+        })
     }
 
     fn direct_editor_right_sidebar(
@@ -690,8 +760,9 @@ impl BlockEditor for PresentationEditor {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let slides = self.slides()?;
-        let slide = self.selected_slide(&slides)?;
-        editors.direct_editor_right_sidebar(slide.block_id, ui)
+        let block_id = self.selected_slide(&slides)?.block_id;
+        let id = self.resolve_block_id(editors, block_id)?;
+        editors.direct_editor_right_sidebar(id, ui)
     }
 
     fn direct_editor_ui(
@@ -703,6 +774,7 @@ impl BlockEditor for PresentationEditor {
     ) -> Option<EditorAction> {
         self.active_this_frame = true;
         self.last_context = Some(ui.ctx().clone());
+        self.poll();
         self.ensure_default_slide(editors);
         let Some(slides) = self.slides() else {
             ui.centered_and_justified(|ui| {
@@ -712,19 +784,19 @@ impl BlockEditor for PresentationEditor {
         };
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
-        Self::ensure_slide_editors(&slides, &dependencies, editors);
+        self.ensure_slide_editors(&slides, &dependencies, editors);
 
         if let Some(result) =
             self.picker
                 .handle(ui.ctx(), editors, BlockParent::Uuid(self.block.id()))
         {
             let index = self.picker_insert_index.take().unwrap_or(slides.len());
-            self.insert_slide(result.id, index);
+            self.insert_slide(editors, result.id, index);
         }
         if self.presenting {
             self.show_playback(ui.ctx(), &slides, &dependencies, editors);
         }
-        let Some(slide) = self.selected_slide(&slides) else {
+        let Some(slide) = self.selected_slide(&slides).cloned() else {
             ui.centered_and_justified(|ui| {
                 ui.vertical_centered(|ui| {
                     ui.heading("Empty presentation");
@@ -735,13 +807,20 @@ impl BlockEditor for PresentationEditor {
         };
 
         let mut action = None;
-        if dependencies
-            .get(&slide.block_id)
+        let resolved_id = self.resolve_block_id(editors, slide.block_id);
+        if resolved_id
+            .and_then(|id| dependencies.get(&id))
             .is_some_and(|reference| reference.block_type == InfiniteCanvas::TYPE_ID)
         {
             viewport.auto_fit(slide.id);
         }
-        if editors.direct_editor_has_left_sidebar(slide.block_id) {
+        let Some(id) = resolved_id else {
+            ui.centered_and_justified(|ui| {
+                ui.weak("This slide's block could not be found.");
+            });
+            return None;
+        };
+        if editors.direct_editor_has_left_sidebar(id) {
             egui::Panel::left(egui::Id::new((
                 "presentation-slide-left",
                 self.block.id(),
@@ -749,10 +828,10 @@ impl BlockEditor for PresentationEditor {
             )))
             .default_size(220.0)
             .show_inside(ui, |ui| {
-                action = editors.direct_editor_left_sidebar(slide.block_id, ui);
+                action = editors.direct_editor_left_sidebar(id, ui);
             });
         }
-        action.or_else(|| editors.direct_editor_ui(slide.block_id, ui, scale, viewport))
+        action.or_else(|| editors.direct_editor_ui(id, ui, scale, viewport))
     }
 
     fn embedded_direct_editor_ui(
@@ -779,7 +858,7 @@ impl BlockEditor for PresentationEditor {
         };
         self.synchronize_selection(&slides);
         let dependencies = self.dependency_map();
-        Self::ensure_slide_editors(&slides, &dependencies, editors);
+        self.ensure_slide_editors(&slides, &dependencies, editors);
         if self.presenting {
             self.show_playback(ui.ctx(), &slides, &dependencies, editors);
         }

@@ -2,6 +2,7 @@ use std::{cmp::Ordering, collections::HashMap};
 
 use block::{BlockReference, BlockReferenceList};
 use block_client::{
+    block_ref::BlockRef,
     blocks::workspace_index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation},
     BlockClient, BlockHandle, ReferenceList,
 };
@@ -13,6 +14,7 @@ use egui_material_icons::{
 use uuid::Uuid;
 
 use super::{
+    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
     BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
     EditorAction, EditorKind, SidebarDragPayload,
 };
@@ -57,7 +59,8 @@ impl FolderSort {
 }
 
 struct BrowserEntry {
-    id: Uuid,
+    entry: BlockRef,
+    id: Option<Uuid>,
     intrinsic_index: usize,
     reference: Option<BlockReference>,
 }
@@ -89,7 +92,9 @@ pub(super) struct WorkspaceIndexEditor {
     view: FolderView,
     sort: FolderSort,
     descending: bool,
-    selected: Option<Uuid>,
+    selected: Option<BlockRef>,
+    reference_cache: ReferenceResolutionCache,
+    pending_adds: ReferenceClassificationQueue<()>,
 }
 
 impl WorkspaceIndexEditor {
@@ -102,10 +107,19 @@ impl WorkspaceIndexEditor {
             sort: FolderSort::Intrinsic,
             descending: false,
             selected: None,
+            reference_cache: ReferenceResolutionCache::default(),
+            pending_adds: ReferenceClassificationQueue::default(),
         }
     }
 
-    fn browser_entries(&self, editors: &EditorAccess<'_>) -> Option<Vec<BrowserEntry>> {
+    fn poll(&mut self) {
+        self.reference_cache.poll();
+        for (reference, ()) in self.pending_adds.poll() {
+            self.block.operate(WorkspaceIndexOperation::Add(reference));
+        }
+    }
+
+    fn browser_entries(&mut self, editors: &EditorAccess<'_>) -> Option<Vec<BrowserEntry>> {
         let index = self.block.read()?;
         let metadata: HashMap<_, _> = self
             .references
@@ -113,14 +127,22 @@ impl WorkspaceIndexEditor {
             .into_iter()
             .map(|reference| (reference.id, reference))
             .collect();
+        let referencing_id = self.block.id();
+        let client = editors.client_handle();
         let mut entries: Vec<_> = index
             .entries()
             .iter()
             .enumerate()
-            .map(|(intrinsic_index, entry)| BrowserEntry {
-                id: entry.id,
-                intrinsic_index,
-                reference: metadata.get(&entry.id).cloned(),
+            .map(|(intrinsic_index, entry)| {
+                let id = self
+                    .reference_cache
+                    .resolve(&client, referencing_id, *entry);
+                BrowserEntry {
+                    entry: *entry,
+                    id,
+                    intrinsic_index,
+                    reference: id.and_then(|id| metadata.get(&id).cloned()),
+                }
             })
             .collect();
         drop(index);
@@ -213,10 +235,10 @@ impl WorkspaceIndexEditor {
                     editors,
                     entry,
                     tile_size,
-                    self.selected == Some(entry.id),
+                    self.selected == Some(entry.entry),
                 );
                 if response.clicked() {
-                    self.selected = Some(entry.id);
+                    self.selected = Some(entry.entry);
                 }
                 if response.double_clicked() {
                     action = open_entry(entry);
@@ -236,8 +258,11 @@ impl WorkspaceIndexEditor {
         for entry in entries {
             let (label, block_type) = entry.reference.as_ref().map_or_else(
                 || {
+                    let placeholder = entry
+                        .id
+                        .map_or_else(|| "broken link".to_owned(), |id| id.to_string());
                     (
-                        format!("Loading…  {}", entry.id).into(),
+                        format!("Loading…  {placeholder}").into(),
                         "Loading…".to_owned(),
                     )
                 },
@@ -254,12 +279,12 @@ impl WorkspaceIndexEditor {
             );
             let response = ui.add_sized(
                 [ui.available_width(), DIRECT_EDITOR_ROW_HEIGHT],
-                egui::Button::selectable(self.selected == Some(entry.id), label)
+                egui::Button::selectable(self.selected == Some(entry.entry), label)
                     .right_text(block_type)
                     .truncate(),
             );
             if response.clicked() {
-                self.selected = Some(entry.id);
+                self.selected = Some(entry.entry);
             }
             if response.double_clicked() {
                 action = open_entry(entry);
@@ -268,7 +293,13 @@ impl WorkspaceIndexEditor {
         action
     }
 
-    fn handle_drop(&self, ui: &mut egui::Ui, rect: egui::Rect, entries: &[BrowserEntry]) {
+    fn handle_drop(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        entries: &[BrowserEntry],
+        editors: &EditorAccess<'_>,
+    ) {
         let response = ui.interact(
             rect,
             egui::Id::new(("folder-drop-target", self.block.id())),
@@ -293,16 +324,19 @@ impl WorkspaceIndexEditor {
         }
         if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
             if self.valid_drop(&dragged, entries) {
-                self.block.operate(WorkspaceIndexOperation::Add(BlockEntry {
-                    id: dragged.reference.id,
-                }));
+                let client = editors.client_handle();
+                let referencing_id = self.block.id();
+                self.pending_adds
+                    .push(&client, referencing_id, dragged.reference.id, ());
             }
         }
     }
 
     fn valid_drop(&self, dragged: &SidebarDragPayload, entries: &[BrowserEntry]) -> bool {
         dragged.reference.id != self.block.id()
-            && !entries.iter().any(|entry| entry.id == dragged.reference.id)
+            && !entries
+                .iter()
+                .any(|entry| entry.id == Some(dragged.reference.id))
     }
 }
 
@@ -363,7 +397,9 @@ fn grid_tile(
                 ICON_FOLDER,
                 "Loading…".to_owned(),
                 false,
-                entry.id.to_string(),
+                entry
+                    .id
+                    .map_or_else(|| "broken link".to_owned(), |id| id.to_string()),
             )
         },
         |reference| {
@@ -413,34 +449,33 @@ impl BlockEditor for WorkspaceIndexEditor {
     }
 
     fn add_child(&self, entry: BlockEntry) -> Option<bool> {
+        let reference = BlockRef::Direct(entry.id);
         let index = self.block.read()?;
-        let already_present = index
-            .entries()
-            .iter()
-            .any(|existing| existing.id == entry.id);
+        let already_present = index.entries().contains(&reference);
         drop(index);
         if !already_present {
-            self.block.operate(WorkspaceIndexOperation::Add(entry));
+            self.block.operate(WorkspaceIndexOperation::Add(reference));
         }
         Some(true)
     }
 
     fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
+        let reference = BlockRef::Direct(entry.id);
         let index = self.block.read()?;
-        let present = index
-            .entries()
-            .iter()
-            .any(|existing| existing.id == entry.id);
+        let present = index.entries().contains(&reference);
         drop(index);
         if present {
-            self.block.operate(WorkspaceIndexOperation::Remove(entry));
+            self.block
+                .operate(WorkspaceIndexOperation::Remove(reference));
         }
         Some(true)
     }
 
     fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        let old = BlockRef::Direct(old);
+        let new = BlockRef::Direct(new.id);
         let index = self.block.read()?;
-        let present = index.entries().iter().any(|entry| entry.id == old);
+        let present = index.entries().contains(&old);
         drop(index);
         if present {
             self.block
@@ -487,6 +522,7 @@ impl BlockEditor for WorkspaceIndexEditor {
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        self.poll();
         let Some(entries) = self.browser_entries(editors) else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -507,7 +543,7 @@ impl BlockEditor for WorkspaceIndexEditor {
                 FolderView::List => self.show_list(ui, editors, &entries),
             }
         };
-        self.handle_drop(ui, drop_rect, &entries);
+        self.handle_drop(ui, drop_rect, &entries, editors);
         action
     }
 }

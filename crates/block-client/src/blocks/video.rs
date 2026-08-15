@@ -7,6 +7,8 @@ use block::{Block, BlockHistory, HistoryDirection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
 
 /// The longest a single clip may run, in frames. About nine hours at thirty
@@ -93,7 +95,7 @@ pub struct VideoEffect {
 pub struct VideoClip {
     pub id: Uuid,
     /// The block the clip shows.
-    pub block_id: Uuid,
+    pub block_id: BlockRef,
     /// How many frames the clip runs for. At least one.
     pub length: u64,
     /// `None` puts the clip on the base track, where clips run back to back in
@@ -104,7 +106,7 @@ pub struct VideoClip {
 }
 
 impl VideoClip {
-    pub fn new(block_id: Uuid, length: u64) -> Self {
+    pub fn new(block_id: BlockRef, length: u64) -> Self {
         Self {
             id: Uuid::new_v4(),
             block_id,
@@ -407,7 +409,7 @@ impl Block for Video {
         let mut seen = HashSet::new();
         self.clips
             .iter()
-            .map(|clip| clip.block_id)
+            .filter_map(|clip| clip.block_id.as_direct())
             .filter(|block_id| seen.insert(*block_id))
             .collect()
     }

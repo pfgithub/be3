@@ -4,6 +4,8 @@ use block::{Block, BlockHistory, HistoryDirection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 /// One entry in the logic editor's tool palette.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "slot", rename_all = "snake_case")]
@@ -17,16 +19,28 @@ pub enum HotbarSlot {
         slots: Vec<HotbarSlot>,
     },
     /// A compiled logic block pinned for placing.
-    Component { name: String, compiled: Uuid },
+    Component { name: String, compiled: BlockRef },
 }
 
 impl HotbarSlot {
     fn collect_components(&self, into: &mut Vec<Uuid>) {
         match self {
-            Self::Component { compiled, .. } => into.push(*compiled),
+            Self::Component { compiled, .. } => into.extend(compiled.as_direct()),
             Self::Folder { slots, .. } => {
                 for slot in slots {
                     slot.collect_components(into);
+                }
+            }
+            Self::Builtin { .. } | Self::Locked { .. } => {}
+        }
+    }
+
+    fn collect_component_refs(&self, into: &mut Vec<BlockRef>) {
+        match self {
+            Self::Component { compiled, .. } => into.push(*compiled),
+            Self::Folder { slots, .. } => {
+                for slot in slots {
+                    slot.collect_component_refs(into);
                 }
             }
             Self::Builtin { .. } | Self::Locked { .. } => {}
@@ -79,6 +93,16 @@ impl Hotbar {
         let mut seen = HashSet::new();
         components.retain(|compiled| seen.insert(*compiled));
         components
+    }
+
+    pub fn component_refs(&self) -> Vec<BlockRef> {
+        let mut refs = Vec::new();
+        for slot in &self.slots {
+            slot.collect_component_refs(&mut refs);
+        }
+        let mut seen = HashSet::new();
+        refs.retain(|compiled| seen.insert(*compiled));
+        refs
     }
 }
 

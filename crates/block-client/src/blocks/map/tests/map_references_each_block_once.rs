@@ -1,3 +1,4 @@
+use crate::block_ref::BlockRef;
 use block::Block;
 use uuid::Uuid;
 
@@ -12,7 +13,10 @@ fn map_references_each_block_once() {
         Map::apply_operation(
             &mut map,
             &MapOperation::AddPoint {
-                point: MapPoint::new(block_id, MapCoordinate::new(longitude, 0.0)),
+                point: MapPoint::new(
+                    BlockRef::Direct(block_id),
+                    MapCoordinate::new(longitude, 0.0),
+                ),
             },
         );
     }

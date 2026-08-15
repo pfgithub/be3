@@ -1,6 +1,7 @@
 use uuid::Uuid;
 
 use super::{Presentation, PresentationOperation, PresentationSlide};
+use crate::block_ref::BlockRef;
 use crate::BlockClient;
 
 #[test]
@@ -9,11 +10,11 @@ fn presentation_history_undoes_and_redoes_changes() {
     let block = client.create_block(Presentation::new());
     let first = PresentationSlide {
         id: Uuid::new_v4(),
-        block_id: Uuid::new_v4(),
+        block_id: BlockRef::Direct(Uuid::new_v4()),
     };
     let second = PresentationSlide {
         id: Uuid::new_v4(),
-        block_id: Uuid::new_v4(),
+        block_id: BlockRef::Direct(Uuid::new_v4()),
     };
     block.operate(PresentationOperation::Insert {
         slide: first.clone(),

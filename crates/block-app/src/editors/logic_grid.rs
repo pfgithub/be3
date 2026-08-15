@@ -14,6 +14,7 @@ use std::{
 
 use block::Block;
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         compiled_logic::CompiledLogic,
         hotbar::{Hotbar, HotbarOperation, HotbarSlot as BlockHotbarSlot},

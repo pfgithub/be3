@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn field_rename_does_not_affect_database_values() {
     let field_id = Uuid::new_v4();
-    let mut database = Database::new(Uuid::new_v4());
+    let mut database = Database::new(BlockRef::Direct(Uuid::new_v4()));
     Database::apply_operation(
         &mut database,
         &DatabaseOperation::SetCell {

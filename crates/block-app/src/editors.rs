@@ -19,6 +19,7 @@ mod map;
 mod pixel_art;
 mod pixel_ray_tracer;
 mod presentation;
+mod reference_cache;
 mod settings;
 mod text;
 mod unsupported;

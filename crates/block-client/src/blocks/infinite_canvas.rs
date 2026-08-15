@@ -7,6 +7,8 @@ use block::{Block, BlockHistory, HistoryDirection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 mod presence;
 
 pub use presence::CanvasCursor;
@@ -68,10 +70,10 @@ pub enum CanvasEntityKind {
         points: Vec<CanvasPoint>,
     },
     Block {
-        block_id: Uuid,
+        block_id: BlockRef,
     },
     DirectEditor {
-        block_id: Uuid,
+        block_id: BlockRef,
         scale: f32,
     },
 }
@@ -353,7 +355,7 @@ impl Block for InfiniteCanvas {
             .iter()
             .filter_map(|entity| match entity.kind {
                 CanvasEntityKind::Block { block_id }
-                | CanvasEntityKind::DirectEditor { block_id, .. } => Some(block_id),
+                | CanvasEntityKind::DirectEditor { block_id, .. } => block_id.as_direct(),
                 _ => None,
             })
             .collect();

@@ -4,6 +4,7 @@ mod spreadsheet;
 
 use block::{Block, BlockParent};
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue},
         database_schema::{
@@ -28,8 +29,9 @@ use self::scatter::ScatterView;
 use self::spreadsheet::SpreadsheetView;
 
 use super::{
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
+    reference_cache::ReferenceResolutionCache, BlockEditor, BlockRenderContext, CreatableEditor,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorKind,
 };
 
 /// The database's schema, rows, and fields, plus the view's own settings.
@@ -66,9 +68,9 @@ impl CreatableEditor for DatabaseViewEditor {
                 options: Vec::new(),
             },
         });
-        let database = client.create_block(Database::new(schema.id()));
+        let database = client.create_block(Database::new(BlockRef::Direct(schema.id())));
         schema.set_parent(BlockParent::Uuid(database.id()));
-        let view = client.create_block(DatabaseView::new(database.id()));
+        let view = client.create_block(DatabaseView::new(BlockRef::Direct(database.id())));
         database.set_parent(BlockParent::Uuid(view.id()));
         Self::new(view, Some(database), Some(schema))
     }
@@ -82,6 +84,7 @@ pub(super) struct DatabaseViewEditor {
     kanban: KanbanView,
     scatter: ScatterView,
     row_editor: RowEditor,
+    reference_cache: ReferenceResolutionCache,
 }
 
 impl DatabaseViewEditor {
@@ -98,45 +101,67 @@ impl DatabaseViewEditor {
             kanban: KanbanView::default(),
             scatter: ScatterView::default(),
             row_editor: RowEditor::default(),
+            reference_cache: ReferenceResolutionCache::default(),
         }
     }
 
-    fn ensure_database(&mut self, client: &BlockClient, database_id: Uuid) {
+    fn ensure_database(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+        database_ref: BlockRef,
+    ) -> Option<()> {
+        let client = editors.client_handle();
+        let database_id = self
+            .reference_cache
+            .resolve(&client, self.block.id(), database_ref)?;
         if self
             .database
             .as_ref()
             .is_none_or(|database| database.id() != database_id)
         {
-            self.database = Some(client.get_block::<Database>(database_id));
+            self.database = Some(editors.client().get_block::<Database>(database_id));
         }
+        Some(())
     }
 
-    fn ensure_schema(&mut self, client: &BlockClient, schema_id: Uuid) {
+    fn ensure_schema(
+        &mut self,
+        editors: &mut EditorAccess<'_>,
+        schema_ref: BlockRef,
+    ) -> Option<()> {
+        let client = editors.client_handle();
+        let referencing_id = self.database.as_ref()?.id();
+        let schema_id = self
+            .reference_cache
+            .resolve(&client, referencing_id, schema_ref)?;
         if self
             .schema
             .as_ref()
             .is_none_or(|schema| schema.id() != schema_id)
         {
-            self.schema = Some(client.get_block::<DatabaseSchema>(schema_id));
+            self.schema = Some(editors.client().get_block::<DatabaseSchema>(schema_id));
         }
+        Some(())
     }
 
-    fn data(&mut self, client: &BlockClient) -> Option<DatabaseViewData> {
+    fn data(&mut self, editors: &mut EditorAccess<'_>) -> Option<DatabaseViewData> {
+        self.reference_cache.poll();
         let view = self.block.read()?;
-        let database_id = view.database_id();
+        let database_ref = view.database_id();
         let sort = view.sort();
         let kind = view.kind();
         let kanban_field_id = view.kanban_field_id();
         let scatter_x_field_id = view.scatter_x_field_id();
         let scatter_y_field_id = view.scatter_y_field_id();
         drop(view);
-        self.ensure_database(client, database_id);
+        self.ensure_database(editors, database_ref)?;
         let database = self.database.as_ref()?.read()?;
-        let schema_id = database.schema_id();
+        let schema_ref = database.schema_id();
         let rows = database.rows().to_vec();
         drop(database);
-        self.ensure_schema(client, schema_id);
+        self.ensure_schema(editors, schema_ref)?;
         let fields = self.schema.as_ref()?.read()?.fields().to_vec();
+        let schema_id = self.schema.as_ref()?.id();
         Some(DatabaseViewData {
             schema_id,
             rows,
@@ -227,24 +252,29 @@ impl BlockEditor for DatabaseViewEditor {
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
+        self.reference_cache.poll();
         let Some(view) = self.block.read() else {
             return false;
         };
-        let database_id = view.database_id();
+        let database_ref = view.database_id();
         let sort = view.sort();
         let kind = view.kind();
         let kanban_field_id = view.kanban_field_id();
         let scatter_x_field_id = view.scatter_x_field_id();
         let scatter_y_field_id = view.scatter_y_field_id();
         drop(view);
-        self.ensure_database(editors.client(), database_id);
+        if self.ensure_database(editors, database_ref).is_none() {
+            return false;
+        }
         let Some(database) = self.database.as_ref().and_then(|database| database.read()) else {
             return false;
         };
-        let schema_id = database.schema_id();
+        let schema_ref = database.schema_id();
         let mut rows = database.rows().to_vec();
         drop(database);
-        self.ensure_schema(editors.client(), schema_id);
+        if self.ensure_schema(editors, schema_ref).is_none() {
+            return false;
+        }
         let Some(fields) = self
             .schema
             .as_ref()
@@ -292,7 +322,7 @@ impl BlockEditor for DatabaseViewEditor {
         &mut self,
         editors: &mut EditorAccess<'_>,
     ) -> Option<egui::Vec2> {
-        let data = self.data(editors.client())?;
+        let data = self.data(editors)?;
         match data.kind {
             DatabaseViewKind::Spreadsheet => Some(
                 self.spreadsheet
@@ -308,7 +338,7 @@ impl BlockEditor for DatabaseViewEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let data = self.data(editors.client())?;
+        let data = self.data(editors)?;
         if data.kind == DatabaseViewKind::Spreadsheet {
             let mut operations = Vec::new();
             self.spreadsheet.formula_bar(
@@ -333,7 +363,7 @@ impl BlockEditor for DatabaseViewEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
-        let data = self.data(editors.client())?;
+        let data = self.data(editors)?;
         let mut action = None;
         egui::CollapsingHeader::new("Column settings")
             .default_open(false)
@@ -404,7 +434,7 @@ impl BlockEditor for DatabaseViewEditor {
         scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let data = self.data(editors.client())?;
+        let data = self.data(editors)?;
         let mut operations = Vec::new();
         match data.kind {
             DatabaseViewKind::Spreadsheet => {

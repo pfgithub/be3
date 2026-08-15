@@ -5,6 +5,8 @@ use logicgame::challenges::{ChallengeId, CHALLENGES};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::block_ref::BlockRef;
+
 /// One level: a built-in challenge, the grids that have been started for it,
 /// and whether any of them has passed.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -12,7 +14,7 @@ pub struct Level {
     pub challenge: ChallengeId,
     /// Logic grid blocks holding attempts at this level, in the order they
     /// were created.
-    pub solutions: Vec<Uuid>,
+    pub solutions: Vec<BlockRef>,
     pub completed: bool,
 }
 
@@ -57,12 +59,12 @@ pub struct LogicGame {
 pub enum LogicGameOperation {
     InsertSolution {
         challenge: ChallengeId,
-        solution: Uuid,
+        solution: BlockRef,
         index: usize,
     },
     RemoveSolution {
         challenge: ChallengeId,
-        solution: Uuid,
+        solution: BlockRef,
     },
     SetCompleted {
         challenge: ChallengeId,
@@ -84,7 +86,7 @@ pub struct LogicGameHistoryAction {
 enum LogicGameHistoryChange {
     Solution {
         challenge: ChallengeId,
-        solution: Uuid,
+        solution: BlockRef,
         index: usize,
         added: bool,
     },
@@ -191,7 +193,7 @@ impl Block for LogicGame {
         let mut seen = HashSet::new();
         self.levels
             .iter()
-            .flat_map(|level| level.solutions.iter().copied())
+            .flat_map(|level| level.solutions.iter().filter_map(BlockRef::as_direct))
             .filter(|reference| seen.insert(*reference))
             .collect()
     }

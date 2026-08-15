@@ -1,6 +1,7 @@
 use uuid::Uuid;
 
 use super::{Presentation, PresentationOperation, PresentationSlide};
+use crate::block_ref::BlockRef;
 use block::Block;
 
 #[test]
@@ -14,7 +15,7 @@ fn presentation_references_are_deduplicated() {
             &PresentationOperation::Insert {
                 slide: PresentationSlide {
                     id: Uuid::new_v4(),
-                    block_id,
+                    block_id: BlockRef::Direct(block_id),
                 },
                 index,
             },

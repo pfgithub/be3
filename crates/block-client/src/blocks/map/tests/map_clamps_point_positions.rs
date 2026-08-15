@@ -1,3 +1,4 @@
+use crate::block_ref::BlockRef;
 use block::Block;
 use uuid::Uuid;
 
@@ -6,7 +7,10 @@ use super::{Map, MapCoordinate, MapOperation, MapPoint, MAX_LATITUDE};
 #[test]
 fn map_clamps_point_positions() {
     let mut map = Map::new();
-    let point = MapPoint::new(Uuid::new_v4(), MapCoordinate::new(400.0, 95.0));
+    let point = MapPoint::new(
+        BlockRef::Direct(Uuid::new_v4()),
+        MapCoordinate::new(400.0, 95.0),
+    );
     Map::apply_operation(&mut map, &MapOperation::AddPoint { point });
     assert_eq!(
         map.point(point.id).map(|point| point.position),

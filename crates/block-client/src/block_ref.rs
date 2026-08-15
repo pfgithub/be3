@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::BlockClient;
 
 #[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum BlockRef {
     Direct(Uuid),
     RepoRelative { repo: Uuid, eternal_id: Uuid },

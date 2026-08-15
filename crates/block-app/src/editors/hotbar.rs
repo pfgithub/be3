@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use block::Block;
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         compiled_logic::CompiledLogic,
         hotbar::{Hotbar, HotbarOperation, HotbarSlot},
@@ -16,8 +17,8 @@ use egui_material_icons::{
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind,
+    reference_cache::ReferenceResolutionCache, BlockEditor, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 460.0;
@@ -31,6 +32,7 @@ pub(super) struct HotbarEditor {
     block: BlockHandle<Hotbar>,
     /// Handles kept only so pinned components can be named.
     components: HashMap<Uuid, BlockHandle<CompiledLogic>>,
+    reference_cache: ReferenceResolutionCache,
 }
 
 impl EditorKind for HotbarEditor {
@@ -43,6 +45,7 @@ impl EditorKind for HotbarEditor {
         Self {
             block,
             components: HashMap::new(),
+            reference_cache: ReferenceResolutionCache::default(),
         }
     }
 }
@@ -78,6 +81,7 @@ impl BlockEditor for HotbarEditor {
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        self.reference_cache.poll();
         let Some(hotbar) = self.block.read() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -85,15 +89,27 @@ impl BlockEditor for HotbarEditor {
             return None;
         };
         let slots = hotbar.slots().to_vec();
-        let pinned = hotbar.components();
+        let pinned_refs = hotbar.component_refs();
         drop(hotbar);
 
-        let client = editors.client();
-        self.components.retain(|id, _| pinned.contains(id));
-        for compiled in &pinned {
+        let referencing_id = self.block.id();
+        let client = editors.client_handle();
+        let resolved: HashMap<BlockRef, Option<Uuid>> = pinned_refs
+            .iter()
+            .map(|compiled| {
+                (
+                    *compiled,
+                    self.reference_cache
+                        .resolve(&client, referencing_id, *compiled),
+                )
+            })
+            .collect();
+        let pinned_ids: Vec<Uuid> = resolved.values().copied().flatten().collect();
+        self.components.retain(|id, _| pinned_ids.contains(id));
+        for id in pinned_ids {
             self.components
-                .entry(*compiled)
-                .or_insert_with(|| client.get_block::<CompiledLogic>(*compiled));
+                .entry(id)
+                .or_insert_with(|| editors.client().get_block::<CompiledLogic>(id));
         }
 
         if slots.is_empty() {
@@ -103,7 +119,7 @@ impl BlockEditor for HotbarEditor {
 
         let mut action = None;
         let mut unpin = None;
-        self.show_slots(ui, &slots, 0, &mut action, &mut unpin);
+        self.show_slots(ui, &slots, 0, &resolved, &mut action, &mut unpin);
         if let Some(compiled) = unpin {
             self.block.operate(HotbarOperation::SetSlots {
                 slots: without_component(&slots, compiled),
@@ -119,8 +135,9 @@ impl HotbarEditor {
         ui: &mut egui::Ui,
         slots: &[HotbarSlot],
         depth: usize,
+        resolved: &HashMap<BlockRef, Option<Uuid>>,
         action: &mut Option<EditorAction>,
-        unpin: &mut Option<Uuid>,
+        unpin: &mut Option<BlockRef>,
     ) {
         for slot in slots {
             ui.horizontal(|ui| {
@@ -136,16 +153,20 @@ impl HotbarEditor {
                         ui.label(format!("{} {name}", ICON_FOLDER.codepoint));
                     }
                     HotbarSlot::Component { name, compiled } => {
-                        let title = self
-                            .components
-                            .get(compiled)
+                        let resolved_id = resolved.get(compiled).copied().flatten();
+                        let title = resolved_id
+                            .and_then(|id| self.components.get(&id))
                             .and_then(BlockHandle::name)
                             .unwrap_or_else(|| name.clone());
-                        if ui.link(title).clicked() {
-                            *action = Some(EditorAction::OpenBlock {
-                                id: *compiled,
-                                block_type: CompiledLogic::TYPE_ID,
-                            });
+                        if let Some(id) = resolved_id {
+                            if ui.link(title).clicked() {
+                                *action = Some(EditorAction::OpenBlock {
+                                    id,
+                                    block_type: CompiledLogic::TYPE_ID,
+                                });
+                            }
+                        } else {
+                            ui.weak(format!("{title} (broken link)"));
                         }
                         if ui
                             .small_button(ICON_DELETE)
@@ -158,7 +179,7 @@ impl HotbarEditor {
                 }
             });
             if let HotbarSlot::Folder { slots, .. } = slot {
-                self.show_slots(ui, slots, depth + 1, action, unpin);
+                self.show_slots(ui, slots, depth + 1, resolved, action, unpin);
             }
         }
     }
@@ -175,7 +196,7 @@ fn count_slots(slots: &[HotbarSlot]) -> usize {
 }
 
 /// The same tree with every pin of `compiled` taken out, at any depth.
-fn without_component(slots: &[HotbarSlot], compiled: Uuid) -> Vec<HotbarSlot> {
+fn without_component(slots: &[HotbarSlot], compiled: BlockRef) -> Vec<HotbarSlot> {
     slots
         .iter()
         .filter(|slot| !matches!(slot, HotbarSlot::Component { compiled: pinned, .. } if *pinned == compiled))

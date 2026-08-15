@@ -112,8 +112,9 @@ impl InfiniteCanvasEditor {
                 if let [entity] = selected.as_slice() {
                     let transform_enabled = !entity.locked;
                     let resize = match entity.kind {
-                        CanvasEntityKind::DirectEditor { block_id, .. } => editors
-                            .direct_editor_resize(block_id)
+                        CanvasEntityKind::DirectEditor { block_id, .. } => self
+                            .resolve_block_id(editors, block_id)
+                            .and_then(|id| editors.direct_editor_resize(id))
                             .unwrap_or(DirectEditorResize::None),
                         _ => DirectEditorResize::Both,
                     };
@@ -199,11 +200,13 @@ impl InfiniteCanvasEditor {
                 _ => None,
             };
             if let Some((block_id, direct)) = block_mode {
+                let resolved_id = self.resolve_block_id(editors, block_id);
                 egui::CollapsingHeader::new("Block")
                     .default_open(true)
                     .show(ui, |ui| {
-                        let available =
-                            direct || editors.direct_editor_capabilities(block_id).is_some();
+                        let available = direct
+                            || resolved_id
+                                .is_some_and(|id| editors.direct_editor_capabilities(id).is_some());
                         let label = if direct {
                             "Show preview only"
                         } else {
@@ -220,8 +223,8 @@ impl InfiniteCanvasEditor {
                                 }
                                 direct_editor_to_preview(entity, block_id)
                             } else {
-                                editors
-                                    .direct_editor_intrinsic_size(block_id)
+                                resolved_id
+                                    .and_then(|id| editors.direct_editor_intrinsic_size(id))
                                     .map(|intrinsic| {
                                         preview_to_direct_editor(entity, block_id, intrinsic)
                                     })

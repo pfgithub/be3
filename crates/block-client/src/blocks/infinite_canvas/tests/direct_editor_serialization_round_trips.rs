@@ -2,6 +2,7 @@ use super::{
     CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
     InfiniteCanvasOperation,
 };
+use crate::block_ref::BlockRef;
 use uuid::Uuid;
 
 #[test]
@@ -15,7 +16,7 @@ fn direct_editor_serialization_round_trips() {
                 0.0,
             ),
             kind: CanvasEntityKind::DirectEditor {
-                block_id: Uuid::new_v4(),
+                block_id: BlockRef::Direct(Uuid::new_v4()),
                 scale: 2.0,
             },
             style: CanvasEntityStyle::default(),
