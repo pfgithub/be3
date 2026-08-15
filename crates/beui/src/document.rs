@@ -121,6 +121,17 @@ impl Document {
         outline.visible = visible;
     }
 
+    pub fn set_button_on_click(
+        &mut self,
+        button: NodeId,
+        handler: impl FnMut(&mut Document) + 'static,
+    ) {
+        let NodeKind::Button(button) = &mut self.arena.get_mut(button).kind else {
+            panic!("node is not a Button node");
+        };
+        button.on_click = Some(Box::new(handler));
+    }
+
     pub fn set_button_on_hover_change(
         &mut self,
         button: NodeId,
@@ -186,13 +197,6 @@ impl Document {
             panic!("node is not a Text node");
         };
         &text.content
-    }
-
-    pub fn was_clicked(&mut self, id: NodeId) -> bool {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(id).kind else {
-            panic!("node is not a Button node");
-        };
-        std::mem::take(&mut button.clicked)
     }
 
     pub fn show(&mut self, ctx: &Context, rect: Rect) {

@@ -18,10 +18,6 @@ fn main() -> eframe::Result {
 
 struct DemoApp {
     document: Document,
-    increment_button: NodeId,
-    decrement_button: NodeId,
-    counter_text: NodeId,
-    counter: i32,
 }
 
 fn button_fill_color(hovered: bool, active: bool) -> Color32 {
@@ -82,6 +78,19 @@ impl DemoApp {
         document.append_child(toolbar, toolbar_label, ItemSize::Percent(100.0));
 
         let counter_text = document.create_text("Count: 0");
+        let counter = Rc::new(Cell::new(0i32));
+
+        let increment_counter = counter.clone();
+        document.set_button_on_click(increment_button, move |doc| {
+            increment_counter.set(increment_counter.get() + 1);
+            doc.set_text(counter_text, format!("Count: {}", increment_counter.get()));
+        });
+
+        let decrement_counter = counter.clone();
+        document.set_button_on_click(decrement_button, move |doc| {
+            decrement_counter.set(decrement_counter.get() - 1);
+            doc.set_text(counter_text, format!("Count: {}", decrement_counter.get()));
+        });
 
         let left_pane = document.create_text("Left pane, 30% of the remaining space.");
         let right_pane = document.create_text("Right pane, 70% of the remaining space.");
@@ -95,13 +104,7 @@ impl DemoApp {
         document.append_child(root, panes, ItemSize::Percent(100.0));
         document.set_root(root);
 
-        Self {
-            document,
-            increment_button,
-            decrement_button,
-            counter_text,
-            counter: 0,
-        }
+        Self { document }
     }
 }
 
@@ -109,14 +112,5 @@ impl eframe::App for DemoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx();
         self.document.show(ctx, ctx.content_rect());
-
-        if self.document.was_clicked(self.increment_button) {
-            self.counter += 1;
-        }
-        if self.document.was_clicked(self.decrement_button) {
-            self.counter -= 1;
-        }
-        self.document
-            .set_text(self.counter_text, format!("Count: {}", self.counter));
     }
 }

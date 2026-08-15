@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use egui::{Context, Pos2, Rect};
 
-use crate::button::ChangeHandler;
+use crate::button::{ChangeHandler, ClickHandler};
 use crate::document::Document;
 use crate::node::{NodeId, NodeKind};
 
@@ -44,6 +44,7 @@ fn interact_node(
     let rect = rects[&id];
 
     let mut children: Vec<NodeId> = Vec::new();
+    let mut click: Option<ClickHandler> = None;
     let mut hover_change: Option<(ChangeHandler, bool)> = None;
     let mut active_change: Option<(ChangeHandler, bool)> = None;
 
@@ -65,7 +66,7 @@ fn interact_node(
             }
             if released_this_frame {
                 if hovered && button.armed {
-                    button.clicked = true;
+                    click = button.on_click.take();
                 }
                 button.armed = false;
             }
@@ -89,6 +90,12 @@ fn interact_node(
         }
     }
 
+    if let Some(mut handler) = click {
+        handler(doc);
+        if let NodeKind::Button(button) = &mut doc.arena.get_mut(id).kind {
+            button.on_click = Some(handler);
+        }
+    }
     if let Some((mut handler, hovered)) = hover_change {
         handler(doc, hovered);
         if let NodeKind::Button(button) = &mut doc.arena.get_mut(id).kind {
