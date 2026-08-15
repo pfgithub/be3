@@ -42,16 +42,14 @@ pub(crate) fn paint(
                 }
                 button.armed = false;
             }
-            let pressed = hovered && button.armed;
-            let fill = if pressed {
-                style.button_press_fill
-            } else if hovered {
-                style.button_hover_fill
-            } else {
-                style.button_fill
-            };
             let child = button.child;
-            painter.rect_filled(rect, style.corner_radius, fill);
+            if let Some(child) = child {
+                paint(doc, ctx, painter, rects, child);
+            }
+        }
+        NodeKind::Fill(fill) => {
+            let child = fill.child;
+            painter.rect_filled(rect, style.corner_radius, fill.color);
             if let Some(child) = child {
                 paint(doc, ctx, painter, rects, child);
             }

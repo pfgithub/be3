@@ -10,8 +10,12 @@ use crate::style::Style;
 pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId) -> Vec2 {
     match &doc.arena.get(id).kind {
         NodeKind::Text(text) => text_size(painter, &doc.style, &text.content),
-        NodeKind::Button(button) => {
-            let inner = match button.child {
+        NodeKind::Button(button) => match button.child {
+            Some(child) => measure(doc, painter, child),
+            None => Vec2::ZERO,
+        },
+        NodeKind::Fill(fill) => {
+            let inner = match fill.child {
                 Some(child) => measure(doc, painter, child),
                 None => Vec2::ZERO,
             };
@@ -60,6 +64,12 @@ pub(crate) fn layout(
         NodeKind::List(list) => list,
         NodeKind::Button(button) => {
             if let Some(child) = button.child {
+                layout(doc, painter, child, rect, out);
+            }
+            return;
+        }
+        NodeKind::Fill(fill) => {
+            if let Some(child) = fill.child {
                 layout(doc, painter, child, rect.shrink(doc.style.padding), out);
             }
             return;

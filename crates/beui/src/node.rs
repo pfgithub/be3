@@ -1,4 +1,5 @@
 use crate::button::ButtonNode;
+use crate::fill::FillNode;
 use crate::list::ListNode;
 use crate::text::TextNode;
 
@@ -12,6 +13,7 @@ pub(crate) struct Node {
 pub(crate) enum NodeKind {
     List(ListNode),
     Button(ButtonNode),
+    Fill(FillNode),
     Text(TextNode),
 }
 

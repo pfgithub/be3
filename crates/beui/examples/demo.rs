@@ -1,5 +1,6 @@
 use beui::{Direction, Document, ItemSize, NodeId};
 use eframe::egui;
+use egui::Color32;
 
 fn main() -> eframe::Result {
     eframe::run_native(
@@ -24,18 +25,24 @@ impl DemoApp {
     fn new() -> Self {
         let mut document = Document::new();
 
+        let button_fill = Color32::from_rgb(70, 120, 220);
+
         let decrement_button = document.create_button();
         let decrement_label = document.create_text("-");
         document.set_button_child(decrement_button, decrement_label);
+        let decrement_fill = document.create_fill(button_fill);
+        document.set_fill_child(decrement_fill, decrement_button);
 
         let increment_button = document.create_button();
         let increment_label = document.create_text("+");
         document.set_button_child(increment_button, increment_label);
+        let increment_fill = document.create_fill(button_fill);
+        document.set_fill_child(increment_fill, increment_button);
 
         let toolbar_label = document.create_text("beui demo");
         let toolbar = document.create_list(Direction::Horizontal);
-        document.append_child(toolbar, decrement_button, ItemSize::Intrinsic);
-        document.append_child(toolbar, increment_button, ItemSize::Intrinsic);
+        document.append_child(toolbar, decrement_fill, ItemSize::Intrinsic);
+        document.append_child(toolbar, increment_fill, ItemSize::Intrinsic);
         document.append_child(toolbar, toolbar_label, ItemSize::Percent(100.0));
 
         let counter_text = document.create_text("Count: 0");

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use egui::{Context, Id, LayerId, Order, Rect};
+use egui::{Color32, Context, Id, LayerId, Order, Rect};
 
 use crate::button::ButtonNode;
+use crate::fill::FillNode;
 use crate::layout;
 use crate::list::{Direction, ItemSize, ListItem, ListNode};
 use crate::node::{Arena, NodeId, NodeKind};
@@ -52,6 +53,10 @@ impl Document {
         self.arena.insert(NodeKind::Button(ButtonNode::new()))
     }
 
+    pub fn create_fill(&mut self, color: Color32) -> NodeId {
+        self.arena.insert(NodeKind::Fill(FillNode::new(color)))
+    }
+
     pub fn create_text(&mut self, content: impl Into<String>) -> NodeId {
         self.arena.insert(NodeKind::Text(TextNode {
             content: content.into(),
@@ -79,10 +84,18 @@ impl Document {
         button.child = Some(child);
     }
 
+    pub fn set_fill_child(&mut self, fill: NodeId, child: NodeId) {
+        let NodeKind::Fill(fill) = &mut self.arena.get_mut(fill).kind else {
+            panic!("node is not a Fill node");
+        };
+        fill.child = Some(child);
+    }
+
     pub fn remove_node(&mut self, id: NodeId) {
         let children: Vec<NodeId> = match &self.arena.get(id).kind {
             NodeKind::List(list) => list.items.iter().map(|item| item.child).collect(),
             NodeKind::Button(button) => button.child.into_iter().collect(),
+            NodeKind::Fill(fill) => fill.child.into_iter().collect(),
             NodeKind::Text(_) => Vec::new(),
         };
         for child in children {
