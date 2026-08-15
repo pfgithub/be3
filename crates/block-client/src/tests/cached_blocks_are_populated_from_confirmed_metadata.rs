@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    BlockShared, CachedBlock, ClientDebugSnapshot, ErasedBlock, NetworkDebugSnapshot,
+    crypto, BlockShared, CachedBlock, ClientDebugSnapshot, ErasedBlock, NetworkDebugSnapshot,
     PendingRequest, StoredBlock, TypedBlock, WorkerState,
 };
 use crate::properties::{self, BlockName};
@@ -103,11 +103,13 @@ fn cached_blocks_are_populated_from_confirmed_metadata() {
         id: read_id,
         block_type: MetadataBlock::TYPE_ID,
         author: Uuid::new_v4(),
-        snapshot: serde_json::to_vec(&StoredBlock {
-            value: MetadataBlock,
-            dynamic_artifact: None,
-        })
-        .unwrap(),
+        snapshot: crypto::encode(
+            &serde_json::to_vec(&StoredBlock {
+                value: MetadataBlock,
+                dynamic_artifact: None,
+            })
+            .unwrap(),
+        ),
         snapshot_seq: 0,
         operations: Vec::new(),
         parent: BlockParent::Root,

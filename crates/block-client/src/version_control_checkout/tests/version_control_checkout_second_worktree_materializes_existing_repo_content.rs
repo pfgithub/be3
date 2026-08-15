@@ -13,11 +13,11 @@ async fn version_control_checkout_second_worktree_materializes_existing_repo_con
     let member_id = fixture.add_member().await;
     let nested = fixture.client.create_block(WorkspaceIndex::default());
     nested.loaded().await;
-    nested.set_parent(BlockParent::Uuid(member_id));
     fixture
         .client
         .get_block::<WorkspaceIndex>(member_id)
         .operate(WorkspaceIndexOperation::Add(BlockRef::Direct(nested.id())));
+    nested.set_parent(BlockParent::Uuid(member_id));
     fixture.client.synchronized().await;
     fixture.commit("first").await;
 

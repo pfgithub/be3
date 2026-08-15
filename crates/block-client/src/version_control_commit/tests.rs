@@ -119,9 +119,9 @@ impl Fixture {
     async fn change_member(&self, member_id: Uuid) {
         let nested = self.client.create_block(WorkspaceIndex::default());
         nested.loaded().await;
-        nested.set_parent(BlockParent::Uuid(member_id));
         let member = self.client.get_block::<WorkspaceIndex>(member_id);
         member.operate(WorkspaceIndexOperation::Add(BlockRef::Direct(nested.id())));
+        nested.set_parent(BlockParent::Uuid(member_id));
     }
 
     fn objects_len(&self) -> usize {

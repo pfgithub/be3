@@ -63,18 +63,20 @@ impl Block for Counter {
 }
 
 fn counter_snapshot(count: i64) -> Vec<u8> {
-    serde_json::to_vec(&StoredBlock {
+    let serialized = serde_json::to_vec(&StoredBlock {
         value: Counter { count },
         dynamic_artifact: None,
     })
-    .unwrap()
+    .unwrap();
+    crypto::encode(&serialized)
 }
 
 fn counter_operation(amount: i64) -> Vec<u8> {
-    serde_json::to_vec(&StoredOperation::<Counter, CounterOperation>::Operate(
+    let serialized = serde_json::to_vec(&StoredOperation::<Counter, CounterOperation>::Operate(
         CounterOperation::Add(amount),
     ))
-    .unwrap()
+    .unwrap();
+    crypto::encode(&serialized)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

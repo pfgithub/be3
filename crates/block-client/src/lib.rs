@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 pub mod block_ref;
 pub mod blocks;
+mod crypto;
 pub mod presence;
 pub mod properties;
 mod transport;
@@ -1752,6 +1753,12 @@ async fn run_connected(
                     fatal("BlockClient::connect may only be called once");
                 }
                 state.handle_command(command);
+                while let Ok(command) = commands.try_recv() {
+                    if matches!(command, WorkerCommand::Connect { .. }) {
+                        fatal("BlockClient::connect may only be called once");
+                    }
+                    state.handle_command(command);
+                }
                 state.finish_synchronization();
             }
             message = socket.next().fuse() => {
@@ -3610,11 +3617,12 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 
     fn initial_data(&self) -> Option<Vec<u8>> {
         self.state.read().initial.as_ref().map(|initial| {
-            serde_json::to_vec(&StoredBlock {
+            let serialized = serde_json::to_vec(&StoredBlock {
                 value: initial,
                 dynamic_artifact: self.dynamic_artifact.read().clone(),
             })
-            .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")))
+            .unwrap_or_else(|error| fatal(format!("failed to serialize block: {error}")));
+            crypto::encode(&serialized)
         })
     }
 
@@ -3688,9 +3696,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         properties: BTreeMap<Uuid, Vec<u8>>,
     ) {
         *self.author.write() = Some(author);
-        let stored: StoredBlock<B> = serde_json::from_slice(&snapshot).unwrap_or_else(|error| {
-            fatal(format!("failed to deserialize block snapshot: {error}"))
-        });
+        let stored: StoredBlock<B> = serde_json::from_slice(&crypto::decode(&snapshot))
+            .unwrap_or_else(|error| {
+                fatal(format!("failed to deserialize block snapshot: {error}"))
+            });
         let mut value = stored.value;
         *self.dynamic_artifact.write() = stored.dynamic_artifact;
         let mut seq = snapshot_seq;
@@ -3698,10 +3707,10 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             if record.seq != seq + 1 {
                 fatal("server returned noncontiguous block history");
             }
-            let operation: StoredOperation<B, B::Operation> =
-                serde_json::from_slice(&record.operation).unwrap_or_else(|error| {
-                    fatal(format!("failed to deserialize operation: {error}"))
-                });
+            let operation: StoredOperation<B, B::Operation> = serde_json::from_slice(
+                &crypto::decode(&record.operation),
+            )
+            .unwrap_or_else(|error| fatal(format!("failed to deserialize operation: {error}")));
             self.apply_stored_operation(&mut value, &operation);
             seq = record.seq;
         }
@@ -3755,15 +3764,17 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             .iter()
             .find(|pending| !state.in_flight.contains(&pending.id))?;
         let pending_id = pending.id;
-        let update = OutboundUpdate {
-            seq: (!B::CRDT).then_some(state.confirmed_seq + 1),
-            operation_id: pending_id,
-            operation: serde_json::to_vec(&pending.operation)
-                .unwrap_or_else(|error| fatal(format!("failed to serialize operation: {error}"))),
-            properties: pending.properties.clone(),
-            dynamic_artifact: pending.dynamic_artifact,
-            references: pending.references.clone(),
-        };
+        let update =
+            OutboundUpdate {
+                seq: (!B::CRDT).then_some(state.confirmed_seq + 1),
+                operation_id: pending_id,
+                operation: crypto::encode(&serde_json::to_vec(&pending.operation).unwrap_or_else(
+                    |error| fatal(format!("failed to serialize operation: {error}")),
+                )),
+                properties: pending.properties.clone(),
+                dynamic_artifact: pending.dynamic_artifact,
+                references: pending.references.clone(),
+            };
         state.in_flight.insert(pending_id);
         Some(update)
     }
@@ -3863,9 +3874,9 @@ impl<B: Block> TypedBlock<B> {
     fn apply_remote_operation(&self, state: &mut TypedState<B>, record: OperationRecord) {
         if B::CRDT {
             let remote: StoredOperation<B, B::Operation> =
-                serde_json::from_slice(&record.operation).unwrap_or_else(|error| {
-                    fatal(format!("failed to deserialize remote operation: {error}"))
-                });
+                serde_json::from_slice(&crypto::decode(&record.operation)).unwrap_or_else(
+                    |error| fatal(format!("failed to deserialize remote operation: {error}")),
+                );
             if let Some(value) = self.shared.value.write().as_mut() {
                 self.apply_stored_operation(value, &remote);
                 self.changed.send_replace(());
@@ -3895,8 +3906,8 @@ impl<B: Block> TypedBlock<B> {
             return;
         }
 
-        let remote: StoredOperation<B, B::Operation> = serde_json::from_slice(&record.operation)
-            .unwrap_or_else(|error| {
+        let remote: StoredOperation<B, B::Operation> =
+            serde_json::from_slice(&crypto::decode(&record.operation)).unwrap_or_else(|error| {
                 fatal(format!("failed to deserialize remote operation: {error}"))
             });
         self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &remote);
@@ -3927,6 +3938,6 @@ fn reference_delta(before: &[Uuid], after: &[Uuid]) -> ReferenceDelta {
     }
 }
 
-fn fatal(message: impl AsRef<str>) -> ! {
+pub(crate) fn fatal(message: impl AsRef<str>) -> ! {
     panic!("fatal block client error: {}", message.as_ref())
 }

@@ -130,6 +130,8 @@ pub async fn checkout_worktree(
 
     worktree.operate(VersionControlWorktreeOperation::SetCheckedOutCommit { commit: target });
 
+    client.synchronized().await;
+
     Some(CheckoutOutcome::Applied {
         created,
         replaced,

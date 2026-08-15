@@ -144,6 +144,8 @@ pub async fn commit_worktree(
         commit: commit_id.clone(),
     });
 
+    client.synchronized().await;
+
     Some(CommitOutcome {
         commit: commit_id,
         tree_hash,
