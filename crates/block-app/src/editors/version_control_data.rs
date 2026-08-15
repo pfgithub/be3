@@ -163,7 +163,6 @@ impl VersionControlDataEditor {
         let worktree =
             client.create_block(VersionControlWorktree::new(self.block.id(), &data_state));
         drop(data_state);
-        worktree.set_parent(BlockParent::Uuid(self.block.id()));
         Some(EditorAction::OpenBlock {
             id: worktree.id(),
             block_type: VersionControlWorktree::TYPE_ID,
