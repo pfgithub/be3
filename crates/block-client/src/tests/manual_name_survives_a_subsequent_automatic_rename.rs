@@ -4,6 +4,7 @@ use parking_lot::RwLock;
 use uuid::Uuid;
 
 use super::{
+    crypto,
     lib_test_support::{Counter, CounterOperation},
     BlockShared, ErasedBlock, TypedBlock,
 };
@@ -30,7 +31,7 @@ fn manual_name_survives_a_subsequent_automatic_rename() {
 
     let update = block.next_update().unwrap();
     assert_eq!(
-        properties::read_name(&update.properties),
+        properties::read_name(&crypto::decode_properties(update.properties)),
         Some(BlockName {
             manual: true,
             value: "My counter".to_owned(),

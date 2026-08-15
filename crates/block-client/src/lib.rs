@@ -2290,6 +2290,7 @@ impl WorkerState {
                         block.block_type_id()
                     ));
                 }
+                let properties = crypto::decode_properties(properties);
                 block.resolve_authored(
                     author,
                     snapshot,
@@ -2391,6 +2392,7 @@ impl WorkerState {
                     .blocks
                     .get(&id)
                     .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
+                let properties = crypto::decode_properties(properties);
                 block.remote_operation(operation);
                 block.apply_properties(properties.clone());
                 if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
@@ -2413,6 +2415,7 @@ impl WorkerState {
                         .blocks
                         .get(&id)
                         .unwrap_or_else(|| fatal(format!("update for unknown block {id}")));
+                    let properties = crypto::decode_properties(properties);
                     block.remote_operation(operation);
                     block.apply_properties(properties.clone());
                     if let Some(cached) = self.cached_blocks.write().get_mut(&id) {
@@ -2437,7 +2440,7 @@ impl WorkerState {
                         presence
                             .entry(id)
                             .or_default()
-                            .insert((client_id, presence_id), data);
+                            .insert((client_id, presence_id), crypto::decode(&data));
                     }
                     None => {
                         if let Some(entries) = presence.get_mut(&id) {
@@ -2450,6 +2453,7 @@ impl WorkerState {
                 }
             }
             ServerMessage::BlockPropertyUpdated { id, key, value } => {
+                let value = crypto::decode(&value);
                 if let Some(block) = self.blocks.get(&id) {
                     block.set_property(key, value.clone());
                 }
@@ -2462,6 +2466,7 @@ impl WorkerState {
                 list,
                 blocks,
             } => {
+                let blocks = decode_reference_properties(blocks);
                 self.cache_reference_blocks(&blocks);
                 let pending = self
                     .requests
@@ -2485,6 +2490,7 @@ impl WorkerState {
                 }
             }
             ServerMessage::ReferencesUpdated { list, blocks } => {
+                let blocks = decode_reference_properties(blocks);
                 self.cache_reference_blocks(&blocks);
                 if let Some(shared) = self.reference_lists.get(&list) {
                     *shared.blocks.write() = blocks;
@@ -2587,7 +2593,7 @@ impl WorkerState {
                     request_id,
                     id,
                     key,
-                    value,
+                    value: crypto::encode(&value),
                 });
             }
             DeferredRequest::SetPresence {
@@ -2601,7 +2607,7 @@ impl WorkerState {
                     request_id,
                     id,
                     presence_id,
-                    data,
+                    data: data.map(|data| crypto::encode(&data)),
                 });
             }
             DeferredRequest::ListReferences { list, completed } => {
@@ -3655,7 +3661,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             .and_then(Block::implicit_name);
         let mut properties = BTreeMap::new();
         properties::apply_implicit_name(&mut properties, implicit_name);
-        properties
+        crypto::encode_properties(&properties)
     }
 
     fn initial_dynamic_artifact(&self) -> bool {
@@ -3771,7 +3777,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
                 operation: crypto::encode(&serde_json::to_vec(&pending.operation).unwrap_or_else(
                     |error| fatal(format!("failed to serialize operation: {error}")),
                 )),
-                properties: pending.properties.clone(),
+                properties: crypto::encode_properties(&pending.properties),
                 dynamic_artifact: pending.dynamic_artifact,
                 references: pending.references.clone(),
             };
@@ -3923,6 +3929,16 @@ impl<B: Block> TypedBlock<B> {
         self.recompute_pending_references(state);
         self.rebuild_visible(state);
     }
+}
+
+fn decode_reference_properties(blocks: Vec<BlockReference>) -> Vec<BlockReference> {
+    blocks
+        .into_iter()
+        .map(|block| BlockReference {
+            properties: crypto::decode_properties(block.properties),
+            ..block
+        })
+        .collect()
 }
 
 fn normalized_references(mut references: Vec<Uuid>) -> Vec<Uuid> {

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
 use chacha20poly1305::{
@@ -5,6 +6,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use uuid::Uuid;
 
 use crate::fatal;
 
@@ -55,6 +57,20 @@ pub(crate) fn decode(encoded: &[u8]) -> Vec<u8> {
         .decrypt(Nonce::from_slice(nonce_bytes), ciphertext)
         .unwrap_or_else(|error| fatal(format!("failed to decrypt block data: {error}")));
     decompress(&compressed)
+}
+
+pub(crate) fn encode_properties(properties: &BTreeMap<Uuid, Vec<u8>>) -> BTreeMap<Uuid, Vec<u8>> {
+    properties
+        .iter()
+        .map(|(key, value)| (*key, encode(value)))
+        .collect()
+}
+
+pub(crate) fn decode_properties(properties: BTreeMap<Uuid, Vec<u8>>) -> BTreeMap<Uuid, Vec<u8>> {
+    properties
+        .into_iter()
+        .map(|(key, value)| (key, decode(&value)))
+        .collect()
 }
 
 #[cfg(test)]

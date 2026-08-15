@@ -30,10 +30,10 @@ impl Block for MetadataBlock {
 }
 
 fn name_property(value: &str) -> Vec<u8> {
-    properties::encode_name(&BlockName {
+    crypto::encode(&properties::encode_name(&BlockName {
         manual: false,
         value: value.to_owned(),
-    })
+    }))
 }
 
 fn cached_name(cache: &Arc<RwLock<HashMap<Uuid, CachedBlock>>>, id: Uuid) -> String {
