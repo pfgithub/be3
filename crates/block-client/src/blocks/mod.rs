@@ -14,6 +14,7 @@ pub mod map;
 pub mod pixel_art;
 pub mod pixel_ray_tracer;
 pub mod presentation;
+pub mod scene_3d;
 pub mod settings;
 pub mod text;
 pub mod version_control_data;

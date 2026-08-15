@@ -20,6 +20,7 @@ mod pixel_art;
 mod pixel_ray_tracer;
 mod presentation;
 mod reference_cache;
+mod scene_3d;
 mod settings;
 mod text;
 mod unsupported;
@@ -66,6 +67,7 @@ pub(super) fn embedded_editor_frame_size(intrinsic: egui::Vec2, scale: f32) -> e
 /// inside an editor.
 pub fn install_render_resources(creation_context: &eframe::CreationContext<'_>) {
     logic_grid::renderer::install(creation_context);
+    scene_3d::renderer::install(creation_context);
 }
 
 pub enum EditorAction {
@@ -1361,6 +1363,7 @@ impl EditorRegistry {
         registry.register_creatable::<pixel_art::PixelArtEditor>();
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<presentation::PresentationEditor>();
+        registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register_creatable::<text::TextEditor>();
         registry.register_creatable::<version_control_data::VersionControlDataEditor>();
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
