@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use block::{Block, BlockParent};
 use block_client::{
     blocks::version_control_data::{
@@ -13,8 +15,8 @@ use egui_material_icons::{
 };
 
 use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind,
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 640.0;
@@ -43,6 +45,14 @@ impl EditorKind for VersionControlDataEditor {
 
     fn open(_client: &BlockClient, block: BlockHandle<VersionControlData>) -> Self {
         Self::new(block)
+    }
+}
+
+impl CreatableEditor for VersionControlDataEditor {
+    fn create(client: &BlockClient) -> Self {
+        let author = client.account_id();
+        let time = unix_seconds_now();
+        Self::new(client.create_block(VersionControlData::new(author, time)))
     }
 }
 
@@ -241,6 +251,13 @@ impl BlockEditor for VersionControlDataEditor {
 
 pub(super) fn short_commit_id(id: &CommitId) -> String {
     id.as_str().chars().take(SHORT_ID_LEN).collect()
+}
+
+fn unix_seconds_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn short_author(author: uuid::Uuid) -> String {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use block::{BlockParent, BlockReference, BlockReferenceList};
+use block::{BlockReference, BlockReferenceList};
 use block_client::{
     blocks::version_control_data::{CommitId, VersionControlData},
     blocks::version_control_worktree::{VersionControlWorktree, VersionControlWorktreeOperation},
@@ -25,8 +25,8 @@ use crate::platform;
 
 use super::version_control_data::short_commit_id;
 use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind,
 };
 
 const DIRECT_EDITOR_WIDTH: f32 = 480.0;
@@ -42,19 +42,6 @@ impl EditorKind for VersionControlWorktreeEditor {
 
     fn open(client: &BlockClient, block: BlockHandle<VersionControlWorktree>) -> Self {
         Self::new(client, block)
-    }
-}
-
-impl CreatableEditor for VersionControlWorktreeEditor {
-    fn create(client: &BlockClient) -> Self {
-        let author = client.account_id();
-        let time = unix_seconds_now();
-        let data = client.create_block(VersionControlData::new(author, time));
-        let data_state = data.read().expect("just created");
-        let worktree = client.create_block(VersionControlWorktree::new(data.id(), &data_state));
-        drop(data_state);
-        data.set_parent(BlockParent::Uuid(worktree.id()));
-        Self::new(client, worktree)
     }
 }
 
