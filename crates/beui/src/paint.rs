@@ -48,5 +48,13 @@ pub(crate) fn paint(doc: &Document, painter: &Painter, rects: &HashMap<NodeId, R
                 paint(doc, painter, rects, child);
             }
         }
+        NodeKind::Shadow(shadow) => {
+            paint(doc, painter, rects, shadow.shadow_root);
+        }
+        NodeKind::Slot(slot) => {
+            if let Some(content) = slot.content {
+                paint(doc, painter, rects, content);
+            }
+        }
     }
 }

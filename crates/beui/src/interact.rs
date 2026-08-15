@@ -59,6 +59,12 @@ fn interact_node(
         NodeKind::Outline(outline) => {
             children.extend(outline.child);
         }
+        NodeKind::Shadow(shadow) => {
+            children.push(shadow.shadow_root);
+        }
+        NodeKind::Slot(slot) => {
+            children.extend(slot.content);
+        }
         NodeKind::Button(button) => {
             let hovered = pointer_pos.is_some_and(|pos| rect.contains(pos));
             if hovered && pressed_this_frame {

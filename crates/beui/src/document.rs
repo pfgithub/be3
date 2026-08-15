@@ -10,6 +10,7 @@ use crate::list::{Direction, ItemSize, ListItem, ListNode};
 use crate::node::{Arena, NodeId, NodeKind};
 use crate::outline::OutlineNode;
 use crate::paint;
+use crate::shadow::{ShadowNode, SlotNode};
 use crate::style::Style;
 use crate::text::TextNode;
 
@@ -72,6 +73,16 @@ impl Document {
         }))
     }
 
+    pub fn create_slot(&mut self) -> NodeId {
+        self.arena
+            .insert(NodeKind::Slot(SlotNode { content: None }))
+    }
+
+    pub fn create_shadow(&mut self, shadow_root: NodeId, slot: NodeId) -> NodeId {
+        self.arena
+            .insert(NodeKind::Shadow(ShadowNode { shadow_root, slot }))
+    }
+
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, size: ItemSize) {
         let NodeKind::List(list) = &mut self.arena.get_mut(parent).kind else {
             panic!("only List nodes can have children");
@@ -119,6 +130,17 @@ impl Document {
             panic!("node is not an Outline node");
         };
         outline.visible = visible;
+    }
+
+    pub fn set_shadow_child(&mut self, shadow: NodeId, child: NodeId) {
+        let NodeKind::Shadow(shadow) = &self.arena.get(shadow).kind else {
+            panic!("node is not a Shadow node");
+        };
+        let slot = shadow.slot;
+        let NodeKind::Slot(slot) = &mut self.arena.get_mut(slot).kind else {
+            panic!("shadow slot is not a Slot node");
+        };
+        slot.content = Some(child);
     }
 
     pub fn set_button_on_click(
@@ -171,6 +193,8 @@ impl Document {
             NodeKind::Button(button) => button.child.into_iter().collect(),
             NodeKind::Fill(fill) => fill.child.into_iter().collect(),
             NodeKind::Outline(outline) => outline.child.into_iter().collect(),
+            NodeKind::Shadow(shadow) => vec![shadow.shadow_root],
+            NodeKind::Slot(slot) => slot.content.into_iter().collect(),
             NodeKind::Text(_) => Vec::new(),
         };
         for child in children {
