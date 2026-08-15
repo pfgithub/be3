@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use block::{Block, BlockParent};
+use block::Block;
 use block_client::{
     blocks::version_control_data::{
         Commit, CommitId, VersionControlData, VersionControlDataOperation, MAIN_BRANCH,
