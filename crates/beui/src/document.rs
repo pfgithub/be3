@@ -4,6 +4,7 @@ use egui::{Color32, Context, Id, LayerId, Order, Rect};
 
 use crate::button::ButtonNode;
 use crate::fill::FillNode;
+use crate::interact;
 use crate::layout;
 use crate::list::{Direction, ItemSize, ListItem, ListNode};
 use crate::node::{Arena, NodeId, NodeKind};
@@ -202,23 +203,12 @@ impl Document {
         let mut rects = HashMap::new();
         layout::layout(self, &painter, root, rect, &mut rects);
 
-        let pressed_this_frame = ctx.input(|input| input.pointer.primary_pressed());
-        let mut focus_target = None;
-        paint::paint(
-            self,
-            ctx,
-            &painter,
-            &rects,
-            root,
-            pressed_this_frame,
-            &mut focus_target,
-        );
-        if pressed_this_frame {
-            self.update_focus(focus_target);
-        }
+        interact::interact(self, ctx, &rects, root);
+
+        paint::paint(self, &painter, &rects, root);
     }
 
-    fn update_focus(&mut self, new_focus: Option<NodeId>) {
+    pub(crate) fn update_focus(&mut self, new_focus: Option<NodeId>) {
         if new_focus == self.focused {
             return;
         }
