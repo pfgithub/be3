@@ -9,7 +9,6 @@ pub struct Style {
     pub button_fill: Color32,
     pub button_hover_fill: Color32,
     pub button_press_fill: Color32,
-    pub button_text_color: Color32,
     pub corner_radius: u8,
 }
 
@@ -23,7 +22,6 @@ impl Default for Style {
             button_fill: Color32::from_rgb(70, 120, 220),
             button_hover_fill: Color32::from_rgb(90, 140, 235),
             button_press_fill: Color32::from_rgb(50, 95, 190),
-            button_text_color: Color32::WHITE,
             corner_radius: 4,
         }
     }

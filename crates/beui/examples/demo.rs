@@ -24,8 +24,14 @@ impl DemoApp {
     fn new() -> Self {
         let mut document = Document::new();
 
-        let decrement_button = document.create_button("-");
-        let increment_button = document.create_button("+");
+        let decrement_button = document.create_button();
+        let decrement_label = document.create_text("-");
+        document.set_button_child(decrement_button, decrement_label);
+
+        let increment_button = document.create_button();
+        let increment_label = document.create_text("+");
+        document.set_button_child(increment_button, increment_label);
+
         let toolbar_label = document.create_text("beui demo");
         let toolbar = document.create_list(Direction::Horizontal);
         document.append_child(toolbar, decrement_button, ItemSize::Intrinsic);

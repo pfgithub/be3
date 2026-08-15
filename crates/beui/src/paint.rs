@@ -50,14 +50,11 @@ pub(crate) fn paint(
             } else {
                 style.button_fill
             };
+            let child = button.child;
             painter.rect_filled(rect, style.corner_radius, fill);
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                &button.label,
-                FontId::proportional(style.font_size),
-                style.button_text_color,
-            );
+            if let Some(child) = child {
+                paint(doc, ctx, painter, rects, child);
+            }
         }
     }
 }

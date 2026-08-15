@@ -48,9 +48,8 @@ impl Document {
         }))
     }
 
-    pub fn create_button(&mut self, label: impl Into<String>) -> NodeId {
-        self.arena
-            .insert(NodeKind::Button(ButtonNode::new(label.into())))
+    pub fn create_button(&mut self) -> NodeId {
+        self.arena.insert(NodeKind::Button(ButtonNode::new()))
     }
 
     pub fn create_text(&mut self, content: impl Into<String>) -> NodeId {
@@ -73,10 +72,18 @@ impl Document {
         list.items.retain(|item| item.child != child);
     }
 
+    pub fn set_button_child(&mut self, button: NodeId, child: NodeId) {
+        let NodeKind::Button(button) = &mut self.arena.get_mut(button).kind else {
+            panic!("node is not a Button node");
+        };
+        button.child = Some(child);
+    }
+
     pub fn remove_node(&mut self, id: NodeId) {
         let children: Vec<NodeId> = match &self.arena.get(id).kind {
             NodeKind::List(list) => list.items.iter().map(|item| item.child).collect(),
-            NodeKind::Button(_) | NodeKind::Text(_) => Vec::new(),
+            NodeKind::Button(button) => button.child.into_iter().collect(),
+            NodeKind::Text(_) => Vec::new(),
         };
         for child in children {
             self.remove_node(child);
@@ -99,20 +106,6 @@ impl Document {
             panic!("node is not a Text node");
         };
         &text.content
-    }
-
-    pub fn set_button_label(&mut self, id: NodeId, label: impl Into<String>) {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(id).kind else {
-            panic!("node is not a Button node");
-        };
-        button.label = label.into();
-    }
-
-    pub fn button_label(&self, id: NodeId) -> &str {
-        let NodeKind::Button(button) = &self.arena.get(id).kind else {
-            panic!("node is not a Button node");
-        };
-        &button.label
     }
 
     pub fn was_clicked(&mut self, id: NodeId) -> bool {

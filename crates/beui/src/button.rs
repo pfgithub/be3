@@ -1,13 +1,15 @@
+use crate::node::NodeId;
+
 pub(crate) struct ButtonNode {
-    pub(crate) label: String,
+    pub(crate) child: Option<NodeId>,
     pub(crate) armed: bool,
     pub(crate) clicked: bool,
 }
 
 impl ButtonNode {
-    pub(crate) fn new(label: String) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            label,
+            child: None,
             armed: false,
             clicked: false,
         }

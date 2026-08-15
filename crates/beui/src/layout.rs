@@ -11,7 +11,11 @@ pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId) -> Vec2 {
     match &doc.arena.get(id).kind {
         NodeKind::Text(text) => text_size(painter, &doc.style, &text.content),
         NodeKind::Button(button) => {
-            text_size(painter, &doc.style, &button.label) + Vec2::splat(doc.style.padding * 2.0)
+            let inner = match button.child {
+                Some(child) => measure(doc, painter, child),
+                None => Vec2::ZERO,
+            };
+            inner + Vec2::splat(doc.style.padding * 2.0)
         }
         NodeKind::List(list) => {
             let horizontal = list.direction == Direction::Horizontal;
@@ -52,8 +56,15 @@ pub(crate) fn layout(
     out: &mut HashMap<NodeId, Rect>,
 ) {
     out.insert(id, rect);
-    let NodeKind::List(list) = &doc.arena.get(id).kind else {
-        return;
+    let list = match &doc.arena.get(id).kind {
+        NodeKind::List(list) => list,
+        NodeKind::Button(button) => {
+            if let Some(child) = button.child {
+                layout(doc, painter, child, rect.shrink(doc.style.padding), out);
+            }
+            return;
+        }
+        NodeKind::Text(_) => return,
     };
     let horizontal = list.direction == Direction::Horizontal;
     let available_main = if horizontal {
