@@ -1,4 +1,5 @@
 mod font;
+mod hex;
 #[cfg(test)]
 mod tests;
 mod timings;
@@ -26,11 +27,11 @@ use eframe::egui::{
 };
 use egui_material_icons::{
     icons::{
-        ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DESCRIPTION,
-        ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED,
-        ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN,
-        ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP, ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH,
-        ICON_TITLE,
+        ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DATA_ARRAY,
+        ICON_DESCRIPTION, ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC,
+        ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH,
+        ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP,
+        ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH, ICON_TITLE,
     },
     MaterialIcon,
 };
@@ -134,6 +135,10 @@ pub(super) struct TextEditor {
     pending_presence_reveal: Option<ClientId>,
     reference_cache: EmbedReferenceCache,
     pending_embeds: Vec<PendingEmbed>,
+    hex_view: bool,
+    hex_insert_mode: bool,
+    hex_pending_nibble: Option<u8>,
+    hex_selection_anchor: Option<usize>,
 }
 
 struct PendingEmbed {
@@ -283,6 +288,10 @@ impl TextEditor {
             pending_presence_reveal: None,
             reference_cache: EmbedReferenceCache::default(),
             pending_embeds: Vec::new(),
+            hex_view: false,
+            hex_insert_mode: false,
+            hex_pending_nibble: None,
+            hex_selection_anchor: None,
         }
     }
 
@@ -291,6 +300,29 @@ impl TextEditor {
         let mut language = previous;
         let mut indentation = self.core.indentation();
         ui.horizontal_wrapped(|ui| {
+            if ui
+                .selectable_label(self.hex_view, ICON_DATA_ARRAY)
+                .on_hover_text(if self.hex_view {
+                    "Switch to text view"
+                } else {
+                    "Switch to hex view"
+                })
+                .clicked()
+            {
+                self.toggle_hex_view();
+            }
+            if self.hex_view {
+                ui.separator();
+                if ui
+                    .selectable_label(self.hex_insert_mode, "Insert")
+                    .on_hover_text("Toggle insert/overwrite mode")
+                    .clicked()
+                {
+                    self.hex_insert_mode = !self.hex_insert_mode;
+                    self.hex_pending_nibble = None;
+                }
+                return;
+            }
             ui.label("Language:");
             egui::ComboBox::from_id_salt(("text-editor-language", self.block.id()))
                 .selected_text(previous.label())
@@ -410,6 +442,16 @@ impl TextEditor {
         if indentation != self.core.indentation() {
             self.core
                 .execute_command(EditorCommand::SetIndentation(indentation));
+        }
+    }
+
+    fn toggle_hex_view(&mut self) {
+        self.hex_view = !self.hex_view;
+        self.hex_pending_nibble = None;
+        self.hex_selection_anchor = None;
+        self.focused_embed = None;
+        if self.hex_view {
+            self.close_find();
         }
     }
 
@@ -1736,6 +1778,10 @@ impl TextEditor {
     }
 
     fn direct_editor_size(&mut self, editors: &mut EditorAccess<'_>, width: f32) -> Option<Vec2> {
+        if self.hex_view {
+            let len = self.block.read()?.len();
+            return Some(hex::intrinsic_size(len, width));
+        }
         let bytes = self.block.read()?.bytes().to_vec();
         let highlight = self.core.highlight();
         let embeds = self.resolve_embeds(&bytes, editors);
@@ -1910,6 +1956,9 @@ impl BlockEditor for TextEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        if self.hex_view {
+            return self.hex_direct_editor_ui(ui);
+        }
         let _performance_group =
             performance::GroupGuard::new(format!("Text editor ({})", self.block.id()));
         let frame_start = Instant::now();
