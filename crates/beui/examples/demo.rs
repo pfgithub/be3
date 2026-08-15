@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use beui::{Direction, Document, ItemSize, NodeId};
 use eframe::egui;
 use egui::Color32;
@@ -21,28 +24,61 @@ struct DemoApp {
     counter: i32,
 }
 
+fn button_fill_color(hovered: bool, active: bool) -> Color32 {
+    if active {
+        Color32::from_rgb(50, 95, 190)
+    } else if hovered {
+        Color32::from_rgb(90, 140, 235)
+    } else {
+        Color32::from_rgb(70, 120, 220)
+    }
+}
+
+fn create_styled_button(document: &mut Document, label: &str) -> (NodeId, NodeId) {
+    let button = document.create_button();
+    let text = document.create_text(label);
+    document.set_button_child(button, text);
+
+    let fill = document.create_fill(button_fill_color(false, false));
+    document.set_fill_child(fill, button);
+
+    let outline = document.create_outline(Color32::from_rgb(255, 190, 60), 2.0);
+    document.set_outline_child(outline, fill);
+
+    let state = Rc::new(Cell::new((false, false)));
+
+    let hover_state = state.clone();
+    document.set_button_on_hover_change(button, move |doc, hovered| {
+        let active = hover_state.get().1;
+        hover_state.set((hovered, active));
+        doc.set_fill_color(fill, button_fill_color(hovered, active));
+    });
+
+    let active_state = state.clone();
+    document.set_button_on_active_change(button, move |doc, active| {
+        let hovered = active_state.get().0;
+        active_state.set((hovered, active));
+        doc.set_fill_color(fill, button_fill_color(hovered, active));
+    });
+
+    document.set_button_on_focus_change(button, move |doc, focused| {
+        doc.set_outline_visible(outline, focused);
+    });
+
+    (outline, button)
+}
+
 impl DemoApp {
     fn new() -> Self {
         let mut document = Document::new();
 
-        let button_fill = Color32::from_rgb(70, 120, 220);
-
-        let decrement_button = document.create_button();
-        let decrement_label = document.create_text("-");
-        document.set_button_child(decrement_button, decrement_label);
-        let decrement_fill = document.create_fill(button_fill);
-        document.set_fill_child(decrement_fill, decrement_button);
-
-        let increment_button = document.create_button();
-        let increment_label = document.create_text("+");
-        document.set_button_child(increment_button, increment_label);
-        let increment_fill = document.create_fill(button_fill);
-        document.set_fill_child(increment_fill, increment_button);
+        let (decrement_outline, decrement_button) = create_styled_button(&mut document, "-");
+        let (increment_outline, increment_button) = create_styled_button(&mut document, "+");
 
         let toolbar_label = document.create_text("beui demo");
         let toolbar = document.create_list(Direction::Horizontal);
-        document.append_child(toolbar, decrement_fill, ItemSize::Intrinsic);
-        document.append_child(toolbar, increment_fill, ItemSize::Intrinsic);
+        document.append_child(toolbar, decrement_outline, ItemSize::Intrinsic);
+        document.append_child(toolbar, increment_outline, ItemSize::Intrinsic);
         document.append_child(toolbar, toolbar_label, ItemSize::Percent(100.0));
 
         let counter_text = document.create_text("Count: 0");

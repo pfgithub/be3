@@ -21,6 +21,10 @@ pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId) -> Vec2 {
             };
             inner + Vec2::splat(doc.style.padding * 2.0)
         }
+        NodeKind::Outline(outline) => match outline.child {
+            Some(child) => measure(doc, painter, child),
+            None => Vec2::ZERO,
+        },
         NodeKind::List(list) => {
             let horizontal = list.direction == Direction::Horizontal;
             let mut main = 0.0f32;
@@ -71,6 +75,12 @@ pub(crate) fn layout(
         NodeKind::Fill(fill) => {
             if let Some(child) = fill.child {
                 layout(doc, painter, child, rect.shrink(doc.style.padding), out);
+            }
+            return;
+        }
+        NodeKind::Outline(outline) => {
+            if let Some(child) = outline.child {
+                layout(doc, painter, child, rect, out);
             }
             return;
         }

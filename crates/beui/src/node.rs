@@ -1,6 +1,7 @@
 use crate::button::ButtonNode;
 use crate::fill::FillNode;
 use crate::list::ListNode;
+use crate::outline::OutlineNode;
 use crate::text::TextNode;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -14,6 +15,7 @@ pub(crate) enum NodeKind {
     List(ListNode),
     Button(ButtonNode),
     Fill(FillNode),
+    Outline(OutlineNode),
     Text(TextNode),
 }
 

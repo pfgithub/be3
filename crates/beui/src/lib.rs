@@ -4,6 +4,7 @@ mod fill;
 mod layout;
 mod list;
 mod node;
+mod outline;
 mod paint;
 mod style;
 mod text;
