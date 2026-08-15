@@ -7,9 +7,8 @@ use std::collections::HashMap;
 use block::{BlockParent, BlockReference, BlockReferenceList};
 use block_client::{
     block_ref::BlockRef,
-    blocks::{
-        video::{Video, VideoAttachment, VideoClip, VideoFrameRate, VideoOperation},
-        workspace_index::BlockEntry,
+    blocks::video::{
+        Video, VideoAttachment, VideoClip, VideoFrameRate, VideoOperation, DEFAULT_CLIP_SECONDS,
     },
     BlockClient, BlockHandle, ReferenceList,
 };
@@ -39,8 +38,6 @@ const MIN_TIMELINE_HEIGHT: f32 = 176.0;
 const MAX_TIMELINE_HEIGHT: f32 = 380.0;
 const DEFAULT_EDITOR_SIZE: Vec2 = egui::vec2(1000.0, 640.0);
 const DEFAULT_PIXELS_PER_FRAME: f32 = 4.0;
-/// How long a clip is when it is first added.
-const DEFAULT_CLIP_SECONDS: f64 = 5.0;
 const PANEL_GAP: f32 = 6.0;
 /// Height of the playback controls strip under the preview panel.
 const PLAYBACK_BAR_HEIGHT: f32 = 30.0;
@@ -469,54 +466,6 @@ fn frame_rate_label(frame_rate: VideoFrameRate) -> String {
 impl BlockEditor for VideoEditor {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
-    }
-
-    fn add_child(&self, entry: BlockEntry) -> Option<bool> {
-        let video = self.block.read()?;
-        let length = video.frame_rate().frames(DEFAULT_CLIP_SECONDS).max(1);
-        let index = video.children(None).len();
-        drop(video);
-        self.block.operate(VideoOperation::InsertClip {
-            clip: VideoClip::new(BlockRef::Direct(entry.id), length),
-            index,
-        });
-        Some(true)
-    }
-
-    fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
-        let reference = BlockRef::Direct(entry.id);
-        let ids = self
-            .block
-            .read()?
-            .clips()
-            .iter()
-            .filter(|clip| clip.block_id == reference)
-            .map(|clip| clip.id)
-            .collect::<Vec<_>>();
-        if !ids.is_empty() {
-            self.block.operate(VideoOperation::RemoveClips { ids });
-        }
-        Some(true)
-    }
-
-    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
-        let old = BlockRef::Direct(old);
-        let new_reference = BlockRef::Direct(new.id);
-        let clips = self
-            .block
-            .read()?
-            .clips()
-            .iter()
-            .filter(|clip| clip.block_id == old)
-            .map(|clip| VideoClip {
-                block_id: new_reference,
-                ..clip.clone()
-            })
-            .collect::<Vec<_>>();
-        if !clips.is_empty() {
-            self.block.operate(VideoOperation::UpdateClips { clips });
-        }
-        Some(true)
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {

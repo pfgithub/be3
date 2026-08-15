@@ -238,6 +238,24 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
     fn references_for_workspace(&self, _workspace_id: Uuid) -> Vec<Uuid> {
         self.references()
     }
+
+    /// Operations that add `block_id` as a child, or `None` if this block
+    /// type does not support child blocks.
+    fn add_child(&self, _block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        None
+    }
+
+    /// Operations that remove `block_id` as a child, or `None` if this block
+    /// type does not support child blocks.
+    fn delete_child(&self, _block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        None
+    }
+
+    /// Operations that replace child `old` with `new`, or `None` if this
+    /// block type does not support child blocks.
+    fn replace_child(&self, _old: Uuid, _new: Uuid) -> Option<Vec<Self::Operation>> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

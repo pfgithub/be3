@@ -155,7 +155,7 @@ When the block references other blocks:
 
 ## 5. Support child blocks when applicable
 
-Set `CAN_ADD_CHILD` or `CAN_DELETE_CHILD` to `true` only when the editor implements the matching `add_child` or `delete_child` method. These methods update the parent block's references and return `Some(true)` when the Files sidebar may complete the parent transfer.
+Implement `add_child`, `delete_child`, and `replace_child` on the block type itself (see the [block guide](../../../block-client/src/blocks/guide.md)), not on the editor. `BlockEditor`'s versions are plain passthroughs to `self.block()`; set `CAN_ADD_CHILD` or `CAN_DELETE_CHILD` to `true` only when the block type overrides the matching method. They return `Some(true)` when the Files sidebar may complete the parent transfer.
 
 Use a `BlockPicker` for child creation and existing-block links. Show its menu where appropriate:
 

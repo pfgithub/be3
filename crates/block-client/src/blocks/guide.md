@@ -77,6 +77,19 @@ Return each referenced block once unless reference multiplicity has meaning to t
 
 When an editor creates a referenced child, it must update the parent block and then call `set_parent` on the child.
 
+If the block type has a natural notion of a "child" reference that the Files sidebar can add, remove, or swap by drag-and-drop, override `add_child`, `delete_child`, and `replace_child` from the `Block` trait. Each returns the operations needed (an empty `Vec` if the child is already in the requested state), or `None` if the block type doesn't support the operation:
+
+```rust
+fn add_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+    if self.items.iter().any(|item| item.block_id == block_id) {
+        return Some(Vec::new());
+    }
+    Some(vec![MyBlockOperation::AddItem { block_id }])
+}
+```
+
+`BlockHandleAccess` reads the block, calls the override, and applies the resulting operations, so the corresponding `BlockEditor` method never needs to be implemented - its default already forwards to `self.block()`.
+
 ## 3. Choose synchronization and history behavior
 
 Blocks are non-CRDT by default. Set `const CRDT: bool = true` only when operations can be transformed or safely merged under concurrent editing. Implement `transform_operation` when local operations need rebasing over remote operations.

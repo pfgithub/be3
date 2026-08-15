@@ -11,6 +11,9 @@ use crate::block_ref::BlockRef;
 
 const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
 
+/// How long a clip is when it is first added, in seconds.
+pub const DEFAULT_CLIP_SECONDS: f64 = 5.0;
+
 /// The longest a single clip may run, in frames. About nine hours at thirty
 /// frames a second, which keeps timeline arithmetic far away from overflowing.
 pub const MAX_CLIP_LENGTH: u64 = 1_000_000;
@@ -412,6 +415,47 @@ impl Block for Video {
             .filter_map(|clip| clip.block_id.as_direct())
             .filter(|block_id| seen.insert(*block_id))
             .collect()
+    }
+
+    fn add_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let length = self.frame_rate().frames(DEFAULT_CLIP_SECONDS).max(1);
+        let index = self.children(None).len();
+        Some(vec![VideoOperation::InsertClip {
+            clip: VideoClip::new(BlockRef::Direct(block_id), length),
+            index,
+        }])
+    }
+
+    fn delete_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let reference = BlockRef::Direct(block_id);
+        let ids = self
+            .clips()
+            .iter()
+            .filter(|clip| clip.block_id == reference)
+            .map(|clip| clip.id)
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return Some(Vec::new());
+        }
+        Some(vec![VideoOperation::RemoveClips { ids }])
+    }
+
+    fn replace_child(&self, old: Uuid, new: Uuid) -> Option<Vec<Self::Operation>> {
+        let old = BlockRef::Direct(old);
+        let new_reference = BlockRef::Direct(new);
+        let clips = self
+            .clips()
+            .iter()
+            .filter(|clip| clip.block_id == old)
+            .map(|clip| VideoClip {
+                block_id: new_reference,
+                ..clip.clone()
+            })
+            .collect::<Vec<_>>();
+        if clips.is_empty() {
+            return Some(Vec::new());
+        }
+        Some(vec![VideoOperation::UpdateClips { clips }])
     }
 }
 

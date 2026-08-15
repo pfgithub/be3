@@ -5,8 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use block::{BlockReference, BlockReferenceList};
 use block_client::{
     blocks::version_control_data::{CommitId, VersionControlData},
-    blocks::version_control_worktree::{VersionControlWorktree, VersionControlWorktreeOperation},
-    blocks::workspace_index::BlockEntry,
+    blocks::version_control_worktree::VersionControlWorktree,
     version_control_checkout::{checkout_worktree, worktree_is_clean, CheckoutOutcome},
     version_control_commit::{commit_worktree, CommitOutcome},
     BlockClient, BlockHandle, ReferenceList,
@@ -379,31 +378,6 @@ impl VersionControlWorktreeEditor {
 impl BlockEditor for VersionControlWorktreeEditor {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
-    }
-
-    fn add_child(&self, entry: BlockEntry) -> Option<bool> {
-        let worktree = self.block.read()?;
-        let already_member = worktree.eternal_id_for_member(entry.id).is_some();
-        drop(worktree);
-        if !already_member {
-            self.block
-                .operate(VersionControlWorktreeOperation::AddMember {
-                    live_id: entry.id,
-                    eternal_id: Uuid::new_v4(),
-                });
-        }
-        Some(true)
-    }
-
-    fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
-        let worktree = self.block.read()?;
-        let is_member = worktree.eternal_id_for_member(entry.id).is_some();
-        drop(worktree);
-        if is_member {
-            self.block
-                .operate(VersionControlWorktreeOperation::RemoveMember { live_id: entry.id });
-        }
-        Some(true)
     }
 
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {

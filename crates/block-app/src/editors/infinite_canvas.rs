@@ -20,7 +20,6 @@ use block_client::{
             CanvasLayerMove, CanvasPoint, CanvasPreviewRegion, CanvasTextAlign, CanvasTextStyle,
             CanvasTextWeight, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
         },
-        workspace_index::BlockEntry,
     },
     presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,

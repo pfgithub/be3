@@ -6,7 +6,6 @@ use block_client::{
     blocks::{
         infinite_canvas::InfiniteCanvas,
         presentation::{Presentation, PresentationOperation, PresentationSlide},
-        workspace_index::BlockEntry,
     },
     BlockClient, BlockHandle, ReferenceList,
 };
@@ -568,49 +567,6 @@ impl PresentationEditor {
 impl BlockEditor for PresentationEditor {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
-    }
-
-    fn add_child(&self, entry: BlockEntry) -> Option<bool> {
-        let index = self.block.read()?.slides().len();
-        self.block.operate(PresentationOperation::Insert {
-            slide: PresentationSlide {
-                id: Uuid::new_v4(),
-                block_id: BlockRef::Direct(entry.id),
-            },
-            index,
-        });
-        Some(true)
-    }
-
-    fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
-        let reference = BlockRef::Direct(entry.id);
-        let slides = self.block.read()?.slides().to_vec();
-        let operations = slides
-            .iter()
-            .filter(|slide| slide.block_id == reference)
-            .map(|slide| PresentationOperation::Remove { slide_id: slide.id })
-            .collect::<Vec<_>>();
-        if !operations.is_empty() {
-            self.block.operate_grouped(operations);
-        }
-        Some(true)
-    }
-
-    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
-        let old = BlockRef::Direct(old);
-        let slides = self.block.read()?.slides().to_vec();
-        let operations = slides
-            .iter()
-            .filter(|slide| slide.block_id == old)
-            .map(|slide| PresentationOperation::SetBlockId {
-                slide_id: slide.id,
-                block_id: BlockRef::Direct(new.id),
-            })
-            .collect::<Vec<_>>();
-        if !operations.is_empty() {
-            self.block.operate_grouped(operations);
-        }
-        Some(true)
     }
 
     fn set_tab_active(&mut self, active: bool) {

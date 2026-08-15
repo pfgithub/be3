@@ -129,6 +129,41 @@ impl Block for Presentation {
             .filter(|block_id| seen.insert(*block_id))
             .collect()
     }
+
+    fn add_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        Some(vec![PresentationOperation::Insert {
+            slide: PresentationSlide {
+                id: Uuid::new_v4(),
+                block_id: BlockRef::Direct(block_id),
+            },
+            index: self.slides.len(),
+        }])
+    }
+
+    fn delete_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let reference = BlockRef::Direct(block_id);
+        Some(
+            self.slides
+                .iter()
+                .filter(|slide| slide.block_id == reference)
+                .map(|slide| PresentationOperation::Remove { slide_id: slide.id })
+                .collect(),
+        )
+    }
+
+    fn replace_child(&self, old: Uuid, new: Uuid) -> Option<Vec<Self::Operation>> {
+        let old = BlockRef::Direct(old);
+        Some(
+            self.slides
+                .iter()
+                .filter(|slide| slide.block_id == old)
+                .map(|slide| PresentationOperation::SetBlockId {
+                    slide_id: slide.id,
+                    block_id: BlockRef::Direct(new),
+                })
+                .collect(),
+        )
+    }
 }
 
 impl BlockHistory<Presentation> for PresentationHistory {

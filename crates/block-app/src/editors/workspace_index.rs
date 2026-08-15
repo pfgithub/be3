@@ -3,7 +3,7 @@ use std::{cmp::Ordering, collections::HashMap};
 use block::{BlockReference, BlockReferenceList};
 use block_client::{
     block_ref::BlockRef,
-    blocks::workspace_index::{BlockEntry, WorkspaceIndex, WorkspaceIndexOperation},
+    blocks::workspace_index::{WorkspaceIndex, WorkspaceIndexOperation},
     BlockClient, BlockHandle, ReferenceList,
 };
 use eframe::egui;
@@ -446,42 +446,6 @@ fn grid_tile(
 impl BlockEditor for WorkspaceIndexEditor {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
-    }
-
-    fn add_child(&self, entry: BlockEntry) -> Option<bool> {
-        let reference = BlockRef::Direct(entry.id);
-        let index = self.block.read()?;
-        let already_present = index.entries().contains(&reference);
-        drop(index);
-        if !already_present {
-            self.block.operate(WorkspaceIndexOperation::Add(reference));
-        }
-        Some(true)
-    }
-
-    fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
-        let reference = BlockRef::Direct(entry.id);
-        let index = self.block.read()?;
-        let present = index.entries().contains(&reference);
-        drop(index);
-        if present {
-            self.block
-                .operate(WorkspaceIndexOperation::Remove(reference));
-        }
-        Some(true)
-    }
-
-    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
-        let old = BlockRef::Direct(old);
-        let new = BlockRef::Direct(new.id);
-        let index = self.block.read()?;
-        let present = index.entries().contains(&old);
-        drop(index);
-        if present {
-            self.block
-                .operate(WorkspaceIndexOperation::Replace { old, new });
-        }
-        Some(true)
     }
 
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {

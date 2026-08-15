@@ -95,6 +95,25 @@ impl Block for VersionControlWorktree {
             }
         }
     }
+
+    fn add_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        if self.eternal_id_for_member(block_id).is_some() {
+            return Some(Vec::new());
+        }
+        Some(vec![VersionControlWorktreeOperation::AddMember {
+            live_id: block_id,
+            eternal_id: Uuid::new_v4(),
+        }])
+    }
+
+    fn delete_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        if self.eternal_id_for_member(block_id).is_none() {
+            return Some(Vec::new());
+        }
+        Some(vec![VersionControlWorktreeOperation::RemoveMember {
+            live_id: block_id,
+        }])
+    }
 }
 
 pub struct VersionControlWorktreeMembership;

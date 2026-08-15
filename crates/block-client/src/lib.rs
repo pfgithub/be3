@@ -1399,6 +1399,21 @@ pub trait BlockHandleAccess {
     fn block_name(&self) -> Option<properties::BlockName>;
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
+    /// Adds `block_id` as a child, or `None` if the block isn't loaded yet or
+    /// this block type doesn't support child blocks.
+    fn add_child(&self, _block_id: Uuid) -> Option<bool> {
+        None
+    }
+    /// Removes `block_id` as a child, or `None` if the block isn't loaded yet
+    /// or this block type doesn't support child blocks.
+    fn delete_child(&self, _block_id: Uuid) -> Option<bool> {
+        None
+    }
+    /// Replaces child `old` with `new`, or `None` if the block isn't loaded
+    /// yet or this block type doesn't support child blocks.
+    fn replace_child(&self, _old: Uuid, _new: Uuid) -> Option<bool> {
+        None
+    }
     fn history(&self) -> Option<&dyn BlockHistoryHandle>;
     /// Creates a brand-new, independent block of the same type, seeded with
     /// this block's current live value. The copy starts unparented with its
@@ -1440,6 +1455,33 @@ impl<B: Block> BlockHandleAccess for BlockHandle<B> {
 
     fn set_parent(&self, parent: BlockParent) {
         BlockHandle::set_parent(self, parent);
+    }
+
+    fn add_child(&self, block_id: Uuid) -> Option<bool> {
+        let operations = self.read()?.add_child(block_id)?;
+        if !operations.is_empty() {
+            self.finish_history_group();
+            self.operate_grouped(operations);
+        }
+        Some(true)
+    }
+
+    fn delete_child(&self, block_id: Uuid) -> Option<bool> {
+        let operations = self.read()?.delete_child(block_id)?;
+        if !operations.is_empty() {
+            self.finish_history_group();
+            self.operate_grouped(operations);
+        }
+        Some(true)
+    }
+
+    fn replace_child(&self, old: Uuid, new: Uuid) -> Option<bool> {
+        let operations = self.read()?.replace_child(old, new)?;
+        if !operations.is_empty() {
+            self.finish_history_group();
+            self.operate_grouped(operations);
+        }
+        Some(true)
     }
 
     fn history(&self) -> Option<&dyn BlockHistoryHandle> {

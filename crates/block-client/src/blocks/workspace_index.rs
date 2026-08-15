@@ -63,6 +63,31 @@ impl Block for WorkspaceIndex {
             .filter_map(BlockRef::as_direct)
             .collect()
     }
+
+    fn add_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let reference = BlockRef::Direct(block_id);
+        if self.entries.contains(&reference) {
+            return Some(Vec::new());
+        }
+        Some(vec![WorkspaceIndexOperation::Add(reference)])
+    }
+
+    fn delete_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let reference = BlockRef::Direct(block_id);
+        if !self.entries.contains(&reference) {
+            return Some(Vec::new());
+        }
+        Some(vec![WorkspaceIndexOperation::Remove(reference)])
+    }
+
+    fn replace_child(&self, old: Uuid, new: Uuid) -> Option<Vec<Self::Operation>> {
+        let old = BlockRef::Direct(old);
+        let new = BlockRef::Direct(new);
+        if !self.entries.contains(&old) {
+            return Some(Vec::new());
+        }
+        Some(vec![WorkspaceIndexOperation::Replace { old, new }])
+    }
 }
 
 #[cfg(test)]

@@ -195,6 +195,49 @@ impl Block for Map {
             .filter(|block_id| seen.insert(*block_id))
             .collect()
     }
+
+    fn add_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let reference = BlockRef::Direct(block_id);
+        let already_placed = self.points.iter().any(|point| point.block_id == reference);
+        if already_placed {
+            return Some(Vec::new());
+        }
+        Some(vec![MapOperation::AddPoint {
+            point: MapPoint::new(reference, self.displayed_region().center()),
+        }])
+    }
+
+    fn delete_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let reference = BlockRef::Direct(block_id);
+        let ids = self
+            .points
+            .iter()
+            .filter(|point| point.block_id == reference)
+            .map(|point| point.id)
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return Some(Vec::new());
+        }
+        Some(vec![MapOperation::RemovePoints { ids }])
+    }
+
+    fn replace_child(&self, old: Uuid, new: Uuid) -> Option<Vec<Self::Operation>> {
+        let old = BlockRef::Direct(old);
+        let new_reference = BlockRef::Direct(new);
+        let points = self
+            .points
+            .iter()
+            .filter(|point| point.block_id == old)
+            .map(|point| MapPoint {
+                block_id: new_reference,
+                ..*point
+            })
+            .collect::<Vec<_>>();
+        if points.is_empty() {
+            return Some(Vec::new());
+        }
+        Some(vec![MapOperation::UpdatePoints { points }])
+    }
 }
 
 fn normalized_point(mut point: MapPoint) -> MapPoint {

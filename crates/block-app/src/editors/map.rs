@@ -19,7 +19,6 @@ use block_client::{
     blocks::{
         image::Image as ImageBlock,
         map::{Map, MapColor, MapCoordinate, MapOperation, MapPoint, MapRegion, MAX_LATITUDE},
-        workspace_index::BlockEntry,
     },
     BlockClient, BlockHandle, ReferenceList,
 };
@@ -781,58 +780,6 @@ fn draw_region_outline(painter: &egui::Painter, rect: Rect) {
 impl BlockEditor for MapEditor {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
-    }
-
-    fn add_child(&self, entry: BlockEntry) -> Option<bool> {
-        let reference = BlockRef::Direct(entry.id);
-        let map = self.block.read()?;
-        let already_placed = map.points().iter().any(|point| point.block_id == reference);
-        drop(map);
-        if !already_placed {
-            self.block.finish_history_group();
-            self.block.operate(MapOperation::AddPoint {
-                point: MapPoint::new(reference, self.view_center.get()),
-            });
-        }
-        Some(true)
-    }
-
-    fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
-        let reference = BlockRef::Direct(entry.id);
-        let map = self.block.read()?;
-        let ids = map
-            .points()
-            .iter()
-            .filter(|point| point.block_id == reference)
-            .map(|point| point.id)
-            .collect::<Vec<_>>();
-        drop(map);
-        if !ids.is_empty() {
-            self.block.finish_history_group();
-            self.block.operate(MapOperation::RemovePoints { ids });
-        }
-        Some(true)
-    }
-
-    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
-        let old = BlockRef::Direct(old);
-        let new_reference = BlockRef::Direct(new.id);
-        let map = self.block.read()?;
-        let points = map
-            .points()
-            .iter()
-            .filter(|point| point.block_id == old)
-            .map(|point| MapPoint {
-                block_id: new_reference,
-                ..*point
-            })
-            .collect::<Vec<_>>();
-        drop(map);
-        if !points.is_empty() {
-            self.block.finish_history_group();
-            self.block.operate(MapOperation::UpdatePoints { points });
-        }
-        Some(true)
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {

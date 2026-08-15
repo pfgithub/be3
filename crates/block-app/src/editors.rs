@@ -732,14 +732,14 @@ pub trait BlockEditor {
     fn set_parent(&self, parent: BlockParent) {
         self.block().set_parent(parent);
     }
-    fn add_child(&self, _entry: BlockEntry) -> Option<bool> {
-        None
+    fn add_child(&self, entry: BlockEntry) -> Option<bool> {
+        self.block().add_child(entry.id)
     }
-    fn delete_child(&self, _entry: BlockEntry) -> Option<bool> {
-        None
+    fn delete_child(&self, entry: BlockEntry) -> Option<bool> {
+        self.block().delete_child(entry.id)
     }
-    fn replace_child(&self, _old: Uuid, _new: BlockEntry) -> Option<bool> {
-        None
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        self.block().replace_child(old, new.id)
     }
     fn update(&mut self, _frame: &eframe::Frame) {}
     fn finish_frame(&mut self) {}

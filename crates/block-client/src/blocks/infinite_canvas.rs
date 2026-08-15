@@ -363,6 +363,36 @@ impl Block for InfiniteCanvas {
         references.retain(|reference| seen.insert(*reference));
         references
     }
+
+    fn replace_child(&self, old: Uuid, new: Uuid) -> Option<Vec<Self::Operation>> {
+        let old = BlockRef::Direct(old);
+        let new_reference = BlockRef::Direct(new);
+        let entities = self
+            .entities
+            .iter()
+            .filter_map(|entity| match &entity.kind {
+                CanvasEntityKind::Block { block_id }
+                | CanvasEntityKind::DirectEditor { block_id, .. }
+                    if *block_id == old =>
+                {
+                    let mut entity = entity.clone();
+                    match &mut entity.kind {
+                        CanvasEntityKind::Block { block_id }
+                        | CanvasEntityKind::DirectEditor { block_id, .. } => {
+                            *block_id = new_reference;
+                        }
+                        _ => unreachable!(),
+                    }
+                    Some(entity)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if entities.is_empty() {
+            return Some(Vec::new());
+        }
+        Some(vec![InfiniteCanvasOperation::Update { entities }])
+    }
 }
 
 fn normalized_entity(mut entity: CanvasEntity) -> CanvasEntity {
