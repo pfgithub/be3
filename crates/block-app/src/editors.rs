@@ -23,6 +23,7 @@ mod reference_cache;
 mod settings;
 mod text;
 mod unsupported;
+mod version_control_data;
 mod video;
 mod workspace_index;
 
@@ -1360,6 +1361,7 @@ impl EditorRegistry {
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<presentation::PresentationEditor>();
         registry.register_creatable::<text::TextEditor>();
+        registry.register::<version_control_data::VersionControlDataEditor>();
         registry.register_creatable::<video::VideoEditor>();
         #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
