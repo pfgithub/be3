@@ -1,7 +1,9 @@
+use block::{Block, BlockParent};
 use block_client::{
     blocks::version_control_data::{
         Commit, CommitId, VersionControlData, VersionControlDataOperation, MAIN_BRANCH,
     },
+    blocks::version_control_worktree::VersionControlWorktree,
     BlockClient, BlockHandle,
 };
 use eframe::egui;
@@ -18,7 +20,7 @@ use super::{
 const DIRECT_EDITOR_WIDTH: f32 = 640.0;
 const BRANCH_ROW_HEIGHT: f32 = 26.0;
 const COMMIT_ROW_HEIGHT: f32 = 44.0;
-const CHROME_HEIGHT: f32 = 160.0;
+const CHROME_HEIGHT: f32 = 192.0;
 const SHORT_ID_LEN: usize = 8;
 const SECONDS_PER_DAY: i64 = 86_400;
 
@@ -134,6 +136,30 @@ impl VersionControlDataEditor {
         });
     }
 
+    fn new_worktree_button(
+        &self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        if !ui
+            .button(format!("{} New worktree", ICON_ADD.codepoint))
+            .on_hover_text("Create a worktree checked out against this repository")
+            .clicked()
+        {
+            return None;
+        }
+        let client = editors.client();
+        let data_state = self.block.read()?;
+        let worktree =
+            client.create_block(VersionControlWorktree::new(self.block.id(), &data_state));
+        drop(data_state);
+        worktree.set_parent(BlockParent::Uuid(self.block.id()));
+        Some(EditorAction::OpenBlock {
+            id: worktree.id(),
+            block_type: VersionControlWorktree::TYPE_ID,
+        })
+    }
+
     fn commit_history(&self, ui: &mut egui::Ui, history: &[CommitRow]) {
         if history.is_empty() {
             ui.weak("This branch has no commits yet.");
@@ -189,7 +215,7 @@ impl BlockEditor for VersionControlDataEditor {
     fn direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
+        editors: &mut EditorAccess<'_>,
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
@@ -203,16 +229,17 @@ impl BlockEditor for VersionControlDataEditor {
         ui.heading("Branches");
         self.branch_list(ui, &branches);
         self.new_branch_row(ui, &branches);
+        let action = self.new_worktree_button(ui, editors);
 
         ui.add_space(8.0);
         ui.heading(format!("History  ({})", self.selected_branch));
         self.commit_history(ui, &history);
 
-        None
+        action
     }
 }
 
-fn short_commit_id(id: &CommitId) -> String {
+pub(super) fn short_commit_id(id: &CommitId) -> String {
     id.as_str().chars().take(SHORT_ID_LEN).collect()
 }
 

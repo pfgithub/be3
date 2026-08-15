@@ -24,6 +24,7 @@ mod settings;
 mod text;
 mod unsupported;
 mod version_control_data;
+mod version_control_worktree;
 mod video;
 mod workspace_index;
 
@@ -1362,6 +1363,7 @@ impl EditorRegistry {
         registry.register_creatable::<presentation::PresentationEditor>();
         registry.register_creatable::<text::TextEditor>();
         registry.register::<version_control_data::VersionControlDataEditor>();
+        registry.register_creatable::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<video::VideoEditor>();
         #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
