@@ -42,20 +42,13 @@ struct SidebarRenderState {
 
 impl BlockApp {
     fn open_settings(&mut self) {
-        if !self.roots.is_loaded() {
+        let Some(id) = self
+            .root_settings
+            .ensure(&self.client)
+            .map(|settings| settings.id())
+        else {
             return;
-        }
-        let id = self
-            .roots
-            .read()
-            .into_iter()
-            .find(|reference| reference.block_type == Settings::TYPE_ID)
-            .map(|reference| reference.id)
-            .unwrap_or_else(|| {
-                let settings = self.client.create_block(Settings::new());
-                settings.set_parent(BlockParent::Root);
-                settings.id()
-            });
+        };
         self.open_tab(id, Settings::TYPE_ID);
     }
 
@@ -708,10 +701,7 @@ impl BlockApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button("More", |ui| {
-                    if ui
-                        .add_enabled(self.roots.is_loaded(), egui::Button::new("Settings"))
-                        .clicked()
-                    {
+                    if ui.button("Settings").clicked() {
                         self.open_settings();
                         ui.close();
                     }

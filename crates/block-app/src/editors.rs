@@ -21,7 +21,7 @@ mod pixel_ray_tracer;
 mod presentation;
 mod reference_cache;
 mod scene_3d;
-mod settings;
+pub(crate) mod settings;
 mod text;
 mod ui_settings;
 mod unsupported;

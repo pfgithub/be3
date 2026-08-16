@@ -23,13 +23,13 @@ const DIRECT_EDITOR_HEIGHT: f32 = 120.0;
 /// tree. Every block type's settings are registered inside it instead of each
 /// type having a root block of its own, so the root listing stays down to one
 /// entry no matter how many kinds of settings accumulate.
-struct RootSettings {
+pub(crate) struct RootSettings {
     roots: ReferenceList,
     block: Option<BlockHandle<Settings>>,
 }
 
 impl RootSettings {
-    fn new(client: &BlockClient) -> Self {
+    pub(crate) fn new(client: &BlockClient) -> Self {
         Self {
             roots: client.watch_references(BlockReferenceList::Roots),
             block: None,
@@ -38,7 +38,7 @@ impl RootSettings {
 
     /// Looks the settings block up in the root listing, which is only there
     /// to be searched once the workspace has answered.
-    fn find(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
+    pub(crate) fn find(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
         if self.block.is_none() {
             let found = self
                 .roots
@@ -53,7 +53,7 @@ impl RootSettings {
     /// The settings block to write to, creating it at the root when the tree
     /// has none. Nothing is created before the root listing has loaded, so a
     /// workspace that already has one is never given a second.
-    fn ensure(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
+    pub(crate) fn ensure(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
         if self.find(client).is_none() && self.roots.is_loaded() {
             let settings = client.create_block(Settings::new());
             settings.set_parent(BlockParent::Root);

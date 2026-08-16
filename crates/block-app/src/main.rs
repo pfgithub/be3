@@ -25,7 +25,7 @@ use block::{
     Workspace, WorkspaceInvitation, WorkspaceRole,
 };
 use block_client::{
-    blocks::{settings::Settings, ui_settings::UiSettings, workspace_index::BlockEntry},
+    blocks::{ui_settings::UiSettings, workspace_index::BlockEntry},
     presence::{pick_free_color, PresenceColor, UserActive},
     properties::MAX_NAME_BYTES,
     BlockClient, BlockHandle, DynamicArtifactDescriptor, ManagementClient, ManagementClientError,
@@ -33,9 +33,9 @@ use block_client::{
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
-    direct_editor_tab_ui, BlockEditor, BlockLabel, DynamicArtifactRegeneration,
-    DynamicArtifactSupport, EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload,
-    SidebarDragSource,
+    direct_editor_tab_ui, settings::RootSettings, BlockEditor, BlockLabel,
+    DynamicArtifactRegeneration, DynamicArtifactSupport, EditorAccess, EditorAction,
+    EditorRegistry, SidebarDragPayload, SidebarDragSource,
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
@@ -178,6 +178,7 @@ struct BlockApp {
     account: Account,
     client: Arc<BlockClient>,
     roots: ReferenceList,
+    root_settings: RootSettings,
     ui_settings: Option<BlockHandle<UiSettings>>,
     orphaned: Option<ReferenceList>,
     orphaned_expanded: bool,
@@ -557,6 +558,7 @@ impl BlockApp {
         };
         let client = Arc::new(BlockClient::new(account.id, Uuid::nil()));
         let roots = client.watch_references(BlockReferenceList::Roots);
+        let root_settings = RootSettings::new(&client);
         Ok(Self {
             app_state,
             client_id,
@@ -583,6 +585,7 @@ impl BlockApp {
             account,
             client,
             roots,
+            root_settings,
             ui_settings: None,
             orphaned: None,
             orphaned_expanded: false,
@@ -1174,6 +1177,7 @@ impl BlockApp {
         self.active_tab = None;
         self.share = ShareDialog::default();
         self.roots = roots;
+        self.root_settings = RootSettings::new(&client);
         self.ui_settings = None;
         self.client = client;
         self.workspace = Some(workspace.clone());
@@ -1541,6 +1545,7 @@ impl BlockApp {
         self.reauth = None;
         self.invite_open = false;
         self.roots = roots;
+        self.root_settings = RootSettings::new(&client);
         self.ui_settings = None;
         self.client = client;
         self.account = account;
@@ -3624,18 +3629,11 @@ impl BlockApp {
 
     fn sync_ui_settings(&mut self, context: &egui::Context) {
         if self.ui_settings.is_none() {
-            let Some(settings_id) = self
-                .roots
-                .read()
-                .into_iter()
-                .find(|reference| reference.block_type == Settings::TYPE_ID)
-                .map(|reference| reference.id)
-            else {
+            let Some(root_settings) = self.root_settings.find(&self.client) else {
                 context.set_zoom_factor(1.0);
                 return;
             };
-            let settings = self.client.get_block::<Settings>(settings_id);
-            let Some(settings) = settings.read() else {
+            let Some(settings) = root_settings.read() else {
                 return;
             };
             let Some(id) = settings
