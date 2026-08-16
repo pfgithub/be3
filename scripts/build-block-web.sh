@@ -94,7 +94,7 @@ fi
 wasi_sysroot="$(cd "$wasi_sysroot" && pwd)"
 echo "Building against the WASI sysroot at $wasi_sysroot"
 
-compiler_flags="--sysroot=$wasi_sysroot -isystem $wasi_sysroot/include/c++/v1 -mllvm -wasm-enable-sjlj -fno-exceptions -fno-rtti -DHB_NO_MT -O2 -w"
+compiler_flags="--sysroot=$wasi_sysroot -isystem $wasi_sysroot/include/c++/v1 -mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false -fno-exceptions -fno-rtti -DHB_NO_MT -O2 -w"
 export CC_wasm32_wasip1='clang'
 export CXX_wasm32_wasip1='clang++'
 export AR_wasm32_wasip1='llvm-ar'
