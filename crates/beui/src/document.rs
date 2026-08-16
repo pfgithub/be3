@@ -7,7 +7,7 @@ use crate::fill::FillNode;
 use crate::interact;
 use crate::layout;
 use crate::list::{Direction, ItemSize, ListItem, ListNode};
-use crate::node::{Arena, NodeId, NodeKind};
+use crate::node::{Arena, NodeId};
 use crate::outline::OutlineNode;
 use crate::padding::PaddingNode;
 use crate::paint;
@@ -39,40 +39,32 @@ impl Document {
     }
 
     pub fn create_list(&mut self, direction: Direction, spacing: f32) -> NodeId {
-        self.arena.insert(NodeKind::List(ListNode {
+        self.arena.insert(ListNode {
             direction,
             spacing,
             items: Vec::new(),
-        }))
+        })
     }
 
     pub fn create_button(&mut self) -> NodeId {
-        self.arena.insert(NodeKind::Button(ButtonNode::new()))
+        self.arena.insert(ButtonNode::new())
     }
 
     pub fn create_fill(&mut self, color: Color32, corner_radius: u8) -> NodeId {
-        self.arena
-            .insert(NodeKind::Fill(FillNode::new(color, corner_radius)))
+        self.arena.insert(FillNode::new(color, corner_radius))
     }
 
     pub fn create_outline(&mut self, color: Color32, width: f32, corner_radius: u8) -> NodeId {
-        self.arena.insert(NodeKind::Outline(OutlineNode::new(
-            color,
-            width,
-            corner_radius,
-        )))
+        self.arena
+            .insert(OutlineNode::new(color, width, corner_radius))
     }
 
     pub fn create_padding(&mut self, amount: f32) -> NodeId {
-        self.arena
-            .insert(NodeKind::Padding(PaddingNode::new(amount)))
+        self.arena.insert(PaddingNode::new(amount))
     }
 
     pub fn set_padding_child(&mut self, padding: NodeId, child: NodeId) {
-        let NodeKind::Padding(padding) = &mut self.arena.get_mut(padding).kind else {
-            panic!("node is not a Padding node");
-        };
-        padding.child = Some(child);
+        self.arena.get_mut_as::<PaddingNode>(padding).child = Some(child);
     }
 
     pub fn create_text(
@@ -81,92 +73,69 @@ impl Document {
         font_size: f32,
         color: Color32,
     ) -> NodeId {
-        self.arena.insert(NodeKind::Text(TextNode {
+        self.arena.insert(TextNode {
             content: content.into(),
             font_size,
             color,
-        }))
+        })
     }
 
     pub fn create_slot(&mut self) -> NodeId {
-        self.arena
-            .insert(NodeKind::Slot(SlotNode { content: None }))
+        self.arena.insert(SlotNode { content: None })
     }
 
     pub fn create_shadow(&mut self, shadow_root: NodeId, slot: NodeId) -> NodeId {
-        self.arena
-            .insert(NodeKind::Shadow(ShadowNode { shadow_root, slot }))
+        self.arena.insert(ShadowNode { shadow_root, slot })
     }
 
     pub fn create_scroll(&mut self) -> NodeId {
-        self.arena.insert(NodeKind::Scroll(ScrollNode::new()))
+        self.arena.insert(ScrollNode::new())
     }
 
     pub fn append_scroll_item(&mut self, scroll: NodeId, child: NodeId) {
-        let NodeKind::Scroll(scroll) = &mut self.arena.get_mut(scroll).kind else {
-            panic!("node is not a Scroll node");
-        };
-        scroll.items.push(child);
+        self.arena
+            .get_mut_as::<ScrollNode>(scroll)
+            .items
+            .push(child);
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, size: ItemSize) {
-        let NodeKind::List(list) = &mut self.arena.get_mut(parent).kind else {
-            panic!("only List nodes can have children");
-        };
-        list.items.push(ListItem { child, size });
+        self.arena
+            .get_mut_as::<ListNode>(parent)
+            .items
+            .push(ListItem { child, size });
     }
 
     pub fn remove_child(&mut self, parent: NodeId, child: NodeId) {
-        let NodeKind::List(list) = &mut self.arena.get_mut(parent).kind else {
-            panic!("only List nodes can have children");
-        };
-        list.items.retain(|item| item.child != child);
+        self.arena
+            .get_mut_as::<ListNode>(parent)
+            .items
+            .retain(|item| item.child != child);
     }
 
     pub fn set_button_child(&mut self, button: NodeId, child: NodeId) {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(button).kind else {
-            panic!("node is not a Button node");
-        };
-        button.child = Some(child);
+        self.arena.get_mut_as::<ButtonNode>(button).child = Some(child);
     }
 
     pub fn set_fill_child(&mut self, fill: NodeId, child: NodeId) {
-        let NodeKind::Fill(fill) = &mut self.arena.get_mut(fill).kind else {
-            panic!("node is not a Fill node");
-        };
-        fill.child = Some(child);
+        self.arena.get_mut_as::<FillNode>(fill).child = Some(child);
     }
 
     pub fn set_fill_color(&mut self, fill: NodeId, color: Color32) {
-        let NodeKind::Fill(fill) = &mut self.arena.get_mut(fill).kind else {
-            panic!("node is not a Fill node");
-        };
-        fill.color = color;
+        self.arena.get_mut_as::<FillNode>(fill).color = color;
     }
 
     pub fn set_outline_child(&mut self, outline: NodeId, child: NodeId) {
-        let NodeKind::Outline(outline) = &mut self.arena.get_mut(outline).kind else {
-            panic!("node is not an Outline node");
-        };
-        outline.child = Some(child);
+        self.arena.get_mut_as::<OutlineNode>(outline).child = Some(child);
     }
 
     pub fn set_outline_visible(&mut self, outline: NodeId, visible: bool) {
-        let NodeKind::Outline(outline) = &mut self.arena.get_mut(outline).kind else {
-            panic!("node is not an Outline node");
-        };
-        outline.visible = visible;
+        self.arena.get_mut_as::<OutlineNode>(outline).visible = visible;
     }
 
     pub fn set_shadow_child(&mut self, shadow: NodeId, child: NodeId) {
-        let NodeKind::Shadow(shadow) = &self.arena.get(shadow).kind else {
-            panic!("node is not a Shadow node");
-        };
-        let slot = shadow.slot;
-        let NodeKind::Slot(slot) = &mut self.arena.get_mut(slot).kind else {
-            panic!("shadow slot is not a Slot node");
-        };
-        slot.content = Some(child);
+        let slot = self.arena.get_as::<ShadowNode>(shadow).slot;
+        self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);
     }
 
     pub fn set_button_on_click(
@@ -174,10 +143,7 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document) + 'static,
     ) {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(button).kind else {
-            panic!("node is not a Button node");
-        };
-        button.on_click = Some(Box::new(handler));
+        self.arena.get_mut_as::<ButtonNode>(button).on_click = Some(Box::new(handler));
     }
 
     pub fn set_button_on_hover_change(
@@ -185,10 +151,7 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
     ) {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(button).kind else {
-            panic!("node is not a Button node");
-        };
-        button.on_hover_change = Some(Box::new(handler));
+        self.arena.get_mut_as::<ButtonNode>(button).on_hover_change = Some(Box::new(handler));
     }
 
     pub fn set_button_on_active_change(
@@ -196,10 +159,7 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
     ) {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(button).kind else {
-            panic!("node is not a Button node");
-        };
-        button.on_active_change = Some(Box::new(handler));
+        self.arena.get_mut_as::<ButtonNode>(button).on_active_change = Some(Box::new(handler));
     }
 
     pub fn set_button_on_focus_change(
@@ -207,24 +167,11 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
     ) {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(button).kind else {
-            panic!("node is not a Button node");
-        };
-        button.on_focus_change = Some(Box::new(handler));
+        self.arena.get_mut_as::<ButtonNode>(button).on_focus_change = Some(Box::new(handler));
     }
 
     pub fn remove_node(&mut self, id: NodeId) {
-        let children: Vec<NodeId> = match &self.arena.get(id).kind {
-            NodeKind::List(list) => list.items.iter().map(|item| item.child).collect(),
-            NodeKind::Button(button) => button.child.into_iter().collect(),
-            NodeKind::Fill(fill) => fill.child.into_iter().collect(),
-            NodeKind::Outline(outline) => outline.child.into_iter().collect(),
-            NodeKind::Padding(padding) => padding.child.into_iter().collect(),
-            NodeKind::Shadow(shadow) => vec![shadow.shadow_root],
-            NodeKind::Slot(slot) => slot.content.into_iter().collect(),
-            NodeKind::Scroll(scroll) => scroll.items.clone(),
-            NodeKind::Text(_) => Vec::new(),
-        };
+        let children = self.arena.get(id).children();
         for child in children {
             self.remove_node(child);
         }
@@ -238,17 +185,11 @@ impl Document {
     }
 
     pub fn set_text(&mut self, id: NodeId, content: impl Into<String>) {
-        let NodeKind::Text(text) = &mut self.arena.get_mut(id).kind else {
-            panic!("node is not a Text node");
-        };
-        text.content = content.into();
+        self.arena.get_mut_as::<TextNode>(id).content = content.into();
     }
 
     pub fn text(&self, id: NodeId) -> &str {
-        let NodeKind::Text(text) = &self.arena.get(id).kind else {
-            panic!("node is not a Text node");
-        };
-        &text.content
+        &self.arena.get_as::<TextNode>(id).content
     }
 
     pub fn show(&mut self, ctx: &Context, rect: Rect) {
@@ -278,17 +219,21 @@ impl Document {
     }
 
     fn set_button_focused(&mut self, id: NodeId, focused: bool) {
-        let NodeKind::Button(button) = &mut self.arena.get_mut(id).kind else {
-            return;
-        };
-        button.focused = focused;
-        let Some(mut handler) = button.on_focus_change.take() else {
-            return;
-        };
-        handler(self, focused);
-        if let NodeKind::Button(button) = &mut self.arena.get_mut(id).kind {
-            button.on_focus_change = Some(handler);
+        let mut element = self.arena.take(id);
+        let handler = element
+            .as_any_mut()
+            .downcast_mut::<ButtonNode>()
+            .and_then(|button| {
+                button.focused = focused;
+                button.on_focus_change.take()
+            });
+        if let Some(mut handler) = handler {
+            handler(self, focused);
+            if let Some(button) = element.as_any_mut().downcast_mut::<ButtonNode>() {
+                button.on_focus_change = Some(handler);
+            }
         }
+        self.arena.put_back(id, element);
     }
 }
 
