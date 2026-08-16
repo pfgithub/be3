@@ -1222,7 +1222,7 @@ impl TextEditor {
             SelectionHandle::End => (range.start, range.end),
         };
         self.dragging_handle = Some(self.core.position(fixed_byte));
-        self.dragging_handle_offset = touch_handle_anchor(layout, moving_byte)
+        self.dragging_handle_offset = hit_test_anchor(layout, moving_byte)
             .map_or(Vec2::ZERO, |anchor| local_pointer - anchor);
         self.selecting = false;
         self.drag_selection_handle(layout, local_pointer);
@@ -2379,6 +2379,12 @@ fn touch_handle_anchor(layout: &DocumentLayout, byte: usize) -> Option<Vec2> {
         position.x,
         line.y + line.height + TOUCH_HANDLE_GAP,
     ))
+}
+
+fn hit_test_anchor(layout: &DocumentLayout, byte: usize) -> Option<Vec2> {
+    let position = layout.positions.get(byte).and_then(|position| *position)?;
+    let line = layout.lines.get(position.line)?;
+    Some(Vec2::new(position.x, line.y))
 }
 
 fn touch_handle_shape(anchor: Vec2, handle: SelectionHandle) -> (Rect, CornerRadius) {
