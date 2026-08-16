@@ -1064,6 +1064,7 @@ impl TextEditor {
                 }
                 self.dragging_handle = None;
                 self.dragging_handle_offset = Vec2::ZERO;
+                return true;
             } else if pressed {
                 if let Some(handle) = self.selection_handle_at(layout, local_pointer) {
                     self.begin_selection_handle_drag(handle, layout, local_pointer);
