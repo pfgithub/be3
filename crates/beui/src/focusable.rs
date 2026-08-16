@@ -4,40 +4,25 @@ use std::collections::HashMap;
 use egui::{Painter, Rect, Vec2};
 
 use crate::document::Document;
-use crate::node::{Element, InteractInput, NodeId};
+use crate::node::{ChangeHandler, Element, InteractInput, NodeId};
 
-pub(crate) type ChangeHandler = Box<dyn FnMut(&mut Document, bool)>;
-pub(crate) type ClickHandler = Box<dyn FnMut(&mut Document)>;
-
-pub(crate) struct ButtonNode {
+pub(crate) struct FocusableNode {
     pub(crate) child: Option<NodeId>,
-    pub(crate) armed: bool,
-    pub(crate) hovered: bool,
-    pub(crate) active: bool,
     pub(crate) focused: bool,
-    pub(crate) on_click: Option<ClickHandler>,
-    pub(crate) on_hover_change: Option<ChangeHandler>,
-    pub(crate) on_active_change: Option<ChangeHandler>,
     pub(crate) on_focus_change: Option<ChangeHandler>,
 }
 
-impl ButtonNode {
+impl FocusableNode {
     pub(crate) fn new() -> Self {
         Self {
             child: None,
-            armed: false,
-            hovered: false,
-            active: false,
             focused: false,
-            on_click: None,
-            on_hover_change: None,
-            on_active_change: None,
             on_focus_change: None,
         }
     }
 }
 
-impl Element for ButtonNode {
+impl Element for FocusableNode {
     fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
         match self.child {
             Some(child) => crate::layout::measure(doc, painter, child),
@@ -65,7 +50,7 @@ impl Element for ButtonNode {
 
     fn interact(
         &mut self,
-        doc: &mut Document,
+        _doc: &mut Document,
         _painter: &Painter,
         input: &InteractInput,
         id: NodeId,
@@ -73,35 +58,8 @@ impl Element for ButtonNode {
         focus_target: &mut Option<NodeId>,
     ) -> Vec<NodeId> {
         let hovered = input.pointer_pos.is_some_and(|pos| rect.contains(pos));
-        if hovered && input.pressed_this_frame {
-            self.armed = true;
-        }
-        if input.released_this_frame {
-            if hovered && self.armed {
-                if let Some(mut handler) = self.on_click.take() {
-                    handler(doc);
-                    self.on_click = Some(handler);
-                }
-            }
-            self.armed = false;
-        }
-        let active = hovered && self.armed;
         if input.pressed_this_frame && hovered {
             *focus_target = Some(id);
-        }
-        if hovered != self.hovered {
-            self.hovered = hovered;
-            if let Some(mut handler) = self.on_hover_change.take() {
-                handler(doc, hovered);
-                self.on_hover_change = Some(handler);
-            }
-        }
-        if active != self.active {
-            self.active = active;
-            if let Some(mut handler) = self.on_active_change.take() {
-                handler(doc, active);
-                self.on_active_change = Some(handler);
-            }
         }
         self.child.into_iter().collect()
     }

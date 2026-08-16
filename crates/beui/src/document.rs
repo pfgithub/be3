@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use egui::{Color32, Context, Id, LayerId, Order, Rect};
+use egui::{Color32, Context, CursorIcon, Id, LayerId, Order, Rect};
 
-use crate::button::ButtonNode;
+use crate::click_catcher::ClickCatcherNode;
 use crate::fill::FillNode;
+use crate::focusable::FocusableNode;
 use crate::interact;
 use crate::layout;
 use crate::list::{Direction, ItemSize, ListItem, ListNode};
@@ -46,8 +47,82 @@ impl Document {
         })
     }
 
+    pub fn create_focusable(&mut self) -> NodeId {
+        self.arena.insert(FocusableNode::new())
+    }
+
+    pub fn set_focusable_child(&mut self, focusable: NodeId, child: NodeId) {
+        self.arena.get_mut_as::<FocusableNode>(focusable).child = Some(child);
+    }
+
+    pub fn set_focusable_on_focus_change(
+        &mut self,
+        focusable: NodeId,
+        handler: impl FnMut(&mut Document, bool) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<FocusableNode>(focusable)
+            .on_focus_change = Some(Box::new(handler));
+    }
+
+    pub fn create_click_catcher(&mut self, cursor: CursorIcon) -> NodeId {
+        self.arena.insert(ClickCatcherNode::new(cursor))
+    }
+
+    pub fn set_click_catcher_child(&mut self, click_catcher: NodeId, child: NodeId) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .child = Some(child);
+    }
+
+    pub fn set_click_catcher_on_click(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_click = Some(Box::new(handler));
+    }
+
+    pub fn set_click_catcher_on_hover_change(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document, bool) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_hover_change = Some(Box::new(handler));
+    }
+
+    pub fn set_click_catcher_on_active_change(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document, bool) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_active_change = Some(Box::new(handler));
+    }
+
     pub fn create_button(&mut self) -> NodeId {
-        self.arena.insert(ButtonNode::new())
+        let click_catcher = self.create_click_catcher(CursorIcon::PointingHand);
+        let focusable = self.create_focusable();
+        self.set_focusable_child(focusable, click_catcher);
+        let slot = self.create_slot();
+        self.set_click_catcher_child(click_catcher, slot);
+        self.create_shadow(focusable, slot)
+    }
+
+    fn button_focusable(&self, button: NodeId) -> NodeId {
+        self.arena.get_as::<ShadowNode>(button).shadow_root
+    }
+
+    fn button_click_catcher(&self, button: NodeId) -> NodeId {
+        self.arena
+            .get_as::<FocusableNode>(self.button_focusable(button))
+            .child
+            .expect("button is missing its click catcher")
     }
 
     pub fn create_fill(&mut self, color: Color32, corner_radius: u8) -> NodeId {
@@ -114,7 +189,7 @@ impl Document {
     }
 
     pub fn set_button_child(&mut self, button: NodeId, child: NodeId) {
-        self.arena.get_mut_as::<ButtonNode>(button).child = Some(child);
+        self.set_shadow_child(button, child);
     }
 
     pub fn set_fill_child(&mut self, fill: NodeId, child: NodeId) {
@@ -143,7 +218,8 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document) + 'static,
     ) {
-        self.arena.get_mut_as::<ButtonNode>(button).on_click = Some(Box::new(handler));
+        let click_catcher = self.button_click_catcher(button);
+        self.set_click_catcher_on_click(click_catcher, handler);
     }
 
     pub fn set_button_on_hover_change(
@@ -151,7 +227,8 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
     ) {
-        self.arena.get_mut_as::<ButtonNode>(button).on_hover_change = Some(Box::new(handler));
+        let click_catcher = self.button_click_catcher(button);
+        self.set_click_catcher_on_hover_change(click_catcher, handler);
     }
 
     pub fn set_button_on_active_change(
@@ -159,7 +236,8 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
     ) {
-        self.arena.get_mut_as::<ButtonNode>(button).on_active_change = Some(Box::new(handler));
+        let click_catcher = self.button_click_catcher(button);
+        self.set_click_catcher_on_active_change(click_catcher, handler);
     }
 
     pub fn set_button_on_focus_change(
@@ -167,7 +245,8 @@ impl Document {
         button: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
     ) {
-        self.arena.get_mut_as::<ButtonNode>(button).on_focus_change = Some(Box::new(handler));
+        let focusable = self.button_focusable(button);
+        self.set_focusable_on_focus_change(focusable, handler);
     }
 
     pub fn remove_node(&mut self, id: NodeId) {
@@ -210,27 +289,27 @@ impl Document {
             return;
         }
         if let Some(old) = self.focused {
-            self.set_button_focused(old, false);
+            self.set_focusable_focused(old, false);
         }
         if let Some(new) = new_focus {
-            self.set_button_focused(new, true);
+            self.set_focusable_focused(new, true);
         }
         self.focused = new_focus;
     }
 
-    fn set_button_focused(&mut self, id: NodeId, focused: bool) {
+    fn set_focusable_focused(&mut self, id: NodeId, focused: bool) {
         let mut element = self.arena.take(id);
         let handler = element
             .as_any_mut()
-            .downcast_mut::<ButtonNode>()
-            .and_then(|button| {
-                button.focused = focused;
-                button.on_focus_change.take()
+            .downcast_mut::<FocusableNode>()
+            .and_then(|focusable| {
+                focusable.focused = focused;
+                focusable.on_focus_change.take()
             });
         if let Some(mut handler) = handler {
             handler(self, focused);
-            if let Some(button) = element.as_any_mut().downcast_mut::<ButtonNode>() {
-                button.on_focus_change = Some(handler);
+            if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
+                focusable.on_focus_change = Some(handler);
             }
         }
         self.arena.put_back(id, element);

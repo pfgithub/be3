@@ -15,6 +15,9 @@ pub(crate) struct InteractInput {
     pub(crate) scroll_delta: f32,
 }
 
+pub(crate) type ChangeHandler = Box<dyn FnMut(&mut Document, bool)>;
+pub(crate) type ClickHandler = Box<dyn FnMut(&mut Document)>;
+
 pub(crate) trait Element: Any {
     fn measure(&self, doc: &Document, painter: &Painter) -> Vec2;
 
