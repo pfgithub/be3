@@ -65,6 +65,35 @@ if (-not (Get-Command 'wasm-bindgen' -ErrorAction SilentlyContinue)) {
     if ($LASTEXITCODE -ne 0) { throw 'failed to install wasm-bindgen-cli' }
 }
 
+$profileArguments = @()
+$profileDirectory = 'debug'
+if ($Release) {
+    $profileArguments = @('--release')
+    $profileDirectory = 'release'
+}
+
+# The wasm-demo debug window's guest module is a plain wasm32-unknown-unknown
+# build: unlike block-app it has no C dependencies, so it needs none of the
+# WASI setup below. Building and binding it first, before that setup mutates
+# $env:RUSTFLAGS for wasm32-wasip1, keeps those flags from leaking into it.
+if ($targets -notcontains 'wasm32-unknown-unknown') {
+    Write-Host 'Installing the wasm32-unknown-unknown Rust target...'
+    & rustup target add wasm32-unknown-unknown
+    if ($LASTEXITCODE -ne 0) { throw 'failed to install the wasm32-unknown-unknown target' }
+}
+
+Write-Host 'Building wasm-demo for wasm32-unknown-unknown...'
+& cargo build -p wasm-demo --target wasm32-unknown-unknown @profileArguments
+if ($LASTEXITCODE -ne 0) { throw 'cargo build of wasm-demo failed' }
+
+$wasmDemo = Join-Path $repository "target/wasm32-unknown-unknown/$profileDirectory/wasm_demo.wasm"
+if (-not (Test-Path $wasmDemo)) { throw "cargo did not produce $wasmDemo" }
+
+Write-Host 'Generating JavaScript bindings for wasm-demo...'
+New-Item -ItemType Directory -Force $outputDirectory | Out-Null
+& wasm-bindgen --target web --no-typescript --out-dir $outputDirectory $wasmDemo
+if ($LASTEXITCODE -ne 0) { throw 'wasm-bindgen failed for wasm-demo' }
+
 # The sysroot ships wasi-libc and libc++ built for wasm32. Only the sysroot is
 # needed, not the whole wasi-sdk, because the local clang does the compiling.
 if (-not $WasiSysroot) {
@@ -123,13 +152,6 @@ $env:HARFBUZZ_SYS_NO_PKG_CONFIG = '1'
 $linkerSearchPath = "$WasiSysroot/lib/wasm32-wasip1/noeh"
 $setjmpLibrary = "$WasiSysroot/lib/wasm32-wasip1/libsetjmp.a"
 $env:RUSTFLAGS = "-C link-arg=-L$linkerSearchPath -C link-arg=$setjmpLibrary"
-
-$profileArguments = @()
-$profileDirectory = 'debug'
-if ($Release) {
-    $profileArguments = @('--release')
-    $profileDirectory = 'release'
-}
 
 Write-Host 'Building block-app for wasm32-wasip1...'
 & cargo build -p block-app --lib --target wasm32-wasip1 @profileArguments
