@@ -56,14 +56,9 @@ if $release; then
     profile_arguments=(--release)
 fi
 
-if ! grep -qx 'wasm32-unknown-unknown' <<< "$installed_targets"; then
-    echo 'Installing the wasm32-unknown-unknown Rust target...'
-    rustup target add wasm32-unknown-unknown
-fi
-
-echo 'Building wasm-demo for wasm32-unknown-unknown...'
-cargo build -p wasm-demo --target wasm32-unknown-unknown "${profile_arguments[@]}"
-wasm_demo="$repository/target/wasm32-unknown-unknown/$profile_directory/wasm_demo.wasm"
+echo 'Building wasm-demo for wasm32-wasip1...'
+cargo build -p wasm-demo --target wasm32-wasip1 "${profile_arguments[@]}"
+wasm_demo="$repository/target/wasm32-wasip1/$profile_directory/wasm_demo.wasm"
 if [[ ! -f "$wasm_demo" ]]; then
     echo "cargo did not produce $wasm_demo" >&2
     exit 1
