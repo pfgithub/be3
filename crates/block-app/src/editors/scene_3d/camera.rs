@@ -25,7 +25,7 @@ impl Default for Camera {
 
 impl Camera {
     pub(super) fn look(&mut self, delta: [f32; 2]) {
-        self.yaw -= delta[0] * LOOK_RADIANS_PER_PIXEL;
+        self.yaw += delta[0] * LOOK_RADIANS_PER_PIXEL;
         self.pitch = (self.pitch - delta[1] * LOOK_RADIANS_PER_PIXEL).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
