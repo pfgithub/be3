@@ -705,6 +705,10 @@ impl BlockApp {
                         crate::debug::version::open();
                         ui.close();
                     }
+                    if ui.button("Wasm Demo").clicked() {
+                        crate::debug::wasm_demo::open();
+                        ui.close();
+                    }
                     #[cfg(not(any(
                         target_os = "android",
                         target_os = "windows",

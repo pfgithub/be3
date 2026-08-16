@@ -1,0 +1,11 @@
+[package]
+name = "wasm-demo"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
