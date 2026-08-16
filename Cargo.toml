@@ -14,6 +14,7 @@ members = [
     "crates/logicgame",
     "crates/cvl2",
     "crates/wasm-demo",
+    "crates/gpui-demo",
 ]
 resolver = "2"
 

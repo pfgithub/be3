@@ -1,0 +1,15 @@
+[package]
+name = "gpui-demo"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gpui-demo"
+test = false
+
+[dependencies]
+gpui = "0.2"
+
+[lints]
+workspace = true
