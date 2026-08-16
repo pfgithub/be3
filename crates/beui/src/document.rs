@@ -9,15 +9,14 @@ use crate::layout;
 use crate::list::{Direction, ItemSize, ListItem, ListNode};
 use crate::node::{Arena, NodeId, NodeKind};
 use crate::outline::OutlineNode;
+use crate::padding::PaddingNode;
 use crate::paint;
 use crate::scroll::ScrollNode;
 use crate::shadow::{ShadowNode, SlotNode};
-use crate::style::Style;
 use crate::text::TextNode;
 
 pub struct Document {
     pub(crate) arena: Arena,
-    pub(crate) style: Style,
     root: Option<NodeId>,
     focused: Option<NodeId>,
 }
@@ -26,18 +25,9 @@ impl Document {
     pub fn new() -> Self {
         Self {
             arena: Arena::default(),
-            style: Style::default(),
             root: None,
             focused: None,
         }
-    }
-
-    pub fn style(&self) -> &Style {
-        &self.style
-    }
-
-    pub fn set_style(&mut self, style: Style) {
-        self.style = style;
     }
 
     pub fn set_root(&mut self, id: NodeId) {
@@ -48,9 +38,10 @@ impl Document {
         self.root
     }
 
-    pub fn create_list(&mut self, direction: Direction) -> NodeId {
+    pub fn create_list(&mut self, direction: Direction, spacing: f32) -> NodeId {
         self.arena.insert(NodeKind::List(ListNode {
             direction,
+            spacing,
             items: Vec::new(),
         }))
     }
@@ -59,18 +50,41 @@ impl Document {
         self.arena.insert(NodeKind::Button(ButtonNode::new()))
     }
 
-    pub fn create_fill(&mut self, color: Color32) -> NodeId {
-        self.arena.insert(NodeKind::Fill(FillNode::new(color)))
-    }
-
-    pub fn create_outline(&mut self, color: Color32, width: f32) -> NodeId {
+    pub fn create_fill(&mut self, color: Color32, corner_radius: u8) -> NodeId {
         self.arena
-            .insert(NodeKind::Outline(OutlineNode::new(color, width)))
+            .insert(NodeKind::Fill(FillNode::new(color, corner_radius)))
     }
 
-    pub fn create_text(&mut self, content: impl Into<String>) -> NodeId {
+    pub fn create_outline(&mut self, color: Color32, width: f32, corner_radius: u8) -> NodeId {
+        self.arena.insert(NodeKind::Outline(OutlineNode::new(
+            color,
+            width,
+            corner_radius,
+        )))
+    }
+
+    pub fn create_padding(&mut self, amount: f32) -> NodeId {
+        self.arena
+            .insert(NodeKind::Padding(PaddingNode::new(amount)))
+    }
+
+    pub fn set_padding_child(&mut self, padding: NodeId, child: NodeId) {
+        let NodeKind::Padding(padding) = &mut self.arena.get_mut(padding).kind else {
+            panic!("node is not a Padding node");
+        };
+        padding.child = Some(child);
+    }
+
+    pub fn create_text(
+        &mut self,
+        content: impl Into<String>,
+        font_size: f32,
+        color: Color32,
+    ) -> NodeId {
         self.arena.insert(NodeKind::Text(TextNode {
             content: content.into(),
+            font_size,
+            color,
         }))
     }
 
@@ -205,6 +219,7 @@ impl Document {
             NodeKind::Button(button) => button.child.into_iter().collect(),
             NodeKind::Fill(fill) => fill.child.into_iter().collect(),
             NodeKind::Outline(outline) => outline.child.into_iter().collect(),
+            NodeKind::Padding(padding) => padding.child.into_iter().collect(),
             NodeKind::Shadow(shadow) => vec![shadow.shadow_root],
             NodeKind::Slot(slot) => slot.content.into_iter().collect(),
             NodeKind::Scroll(scroll) => scroll.items.clone(),

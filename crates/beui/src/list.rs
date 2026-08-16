@@ -19,5 +19,6 @@ pub(crate) struct ListItem {
 
 pub(crate) struct ListNode {
     pub(crate) direction: Direction,
+    pub(crate) spacing: f32,
     pub(crate) items: Vec<ListItem>,
 }

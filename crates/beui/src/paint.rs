@@ -7,7 +7,6 @@ use crate::node::{NodeId, NodeKind};
 
 pub(crate) fn paint(doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, id: NodeId) {
     let rect = rects[&id];
-    let style = &doc.style;
 
     match &doc.arena.get(id).kind {
         NodeKind::List(list) => {
@@ -20,12 +19,12 @@ pub(crate) fn paint(doc: &Document, painter: &Painter, rects: &HashMap<NodeId, R
                 rect.left_top(),
                 Align2::LEFT_TOP,
                 &text.content,
-                FontId::proportional(style.font_size),
-                style.text_color,
+                FontId::proportional(text.font_size),
+                text.color,
             );
         }
         NodeKind::Fill(fill) => {
-            painter.rect_filled(rect, style.corner_radius, fill.color);
+            painter.rect_filled(rect, fill.corner_radius, fill.color);
             if let Some(child) = fill.child {
                 paint(doc, painter, rects, child);
             }
@@ -34,12 +33,17 @@ pub(crate) fn paint(doc: &Document, painter: &Painter, rects: &HashMap<NodeId, R
             if outline.visible {
                 painter.rect_stroke(
                     rect,
-                    style.corner_radius,
+                    outline.corner_radius,
                     Stroke::new(outline.width, outline.color),
                     StrokeKind::Outside,
                 );
             }
             if let Some(child) = outline.child {
+                paint(doc, painter, rects, child);
+            }
+        }
+        NodeKind::Padding(padding) => {
+            if let Some(child) = padding.child {
                 paint(doc, painter, rects, child);
             }
         }

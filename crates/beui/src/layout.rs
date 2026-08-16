@@ -5,26 +5,29 @@ use egui::{pos2, vec2, FontId, Painter, Rect, Vec2};
 use crate::document::Document;
 use crate::list::{Direction, ItemSize};
 use crate::node::{NodeId, NodeKind};
-use crate::style::Style;
 
 pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId) -> Vec2 {
     match &doc.arena.get(id).kind {
-        NodeKind::Text(text) => text_size(painter, &doc.style, &text.content),
+        NodeKind::Text(text) => text_size(painter, text.font_size, &text.content),
         NodeKind::Button(button) => match button.child {
             Some(child) => measure(doc, painter, child),
             None => Vec2::ZERO,
         },
-        NodeKind::Fill(fill) => {
-            let inner = match fill.child {
-                Some(child) => measure(doc, painter, child),
-                None => Vec2::ZERO,
-            };
-            inner + Vec2::splat(doc.style.padding * 2.0)
-        }
+        NodeKind::Fill(fill) => match fill.child {
+            Some(child) => measure(doc, painter, child),
+            None => Vec2::ZERO,
+        },
         NodeKind::Outline(outline) => match outline.child {
             Some(child) => measure(doc, painter, child),
             None => Vec2::ZERO,
         },
+        NodeKind::Padding(padding) => {
+            let inner = match padding.child {
+                Some(child) => measure(doc, painter, child),
+                None => Vec2::ZERO,
+            };
+            inner + Vec2::splat(padding.amount * 2.0)
+        }
         NodeKind::Shadow(shadow) => measure(doc, painter, shadow.shadow_root),
         NodeKind::Slot(slot) => match slot.content {
             Some(content) => measure(doc, painter, content),
@@ -39,7 +42,7 @@ pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId) -> Vec2 {
             let mut cross = 0.0f32;
             for (index, item) in list.items.iter().enumerate() {
                 if index > 0 {
-                    main += doc.style.spacing;
+                    main += list.spacing;
                 }
                 // Percent items have no natural size of their own; they only
                 // get one once a concrete rect is assigned during layout.
@@ -82,13 +85,19 @@ pub(crate) fn layout(
         }
         NodeKind::Fill(fill) => {
             if let Some(child) = fill.child {
-                layout(doc, painter, child, rect.shrink(doc.style.padding), out);
+                layout(doc, painter, child, rect, out);
             }
             return;
         }
         NodeKind::Outline(outline) => {
             if let Some(child) = outline.child {
                 layout(doc, painter, child, rect, out);
+            }
+            return;
+        }
+        NodeKind::Padding(padding) => {
+            if let Some(child) = padding.child {
+                layout(doc, painter, child, rect.shrink(padding.amount), out);
             }
             return;
         }
@@ -141,12 +150,8 @@ pub(crate) fn layout(
             ItemSize::Percent(_) => 0.0,
         })
         .collect();
-    let main_lengths = distribute_main_axis(
-        available_main,
-        doc.style.spacing,
-        &sizes,
-        &intrinsic_lengths,
-    );
+    let main_lengths =
+        distribute_main_axis(available_main, list.spacing, &sizes, &intrinsic_lengths);
 
     let mut cursor = if horizontal { rect.left() } else { rect.top() };
     for (item, length) in list.items.iter().zip(main_lengths.iter()) {
@@ -156,7 +161,7 @@ pub(crate) fn layout(
             Rect::from_min_size(pos2(rect.left(), cursor), vec2(rect.width(), *length))
         };
         layout(doc, painter, item.child, child_rect, out);
-        cursor += length + doc.style.spacing;
+        cursor += length + list.spacing;
     }
 }
 
@@ -205,12 +210,12 @@ pub(crate) fn distribute_main_axis(
         .collect()
 }
 
-fn text_size(painter: &Painter, style: &Style, content: &str) -> Vec2 {
+fn text_size(painter: &Painter, font_size: f32, content: &str) -> Vec2 {
     painter
         .layout_no_wrap(
             content.to_string(),
-            FontId::proportional(style.font_size),
-            style.text_color,
+            FontId::proportional(font_size),
+            egui::Color32::PLACEHOLDER,
         )
         .size()
 }

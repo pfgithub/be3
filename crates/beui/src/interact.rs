@@ -67,6 +67,9 @@ fn interact_node(
         NodeKind::Outline(outline) => {
             children.extend(outline.child);
         }
+        NodeKind::Padding(padding) => {
+            children.extend(padding.child);
+        }
         NodeKind::Shadow(shadow) => {
             children.push(shadow.shadow_root);
         }
