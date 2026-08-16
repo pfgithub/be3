@@ -4,6 +4,10 @@ use eframe::egui;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+mod renderer;
+
+use renderer::WasmDemoCallback;
+
 const WASM_DEMO_URL: &str = "/wasm_demo.js";
 const CANVAS_ID: &str = "wasm-demo-canvas";
 
@@ -27,69 +31,96 @@ thread_local! {
 struct State {
     open: bool,
     started: bool,
+    render_available: bool,
+    error: Option<String>,
+    canvas_size: [u32; 2],
 }
 
-/// Nothing to do at startup: the wasm-demo module and its wgpu device are
-/// loaded lazily, the first time the debug window opens.
-pub(crate) fn install(_creation_context: &eframe::CreationContext<'_>) {}
+/// Registers the wgpu renderer that composites the wasm-demo canvas into
+/// egui's own render pass. The wasm-demo module itself is loaded lazily, the
+/// first time the debug window opens.
+pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
+    let render_available = renderer::install(creation_context);
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.render_available = render_available;
+        if !render_available {
+            state.error = Some("wgpu is not available in this build.".to_owned());
+        }
+    });
+}
 
 /// Opens the wasm-demo debug window, loading and starting the wasm-demo
 /// module the first time this is called. wasm-demo sets up its own wgpu
-/// device against its own canvas and drives its own render loop from there;
-/// this side just has to load it once and keep that canvas positioned over
-/// the window's content area for as long as it stays open.
+/// device against its own hidden canvas and drives its own render loop from
+/// there; this side copies that canvas into a texture of its own each frame
+/// it is shown, via the browser's `copyExternalImageToTexture`, rather than
+/// sharing a device or displaying the canvas directly.
 pub(crate) fn open() {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.open = true;
-        if !state.started {
-            state.started = true;
-            create_canvas();
-            wasm_bindgen_futures::spawn_local(async {
-                if let Err(error) = run_wasm_demo(WASM_DEMO_URL, CANVAS_ID).await {
-                    web_sys::console::error_1(&error);
-                }
-            });
+        if state.started || !state.render_available {
+            return;
         }
+        state.started = true;
+        create_canvas();
+        wasm_bindgen_futures::spawn_local(async {
+            if let Err(error) = run_wasm_demo(WASM_DEMO_URL, CANVAS_ID).await {
+                let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
+                web_sys::console::error_1(&error);
+                STATE.with(|state| state.borrow_mut().error = Some(message));
+            }
+        });
     });
 }
 
-/// Draws the wasm-demo debug window, if open, and keeps the wasm-demo canvas
-/// positioned over its content area (or hidden while the window is closed).
+/// Draws the wasm-demo debug window, if open: either the error that stopped
+/// it from starting, or the paint callback that copies its canvas in and
+/// blits it into place.
 pub(crate) fn show(ctx: &egui::Context) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         if !state.open {
-            hide_canvas();
             return;
         }
 
         let mut open = state.open;
-        let mut content_rect = None;
+        let error = state.error.clone();
+        let mut requested_size = None;
         egui::Window::new("Wasm Demo")
             .open(&mut open)
             .default_size([420.0, 420.0])
             .show(ctx, |ui| {
-                let (rect, _response) =
-                    ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                content_rect = Some(rect);
+                if let Some(error) = &error {
+                    ui.colored_label(egui::Color32::RED, error);
+                    return;
+                }
+                let pixels_per_point = ui.ctx().pixels_per_point();
+                let (response, painter) =
+                    ui.allocate_painter(ui.available_size(), egui::Sense::hover());
+                let size = [
+                    (response.rect.width() * pixels_per_point).round() as u32,
+                    (response.rect.height() * pixels_per_point).round() as u32,
+                ];
+                requested_size = Some(size);
+                painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
+                    response.rect,
+                    WasmDemoCallback {
+                        size,
+                        canvas_id: CANVAS_ID,
+                    },
+                ));
             });
         state.open = open;
 
-        match (state.open, content_rect) {
-            (true, Some(rect)) => position_canvas(rect),
-            (true, None) => {}
-            (false, _) => hide_canvas(),
+        if let Some(size) = requested_size {
+            if state.canvas_size != size {
+                resize_canvas(size);
+                state.canvas_size = size;
+            }
         }
     });
-}
-
-fn canvas_element() -> Option<web_sys::HtmlCanvasElement> {
-    web_sys::window()?
-        .document()?
-        .get_element_by_id(CANVAS_ID)?
-        .dyn_into()
-        .ok()
 }
 
 fn create_canvas() {
@@ -101,30 +132,21 @@ fn create_canvas() {
         let canvas: web_sys::HtmlCanvasElement =
             document.create_element("canvas").ok()?.dyn_into().ok()?;
         canvas.set_id(CANVAS_ID);
-        let style = canvas.style();
-        let _ = style.set_property("position", "absolute");
-        let _ = style.set_property("z-index", "1");
-        let _ = style.set_property("display", "none");
+        let _ = canvas.style().set_property("display", "none");
         document.body()?.append_child(&canvas).ok()?;
         Some(())
     })();
 }
 
-fn position_canvas(rect: egui::Rect) {
-    let Some(canvas) = canvas_element() else {
-        return;
-    };
-    let style = canvas.style();
-    let _ = style.set_property("display", "block");
-    let _ = style.set_property("left", &format!("{}px", rect.min.x));
-    let _ = style.set_property("top", &format!("{}px", rect.min.y));
-    let _ = style.set_property("width", &format!("{}px", rect.width()));
-    let _ = style.set_property("height", &format!("{}px", rect.height()));
-}
-
-fn hide_canvas() {
-    let Some(canvas) = canvas_element() else {
-        return;
-    };
-    let _ = canvas.style().set_property("display", "none");
+fn resize_canvas(size: [u32; 2]) {
+    (|| -> Option<()> {
+        let canvas: web_sys::HtmlCanvasElement = web_sys::window()?
+            .document()?
+            .get_element_by_id(CANVAS_ID)?
+            .dyn_into()
+            .ok()?;
+        canvas.set_width(size[0].max(1));
+        canvas.set_height(size[1].max(1));
+        Some(())
+    })();
 }

@@ -18,7 +18,10 @@ struct Scene {
 /// Loads and runs the wasm-demo scene into `canvas_id`, using its own wgpu
 /// device rather than block-app's: wgpu has no supported way to hand a live
 /// device across a wasm instance boundary, so the guest sets one up itself,
-/// exactly like block-app's own web entry point does.
+/// exactly like block-app's own web entry point does. The canvas is never
+/// shown; block-app copies its contents into its own texture every frame and
+/// drives its resolution by setting `width`/`height` on it directly, so the
+/// render loop tracks those attributes rather than CSS layout size.
 #[wasm_bindgen]
 pub async fn start(canvas_id: String) -> Result<(), JsValue> {
     let window =
@@ -170,15 +173,12 @@ fn render_frame(
 ) {
     let mut scene = scene.borrow_mut();
 
-    let device_pixel_ratio = web_sys::window().map_or(1.0, |window| window.device_pixel_ratio());
-    let width = ((canvas.client_width() as f64) * device_pixel_ratio).round() as u32;
-    let height = ((canvas.client_height() as f64) * device_pixel_ratio).round() as u32;
+    let width = canvas.width();
+    let height = canvas.height();
     if width == 0 || height == 0 {
         return;
     }
     if scene.configured_size != [width, height] {
-        canvas.set_width(width);
-        canvas.set_height(height);
         let Some(config) = scene.surface.get_default_config(adapter, width, height) else {
             return;
         };
