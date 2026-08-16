@@ -9249,11 +9249,11 @@ dependencies = [
 name = "wasm-demo"
 version = "0.1.0"
 dependencies = [
+ "eframe",
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu",
 ]
 
 [[package]]
