@@ -17,6 +17,7 @@ pub mod presentation;
 pub mod scene_3d;
 pub mod settings;
 pub mod text;
+pub mod ui_settings;
 pub mod version_control_data;
 pub mod version_control_object;
 pub mod version_control_worktree;

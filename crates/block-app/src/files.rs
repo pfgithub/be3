@@ -4,7 +4,8 @@
 
 use std::collections::HashSet;
 
-use block::{BlockAccess, BlockParent, BlockReference, BlockReferenceList};
+use block::{Block, BlockAccess, BlockParent, BlockReference, BlockReferenceList};
+use block_client::blocks::settings::Settings;
 use eframe::egui;
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_FORWARD, ICON_ARROW_UPWARD, ICON_CHECK, ICON_CIRCLE,
@@ -40,6 +41,24 @@ struct SidebarRenderState {
 }
 
 impl BlockApp {
+    fn open_settings(&mut self) {
+        if !self.roots.is_loaded() {
+            return;
+        }
+        let id = self
+            .roots
+            .read()
+            .into_iter()
+            .find(|reference| reference.block_type == Settings::TYPE_ID)
+            .map(|reference| reference.id)
+            .unwrap_or_else(|| {
+                let settings = self.client.create_block(Settings::new());
+                settings.set_parent(BlockParent::Root);
+                settings.id()
+            });
+        self.open_tab(id, Settings::TYPE_ID);
+    }
+
     fn root_via_roots_list(&self, id: Uuid) -> Option<BlockParent> {
         if !self.roots.is_loaded() {
             return None;
@@ -689,6 +708,14 @@ impl BlockApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button("More", |ui| {
+                    if ui
+                        .add_enabled(self.roots.is_loaded(), egui::Button::new("Settings"))
+                        .clicked()
+                    {
+                        self.open_settings();
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button("Client").clicked() {
                         self.client_debug_open = true;
                         ui.close();

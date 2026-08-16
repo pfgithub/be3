@@ -23,6 +23,7 @@ mod reference_cache;
 mod scene_3d;
 mod settings;
 mod text;
+mod ui_settings;
 mod unsupported;
 mod version_control_data;
 mod version_control_worktree;
@@ -1364,7 +1365,9 @@ impl EditorRegistry {
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<presentation::PresentationEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
+        registry.register::<settings::SettingsEditor>();
         registry.register_creatable::<text::TextEditor>();
+        registry.register::<ui_settings::UiSettingsEditor>();
         registry.register_creatable::<version_control_data::VersionControlDataEditor>();
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<video::VideoEditor>();

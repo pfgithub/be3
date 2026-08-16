@@ -21,15 +21,15 @@ use std::{io, path::PathBuf};
 
 use app_state::{AppStateStore, SavedAccount, ServerLocation};
 use block::{
-    BlockAccess, BlockParent, BlockReference, BlockReferenceList, ManagementErrorCode, Workspace,
-    WorkspaceInvitation, WorkspaceRole,
+    Block, BlockAccess, BlockParent, BlockReference, BlockReferenceList, ManagementErrorCode,
+    Workspace, WorkspaceInvitation, WorkspaceRole,
 };
 use block_client::{
-    blocks::workspace_index::BlockEntry,
+    blocks::{settings::Settings, ui_settings::UiSettings, workspace_index::BlockEntry},
     presence::{pick_free_color, PresenceColor, UserActive},
     properties::MAX_NAME_BYTES,
-    BlockClient, DynamicArtifactDescriptor, ManagementClient, ManagementClientError, ReferenceList,
-    Session,
+    BlockClient, BlockHandle, DynamicArtifactDescriptor, ManagementClient, ManagementClientError,
+    ReferenceList, Session,
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
@@ -178,6 +178,7 @@ struct BlockApp {
     account: Account,
     client: Arc<BlockClient>,
     roots: ReferenceList,
+    ui_settings: Option<BlockHandle<UiSettings>>,
     orphaned: Option<ReferenceList>,
     orphaned_expanded: bool,
     expanded: HashMap<Uuid, ReferenceList>,
@@ -582,6 +583,7 @@ impl BlockApp {
             account,
             client,
             roots,
+            ui_settings: None,
             orphaned: None,
             orphaned_expanded: false,
             expanded: HashMap::new(),
@@ -1172,6 +1174,7 @@ impl BlockApp {
         self.active_tab = None;
         self.share = ShareDialog::default();
         self.roots = roots;
+        self.ui_settings = None;
         self.client = client;
         self.workspace = Some(workspace.clone());
         self.account.last_workspace_id = Some(workspace.id);
@@ -1538,6 +1541,7 @@ impl BlockApp {
         self.reauth = None;
         self.invite_open = false;
         self.roots = roots;
+        self.ui_settings = None;
         self.client = client;
         self.account = account;
         self.server_url = server_url;
@@ -3589,6 +3593,7 @@ impl BlockApp {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
             return;
         }
+        self.sync_ui_settings(ui.ctx());
         self.poll_workspace_request();
         self.show_reauth(ui.ctx());
         self.intercept_close(ui.ctx());
@@ -3615,6 +3620,36 @@ impl BlockApp {
         self.show_discard_confirmation(ui.ctx());
         performance::show(ui.ctx());
         performance::end_frame();
+    }
+
+    fn sync_ui_settings(&mut self, context: &egui::Context) {
+        if self.ui_settings.is_none() {
+            let Some(settings_id) = self
+                .roots
+                .read()
+                .into_iter()
+                .find(|reference| reference.block_type == Settings::TYPE_ID)
+                .map(|reference| reference.id)
+            else {
+                context.set_zoom_factor(1.0);
+                return;
+            };
+            let settings = self.client.get_block::<Settings>(settings_id);
+            let Some(settings) = settings.read() else {
+                return;
+            };
+            let Some(id) = settings
+                .resolve(UiSettings::TYPE_ID, self.client_id)
+                .and_then(|reference| reference.as_direct())
+            else {
+                context.set_zoom_factor(1.0);
+                return;
+            };
+            self.ui_settings = Some(self.client.get_block::<UiSettings>(id));
+        }
+        if let Some(settings) = self.ui_settings.as_ref().and_then(BlockHandle::read) {
+            context.set_zoom_factor(settings.zoom());
+        }
     }
 
     fn show_error_window(&mut self, ui: &mut egui::Ui, message: &str) {
