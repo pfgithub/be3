@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 
-use egui::{Context, Pos2, Rect};
+use egui::{Context, Painter, Pos2, Rect};
 
 use crate::button::{ChangeHandler, ClickHandler};
 use crate::document::Document;
+use crate::layout::measure;
 use crate::node::{NodeId, NodeKind};
 
 pub(crate) fn interact(
     doc: &mut Document,
     ctx: &Context,
+    painter: &Painter,
     rects: &HashMap<NodeId, Rect>,
     root: NodeId,
 ) {
@@ -19,6 +21,8 @@ pub(crate) fn interact(
     let mut focus_target = None;
     interact_node(
         doc,
+        ctx,
+        painter,
         rects,
         root,
         pointer_pos,
@@ -32,8 +36,11 @@ pub(crate) fn interact(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn interact_node(
     doc: &mut Document,
+    ctx: &Context,
+    painter: &Painter,
     rects: &HashMap<NodeId, Rect>,
     id: NodeId,
     pointer_pos: Option<Pos2>,
@@ -47,6 +54,7 @@ fn interact_node(
     let mut click: Option<ClickHandler> = None;
     let mut hover_change: Option<(ChangeHandler, bool)> = None;
     let mut active_change: Option<(ChangeHandler, bool)> = None;
+    let mut scroll_delta: Option<f32> = None;
 
     match &mut doc.arena.get_mut(id).kind {
         NodeKind::List(list) => {
@@ -64,6 +72,15 @@ fn interact_node(
         }
         NodeKind::Slot(slot) => {
             children.extend(slot.content);
+        }
+        NodeKind::Scroll(scroll) => {
+            if pointer_pos.is_some_and(|pos| rect.contains(pos)) {
+                let delta = ctx.input(|input| input.smooth_scroll_delta.y);
+                if delta != 0.0 {
+                    scroll_delta = Some(delta);
+                }
+            }
+            children.extend(scroll.items.iter().skip(scroll.top_index).copied());
         }
         NodeKind::Button(button) => {
             let hovered = pointer_pos.is_some_and(|pos| rect.contains(pos));
@@ -114,10 +131,33 @@ fn interact_node(
             button.on_active_change = Some(handler);
         }
     }
+    if let Some(delta) = scroll_delta {
+        let (items, mut top_index, mut offset) = {
+            let NodeKind::Scroll(scroll) = &doc.arena.get(id).kind else {
+                unreachable!("scroll_delta only set for Scroll nodes");
+            };
+            (
+                scroll.items.clone(),
+                scroll.top_index,
+                scroll.offset - delta,
+            )
+        };
+        normalize_scroll(doc, painter, &items, &mut top_index, &mut offset);
+        if let NodeKind::Scroll(scroll) = &mut doc.arena.get_mut(id).kind {
+            scroll.top_index = top_index;
+            scroll.offset = offset;
+        }
+    }
+
+    // Scroll children beyond the visible range are never laid out, so only
+    // recurse into children that actually have a rect this frame.
+    children.retain(|child| rects.contains_key(child));
 
     for child in children {
         interact_node(
             doc,
+            ctx,
+            painter,
             rects,
             child,
             pointer_pos,
@@ -125,5 +165,40 @@ fn interact_node(
             released_this_frame,
             focus_target,
         );
+    }
+}
+
+fn normalize_scroll(
+    doc: &Document,
+    painter: &Painter,
+    items: &[NodeId],
+    top_index: &mut usize,
+    offset: &mut f32,
+) {
+    if items.is_empty() {
+        *top_index = 0;
+        *offset = 0.0;
+        return;
+    }
+    loop {
+        if *offset < 0.0 {
+            if *top_index == 0 {
+                *offset = 0.0;
+                return;
+            }
+            *top_index -= 1;
+            *offset += measure(doc, painter, items[*top_index]).y;
+            continue;
+        }
+        let height = measure(doc, painter, items[*top_index]).y;
+        if *offset > height && *top_index + 1 < items.len() {
+            *offset -= height;
+            *top_index += 1;
+            continue;
+        }
+        if *offset > height {
+            *offset = height;
+        }
+        return;
     }
 }

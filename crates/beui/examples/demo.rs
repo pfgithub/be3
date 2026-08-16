@@ -110,10 +110,16 @@ impl DemoApp {
         });
 
         let left_pane = document.create_text("Left pane, 30% of the remaining space.");
-        let right_pane = document.create_text("Right pane, 70% of the remaining space.");
+
+        let scroll = document.create_scroll();
+        for i in 0..200 {
+            let row = document.create_text(format!("Row {i}"));
+            document.append_scroll_item(scroll, row);
+        }
+
         let panes = document.create_list(Direction::Horizontal);
         document.append_child(panes, left_pane, ItemSize::Percent(30.0));
-        document.append_child(panes, right_pane, ItemSize::Percent(70.0));
+        document.append_child(panes, scroll, ItemSize::Percent(70.0));
 
         let root = document.create_list(Direction::Vertical);
         document.append_child(root, toolbar, ItemSize::Intrinsic);

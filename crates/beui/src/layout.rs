@@ -30,6 +30,9 @@ pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId) -> Vec2 {
             Some(content) => measure(doc, painter, content),
             None => Vec2::ZERO,
         },
+        // A scroll view's content is unbounded and only measured lazily for
+        // the visible range during layout, so it has no useful intrinsic size.
+        NodeKind::Scroll(_) => Vec2::ZERO,
         NodeKind::List(list) => {
             let horizontal = list.direction == Direction::Horizontal;
             let mut main = 0.0f32;
@@ -96,6 +99,20 @@ pub(crate) fn layout(
         NodeKind::Slot(slot) => {
             if let Some(content) = slot.content {
                 layout(doc, painter, content, rect, out);
+            }
+            return;
+        }
+        NodeKind::Scroll(scroll) => {
+            let mut cursor = rect.top() - scroll.offset;
+            for &item in scroll.items.iter().skip(scroll.top_index) {
+                let height = measure(doc, painter, item).y;
+                let child_rect =
+                    Rect::from_min_size(pos2(rect.left(), cursor), vec2(rect.width(), height));
+                layout(doc, painter, item, child_rect, out);
+                cursor += height;
+                if cursor >= rect.bottom() {
+                    break;
+                }
             }
             return;
         }

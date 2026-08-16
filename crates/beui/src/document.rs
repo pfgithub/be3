@@ -10,6 +10,7 @@ use crate::list::{Direction, ItemSize, ListItem, ListNode};
 use crate::node::{Arena, NodeId, NodeKind};
 use crate::outline::OutlineNode;
 use crate::paint;
+use crate::scroll::ScrollNode;
 use crate::shadow::{ShadowNode, SlotNode};
 use crate::style::Style;
 use crate::text::TextNode;
@@ -81,6 +82,17 @@ impl Document {
     pub fn create_shadow(&mut self, shadow_root: NodeId, slot: NodeId) -> NodeId {
         self.arena
             .insert(NodeKind::Shadow(ShadowNode { shadow_root, slot }))
+    }
+
+    pub fn create_scroll(&mut self) -> NodeId {
+        self.arena.insert(NodeKind::Scroll(ScrollNode::new()))
+    }
+
+    pub fn append_scroll_item(&mut self, scroll: NodeId, child: NodeId) {
+        let NodeKind::Scroll(scroll) = &mut self.arena.get_mut(scroll).kind else {
+            panic!("node is not a Scroll node");
+        };
+        scroll.items.push(child);
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, size: ItemSize) {
@@ -195,6 +207,7 @@ impl Document {
             NodeKind::Outline(outline) => outline.child.into_iter().collect(),
             NodeKind::Shadow(shadow) => vec![shadow.shadow_root],
             NodeKind::Slot(slot) => slot.content.into_iter().collect(),
+            NodeKind::Scroll(scroll) => scroll.items.clone(),
             NodeKind::Text(_) => Vec::new(),
         };
         for child in children {
@@ -231,7 +244,7 @@ impl Document {
         let mut rects = HashMap::new();
         layout::layout(self, &painter, root, rect, &mut rects);
 
-        interact::interact(self, ctx, &rects, root);
+        interact::interact(self, ctx, &painter, &rects, root);
 
         paint::paint(self, &painter, &rects, root);
     }

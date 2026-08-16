@@ -56,5 +56,14 @@ pub(crate) fn paint(doc: &Document, painter: &Painter, rects: &HashMap<NodeId, R
                 paint(doc, painter, rects, content);
             }
         }
+        NodeKind::Scroll(scroll) => {
+            let clipped = painter.with_clip_rect(rect);
+            for &item in scroll.items.iter().skip(scroll.top_index) {
+                if !rects.contains_key(&item) {
+                    break;
+                }
+                paint(doc, &clipped, rects, item);
+            }
+        }
     }
 }

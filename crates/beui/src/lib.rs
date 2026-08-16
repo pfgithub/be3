@@ -7,6 +7,7 @@ mod list;
 mod node;
 mod outline;
 mod paint;
+mod scroll;
 mod shadow;
 mod style;
 mod text;

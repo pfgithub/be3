@@ -2,6 +2,7 @@ use crate::button::ButtonNode;
 use crate::fill::FillNode;
 use crate::list::ListNode;
 use crate::outline::OutlineNode;
+use crate::scroll::ScrollNode;
 use crate::shadow::{ShadowNode, SlotNode};
 use crate::text::TextNode;
 
@@ -19,6 +20,7 @@ pub(crate) enum NodeKind {
     Outline(OutlineNode),
     Shadow(ShadowNode),
     Slot(SlotNode),
+    Scroll(ScrollNode),
     Text(TextNode),
 }
 
