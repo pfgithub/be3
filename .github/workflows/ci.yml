@@ -48,7 +48,7 @@ jobs:
         with:
           version: 0.15.2
 
-      - run: pwsh -File ./scripts/verify.ps1 -Check
+      - run: ./scripts/verify.sh --check
 
   web:
     name: web bundle
@@ -94,7 +94,7 @@ jobs:
           path: target/tools
           key: wasi-sysroot-33
 
-      - run: pwsh -File ./scripts/build-block-web.ps1 -Release
+      - run: ./scripts/build-block-web.sh --release
 
       - uses: actions/upload-artifact@v7
         with:
@@ -192,7 +192,7 @@ jobs:
           sed -i 's/^package = "com.be3.block"$/package = "com.be3.block.ci"/' crates/block-app/Cargo.toml
           sed -i 's/^label = "Block"$/label = "Block (CI)"/' crates/block-app/Cargo.toml
 
-      - run: pwsh -File ./scripts/build-block-android.ps1 -AndroidSdk "$ANDROID_SDK_ROOT"
+      - run: ./scripts/build-block-android.sh --android-sdk "$ANDROID_SDK_ROOT"
 
       - uses: actions/upload-artifact@v7
         with:

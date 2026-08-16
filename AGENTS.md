@@ -18,7 +18,7 @@ Main folders:
 - `crates/block-e2e` — end-to-end tests that run a real server and client together; no library code of its own beyond test support.
 - `crates/text-editor-core` — the text editor's own logic, pulled out of `block-app` into its own crate: text diffing (`core.rs`), `tree-sitter`-based syntax highlighting for Markdown/Rust/Zig (`highlighter/`), and text-cursor presence. It sits on the editor/view side, not the block side — the `text` block itself (`block-client/src/blocks/text.rs`) stays minimal.
 - `crates/logicgame` — a standalone logic-circuit simulation engine (`grid` for the component graph, `execution` for running it, `challenges` for the built-in puzzle set), used by the logic_game/logic_grid/compiled_logic block types but with no dependency on `block`/`block-client` itself.
-- `scripts/` — verification (`verify.sh`/`verify.ps1`), platform build scripts, and the `web/` wasm/WASI host glue for the browser build.
+- `scripts/` — verification, platform build scripts, and the `web/` wasm/WASI host glue for the browser build.
 - `crates/citygame`, `crates/citygenerator`, `crates/reactive`, `crates/tablet`, `crates/cvl2` — separate, unrelated projects that happen to live in this workspace; ignore them for BE3 work.
 
 Block types (the core, in `crates/block-client/src/blocks/<name>.rs`; each is defined by a state struct, an operation enum, and `apply_operation`):
@@ -89,7 +89,7 @@ Tests:
 - Do not add irrelevant or useless tests. If a change needs manual testing, note what needs testing in your final output.
 
 Verification:
-- After making changes, always run: on Windows, `powershell -File ./scripts/verify.ps1`; on other OSes, `./scripts/verify.sh`. It runs clippy (applying the fixes it can), rustfmt and the tests, and fails if any clippy warning is left. This should take less than 2 minutes including compilation time. Then, commit changes to git and push using `git push`.
+- After making changes, always run `./scripts/verify.sh`. It runs clippy (applying the fixes it can), rustfmt and the tests, and fails if any clippy warning is left. This should take less than 2 minutes including compilation time. Then, commit changes to git and push using `git push`.
 - Commit using `git add --all` and `git commit`. Don't check the status. Don't worry about it if the wrong file ends up in a commit unless it is supposed to be gitignored.
 - When there are multiple or large changes, split them up into tasks and test & commit to git after each one.
 - Use commit message format `type: message` where type is fix/feat/docs/...
