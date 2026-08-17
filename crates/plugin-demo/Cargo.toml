@@ -23,5 +23,8 @@ web-sys = { version = "0.3", features = [
     "Window",
 ] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [lints]
 workspace = true

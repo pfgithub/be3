@@ -4,6 +4,8 @@ mod input;
 mod native;
 #[cfg(target_arch = "wasm32")]
 mod presenter;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+mod process;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
