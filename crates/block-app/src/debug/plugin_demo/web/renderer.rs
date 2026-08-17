@@ -1,59 +1,33 @@
-use eframe::egui_wgpu::{self, wgpu};
+use eframe::egui_wgpu::wgpu;
 use wasm_bindgen::JsCast;
+
+use super::super::presenter::SurfacePresenter;
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 /// Registers the renderer that copies the plugin-demo canvas into a texture
 /// each frame. Returns whether a wgpu render backend was available at all;
 /// the debug window shows an error instead of the demo when it is not.
-pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
+pub(super) fn install(
+    creation_context: &eframe::CreationContext<'_>,
+) -> Option<super::super::presenter::PresenterStatus> {
     let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
-        return false;
+        return None;
     };
     render_state
         .renderer
         .write()
         .callback_resources
-        .insert(PluginDemoRenderer::new(
+        .insert(WebSurfacePresenter::new(
             &render_state.device,
             render_state.target_format,
         ));
-    true
+    Some(super::super::presenter::PresenterStatus::waiting())
 }
 
-pub(super) struct PluginDemoCallback {
+pub(crate) struct WebFrame {
     pub(super) size: [u32; 2],
     pub(super) canvas_id: &'static str,
-}
-
-impl egui_wgpu::CallbackTrait for PluginDemoCallback {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
-        callback_resources: &mut egui_wgpu::CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        if self.size[0] > 0 && self.size[1] > 0 {
-            if let Some(renderer) = callback_resources.get_mut::<PluginDemoRenderer>() {
-                renderer.ensure_target(device, self.size);
-                renderer.copy_from_canvas(queue, self.canvas_id);
-            }
-        }
-        Vec::new()
-    }
-
-    fn paint(
-        &self,
-        _info: eframe::egui::PaintCallbackInfo,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        callback_resources: &egui_wgpu::CallbackResources,
-    ) {
-        if let Some(renderer) = callback_resources.get::<PluginDemoRenderer>() {
-            renderer.blit(render_pass);
-        }
-    }
 }
 
 struct PluginDemoTarget {
@@ -66,14 +40,14 @@ struct PluginDemoTarget {
 /// pipeline that blits it into egui's own render pass. Rebuilt from the two
 /// independent wgpu devices' canvases meeting only at the browser's
 /// `GPUQueue.copyExternalImageToTexture`, not via any shared wgpu resource.
-struct PluginDemoRenderer {
+pub(crate) struct WebSurfacePresenter {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     target: Option<PluginDemoTarget>,
 }
 
-impl PluginDemoRenderer {
+impl WebSurfacePresenter {
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("blit.wgsl"));
 
@@ -229,6 +203,32 @@ impl PluginDemoRenderer {
         render_pass.set_pipeline(&self.blit_pipeline);
         render_pass.set_bind_group(0, &target.bind_group, &[]);
         render_pass.draw(0..3, 0..1);
+    }
+}
+
+impl SurfacePresenter for WebSurfacePresenter {
+    type Frame = WebFrame;
+
+    fn replace(&mut self, device: &wgpu::Device, frame: &Self::Frame) -> Result<(), String> {
+        if frame.size[0] > 0 && frame.size[1] > 0 {
+            self.ensure_target(device, frame.size);
+        }
+        Ok(())
+    }
+
+    fn prepare(&mut self, queue: &wgpu::Queue, frame: &Self::Frame) -> Result<(), String> {
+        if frame.size[0] > 0 && frame.size[1] > 0 {
+            self.copy_from_canvas(queue, frame.canvas_id);
+        }
+        Ok(())
+    }
+
+    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>) {
+        self.blit(render_pass);
+    }
+
+    fn release(&mut self) {
+        self.target = None;
     }
 }
 

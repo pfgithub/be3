@@ -4,11 +4,13 @@ use eframe::egui;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-mod renderer;
+pub(super) mod renderer;
 
 use super::input::InputAdapter;
+use super::presenter::{
+    PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, WebFrame,
+};
 use block_plugin_api::{InputEvent, Message, PointerButton, WheelUnit};
-use renderer::PluginDemoCallback;
 
 const PLUGIN_DEMO_URL: &str = "/plugin_demo.js";
 const CANVAS_ID: &str = "plugin-demo-canvas";
@@ -100,13 +102,16 @@ struct State {
     error: Option<String>,
     canvas_size: [u32; 2],
     input: InputAdapter,
+    presenter_status: Option<PresenterStatus>,
 }
 
 pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
-    let render_available = renderer::install(creation_context);
+    let presenter_status = renderer::install(creation_context);
+    let render_available = presenter_status.is_some();
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.render_available = render_available;
+        state.presenter_status = presenter_status;
         if !render_available {
             state.error = Some("wgpu is not available in this build.".to_owned());
         }
@@ -140,7 +145,17 @@ pub(crate) fn show(ctx: &egui::Context) {
         }
 
         let mut open = state.open;
-        let error = state.error.clone();
+        let presenter_error =
+            state
+                .presenter_status
+                .as_ref()
+                .and_then(|status| match status.get() {
+                    PresenterState::Unsupported(error) | PresenterState::Failed(error) => {
+                        Some(error)
+                    }
+                    _ => None,
+                });
+        let error = state.error.clone().or(presenter_error);
         let mut requested_size = None;
         let pixels_per_point = ctx.pixels_per_point();
         egui::Window::new("Plugin Demo")
@@ -163,14 +178,31 @@ pub(crate) fn show(ctx: &egui::Context) {
                     ui,
                     &response,
                 );
-                painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
-                    response.rect,
-                    PluginDemoCallback {
-                        size,
-                        canvas_id: CANVAS_ID,
-                    },
-                ));
+                if let Some(status) = state.presenter_status.clone() {
+                    painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
+                        response.rect,
+                        PresenterCallback {
+                            command: PresenterCommand::Present(WebFrame {
+                                size,
+                                canvas_id: CANVAS_ID,
+                            }),
+                            status,
+                        },
+                    ));
+                }
             });
+        if state.open && !open {
+            if let Some(status) = state.presenter_status.clone() {
+                ctx.debug_painter()
+                    .add(eframe::egui_wgpu::Callback::new_paint_callback(
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+                        PresenterCallback::<WebFrame> {
+                            command: PresenterCommand::Release,
+                            status,
+                        },
+                    ));
+            }
+        }
         state.open = open;
 
         if let Some((size, _)) = requested_size {
