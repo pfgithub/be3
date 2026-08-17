@@ -121,7 +121,7 @@ struct Window {
 fn plugin_path() -> PathBuf {
     let mut path = std::env::current_exe().unwrap_or_default();
     #[cfg(target_os = "windows")]
-    path.set_file_name("plugin-demo/plugin-demo.exe");
+    path.set_file_name("plugin-demo-host.exe");
     #[cfg(target_os = "macos")]
     path.set_file_name("plugin-demo");
     #[cfg(target_os = "linux")]
