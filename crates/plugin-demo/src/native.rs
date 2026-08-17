@@ -44,6 +44,10 @@ impl ClientSession {
         capabilities.push(Capability::Surface(
             block_plugin_api::SurfaceMechanism::LinuxDmaBuf,
         ));
+        #[cfg(target_arch = "wasm32")]
+        capabilities.push(Capability::Surface(
+            block_plugin_api::SurfaceMechanism::WebExternalImage,
+        ));
         Message::Hello(Hello {
             minimum_version: PROTOCOL_VERSION,
             maximum_version: PROTOCOL_VERSION,

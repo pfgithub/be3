@@ -1,6 +1,5 @@
 use block_plugin_api::{
-    FrameReady, InputBatch, InputEvent, Message, PointerButton, ViewportMetrics, WheelUnit,
-    WindowsSurfaceDescriptor,
+    FrameReady, InputBatch, Message, ViewportMetrics, WindowsSurfaceDescriptor,
 };
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
@@ -23,8 +22,7 @@ pub struct Surface {
     texture: wgpu::Texture,
     context: egui::Context,
     renderer: egui_wgpu::Renderer,
-    demo: crate::demo::Demo,
-    input: egui::RawInput,
+    egui: crate::egui_session::EguiSession,
     fence: ID3D12Fence,
     resource_handle: OwnedHandle,
     fence_handle: OwnedHandle,
@@ -146,8 +144,7 @@ impl Surface {
             texture,
             context,
             renderer,
-            demo: crate::demo::Demo::default(),
-            input: egui::RawInput::default(),
+            egui: crate::egui_session::EguiSession::default(),
             fence,
             resource_handle,
             fence_handle,
@@ -188,73 +185,13 @@ impl Surface {
     }
 
     pub fn input(&mut self, batch: &InputBatch) {
-        for event in &batch.events {
-            match event {
-                InputEvent::PointerMoved { x, y } => self
-                    .input
-                    .events
-                    .push(egui::Event::PointerMoved(egui::pos2(*x, *y))),
-                InputEvent::PointerButton {
-                    button,
-                    pressed,
-                    x,
-                    y,
-                } => self.input.events.push(egui::Event::PointerButton {
-                    pos: egui::pos2(*x, *y),
-                    button: pointer_button(*button),
-                    pressed: *pressed,
-                    modifiers: self.input.modifiers,
-                }),
-                InputEvent::Wheel { x, y, unit } => {
-                    self.input.events.push(egui::Event::MouseWheel {
-                        unit: wheel_unit(*unit),
-                        delta: egui::vec2(*x, *y),
-                        modifiers: self.input.modifiers,
-                    });
-                }
-                InputEvent::Key {
-                    logical,
-                    pressed,
-                    repeat,
-                    ..
-                } => {
-                    if let Some(key) = egui::Key::from_name(logical) {
-                        self.input.events.push(egui::Event::Key {
-                            key,
-                            physical_key: None,
-                            pressed: *pressed,
-                            repeat: *repeat,
-                            modifiers: self.input.modifiers,
-                        });
-                    }
-                }
-                InputEvent::Text(text) => self.input.events.push(egui::Event::Text(text.clone())),
-                InputEvent::Modifiers(modifiers) => {
-                    self.input.modifiers = egui::Modifiers {
-                        alt: modifiers.alt,
-                        ctrl: modifiers.control,
-                        shift: modifiers.shift,
-                        mac_cmd: false,
-                        command: modifiers.command,
-                    };
-                }
-                InputEvent::Focus(focused) => self.input.focused = *focused,
-            }
-        }
+        self.egui.receive(&Message::Input(batch.clone()));
     }
 
     pub fn render(&mut self, phase: f64) -> Result<Message, String> {
-        self.input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(self.metrics.logical_width, self.metrics.logical_height),
-        ));
-        self.input.time = Some(phase);
-        let input = std::mem::take(&mut self.input);
-        self.input.focused = input.focused;
-        self.input.modifiers = input.modifiers;
-        let output = self.context.run(input, |context| {
-            egui::CentralPanel::default().show(context, |ui| self.demo.show(ui));
-        });
+        self.egui
+            .receive(&Message::ResizeViewport(self.metrics.clone()));
+        let output = self.egui.run(&self.context, phase);
         let paint_jobs = self
             .context
             .tessellate(output.shapes, self.metrics.scale_factor);
@@ -314,23 +251,5 @@ impl Surface {
             damage: Vec::new(),
             synchronization_value: self.fence_value,
         }))
-    }
-}
-
-fn pointer_button(button: PointerButton) -> egui::PointerButton {
-    match button {
-        PointerButton::Primary => egui::PointerButton::Primary,
-        PointerButton::Secondary => egui::PointerButton::Secondary,
-        PointerButton::Middle => egui::PointerButton::Middle,
-        PointerButton::Back => egui::PointerButton::Extra1,
-        PointerButton::Forward | PointerButton::Other(_) => egui::PointerButton::Extra2,
-    }
-}
-
-fn wheel_unit(unit: WheelUnit) -> egui::MouseWheelUnit {
-    match unit {
-        WheelUnit::Pixels => egui::MouseWheelUnit::Point,
-        WheelUnit::Lines => egui::MouseWheelUnit::Line,
-        WheelUnit::Pages => egui::MouseWheelUnit::Page,
     }
 }
