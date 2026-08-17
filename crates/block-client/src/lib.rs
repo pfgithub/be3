@@ -383,6 +383,79 @@ pub struct BlockClient {
     watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
     block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
     presence: Arc<RwLock<PresenceStore>>,
+    delegated_failure: Arc<RwLock<Option<String>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DelegatedRequest {
+    Watch {
+        id: Uuid,
+        block_type: Uuid,
+    },
+    Unwatch {
+        id: Uuid,
+    },
+    Operate {
+        id: Uuid,
+        operation_id: Uuid,
+        sequence: u64,
+        operation: Vec<u8>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DelegatedEvent {
+    Snapshot {
+        id: Uuid,
+        block_type: Uuid,
+        author: Uuid,
+        sequence: u64,
+        access: BlockAccess,
+        data: Vec<u8>,
+    },
+    Acknowledged {
+        id: Uuid,
+        operation_id: Uuid,
+        sequence: u64,
+    },
+    RemoteOperation {
+        id: Uuid,
+        operation_id: Uuid,
+        author: Uuid,
+        sequence: u64,
+        operation: Vec<u8>,
+    },
+    AccessChanged {
+        id: Uuid,
+        access: BlockAccess,
+    },
+    Error(String),
+    Disconnected(String),
+}
+
+pub struct DelegatedClientEndpoint {
+    requests: mpsc::UnboundedSender<DelegatedRequest>,
+    events: mpsc::UnboundedReceiver<DelegatedEvent>,
+}
+
+pub struct DelegatedHostEndpoint {
+    pub requests: mpsc::UnboundedReceiver<DelegatedRequest>,
+    pub events: mpsc::UnboundedSender<DelegatedEvent>,
+}
+
+pub fn delegated_channel() -> (DelegatedClientEndpoint, DelegatedHostEndpoint) {
+    let (request_tx, request_rx) = mpsc::unbounded();
+    let (event_tx, event_rx) = mpsc::unbounded();
+    (
+        DelegatedClientEndpoint {
+            requests: request_tx,
+            events: event_rx,
+        },
+        DelegatedHostEndpoint {
+            requests: request_rx,
+            events: event_tx,
+        },
+    )
 }
 
 /// A sharing request that is still in flight. The UI polls it each frame rather
@@ -651,6 +724,7 @@ impl BlockClient {
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
         let block_access = Arc::new(RwLock::new(HashMap::new()));
         let presence = Arc::new(RwLock::new(HashMap::new()));
+        let delegated_failure = Arc::new(RwLock::new(None));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
         let worker_client_debug = Arc::clone(&client_debug);
@@ -682,7 +756,65 @@ impl BlockClient {
             watched_reference_lists,
             block_access,
             presence,
+            delegated_failure,
         }
+    }
+
+    pub fn delegated(
+        account_id: Uuid,
+        workspace_id: Uuid,
+        endpoint: DelegatedClientEndpoint,
+    ) -> Self {
+        let (commands, command_rx) = mpsc::unbounded();
+        let commands = CommandSender(commands);
+        let id = Uuid::new_v4();
+        let connected = Arc::new(OnceLock::new());
+        let _ = connected.set(());
+        let shutdown = Shutdown::default();
+        let access = Arc::new(RwLock::new(()));
+        let debug = Arc::new(RwLock::new(NetworkDebugSnapshot {
+            changes_saved: true,
+            ..Default::default()
+        }));
+        let client_debug = Arc::new(RwLock::new(ClientDebugSnapshot::empty(
+            id,
+            account_id,
+            workspace_id,
+        )));
+        let cached_blocks = Arc::new(RwLock::new(HashMap::new()));
+        let registered_blocks = Arc::new(RwLock::new(HashMap::new()));
+        let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
+        let block_access = Arc::new(RwLock::new(HashMap::new()));
+        let presence = Arc::new(RwLock::new(HashMap::new()));
+        let delegated_failure = Arc::new(RwLock::new(None));
+        transport::spawn_worker(delegated_worker_main(
+            command_rx,
+            endpoint,
+            Arc::clone(&access),
+            Arc::clone(&block_access),
+            Arc::clone(&delegated_failure),
+        ));
+        Self {
+            id,
+            account_id,
+            workspace_id,
+            commands,
+            connected,
+            shutdown,
+            access,
+            debug,
+            client_debug,
+            cached_blocks,
+            registered_blocks,
+            watched_reference_lists,
+            block_access,
+            presence,
+            delegated_failure,
+        }
+    }
+
+    pub fn delegated_failure(&self) -> Option<String> {
+        self.delegated_failure.read().clone()
     }
 
     /// Connects to the block websocket of the server at `url`, which is the same
@@ -1657,6 +1789,153 @@ enum WorkerCommand {
     PauseSending,
     StepSending,
     ResumeSending,
+}
+
+async fn delegated_worker_main(
+    commands: mpsc::UnboundedReceiver<WorkerCommand>,
+    endpoint: DelegatedClientEndpoint,
+    access: Arc<RwLock<()>>,
+    block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
+    failure: Arc<RwLock<Option<String>>>,
+) {
+    let DelegatedClientEndpoint {
+        mut requests,
+        events,
+    } = endpoint;
+    let mut commands = commands.fuse();
+    let mut events = events.fuse();
+    let mut blocks = HashMap::<Uuid, Arc<dyn ErasedBlock>>::new();
+    let mut in_flight = HashMap::<Uuid, (Uuid, u64)>::new();
+    loop {
+        futures_util::select! {
+            command = commands.next() => {
+                let Some(command) = command else {
+                    for id in blocks.keys().copied() {
+                        let _ = requests.unbounded_send(DelegatedRequest::Unwatch { id });
+                    }
+                    return;
+                };
+                match command {
+                    WorkerCommand::AddBlock(block) => {
+                        let id = block.id();
+                        if blocks.is_empty() && block.initial_data().is_none() {
+                            let block_type = block.block_type_id();
+                            blocks.insert(id, block);
+                            if requests.unbounded_send(DelegatedRequest::Watch { id, block_type }).is_err() {
+                                *failure.write() = Some("delegated host disconnected".into());
+                                return;
+                            }
+                        } else {
+                            *failure.write() = Some("delegated clients may watch one existing block".into());
+                        }
+                    }
+                    WorkerCommand::Operate { id } => {
+                        delegated_send_update(id, &blocks, &mut in_flight, &mut requests, &failure);
+                    }
+                    _ => {
+                        *failure.write() = Some("operation is unavailable to delegated clients".into());
+                    }
+                }
+            },
+            event = events.next() => {
+                let Some(event) = event else {
+                    *failure.write() = Some("delegated host disconnected".into());
+                    return;
+                };
+                match event {
+                    DelegatedEvent::Snapshot { id, block_type, author, sequence, access: granted, data } => {
+                        let Some(block) = blocks.get(&id) else {
+                            *failure.write() = Some("snapshot referenced an unknown block".into());
+                            continue;
+                        };
+                        if block.block_type_id() != block_type || block.author().is_some() {
+                            *failure.write() = Some("snapshot did not match the delegated watch".into());
+                            continue;
+                        }
+                        let _guard = access.write();
+                        block.resolve_authored(
+                            author,
+                            crypto::encode(&data),
+                            sequence,
+                            Vec::new(),
+                            BlockParent::Orphaned,
+                            BTreeMap::new(),
+                        );
+                        block_access.write().insert(id, granted);
+                        delegated_send_update(id, &blocks, &mut in_flight, &mut requests, &failure);
+                    }
+                    DelegatedEvent::Acknowledged { id, operation_id, sequence } => {
+                        if in_flight.remove(&operation_id) != Some((id, sequence)) {
+                            *failure.write() = Some("stale delegated acknowledgement".into());
+                            continue;
+                        }
+                        if let Some(block) = blocks.get(&id) {
+                            let _guard = access.write();
+                            block.acknowledge(operation_id, sequence);
+                            delegated_send_update(id, &blocks, &mut in_flight, &mut requests, &failure);
+                        }
+                    }
+                    DelegatedEvent::RemoteOperation { id, operation_id, author, sequence, operation } => {
+                        let Some(block) = blocks.get(&id) else {
+                            *failure.write() = Some("remote operation referenced an unknown block".into());
+                            continue;
+                        };
+                        let _guard = access.write();
+                        block.remote_operation(OperationRecord {
+                            seq: sequence,
+                            operation_id,
+                            author,
+                            operation: crypto::encode(&operation),
+                            references: ReferenceDelta::default(),
+                        });
+                    }
+                    DelegatedEvent::AccessChanged { id, access } => {
+                        if blocks.contains_key(&id) {
+                            block_access.write().insert(id, access);
+                        } else {
+                            *failure.write() = Some("access update referenced an unknown block".into());
+                        }
+                    }
+                    DelegatedEvent::Error(message) | DelegatedEvent::Disconnected(message) => {
+                        *failure.write() = Some(message);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn delegated_send_update(
+    id: Uuid,
+    blocks: &HashMap<Uuid, Arc<dyn ErasedBlock>>,
+    in_flight: &mut HashMap<Uuid, (Uuid, u64)>,
+    requests: &mut mpsc::UnboundedSender<DelegatedRequest>,
+    failure: &RwLock<Option<String>>,
+) {
+    let Some(block) = blocks.get(&id) else {
+        *failure.write() = Some("operation referenced an unknown delegated block".into());
+        return;
+    };
+    let Some(update) = block.next_update() else {
+        return;
+    };
+    let Some(sequence) = update.seq else {
+        *failure.write() = Some("CRDT blocks are unavailable to delegated clients".into());
+        return;
+    };
+    in_flight.insert(update.operation_id, (id, sequence));
+    if requests
+        .unbounded_send(DelegatedRequest::Operate {
+            id,
+            operation_id: update.operation_id,
+            sequence,
+            operation: crypto::decode(&update.operation),
+        })
+        .is_err()
+    {
+        *failure.write() = Some("delegated host disconnected".into());
+    }
 }
 
 async fn worker_main(

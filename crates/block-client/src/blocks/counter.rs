@@ -37,3 +37,6 @@ impl Block for Counter {
         };
     }
 }
+
+#[cfg(test)]
+mod tests;
