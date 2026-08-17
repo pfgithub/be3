@@ -90,7 +90,7 @@ impl WindowsSurfacePresenter {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vertex"),
+                entry_point: Some("blit_vertex"),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
@@ -99,7 +99,7 @@ impl WindowsSurfacePresenter {
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fragment"),
+                entry_point: Some("blit_fragment"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: target_format,

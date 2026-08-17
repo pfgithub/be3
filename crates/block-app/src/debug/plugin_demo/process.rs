@@ -2,13 +2,16 @@ use block_plugin_api::{
     encode_frame, Capability, HostSession, Message, SessionState, MAX_FRAME_BYTES,
 };
 use std::{
-    io::{self, Read, Write},
+    io,
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     thread,
     time::{Duration, Instant},
 };
+
+#[cfg(not(target_os = "windows"))]
+use std::io::{Read, Write};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::io::OwnedHandle;
@@ -231,6 +234,7 @@ impl Drop for Process {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn drive<S: Read + Write>(
     mut stream: S,
     child: &mut Child,

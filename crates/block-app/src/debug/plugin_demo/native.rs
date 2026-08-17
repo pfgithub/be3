@@ -87,6 +87,18 @@ pub(crate) fn show(ctx: &egui::Context) {
             if let Some(mut process) = window.process.take() {
                 process.shutdown();
             }
+            #[cfg(target_os = "windows")]
+            if let Some(status) = window.presenter_status.clone() {
+                use super::presenter::{PresenterCallback, PresenterCommand};
+                ctx.debug_painter()
+                    .add(eframe::egui_wgpu::Callback::new_paint_callback(
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+                        PresenterCallback::<super::windows::WindowsFrame> {
+                            command: PresenterCommand::Release,
+                            status,
+                        },
+                    ));
+            }
         }
         window.open = is_open;
     });
