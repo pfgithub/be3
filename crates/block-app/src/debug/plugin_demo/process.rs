@@ -25,18 +25,22 @@ impl Process {
         thread::spawn(move || {
             let result = platform::Endpoint::create().and_then(|endpoint| {
                 let argument = endpoint.argument();
-                let mut child = Command::new(&executable)
+                let mut command = Command::new(&executable);
+                command
                     .args(["--endpoint", &argument])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|error| {
-                        io::Error::new(
-                            error.kind(),
-                            format!("failed to launch {}: {error}", executable.display()),
-                        )
-                    })?;
+                    .stderr(Stdio::null());
+                #[cfg(target_os = "windows")]
+                if let Some(directory) = executable.parent() {
+                    command.current_dir(directory).env_remove("PATH");
+                }
+                let mut child = command.spawn().map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("failed to launch {}: {error}", executable.display()),
+                    )
+                })?;
                 status_sender
                     .send("Waiting for plugin handshake".into())
                     .ok();

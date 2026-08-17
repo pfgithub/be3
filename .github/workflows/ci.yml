@@ -284,16 +284,32 @@ jobs:
         if: matrix.client
         run: cargo build --release --target ${{ matrix.target }} -p block-app --bins
 
+      - name: Build and stage the desktop plugin
+        if: matrix.client
+        shell: bash
+        run: |
+          extension=''
+          if [ "${{ runner.os }}" = Windows ]; then extension='.exe'; fi
+          arguments=(
+            --target "${{ matrix.target }}"
+            --profile release
+            --output dist/plugin-package
+            --app-executable "target/${{ matrix.target }}/release/block-app$extension"
+          )
+          if [ "${{ runner.os }}" = macOS ]; then arguments+=(--sign-identity -); fi
+          ./scripts/build-plugin-demo.sh "${arguments[@]}"
+
       - name: Collect the binaries
         shell: bash
         run: |
           mkdir -p dist
-          for binary in block-server block-app; do
+          for binary in block-server; do
             for path in "target/${{ matrix.target }}/release/$binary" \
                         "target/${{ matrix.target }}/release/$binary.exe"; do
               if [ -f "$path" ]; then cp "$path" dist/; fi
             done
           done
+          if [ -d dist/plugin-package ]; then cp -R dist/plugin-package/. dist/; fi
           ls -l dist
 
       - uses: actions/upload-artifact@v7

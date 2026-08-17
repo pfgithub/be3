@@ -13,3 +13,6 @@ See .github/workflows/ci.yml for detailed instructions
 Basic setup:
 
 install rustup, `rustup default stable`, install cargo-nextest
+
+Desktop plugin build and packaging instructions are in
+[`external/plugin-demo.md`](external/plugin-demo.md).
