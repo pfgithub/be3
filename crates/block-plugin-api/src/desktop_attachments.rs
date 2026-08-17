@@ -124,12 +124,12 @@ mod unix {
         message.msg_iovlen = 1;
         if !attachments.is_empty() {
             message.msg_control = control.as_mut_ptr().cast();
-            message.msg_controllen = control.len();
+            message.msg_controllen = control.len() as _;
             let header = unsafe { libc::CMSG_FIRSTHDR(&message) };
             unsafe {
                 (*header).cmsg_level = libc::SOL_SOCKET;
                 (*header).cmsg_type = libc::SCM_RIGHTS;
-                (*header).cmsg_len = libc::CMSG_LEN(bytes as u32) as usize;
+                (*header).cmsg_len = libc::CMSG_LEN(bytes as u32) as _;
                 std::ptr::copy_nonoverlapping(
                     attachments.as_ptr(),
                     libc::CMSG_DATA(header).cast(),
@@ -158,8 +158,12 @@ mod unix {
         message.msg_iov = &raw mut io;
         message.msg_iovlen = 1;
         message.msg_control = control.as_mut_ptr().cast();
-        message.msg_controllen = control.len();
-        let received = unsafe { libc::recvmsg(fd, &raw mut message, libc::MSG_CMSG_CLOEXEC) };
+        message.msg_controllen = control.len() as _;
+        #[cfg(target_vendor = "apple")]
+        let flags = 0;
+        #[cfg(not(target_vendor = "apple"))]
+        let flags = libc::MSG_CMSG_CLOEXEC;
+        let received = unsafe { libc::recvmsg(fd, &raw mut message, flags) };
         if received < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -191,8 +195,8 @@ mod unix {
                     "unexpected attachment type",
                 ));
             }
-            let data_length = value.cmsg_len - unsafe { libc::CMSG_LEN(0) as usize };
-            if data_length % mem::size_of::<RawFd>() != 0 {
+            let data_length = value.cmsg_len as usize - unsafe { libc::CMSG_LEN(0) as usize };
+            if !data_length.is_multiple_of(mem::size_of::<RawFd>()) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "malformed descriptors",
@@ -208,11 +212,13 @@ mod unix {
             let descriptors = unsafe {
                 std::slice::from_raw_parts(libc::CMSG_DATA(control_header).cast::<RawFd>(), count)
             };
-            result.extend(
-                descriptors
-                    .iter()
-                    .map(|fd| unsafe { OwnedFd::from_raw_fd(*fd) }),
-            );
+            result.extend(descriptors.iter().map(|fd| {
+                #[cfg(target_vendor = "apple")]
+                unsafe {
+                    libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
+                }
+                unsafe { OwnedFd::from_raw_fd(*fd) }
+            }));
             control_header = unsafe { libc::CMSG_NXTHDR(&message, control_header) };
         }
         Ok(result)
