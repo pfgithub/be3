@@ -232,8 +232,8 @@ mod windows {
         os::windows::io::{FromRawHandle, OwnedHandle, RawHandle},
     };
     use windows_sys::Win32::{
-        Foundation::HANDLE,
-        System::Threading::{DuplicateHandle, GetCurrentProcess, DUPLICATE_SAME_ACCESS},
+        Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE},
+        System::Threading::GetCurrentProcess,
     };
 
     pub struct WindowsAttachmentCarrier {
