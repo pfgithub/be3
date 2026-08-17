@@ -2,7 +2,7 @@
 mod app;
 #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
 mod demo;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
 mod egui_session;
 
 pub mod native;

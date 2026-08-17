@@ -22,6 +22,7 @@ impl EguiSession {
         }
     }
 
+    #[cfg(target_os = "windows")]
     pub(crate) fn run(&mut self, context: &egui::Context, time: f64) -> egui::FullOutput {
         if let Some(metrics) = &self.metrics {
             context.set_pixels_per_point(metrics.scale_factor);
@@ -34,13 +35,19 @@ impl EguiSession {
         let input = std::mem::take(&mut self.input);
         self.input.focused = input.focused;
         self.input.modifiers = input.modifiers;
-        context.run(input, |context| {
-            egui::CentralPanel::default().show(context, |ui| self.demo.show(ui));
+        context.run_ui(input, |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| self.demo.show(ui));
         })
     }
 
     pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
         self.demo.show(ui);
+    }
+
+    pub(crate) fn append_input(&mut self, input: &mut egui::RawInput) {
+        input.events.append(&mut self.input.events);
+        input.modifiers = self.input.modifiers;
+        input.focused = self.input.focused;
     }
 
     fn input(&mut self, event: &InputEvent) {
@@ -64,6 +71,7 @@ impl EguiSession {
                 self.input.events.push(egui::Event::MouseWheel {
                     unit: wheel_unit(*unit),
                     delta: egui::vec2(*x, *y),
+                    phase: egui::TouchPhase::Move,
                     modifiers: self.input.modifiers,
                 });
             }
