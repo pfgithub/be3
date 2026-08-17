@@ -6,6 +6,8 @@ use wasm_bindgen::JsCast;
 
 mod renderer;
 
+use super::input::InputAdapter;
+use block_plugin_api::{InputEvent, Message, PointerButton, WheelUnit};
 use renderer::PluginDemoCallback;
 
 const PLUGIN_DEMO_URL: &str = "/plugin_demo.js";
@@ -97,7 +99,7 @@ struct State {
     render_available: bool,
     error: Option<String>,
     canvas_size: [u32; 2],
-    pointer_down: bool,
+    input: InputAdapter,
 }
 
 pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
@@ -156,11 +158,11 @@ pub(crate) fn show(ctx: &egui::Context) {
                     (response.rect.height() * pixels_per_point).round() as u32,
                 ];
                 requested_size = Some((size, response.rect));
-                forward_input(ui, &response, state.pointer_down);
-                state.pointer_down = ui.input(|input| {
-                    state.pointer_down && input.pointer.primary_down()
-                        || response.hovered() && input.pointer.primary_down()
-                });
+                forward_input(
+                    state.input.update(ui, &response, pixels_per_point),
+                    ui,
+                    &response,
+                );
                 painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
                     response.rect,
                     PluginDemoCallback {
@@ -180,80 +182,87 @@ pub(crate) fn show(ctx: &egui::Context) {
     });
 }
 
-fn forward_input(ui: &egui::Ui, response: &egui::Response, pointer_down: bool) {
-    let events = ui.input(|input| input.events.clone());
-    for event in events {
-        match event {
-            egui::Event::PointerMoved(position)
-                if response.rect.contains(position) || pointer_down =>
-            {
-                let position = position - response.rect.min;
-                let buttons = ui.input(|input| pointer_buttons(&input.pointer));
-                plugin_demo_pointer(
-                    CANVAS_ID,
-                    "mousemove",
-                    position.x,
-                    position.y,
-                    -1,
-                    buttons,
-                    false,
-                    false,
-                    false,
-                    false,
-                );
+fn forward_input(messages: Vec<Message>, ui: &egui::Ui, response: &egui::Response) {
+    for message in messages {
+        let Message::Input(input) = message else {
+            continue;
+        };
+        for event in input.events {
+            match event {
+                InputEvent::PointerMoved { x, y } => {
+                    let buttons = ui.input(|input| pointer_buttons(&input.pointer));
+                    plugin_demo_pointer(
+                        CANVAS_ID,
+                        "mousemove",
+                        x,
+                        y,
+                        -1,
+                        buttons,
+                        false,
+                        false,
+                        false,
+                        false,
+                    );
+                }
+                InputEvent::PointerButton {
+                    button,
+                    pressed,
+                    x,
+                    y,
+                } => {
+                    let buttons = ui.input(|input| pointer_buttons(&input.pointer));
+                    plugin_demo_pointer(
+                        CANVAS_ID,
+                        if pressed { "pointerdown" } else { "pointerup" },
+                        x,
+                        y,
+                        pointer_button(button),
+                        buttons,
+                        false,
+                        false,
+                        false,
+                        false,
+                    );
+                }
+                InputEvent::Wheel { x, y, unit } if response.hovered() => {
+                    let position = ui
+                        .input(|input| input.pointer.hover_pos())
+                        .unwrap_or(response.rect.center())
+                        - response.rect.min;
+                    plugin_demo_wheel(
+                        CANVAS_ID,
+                        position.x,
+                        position.y,
+                        -x * wheel_scale(unit),
+                        -y * wheel_scale(unit),
+                        false,
+                        false,
+                        false,
+                        false,
+                    );
+                }
+                _ => {}
             }
-            egui::Event::PointerButton {
-                pos,
-                button,
-                pressed,
-                modifiers,
-            } if response.rect.contains(pos) || pointer_down => {
-                let position = pos - response.rect.min;
-                let buttons = ui.input(|input| pointer_buttons(&input.pointer));
-                plugin_demo_pointer(
-                    CANVAS_ID,
-                    if pressed { "pointerdown" } else { "pointerup" },
-                    position.x,
-                    position.y,
-                    pointer_button(button),
-                    buttons,
-                    modifiers.ctrl,
-                    modifiers.shift,
-                    modifiers.alt,
-                    modifiers.mac_cmd,
-                );
-            }
-            egui::Event::MouseWheel {
-                delta, modifiers, ..
-            } if response.hovered() => {
-                let position = ui
-                    .input(|input| input.pointer.hover_pos())
-                    .unwrap_or(response.rect.center())
-                    - response.rect.min;
-                plugin_demo_wheel(
-                    CANVAS_ID,
-                    position.x,
-                    position.y,
-                    -delta.x,
-                    -delta.y,
-                    modifiers.ctrl,
-                    modifiers.shift,
-                    modifiers.alt,
-                    modifiers.mac_cmd,
-                );
-            }
-            _ => {}
         }
     }
 }
 
-fn pointer_button(button: egui::PointerButton) -> i16 {
+fn pointer_button(button: PointerButton) -> i16 {
     match button {
-        egui::PointerButton::Primary => 0,
-        egui::PointerButton::Middle => 1,
-        egui::PointerButton::Secondary => 2,
-        egui::PointerButton::Extra1 => 3,
-        egui::PointerButton::Extra2 => 4,
+        PointerButton::Primary => 0,
+        PointerButton::Middle => 1,
+        PointerButton::Secondary => 2,
+        PointerButton::Back => 3,
+        PointerButton::Forward => 4,
+        PointerButton::Other(button) => button as i16,
+    }
+}
+
+fn wheel_scale(unit: WheelUnit) -> f32 {
+    match unit {
+        WheelUnit::Pixels => 1.0,
+        WheelUnit::Lines => 40.0,
+        WheelUnit::Pages => 400.0,
     }
 }
 

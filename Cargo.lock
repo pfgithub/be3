@@ -854,6 +854,7 @@ dependencies = [
  "arboard",
  "block 0.1.0",
  "block-client",
+ "block-plugin-api",
  "block-server",
  "bytemuck",
  "eframe",
