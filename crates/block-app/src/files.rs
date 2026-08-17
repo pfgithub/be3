@@ -722,8 +722,8 @@ impl BlockApp {
                         crate::debug::version::open();
                         ui.close();
                     }
-                    if ui.button("Wasm Demo").clicked() {
-                        crate::debug::wasm_demo::open();
+                    if ui.button("Plugin Demo").clicked() {
+                        crate::debug::plugin_demo::open();
                         ui.close();
                     }
                     #[cfg(not(any(

@@ -18,11 +18,11 @@ fn blit_vertex(@builtin(vertex_index) index: u32) -> BlitOutput {
 }
 
 @group(0) @binding(0)
-var wasm_demo_texture: texture_2d<f32>;
+var plugin_demo_texture: texture_2d<f32>;
 @group(0) @binding(1)
-var wasm_demo_sampler: sampler;
+var plugin_demo_sampler: sampler;
 
 @fragment
 fn blit_fragment(input: BlitOutput) -> @location(0) vec4<f32> {
-    return textureSample(wasm_demo_texture, wasm_demo_sampler, input.uv);
+    return textureSample(plugin_demo_texture, plugin_demo_sampler, input.uv);
 }

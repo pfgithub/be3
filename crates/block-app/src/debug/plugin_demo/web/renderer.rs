@@ -3,7 +3,7 @@ use wasm_bindgen::JsCast;
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-/// Registers the renderer that copies the wasm-demo canvas into a texture
+/// Registers the renderer that copies the plugin-demo canvas into a texture
 /// each frame. Returns whether a wgpu render backend was available at all;
 /// the debug window shows an error instead of the demo when it is not.
 pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
@@ -14,19 +14,19 @@ pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
         .renderer
         .write()
         .callback_resources
-        .insert(WasmDemoRenderer::new(
+        .insert(PluginDemoRenderer::new(
             &render_state.device,
             render_state.target_format,
         ));
     true
 }
 
-pub(super) struct WasmDemoCallback {
+pub(super) struct PluginDemoCallback {
     pub(super) size: [u32; 2],
     pub(super) canvas_id: &'static str,
 }
 
-impl egui_wgpu::CallbackTrait for WasmDemoCallback {
+impl egui_wgpu::CallbackTrait for PluginDemoCallback {
     fn prepare(
         &self,
         device: &wgpu::Device,
@@ -36,7 +36,7 @@ impl egui_wgpu::CallbackTrait for WasmDemoCallback {
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if self.size[0] > 0 && self.size[1] > 0 {
-            if let Some(renderer) = callback_resources.get_mut::<WasmDemoRenderer>() {
+            if let Some(renderer) = callback_resources.get_mut::<PluginDemoRenderer>() {
                 renderer.ensure_target(device, self.size);
                 renderer.copy_from_canvas(queue, self.canvas_id);
             }
@@ -50,36 +50,36 @@ impl egui_wgpu::CallbackTrait for WasmDemoCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        if let Some(renderer) = callback_resources.get::<WasmDemoRenderer>() {
+        if let Some(renderer) = callback_resources.get::<PluginDemoRenderer>() {
             renderer.blit(render_pass);
         }
     }
 }
 
-struct WasmDemoTarget {
+struct PluginDemoTarget {
     size: [u32; 2],
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
-/// Owns the destination texture the wasm-demo canvas is copied into and the
+/// Owns the destination texture the plugin-demo canvas is copied into and the
 /// pipeline that blits it into egui's own render pass. Rebuilt from the two
 /// independent wgpu devices' canvases meeting only at the browser's
 /// `GPUQueue.copyExternalImageToTexture`, not via any shared wgpu resource.
-struct WasmDemoRenderer {
+struct PluginDemoRenderer {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    target: Option<WasmDemoTarget>,
+    target: Option<PluginDemoTarget>,
 }
 
-impl WasmDemoRenderer {
+impl PluginDemoRenderer {
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("blit.wgsl"));
 
         let blit_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("wasm demo blit bind group layout"),
+                label: Some("plugin demo blit bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -100,12 +100,12 @@ impl WasmDemoRenderer {
                 ],
             });
         let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("wasm demo blit pipeline layout"),
+            label: Some("plugin demo blit pipeline layout"),
             bind_group_layouts: &[Some(&blit_bind_group_layout)],
             immediate_size: 0,
         });
         let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("wasm demo blit pipeline"),
+            label: Some("plugin demo blit pipeline"),
             layout: Some(&blit_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -131,7 +131,7 @@ impl WasmDemoRenderer {
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("wasm demo blit sampler"),
+            label: Some("plugin demo blit sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
@@ -154,7 +154,7 @@ impl WasmDemoRenderer {
             return;
         }
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("wasm demo copy target"),
+            label: Some("plugin demo copy target"),
             size: wgpu::Extent3d {
                 width: size[0],
                 height: size[1],
@@ -169,7 +169,7 @@ impl WasmDemoRenderer {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("wasm demo blit bind group"),
+            label: Some("plugin demo blit bind group"),
             layout: &self.blit_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -182,7 +182,7 @@ impl WasmDemoRenderer {
                 },
             ],
         });
-        self.target = Some(WasmDemoTarget {
+        self.target = Some(PluginDemoTarget {
             size,
             texture,
             bind_group,

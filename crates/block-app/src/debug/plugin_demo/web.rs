@@ -6,19 +6,19 @@ use wasm_bindgen::JsCast;
 
 mod renderer;
 
-use renderer::WasmDemoCallback;
+use renderer::PluginDemoCallback;
 
-const WASM_DEMO_URL: &str = "/wasm_demo.js";
-const CANVAS_ID: &str = "wasm-demo-canvas";
+const PLUGIN_DEMO_URL: &str = "/plugin_demo.js";
+const CANVAS_ID: &str = "plugin-demo-canvas";
 
 #[wasm_bindgen(inline_js = "
-export async function run_wasm_demo(url, canvas_id) {
+export async function run_plugin_demo(url, canvas_id) {
     const module = await import(url);
     await module.default();
     await module.start(canvas_id);
 }
 
-export function wasm_demo_pointer(canvas_id, kind, x, y, button, buttons, ctrl, shift, alt, meta) {
+export function plugin_demo_pointer(canvas_id, kind, x, y, button, buttons, ctrl, shift, alt, meta) {
     const canvas = document.getElementById(canvas_id);
     const rect = canvas.getBoundingClientRect();
     const event = new PointerEvent(kind, {
@@ -39,7 +39,7 @@ export function wasm_demo_pointer(canvas_id, kind, x, y, button, buttons, ctrl, 
     });
 }
 
-export function wasm_demo_wheel(canvas_id, x, y, delta_x, delta_y, ctrl, shift, alt, meta) {
+export function plugin_demo_wheel(canvas_id, x, y, delta_x, delta_y, ctrl, shift, alt, meta) {
     const canvas = document.getElementById(canvas_id);
     const rect = canvas.getBoundingClientRect();
     const event = new WheelEvent('wheel', {
@@ -58,9 +58,9 @@ export function wasm_demo_wheel(canvas_id, x, y, delta_x, delta_y, ctrl, shift, 
 ")]
 extern "C" {
     #[wasm_bindgen(catch)]
-    async fn run_wasm_demo(url: &str, canvas_id: &str) -> Result<(), JsValue>;
+    async fn run_plugin_demo(url: &str, canvas_id: &str) -> Result<(), JsValue>;
 
-    fn wasm_demo_pointer(
+    fn plugin_demo_pointer(
         canvas_id: &str,
         kind: &str,
         x: f32,
@@ -73,7 +73,7 @@ extern "C" {
         meta: bool,
     );
 
-    fn wasm_demo_wheel(
+    fn plugin_demo_wheel(
         canvas_id: &str,
         x: f32,
         y: f32,
@@ -121,7 +121,7 @@ pub(crate) fn open() {
         state.started = true;
         create_canvas();
         wasm_bindgen_futures::spawn_local(async {
-            if let Err(error) = run_wasm_demo(WASM_DEMO_URL, CANVAS_ID).await {
+            if let Err(error) = run_plugin_demo(PLUGIN_DEMO_URL, CANVAS_ID).await {
                 let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
                 web_sys::console::error_1(&error);
                 STATE.with(|state| state.borrow_mut().error = Some(message));
@@ -141,7 +141,7 @@ pub(crate) fn show(ctx: &egui::Context) {
         let error = state.error.clone();
         let mut requested_size = None;
         let pixels_per_point = ctx.pixels_per_point();
-        egui::Window::new("Wasm Demo")
+        egui::Window::new("Plugin Demo")
             .open(&mut open)
             .default_size([420.0, 420.0])
             .show(ctx, |ui| {
@@ -163,7 +163,7 @@ pub(crate) fn show(ctx: &egui::Context) {
                 });
                 painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
                     response.rect,
-                    WasmDemoCallback {
+                    PluginDemoCallback {
                         size,
                         canvas_id: CANVAS_ID,
                     },
@@ -189,7 +189,7 @@ fn forward_input(ui: &egui::Ui, response: &egui::Response, pointer_down: bool) {
             {
                 let position = position - response.rect.min;
                 let buttons = ui.input(|input| pointer_buttons(&input.pointer));
-                wasm_demo_pointer(
+                plugin_demo_pointer(
                     CANVAS_ID,
                     "mousemove",
                     position.x,
@@ -210,7 +210,7 @@ fn forward_input(ui: &egui::Ui, response: &egui::Response, pointer_down: bool) {
             } if response.rect.contains(pos) || pointer_down => {
                 let position = pos - response.rect.min;
                 let buttons = ui.input(|input| pointer_buttons(&input.pointer));
-                wasm_demo_pointer(
+                plugin_demo_pointer(
                     CANVAS_ID,
                     if pressed { "pointerdown" } else { "pointerup" },
                     position.x,
@@ -230,7 +230,7 @@ fn forward_input(ui: &egui::Ui, response: &egui::Response, pointer_down: bool) {
                     .input(|input| input.pointer.hover_pos())
                     .unwrap_or(response.rect.center())
                     - response.rect.min;
-                wasm_demo_wheel(
+                plugin_demo_wheel(
                     CANVAS_ID,
                     position.x,
                     position.y,

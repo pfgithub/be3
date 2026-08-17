@@ -13,7 +13,7 @@ members = [
     "crates/citygenerator",
     "crates/logicgame",
     "crates/cvl2",
-    "crates/wasm-demo",
+    "crates/plugin-demo",
     "crates/gpui-demo",
 ]
 resolver = "2"

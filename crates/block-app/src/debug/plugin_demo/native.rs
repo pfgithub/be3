@@ -20,7 +20,7 @@ pub(crate) fn show(ctx: &egui::Context) {
         if !is_open {
             return;
         }
-        egui::Window::new("Wasm Demo")
+        egui::Window::new("Plugin Demo")
             .open(&mut is_open)
             .default_size([360.0, 140.0])
             .show(ctx, |ui| {

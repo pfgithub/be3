@@ -1,8 +1,8 @@
 mod block_data;
 mod client;
 mod network;
+pub(crate) mod plugin_demo;
 pub(crate) mod version;
-pub(crate) mod wasm_demo;
 // libghostty-vt is not supported on Windows, and is disabled on macOS because
 // it does not currently build there.
 #[cfg(not(any(

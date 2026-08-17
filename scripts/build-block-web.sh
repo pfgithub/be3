@@ -63,17 +63,17 @@ if $release; then
     profile_arguments=(--release)
 fi
 
-echo 'Building wasm-demo for wasm32-wasip1...'
-cargo build -p wasm-demo --target wasm32-wasip1 "${profile_arguments[@]}"
-wasm_demo="$repository/target/wasm32-wasip1/$profile_directory/wasm_demo.wasm"
-if [[ ! -f "$wasm_demo" ]]; then
-    echo "cargo did not produce $wasm_demo" >&2
+echo 'Building plugin-demo for wasm32-wasip1...'
+cargo build -p plugin-demo --target wasm32-wasip1 "${profile_arguments[@]}"
+plugin_demo="$repository/target/wasm32-wasip1/$profile_directory/plugin_demo.wasm"
+if [[ ! -f "$plugin_demo" ]]; then
+    echo "cargo did not produce $plugin_demo" >&2
     exit 1
 fi
 
-echo 'Generating JavaScript bindings for wasm-demo...'
+echo 'Generating JavaScript bindings for plugin-demo...'
 mkdir -p "$output_directory"
-"$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$wasm_demo"
+"$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$plugin_demo"
 
 if [[ -z "$wasi_sysroot" ]]; then
     wasi_sysroot="$tools_directory/wasi-sysroot"

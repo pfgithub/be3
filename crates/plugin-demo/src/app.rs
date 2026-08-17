@@ -11,8 +11,8 @@ struct Demo {
 
 impl eframe::App for Demo {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        ui.heading("egui wasm demo");
-        ui.label("This interface is rendered by wasm-demo.");
+        ui.heading("egui plugin demo");
+        ui.label("This interface is rendered by plugin-demo.");
         ui.separator();
         ui.checkbox(&mut self.enabled, "Enable controls");
         ui.add_enabled_ui(self.enabled, |ui| {
