@@ -104,8 +104,9 @@ export CFLAGS_wasm32_wasip1="$compiler_flags"
 export CXXFLAGS_wasm32_wasip1="$compiler_flags"
 export CXXSTDLIB_wasm32_wasip1='c++'
 export HARFBUZZ_SYS_NO_PKG_CONFIG='1'
-linker_search_path="$wasi_sysroot/lib/wasm32-wasip1/eh"
-export RUSTFLAGS="-C link-arg=-L$linker_search_path -C panic=unwind -C target-feature=+exception-handling"
+linker_search_path="$wasi_sysroot/lib/wasm32-wasip1/noeh"
+setjmp_library="$wasi_sysroot/lib/wasm32-wasip1/libsetjmp.a"
+export RUSTFLAGS="-C link-arg=-L$linker_search_path -C link-arg=$setjmp_library"
 
 echo 'Building block-app for wasm32-wasip1...'
 cargo build -p block-app --lib --target wasm32-wasip1 "${profile_arguments[@]}"
