@@ -102,9 +102,10 @@ fn bind() -> Result<(), String> {
         .attach_current_thread_for_scope(|environment| {
             let activity =
                 unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
+            let bridge = plugin_host_bridge(environment, &activity)?;
             environment
                 .call_static_method(
-                    jni::jni_str!("com/be3/block/plugin/PluginHostBridge"),
+                    &bridge,
                     jni::jni_str!("bind"),
                     jni::jni_sig!("(Landroid/content/Context;)Z"),
                     &[jni::objects::JValue::Object(&activity)],
@@ -125,14 +126,39 @@ fn unbind() {
     let _ = vm.attach_current_thread_for_scope(|environment| {
         let activity =
             unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
+        let bridge = plugin_host_bridge(environment, &activity)?;
         environment.call_static_method(
-            jni::jni_str!("com/be3/block/plugin/PluginHostBridge"),
+            &bridge,
             jni::jni_str!("unbind"),
             jni::jni_sig!("(Landroid/content/Context;)V"),
             &[jni::objects::JValue::Object(&activity)],
         )?;
         Ok::<_, jni::errors::Error>(())
     });
+}
+
+fn plugin_host_bridge<'local>(
+    environment: &mut jni::Env<'local>,
+    activity: &jni::objects::JObject<'local>,
+) -> jni::errors::Result<jni::objects::JClass<'local>> {
+    let class_loader = environment
+        .call_method(
+            activity,
+            jni::jni_str!("getClassLoader"),
+            jni::jni_sig!("()Ljava/lang/ClassLoader;"),
+            &[],
+        )?
+        .l()?;
+    let class_name = environment.new_string("com.be3.block.plugin.PluginHostBridge")?;
+    let class = environment
+        .call_method(
+            &class_loader,
+            jni::jni_str!("loadClass"),
+            jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/Class;"),
+            &[jni::objects::JValue::Object(&class_name)],
+        )?
+        .l()?;
+    environment.cast_local::<jni::objects::JClass<'local>>(class)
 }
 
 fn push(event: Event) {
