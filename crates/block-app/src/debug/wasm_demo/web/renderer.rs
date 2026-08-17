@@ -196,6 +196,14 @@ impl WasmDemoRenderer {
         let Some(canvas) = canvas_element(canvas_id) else {
             return;
         };
+        let copy_size = wgpu::Extent3d {
+            width: target.size[0].min(canvas.width()),
+            height: target.size[1].min(canvas.height()),
+            depth_or_array_layers: 1,
+        };
+        if copy_size.width == 0 || copy_size.height == 0 {
+            return;
+        }
         queue.copy_external_image_to_texture(
             &wgpu::CopyExternalImageSourceInfo {
                 source: wgpu::ExternalImageSource::HTMLCanvasElement(canvas),
@@ -210,11 +218,7 @@ impl WasmDemoRenderer {
                 color_space: wgpu::PredefinedColorSpace::Srgb,
                 premultiplied_alpha: false,
             },
-            wgpu::Extent3d {
-                width: target.size[0],
-                height: target.size[1],
-                depth_or_array_layers: 1,
-            },
+            copy_size,
         );
     }
 
