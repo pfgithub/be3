@@ -163,6 +163,7 @@ struct BlockApp {
     workspaces: Vec<Workspace>,
     invitations: Vec<WorkspaceInvitation>,
     workspaces_loaded: bool,
+    workspaces_load_failed: bool,
     pending_workspace_request:
         Option<platform::RequestResult<Result<WorkspaceResult, WorkspaceRequestError>>>,
     workspace_name: String,
@@ -573,6 +574,7 @@ impl BlockApp {
             workspaces: Vec::new(),
             invitations: Vec::new(),
             workspaces_loaded: false,
+            workspaces_load_failed: false,
             pending_workspace_request: None,
             workspace_name: String::new(),
             workspace_error: None,
@@ -907,6 +909,9 @@ impl BlockApp {
             Ok(client) => client,
             Err(error) => {
                 self.workspace_error = Some(error.to_string());
+                if matches!(operation, WorkspaceOperation::Load) {
+                    self.workspaces_load_failed = true;
+                }
                 return;
             }
         };
@@ -959,6 +964,7 @@ impl BlockApp {
                 self.workspaces = workspaces;
                 self.invitations = invitations;
                 self.workspaces_loaded = true;
+                self.workspaces_load_failed = false;
                 if let Some(last_workspace_id) = self.account.last_workspace_id {
                     if let Some(workspace) = self
                         .workspaces
@@ -977,6 +983,7 @@ impl BlockApp {
             }
             Ok(WorkspaceResult::Responded) => {
                 self.workspaces_loaded = false;
+                self.workspaces_load_failed = false;
                 self.begin_workspace_request(WorkspaceOperation::Load);
             }
             Ok(WorkspaceResult::Invited) => {
@@ -984,7 +991,12 @@ impl BlockApp {
                 self.invite_open = false;
             }
             Err(error) if error.invalid_token => self.begin_reauth(),
-            Err(error) => self.workspace_error = Some(error.message),
+            Err(error) => {
+                if !self.workspaces_loaded {
+                    self.workspaces_load_failed = true;
+                }
+                self.workspace_error = Some(error.message);
+            }
         }
     }
 
@@ -1068,6 +1080,7 @@ impl BlockApp {
                 }
                 self.workspace_error = None;
                 self.workspaces_loaded = false;
+                self.workspaces_load_failed = false;
                 self.begin_workspace_request(WorkspaceOperation::Load);
             }
             Err(error) => {
@@ -1199,6 +1212,7 @@ impl BlockApp {
 
     fn show_workspace_onboarding(&mut self, ui: &mut egui::Ui) {
         if !self.workspaces_loaded
+            && !self.workspaces_load_failed
             && self.pending_workspace_request.is_none()
             && self.reauth.is_none()
         {
@@ -1211,6 +1225,7 @@ impl BlockApp {
         let mut respond = None;
         let mut create = false;
         let mut refresh = false;
+        let mut retry = false;
         let mut switch_account = false;
         let mut log_out = false;
         egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -1282,6 +1297,11 @@ impl BlockApp {
                     onboarding_card(ui, |ui| {
                         if self.workspaces_loaded {
                             ui.weak("You do not have any workspaces yet. Create one below.");
+                        } else if self.workspaces_load_failed {
+                            ui.horizontal(|ui| {
+                                ui.weak("Could not load workspaces.");
+                                retry = ui.button("Retry").clicked();
+                            });
                         } else {
                             ui.horizontal(|ui| {
                                 ui.spinner();
@@ -1385,6 +1405,11 @@ impl BlockApp {
         }
         if refresh {
             self.workspaces_loaded = false;
+            self.workspaces_load_failed = false;
+            self.begin_workspace_request(WorkspaceOperation::Load);
+        }
+        if retry {
+            self.workspaces_load_failed = false;
             self.begin_workspace_request(WorkspaceOperation::Load);
         }
         if switch_account {
@@ -1540,6 +1565,7 @@ impl BlockApp {
         self.workspaces.clear();
         self.invitations.clear();
         self.workspaces_loaded = false;
+        self.workspaces_load_failed = false;
         self.pending_workspace_request = None;
         self.workspace_error = None;
         self.reauth = None;
