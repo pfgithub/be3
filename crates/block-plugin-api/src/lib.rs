@@ -34,13 +34,210 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
 pub const MAX_QUEUED_MESSAGES: usize = 256;
 pub const REQUEST_TIMEOUT_MILLISECONDS: u64 = 5_000;
+pub const MAX_BLOCK_PAYLOAD_BYTES: usize = 256 * 1024;
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorInstanceId(pub u64);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginManifest {
+    pub identity: PluginIdentity,
+    pub block_type: [u8; 16],
+    pub display_name: String,
+    pub icon: String,
+    pub creation: CreationMode,
+    pub regions: Vec<EditorRegion>,
+    pub entry_points: EntryPoints,
+    pub surfaces: Vec<SurfaceMechanism>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CreationMode {
+    Immediate,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorRegion {
+    pub id: String,
+    pub main: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntryPoints {
+    pub web: Option<String>,
+    pub windows: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ManifestError {
+    Empty(&'static str),
+    TooLong(&'static str),
+    InvalidIdentity,
+    InvalidRegions,
+    MissingEntryPoint,
+    MissingSurface,
+}
+
+impl PluginManifest {
+    pub fn validate(&self) -> Result<(), ManifestError> {
+        manifest_string("plugin id", &self.identity.id)?;
+        manifest_string("plugin name", &self.identity.name)?;
+        manifest_string("plugin version", &self.identity.version)?;
+        manifest_string("display name", &self.display_name)?;
+        manifest_string("icon", &self.icon)?;
+        if !self
+            .identity
+            .id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        {
+            return Err(ManifestError::InvalidIdentity);
+        }
+        if self.regions.len() != 1 || !self.regions[0].main {
+            return Err(ManifestError::InvalidRegions);
+        }
+        manifest_string("region id", &self.regions[0].id)?;
+        if self.entry_points.web.is_none() && self.entry_points.windows.is_none() {
+            return Err(ManifestError::MissingEntryPoint);
+        }
+        for entry in [&self.entry_points.web, &self.entry_points.windows]
+            .into_iter()
+            .flatten()
+        {
+            manifest_string("entry point", entry)?;
+        }
+        let web_valid = self.entry_points.web.is_none()
+            || self.surfaces.contains(&SurfaceMechanism::WebExternalImage);
+        let windows_valid = self.entry_points.windows.is_none()
+            || self.surfaces.contains(&SurfaceMechanism::WindowsDxgi);
+        if !web_valid || !windows_valid {
+            return Err(ManifestError::MissingSurface);
+        }
+        Ok(())
+    }
+}
+
+fn manifest_string(field: &'static str, value: &str) -> Result<(), ManifestError> {
+    if value.is_empty() {
+        Err(ManifestError::Empty(field))
+    } else if value.len() > MAX_STRING_BYTES {
+        Err(ManifestError::TooLong(field))
+    } else {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum EditorMessage {
+    Open {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        block_type: [u8; 16],
+        account_id: [u8; 16],
+        workspace_id: [u8; 16],
+        editable: bool,
+        metrics: ViewportMetrics,
+    },
+    Resize {
+        instance: EditorInstanceId,
+        metrics: ViewportMetrics,
+    },
+    Input {
+        instance: EditorInstanceId,
+        batch: InputBatch,
+    },
+    EditabilityChanged {
+        instance: EditorInstanceId,
+        editable: bool,
+    },
+    Close {
+        instance: EditorInstanceId,
+    },
+    Surface {
+        instance: EditorInstanceId,
+        descriptor: SurfaceDescriptor,
+    },
+    Frame {
+        instance: EditorInstanceId,
+        frame: FrameReady,
+    },
+    Acknowledged {
+        instance: EditorInstanceId,
+        request_id: u64,
+    },
+    Failure {
+        instance: EditorInstanceId,
+        request_id: Option<u64>,
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DelegatedClientMessage {
+    Watch {
+        instance: EditorInstanceId,
+        request_id: u64,
+        block_id: [u8; 16],
+        block_type: [u8; 16],
+    },
+    Unwatch {
+        instance: EditorInstanceId,
+        request_id: u64,
+        block_id: [u8; 16],
+    },
+    Snapshot {
+        instance: EditorInstanceId,
+        request_id: u64,
+        block_id: [u8; 16],
+        author: [u8; 16],
+        sequence: u64,
+        access: u8,
+        data: Vec<u8>,
+    },
+    Operate {
+        instance: EditorInstanceId,
+        request_id: u64,
+        block_id: [u8; 16],
+        operation_id: [u8; 16],
+        sequence: u64,
+        operation: Vec<u8>,
+    },
+    Acknowledge {
+        instance: EditorInstanceId,
+        request_id: u64,
+        block_id: [u8; 16],
+        operation_id: [u8; 16],
+        sequence: u64,
+    },
+    RemoteOperation {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        operation_id: [u8; 16],
+        sequence: u64,
+        operation: Vec<u8>,
+    },
+    AccessChanged {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        access: u8,
+    },
+    Error {
+        instance: EditorInstanceId,
+        request_id: Option<u64>,
+        message: String,
+    },
+    Disconnected {
+        instance: EditorInstanceId,
+        message: String,
+    },
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Message {
@@ -60,6 +257,8 @@ pub enum Message {
     Error(ProtocolError),
     Shutdown,
     ShutdownAcknowledged,
+    Editor(EditorMessage),
+    Client(DelegatedClientMessage),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -350,6 +549,55 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             }
             Ok(())
         }
+        Message::Editor(value) => validate_editor(value),
+        Message::Client(value) => validate_client(value),
+        _ => Ok(()),
+    }
+}
+
+fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
+    match message {
+        EditorMessage::Input { batch, .. } => {
+            collection(batch.events.len())?;
+            for event in &batch.events {
+                if let InputEvent::Key { logical, .. } | InputEvent::Text(logical) = event {
+                    string(logical)?;
+                }
+            }
+            Ok(())
+        }
+        EditorMessage::Surface { descriptor, .. } => {
+            if descriptor.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
+                return Err(DecodeError::LimitExceeded("surface descriptor"));
+            }
+            collection(descriptor.attachments.len())
+        }
+        EditorMessage::Frame { frame, .. } => {
+            collection(frame.damage.len())?;
+            collection(frame.attachments.len())
+        }
+        EditorMessage::Failure { message, .. } => string(message),
+        _ => Ok(()),
+    }
+}
+
+fn validate_client(message: &DelegatedClientMessage) -> Result<(), DecodeError> {
+    match message {
+        DelegatedClientMessage::Snapshot { data, .. }
+        | DelegatedClientMessage::Operate {
+            operation: data, ..
+        }
+        | DelegatedClientMessage::RemoteOperation {
+            operation: data, ..
+        } => {
+            if data.len() > MAX_BLOCK_PAYLOAD_BYTES {
+                Err(DecodeError::LimitExceeded("block payload"))
+            } else {
+                Ok(())
+            }
+        }
+        DelegatedClientMessage::Error { message, .. }
+        | DelegatedClientMessage::Disconnected { message, .. } => string(message),
         _ => Ok(()),
     }
 }

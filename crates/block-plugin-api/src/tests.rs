@@ -17,8 +17,11 @@ fn hello() -> Message {
 }
 
 mod frame_round_trips;
+mod manifest_validation;
+mod multiplexed_messages_round_trip;
 mod rejects_collection_over_limit;
 mod rejects_frame_over_limit;
 mod rejects_malformed_payload;
+mod rejects_oversized_block_payload;
 mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
