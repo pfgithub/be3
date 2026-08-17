@@ -68,6 +68,14 @@ fn native_options() -> eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_app_id(APP_ID)
             .with_inner_size([1100.0, 720.0]),
+        #[cfg(target_os = "windows")]
+        wgpu_options: {
+            let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
+            if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+                setup.instance_descriptor.backends = eframe::egui_wgpu::wgpu::Backends::DX12;
+            }
+            options
+        },
         ..Default::default()
     }
 }
