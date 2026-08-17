@@ -2,6 +2,7 @@ use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+mod android_packet;
 mod android_surface;
 mod attachment;
 #[cfg(any(unix, windows))]
@@ -11,6 +12,7 @@ mod macos_surface;
 mod session;
 mod windows_surface;
 
+pub use android_packet::{AndroidPacket, AndroidPacketError};
 pub use android_surface::{
     AndroidSurfaceDescriptor, AndroidSurfaceError, AndroidSurfaceLifecycle, AndroidSurfaceState,
     ANDROID_HARDWARE_BUFFER_FORMAT_R8G8B8A8_UNORM, ANDROID_HARDWARE_BUFFER_USAGE_GPU_COLOR_OUTPUT,

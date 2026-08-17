@@ -63,7 +63,7 @@ const ONBOARDING_WIDTH: f32 = 460.0;
 pub(crate) const COMMIT: &str = env!("BLOCK_APP_COMMIT");
 #[cfg(not(target_arch = "wasm32"))]
 fn native_options() -> eframe::NativeOptions {
-    eframe::NativeOptions {
+    let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_app_id(APP_ID)
@@ -77,7 +77,12 @@ fn native_options() -> eframe::NativeOptions {
             options
         },
         ..Default::default()
+    };
+    #[cfg(target_os = "android")]
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+        setup.instance_descriptor.backends = eframe::egui_wgpu::wgpu::Backends::GL;
     }
+    options
 }
 
 #[cfg(not(target_arch = "wasm32"))]

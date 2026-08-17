@@ -3,10 +3,20 @@
 set -euo pipefail
 
 android_sdk="${ANDROID_HOME:-}"
+application_id='com.be3.block'
+application_label='Block'
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --android-sdk)
             android_sdk="$2"
+            shift 2
+            ;;
+        --application-id)
+            application_id="$2"
+            shift 2
+            ;;
+        --label)
+            application_label="$2"
             shift 2
             ;;
         *)
@@ -39,6 +49,8 @@ fi
 keystore="$repository/target/android-debug.keystore"
 apk="$repository/target/debug/apk/block-app.apk"
 aligned_apk="$repository/target/debug/apk/block-app-aligned.apk"
+gradle_apk="$repository/android/app/build/outputs/apk/debug/app-debug.apk"
+native_libraries="$repository/android/app/src/main/jniLibs/arm64-v8a"
 
 for required_path in "$ndk" "$zipalign" "$apksigner" "$keystore"; do
     if [[ ! -e "$required_path" ]]; then
@@ -52,12 +64,30 @@ export ANDROID_SDK_ROOT="$android_sdk"
 export ANDROID_NDK_HOME="$ndk"
 export ANDROID_NDK_ROOT="$ndk"
 
+host_tag='linux-x86_64'
+if [[ "${OS:-}" == "Windows_NT" ]]; then
+    host_tag='windows-x86_64'
+fi
+toolchain="$ndk/toolchains/llvm/prebuilt/$host_tag/bin"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$toolchain/aarch64-linux-android26-clang"
+export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
+export AR_aarch64_linux_android="$toolchain/llvm-ar"
+
+cargo build -p block-app --lib --target aarch64-linux-android
+cargo build -p plugin-demo --lib --target aarch64-linux-android
+
+mkdir -p "$native_libraries" "$(dirname "$apk")"
+cp "$repository/target/aarch64-linux-android/debug/libblock_app_lib.so" "$native_libraries/"
+cp "$repository/target/aarch64-linux-android/debug/libplugin_demo.so" "$native_libraries/"
+
 (
-    cd "$repository/crates/block-app"
-    cargo apk build --lib --target aarch64-linux-android
+    cd "$repository/android"
+    gradle --no-daemon :app:assembleDebug \
+        -Pbe3ApplicationId="$application_id" \
+        -Pbe3Label="$application_label"
 )
 
-"$zipalign" -P 16 -f 4 "$apk" "$aligned_apk"
+"$zipalign" -P 16 -f 4 "$gradle_apk" "$aligned_apk"
 "$apksigner" sign --ks "$keystore" --ks-pass pass:android "$aligned_apk"
 mv -f "$aligned_apk" "$apk"
 echo "Built 16 KB-compatible APK: $apk"
