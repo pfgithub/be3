@@ -6,6 +6,7 @@ thread_local! {
     static RUNNER: RefCell<Option<eframe::WebRunner>> = const { RefCell::new(None) };
     static SESSION: RefCell<crate::native::ClientSession> = RefCell::default();
     static EGUI_SESSION: RefCell<Option<Rc<RefCell<crate::egui_session::EguiSession>>>> = const { RefCell::new(None) };
+    static EGUI_CONTEXT: RefCell<Option<eframe::egui::Context>> = const { RefCell::new(None) };
     static CANVAS_ID: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
@@ -54,7 +55,10 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
         .start(
             canvas,
             eframe::WebOptions::default(),
-            Box::new(move |_| {
+            Box::new(move |creation_context| {
+                EGUI_CONTEXT.with(|current| {
+                    *current.borrow_mut() = Some(creation_context.egui_ctx.clone());
+                });
                 Ok(Box::new(WebApp {
                     session: app_session,
                 }))
@@ -99,6 +103,7 @@ pub fn shutdown() {
         }
     });
     EGUI_SESSION.with(|current| current.borrow_mut().take());
+    EGUI_CONTEXT.with(|current| current.borrow_mut().take());
 }
 
 fn dispatch(message: &Message) {
@@ -118,6 +123,11 @@ fn dispatch(message: &Message) {
     EGUI_SESSION.with(|session| {
         if let Some(session) = session.borrow_mut().as_mut() {
             session.borrow_mut().receive(message);
+        }
+    });
+    EGUI_CONTEXT.with(|context| {
+        if let Some(context) = context.borrow().as_ref() {
+            context.request_repaint();
         }
     });
 }

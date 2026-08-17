@@ -58,8 +58,14 @@ pub(crate) fn open() {
                 state.starting = false;
                 match result {
                     Ok(adapter) if state.open => state.adapter = Some(adapter),
-                    Ok(mut adapter) => adapter.shutdown(),
-                    Err(error) => state.error = Some(error),
+                    Ok(mut adapter) => {
+                        adapter.shutdown();
+                        remove_canvas();
+                    }
+                    Err(error) => {
+                        state.error = Some(error);
+                        remove_canvas();
+                    }
                 }
             });
         });
@@ -130,6 +136,9 @@ pub(crate) fn show(ctx: &egui::Context) {
             }
             state.input = InputAdapter::default();
             state.canvas_size = [0, 0];
+            if !state.starting {
+                remove_canvas();
+            }
             if let Some(status) = state.presenter_status.clone() {
                 ctx.debug_painter()
                     .add(eframe::egui_wgpu::Callback::new_paint_callback(
@@ -167,4 +176,14 @@ fn create_canvas() {
         document.body()?.append_child(&canvas).ok()?;
         Some(())
     })();
+}
+
+fn remove_canvas() {
+    let Some(canvas) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(CANVAS_ID))
+    else {
+        return;
+    };
+    canvas.remove();
 }
