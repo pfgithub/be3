@@ -97,42 +97,41 @@ fn drain_events() {
 
 fn bind() -> Result<(), String> {
     let context = ndk_context::android_context();
-    let mut environment = unsafe { jni::EnvUnowned::from_raw(context.vm().cast()) }
-        .map_err(|error| error.to_string())?
-        .with_env(|environment| {
+    let vm = unsafe { jni::vm::JavaVM::from_raw(context.vm().cast()) };
+    let bound = vm
+        .attach_current_thread_for_scope(|environment| {
+            let activity =
+                unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
             environment
                 .call_static_method(
                     "com/be3/block/plugin/PluginHostBridge",
                     "bind",
                     "(Landroid/content/Context;)Z",
-                    &[jni::objects::JValue::Object(unsafe {
-                        &jni::objects::JObject::from_raw(context.context().cast())
-                    })],
+                    &[jni::objects::JValue::Object(&activity)],
                 )
                 .and_then(|value| value.z())
         })
         .map_err(|error| error.to_string())?;
-    if environment {
+    if bound {
         Ok(())
     } else {
-        Err("Plugin service could not be bound".into())
+        Err("Plugin service is unavailable; Android API 26 or newer is required".into())
     }
 }
 
 fn unbind() {
     let context = ndk_context::android_context();
-    let _ = unsafe { jni::EnvUnowned::from_raw(context.vm().cast()) }.and_then(|vm| {
-        vm.with_env(|environment| {
-            environment.call_static_method(
-                "com/be3/block/plugin/PluginHostBridge",
-                "unbind",
-                "(Landroid/content/Context;)V",
-                &[jni::objects::JValue::Object(unsafe {
-                    &jni::objects::JObject::from_raw(context.context().cast())
-                })],
-            )?;
-            Ok(())
-        })
+    let vm = unsafe { jni::vm::JavaVM::from_raw(context.vm().cast()) };
+    let _ = vm.attach_current_thread_for_scope(|environment| {
+        let activity =
+            unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
+        environment.call_static_method(
+            "com/be3/block/plugin/PluginHostBridge",
+            "unbind",
+            "(Landroid/content/Context;)V",
+            &[jni::objects::JValue::Object(&activity)],
+        )?;
+        Ok::<_, jni::errors::Error>(())
     });
 }
 
@@ -157,19 +156,18 @@ pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeDisconne
     reason: jni::objects::JString<'_>,
 ) {
     let reason = environment
-        .get_string(&reason)
-        .map(|value| value.into())
+        .with_env(|environment| environment.get_string(&reason).map(|value| value.into()))
         .unwrap_or_else(|_| "Plugin service disconnected".into());
     push(Event::Disconnected(reason));
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativePacket(
-    environment: jni::JNIEnv<'_>,
+    mut environment: jni::JNIEnv<'_>,
     _: jni::objects::JClass<'_>,
     packet: jni::objects::JByteArray<'_>,
 ) {
-    match environment.convert_byte_array(packet) {
+    match environment.with_env(|environment| environment.convert_byte_array(packet)) {
         Ok(packet) if packet.len() <= MAX_PACKET_BYTES => push(Event::Packet(packet)),
         _ => push(Event::Disconnected(
             "Plugin service packet exceeded the size limit".into(),
