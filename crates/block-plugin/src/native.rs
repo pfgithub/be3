@@ -13,18 +13,27 @@ pub enum State {
 pub struct ClientSession {
     state: State,
     viewport_request_id: Option<u64>,
+    plugin: PluginIdentity,
 }
 
 impl Default for ClientSession {
     fn default() -> Self {
-        Self {
-            state: State::AwaitingHello,
-            viewport_request_id: None,
-        }
+        Self::new("", "", "")
     }
 }
 
 impl ClientSession {
+    pub fn new(id: &str, name: &str, version: &str) -> Self {
+        Self {
+            state: State::AwaitingHello,
+            viewport_request_id: None,
+            plugin: PluginIdentity {
+                id: id.into(),
+                name: name.into(),
+                version: version.into(),
+            },
+        }
+    }
     pub fn state(&self) -> State {
         self.state
     }
@@ -51,11 +60,7 @@ impl ClientSession {
         Message::Hello(Hello {
             minimum_version: PROTOCOL_VERSION,
             maximum_version: PROTOCOL_VERSION,
-            plugin: PluginIdentity {
-                id: "be3.plugin-demo".into(),
-                name: "Plugin Demo".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-            },
+            plugin: self.plugin.clone(),
             capabilities,
         })
     }

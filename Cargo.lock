@@ -960,6 +960,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-plugin"
+version = "0.1.0"
+dependencies = [
+ "block-plugin-api",
+ "eframe",
+ "js-sys",
+ "pollster 0.4.0",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu-hal",
+ "windows 0.62.2",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "block-plugin-api"
 version = "0.1.0"
 dependencies = [
@@ -6075,16 +6091,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "plugin-demo"
 version = "0.1.0"
 dependencies = [
- "block-plugin-api",
- "eframe",
- "js-sys",
- "pollster 0.4.0",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu-hal",
- "windows 0.62.2",
- "windows-sys 0.59.0",
+ "block-plugin",
 ]
 
 [[package]]

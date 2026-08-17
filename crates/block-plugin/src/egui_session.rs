@@ -1,11 +1,30 @@
 use block_plugin_api::{InputEvent, Message, PointerButton, ViewportMetrics, WheelUnit};
 use eframe::egui;
 
-#[derive(Default)]
 pub(crate) struct EguiSession {
-    demo: crate::demo::Demo,
+    app: Box<dyn AppUi>,
     input: egui::RawInput,
     metrics: Option<ViewportMetrics>,
+}
+
+trait AppUi {
+    fn ui(&mut self, ui: &mut egui::Ui);
+}
+
+impl<A: crate::App> AppUi for A {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        crate::App::ui(self, ui);
+    }
+}
+
+impl EguiSession {
+    pub(crate) fn new<A: crate::App>() -> Self {
+        Self {
+            app: Box::new(A::default()),
+            input: egui::RawInput::default(),
+            metrics: None,
+        }
+    }
 }
 
 impl EguiSession {
@@ -36,13 +55,13 @@ impl EguiSession {
         self.input.focused = input.focused;
         self.input.modifiers = input.modifiers;
         context.run_ui(input, |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| self.demo.show(ui));
+            egui::CentralPanel::default().show_inside(ui, |ui| self.app.ui(ui));
         })
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
-        self.demo.show(ui);
+        self.app.ui(ui);
     }
 
     #[cfg(target_arch = "wasm32")]

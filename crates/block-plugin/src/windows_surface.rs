@@ -33,7 +33,11 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn new(request_id: u64, metrics: ViewportMetrics, generation: u64) -> Result<Self, String> {
+    pub fn new<A: crate::App>(
+        request_id: u64,
+        metrics: ViewportMetrics,
+        generation: u64,
+    ) -> Result<Self, String> {
         let size = [metrics.pixel_width, metrics.pixel_height];
         let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         instance_descriptor.backends = wgpu::Backends::DX12;
@@ -144,7 +148,7 @@ impl Surface {
             texture,
             context,
             renderer,
-            egui: crate::egui_session::EguiSession::default(),
+            egui: crate::egui_session::EguiSession::new::<A>(),
             fence,
             resource_handle,
             fence_handle,

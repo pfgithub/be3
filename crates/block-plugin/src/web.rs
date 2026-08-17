@@ -39,8 +39,7 @@ extern "C" {
     fn plugin_resize(canvas_id: &str, width: f32, height: f32);
 }
 
-#[wasm_bindgen]
-pub async fn start(canvas_id: String) -> Result<(), JsValue> {
+pub(crate) async fn start<A: crate::App>(canvas_id: String) -> Result<(), JsValue> {
     let document = web_sys::window()
         .and_then(|window| window.document())
         .ok_or_else(|| JsValue::from_str("no document is available"))?;
@@ -48,7 +47,7 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
         .get_element_by_id(&canvas_id)
         .ok_or_else(|| JsValue::from_str(&format!("no element id {canvas_id}")))?
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
-    let session = Rc::new(RefCell::new(crate::egui_session::EguiSession::default()));
+    let session = Rc::new(RefCell::new(crate::egui_session::EguiSession::new::<A>()));
     let app_session = Rc::clone(&session);
     let runner = eframe::WebRunner::new();
     runner
@@ -72,13 +71,16 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
     Ok(())
 }
 
-#[wasm_bindgen]
-pub fn hello() -> Result<Vec<u8>, JsValue> {
-    SESSION.with(|session| encode_frame(&session.borrow().hello()).map_err(protocol_error))
+pub(crate) fn hello(id: &str, name: &str, version: &str) -> Result<Vec<u8>, JsValue> {
+    SESSION.with(|session| {
+        let client = crate::native::ClientSession::new(id, name, version);
+        let frame = encode_frame(&client.hello()).map_err(protocol_error)?;
+        *session.borrow_mut() = client;
+        Ok(frame)
+    })
 }
 
-#[wasm_bindgen]
-pub fn receive(frame: Vec<u8>) -> Result<js_sys::Array, JsValue> {
+pub(crate) fn receive(frame: Vec<u8>) -> Result<js_sys::Array, JsValue> {
     let message = decode_frame(&frame).map_err(protocol_error)?;
     dispatch(&message);
     SESSION.with(|session| {
@@ -95,8 +97,7 @@ pub fn receive(frame: Vec<u8>) -> Result<js_sys::Array, JsValue> {
     })
 }
 
-#[wasm_bindgen]
-pub fn shutdown() {
+pub(crate) fn shutdown() {
     RUNNER.with(|current| {
         if let Some(runner) = current.borrow_mut().take() {
             runner.destroy();

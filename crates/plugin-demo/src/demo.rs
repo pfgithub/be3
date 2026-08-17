@@ -1,14 +1,14 @@
-use eframe::egui;
+use block_plugin::egui;
 
 #[derive(Default)]
-pub(crate) struct Demo {
+pub struct Demo {
     clicks: u32,
     enabled: bool,
     value: f32,
 }
 
-impl Demo {
-    pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
+impl block_plugin::App for Demo {
+    fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("egui plugin demo");
         ui.label("This interface is rendered by plugin-demo.");
         ui.separator();
