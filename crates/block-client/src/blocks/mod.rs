@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod calendar;
 pub mod compiled_logic;
+pub mod counter;
 pub mod database;
 pub mod database_schema;
 pub mod database_view;

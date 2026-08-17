@@ -6,6 +6,7 @@ mod browser_tab;
 mod calendar;
 mod clipboard;
 mod compiled_logic;
+mod counter;
 mod database;
 mod database_schema;
 mod database_view;
@@ -1357,6 +1358,7 @@ impl EditorRegistry {
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
+        registry.register_creatable::<counter::CounterEditor>();
         registry.register::<hotbar::HotbarEditor>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
