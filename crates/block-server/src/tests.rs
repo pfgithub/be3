@@ -72,7 +72,7 @@ async fn test_connect(
     token: &str,
     workspace_id: Uuid,
 ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
-    let request = format!("{url}/?token={token}&workspace={workspace_id}")
+    let request = format!("{url}/api?token={token}&workspace={workspace_id}")
         .into_client_request()
         .unwrap();
     connect_async(request).await.unwrap().0
@@ -145,7 +145,7 @@ mod support {
     impl Management {
         pub fn new(url: &str) -> Self {
             Self {
-                url: format!("{url}/management"),
+                url: format!("{url}/api/management"),
             }
         }
     }
@@ -218,7 +218,7 @@ mod support {
             workspace_id: Uuid,
         ) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
             let request = format!(
-                "{}/?token={token}&workspace={workspace_id}",
+                "{}/api?token={token}&workspace={workspace_id}",
                 websocket_url(&self.url)
             )
             .into_client_request()

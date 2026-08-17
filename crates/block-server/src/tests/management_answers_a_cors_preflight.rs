@@ -6,7 +6,7 @@ use super::support::TestServer;
 #[tokio::test]
 async fn management_answers_a_cors_preflight() {
     let server = TestServer::start().await;
-    let url = format!("{}/management", server.url);
+    let url = format!("{}/api/management", server.url);
 
     let preflight = tokio::task::spawn_blocking({
         let url = url.clone();

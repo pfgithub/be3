@@ -49,9 +49,10 @@ use self::http::{PrefixedStream, Status};
 /// string is the only place a web client can put this.
 const TOKEN_PARAMETER: &str = "token";
 const WORKSPACE_PARAMETER: &str = "workspace";
+const API_PATH: &str = "/api";
 /// Management commands are POSTed here as JSON; the websocket carries block
 /// traffic only.
-const MANAGEMENT_PATH: &str = "/management";
+const MANAGEMENT_PATH: &str = "/api/management";
 const DATABASE_FILE: &str = "server.sqlite3";
 /// The shortest password `register_account` accepts.
 const MIN_PASSWORD_BYTES: usize = 8;
@@ -161,6 +162,10 @@ async fn handle_connection(
     if !request.head.is_websocket_upgrade() {
         return handle_management_request(stream, request, store).await;
     }
+    if request.head.path != API_PATH {
+        reject_websocket_path(&mut stream).await?;
+        return Err(ServerError::InvalidHandshake);
+    }
     let identity = match connection_identity(&request.head, &store).await {
         Some(identity) => identity,
         None => {
@@ -207,6 +212,19 @@ async fn reject_handshake(stream: &mut TcpStream) -> Result<(), ServerError> {
         expected_seq: None,
     };
     http::write_json_response(stream, Status::Forbidden, &serde_json::to_vec(&response)?).await?;
+    Ok(())
+}
+
+async fn reject_websocket_path(stream: &mut TcpStream) -> Result<(), ServerError> {
+    let response = ServerMessage::Error {
+        request_id: None,
+        command: None,
+        id: None,
+        code: ErrorCode::UnsupportedMessage,
+        message: format!("websocket connections are accepted at {API_PATH}"),
+        expected_seq: None,
+    };
+    http::write_json_response(stream, Status::NotFound, &serde_json::to_vec(&response)?).await?;
     Ok(())
 }
 
@@ -281,13 +299,20 @@ async fn handle_management_request(
     request: http::BufferedRequest,
     store: Arc<BlockStore>,
 ) -> Result<(), ServerError> {
-    // A browser asks permission before sending a management command, and will
-    // not send the command at all unless the preflight is answered.
-    if request.head.method == "OPTIONS" {
+    let (status, response) = if request.head.path != MANAGEMENT_PATH {
+        (
+            Status::NotFound,
+            management_error(
+                ManagementErrorCode::UnsupportedMessage,
+                format!("{} is not a management endpoint", request.head.path),
+            ),
+        )
+    } else if request.head.method == "OPTIONS" {
+        // A browser asks permission before sending a management command, and
+        // will not send the command at all unless the preflight is answered.
         http::write_preflight_response(&mut stream).await?;
         return Ok(());
-    }
-    let (status, response) = if request.head.method != "POST" {
+    } else if request.head.method != "POST" {
         (
             Status::MethodNotAllowed,
             management_error(
@@ -296,14 +321,6 @@ async fn handle_management_request(
                     "management commands are sent as POST {MANAGEMENT_PATH}, not {} {}",
                     request.head.method, request.head.path
                 ),
-            ),
-        )
-    } else if request.head.path != MANAGEMENT_PATH {
-        (
-            Status::NotFound,
-            management_error(
-                ManagementErrorCode::UnsupportedMessage,
-                format!("{} is not a management endpoint", request.head.path),
             ),
         )
     } else {

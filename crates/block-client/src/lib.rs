@@ -81,8 +81,9 @@ impl Shutdown {
 /// string is the only place a web client can put this.
 const TOKEN_PARAMETER: &str = "token";
 const WORKSPACE_PARAMETER: &str = "workspace";
+const API_PATH: &str = "/api";
 /// Where the server answers management commands, relative to the server URL.
-const MANAGEMENT_PATH: &str = "/management";
+const MANAGEMENT_PATH: &str = "/api/management";
 const BLOCK_URL_BASE: &str = "https://blocks.pfg.pw/";
 const REPO_RELATIVE_BLOCK_URL_MARKER: &str = "repo/";
 const UUID_TEXT_BYTES: usize = 36;
@@ -1708,7 +1709,7 @@ fn websocket_url(url: &str, token: &str, workspace_id: Uuid) -> String {
         Some(("https", host)) => format!("wss://{host}"),
         _ => url.to_owned(),
     };
-    format!("{base}/?{TOKEN_PARAMETER}={token}&{WORKSPACE_PARAMETER}={workspace_id}")
+    format!("{base}{API_PATH}?{TOKEN_PARAMETER}={token}&{WORKSPACE_PARAMETER}={workspace_id}")
 }
 
 /// Runs the connection until it ends. There is no reconnecting, so every way
