@@ -254,6 +254,7 @@ impl Surface {
             generation: self.generation,
             damage: Vec::new(),
             synchronization_value: self.fence_value,
+            attachments: Vec::new(),
         }))
     }
 }

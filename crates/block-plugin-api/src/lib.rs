@@ -2,6 +2,7 @@ use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+mod android_surface;
 mod attachment;
 #[cfg(any(unix, windows))]
 pub mod desktop_attachments;
@@ -10,6 +11,11 @@ mod macos_surface;
 mod session;
 mod windows_surface;
 
+pub use android_surface::{
+    AndroidSurfaceDescriptor, AndroidSurfaceError, AndroidSurfaceLifecycle, AndroidSurfaceState,
+    ANDROID_HARDWARE_BUFFER_FORMAT_R8G8B8A8_UNORM, ANDROID_HARDWARE_BUFFER_USAGE_GPU_COLOR_OUTPUT,
+    ANDROID_HARDWARE_BUFFER_USAGE_GPU_SAMPLED_IMAGE,
+};
 pub use attachment::{
     validate_attachments, AttachmentDescriptor, AttachmentError, AttachmentOwnership,
     AttachmentType, MAX_ATTACHMENTS,
@@ -26,7 +32,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
@@ -217,6 +223,7 @@ pub struct FrameReady {
     pub generation: u64,
     pub damage: Vec<DamageRect>,
     pub synchronization_value: u64,
+    pub attachments: Vec<AttachmentDescriptor>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -334,7 +341,13 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             }
             Ok(())
         }
-        Message::FrameReady(value) => collection(value.damage.len()),
+        Message::FrameReady(value) => {
+            collection(value.damage.len())?;
+            if value.attachments.len() > MAX_ATTACHMENTS {
+                return Err(DecodeError::LimitExceeded("frame attachments"));
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
