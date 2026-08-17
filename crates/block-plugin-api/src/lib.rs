@@ -2,6 +2,10 @@ use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+mod session;
+
+pub use session::{HostSession, QueueError, SessionFailure, SessionState};
+
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
