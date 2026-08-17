@@ -1,5 +1,8 @@
-use block_plugin_api::{FrameReady, Message, WindowsSurfaceDescriptor};
-use eframe::egui_wgpu::wgpu;
+use block_plugin_api::{
+    FrameReady, InputBatch, InputEvent, Message, PointerButton, ViewportMetrics, WheelUnit,
+    WindowsSurfaceDescriptor,
+};
+use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use windows::Win32::{
     Foundation::GENERIC_ALL,
@@ -18,17 +21,22 @@ pub struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
     texture: wgpu::Texture,
+    context: egui::Context,
+    renderer: egui_wgpu::Renderer,
+    demo: crate::demo::Demo,
+    input: egui::RawInput,
     fence: ID3D12Fence,
     resource_handle: OwnedHandle,
     fence_handle: OwnedHandle,
     generation: u64,
     fence_value: u64,
     request_id: u64,
-    size: [u32; 2],
+    metrics: ViewportMetrics,
 }
 
 impl Surface {
-    pub fn new(request_id: u64, size: [u32; 2], generation: u64) -> Result<Self, String> {
+    pub fn new(request_id: u64, metrics: ViewportMetrics, generation: u64) -> Result<Self, String> {
+        let size = [metrics.pixel_width, metrics.pixel_height];
         let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         instance_descriptor.backends = wgpu::Backends::DX12;
         let instance = wgpu::Instance::new(instance_descriptor);
@@ -125,17 +133,28 @@ impl Surface {
                 },
             )
         };
+        let context = egui::Context::default();
+        context.set_pixels_per_point(metrics.scale_factor);
+        let renderer = egui_wgpu::Renderer::new(
+            &device,
+            wgpu::TextureFormat::Bgra8Unorm,
+            egui_wgpu::RendererOptions::default(),
+        );
         Ok(Self {
             device,
             queue,
             texture,
+            context,
+            renderer,
+            demo: crate::demo::Demo::default(),
+            input: egui::RawInput::default(),
             fence,
             resource_handle,
             fence_handle,
             generation,
             fence_value: 0,
             request_id,
-            size,
+            metrics,
         })
     }
 
@@ -153,7 +172,12 @@ impl Surface {
             texture_format: DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32,
             initial_fence_value: self.fence_value,
         }
-        .surface(self.request_id, self.generation, self.size[0], self.size[1]);
+        .surface(
+            self.request_id,
+            self.generation,
+            self.metrics.pixel_width,
+            self.metrics.pixel_height,
+        );
         (
             Message::Surface(descriptor),
             [
@@ -163,26 +187,106 @@ impl Surface {
         )
     }
 
+    pub fn input(&mut self, batch: &InputBatch) {
+        for event in &batch.events {
+            match event {
+                InputEvent::PointerMoved { x, y } => self
+                    .input
+                    .events
+                    .push(egui::Event::PointerMoved(egui::pos2(*x, *y))),
+                InputEvent::PointerButton {
+                    button,
+                    pressed,
+                    x,
+                    y,
+                } => self.input.events.push(egui::Event::PointerButton {
+                    pos: egui::pos2(*x, *y),
+                    button: pointer_button(*button),
+                    pressed: *pressed,
+                    modifiers: self.input.modifiers,
+                }),
+                InputEvent::Wheel { x, y, unit } => {
+                    self.input.events.push(egui::Event::MouseWheel {
+                        unit: wheel_unit(*unit),
+                        delta: egui::vec2(*x, *y),
+                        modifiers: self.input.modifiers,
+                    });
+                }
+                InputEvent::Key {
+                    logical,
+                    pressed,
+                    repeat,
+                    ..
+                } => {
+                    if let Some(key) = egui::Key::from_name(logical) {
+                        self.input.events.push(egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: *pressed,
+                            repeat: *repeat,
+                            modifiers: self.input.modifiers,
+                        });
+                    }
+                }
+                InputEvent::Text(text) => self.input.events.push(egui::Event::Text(text.clone())),
+                InputEvent::Modifiers(modifiers) => {
+                    self.input.modifiers = egui::Modifiers {
+                        alt: modifiers.alt,
+                        ctrl: modifiers.control,
+                        shift: modifiers.shift,
+                        mac_cmd: false,
+                        command: modifiers.command,
+                    };
+                }
+                InputEvent::Focus(focused) => self.input.focused = *focused,
+            }
+        }
+    }
+
     pub fn render(&mut self, phase: f64) -> Result<Message, String> {
+        self.input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(self.metrics.logical_width, self.metrics.logical_height),
+        ));
+        self.input.time = Some(phase);
+        let input = std::mem::take(&mut self.input);
+        self.input.focused = input.focused;
+        self.input.modifiers = input.modifiers;
+        let output = self.context.run(input, |context| {
+            egui::CentralPanel::default().show(context, |ui| self.demo.show(ui));
+        });
+        let paint_jobs = self
+            .context
+            .tessellate(output.shapes, self.metrics.scale_factor);
+        for (id, delta) in &output.textures_delta.set {
+            self.renderer
+                .update_texture(&self.device, &self.queue, *id, delta);
+        }
         let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.metrics.pixel_width, self.metrics.pixel_height],
+            pixels_per_point: self.metrics.scale_factor,
+        };
+        let commands = self.renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &paint_jobs,
+            &screen,
+        );
         {
-            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("plugin demo frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.08 + phase.sin().abs() * 0.25,
-                            g: 0.16,
-                            b: 0.32 + phase.cos().abs() * 0.25,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -192,8 +296,14 @@ impl Surface {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            self.renderer
+                .render(&mut pass.forget_lifetime(), &paint_jobs, &screen);
         }
-        self.queue.submit([encoder.finish()]);
+        self.queue
+            .submit(commands.into_iter().chain([encoder.finish()]));
+        for id in &output.textures_delta.free {
+            self.renderer.free_texture(id);
+        }
         self.fence_value += 1;
         let hal_queue = unsafe { self.queue.as_hal::<wgpu_hal::api::Dx12>() }
             .ok_or_else(|| "the plugin queue is not D3D12".to_owned())?;
@@ -204,5 +314,23 @@ impl Surface {
             damage: Vec::new(),
             synchronization_value: self.fence_value,
         }))
+    }
+}
+
+fn pointer_button(button: PointerButton) -> egui::PointerButton {
+    match button {
+        PointerButton::Primary => egui::PointerButton::Primary,
+        PointerButton::Secondary => egui::PointerButton::Secondary,
+        PointerButton::Middle => egui::PointerButton::Middle,
+        PointerButton::Back => egui::PointerButton::Extra1,
+        PointerButton::Forward | PointerButton::Other(_) => egui::PointerButton::Extra2,
+    }
+}
+
+fn wheel_unit(unit: WheelUnit) -> egui::MouseWheelUnit {
+    match unit {
+        WheelUnit::Pixels => egui::MouseWheelUnit::Point,
+        WheelUnit::Lines => egui::MouseWheelUnit::Line,
+        WheelUnit::Pages => egui::MouseWheelUnit::Page,
     }
 }

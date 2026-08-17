@@ -1,5 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 mod app;
+#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+mod demo;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;

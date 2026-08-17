@@ -116,24 +116,23 @@ fn run_endpoint(endpoint: &str) -> Result<(), Box<dyn std::error::Error>> {
         let (message, attachments) = carrier.receive()?;
         drop(attachments);
         let create = match &message {
-            Message::CreateViewport(viewport) => Some((
-                viewport.request_id,
-                viewport.metrics.pixel_width,
-                viewport.metrics.pixel_height,
-            )),
-            Message::ResizeViewport(metrics) => {
-                Some((1, metrics.pixel_width, metrics.pixel_height))
+            Message::CreateViewport(viewport) => {
+                Some((viewport.request_id, viewport.metrics.clone()))
             }
+            Message::ResizeViewport(metrics) => Some((1, metrics.clone())),
             _ => None,
         };
+        if let (Message::Input(input), Some(surface)) = (&message, &mut surface) {
+            surface.input(input);
+        }
         for response in session.receive(message) {
             carrier.send(&response, &[])?;
         }
-        if let Some((request_id, width, height)) =
-            create.filter(|(_, width, height)| *width > 0 && *height > 0)
+        if let Some((request_id, metrics)) =
+            create.filter(|(_, metrics)| metrics.pixel_width > 0 && metrics.pixel_height > 0)
         {
             generation += 1;
-            let mut next = Surface::new(request_id, [width, height], generation)?;
+            let mut next = Surface::new(request_id, metrics, generation)?;
             let (descriptor, handles) = next.descriptor();
             carrier.send(&descriptor, &handles)?;
             let ready = next.render(started.elapsed().as_secs_f64())?;
