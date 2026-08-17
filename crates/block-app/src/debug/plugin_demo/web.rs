@@ -102,8 +102,11 @@ pub(crate) fn show(ctx: &egui::Context) {
                     (response.rect.height() * pixels_per_point).round() as u32,
                 ];
                 requested_size = Some((size, response.rect));
-                let messages = state.input.update(ui, &response, pixels_per_point);
-                if let Some(adapter) = &mut state.adapter {
+                let messages = state
+                    .adapter
+                    .is_some()
+                    .then(|| state.input.update(ui, &response, pixels_per_point));
+                if let (Some(adapter), Some(messages)) = (&mut state.adapter, messages) {
                     if let Err(error) = adapter.send(messages) {
                         state.error = Some(error);
                     }
