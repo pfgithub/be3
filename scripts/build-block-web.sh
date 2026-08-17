@@ -37,6 +37,8 @@ tools_directory="$repository/target/tools"
 output_directory="$repository/target/web"
 wasi_sdk_version='33'
 wasm_bindgen_version='0.2.122'
+cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+wasm_bindgen="$cargo_home/bin/wasm-bindgen"
 
 installed_targets="$(rustup target list --installed)"
 if ! grep -qx 'wasm32-wasip1' <<< "$installed_targets"; then
@@ -44,9 +46,14 @@ if ! grep -qx 'wasm32-wasip1' <<< "$installed_targets"; then
     rustup target add wasm32-wasip1
 fi
 
-if ! command -v wasm-bindgen > /dev/null; then
+if [[ ! -x "$wasm_bindgen" ]]; then
     echo "Installing wasm-bindgen-cli $wasm_bindgen_version..."
     cargo install wasm-bindgen-cli --version "$wasm_bindgen_version"
+fi
+
+if [[ ! -x "$wasm_bindgen" ]]; then
+    echo "wasm-bindgen was not installed at $wasm_bindgen" >&2
+    exit 1
 fi
 
 profile_directory='debug'
@@ -66,7 +73,7 @@ fi
 
 echo 'Generating JavaScript bindings for wasm-demo...'
 mkdir -p "$output_directory"
-wasm-bindgen --target web --no-typescript --out-dir "$output_directory" "$wasm_demo"
+"$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$wasm_demo"
 
 if [[ -z "$wasi_sysroot" ]]; then
     wasi_sysroot="$tools_directory/wasi-sysroot"
@@ -111,7 +118,7 @@ fi
 
 echo 'Generating JavaScript bindings...'
 mkdir -p "$output_directory"
-wasm-bindgen --target web --no-typescript --out-dir "$output_directory" "$wasm"
+"$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$wasm"
 cp "$repository/scripts/web/index.html" "$output_directory"
 cp "$repository/scripts/web/wasi.js" "$output_directory"
 

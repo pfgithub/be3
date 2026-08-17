@@ -10,20 +10,18 @@ struct Demo {
 }
 
 impl eframe::App for Demo {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("egui wasm demo");
-            ui.label("This interface is rendered by wasm-demo.");
-            ui.separator();
-            ui.checkbox(&mut self.enabled, "Enable controls");
-            ui.add_enabled_ui(self.enabled, |ui| {
-                ui.add(egui::Slider::new(&mut self.value, 0.0..=1.0).text("Value"));
-                if ui.button("Click me").clicked() {
-                    self.clicks += 1;
-                }
-            });
-            ui.label(format!("Clicks: {}", self.clicks));
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        ui.heading("egui wasm demo");
+        ui.label("This interface is rendered by wasm-demo.");
+        ui.separator();
+        ui.checkbox(&mut self.enabled, "Enable controls");
+        ui.add_enabled_ui(self.enabled, |ui| {
+            ui.add(egui::Slider::new(&mut self.value, 0.0..=1.0).text("Value"));
+            if ui.button("Click me").clicked() {
+                self.clicks += 1;
+            }
         });
+        ui.label(format!("Clicks: {}", self.clicks));
     }
 }
 

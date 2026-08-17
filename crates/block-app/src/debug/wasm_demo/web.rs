@@ -76,6 +76,7 @@ pub(crate) fn show(ctx: &egui::Context) {
         let mut open = state.open;
         let error = state.error.clone();
         let mut requested_size = None;
+        let pixels_per_point = ctx.pixels_per_point();
         egui::Window::new("Wasm Demo")
             .open(&mut open)
             .default_size([420.0, 420.0])
@@ -84,7 +85,6 @@ pub(crate) fn show(ctx: &egui::Context) {
                     ui.colored_label(egui::Color32::RED, error);
                     return;
                 }
-                let pixels_per_point = ui.ctx().pixels_per_point();
                 let (response, painter) =
                     ui.allocate_painter(ui.available_size(), egui::Sense::hover());
                 let size = [
