@@ -65,13 +65,13 @@ if [[ "$profile" == 'release' ]]; then
     profile_arguments=(--release)
 fi
 
-cargo build -p plugin-demo --bin plugin-demo --target "$target" "${profile_arguments[@]}"
+cargo build -p plugin-demo --bin plugin-demo-host --target "$target" "${profile_arguments[@]}"
 
 extension=''
 case "$target" in
     *-windows-*) extension='.exe' ;;
 esac
-source_executable="$repository/target/$target/$profile/plugin-demo$extension"
+source_executable="$repository/target/$target/$profile/plugin-demo-host$extension"
 if [[ ! -f "$source_executable" ]]; then
     echo "cargo did not produce $source_executable" >&2
     exit 1

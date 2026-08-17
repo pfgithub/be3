@@ -7,6 +7,10 @@ license.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "plugin-demo-host"
+path = "src/main.rs"
+
 [dependencies]
 block-plugin-api = { path = "../block-plugin-api" }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "wgpu"] }
@@ -24,7 +28,7 @@ web-sys = { version = "0.3", features = [
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }
 
 [lints]
 workspace = true
