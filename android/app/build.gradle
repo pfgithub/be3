@@ -1,0 +1,22 @@
+plugins { id "com.android.application" }
+
+android {
+    namespace "com.be3.block"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId providers.gradleProperty("be3ApplicationId").getOrElse("com.be3.block")
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0"
+        manifestPlaceholders.be3Label = providers.gradleProperty("be3Label").getOrElse("Block")
+    }
+
+    sourceSets.main.jniLibs.srcDir "src/main/jniLibs"
+
+    packaging.jniLibs {
+        useLegacyPackaging = false
+        keepDebugSymbols += ["**/libblock_app_lib.so", "**/libplugin_demo.so"]
+    }
+}

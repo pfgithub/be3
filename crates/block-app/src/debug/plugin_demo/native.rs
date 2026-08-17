@@ -112,8 +112,6 @@ pub(crate) fn show(ctx: &egui::Context) {
 #[derive(Default)]
 struct Window {
     open: bool,
-    #[cfg(target_os = "android")]
-    demo: plugin_demo::demo::Demo,
     #[cfg(not(target_os = "android"))]
     process: Option<super::process::Process>,
     #[cfg(target_os = "windows")]

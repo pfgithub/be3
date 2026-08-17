@@ -870,7 +870,6 @@ dependencies = [
  "libghostty-vt",
  "logicgame",
  "ndk-context",
- "plugin-demo",
  "portable-pty",
  "rfd",
  "rodio",
@@ -6093,6 +6092,7 @@ name = "plugin-demo"
 version = "0.1.0"
 dependencies = [
  "block-plugin",
+ "jni 0.22.4",
 ]
 
 [[package]]

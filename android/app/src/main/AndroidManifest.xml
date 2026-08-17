@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:label="${be3Label}" android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" android:extractNativeLibs="false">
+        <activity android:name="android.app.NativeActivity" android:configChanges="orientation|keyboardHidden|screenSize|screenLayout" android:exported="true">
+            <meta-data android:name="android.app.lib_name" android:value="block_app_lib" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service android:name="com.be3.block.plugin.PluginDemoService" android:enabled="@bool/plugin_demo_supported" android:exported="false" android:process=":plugin_demo" />
+    </application>
+</manifest>
