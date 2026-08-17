@@ -71,6 +71,7 @@ fi
 toolchain="$ndk/toolchains/llvm/prebuilt/$host_tag/bin"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$toolchain/aarch64-linux-android26-clang"
 export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
+export CXX_aarch64_linux_android="$toolchain/aarch64-linux-android26-clang++"
 export AR_aarch64_linux_android="$toolchain/llvm-ar"
 
 cargo build -p block-app --lib --target aarch64-linux-android

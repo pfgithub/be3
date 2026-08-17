@@ -10,7 +10,7 @@ mod android {
 
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_be3_block_plugin_PluginDemoService_nativeStart(
-        _: jni::JNIEnv<'_>,
+        _: jni::EnvUnowned<'_>,
         _: jni::objects::JClass<'_>,
     ) {
         let Ok(mut worker) = WORKER.get_or_init(Default::default).lock() else {
@@ -29,7 +29,7 @@ mod android {
 
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_be3_block_plugin_PluginDemoService_nativeShutdown(
-        _: jni::JNIEnv<'_>,
+        _: jni::EnvUnowned<'_>,
         _: jni::objects::JClass<'_>,
     ) {
         if let Ok(mut worker) = WORKER.get_or_init(Default::default).lock() {

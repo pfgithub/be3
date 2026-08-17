@@ -104,9 +104,9 @@ fn bind() -> Result<(), String> {
                 unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
             environment
                 .call_static_method(
-                    "com/be3/block/plugin/PluginHostBridge",
-                    "bind",
-                    "(Landroid/content/Context;)Z",
+                    jni::jni_str!("com/be3/block/plugin/PluginHostBridge"),
+                    jni::jni_str!("bind"),
+                    jni::jni_sig!("(Landroid/content/Context;)Z"),
                     &[jni::objects::JValue::Object(&activity)],
                 )
                 .and_then(|value| value.z())
@@ -126,9 +126,9 @@ fn unbind() {
         let activity =
             unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
         environment.call_static_method(
-            "com/be3/block/plugin/PluginHostBridge",
-            "unbind",
-            "(Landroid/content/Context;)V",
+            jni::jni_str!("com/be3/block/plugin/PluginHostBridge"),
+            jni::jni_str!("unbind"),
+            jni::jni_sig!("(Landroid/content/Context;)V"),
             &[jni::objects::JValue::Object(&activity)],
         )?;
         Ok::<_, jni::errors::Error>(())
@@ -143,7 +143,7 @@ fn push(event: Event) {
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeConnected(
-    _: jni::JNIEnv<'_>,
+    _: jni::EnvUnowned<'_>,
     _: jni::objects::JClass<'_>,
 ) {
     push(Event::Connected);
@@ -151,24 +151,33 @@ pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeConnecte
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeDisconnected(
-    mut environment: jni::JNIEnv<'_>,
+    mut environment: jni::EnvUnowned<'_>,
     _: jni::objects::JClass<'_>,
     reason: jni::objects::JString<'_>,
 ) {
-    let reason = environment
-        .with_env(|environment| environment.get_string(&reason).map(|value| value.into()))
-        .unwrap_or_else(|_| "Plugin service disconnected".into());
+    let reason = match environment
+        .with_env(|_| Ok::<_, jni::errors::Error>(reason.to_string()))
+        .into_outcome()
+    {
+        jni::Outcome::Ok(reason) => reason,
+        jni::Outcome::Err(_) | jni::Outcome::Panic(_) => "Plugin service disconnected".into(),
+    };
     push(Event::Disconnected(reason));
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativePacket(
-    mut environment: jni::JNIEnv<'_>,
+    mut environment: jni::EnvUnowned<'_>,
     _: jni::objects::JClass<'_>,
     packet: jni::objects::JByteArray<'_>,
 ) {
-    match environment.with_env(|environment| environment.convert_byte_array(packet)) {
-        Ok(packet) if packet.len() <= MAX_PACKET_BYTES => push(Event::Packet(packet)),
+    match environment
+        .with_env(|environment| environment.convert_byte_array(packet))
+        .into_outcome()
+    {
+        jni::Outcome::Ok(packet) if packet.len() <= MAX_PACKET_BYTES => {
+            push(Event::Packet(packet));
+        }
         _ => push(Event::Disconnected(
             "Plugin service packet exceeded the size limit".into(),
         )),
