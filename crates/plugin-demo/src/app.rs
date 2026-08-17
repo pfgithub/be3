@@ -1,6 +1,11 @@
 use eframe::egui;
+use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+
+thread_local! {
+    static RUNNER: RefCell<Option<eframe::WebRunner>> = const { RefCell::new(None) };
+}
 
 #[derive(Default)]
 struct Demo {
@@ -37,11 +42,23 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
         .ok_or_else(|| JsValue::from_str(&format!("no element id {canvas_id}")))?
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
 
-    eframe::WebRunner::new()
+    let runner = eframe::WebRunner::new();
+    runner
         .start(
             canvas,
             eframe::WebOptions::default(),
             Box::new(|_| Ok(Box::<Demo>::default())),
         )
-        .await
+        .await?;
+    RUNNER.with(|current| current.replace(Some(runner)));
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn shutdown() {
+    RUNNER.with(|current| {
+        if let Some(runner) = current.borrow_mut().take() {
+            runner.destroy();
+        }
+    });
 }

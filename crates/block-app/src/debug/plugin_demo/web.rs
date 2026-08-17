@@ -1,94 +1,17 @@
 use std::cell::RefCell;
 
 use eframe::egui;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+mod adapter;
 pub(super) mod renderer;
 
 use super::input::InputAdapter;
 use super::presenter::{
     PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, WebFrame,
 };
-use block_plugin_api::{InputEvent, Message, PointerButton, WheelUnit};
-
-const PLUGIN_DEMO_URL: &str = "/plugin_demo.js";
+use adapter::WebProtocolAdapter;
 const CANVAS_ID: &str = "plugin-demo-canvas";
-
-#[wasm_bindgen(inline_js = "
-export async function run_plugin_demo(url, canvas_id) {
-    const module = await import(url);
-    await module.default();
-    await module.start(canvas_id);
-}
-
-export function plugin_demo_pointer(canvas_id, kind, x, y, button, buttons, ctrl, shift, alt, meta) {
-    const canvas = document.getElementById(canvas_id);
-    const rect = canvas.getBoundingClientRect();
-    const event = new PointerEvent(kind, {
-        bubbles: true,
-        clientX: rect.left + x,
-        clientY: rect.top + y,
-        button,
-        buttons,
-        ctrlKey: ctrl,
-        shiftKey: shift,
-        altKey: alt,
-        metaKey: meta,
-        pointerId: 1,
-        pointerType: 'mouse',
-    });
-    queueMicrotask(() => {
-        (kind === 'pointerdown' ? canvas : document).dispatchEvent(event);
-    });
-}
-
-export function plugin_demo_wheel(canvas_id, x, y, delta_x, delta_y, ctrl, shift, alt, meta) {
-    const canvas = document.getElementById(canvas_id);
-    const rect = canvas.getBoundingClientRect();
-    const event = new WheelEvent('wheel', {
-        bubbles: true,
-        clientX: rect.left + x,
-        clientY: rect.top + y,
-        deltaX: delta_x,
-        deltaY: delta_y,
-        ctrlKey: ctrl,
-        shiftKey: shift,
-        altKey: alt,
-        metaKey: meta,
-    });
-    queueMicrotask(() => canvas.dispatchEvent(event));
-}
-")]
-extern "C" {
-    #[wasm_bindgen(catch)]
-    async fn run_plugin_demo(url: &str, canvas_id: &str) -> Result<(), JsValue>;
-
-    fn plugin_demo_pointer(
-        canvas_id: &str,
-        kind: &str,
-        x: f32,
-        y: f32,
-        button: i16,
-        buttons: u16,
-        ctrl: bool,
-        shift: bool,
-        alt: bool,
-        meta: bool,
-    );
-
-    fn plugin_demo_wheel(
-        canvas_id: &str,
-        x: f32,
-        y: f32,
-        delta_x: f32,
-        delta_y: f32,
-        ctrl: bool,
-        shift: bool,
-        alt: bool,
-        meta: bool,
-    );
-}
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
@@ -97,7 +20,8 @@ thread_local! {
 #[derive(Default)]
 struct State {
     open: bool,
-    started: bool,
+    starting: bool,
+    adapter: Option<WebProtocolAdapter>,
     render_available: bool,
     error: Option<String>,
     canvas_size: [u32; 2],
@@ -122,17 +46,22 @@ pub(crate) fn open() {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.open = true;
-        if state.started || !state.render_available {
+        if state.starting || state.adapter.is_some() || !state.render_available {
             return;
         }
-        state.started = true;
+        state.starting = true;
         create_canvas();
         wasm_bindgen_futures::spawn_local(async {
-            if let Err(error) = run_plugin_demo(PLUGIN_DEMO_URL, CANVAS_ID).await {
-                let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
-                web_sys::console::error_1(&error);
-                STATE.with(|state| state.borrow_mut().error = Some(message));
-            }
+            let result = WebProtocolAdapter::start(CANVAS_ID).await;
+            STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                state.starting = false;
+                match result {
+                    Ok(adapter) if state.open => state.adapter = Some(adapter),
+                    Ok(mut adapter) => adapter.shutdown(),
+                    Err(error) => state.error = Some(error),
+                }
+            });
         });
     });
 }
@@ -173,11 +102,12 @@ pub(crate) fn show(ctx: &egui::Context) {
                     (response.rect.height() * pixels_per_point).round() as u32,
                 ];
                 requested_size = Some((size, response.rect));
-                forward_input(
-                    state.input.update(ui, &response, pixels_per_point),
-                    ui,
-                    &response,
-                );
+                let messages = state.input.update(ui, &response, pixels_per_point);
+                if let Some(adapter) = &mut state.adapter {
+                    if let Err(error) = adapter.send(messages) {
+                        state.error = Some(error);
+                    }
+                }
                 if let Some(status) = state.presenter_status.clone() {
                     painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
                         response.rect,
@@ -192,6 +122,11 @@ pub(crate) fn show(ctx: &egui::Context) {
                 }
             });
         if state.open && !open {
+            if let Some(mut adapter) = state.adapter.take() {
+                adapter.shutdown();
+            }
+            state.input = InputAdapter::default();
+            state.canvas_size = [0, 0];
             if let Some(status) = state.presenter_status.clone() {
                 ctx.debug_painter()
                     .add(eframe::egui_wgpu::Callback::new_paint_callback(
@@ -209,101 +144,8 @@ pub(crate) fn show(ctx: &egui::Context) {
             if state.canvas_size != size {
                 state.canvas_size = size;
             }
-            resize_canvas(size, pixels_per_point);
         }
     });
-}
-
-fn forward_input(messages: Vec<Message>, ui: &egui::Ui, response: &egui::Response) {
-    for message in messages {
-        let Message::Input(input) = message else {
-            continue;
-        };
-        for event in input.events {
-            match event {
-                InputEvent::PointerMoved { x, y } => {
-                    let buttons = ui.input(|input| pointer_buttons(&input.pointer));
-                    plugin_demo_pointer(
-                        CANVAS_ID,
-                        "mousemove",
-                        x,
-                        y,
-                        -1,
-                        buttons,
-                        false,
-                        false,
-                        false,
-                        false,
-                    );
-                }
-                InputEvent::PointerButton {
-                    button,
-                    pressed,
-                    x,
-                    y,
-                } => {
-                    let buttons = ui.input(|input| pointer_buttons(&input.pointer));
-                    plugin_demo_pointer(
-                        CANVAS_ID,
-                        if pressed { "pointerdown" } else { "pointerup" },
-                        x,
-                        y,
-                        pointer_button(button),
-                        buttons,
-                        false,
-                        false,
-                        false,
-                        false,
-                    );
-                }
-                InputEvent::Wheel { x, y, unit } if response.hovered() => {
-                    let position = ui
-                        .input(|input| input.pointer.hover_pos())
-                        .unwrap_or(response.rect.center())
-                        - response.rect.min;
-                    plugin_demo_wheel(
-                        CANVAS_ID,
-                        position.x,
-                        position.y,
-                        -x * wheel_scale(unit),
-                        -y * wheel_scale(unit),
-                        false,
-                        false,
-                        false,
-                        false,
-                    );
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-fn pointer_button(button: PointerButton) -> i16 {
-    match button {
-        PointerButton::Primary => 0,
-        PointerButton::Middle => 1,
-        PointerButton::Secondary => 2,
-        PointerButton::Back => 3,
-        PointerButton::Forward => 4,
-        PointerButton::Other(button) => button as i16,
-    }
-}
-
-fn wheel_scale(unit: WheelUnit) -> f32 {
-    match unit {
-        WheelUnit::Pixels => 1.0,
-        WheelUnit::Lines => 40.0,
-        WheelUnit::Pages => 400.0,
-    }
-}
-
-fn pointer_buttons(pointer: &egui::PointerState) -> u16 {
-    u16::from(pointer.button_down(egui::PointerButton::Primary))
-        | u16::from(pointer.button_down(egui::PointerButton::Secondary)) << 1
-        | u16::from(pointer.button_down(egui::PointerButton::Middle)) << 2
-        | u16::from(pointer.button_down(egui::PointerButton::Extra1)) << 3
-        | u16::from(pointer.button_down(egui::PointerButton::Extra2)) << 4
 }
 
 fn create_canvas() {
@@ -320,23 +162,6 @@ fn create_canvas() {
         let _ = canvas.style().set_property("top", "0");
         let _ = canvas.style().set_property("visibility", "hidden");
         document.body()?.append_child(&canvas).ok()?;
-        Some(())
-    })();
-}
-
-fn resize_canvas(size: [u32; 2], pixels_per_point: f32) {
-    (|| -> Option<()> {
-        let canvas: web_sys::HtmlCanvasElement = web_sys::window()?
-            .document()?
-            .get_element_by_id(CANVAS_ID)?
-            .dyn_into()
-            .ok()?;
-        let style = canvas.style();
-        let _ = style.set_property("width", &format!("{}px", size[0] as f32 / pixels_per_point));
-        let _ = style.set_property(
-            "height",
-            &format!("{}px", size[1] as f32 / pixels_per_point),
-        );
         Some(())
     })();
 }
