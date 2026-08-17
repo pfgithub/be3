@@ -14,6 +14,7 @@ members = [
     "crates/logicgame",
     "crates/cvl2",
     "crates/plugin-demo",
+    "crates/block-plugin-api",
     "crates/gpui-demo",
 ]
 resolver = "2"
