@@ -40,10 +40,12 @@ impl EguiSession {
         })
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
         self.demo.show(ui);
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn append_input(&mut self, input: &mut egui::RawInput) {
         input.events.append(&mut self.input.events);
         input.modifiers = self.input.modifiers;

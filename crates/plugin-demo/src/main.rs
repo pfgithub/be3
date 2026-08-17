@@ -110,7 +110,7 @@ fn run_endpoint(endpoint: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut carrier = WindowsAttachmentCarrier::new(stream, host);
     let started = Instant::now();
-    let mut surface = None;
+    let mut surface: Option<Surface> = None;
     let mut generation = 0;
     loop {
         let (message, attachments) = carrier.receive()?;
