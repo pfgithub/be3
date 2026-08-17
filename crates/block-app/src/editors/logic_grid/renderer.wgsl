@@ -24,13 +24,8 @@ struct WireVertexOutput {
     @location(3) @interpolate(flat) value_index: u32,
 };
 
-struct WireValue {
-    low: u32,
-    high: u32,
-};
-
 @group(0) @binding(0)
-var<storage, read> wire_values: array<WireValue>;
+var wire_values: texture_2d<u32>;
 
 @vertex
 fn vertex(input: VertexInput) -> VertexOutput {
@@ -60,8 +55,10 @@ fn wire_vertex(input: WireVertexInput) -> WireVertexOutput {
 fn wire_fragment(input: WireVertexOutput) -> @location(0) vec4<f32> {
     let scale = max(input.scale, 1.0);
     let bit = min(u32(floor(clamp(input.bit_coord, 0.0, scale - 0.0001))), 63u);
-    let value = wire_values[input.value_index];
-    let word = select(value.low, value.high, bit >= 32u);
+    let size = textureDimensions(wire_values);
+    let index = input.value_index;
+    let value = textureLoad(wire_values, vec2<u32>(index % size.x, index / size.x), 0);
+    let word = select(value.x, value.y, bit >= 32u);
     let shift = bit & 31u;
     let is_on = (word & (1u << shift)) != 0u;
 

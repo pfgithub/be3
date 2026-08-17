@@ -738,10 +738,15 @@ pub(in crate::editors) fn install(creation_context: &eframe::CreationContext<'_>
         .renderer
         .write()
         .callback_resources
-        .insert(GridRenderer::new(
-            &render_state.device,
-            render_state.target_format,
-        ));
+        .insert(GridRendererSlot {
+            target_format: render_state.target_format,
+            renderer: None,
+        });
+}
+
+struct GridRendererSlot {
+    target_format: wgpu::TextureFormat,
+    renderer: Option<GridRenderer>,
 }
 
 pub struct GridCallback {
@@ -757,7 +762,10 @@ impl egui_wgpu::CallbackTrait for GridCallback {
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        if let Some(renderer) = callback_resources.get_mut::<GridRenderer>() {
+        if let Some(slot) = callback_resources.get_mut::<GridRendererSlot>() {
+            let renderer = slot
+                .renderer
+                .get_or_insert_with(|| GridRenderer::new(device, slot.target_format));
             renderer.prepare(device, queue, &self.frame);
         }
         Vec::new()
@@ -769,7 +777,10 @@ impl egui_wgpu::CallbackTrait for GridCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        if let Some(renderer) = callback_resources.get::<GridRenderer>() {
+        if let Some(renderer) = callback_resources
+            .get::<GridRendererSlot>()
+            .and_then(|slot| slot.renderer.as_ref())
+        {
             renderer.paint(render_pass);
         }
     }
@@ -784,12 +795,12 @@ pub struct GridRenderer {
     vertex_buffer: Arc<wgpu::Buffer>,
     wire_vertex_buffer: Arc<wgpu::Buffer>,
     value_vertex_buffer: Arc<wgpu::Buffer>,
-    wire_value_buffer: Arc<wgpu::Buffer>,
+    wire_value_texture: wgpu::Texture,
     background_vertex_capacity: usize,
     vertex_capacity: usize,
     wire_vertex_capacity: usize,
     value_vertex_capacity: usize,
-    wire_value_capacity: usize,
+    wire_value_size: [u32; 2],
     background_vertex_count: u32,
     vertex_count: u32,
     wire_vertex_count: u32,
@@ -811,10 +822,10 @@ impl GridRenderer {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 }],
@@ -899,18 +910,16 @@ impl GridRenderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
-        let wire_value_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("logic wire value buffer"),
-            size: std::mem::size_of::<WireValue>() as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let wire_value_size = [1, 1];
+        let wire_value_texture = create_wire_value_texture(device, wire_value_size);
+        let wire_value_view =
+            wire_value_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let wire_value_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("logic wire value bind group"),
             layout: &wire_value_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wire_value_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::TextureView(&wire_value_view),
             }],
         });
 
@@ -923,12 +932,12 @@ impl GridRenderer {
             vertex_buffer,
             wire_vertex_buffer,
             value_vertex_buffer,
-            wire_value_buffer,
+            wire_value_texture,
             background_vertex_capacity: vertex_capacity,
             vertex_capacity,
             wire_vertex_capacity: vertex_capacity,
             value_vertex_capacity: vertex_capacity,
-            wire_value_capacity: vertex_capacity,
+            wire_value_size,
             background_vertex_count: 0,
             vertex_count: 0,
             wire_vertex_count: 0,
@@ -983,32 +992,49 @@ impl GridRenderer {
         );
         self.value_vertex_count = value_verts.len() as u32;
 
-        let wire_values = if frame.wire_values.is_empty() {
+        let mut wire_values = if frame.wire_values.is_empty() {
             vec![WireValue::new(0)]
         } else {
             frame.wire_values.clone()
         };
-        if wire_values.len() > self.wire_value_capacity {
-            self.wire_value_capacity = wire_values.len().next_power_of_two();
-            self.wire_value_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("logic wire value buffer"),
-                size: (self.wire_value_capacity * std::mem::size_of::<WireValue>()) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+        let max_width = device.limits().max_texture_dimension_2d;
+        let width = (wire_values.len() as u32).min(max_width).max(1);
+        let height = (wire_values.len() as u32).div_ceil(width);
+        wire_values.resize((width * height) as usize, WireValue::new(0));
+        let size = [width, height];
+        if size != self.wire_value_size {
+            self.wire_value_size = size;
+            self.wire_value_texture = create_wire_value_texture(device, size);
+            let view = self
+                .wire_value_texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
             self.wire_value_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("logic wire value bind group"),
                 layout: &self.wire_value_bind_group_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.wire_value_buffer.as_entire_binding(),
+                    resource: wgpu::BindingResource::TextureView(&view),
                 }],
             });
         }
-        queue.write_buffer(
-            &self.wire_value_buffer,
-            0,
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.wire_value_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
             bytemuck::cast_slice(&wire_values),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * std::mem::size_of::<WireValue>() as u32),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
     }
 
@@ -1036,6 +1062,23 @@ impl GridRenderer {
             render_pass.draw(0..self.value_vertex_count, 0..1);
         }
     }
+}
+
+fn create_wire_value_texture(device: &wgpu::Device, size: [u32; 2]) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("logic wire value texture"),
+        size: wgpu::Extent3d {
+            width: size[0],
+            height: size[1],
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rg32Uint,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
 }
 
 fn prepare_vertex_buffer<T: Pod>(
