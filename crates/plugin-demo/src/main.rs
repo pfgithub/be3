@@ -57,10 +57,97 @@ fn run(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
 fn run_endpoint(endpoint: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stream = connect(endpoint)?;
     run(stream.try_clone()?, stream)
+}
+
+#[cfg(target_os = "windows")]
+fn run_endpoint(endpoint: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use block_plugin_api::{
+        decode_frame, desktop_attachments::WindowsAttachmentCarrier, encode_frame, Message,
+        MAX_FRAME_BYTES,
+    };
+    use plugin_demo::{native::ClientSession, windows_surface::Surface};
+    use std::{
+        io::{Read, Write},
+        os::windows::io::AsRawHandle,
+        time::Instant,
+    };
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::{
+            Pipes::GetNamedPipeServerProcessId,
+            Threading::{OpenProcess, PROCESS_DUP_HANDLE},
+        },
+    };
+
+    let mut stream = connect(endpoint)?;
+    let mut session = ClientSession::default();
+    stream.write_all(&encode_frame(&session.hello())?)?;
+    stream.flush()?;
+    let mut header = [0; 4];
+    stream.read_exact(&mut header)?;
+    let length = u32::from_be_bytes(header) as usize;
+    if length > MAX_FRAME_BYTES {
+        return Err("host handshake frame exceeds limit".into());
+    }
+    let mut frame = Vec::with_capacity(length + 4);
+    frame.extend_from_slice(&header);
+    frame.resize(length + 4, 0);
+    stream.read_exact(&mut frame[4..])?;
+    for response in session.receive(decode_frame(&frame)?) {
+        stream.write_all(&encode_frame(&response)?)?;
+    }
+    let mut host_pid = 0;
+    if unsafe { GetNamedPipeServerProcessId(stream.as_raw_handle().cast(), &mut host_pid) } == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let host = unsafe { OpenProcess(PROCESS_DUP_HANDLE, 0, host_pid) };
+    if host.is_null() {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let mut carrier = WindowsAttachmentCarrier::new(stream, host);
+    let started = Instant::now();
+    let mut surface = None;
+    let mut generation = 0;
+    loop {
+        let (message, attachments) = carrier.receive()?;
+        drop(attachments);
+        let create = match &message {
+            Message::CreateViewport(viewport) => Some((
+                viewport.request_id,
+                viewport.metrics.pixel_width,
+                viewport.metrics.pixel_height,
+            )),
+            Message::ResizeViewport(metrics) => {
+                Some((1, metrics.pixel_width, metrics.pixel_height))
+            }
+            _ => None,
+        };
+        for response in session.receive(message) {
+            carrier.send(&response, &[])?;
+        }
+        if let Some((request_id, width, height)) =
+            create.filter(|(_, width, height)| *width > 0 && *height > 0)
+        {
+            generation += 1;
+            let mut next = Surface::new(request_id, [width, height], generation)?;
+            let (descriptor, handles) = next.descriptor();
+            carrier.send(&descriptor, &handles)?;
+            let ready = next.render(started.elapsed().as_secs_f64())?;
+            carrier.send(&ready, &[])?;
+            surface = Some(next);
+        } else if let Some(surface) = &mut surface {
+            let ready = surface.render(started.elapsed().as_secs_f64())?;
+            carrier.send(&ready, &[])?;
+        }
+        if matches!(session.state(), plugin_demo::native::State::Closed) {
+            unsafe { CloseHandle(host) };
+            return Ok(());
+        }
+    }
 }
 
 #[cfg(all(not(target_arch = "wasm32"), unix))]

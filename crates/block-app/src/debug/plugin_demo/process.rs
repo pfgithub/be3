@@ -10,18 +10,35 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(target_os = "windows")]
+use std::os::windows::io::OwnedHandle;
+
+#[cfg(target_os = "windows")]
+pub(super) enum SurfaceEvent {
+    Surface(block_plugin_api::SurfaceDescriptor, Vec<OwnedHandle>),
+    Frame(block_plugin_api::FrameReady),
+}
+
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) struct Process {
     status: Receiver<String>,
     shutdown: Sender<()>,
     latest: String,
+    #[cfg(target_os = "windows")]
+    messages: Sender<Message>,
+    #[cfg(target_os = "windows")]
+    surfaces: Receiver<SurfaceEvent>,
 }
 
 impl Process {
     pub(super) fn launch(executable: PathBuf) -> Self {
         let (status_sender, status) = mpsc::channel();
         let (shutdown, shutdown_receiver) = mpsc::channel();
+        #[cfg(target_os = "windows")]
+        let (messages, message_receiver) = mpsc::channel();
+        #[cfg(target_os = "windows")]
+        let (surface_sender, surfaces) = mpsc::channel();
         thread::spawn(move || {
             let result = platform::Endpoint::create().and_then(|endpoint| {
                 let argument = endpoint.argument();
@@ -45,6 +62,16 @@ impl Process {
                     .send("Waiting for plugin handshake".into())
                     .ok();
                 let result = endpoint.accept(&child).and_then(|stream| {
+                    #[cfg(target_os = "windows")]
+                    return drive_windows(
+                        stream,
+                        &mut child,
+                        &shutdown_receiver,
+                        &message_receiver,
+                        &surface_sender,
+                        &status_sender,
+                    );
+                    #[cfg(not(target_os = "windows"))]
                     drive(stream, &mut child, &shutdown_receiver, &status_sender)
                 });
                 terminate(&mut child);
@@ -58,6 +85,10 @@ impl Process {
             status,
             shutdown,
             latest: "Starting plugin process".into(),
+            #[cfg(target_os = "windows")]
+            messages,
+            #[cfg(target_os = "windows")]
+            surfaces,
         }
     }
 
@@ -71,6 +102,126 @@ impl Process {
     pub(super) fn shutdown(&mut self) {
         self.shutdown.send(()).ok();
     }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn send(&self, messages: Vec<Message>) {
+        for message in messages {
+            self.messages.send(message).ok();
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn latest_surface(&self) -> Option<SurfaceEvent> {
+        self.surfaces.try_recv().ok()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn drive_windows(
+    mut stream: std::fs::File,
+    child: &mut Child,
+    shutdown: &Receiver<()>,
+    messages: &Receiver<Message>,
+    surfaces: &Sender<SurfaceEvent>,
+    status: &Sender<String>,
+) -> io::Result<()> {
+    use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
+    use std::os::windows::io::AsRawHandle;
+
+    let started = Instant::now();
+    let mut session = HostSession::new(
+        "BE3",
+        vec![
+            Capability::Lifecycle,
+            Capability::Input,
+            Capability::Surface(block_plugin_api::SurfaceMechanism::WindowsDxgi),
+        ],
+    );
+    session.start(0);
+    session.receive(read_message(&mut stream)?, elapsed(started));
+    flush(&mut stream, &mut session)?;
+    if !matches!(session.state(), SessionState::Running) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plugin handshake was rejected",
+        ));
+    }
+    let reader = stream.try_clone()?;
+    let peer = child.as_raw_handle().cast();
+    let (incoming_sender, incoming) = mpsc::channel();
+    thread::spawn(move || {
+        let mut carrier = WindowsAttachmentCarrier::new(reader, peer);
+        loop {
+            match carrier.receive() {
+                Ok(value) => incoming_sender.send(Ok(value)).ok(),
+                Err(error) => {
+                    incoming_sender.send(Err(error.to_string())).ok();
+                    break;
+                }
+            };
+        }
+    });
+    let mut writer = WindowsAttachmentCarrier::new(stream, peer);
+    status
+        .send("Plugin connected; waiting for a DXGI surface".into())
+        .ok();
+    loop {
+        if shutdown.try_recv().is_ok() {
+            writer
+                .send(&Message::Shutdown, &[])
+                .map_err(carrier_error)?;
+            return wait_for_shutdown(child);
+        }
+        while let Ok(message) = messages.try_recv() {
+            writer.send(&message, &[]).map_err(carrier_error)?;
+        }
+        while let Ok(incoming) = incoming.try_recv() {
+            let (message, attachments) =
+                incoming.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            match message {
+                Message::Surface(surface) => {
+                    surfaces
+                        .send(SurfaceEvent::Surface(surface, attachments))
+                        .ok();
+                    status
+                        .send("Plugin connected; presenting Windows DXGI surface".into())
+                        .ok();
+                }
+                Message::FrameReady(frame) => {
+                    surfaces.send(SurfaceEvent::Frame(frame)).ok();
+                }
+                Message::ShutdownAcknowledged => return Ok(()),
+                _ => {}
+            }
+        }
+        if let Some(exit) = child.try_wait()? {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                format!("plugin exited unexpectedly: {exit}"),
+            ));
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn carrier_error(error: block_plugin_api::desktop_attachments::CarrierError) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_shutdown(child: &mut Child) -> io::Result<()> {
+    let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+    while Instant::now() < deadline {
+        if child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "plugin did not exit after shutdown",
+    ))
 }
 
 impl Drop for Process {

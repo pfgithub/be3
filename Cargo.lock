@@ -884,6 +884,8 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "wgpu-hal",
+ "windows 0.62.2",
  "windows-sys 0.59.0",
  "winit",
  "wry",
@@ -6076,9 +6078,12 @@ dependencies = [
  "block-plugin-api",
  "eframe",
  "js-sys",
+ "pollster 0.4.0",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "wgpu-hal",
+ "windows 0.62.2",
  "windows-sys 0.59.0",
 ]
 

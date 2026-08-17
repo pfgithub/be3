@@ -101,4 +101,9 @@ where
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(super) use super::web::renderer::{WebFrame, WebSurfacePresenter};
+#[cfg(target_os = "windows")]
+pub(super) use super::windows::{
+    WindowsFrame as WebFrame, WindowsSurfacePresenter as WebSurfacePresenter,
+};

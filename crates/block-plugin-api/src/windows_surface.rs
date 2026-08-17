@@ -11,7 +11,7 @@ const DESCRIPTOR_LENGTH: usize = 22;
 pub struct WindowsSurfaceDescriptor {
     pub adapter_luid: u64,
     pub texture_format: u32,
-    pub keyed_mutex_key: u64,
+    pub initial_fence_value: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,7 +44,7 @@ impl WindowsSurfaceDescriptor {
         bytes.extend_from_slice(&DESCRIPTOR_VERSION.to_be_bytes());
         bytes.extend_from_slice(&self.adapter_luid.to_be_bytes());
         bytes.extend_from_slice(&self.texture_format.to_be_bytes());
-        bytes.extend_from_slice(&self.keyed_mutex_key.to_be_bytes());
+        bytes.extend_from_slice(&self.initial_fence_value.to_be_bytes());
         bytes
     }
 
@@ -61,7 +61,7 @@ impl WindowsSurfaceDescriptor {
         let descriptor = Self {
             adapter_luid: u64::from_be_bytes(bytes[2..10].try_into().unwrap()),
             texture_format: u32::from_be_bytes(bytes[10..14].try_into().unwrap()),
-            keyed_mutex_key: u64::from_be_bytes(bytes[14..22].try_into().unwrap()),
+            initial_fence_value: u64::from_be_bytes(bytes[14..22].try_into().unwrap()),
         };
         if descriptor.adapter_luid == 0 || descriptor.texture_format == 0 {
             return Err(WindowsSurfaceError::MalformedDescriptor);
@@ -175,7 +175,7 @@ impl WindowsSurfaceLifecycle {
         }
         let descriptor = WindowsSurfaceDescriptor::decode(surface)?;
         self.generation = surface.generation;
-        self.synchronization_value = descriptor.keyed_mutex_key;
+        self.synchronization_value = descriptor.initial_fence_value;
         self.state = WindowsSurfaceState::Ready;
         Ok(descriptor)
     }

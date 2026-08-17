@@ -6,7 +6,14 @@ thread_local! {
     static WINDOW: RefCell<Window> = RefCell::new(Window::default());
 }
 
-pub(crate) fn install(_creation_context: &eframe::CreationContext<'_>) {}
+pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
+    #[cfg(target_os = "windows")]
+    WINDOW.with(|window| {
+        window.borrow_mut().presenter_status = super::windows::install(creation_context);
+    });
+    #[cfg(not(target_os = "windows"))]
+    let _ = creation_context;
+}
 
 pub(crate) fn open() {
     WINDOW.with(|window| {
@@ -32,11 +39,48 @@ pub(crate) fn show(ctx: &egui::Context) {
             .show(ctx, |ui| {
                 #[cfg(target_os = "android")]
                 ui.label("Native plugins require the Android service transport.");
-                #[cfg(not(target_os = "android"))]
+                #[cfg(all(not(target_os = "android"), not(target_os = "windows")))]
                 ui.label(window.process.as_mut().map_or_else(
                     || "Plugin process is not running".to_owned(),
                     super::process::Process::status,
                 ));
+                #[cfg(target_os = "windows")]
+                {
+                    use super::presenter::{PresenterCallback, PresenterCommand};
+                    if window.presenter_status.is_none() {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            "Windows plugins require the D3D12 renderer.",
+                        );
+                    } else {
+                        ui.label(window.process.as_mut().map_or_else(
+                            || "Plugin process is not running".to_owned(),
+                            super::process::Process::status,
+                        ));
+                        let (response, painter) =
+                            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+                        let messages = window.input.update(ui, &response, ctx.pixels_per_point());
+                        if let Some(process) = &window.process {
+                            process.send(messages);
+                            if let Some(frame) = process.latest_surface() {
+                                window.pending_frame = Some(frame.into());
+                            }
+                        }
+                        if let Some(status) = window.presenter_status.clone() {
+                            let frame = window
+                                .pending_frame
+                                .take()
+                                .unwrap_or(super::windows::WindowsFrame::Paint);
+                            painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
+                                response.rect,
+                                PresenterCallback {
+                                    command: PresenterCommand::Present(frame),
+                                    status,
+                                },
+                            ));
+                        }
+                    }
+                }
             });
         if window.open && !is_open {
             #[cfg(not(target_os = "android"))]
@@ -53,6 +97,12 @@ struct Window {
     open: bool,
     #[cfg(not(target_os = "android"))]
     process: Option<super::process::Process>,
+    #[cfg(target_os = "windows")]
+    input: super::input::InputAdapter,
+    #[cfg(target_os = "windows")]
+    presenter_status: Option<super::presenter::PresenterStatus>,
+    #[cfg(target_os = "windows")]
+    pending_frame: Option<super::windows::WindowsFrame>,
 }
 
 #[cfg(not(target_os = "android"))]

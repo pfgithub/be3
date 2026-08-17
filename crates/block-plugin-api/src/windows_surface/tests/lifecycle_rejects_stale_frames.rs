@@ -5,7 +5,7 @@ fn lifecycle_rejects_stale_frames() {
     let surface = WindowsSurfaceDescriptor {
         adapter_luid: 7,
         texture_format: 87,
-        keyed_mutex_key: 4,
+        initial_fence_value: 4,
     }
     .surface(1, 2, 64, 32);
     let mut lifecycle = WindowsSurfaceLifecycle::default();
