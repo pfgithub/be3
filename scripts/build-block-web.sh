@@ -125,4 +125,4 @@ cp "$repository/scripts/web/wasi.js" "$output_directory"
 size="$(du -h "$output_directory/block_app_lib_bg.wasm" | cut -f1)"
 printf '\nWrote %s (%s of WebAssembly).\n' "$output_directory" "$size"
 echo 'Serve it over HTTP, for example:'
-echo '    python -m http.server --directory target/web 8080'
+echo '    caddy file-server --root target/web'
