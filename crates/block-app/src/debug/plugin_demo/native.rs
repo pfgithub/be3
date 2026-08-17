@@ -33,6 +33,8 @@ pub(crate) fn show(ctx: &egui::Context) {
         if !is_open {
             return;
         }
+        #[cfg(target_os = "windows")]
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
         egui::Window::new("Plugin Demo")
             .open(&mut is_open)
             .default_size([360.0, 140.0])
