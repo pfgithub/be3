@@ -69,6 +69,11 @@ if [[ "${OS:-}" == "Windows_NT" ]]; then
     host_tag='windows-x86_64'
 fi
 toolchain="$ndk/toolchains/llvm/prebuilt/$host_tag/bin"
+cpp_runtime="$ndk/toolchains/llvm/prebuilt/$host_tag/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+if [[ ! -f "$cpp_runtime" ]]; then
+    echo "Required Android C++ runtime is missing: $cpp_runtime" >&2
+    exit 1
+fi
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$toolchain/aarch64-linux-android26-clang"
 export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
 export CXX_aarch64_linux_android="$toolchain/aarch64-linux-android26-clang++"
@@ -80,6 +85,7 @@ cargo build -p plugin-demo --lib --target aarch64-linux-android
 mkdir -p "$native_libraries" "$(dirname "$apk")"
 cp "$repository/target/aarch64-linux-android/debug/libblock_app_lib.so" "$native_libraries/"
 cp "$repository/target/aarch64-linux-android/debug/libplugin_demo.so" "$native_libraries/"
+cp "$cpp_runtime" "$native_libraries/"
 
 (
     cd "$repository/android"
