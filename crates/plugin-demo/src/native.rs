@@ -35,6 +35,10 @@ impl ClientSession {
         capabilities.push(Capability::Surface(
             block_plugin_api::SurfaceMechanism::MacOsIoSurface,
         ));
+        #[cfg(target_os = "windows")]
+        capabilities.push(Capability::Surface(
+            block_plugin_api::SurfaceMechanism::WindowsDxgi,
+        ));
         Message::Hello(Hello {
             minimum_version: PROTOCOL_VERSION,
             maximum_version: PROTOCOL_VERSION,

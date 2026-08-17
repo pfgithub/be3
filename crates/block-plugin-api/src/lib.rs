@@ -7,6 +7,7 @@ mod attachment;
 pub mod desktop_attachments;
 mod macos_surface;
 mod session;
+mod windows_surface;
 
 pub use attachment::{
     validate_attachments, AttachmentDescriptor, AttachmentError, AttachmentOwnership,
@@ -16,6 +17,9 @@ pub use macos_surface::{
     MacOsSurfaceDescriptor, MacOsSurfaceError, MacOsSurfaceLifecycle, MacOsSurfaceState,
 };
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
+pub use windows_surface::{
+    WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
+};
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;

@@ -87,6 +87,10 @@ fn drive<S: Read + Write>(
     capabilities.push(Capability::Surface(
         block_plugin_api::SurfaceMechanism::MacOsIoSurface,
     ));
+    #[cfg(target_os = "windows")]
+    capabilities.push(Capability::Surface(
+        block_plugin_api::SurfaceMechanism::WindowsDxgi,
+    ));
     let mut session = HostSession::new("BE3", capabilities);
     session.start(0);
     let message = read_message(&mut stream)?;
