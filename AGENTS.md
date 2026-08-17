@@ -90,10 +90,12 @@ Tests:
 
 Verification:
 - After making changes, always run `./scripts/verify.sh`. It runs clippy (applying the fixes it can), rustfmt and the tests, and fails if any clippy warning is left. This should take less than 2 minutes including compilation time. Then, commit changes to git and push using `git push`.
+- For changes that affect Android, also build the Android APK locally with `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build-block-android.sh --android-sdk /home/ubuntu/Android/Sdk`.
+- For changes that affect the web build, also build it locally with `./scripts/build-block-web.sh`.
 - Commit using `git add --all` and `git commit`. Don't check the status. Don't worry about it if the wrong file ends up in a commit unless it is supposed to be gitignored.
 - When there are multiple or large changes, split them up into tasks and test & commit to git after each one.
 - Use commit message format `type: message` where type is fix/feat/docs/...
-- Do not perform any verification beyond running the verify script. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work — the verify script is the only verification step.
+- Except for the required Android and web builds above, do not perform any verification beyond running the verify script. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work.
 - Do not use the browser tool.
 
 Environment:
