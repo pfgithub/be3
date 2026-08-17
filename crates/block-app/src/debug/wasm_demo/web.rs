@@ -34,13 +34,15 @@ export function wasm_demo_pointer(canvas_id, kind, x, y, button, buttons, ctrl, 
         pointerId: 1,
         pointerType: 'mouse',
     });
-    (kind === 'pointerdown' ? canvas : document).dispatchEvent(event);
+    queueMicrotask(() => {
+        (kind === 'pointerdown' ? canvas : document).dispatchEvent(event);
+    });
 }
 
 export function wasm_demo_wheel(canvas_id, x, y, delta_x, delta_y, ctrl, shift, alt, meta) {
     const canvas = document.getElementById(canvas_id);
     const rect = canvas.getBoundingClientRect();
-    canvas.dispatchEvent(new WheelEvent('wheel', {
+    const event = new WheelEvent('wheel', {
         bubbles: true,
         clientX: rect.left + x,
         clientY: rect.top + y,
@@ -50,7 +52,8 @@ export function wasm_demo_wheel(canvas_id, x, y, delta_x, delta_y, ctrl, shift, 
         shiftKey: shift,
         altKey: alt,
         metaKey: meta,
-    }));
+    });
+    queueMicrotask(() => canvas.dispatchEvent(event));
 }
 ")]
 extern "C" {
