@@ -8,9 +8,9 @@ High-level design only — no code.
 
 - Replace the current `wasm-demo` debug window and `wasm-demo` crate with a
   `plugin-demo` that works on macOS, Linux, Windows, Android, and web.
-- A plugin owns its UI and may use any language or GUI framework. It does not
-  link to BE3, share BE3's `egui` instance, or need the same Rust toolchain or
-  dependency versions as the host.
+- A plugin owns its UI and may use any GUI framework. It does not link to BE3,
+  share BE3's `egui` instance, or need the same Rust toolchain or dependency
+  versions as the host.
 - BE3 gives the plugin a viewport and sends it normalized pointer, wheel,
   keyboard, text, focus, resize, and scale-factor input. The plugin renders a
   frame into a negotiated platform-native image surface, which BE3 composites
@@ -50,13 +50,11 @@ or surfaces.
 
 ## IPC protocol
 
-`block-plugin-api` defines a language-neutral, versioned JSON wire protocol
-rather than Rust or C memory layouts. Its Rust message model derives `serde`
-serialization and messages are encoded with `serde_json` as length-prefixed
-UTF-8 JSON documents. The protocol specification fixes field names, JSON value
-types, numeric ranges, enum representations, required fields, and evolution
-rules so implementations in other languages do not depend on Rust details. The
-protocol covers:
+`block-plugin-api` defines shared Rust message types and a versioned binary wire
+protocol. Both BE3 and native plugins depend on this crate, and its message
+model derives `serde` serialization. Messages use a bounded binary encoding
+inside length-prefixed frames. Protocol versions still change explicitly when
+message representations or semantics change. The protocol covers:
 
 - protocol negotiation, plugin identity, and supported capabilities;
 - viewport creation, logical and pixel size, scale factor, and resizing;
@@ -65,19 +63,20 @@ protocol covers:
 - frame generation, damage, synchronization, and presentation completion;
 - structured errors, liveness, graceful shutdown, and acknowledgement.
 
-The protocol specifies message ordering, request identifiers, maximum JSON
-document and queue sizes, nesting and collection limits, backpressure, timeout
-behavior, and how unknown fields, unknown message kinds, invalid UTF-8, and
-malformed JSON are handled. A slow plugin can cause its own input or frames to
-be coalesced or dropped, but cannot grow host memory without bound or make the
-UI thread wait on IPC.
+The protocol specifies message ordering, request identifiers, maximum frame and
+queue sizes, collection limits, backpressure, timeout behavior, and how unknown
+message kinds, unsupported protocol versions, truncated frames, and malformed
+payloads are handled. A slow plugin can cause its own input or frames to be
+coalesced or dropped, but cannot grow host memory without bound or make the UI
+thread wait on IPC.
 
 Native surface handles are never serialized as process-local integer values.
-They travel through the operating system's handle-passing mechanism: ancillary
-data on Unix-domain sockets, duplicated handles associated with named-pipe
-messages on Windows, and Binder file-descriptor or native-object transfer on
-Android. Every surface capability defines who creates, duplicates, owns,
-signals, waits on, and closes each handle, including behavior on resize,
+Shared Rust attachment types associate their metadata and ownership with a
+protocol frame, while narrow platform adapters carry the actual resources:
+ancillary data on Unix-domain sockets, duplicated handles associated with
+named-pipe messages on Windows, and Binder file-descriptor or native-object
+transfer on Android. Every surface capability defines who creates, duplicates,
+owns, signals, waits on, and closes each handle, including behavior on resize,
 disconnect, and device loss.
 
 The initial desktop transports are Unix-domain sockets on macOS and Linux and
@@ -161,20 +160,19 @@ handling and cleanup rather than deferring correctness work to a final pass.
    `debug/wasm_demo` to `plugin-demo` and `debug/plugin_demo`, including
    workspace entries, build scripts, generated assets, shader identifiers,
    menu labels, and user-facing text. Preserve current web-only behavior.
-2. **JSON protocol model and framing** — add `block-plugin-api` with handshake,
-   lifecycle, input, capability, opaque surface, frame, error, and shutdown
-   messages. Define the normative JSON representation and implement
-   length-prefixed `serde_json` framing, document and collection limits,
-   version-evolution rules, and malformed-message tests. Keep platform-native
-   surface descriptors opaque until their corresponding surface paths define
-   them.
+2. **Shared protocol model and framing** — add `block-plugin-api` with shared
+   Rust types for handshake, lifecycle, input, capability, opaque surface,
+   frame, error, and shutdown messages. Implement a bounded, length-prefixed
+   binary encoding, frame and collection limits, explicit version-evolution
+   rules, and malformed-message tests. Keep platform-native surface descriptors
+   opaque until their corresponding surface paths define them.
 3. **Session and lifecycle core** — implement the transport-independent plugin
    state machine, request tracking, timeouts, bounded queues, and event
    coalescing rules. Only pointer motion, wheel accumulation, redundant
    modifier state, and superseded resize events may be coalesced; button, key,
    text, focus, and lifecycle transitions preserve their ordering. Test it with
-   an in-process protocol peer, including malformed JSON, timeout, disconnect,
-   repeated start and shutdown, and queue saturation.
+   an in-process protocol peer, including malformed payloads, timeout,
+   disconnect, repeated start and shutdown, and queue saturation.
 4. **Host viewport and input adapter** — translate `egui` viewport state and
    pointer, wheel, keyboard, text, modifier, focus, resize, and scale-factor
    input into protocol messages without exposing `egui` types. Implement
@@ -190,76 +188,75 @@ handling and cleanup rather than deferring correctness work to a final pass.
    open and close, and shutdown to the shared session core, then remove the old
    WebAssembly-specific host facade.
 7. **Native demo executable** — build `plugin-demo` as a standalone desktop
-   executable with the JSON protocol client, lifecycle state machine, and a
+   executable with the shared protocol client, lifecycle state machine, and a
    transport test mode. It must exit cleanly on shutdown or host disconnect and
    reject malformed or out-of-order host messages.
-8. **Unix desktop process transport** — launch and monitor the executable on
-   macOS and Linux, connect through a private Unix-domain socket, verify the
-   peer, perform the handshake, and implement disconnect handling, bounded
-   shutdown, forced termination, and process reaping. A missing surface
-   presenter may still produce an unsupported error. Cover startup failure,
-   crash, hang, malformed JSON, and repeated open and close.
-9. **Windows desktop process transport** — implement the equivalent private
-   named-pipe connection, process launch and monitoring, peer verification,
-   handshake, disconnect handling, bounded shutdown, forced termination, and
-   process reaping, with the same failure-path coverage as the Unix transport.
-10. **Unix handle transfer** — associate ancillary file descriptors strictly
-    with their JSON messages, validate descriptor counts and types, and define
-    duplication, ownership, close-on-exec, disconnect, and malformed-message
-    cleanup behavior for macOS and Linux.
-11. **Windows handle transfer** — associate duplicated handles with their JSON
-    messages and define process identity checks, duplication rights, ownership,
-    disconnect, and malformed-message cleanup behavior.
-12. **macOS surface path** — define the macOS surface descriptor, render the
+8. **Desktop process transport** — implement one desktop process lifecycle and
+   IPC driver for macOS, Linux, and Windows using cross-platform process and
+   local-socket APIs where practical. Narrow platform adapters provide private
+   Unix-domain sockets or Windows named pipes, peer verification, forced
+   termination, and process-tree reaping. Perform the handshake and implement
+   disconnect handling and bounded shutdown once in the shared driver. A
+   missing surface presenter may still produce an unsupported error. Cover
+   startup failure, crash, hang, malformed payloads, and repeated open and
+   close on every platform.
+9. **Desktop handle transfer** — define one attachment model that associates
+   native resources strictly with protocol frames and shares descriptor-count,
+   type, ownership, disconnect, and malformed-message validation. Implement
+   narrow Unix ancillary-descriptor and Windows duplicated-handle carriers,
+   including close-on-exec, process identity, duplication rights, and cleanup.
+10. **macOS surface path** — define the macOS surface descriptor, render the
     demo into an IOSurface-backed Metal texture, transfer its handles and
     synchronization over IPC, import it into BE3's active wgpu backend, and
     handle unsupported backends, resize, crash, timeout, shutdown, malformed
     descriptors, synchronization failure, and device loss.
-13. **Windows surface path** — define the Windows surface descriptor and
+11. **Windows surface path** — define the Windows surface descriptor and
     implement the equivalent shared DXGI/D3D texture, duplicated-handle,
     synchronization, import, resize, failure handling, and teardown flow.
-14. **Linux surface path** — define the Linux surface descriptor and implement
+12. **Linux surface path** — define the Linux surface descriptor and implement
     the equivalent dma-buf, explicit-sync, Vulkan/EGL import, resize, failure
     handling, and teardown flow, returning an unsupported error for incompatible
     active backends.
-15. **Desktop build and packaging** — add `scripts/build-plugin-demo.sh`, stage
+13. **Desktop build and packaging** — add `scripts/build-plugin-demo.sh`, stage
     each executable and runtime dependency in its application layout, integrate
     macOS signing and Windows DLL lookup constraints, and document the developer
     build commands and platform-specific failure diagnostics.
-16. **Android service and Binder transport** — add the separately named service
-    process, JSON protocol adapter, Binder connection and peer lifecycle, death
-    handling, bounded queues, orderly shutdown, and recovery after service death
-    or activity recreation. Native graphics handles remain unsupported in this
-    unit.
-17. **Android handle transfer** — define how Binder carries file descriptors or
-    native objects associated with JSON messages, including validation,
+14. **Android service and Binder transport** — add the separately named service
+    process, shared protocol adapter, Binder connection and peer lifecycle,
+    death handling, bounded queues, orderly shutdown, and recovery after service
+    death or activity recreation. Native graphics handles remain unsupported in
+    this unit.
+15. **Android handle transfer** — define how Binder carries file descriptors or
+    native objects associated with protocol frames, including validation,
     ownership, duplication, disconnect, and malformed-message cleanup.
-18. **Android surface path** — define the Android surface descriptor, render to
+16. **Android surface path** — define the Android surface descriptor, render to
     AHardwareBuffer, transfer and import the buffer and synchronization handles,
     and handle unsupported backends, resize, crash, timeout, shutdown,
     synchronization failure, activity recreation, and device loss.
-19. **Android packaging** — declare and package the separate-process service in
+17. **Android packaging** — declare and package the separate-process service in
     the APK, stage the bundled plugin code, and report missing or invalid
     artifacts distinctly.
-20. **Cross-platform diagnostics and documentation** — display detailed process
+18. **Cross-platform diagnostics and documentation** — display detailed process
     or module state, selected transport, protocol version, queue state, and
     negotiated capabilities. Consolidate the platform support matrix and manual
     test matrix after each adapter already owns its lifecycle and cleanup tests.
 
-Units 1–6 establish and validate the framework-neutral protocol through the web
-vertical slice. Units 7–11 establish the native process boundary and native
-resource transfer in independently reviewable steps. Units 12–15 make and
-package desktop rendering one platform at a time. Units 16–19 add Android in
-separate transport, handle-transfer, rendering, and packaging stages. Unit 20
-consolidates diagnostics and documentation without postponing lifecycle
-correctness from earlier units.
+Units 1–6 establish and validate the shared protocol through the web vertical
+slice. Units 7–9 establish the native process boundary and resource-transfer
+model with shared desktop orchestration and narrow platform adapters. Units
+10–13 make and package desktop rendering one platform at a time because native
+GPU import and synchronization cannot be usefully abstracted by cross-platform
+APIs. Units 14–17 add Android in separate transport, handle-transfer, rendering,
+and packaging stages. Unit 18 consolidates diagnostics and documentation
+without postponing lifecycle correctness from earlier units.
 
 ## Out of scope
 
 V1 does not include plugin discovery, installation, automatic updates, hot
-reload, downloaded Android executables, permissions, sandbox policy, CPU image
-fallbacks, audio, accessibility-tree integration, clipboard integration, drag
-and drop, input methods beyond the defined text protocol, or a general plugin
+reload, downloaded Android executables, permissions, sandbox policy, non-Rust
+native plugins, CPU image fallbacks, audio, accessibility-tree integration,
+clipboard integration, drag and drop, input methods beyond the defined text
+protocol, or a general plugin
 SDK for third-party distribution. The process boundary contains memory faults
 but does not by itself restrict filesystem, network, GPU, or child-process
 access. Those capabilities need a separate security and product design.
