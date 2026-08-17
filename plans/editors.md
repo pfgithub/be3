@@ -8,7 +8,7 @@
 - Keep synchronized block models in the trusted host. A plugin edits a host-owned block through serialized snapshots and operations; it does not connect to the server, own a `BlockClient`, implement permissions, or duplicate undo/redo, presence, relationship, and dynamic-artifact rules.
 - Preserve the behavior of the current `BlockEditor` surface: creation, tabs, embedded live editors, passive previews, top and side regions, intrinsic sizing, pan and zoom, access control, child blocks, navigation actions, presence, and dynamic artifacts.
 - Isolate editor failures. A malformed message, panic, timeout, or crash should close only the affected editor instance and show a recoverable error in its place.
-- Support desktop, web, and Android before the in-process editor path is removed. GPU surface sharing may remain an optimization, but every supported target needs a correct fallback presentation path.
+- Support desktop, web, and Android before the in-process editor path is removed. Every supported target must use its optimized GPU texture-sharing mechanism; pixel buffers and software presentation are not part of the architecture.
 - Turn `crates/plugin-demo` into a small reference editor and conformance fixture built on the production SDK, not a parallel debug-only implementation.
 
 ### Architectural boundary
@@ -51,11 +51,11 @@ Replace the fixed `plugin-demo` path and global debug window with package lookup
 
 ### Rendering and platform support
 
-Keep the current external-surface mechanisms as fast paths, but add a portable software-frame capability. Native platforms should transfer bounded RGBA buffers through shared memory or platform attachments rather than embedding large frames in protocol messages. Web may continue copying an off-screen canvas into the host texture. Android needs a service/process transport and either `AHardwareBuffer` presentation or the software fallback.
+Require external GPU surfaces on every target. Windows uses DXGI shared textures, Linux uses DMA-BUF, macOS uses IOSurface, Android uses `AHardwareBuffer`, and web uses `WebExternalImage` backed by the plugin's off-screen canvas. The handshake rejects a plugin when the host and guest cannot negotiate the platform's required surface mechanism. There is no software or pixel-buffer presentation path.
 
 Named regions are independent viewports with their own size, scale factor, input focus, and frame generation. This preserves host-owned panel layout and allows previews and creation dialogs to exist without opening a full tab. Regions that do not need continuous animation render on state, input, theme, access, or size changes. The host sends theme and font-scale data so first-party plugins remain visually consistent, while the protocol does not expose internal `egui` objects.
 
-Linux DMA-BUF and macOS IOSurface import/export are not currently completed by the demo and must not gate correctness. Implement the software path first on every target, then retain Windows DXGI, WebExternalImage, DMA-BUF, IOSurface, and Android hardware buffers as negotiated accelerations. Surface loss must fall back or recreate the region without losing the editor instance.
+Linux DMA-BUF, macOS IOSurface, and Android hardware-buffer import/export are not currently completed by the demo, so they are explicit platform-enablement milestones. Surface loss recreates the optimized surface and its region without losing the editor instance; repeated recreation failure puts that region into an error state rather than changing presentation mechanisms.
 
 ### SDK and editor layout
 
@@ -65,7 +65,9 @@ Split the current demo into three responsibilities:
 - a new `block-editor-plugin` guest SDK: instance routing, revision handling, host requests, `egui` input adaptation, region rendering, and target entry points;
 - `plugin-demo`: a minimal reference package that declares one test block editor and exercises every stable capability needed by conformance tests.
 
-First-party editor packages depend on the guest SDK and the block model types they edit, but not on `block-app` or `BlockClient`. To make that possible without pulling networking into every plugin, move each block's state and operation definitions from `block-client::blocks` into model-only crates or a model-only `block-types` crate. `block-client` re-exports those types and supplies typed handles; plugins use the same codecs to read snapshots and construct operations. Editor-only reusable cores such as `text-editor-core`, `logicgame`, canvas geometry, database layouts, and renderers move with or below their plugin packages rather than remaining reachable through `block-app`.
+First-party editor packages depend on the guest SDK and the block model types they edit, but not on `block-app` or `BlockClient`. To make that possible without pulling networking into every plugin, move each block's state and operation definitions from `block-client::blocks` into model-only crates or a model-only `block-types` crate. `block-client` re-exports those types and supplies typed handles; plugins use the same codecs to read snapshots and construct operations. Editor-only reusable cores such as `logicgame`, canvas geometry, database layouts, and renderers move with or below their plugin packages rather than remaining reachable through `block-app`.
+
+Split the current text editor into two reusable layers before migrating it. `text-editor-core` remains the UI-independent editing engine for diffing, syntax highlighting, and cursor data. A new `text-editor-view` package owns the editor/view behavior currently in `block-app`, including `egui` interaction, layout, font handling, embeds, selection, cursor presentation, and the adapter that drives `text-editor-core`. The text plugin depends on `text-editor-view` and connects its changes and presence data to the guest SDK; neither reusable text package depends on `block-app` or plugin transport.
 
 The guest SDK should present an API close to today's editor authoring model: a typed state view, an operation sender, local UI state, reference and presence subscriptions, named region callbacks, and declarative capabilities. It must not imitate `BlockHandle` in a way that suggests synchronous reads or successful writes; state revisions and rejected operations are explicit. Provide a package template, manifest validation command, build command, and a revised editor guide based on `plugin-demo`.
 
@@ -79,49 +81,56 @@ The migration is complete when `block-app/src/editors` contains only the plugin 
 
 ## Suggested units of work
 
-1. **Define the package manifest.** Add manifest types, bounded decoding, semantic validation, and isolated tests to `block-plugin-api`; give `plugin-demo` a checked manifest without changing how it runs.
-2. **Define editor instances and regions.** Add instance IDs, roles, capabilities, named-region descriptors, geometry types, and their codec-limit tests to the protocol.
-3. **Implement instance lifecycle messages.** Add create, ready, update, close, and failure messages to both session state machines, with ordering and cleanup tests.
-4. **Implement revisioned block messages.** Add snapshot, properties, operation request, accepted operation, rejected operation, and history-group messages, including stale-revision and payload-limit tests.
-5. **Add type-erased block adapters.** Let a host registration encode a typed block snapshot and decode a typed operation before applying it through `BlockHandle`; cover unknown types and invalid payloads with non-GUI tests.
-6. **Add history and access messages.** Route undo, redo, history availability, and live access-ceiling changes, and reject mutations from non-editable instances in host-session tests.
-7. **Add scoped reference messages.** Implement watch, unwatch, snapshot, and change messages using host-issued reference handles; test that a plugin cannot address an arbitrary block UUID.
-8. **Add presence messages.** Implement bounded presence subscriptions and updates keyed by well-known presence UUIDs, with host authorization and cleanup when an instance closes.
-9. **Add editor action messages.** Cover navigation, child actions, intrinsic-size changes, viewport commands, creation results, and dynamic-artifact results without exposing `egui` or app trait types.
-10. **Extract the transport runtime.** Move framing, handshake, queues, timeouts, and shutdown out of `debug/plugin_demo` into a reusable block-app host module while keeping the demo window working.
-11. **Add package runtime management.** Start one runtime per package, route multiple instance IDs over it, stop it after the last instance closes, and surface crashes independently from other packages.
-12. **Generalize input and region scheduling.** Give every named region independent focus, input, scale, resize, frame generation, coalescing, and repaint state.
-13. **Add the `PluginEditor` migration adapter.** Implement the current `BlockEditor` methods by opening plugin regions and translating actions, with loading, missing, incompatible, failed, and restart states.
-14. **Add native software frames.** Define attachment-backed RGBA buffers, implement the desktop producer and presenter, and test size limits, ownership, frame replacement, and release.
-15. **Add web software frames.** Generalize the off-screen canvas adapter from the fixed demo canvas to per-package, per-region canvases with deterministic teardown.
-16. **Add the Android correctness path.** Implement the Android service transport and software-frame presentation so plugins work before hardware-buffer acceleration is available.
-17. **Integrate Windows accelerated frames.** Move the existing DXGI producer and presenter behind general surface negotiation and make loss fall back to software frames.
-18. **Implement Linux accelerated frames.** Add DMA-BUF export, attachment transport, import, synchronization, recovery, and the existing lifecycle tests for the real presenter.
-19. **Implement macOS accelerated frames.** Add IOSurface export/import, synchronization, signing-safe attachment handling, recovery, and the existing lifecycle tests for the real presenter.
-20. **Implement Android accelerated frames.** Add `AHardwareBuffer` negotiation, transfer, presentation, synchronization, and fallback without changing the editor contract.
-21. **Create the guest runtime SDK.** Extract target entry points, handshake, instance routing, revision tracking, and host-request clients from `plugin-demo` into `block-editor-plugin`.
-22. **Create the guest `egui` SDK.** Extract input conversion, theme and font-scale handling, named-region execution, frame production, and a headless region harness.
-23. **Generate the first-party catalog.** Validate manifests during workspace builds, generate deterministic registrations, reject duplicate block types, and load those registrations beside native editors.
-24. **Add external discovery and packaging.** Discover additional desktop packages, resolve explicit overrides, and teach native, web, and Android build scripts to stage the catalog entry points and assets.
-25. **Convert `plugin-demo` into the conformance editor.** Use the guest SDK and a real simple block to exercise creation, editing, preview, history, presence, references, access changes, and intentional failure modes.
-26. **Extract the simple model types.** Move compiled logic, calendar, pixel art, presentation, and workspace-index state and operations into model-only crates or `block-types`, preserving `block-client` re-exports and serialization tests.
-27. **Migrate compiled logic and calendar.** Create their plugin packages, register them through manifests, cover their existing direct and preview capabilities, and remove the in-process editor modules.
-28. **Migrate pixel art and workspace index.** Move their editor cores and UI into plugin packages, including pixel-art image generation and workspace-index child navigation, then remove the native registrations.
-29. **Migrate presentation.** Package slide creation, reference watching, embedded previews, presenter playback, and child actions, then remove its in-process implementation.
-30. **Add scoped import and media services.** Define host requests for file selection, clipboard image import, media decode/playback, and native webviews, with per-instance grants and bounded results.
-31. **Migrate image, audio, and browser tab.** Use the scoped services for configurable imports, playback, and platform webviews, retaining unsupported-target behavior through manifest capabilities.
-32. **Migrate video.** Move its timeline, player, and effects into a plugin package using host media services and preserve frame-accurate block operations.
-33. **Add scoped map and GPU services.** Define host-mediated tile fetching/cache access and negotiated editor-owned GPU resource initialization without granting credentials or arbitrary filesystem/network access.
-34. **Migrate map and pixel ray tracer.** Move their reusable rendering cores and UI into packages using the new scoped services, including preview and intrinsic-size behavior.
-35. **Migrate scene 3D.** Move its renderer, shader assets, camera, and scene UI into a package and remove the scene render-resource installation from block-app.
-36. **Migrate settings, UI settings, and hotbar.** Package fallback and per-client settings resolution plus the shared nested hotbar, then remove their native registrations.
-37. **Migrate logic game and version control.** Package challenge/quiz UI and version-control data/worktree UI while keeping simulation and repository operations in scoped host or model APIs.
-38. **Migrate infinite canvas.** Move its core, interaction, painting, inspector, and geometry into a package and validate nested live editors, previews, clipboard import, access ceilings, and cycle prevention.
-39. **Migrate GUI builder.** Move its surface and inspector into a package, including nested block picking and dynamic Rust artifact settings and regeneration.
-40. **Extract database editor cores.** Move schema, spreadsheet, kanban, and scatter logic below plugin packages and expose shared model types without depending on block-app.
-41. **Migrate database editors.** Package database, database schema, and database view together, preserving reference subscriptions, configured layouts, sorting, and embedded behavior.
-42. **Migrate text.** Package the text UI around `text-editor-core`, including concurrent snapshot replacement, syntax highlighting, embedded images, cursor presence, and intrinsic sizing.
-43. **Extract logic-grid editor cores.** Move canvas geometry, simulation, challenges, hotbar logic, renderer, shaders, and compiled-artifact generation below a plugin package.
-44. **Migrate logic grid.** Package direct editing, GPU rendering, presence, challenge playback, nested components, and dynamic compiled-logic artifacts, then remove its native registration.
-45. **Remove the in-process editor path.** Delete the remaining block-type modules and registrations, reduce `BlockEditor` to host chrome and the plugin adapter, and remove the debug demo window and fixed plugin paths.
-46. **Ship the editor authoring workflow.** Replace the editor guides, add package scaffold and manifest/build commands, document compatibility and signing, and add CI plus a desktop/web/Android manual test matrix for every first-party package.
+The first milestone is deliberately a narrow vertical slice: a real synchronized counter block rendered and edited by a plugin in an ordinary tab. It uses the existing WebExternalImage and Windows DXGI work, supports one plugin instance and one main region, and omits creation UI, previews, history controls, presence, references, and third-party discovery. That proves the model boundary and end-to-end texture path before the general framework is built around it.
+
+1. **Add the counter block model.** Create a model-only counter state and increment/decrement operations, re-export it from `block-client`, and add serialization, operation, and history tests.
+2. **Define the minimum editor manifest.** Add bounded manifest types for plugin identity, one block type, display metadata, entry points, and a required surface mechanism; give `plugin-demo` a valid manifest.
+3. **Define the minimum editor protocol.** Add instance IDs plus open, snapshot, operation, resize, input, close, and error messages for one main region, with codec-limit and ordering tests.
+4. **Add the counter's host block adapter.** Encode counter snapshots, decode counter operations, apply them through its typed `BlockHandle`, and reject invalid payloads or edits without access.
+5. **Extract the minimum host runtime.** Move the existing transport, handshake, process/WASM lifecycle, input queue, and surface presentation out of the debug window into a reusable host module.
+6. **Extract the minimum guest SDK.** Move handshake, single-instance routing, revisioned counter state, operation submission, `egui` input, and frame production from `plugin-demo` into `block-editor-plugin`.
+7. **Add the counter plugin editor.** Replace the local demo controls with a counter view that reads host snapshots and sends increment/decrement operations through the guest SDK.
+8. **Open the counter through `EditorRegistry`.** Add a minimal `PluginEditor`, register the counter manifest, open it as a normal tab, and remove the counter from the debug-only plugin window. This commit is the MVP.
+9. **Support multiple instances per runtime.** Route instance-scoped messages, start one runtime per package, close it after its last instance, and isolate stale or duplicate instance IDs.
+10. **Add robust revision handling.** Acknowledge or reject operations with authoritative revisions, replace state after concurrent changes, bound pending operations, and test resynchronization.
+11. **Add live access and history.** Send access-ceiling and history-availability changes, route undo, redo, and history grouping, and reject mutations immediately after access is reduced.
+12. **Add package failure recovery.** Distinguish missing, incompatible, crashed, timed-out, and surface-failed packages; restart first-party runtimes and reopen their instances from host state.
+13. **Generalize Windows texture presentation.** Move DXGI sharing fully behind the region presenter, support surface recreation, and put a failed region into an error state without another presentation path.
+14. **Generalize web texture presentation.** Replace the fixed demo canvas with per-package, per-region external images and deterministic GPU and DOM resource teardown.
+15. **Implement Linux texture presentation.** Add DMA-BUF export, attachment transfer, import, synchronization, surface recreation, and lifecycle tests.
+16. **Implement macOS texture presentation.** Add IOSurface export/import, synchronization, signing-safe attachment handling, surface recreation, and lifecycle tests.
+17. **Implement Android texture presentation.** Add the Android service transport plus `AHardwareBuffer` transfer, import, synchronization, surface recreation, and lifecycle tests.
+18. **Make optimized surfaces mandatory.** Require the platform surface capability during negotiation, remove demo-only surface assumptions, and test that a handshake with no common mechanism fails explicitly.
+19. **Add named editor regions.** Generalize instances to main, top bar, left sidebar, right sidebar, preview, creation-options, and artifact-settings regions with independent size, focus, input, and frame generations.
+20. **Complete the `PluginEditor` adapter.** Map every current `BlockEditor` region, intrinsic-size query, pan/zoom capability, viewport command, and navigation result onto plugin messages.
+21. **Add creation flows.** Extend manifests and the protocol for immediate and configured creation, let the host create the authoritative block, and make the counter available through the normal block picker.
+22. **Add scoped reference access.** Implement watch, unwatch, snapshot, and change messages using host-issued handles, and test that plugins cannot address arbitrary block UUIDs.
+23. **Add nested editors and previews.** Let a plugin request host-rendered referenced previews or live regions while the host enforces access ceilings and cycle prevention.
+24. **Add presence.** Implement bounded presence subscriptions and updates keyed by well-known presence UUIDs, with access enforcement and cleanup when instances close.
+25. **Add child and artifact actions.** Route child creation/replacement/deletion plus dynamic-artifact settings and regeneration results through host-owned validation.
+26. **Create the full guest authoring API.** Add typed state views, operation senders, reference and presence subscriptions, declarative regions, theme/font-scale data, and a headless conformance harness.
+27. **Generate the first-party catalog.** Validate manifests during workspace builds, generate deterministic registrations, reject duplicate block types, and load catalog registrations beside native editors.
+28. **Add external discovery and packaging.** Discover desktop packages, resolve explicit overrides, and teach native, web, and Android builds to stage catalog entry points, manifests, and assets.
+29. **Turn `plugin-demo` into the conformance package.** Keep the counter as its reference editor and exercise creation, preview, history, presence, references, access changes, multiple instances, and intentional failure modes.
+30. **Extract the first migration models.** Move compiled logic, calendar, pixel art, presentation, and workspace-index state and operations into model-only crates or `block-types`, preserving re-exports and tests.
+31. **Migrate compiled logic and calendar.** Package their direct and preview regions, register their manifests, and remove their in-process editor modules.
+32. **Migrate pixel art and workspace index.** Package painting, image generation, listings, and child navigation, then remove their native registrations.
+33. **Migrate presentation.** Package slide creation, reference watching, embedded previews, presenter playback, and child actions, then remove its native editor.
+34. **Add scoped import and media services.** Define host requests for file selection, clipboard images, media decode/playback, and native webviews with per-instance grants and bounded results.
+35. **Migrate image, audio, and browser tab.** Use the scoped services for imports, playback, and platform webviews while retaining manifest-declared target availability.
+36. **Migrate video.** Package its timeline, player, and effects using host media services while preserving frame-accurate operations.
+37. **Add scoped map and GPU services.** Define host-mediated tile fetching/cache access and editor GPU-resource initialization without granting credentials or arbitrary filesystem/network access.
+38. **Migrate map and pixel ray tracer.** Package their rendering cores and UI using the scoped services, including previews and intrinsic sizing.
+39. **Migrate scene 3D.** Package its renderer, shaders, camera, and scene UI, then remove its block-app render-resource installation.
+40. **Migrate settings, UI settings, and hotbar.** Package fallback and per-client settings resolution plus the shared nested hotbar, then remove their native editors.
+41. **Migrate logic game and version control.** Package challenge, quiz, version-control data, and worktree UI while keeping privileged repository work in scoped host APIs.
+42. **Migrate infinite canvas.** Package its core, interaction, painting, inspector, geometry, nested live editors, previews, and clipboard integration.
+43. **Migrate GUI builder.** Package its surface, inspector, nested block picker, and dynamic Rust artifact settings and regeneration.
+44. **Extract database editor cores.** Move schema, spreadsheet, kanban, and scatter logic below a plugin package and expose the shared model types without depending on block-app.
+45. **Migrate database editors.** Package database, database schema, and database view together, preserving references, configured layouts, sorting, and embedded behavior.
+46. **Create `text-editor-view`.** Move `egui` interaction, layout, fonts, embeds, selection, and cursor presentation out of block-app into a package layered on `text-editor-core`, with neither package depending on plugin transport.
+47. **Migrate text.** Build the text plugin around `text-editor-view`, connecting revisioned text state, operations, cursor presence, embeds, and intrinsic sizing to the guest SDK.
+48. **Extract logic-grid editor cores.** Move canvas geometry, simulation, challenges, hotbar logic, renderer, shaders, and compiled-artifact generation below a plugin package.
+49. **Migrate logic grid.** Package direct editing, GPU rendering, presence, challenge playback, nested components, and compiled-logic artifacts, then remove its native editor.
+50. **Remove the in-process editor path.** Delete remaining block-type registrations and modules, reduce block-app to host chrome and the plugin adapter, and remove debug demo entry points and fixed paths.
+51. **Ship the authoring workflow.** Replace the editor guides, add package scaffold and manifest/build commands, document compatibility and signing, and add CI plus the desktop/web/Android manual matrix.
