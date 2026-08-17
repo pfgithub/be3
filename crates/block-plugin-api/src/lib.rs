@@ -5,6 +5,7 @@ use std::fmt;
 mod attachment;
 #[cfg(any(unix, windows))]
 pub mod desktop_attachments;
+mod linux_surface;
 mod macos_surface;
 mod session;
 mod windows_surface;
@@ -12,6 +13,10 @@ mod windows_surface;
 pub use attachment::{
     validate_attachments, AttachmentDescriptor, AttachmentError, AttachmentOwnership,
     AttachmentType, MAX_ATTACHMENTS,
+};
+pub use linux_surface::{
+    LinuxGraphicsBackend, LinuxSurfaceDescriptor, LinuxSurfaceError, LinuxSurfaceLifecycle,
+    LinuxSurfacePlane, LinuxSurfaceState,
 };
 pub use macos_surface::{
     MacOsSurfaceDescriptor, MacOsSurfaceError, MacOsSurfaceLifecycle, MacOsSurfaceState,
