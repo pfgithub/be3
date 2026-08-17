@@ -30,6 +30,11 @@ impl ClientSession {
     }
 
     pub fn hello(&self) -> Message {
+        let capabilities = vec![Capability::Lifecycle, Capability::Input];
+        #[cfg(target_os = "macos")]
+        capabilities.push(Capability::Surface(
+            block_plugin_api::SurfaceMechanism::MacOsIoSurface,
+        ));
         Message::Hello(Hello {
             minimum_version: PROTOCOL_VERSION,
             maximum_version: PROTOCOL_VERSION,
@@ -38,7 +43,7 @@ impl ClientSession {
                 name: "Plugin Demo".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
             },
-            capabilities: vec![Capability::Lifecycle, Capability::Input],
+            capabilities,
         })
     }
 

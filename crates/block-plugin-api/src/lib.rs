@@ -5,11 +5,15 @@ use std::fmt;
 mod attachment;
 #[cfg(any(unix, windows))]
 pub mod desktop_attachments;
+mod macos_surface;
 mod session;
 
 pub use attachment::{
     validate_attachments, AttachmentDescriptor, AttachmentError, AttachmentOwnership,
     AttachmentType, MAX_ATTACHMENTS,
+};
+pub use macos_surface::{
+    MacOsSurfaceDescriptor, MacOsSurfaceError, MacOsSurfaceLifecycle, MacOsSurfaceState,
 };
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 

@@ -82,7 +82,12 @@ fn drive<S: Read + Write>(
     status: &Sender<String>,
 ) -> io::Result<()> {
     let started = Instant::now();
-    let mut session = HostSession::new("BE3", vec![Capability::Lifecycle, Capability::Input]);
+    let capabilities = vec![Capability::Lifecycle, Capability::Input];
+    #[cfg(target_os = "macos")]
+    capabilities.push(Capability::Surface(
+        block_plugin_api::SurfaceMechanism::MacOsIoSurface,
+    ));
+    let mut session = HostSession::new("BE3", capabilities);
     session.start(0);
     let message = read_message(&mut stream)?;
     session.receive(message, elapsed(started));
