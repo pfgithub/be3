@@ -88,6 +88,7 @@ libghostty-vt = "0.2.1"
 portable-pty = "0.9.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
+plugin-demo = { path = "../plugin-demo" }
 winit = { version = "0.30.13", features = ["android-native-activity"] }
 # Used by the version-switching debug window to build the ContentResolver /
 # Intent calls that download and install a GitHub Actions build.

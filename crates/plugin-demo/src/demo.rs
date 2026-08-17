@@ -9,6 +9,12 @@ pub struct Demo {
 
 impl block_plugin::App for Demo {
     fn ui(&mut self, ui: &mut egui::Ui) {
+        self.show(ui);
+    }
+}
+
+impl Demo {
+    pub fn show(&mut self, ui: &mut egui::Ui) {
         ui.heading("egui plugin demo");
         ui.label("This interface is rendered by plugin-demo.");
         ui.separator();

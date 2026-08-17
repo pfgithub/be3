@@ -870,6 +870,7 @@ dependencies = [
  "libghostty-vt",
  "logicgame",
  "ndk-context",
+ "plugin-demo",
  "portable-pty",
  "rfd",
  "rodio",

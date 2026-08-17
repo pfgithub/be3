@@ -1,4 +1,7 @@
-use std::{cell::RefCell, path::PathBuf};
+use std::cell::RefCell;
+
+#[cfg(not(target_os = "android"))]
+use std::path::PathBuf;
 
 use eframe::egui;
 
@@ -40,7 +43,7 @@ pub(crate) fn show(ctx: &egui::Context) {
             .default_size([360.0, 140.0])
             .show(ctx, |ui| {
                 #[cfg(target_os = "android")]
-                ui.label("Native plugins require the Android service transport.");
+                window.demo.show(ui);
                 #[cfg(all(not(target_os = "android"), not(target_os = "windows")))]
                 ui.label(window.process.as_mut().map_or_else(
                     || "Plugin process is not running".to_owned(),
@@ -109,6 +112,8 @@ pub(crate) fn show(ctx: &egui::Context) {
 #[derive(Default)]
 struct Window {
     open: bool,
+    #[cfg(target_os = "android")]
+    demo: plugin_demo::demo::Demo,
     #[cfg(not(target_os = "android"))]
     process: Option<super::process::Process>,
     #[cfg(target_os = "windows")]
