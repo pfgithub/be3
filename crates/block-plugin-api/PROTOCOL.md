@@ -24,3 +24,12 @@ ordered as sent. Backpressure may coalesce or discard only the event classes
 defined by the session layer; it may not reorder retained messages. A timeout,
 malformed frame, invalid ordering, or unsupported capability is reported with
 a structured error before disconnect when the transport remains usable.
+
+Surface messages may declare at most 16 native attachments. Each declaration
+records the resource type and whether ownership is borrowed or transferred.
+Declaration order is the attachment order in the platform carrier. A missing,
+extra, reordered, or unexpected attachment rejects the frame and closes every
+received native resource. Unix carriers use ancillary file descriptors with
+close-on-exec enabled. Windows carriers duplicate handles into the verified
+peer process without inheritance and associate them with the immediately
+following protocol frame.

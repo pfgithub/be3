@@ -2,8 +2,15 @@ use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+mod attachment;
+#[cfg(any(unix, windows))]
+pub mod desktop_attachments;
 mod session;
 
+pub use attachment::{
+    validate_attachments, AttachmentDescriptor, AttachmentError, AttachmentOwnership,
+    AttachmentType, MAX_ATTACHMENTS,
+};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
 pub const PROTOCOL_VERSION: u16 = 1;
@@ -168,6 +175,7 @@ pub struct SurfaceDescriptor {
     pub format: ColorFormat,
     pub color_space: ColorSpace,
     pub alpha_mode: AlphaMode,
+    pub attachments: Vec<AttachmentDescriptor>,
     pub opaque: Vec<u8>,
 }
 
@@ -304,8 +312,14 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             Ok(())
         }
         Message::SurfaceCapabilities(value) => collection(value.mechanisms.len()),
-        Message::Surface(value) if value.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES => {
-            Err(DecodeError::LimitExceeded("surface descriptor"))
+        Message::Surface(value) => {
+            if value.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
+                return Err(DecodeError::LimitExceeded("surface descriptor"));
+            }
+            if value.attachments.len() > MAX_ATTACHMENTS {
+                return Err(DecodeError::LimitExceeded("surface attachments"));
+            }
+            Ok(())
         }
         Message::FrameReady(value) => collection(value.damage.len()),
         _ => Ok(()),
