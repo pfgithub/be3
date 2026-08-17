@@ -147,9 +147,10 @@ fn drive_windows(
         ));
     }
     let reader = stream.try_clone()?;
-    let peer = child.as_raw_handle().cast();
+    let peer = child.as_raw_handle() as usize;
     let (incoming_sender, incoming) = mpsc::channel();
     thread::spawn(move || {
+        let peer = peer as windows_sys::Win32::Foundation::HANDLE;
         let mut carrier = WindowsAttachmentCarrier::new(reader, peer);
         loop {
             match carrier.receive() {
@@ -161,7 +162,7 @@ fn drive_windows(
             };
         }
     });
-    let mut writer = WindowsAttachmentCarrier::new(stream, peer);
+    let mut writer = WindowsAttachmentCarrier::new(stream, peer as _);
     status
         .send("Plugin connected; waiting for a DXGI surface".into())
         .ok();

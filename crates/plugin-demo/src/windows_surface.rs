@@ -201,7 +201,7 @@ impl Surface {
         self.fence_value += 1;
         let hal_queue = unsafe { self.queue.as_hal::<wgpu_hal::api::Dx12>() }
             .ok_or_else(|| "the plugin queue is not D3D12".to_owned())?;
-        unsafe { hal_queue.raw_queue().Signal(&self.fence, self.fence_value) }
+        unsafe { hal_queue.as_raw().Signal(&self.fence, self.fence_value) }
             .map_err(|error| error.to_string())?;
         Ok(Message::FrameReady(FrameReady {
             generation: self.generation,

@@ -2,9 +2,7 @@ use super::{
     presenter::{PresenterStatus, SurfacePresenter},
     process::SurfaceEvent,
 };
-use block_plugin_api::{
-    FrameReady, SurfaceDescriptor, WindowsSurfaceDescriptor, WindowsSurfaceLifecycle,
-};
+use block_plugin_api::{FrameReady, SurfaceDescriptor, WindowsSurfaceLifecycle};
 use eframe::egui_wgpu::wgpu;
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use windows::Win32::{
@@ -84,7 +82,7 @@ impl WindowsSurfacePresenter {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Windows plugin surface pipeline layout"),
-            bind_group_layouts: &[&layout],
+            bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -236,7 +234,7 @@ impl SurfacePresenter for WindowsSurfacePresenter {
             .ok_or_else(|| "the active wgpu queue is not D3D12".to_owned())?;
         unsafe {
             hal_queue
-                .raw_queue()
+                .as_raw()
                 .Wait(&imported.fence, frame.synchronization_value)
         }
         .map_err(|error| error.to_string())
