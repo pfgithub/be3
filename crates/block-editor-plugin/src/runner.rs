@@ -164,12 +164,14 @@ fn run_endpoint<A: crate::App>(
             let mut next = Surface::new::<A>(request_id, metrics, generation)?;
             let (descriptor, handles) = next.descriptor();
             carrier.send(&descriptor, &handles)?;
-            let ready = next.render(started.elapsed().as_secs_f64())?;
-            carrier.send(&ready, &[])?;
+            for message in next.render(started.elapsed().as_secs_f64())? {
+                carrier.send(&message, &[])?;
+            }
             surface = Some(next);
         } else if let Some(surface) = &mut surface {
-            let ready = surface.render(started.elapsed().as_secs_f64())?;
-            carrier.send(&ready, &[])?;
+            for message in surface.render(started.elapsed().as_secs_f64())? {
+                carrier.send(&message, &[])?;
+            }
         }
         if matches!(session.state(), crate::native::State::Closed) {
             unsafe { CloseHandle(host) };

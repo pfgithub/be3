@@ -197,7 +197,7 @@ impl Surface {
         self.egui.outbound()
     }
 
-    pub fn render(&mut self, phase: f64) -> Result<Message, String> {
+    pub fn render(&mut self, phase: f64) -> Result<Vec<Message>, String> {
         self.egui
             .receive(&Message::ResizeViewport(self.metrics.clone()));
         let output = self.egui.run(&self.context, phase);
@@ -255,11 +255,13 @@ impl Surface {
             .ok_or_else(|| "the plugin queue is not D3D12".to_owned())?;
         unsafe { hal_queue.as_raw().Signal(&self.fence, self.fence_value) }
             .map_err(|error| error.to_string())?;
-        Ok(Message::FrameReady(FrameReady {
+        let mut messages = self.egui.outbound();
+        messages.push(Message::FrameReady(FrameReady {
             generation: self.generation,
             damage: Vec::new(),
             synchronization_value: self.fence_value,
             attachments: Vec::new(),
-        }))
+        }));
+        Ok(messages)
     }
 }
