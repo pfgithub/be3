@@ -1444,7 +1444,7 @@ impl EditorRegistry {
             can_add_child: false,
             can_delete_child: false,
             can_replace_child: false,
-            default_add: true,
+            default_add: false,
             dynamic_artifact: None,
         });
     }
