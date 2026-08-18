@@ -1,14 +1,19 @@
 use uuid::Uuid;
 
-use super::join_action;
+use super::join;
 use crate::{crazy_8s::Crazy8s, Game};
 
 #[test]
 fn duplicate_join_from_the_same_actor_is_ignored() {
     let p0 = Uuid::new_v4();
     let p1 = Uuid::new_v4();
-    let with_duplicate = vec![join_action(p0), join_action(p0), join_action(p1)];
-    let clean = vec![join_action(p0), join_action(p1)];
+
+    let mut with_duplicate = vec![join(&[], p0)];
+    with_duplicate.push(with_duplicate[0].clone()); // same actor, same encoded action again
+    with_duplicate.push(join(&with_duplicate, p1));
+
+    let mut clean = vec![with_duplicate[0].clone()];
+    clean.push(join(&clean, p1));
 
     let with_screen = Crazy8s.show(&with_duplicate, p0);
     let clean_screen = Crazy8s.show(&clean, p0);

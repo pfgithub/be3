@@ -3,10 +3,9 @@ use std::convert::Infallible;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{ActionLabel, Game, GameAction, GameHelper, GameScreen};
+use crate::{Game, GameAction, GameHelper, GameScreen};
 
 pub struct Crazy8s;
 
@@ -31,7 +30,7 @@ const RANKS: [Rank; 13] = [
     Rank::Ace,
 ];
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Suit {
     Clubs,
     Diamonds,
@@ -50,7 +49,7 @@ impl Suit {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Rank {
     Two,
     Three,
@@ -87,7 +86,7 @@ impl Rank {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Card {
     suit: Suit,
     rank: Rank,
@@ -133,51 +132,6 @@ fn draw_from_pile(
     draw_pile.pop()
 }
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
-enum LobbyAction {
-    Join { player: Uuid },
-    Start { player: Uuid },
-}
-
-impl ActionLabel for LobbyAction {
-    fn label(&self) -> String {
-        match self {
-            LobbyAction::Join { .. } => "Join the game".to_owned(),
-            LobbyAction::Start { .. } => "Start the game".to_owned(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
-enum CardAction {
-    Draw {
-        player: Uuid,
-    },
-    Pass {
-        player: Uuid,
-    },
-    Play {
-        player: Uuid,
-        card: Card,
-        chosen_suit: Option<Suit>,
-    },
-}
-
-impl ActionLabel for CardAction {
-    fn label(&self) -> String {
-        match self {
-            CardAction::Draw { .. } => "Draw a card".to_owned(),
-            CardAction::Pass { .. } => "Pass".to_owned(),
-            CardAction::Play {
-                card, chosen_suit, ..
-            } => match chosen_suit {
-                Some(suit) => format!("Play {} and call {}", card.label(), suit.label()),
-                None => format!("Play {}", card.label()),
-            },
-        }
-    }
-}
-
 /// The whole game as one straight-line function over the action log, in the
 /// same style as `tic_tac_toe`. Any number of players may join a table
 /// before anything else can happen, because the shuffle (deterministic like
@@ -189,8 +143,8 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
     let mut players: Vec<Uuid> = Vec::new();
     loop {
         let joined = players.clone();
-        let joined_for_options = joined.clone();
-        let action = helper.action::<LobbyAction>(
+        let mut started = false;
+        helper.action(
             move |player| {
                 if !joined.contains(&player) {
                     "Join the game".to_owned()
@@ -200,23 +154,18 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                     format!("{} players joined - start when ready", joined.len())
                 }
             },
-            move |player| {
-                if !joined_for_options.contains(&player) {
-                    vec![LobbyAction::Join { player }]
-                } else if joined_for_options.len() >= 2 {
-                    vec![LobbyAction::Start { player }]
-                } else {
-                    Vec::new()
+            |player, action| {
+                if !players.contains(&player) {
+                    if action("Join the game") {
+                        players.push(player);
+                    }
+                } else if players.len() >= 2 && action("Start the game") {
+                    started = true;
                 }
             },
         )?;
-        match action {
-            LobbyAction::Join { player } => {
-                if !players.contains(&player) {
-                    players.push(player);
-                }
-            }
-            LobbyAction::Start { .. } => break,
+        if started {
+            break;
         }
     }
 
@@ -243,7 +192,7 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
     loop {
         for (index, winner) in players.iter().copied().enumerate() {
             if hands[index].is_empty() {
-                helper.action::<CardAction>(
+                helper.action(
                     move |player| {
                         if player == winner {
                             "You win!".to_owned()
@@ -251,12 +200,12 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                             "You lose!".to_owned()
                         }
                     },
-                    |_| Vec::new(),
+                    |_, _| {},
                 )?;
             }
         }
         if consecutive_passes >= players.len() {
-            helper.action::<CardAction>(|_| "Draw! No one can play.".to_owned(), |_| Vec::new())?;
+            helper.action(|_| "Draw! No one can play.".to_owned(), |_, _| {})?;
         }
 
         let acting = players[turn];
@@ -264,7 +213,7 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
         let pile_has_cards = !draw_pile.is_empty() || !discard_pile.is_empty();
         let top_label = top_card.label();
 
-        let action = helper.action::<CardAction>(
+        helper.action(
             move |player| {
                 if player == acting {
                     format!(
@@ -275,67 +224,58 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                     "Waiting for your turn...".to_owned()
                 }
             },
-            move |player| {
+            |player, action| {
                 if player != acting {
-                    return Vec::new();
+                    return;
                 }
-                let mut options: Vec<CardAction> = hand_snapshot
-                    .iter()
-                    .filter(|card| card.is_legal(current_suit, current_rank))
-                    .flat_map(|card| {
-                        if card.rank == Rank::Eight {
-                            SUITS
-                                .into_iter()
-                                .map(|suit| CardAction::Play {
-                                    player,
-                                    card: *card,
-                                    chosen_suit: Some(suit),
-                                })
-                                .collect::<Vec<_>>()
-                        } else {
-                            vec![CardAction::Play {
-                                player,
-                                card: *card,
-                                chosen_suit: None,
-                            }]
+                for card in hand_snapshot.iter().copied() {
+                    if !card.is_legal(current_suit, current_rank) {
+                        continue;
+                    }
+                    let chosen_suit = if card.rank == Rank::Eight {
+                        let mut chosen = None;
+                        for suit in SUITS {
+                            if action(&format!("Play {} and call {}", card.label(), suit.label())) {
+                                chosen = Some(suit);
+                                break;
+                            }
                         }
-                    })
-                    .collect();
-                if pile_has_cards {
-                    options.push(CardAction::Draw { player });
-                } else if options.is_empty() {
-                    options.push(CardAction::Pass { player });
+                        match chosen {
+                            Some(suit) => suit,
+                            None => continue,
+                        }
+                    } else if action(&format!("Play {}", card.label())) {
+                        card.suit
+                    } else {
+                        continue;
+                    };
+                    let position = hands[turn]
+                        .iter()
+                        .position(|hand_card| *hand_card == card)
+                        .expect("a legal play always names a card still in hand");
+                    hands[turn].remove(position);
+                    discard_pile.push(top_card);
+                    top_card = card;
+                    current_suit = chosen_suit;
+                    current_rank = card.rank;
+                    consecutive_passes = 0;
+                    turn = (turn + 1) % players.len();
+                    return;
                 }
-                options
+                if pile_has_cards {
+                    if action("Draw a card") {
+                        if let Some(card) =
+                            draw_from_pile(&mut draw_pile, &mut discard_pile, &mut rng)
+                        {
+                            hands[turn].push(card);
+                        }
+                    }
+                } else if action("Pass") {
+                    consecutive_passes += 1;
+                    turn = (turn + 1) % players.len();
+                }
             },
         )?;
-
-        match action {
-            CardAction::Draw { .. } => {
-                if let Some(card) = draw_from_pile(&mut draw_pile, &mut discard_pile, &mut rng) {
-                    hands[turn].push(card);
-                }
-            }
-            CardAction::Play {
-                card, chosen_suit, ..
-            } => {
-                let position = hands[turn]
-                    .iter()
-                    .position(|hand_card| *hand_card == card)
-                    .expect("a legal play always names a card still in hand");
-                hands[turn].remove(position);
-                discard_pile.push(top_card);
-                top_card = card;
-                current_suit = chosen_suit.unwrap_or(card.suit);
-                current_rank = card.rank;
-                consecutive_passes = 0;
-                turn = (turn + 1) % players.len();
-            }
-            CardAction::Pass { .. } => {
-                consecutive_passes += 1;
-                turn = (turn + 1) % players.len();
-            }
-        }
     }
 }
 

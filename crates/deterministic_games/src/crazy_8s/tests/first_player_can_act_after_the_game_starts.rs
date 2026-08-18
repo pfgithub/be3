@@ -1,10 +1,16 @@
 use uuid::Uuid;
 
-use super::{deal, join_action, start_action};
+use super::{deal, join, start};
 use crate::{
-    crazy_8s::{Card, CardAction, Crazy8s},
+    crazy_8s::{Card, Crazy8s},
     Game,
 };
+
+fn played_card_label(option_label: &str) -> Option<&str> {
+    option_label
+        .strip_prefix("Play ")
+        .map(|rest| rest.split(" and call ").next().unwrap())
+}
 
 #[test]
 fn first_player_can_act_after_the_game_starts() {
@@ -13,7 +19,9 @@ fn first_player_can_act_after_the_game_starts() {
     let players = [p0, p1];
     let (hands, deck, top) = deal(&players);
     let hand0 = &hands[0];
-    let actions = vec![join_action(p0), join_action(p1), start_action(p0)];
+    let mut actions = vec![join(&[], p0)];
+    actions.push(join(&actions, p1));
+    actions.push(start(&actions, p0));
 
     let waiting = Crazy8s.show(&actions, p1);
     assert_eq!(waiting.description, "Waiting for your turn...");
@@ -23,22 +31,16 @@ fn first_player_can_act_after_the_game_starts() {
     assert!(screen.description.contains(top.label().as_str()));
     assert!(!deck.is_empty());
 
-    let decoded: Vec<CardAction> = screen
+    assert!(screen
         .actions
         .iter()
-        .map(|option| bincode::deserialize(&option.effect).unwrap())
-        .collect();
+        .any(|option| option.label == "Draw a card"));
 
-    assert!(decoded
-        .iter()
-        .any(|action| matches!(action, CardAction::Draw { player } if *player == p0)));
-
-    let mut offered_cards: Vec<Card> = Vec::new();
-    for action in &decoded {
-        if let CardAction::Play { card, .. } = action {
-            assert!(card.is_legal(top.suit, top.rank));
-            if !offered_cards.contains(card) {
-                offered_cards.push(*card);
+    let mut offered_cards: Vec<&str> = Vec::new();
+    for option in &screen.actions {
+        if let Some(card_label) = played_card_label(&option.label) {
+            if !offered_cards.contains(&card_label) {
+                offered_cards.push(card_label);
             }
         }
     }
@@ -50,6 +52,6 @@ fn first_player_can_act_after_the_game_starts() {
         .collect();
     assert_eq!(offered_cards.len(), expected_cards.len());
     for card in &expected_cards {
-        assert!(offered_cards.contains(card));
+        assert!(offered_cards.contains(&card.label().as_str()));
     }
 }

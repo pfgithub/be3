@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use super::action;
+use super::play;
 use crate::{tic_tac_toe::TicTacToe, Game};
 
 #[test]
@@ -13,7 +13,7 @@ fn first_and_second_actors_become_x_and_o() {
     assert_eq!(empty_screen.description, "Your turn (X)");
     assert_eq!(empty_screen.actions.len(), 9);
 
-    let actions = vec![action(x, 4)];
+    let actions = vec![play(&[], x, 4)];
 
     let x_screen = game.show(&actions, x);
     assert_eq!(x_screen.description, "Waiting for O...");

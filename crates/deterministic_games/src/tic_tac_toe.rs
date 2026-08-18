@@ -1,9 +1,8 @@
 use std::convert::Infallible;
 
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{ActionLabel, Game, GameAction, GameHelper, GameScreen};
+use crate::{Game, GameAction, GameHelper, GameScreen};
 
 pub struct TicTacToe;
 
@@ -35,16 +34,8 @@ impl Symbol {
     }
 }
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
-struct PlayAction {
-    player: Uuid,
-    cell: u8,
-}
-
-impl ActionLabel for PlayAction {
-    fn label(&self) -> String {
-        format!("Row {}, column {}", self.cell / 3 + 1, self.cell % 3 + 1)
-    }
+fn cell_label(cell: usize) -> String {
+    format!("Row {}, column {}", cell / 3 + 1, cell % 3 + 1)
 }
 
 fn winning_symbol(board: &[Option<Symbol>; CELL_COUNT]) -> Option<Symbol> {
@@ -60,10 +51,10 @@ fn winning_symbol(board: &[Option<Symbol>; CELL_COUNT]) -> Option<Symbol> {
 /// The whole game as one straight-line function over the action log:
 /// `helper.action` blocks on a player until the log supplies their move, so
 /// the code below reads like a normal loop rather than a hand-written replay
-/// pass. Player identity is carried inside `PlayAction` itself (set from the
-/// candidate the options closure was asked about), which is what lets the
-/// game learn who actually made a move without `GameHelper` exposing an
-/// actor separately.
+/// pass. Each legal move is offered by calling `action(label)`; when it
+/// returns `true` the move it names is the one the log records next for that
+/// actor, so the board and player-assignment updates happen right there,
+/// inline, instead of being decoded from a returned value afterward.
 fn tic_tac_toe(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
     let mut board: [Option<Symbol>; CELL_COUNT] = [None; CELL_COUNT];
     let mut players: [Option<Uuid>; 2] = [None, None];
@@ -71,13 +62,10 @@ fn tic_tac_toe(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
 
     loop {
         if let Some(winner) = winning_symbol(&board) {
-            helper.action::<PlayAction>(
-                move |_| format!("{} wins!", winner.label()),
-                |_| Vec::new(),
-            )?;
+            helper.action(move |_| format!("{} wins!", winner.label()), |_, _| {})?;
         }
         if move_count >= CELL_COUNT {
-            helper.action::<PlayAction>(|_| "Draw!".to_owned(), |_| Vec::new())?;
+            helper.action(|_| "Draw!".to_owned(), |_, _| {})?;
         }
 
         let turn = move_count % 2;
@@ -88,9 +76,8 @@ fn tic_tac_toe(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
             Some(expected) => expected == player,
             None => other != Some(player),
         };
-        let snapshot = board;
 
-        let play = helper.action::<PlayAction>(
+        helper.action(
             move |player| {
                 if can_move(player) {
                     format!("Your turn ({})", symbol.label())
@@ -98,26 +85,22 @@ fn tic_tac_toe(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                     format!("Waiting for {}...", symbol.label())
                 }
             },
-            move |player| {
+            |player, action| {
                 if !can_move(player) {
-                    return Vec::new();
+                    return;
                 }
-                snapshot
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, cell)| cell.is_none())
-                    .map(|(cell, _)| PlayAction {
-                        player,
-                        cell: cell as u8,
-                    })
-                    .collect()
+                for cell in 0..CELL_COUNT {
+                    if board[cell].is_none() && action(&cell_label(cell)) {
+                        if players[turn].is_none() {
+                            players[turn] = Some(player);
+                        }
+                        board[cell] = Some(symbol);
+                        return;
+                    }
+                }
             },
         )?;
 
-        if players[turn].is_none() {
-            players[turn] = Some(play.player);
-        }
-        board[play.cell as usize] = Some(symbol);
         move_count += 1;
     }
 }

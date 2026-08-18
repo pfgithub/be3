@@ -3,8 +3,8 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use uuid::Uuid;
 
-use super::{deck_count_for, draw_from_pile, full_deck, Card, LobbyAction, Rank, Suit, HAND_SIZE};
-use crate::GameAction;
+use super::{deck_count_for, draw_from_pile, full_deck, Card, Crazy8s, Rank, Suit, HAND_SIZE};
+use crate::{Game, GameAction};
 
 mod deck_count_scales_with_player_count;
 mod draw_from_pile_prefers_the_draw_pile_when_it_has_cards;
@@ -14,18 +14,25 @@ mod first_player_can_act_after_the_game_starts;
 mod playing_greedily_from_all_sides_eventually_ends_the_game;
 mod spectator_after_the_game_starts_has_no_actions;
 
-fn join_action(actor: Uuid) -> GameAction {
+fn option(actions: &[GameAction], actor: Uuid, label: &str) -> GameAction {
+    let screen = Crazy8s.show(actions, actor);
+    let option = screen
+        .actions
+        .into_iter()
+        .find(|option| option.label == label)
+        .unwrap_or_else(|| panic!("{label} is not a legal move for {actor}"));
     GameAction {
         actor,
-        action: bincode::serialize(&LobbyAction::Join { player: actor }).unwrap(),
+        action: option.effect,
     }
 }
 
-fn start_action(actor: Uuid) -> GameAction {
-    GameAction {
-        actor,
-        action: bincode::serialize(&LobbyAction::Start { player: actor }).unwrap(),
-    }
+fn join(actions: &[GameAction], actor: Uuid) -> GameAction {
+    option(actions, actor, "Join the game")
+}
+
+fn start(actions: &[GameAction], actor: Uuid) -> GameAction {
+    option(actions, actor, "Start the game")
 }
 
 /// Replays the same shuffle-and-deal the game itself performs once the

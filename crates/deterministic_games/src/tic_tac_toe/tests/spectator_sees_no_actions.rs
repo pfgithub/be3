@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use super::action;
+use super::play;
 use crate::{tic_tac_toe::TicTacToe, Game};
 
 #[test]
@@ -8,7 +8,8 @@ fn spectator_sees_no_actions() {
     let x = Uuid::new_v4();
     let o = Uuid::new_v4();
     let spectator = Uuid::new_v4();
-    let actions = vec![action(x, 0), action(o, 4)];
+    let mut actions = vec![play(&[], x, 0)];
+    actions.push(play(&actions, o, 4));
 
     let screen = TicTacToe.show(&actions, spectator);
     assert_eq!(screen.description, "Waiting for X...");

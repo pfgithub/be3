@@ -1,14 +1,19 @@
 use uuid::Uuid;
 
-use super::{join_action, start_action};
+use super::{join, start};
 use crate::{crazy_8s::Crazy8s, Game, GameAction};
 
 #[test]
 fn playing_greedily_from_all_sides_eventually_ends_the_game() {
     let players: Vec<Uuid> = (0..5).map(|_| Uuid::new_v4()).collect();
     let game = Crazy8s;
-    let mut actions: Vec<GameAction> = players.iter().copied().map(join_action).collect();
-    actions.push(start_action(players[0]));
+    let mut actions: Vec<GameAction> = Vec::new();
+    for player in players.iter().copied() {
+        let joined = join(&actions, player);
+        actions.push(joined);
+    }
+    let started = start(&actions, players[0]);
+    actions.push(started);
 
     for _ in 0..2000 {
         let screens: Vec<_> = players
