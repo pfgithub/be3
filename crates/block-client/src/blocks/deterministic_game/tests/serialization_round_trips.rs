@@ -1,11 +1,11 @@
 use block::Block;
 use uuid::Uuid;
 
-use super::{DeterministicGame, DeterministicGameOperation};
+use super::{DeterministicGame, DeterministicGameKind, DeterministicGameOperation};
 
 #[test]
 fn serialization_round_trips() {
-    let mut game = DeterministicGame::new("tic_tac_toe");
+    let mut game = DeterministicGame::new(DeterministicGameKind::TicTacToe);
     DeterministicGame::apply_authored_operation(
         &mut game,
         &DeterministicGameOperation::Append { action: vec![0] },

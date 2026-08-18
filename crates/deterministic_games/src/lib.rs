@@ -4,6 +4,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub mod crazy_8s;
 pub mod tic_tac_toe;
 
 /// One entry in a deterministic game's append-only action log. `actor` is

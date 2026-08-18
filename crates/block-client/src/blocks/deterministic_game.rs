@@ -3,13 +3,33 @@ use deterministic_games::GameAction;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Which game a `DeterministicGame` block plays. Fixed at creation and never
+/// changed afterward - there is no operation to reassign it, so the block
+/// always has a valid game to look up in `deterministic_games`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeterministicGameKind {
+    #[default]
+    TicTacToe,
+    Crazy8s,
+}
+
+impl DeterministicGameKind {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            DeterministicGameKind::TicTacToe => "Tic-Tac-Toe",
+            DeterministicGameKind::Crazy8s => "Crazy 8s",
+        }
+    }
+}
+
 /// A deterministic game session: which game it is, and the append-only log
 /// of actions taken in it so far. The block itself has no notion of turns,
 /// legality, or win conditions - that lives entirely in the `deterministic_games`
 /// game implementation, which recomputes the current state from this log.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DeterministicGame {
-    game: String,
+    game: DeterministicGameKind,
     actions: Vec<GameAction>,
 }
 
@@ -20,15 +40,15 @@ pub enum DeterministicGameOperation {
 }
 
 impl DeterministicGame {
-    pub fn new(game: impl Into<String>) -> Self {
+    pub fn new(game: DeterministicGameKind) -> Self {
         Self {
-            game: game.into(),
+            game,
             actions: Vec::new(),
         }
     }
 
-    pub fn game(&self) -> &str {
-        &self.game
+    pub fn game(&self) -> DeterministicGameKind {
+        self.game
     }
 
     pub fn actions(&self) -> &[GameAction] {
@@ -56,7 +76,7 @@ impl Block for DeterministicGame {
     }
 
     fn implicit_name(&self) -> Option<String> {
-        (!self.game.is_empty()).then(|| self.game.clone())
+        Some(self.game.display_name().to_owned())
     }
 }
 

@@ -1,34 +1,36 @@
 use block_client::{
-    blocks::deterministic_game::{DeterministicGame, DeterministicGameOperation},
+    blocks::deterministic_game::{
+        DeterministicGame, DeterministicGameKind, DeterministicGameOperation,
+    },
     BlockClient, BlockHandle,
 };
-use deterministic_games::{tic_tac_toe::TicTacToe, Game};
+use deterministic_games::{crazy_8s::Crazy8s, tic_tac_toe::TicTacToe, Game};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_GRID_3X3, MaterialIcon};
 use uuid::Uuid;
 
 use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    BlockEditor, ConfigurableEditor, CreationOptions, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
-const TIC_TAC_TOE: &str = "tic_tac_toe";
+const GAME_KINDS: [DeterministicGameKind; 2] = [
+    DeterministicGameKind::TicTacToe,
+    DeterministicGameKind::Crazy8s,
+];
 
-/// The only place a game identifier is turned into its `Game` implementation.
-/// Every `DeterministicGame` block shares one editor, so a block created by a
-/// future game this build does not recognize falls back to a plain message
-/// rather than failing to open.
-fn game_for(kind: &str) -> Option<&'static dyn Game> {
+/// The only place a game kind is turned into its `Game` implementation.
+fn game_for(kind: DeterministicGameKind) -> &'static dyn Game {
     match kind {
-        TIC_TAC_TOE => Some(&TicTacToe),
-        _ => None,
+        DeterministicGameKind::TicTacToe => &TicTacToe,
+        DeterministicGameKind::Crazy8s => &Crazy8s,
     }
 }
 
 impl EditorKind for DeterministicGameEditor {
     type Block = DeterministicGame;
 
-    const DISPLAY_NAME: &'static str = "Tic-Tac-Toe";
+    const DISPLAY_NAME: &'static str = "Game";
     const ICON: MaterialIcon = ICON_GRID_3X3;
 
     fn open(client: &BlockClient, block: BlockHandle<DeterministicGame>) -> Self {
@@ -36,10 +38,31 @@ impl EditorKind for DeterministicGameEditor {
     }
 }
 
-impl CreatableEditor for DeterministicGameEditor {
-    fn create(client: &BlockClient) -> Self {
-        let block = client.create_block(DeterministicGame::new(TIC_TAC_TOE));
-        Self::new(client, block)
+/// Which game a `DeterministicGame` block plays is fixed for its lifetime
+/// (there is no operation to change it), so creating one starts by choosing
+/// it.
+impl ConfigurableEditor for DeterministicGameEditor {
+    type Options = ChosenGame;
+
+    fn create(client: &BlockClient, options: ChosenGame) -> Result<Self, String> {
+        let kind = options.kind.ok_or("Choose a game first")?;
+        let block = client.create_block(DeterministicGame::new(kind));
+        Ok(Self::new(client, block))
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ChosenGame {
+    kind: Option<DeterministicGameKind>,
+}
+
+impl CreationOptions for ChosenGame {
+    fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.label("Choose a game:");
+        for kind in GAME_KINDS {
+            ui.radio_value(&mut self.kind, Some(kind), kind.display_name());
+        }
+        self.kind.is_some()
     }
 }
 
@@ -90,15 +113,11 @@ impl BlockEditor for DeterministicGameEditor {
             });
             return None;
         };
-        let kind = block.game().to_owned();
+        let kind = block.game();
         let actions = block.actions().to_vec();
         drop(block);
 
-        let Some(game) = game_for(&kind) else {
-            ui.label(format!("Unsupported game: {kind}"));
-            return None;
-        };
-        let screen = game.show(&actions, self.player);
+        let screen = game_for(kind).show(&actions, self.player);
         ui.vertical_centered(|ui| {
             ui.add_space(12.0);
             ui.label(screen.description);

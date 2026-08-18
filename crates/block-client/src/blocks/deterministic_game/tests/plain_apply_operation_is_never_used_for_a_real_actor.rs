@@ -2,11 +2,11 @@ use block::Block;
 use deterministic_games::GameAction;
 use uuid::Uuid;
 
-use super::{DeterministicGame, DeterministicGameOperation};
+use super::{DeterministicGame, DeterministicGameKind, DeterministicGameOperation};
 
 #[test]
 fn plain_apply_operation_is_never_used_for_a_real_actor() {
-    let mut game = DeterministicGame::new("tic_tac_toe");
+    let mut game = DeterministicGame::new(DeterministicGameKind::TicTacToe);
 
     DeterministicGame::apply_operation(
         &mut game,
