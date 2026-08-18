@@ -857,6 +857,7 @@ dependencies = [
  "block-plugin-api",
  "block-server",
  "bytemuck",
+ "deterministic_games",
  "eframe",
  "egui_dock",
  "egui_material_icons",
@@ -918,6 +919,7 @@ dependencies = [
  "block 0.1.0",
  "block-server",
  "chacha20poly1305",
+ "deterministic_games",
  "eips",
  "flate2",
  "futures-channel",
@@ -2004,6 +2006,14 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "deterministic_games"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
 ]
 
 [[package]]

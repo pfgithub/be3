@@ -9,6 +9,7 @@ members = [
     "crates/text-editor-core",
     "crates/block-e2e",
     "crates/block-app",
+    "crates/deterministic_games",
     "crates/citygame",
     "crates/citygenerator",
     "crates/logicgame",
