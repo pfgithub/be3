@@ -80,7 +80,7 @@ UI style:
 
 Code style:
 - Prefer a.rs over a/mod.rs.
-- Do not add comments to the code. You may also remove existing code comments.
+- Do not add comments to the code. This includes documentation comments too, do not add doc comments. You may also remove existing code comments.
 
 Tests:
 - Keep test files seperate from code files.
