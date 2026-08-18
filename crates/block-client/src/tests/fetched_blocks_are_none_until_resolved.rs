@@ -14,7 +14,12 @@ fn fetched_blocks_are_none_until_resolved() {
     let shared = Arc::new(BlockShared {
         value: RwLock::new(None),
     });
-    let block = TypedBlock::<Counter>::unresolved(Uuid::new_v4(), Uuid::nil(), Arc::clone(&shared));
+    let block = TypedBlock::<Counter>::unresolved(
+        Uuid::new_v4(),
+        Uuid::nil(),
+        Uuid::nil(),
+        Arc::clone(&shared),
+    );
     assert!(shared.value.read().is_none());
     block.resolve(
         counter_snapshot(2),

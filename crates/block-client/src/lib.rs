@@ -895,6 +895,7 @@ impl BlockClient {
         let block = Arc::new(TypedBlock::<B>::unresolved(
             id,
             self.workspace_id,
+            self.account_id,
             Arc::clone(&shared),
         ));
         self.register_block(id, &block);
@@ -3327,6 +3328,10 @@ trait ErasedBlock: Send + Sync {
 struct TypedBlock<B: Block> {
     id: Uuid,
     workspace_id: Uuid,
+    /// The connected account operating this client, used as the author of
+    /// operations this client applies optimistically, before the server has
+    /// echoed back their real, verified `OperationRecord::author`.
+    local_account_id: Uuid,
     author: RwLock<Option<Uuid>>,
     shared: Arc<BlockShared<B>>,
     state: RwLock<TypedState<B>>,
@@ -3489,9 +3494,16 @@ struct PendingOperation<B, O> {
 }
 
 impl<B: Block> TypedBlock<B> {
-    fn apply_stored_operation(&self, value: &mut B, operation: &StoredOperation<B, B::Operation>) {
+    fn apply_stored_operation(
+        &self,
+        value: &mut B,
+        operation: &StoredOperation<B, B::Operation>,
+        author: Uuid,
+    ) {
         match operation {
-            StoredOperation::Operate(operation) => B::apply_operation(value, operation),
+            StoredOperation::Operate(operation) => {
+                B::apply_authored_operation(value, operation, author)
+            }
             StoredOperation::Replace(replacement) => value.clone_from(replacement),
             StoredOperation::SetDynamicArtifact(descriptor) => {
                 self.dynamic_artifact.write().clone_from(descriptor);
@@ -3527,6 +3539,7 @@ impl<B: Block> TypedBlock<B> {
         Self {
             id,
             workspace_id,
+            local_account_id: author,
             author: RwLock::new(Some(author)),
             shared,
             state: RwLock::new(TypedState {
@@ -3552,10 +3565,16 @@ impl<B: Block> TypedBlock<B> {
         }
     }
 
-    fn unresolved(id: Uuid, workspace_id: Uuid, shared: Arc<BlockShared<B>>) -> Self {
+    fn unresolved(
+        id: Uuid,
+        workspace_id: Uuid,
+        local_account_id: Uuid,
+        shared: Arc<BlockShared<B>>,
+    ) -> Self {
         Self {
             id,
             workspace_id,
+            local_account_id,
             author: RwLock::new(None),
             shared,
             state: RwLock::new(TypedState {
@@ -3586,7 +3605,7 @@ impl<B: Block> TypedBlock<B> {
             return;
         };
         for pending in &state.pending {
-            self.apply_stored_operation(&mut value, &pending.operation);
+            self.apply_stored_operation(&mut value, &pending.operation, self.local_account_id);
         }
         *self.shared.value.write() = Some(value);
         self.changed.send_replace(());
@@ -3609,7 +3628,7 @@ impl<B: Block> TypedBlock<B> {
             for operation in &operations {
                 let before =
                     normalized_references(value.references_for_workspace(self.workspace_id));
-                B::apply_operation(value, operation);
+                B::apply_authored_operation(value, operation, self.local_account_id);
                 let properties = self.merged_properties(value.implicit_name());
                 let after =
                     normalized_references(value.references_for_workspace(self.workspace_id));
@@ -3997,7 +4016,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
                 &crypto::decode(&record.operation),
             )
             .unwrap_or_else(|error| fatal(format!("failed to deserialize operation: {error}")));
-            self.apply_stored_operation(&mut value, &operation);
+            self.apply_stored_operation(&mut value, &operation, record.author);
             seq = record.seq;
         }
         self.revision.store(seq, Ordering::Relaxed);
@@ -4011,7 +4030,7 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         *self.properties.write() = properties;
         if B::CRDT {
             for pending in &state.pending {
-                self.apply_stored_operation(&mut value, &pending.operation);
+                self.apply_stored_operation(&mut value, &pending.operation, self.local_account_id);
             }
             *self.shared.value.write() = Some(value);
             self.changed.send_replace(());
@@ -4095,7 +4114,11 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             fatal("update acknowledgement is not contiguous");
         }
         let operation = state.pending.pop_front().unwrap().operation;
-        self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &operation);
+        self.apply_stored_operation(
+            state.confirmed.as_mut().unwrap(),
+            &operation,
+            self.local_account_id,
+        );
         state.confirmed_seq = seq;
         state.in_flight.remove(&operation_id);
         self.rebuild_visible(&state);
@@ -4151,7 +4174,7 @@ impl<B: Block> TypedBlock<B> {
         };
         for pending in &mut state.pending {
             let before = normalized_references(value.references_for_workspace(self.workspace_id));
-            self.apply_stored_operation(&mut value, &pending.operation);
+            self.apply_stored_operation(&mut value, &pending.operation, self.local_account_id);
             let after = normalized_references(value.references_for_workspace(self.workspace_id));
             pending.references = reference_delta(&before, &after);
         }
@@ -4164,7 +4187,7 @@ impl<B: Block> TypedBlock<B> {
                     |error| fatal(format!("failed to deserialize remote operation: {error}")),
                 );
             if let Some(value) = self.shared.value.write().as_mut() {
-                self.apply_stored_operation(value, &remote);
+                self.apply_stored_operation(value, &remote, record.author);
                 self.changed.send_replace(());
             }
             if let Some(index) = state
@@ -4184,7 +4207,11 @@ impl<B: Block> TypedBlock<B> {
             .pending
             .pop_front_if(|pending| pending.id == record.operation_id)
         {
-            self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &pending.operation);
+            self.apply_stored_operation(
+                state.confirmed.as_mut().unwrap(),
+                &pending.operation,
+                record.author,
+            );
             state.confirmed_seq = record.seq;
             state.in_flight.remove(&record.operation_id);
             self.revision.fetch_add(1, Ordering::Relaxed);
@@ -4196,7 +4223,7 @@ impl<B: Block> TypedBlock<B> {
             serde_json::from_slice(&crypto::decode(&record.operation)).unwrap_or_else(|error| {
                 fatal(format!("failed to deserialize remote operation: {error}"))
             });
-        self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &remote);
+        self.apply_stored_operation(state.confirmed.as_mut().unwrap(), &remote, record.author);
         state.confirmed_seq = record.seq;
         if let StoredOperation::Operate(remote) = &remote {
             for pending in &mut state.pending {

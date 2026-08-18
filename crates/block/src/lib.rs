@@ -222,6 +222,16 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
 
     fn apply_operation(block: &mut Self, operation: &Self::Operation);
 
+    /// Like `apply_operation`, but for block types whose state needs to know
+    /// who is responsible for each operation. `author` is the operation's
+    /// server-verified account id (`OperationRecord::author`), never a value
+    /// that the operation's own bytes could claim for themselves. Defaults to
+    /// ignoring it.
+    fn apply_authored_operation(block: &mut Self, operation: &Self::Operation, author: Uuid) {
+        let _ = author;
+        Self::apply_operation(block, operation);
+    }
+
     /// A name this block type can derive from its own content, or `None` if
     /// it has nothing more useful to say than its type. The result becomes
     /// the block's `name` property unless a client has manually renamed it.
