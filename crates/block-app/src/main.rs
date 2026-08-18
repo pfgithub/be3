@@ -6,7 +6,7 @@ mod files;
 mod panic_guard;
 mod performance;
 mod platform;
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
 mod plugin_host;
 mod share;
 mod slide_templates;

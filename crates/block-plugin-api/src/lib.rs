@@ -73,6 +73,7 @@ pub struct EditorRegion {
 pub struct EntryPoints {
     pub web: Option<String>,
     pub windows: Option<String>,
+    pub android: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,12 +105,19 @@ impl PluginManifest {
             return Err(ManifestError::InvalidRegions);
         }
         manifest_string("region id", &self.regions[0].id)?;
-        if self.entry_points.web.is_none() && self.entry_points.windows.is_none() {
+        if self.entry_points.web.is_none()
+            && self.entry_points.windows.is_none()
+            && self.entry_points.android.is_none()
+        {
             return Err(ManifestError::MissingEntryPoint);
         }
-        for entry in [&self.entry_points.web, &self.entry_points.windows]
-            .into_iter()
-            .flatten()
+        for entry in [
+            &self.entry_points.web,
+            &self.entry_points.windows,
+            &self.entry_points.android,
+        ]
+        .into_iter()
+        .flatten()
         {
             manifest_string("entry point", entry)?;
         }
@@ -117,7 +125,11 @@ impl PluginManifest {
             || self.surfaces.contains(&SurfaceMechanism::WebExternalImage);
         let windows_valid = self.entry_points.windows.is_none()
             || self.surfaces.contains(&SurfaceMechanism::WindowsDxgi);
-        if !web_valid || !windows_valid {
+        let android_valid = self.entry_points.android.is_none()
+            || self
+                .surfaces
+                .contains(&SurfaceMechanism::AndroidHardwareBuffer);
+        if !web_valid || !windows_valid || !android_valid {
             return Err(ManifestError::MissingSurface);
         }
         Ok(())

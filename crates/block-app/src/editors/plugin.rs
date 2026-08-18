@@ -28,10 +28,12 @@ pub(super) fn counter_manifest() -> PluginManifest {
         entry_points: EntryPoints {
             web: Some("/plugin_demo.js".into()),
             windows: Some("plugin-demo-host.exe".into()),
+            android: Some("com.be3.block.plugin.PluginDemoService".into()),
         },
         surfaces: vec![
             SurfaceMechanism::WebExternalImage,
             SurfaceMechanism::WindowsDxgi,
+            SurfaceMechanism::AndroidHardwareBuffer,
         ],
     }
 }

@@ -18,7 +18,7 @@ mod logic_grid;
 mod map;
 mod pixel_art;
 mod pixel_ray_tracer;
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
 mod plugin;
 mod presentation;
 mod reference_cache;
@@ -1359,7 +1359,7 @@ impl EditorRegistry {
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
-        #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+        #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
         registry.register_counter_plugin();
         registry.register::<hotbar::HotbarEditor>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
@@ -1415,7 +1415,7 @@ impl EditorRegistry {
             .insert(registration.block_type, registration);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
     fn register_counter_plugin(&mut self) {
         use block_client::blocks::counter::Counter;
         use egui_material_icons::icons::ICON_123;

@@ -8,5 +8,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name="com.be3.block.plugin.PluginDemoService" android:enabled="@bool/plugin_demo_supported" android:exported="false" android:process=":plugin_demo" />
     </application>
 </manifest>

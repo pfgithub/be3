@@ -6097,6 +6097,7 @@ version = "0.1.0"
 dependencies = [
  "block-client",
  "block-editor-plugin",
+ "jni 0.22.4",
  "uuid",
 ]
 

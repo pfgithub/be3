@@ -19,6 +19,7 @@ fn manifest_validation() {
         entry_points: EntryPoints {
             web: Some("/counter.js".into()),
             windows: Some("counter.exe".into()),
+            android: None,
         },
         surfaces: vec![
             SurfaceMechanism::WebExternalImage,
