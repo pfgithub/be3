@@ -9,6 +9,7 @@ mod compiled_logic;
 mod database;
 mod database_schema;
 mod database_view;
+mod deterministic_game;
 mod gui_builder;
 mod hotbar;
 pub(crate) mod image;
@@ -1355,6 +1356,7 @@ impl EditorRegistry {
         registry.register_creatable::<database::DatabaseEditor>();
         registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
         registry.register_creatable::<database_view::DatabaseViewEditor>();
+        registry.register_creatable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
