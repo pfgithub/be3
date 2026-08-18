@@ -19,7 +19,6 @@ impl PresenterStatus {
         Self(Arc::new(Mutex::new(PresenterState::Waiting)))
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub(super) fn get(&self) -> PresenterState {
         self.0.lock().unwrap().clone()
     }

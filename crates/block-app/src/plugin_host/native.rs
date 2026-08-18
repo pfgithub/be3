@@ -42,6 +42,19 @@ pub(crate) fn editor_ui(
             || "Counter plugin is not running".to_owned(),
             super::process::Process::status,
         ));
+        if let Some(status) = &host.presenter_status {
+            use super::presenter::PresenterState;
+            match status.get() {
+                PresenterState::Failed(error) | PresenterState::Unsupported(error) => {
+                    ui.colored_label(
+                        egui::Color32::RED,
+                        format!("Windows plugin presentation failed: {error}"),
+                    );
+                }
+                PresenterState::Waiting | PresenterState::Presenting | PresenterState::Released => {
+                }
+            }
+        }
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let messages = host

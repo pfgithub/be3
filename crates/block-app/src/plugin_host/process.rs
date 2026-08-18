@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::io::OwnedHandle;
@@ -53,7 +53,7 @@ impl Process {
                     .args(["--endpoint", &argument])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null());
+                    .stderr(Stdio::piped());
                 #[cfg(target_os = "windows")]
                 if let Some(directory) = executable.parent() {
                     command.current_dir(directory).env_remove("PATH");
@@ -64,6 +64,14 @@ impl Process {
                         format!("failed to launch {}: {error}", executable.display()),
                     )
                 })?;
+                if let Some(stderr) = child.stderr.take() {
+                    let status_sender = status_sender.clone();
+                    thread::spawn(move || {
+                        for line in io::BufReader::new(stderr).lines().map_while(Result::ok) {
+                            status_sender.send(format!("Counter plugin: {line}")).ok();
+                        }
+                    });
+                }
                 status_sender
                     .send("Waiting for plugin handshake".into())
                     .ok();

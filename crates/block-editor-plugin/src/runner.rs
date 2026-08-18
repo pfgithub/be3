@@ -106,6 +106,7 @@ fn run_endpoint<A: crate::App>(
     };
 
     let mut stream = connect(endpoint)?;
+    eprintln!("connected to the Windows host");
     let mut session = ClientSession::new(id, name, version);
     stream.write_all(&encode_frame(&session.hello())?)?;
     stream.flush()?;
@@ -122,6 +123,7 @@ fn run_endpoint<A: crate::App>(
     for response in session.receive(decode_frame(&frame)?) {
         stream.write_all(&encode_frame(&response)?)?;
     }
+    eprintln!("protocol handshake completed");
     let mut host_pid = 0;
     if unsafe { GetNamedPipeServerProcessId(stream.as_raw_handle().cast(), &mut host_pid) } == 0 {
         return Err(std::io::Error::last_os_error().into());
@@ -130,6 +132,7 @@ fn run_endpoint<A: crate::App>(
     if host.is_null() {
         return Err(std::io::Error::last_os_error().into());
     }
+    eprintln!("opened the host process for DXGI handle transfer");
     let mut carrier = WindowsAttachmentCarrier::new(stream, host);
     let started = Instant::now();
     let mut surface: Option<Surface> = None;
@@ -160,13 +163,20 @@ fn run_endpoint<A: crate::App>(
         if let Some((request_id, metrics)) =
             create.filter(|(_, metrics)| metrics.pixel_width > 0 && metrics.pixel_height > 0)
         {
+            eprintln!(
+                "creating DXGI surface {}x{} at scale {}",
+                metrics.pixel_width, metrics.pixel_height, metrics.scale_factor
+            );
             generation += 1;
             let mut next = Surface::new::<A>(request_id, metrics, generation)?;
+            eprintln!("created DXGI surface generation {generation}");
             let (descriptor, handles) = next.descriptor();
             carrier.send(&descriptor, &handles)?;
+            eprintln!("transferred DXGI surface generation {generation}");
             for message in next.render(started.elapsed().as_secs_f64())? {
                 carrier.send(&message, &[])?;
             }
+            eprintln!("rendered first frame for DXGI surface generation {generation}");
             surface = Some(next);
         } else if let Some(surface) = &mut surface {
             for message in surface.render(started.elapsed().as_secs_f64())? {
