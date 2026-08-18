@@ -31,6 +31,8 @@ pub(super) struct Process {
     messages: Sender<Message>,
     #[cfg(target_os = "windows")]
     surfaces: Receiver<SurfaceEvent>,
+    #[cfg(target_os = "windows")]
+    clients: Receiver<block_plugin_api::DelegatedClientMessage>,
 }
 
 impl Process {
@@ -41,6 +43,8 @@ impl Process {
         let (messages, message_receiver) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (surface_sender, surfaces) = mpsc::channel();
+        #[cfg(target_os = "windows")]
+        let (client_sender, clients) = mpsc::channel();
         thread::spawn(move || {
             let result = platform::Endpoint::create().and_then(|endpoint| {
                 let argument = endpoint.argument();
@@ -71,6 +75,7 @@ impl Process {
                         &shutdown_receiver,
                         &message_receiver,
                         &surface_sender,
+                        &client_sender,
                         &status_sender,
                     );
                     #[cfg(not(target_os = "windows"))]
@@ -91,6 +96,8 @@ impl Process {
             messages,
             #[cfg(target_os = "windows")]
             surfaces,
+            #[cfg(target_os = "windows")]
+            clients,
         }
     }
 
@@ -116,6 +123,11 @@ impl Process {
     pub(super) fn latest_surface(&self) -> Option<SurfaceEvent> {
         self.surfaces.try_recv().ok()
     }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn client_messages(&self) -> Vec<block_plugin_api::DelegatedClientMessage> {
+        self.clients.try_iter().collect()
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -125,6 +137,7 @@ fn drive_windows(
     shutdown: &Receiver<()>,
     messages: &Receiver<Message>,
     surfaces: &Sender<SurfaceEvent>,
+    clients: &Sender<block_plugin_api::DelegatedClientMessage>,
     status: &Sender<String>,
 ) -> io::Result<()> {
     use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
@@ -194,6 +207,9 @@ fn drive_windows(
                     surfaces.send(SurfaceEvent::Frame(frame)).ok();
                 }
                 Message::ShutdownAcknowledged => return Ok(()),
+                Message::Client(message) => {
+                    clients.send(message).ok();
+                }
                 _ => {}
             }
         }

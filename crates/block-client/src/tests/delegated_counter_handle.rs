@@ -85,7 +85,7 @@ async fn delegated_counter_handle() {
         if client.delegated_failure().is_some() {
             break;
         }
-        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
     }
     assert_eq!(
         client.delegated_failure().as_deref(),

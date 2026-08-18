@@ -14,6 +14,7 @@ pub struct ClientSession {
     state: State,
     viewport_request_id: Option<u64>,
     plugin: PluginIdentity,
+    editor_instance: Option<block_plugin_api::EditorInstanceId>,
 }
 
 impl Default for ClientSession {
@@ -32,6 +33,7 @@ impl ClientSession {
                 name: name.into(),
                 version: version.into(),
             },
+            editor_instance: None,
         }
     }
     pub fn state(&self) -> State {
@@ -90,6 +92,48 @@ impl ClientSession {
             (State::Running, Message::Input(input))
                 if self.viewport_request_id == Some(input.viewport_request_id) =>
             {
+                Ok(Vec::new())
+            }
+            (
+                State::Running,
+                Message::Editor(block_plugin_api::EditorMessage::Open { instance, .. }),
+            ) if self.editor_instance.is_none() => {
+                self.editor_instance = Some(instance);
+                Ok(vec![Message::Editor(
+                    block_plugin_api::EditorMessage::Acknowledged {
+                        instance,
+                        request_id: 0,
+                    },
+                )])
+            }
+            (
+                State::Running,
+                Message::Editor(block_plugin_api::EditorMessage::Resize { instance, .. }),
+            )
+            | (
+                State::Running,
+                Message::Editor(block_plugin_api::EditorMessage::Input { instance, .. }),
+            )
+            | (
+                State::Running,
+                Message::Editor(block_plugin_api::EditorMessage::EditabilityChanged {
+                    instance,
+                    ..
+                }),
+            ) if self.editor_instance == Some(instance) => Ok(Vec::new()),
+            (
+                State::Running,
+                Message::Editor(block_plugin_api::EditorMessage::Close { instance }),
+            ) if self.editor_instance == Some(instance) => {
+                self.editor_instance = None;
+                Ok(vec![Message::Editor(
+                    block_plugin_api::EditorMessage::Acknowledged {
+                        instance,
+                        request_id: 0,
+                    },
+                )])
+            }
+            (State::Running, Message::Client(_)) if self.editor_instance.is_some() => {
                 Ok(Vec::new())
             }
             (State::Running, Message::Ping { nonce }) => Ok(vec![Message::Pong { nonce }]),

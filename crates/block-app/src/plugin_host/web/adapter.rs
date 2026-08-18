@@ -1,5 +1,6 @@
 use block_plugin_api::{
-    encode_frame, Capability, HostSession, Message, QueueError, SessionState, SurfaceMechanism,
+    encode_frame, Capability, DelegatedClientMessage, EditorMessage, HostSession, Message,
+    QueueError, SessionState, SurfaceMechanism,
 };
 use wasm_bindgen::prelude::*;
 
@@ -41,6 +42,7 @@ extern "C" {
 pub(super) struct WebProtocolAdapter {
     canvas_id: &'static str,
     session: HostSession,
+    client_messages: Vec<DelegatedClientMessage>,
 }
 
 impl WebProtocolAdapter {
@@ -59,7 +61,11 @@ impl WebProtocolAdapter {
         );
         session.start(now());
         session.receive(decode(&hello)?, now());
-        let mut adapter = Self { canvas_id, session };
+        let mut adapter = Self {
+            canvas_id,
+            session,
+            client_messages: Vec::new(),
+        };
         adapter.flush()?;
         if adapter.session.state() != &SessionState::Running {
             web_plugin_shutdown(canvas_id);
@@ -87,6 +93,15 @@ impl WebProtocolAdapter {
         }
     }
 
+    pub(super) fn send_plugin(&mut self, message: Message) -> Result<(), String> {
+        self.session.enqueue(message).map_err(queue_error)?;
+        self.flush()
+    }
+
+    pub(super) fn take_client_messages(&mut self) -> Vec<DelegatedClientMessage> {
+        std::mem::take(&mut self.client_messages)
+    }
+
     pub(super) fn shutdown(&mut self) {
         self.session.shutdown(now());
         let _ = self.flush();
@@ -99,7 +114,11 @@ impl WebProtocolAdapter {
             let responses = web_plugin_send(self.canvas_id, &frame).map_err(js_error)?;
             for response in responses.iter() {
                 let response = js_sys::Uint8Array::new(&response).to_vec();
-                self.session.receive(decode(&response)?, now());
+                match decode(&response)? {
+                    Message::Client(message) => self.client_messages.push(message),
+                    Message::Editor(EditorMessage::Acknowledged { .. }) => {}
+                    message => self.session.receive(message, now()),
+                }
             }
         }
         Ok(())

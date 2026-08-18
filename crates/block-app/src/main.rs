@@ -6,6 +6,8 @@ mod files;
 mod panic_guard;
 mod performance;
 mod platform;
+#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+mod plugin_host;
 mod share;
 mod slide_templates;
 
@@ -97,7 +99,8 @@ fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> 
         Box::new(move |creation_context| {
             egui_material_icons::initialize(&creation_context.egui_ctx);
             editors::install_render_resources(creation_context);
-            debug::plugin_demo::install(creation_context);
+            #[cfg(target_os = "windows")]
+            plugin_host::install(creation_context);
             BlockApp::new(storage_root).map(|app| Box::new(app) as Box<dyn eframe::App>)
         }),
     )
@@ -133,7 +136,7 @@ pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
             Box::new(|creation_context| {
                 egui_material_icons::initialize(&creation_context.egui_ctx);
                 editors::install_render_resources(creation_context);
-                debug::plugin_demo::install(creation_context);
+                plugin_host::install(creation_context);
                 BlockApp::new()
                     .map(|app| Box::new(app) as Box<dyn eframe::App>)
                     .map_err(Into::into)
@@ -3659,7 +3662,6 @@ impl BlockApp {
         )))]
         debug::terminal::show(ui.ctx());
         debug::version::show(ui.ctx());
-        debug::plugin_demo::show(ui.ctx());
         self.show_invite(ui.ctx());
         self.show_about(ui.ctx());
 

@@ -83,18 +83,20 @@ pub(crate) fn hello(id: &str, name: &str, version: &str) -> Result<Vec<u8>, JsVa
 pub(crate) fn receive(frame: Vec<u8>) -> Result<js_sys::Array, JsValue> {
     let message = decode_frame(&frame).map_err(protocol_error)?;
     dispatch(&message);
-    SESSION.with(|session| {
-        session
-            .borrow_mut()
-            .receive(message)
-            .into_iter()
-            .map(|message| {
-                encode_frame(&message)
-                    .map(|frame| JsValue::from(js_sys::Uint8Array::from(frame.as_slice())))
-                    .map_err(protocol_error)
-            })
-            .collect()
-    })
+    let mut responses = SESSION.with(|session| session.borrow_mut().receive(message));
+    EGUI_SESSION.with(|session| {
+        if let Some(session) = session.borrow_mut().as_mut() {
+            responses.extend(session.borrow_mut().outbound());
+        }
+    });
+    responses
+        .into_iter()
+        .map(|message| {
+            encode_frame(&message)
+                .map(|frame| JsValue::from(js_sys::Uint8Array::from(frame.as_slice())))
+                .map_err(protocol_error)
+        })
+        .collect()
 }
 
 pub(crate) fn shutdown() {

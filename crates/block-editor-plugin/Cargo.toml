@@ -1,12 +1,16 @@
 [package]
-name = "block-plugin"
+name = "block-editor-plugin"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 
 [dependencies]
+block-client = { path = "../block-client" }
+block = { path = "../block" }
 block-plugin-api = { path = "../block-plugin-api" }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "wgpu"] }
+futures-util = "0.3"
+uuid = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"

@@ -10,4 +10,5 @@ fn accept(session: &mut ClientSession) {
 }
 
 mod accepts_ordered_lifecycle;
+mod opens_and_closes_editor_instance;
 mod rejects_out_of_order_messages;

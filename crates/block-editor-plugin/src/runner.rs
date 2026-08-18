@@ -147,6 +147,13 @@ fn run_endpoint<A: crate::App>(
         if let (Message::Input(input), Some(surface)) = (&message, &mut surface) {
             surface.input(input);
         }
+        if matches!(message, Message::Editor(_) | Message::Client(_)) {
+            if let Some(surface) = &mut surface {
+                for response in surface.receive(&message) {
+                    carrier.send(&response, &[])?;
+                }
+            }
+        }
         for response in session.receive(message) {
             carrier.send(&response, &[])?;
         }

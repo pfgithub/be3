@@ -11,6 +11,7 @@ mod web;
 mod windows_surface;
 
 pub trait App: Default + 'static {
+    fn connect(&mut self, _client: block_client::BlockClient, _block_id: uuid::Uuid) {}
     fn ui(&mut self, ui: &mut egui::Ui);
 }
 
@@ -53,42 +54,42 @@ pub mod __private {
 macro_rules! plugin {
     ($app:ty, $id:expr, $name:expr) => {
         #[cfg(target_arch = "wasm32")]
-        use block_plugin::__private::{js_sys, wasm_bindgen, wasm_bindgen_futures};
+        use block_editor_plugin::__private::{js_sys, wasm_bindgen, wasm_bindgen_futures};
 
         #[cfg(target_arch = "wasm32")]
-        #[block_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
+        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
         pub async fn start(
             canvas_id: String,
-        ) -> Result<(), block_plugin::__private::wasm_bindgen::JsValue> {
-            block_plugin::__private::start::<$app>(canvas_id).await
+        ) -> Result<(), block_editor_plugin::__private::wasm_bindgen::JsValue> {
+            block_editor_plugin::__private::start::<$app>(canvas_id).await
         }
 
         #[cfg(target_arch = "wasm32")]
-        #[block_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn hello() -> Result<Vec<u8>, block_plugin::__private::wasm_bindgen::JsValue> {
-            block_plugin::__private::hello($id, $name, env!("CARGO_PKG_VERSION"))
+        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
+        pub fn hello() -> Result<Vec<u8>, block_editor_plugin::__private::wasm_bindgen::JsValue> {
+            block_editor_plugin::__private::hello($id, $name, env!("CARGO_PKG_VERSION"))
         }
 
         #[cfg(target_arch = "wasm32")]
-        #[block_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
+        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
         pub fn receive(
             frame: Vec<u8>,
         ) -> Result<
-            block_plugin::__private::js_sys::Array,
-            block_plugin::__private::wasm_bindgen::JsValue,
+            block_editor_plugin::__private::js_sys::Array,
+            block_editor_plugin::__private::wasm_bindgen::JsValue,
         > {
-            block_plugin::__private::receive(frame)
+            block_editor_plugin::__private::receive(frame)
         }
 
         #[cfg(target_arch = "wasm32")]
-        #[block_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
+        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
         pub fn shutdown() {
-            block_plugin::__private::shutdown();
+            block_editor_plugin::__private::shutdown();
         }
 
         #[cfg(not(target_arch = "wasm32"))]
         pub fn run() {
-            block_plugin::__private::run::<$app>($id, $name, env!("CARGO_PKG_VERSION"));
+            block_editor_plugin::__private::run::<$app>($id, $name, env!("CARGO_PKG_VERSION"));
         }
     };
 }

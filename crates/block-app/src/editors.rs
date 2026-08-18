@@ -6,7 +6,6 @@ mod browser_tab;
 mod calendar;
 mod clipboard;
 mod compiled_logic;
-mod counter;
 mod database;
 mod database_schema;
 mod database_view;
@@ -19,6 +18,8 @@ mod logic_grid;
 mod map;
 mod pixel_art;
 mod pixel_ray_tracer;
+#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+mod plugin;
 mod presentation;
 mod reference_cache;
 mod scene_3d;
@@ -1358,7 +1359,8 @@ impl EditorRegistry {
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
-        registry.register_creatable::<counter::CounterEditor>();
+        #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+        registry.register_counter_plugin();
         registry.register::<hotbar::HotbarEditor>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
@@ -1411,6 +1413,40 @@ impl EditorRegistry {
         }
         self.registrations
             .insert(registration.block_type, registration);
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    fn register_counter_plugin(&mut self) {
+        use block_client::blocks::counter::Counter;
+        use egui_material_icons::icons::ICON_123;
+
+        let manifest = plugin::counter_manifest();
+        manifest
+            .validate()
+            .expect("invalid built-in Counter plugin manifest");
+        let display_name: &'static str = Box::leak(manifest.display_name.into_boxed_str());
+        self.insert(EditorRegistration {
+            block_type: Counter::TYPE_ID,
+            display_name,
+            icon: ICON_123,
+            create: Some(CreateBlock::Immediate(|client| {
+                Box::new(plugin::PluginEditor::new(
+                    client,
+                    client.create_block(Counter::new()),
+                ))
+            })),
+            open: |client, id| {
+                Box::new(plugin::PluginEditor::new(
+                    client,
+                    client.get_block::<Counter>(id),
+                ))
+            },
+            can_add_child: false,
+            can_delete_child: false,
+            can_replace_child: false,
+            default_add: true,
+            dynamic_artifact: None,
+        });
     }
 
     /// Creatable block types, with whether each belongs in the picker's main

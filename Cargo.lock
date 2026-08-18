@@ -951,28 +951,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "block-padding"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
-dependencies = [
- "generic-array",
-]
-
-[[package]]
-name = "block-plugin"
+name = "block-editor-plugin"
 version = "0.1.0"
 dependencies = [
+ "block 0.1.0",
+ "block-client",
  "block-plugin-api",
  "eframe",
+ "futures-util",
  "js-sys",
  "pollster 0.4.0",
+ "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu-hal",
  "windows 0.62.2",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "block-padding"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
+dependencies = [
+ "generic-array",
 ]
 
 [[package]]
@@ -6091,8 +6095,9 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "plugin-demo"
 version = "0.1.0"
 dependencies = [
- "block-plugin",
- "jni 0.22.4",
+ "block-client",
+ "block-editor-plugin",
+ "uuid",
 ]
 
 [[package]]

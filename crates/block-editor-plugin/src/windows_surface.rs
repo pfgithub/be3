@@ -192,6 +192,11 @@ impl Surface {
         self.egui.receive(&Message::Input(batch.clone()));
     }
 
+    pub fn receive(&mut self, message: &Message) -> Vec<Message> {
+        self.egui.receive(message);
+        self.egui.outbound()
+    }
+
     pub fn render(&mut self, phase: f64) -> Result<Message, String> {
         self.egui
             .receive(&Message::ResizeViewport(self.metrics.clone()));

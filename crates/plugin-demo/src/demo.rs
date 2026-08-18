@@ -1,30 +1,37 @@
-use block_plugin::egui;
+use block_client::blocks::counter::{Counter, CounterOperation};
+use block_editor_plugin::egui;
 
 #[derive(Default)]
-pub struct Demo {
-    clicks: u32,
-    enabled: bool,
-    value: f32,
+pub struct CounterApp {
+    block: Option<block_client::BlockHandle<Counter>>,
 }
 
-impl block_plugin::App for Demo {
-    fn ui(&mut self, ui: &mut egui::Ui) {
-        self.show(ui);
+impl block_editor_plugin::App for CounterApp {
+    fn connect(&mut self, client: block_client::BlockClient, block_id: uuid::Uuid) {
+        self.block = Some(client.get_block(block_id));
     }
-}
 
-impl Demo {
-    pub fn show(&mut self, ui: &mut egui::Ui) {
-        ui.heading("egui plugin demo");
-        ui.label("This interface is rendered by plugin-demo.");
-        ui.separator();
-        ui.checkbox(&mut self.enabled, "Enable controls");
-        ui.add_enabled_ui(self.enabled, |ui| {
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=1.0).text("Value"));
-            if ui.button("Click me").clicked() {
-                self.clicks += 1;
-            }
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let Some(block) = &self.block else {
+            ui.spinner();
+            return;
+        };
+        let Some(counter) = block.read() else {
+            ui.spinner();
+            return;
+        };
+        let count = counter.count();
+        drop(counter);
+        ui.centered_and_justified(|ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Remove").clicked() {
+                    block.operate(CounterOperation::Decrement);
+                }
+                ui.label(count.to_string());
+                if ui.button("Add").clicked() {
+                    block.operate(CounterOperation::Increment);
+                }
+            });
         });
-        ui.label(format!("Clicks: {}", self.clicks));
     }
 }

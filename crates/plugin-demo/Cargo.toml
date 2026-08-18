@@ -12,10 +12,9 @@ name = "plugin-demo-host"
 path = "src/main.rs"
 
 [dependencies]
-block-plugin = { path = "../block-plugin" }
-
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.22"
+block-client = { path = "../block-client" }
+block-editor-plugin = { path = "../block-editor-plugin" }
+uuid = "1"
 
 [lints]
 workspace = true
