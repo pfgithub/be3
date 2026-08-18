@@ -4,7 +4,9 @@ use block_client::{
     },
     BlockClient, BlockHandle,
 };
-use deterministic_games::{crazy_8s::Crazy8s, tic_tac_toe::TicTacToe, Game};
+use deterministic_games::{
+    connect_four::ConnectFour, crazy_8s::Crazy8s, tic_tac_toe::TicTacToe, Game,
+};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_GRID_3X3, MaterialIcon};
 use uuid::Uuid;
@@ -14,9 +16,10 @@ use super::{
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
-const GAME_KINDS: [DeterministicGameKind; 2] = [
+const GAME_KINDS: [DeterministicGameKind; 3] = [
     DeterministicGameKind::TicTacToe,
     DeterministicGameKind::Crazy8s,
+    DeterministicGameKind::ConnectFour,
 ];
 
 /// The only place a game kind is turned into its `Game` implementation.
@@ -24,6 +27,7 @@ fn game_for(kind: DeterministicGameKind) -> &'static dyn Game {
     match kind {
         DeterministicGameKind::TicTacToe => &TicTacToe,
         DeterministicGameKind::Crazy8s => &Crazy8s,
+        DeterministicGameKind::ConnectFour => &ConnectFour,
     }
 }
 

@@ -12,6 +12,7 @@ pub enum DeterministicGameKind {
     #[default]
     TicTacToe,
     Crazy8s,
+    ConnectFour,
 }
 
 impl DeterministicGameKind {
@@ -19,6 +20,7 @@ impl DeterministicGameKind {
         match self {
             DeterministicGameKind::TicTacToe => "Tic-Tac-Toe",
             DeterministicGameKind::Crazy8s => "Crazy 8s",
+            DeterministicGameKind::ConnectFour => "Connect Four",
         }
     }
 }

@@ -3,6 +3,7 @@ use std::cell::Cell;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub mod connect_four;
 pub mod crazy_8s;
 pub mod tic_tac_toe;
 
