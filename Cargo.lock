@@ -2012,6 +2012,7 @@ dependencies = [
 name = "deterministic_games"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "serde",
  "uuid",
 ]

@@ -1,6 +1,9 @@
+use std::convert::Infallible;
+
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Game, GameAction, GameActionOption, GameScreen};
+use crate::{ActionLabel, Game, GameAction, GameHelper, GameScreen};
 
 pub struct TicTacToe;
 
@@ -32,11 +35,16 @@ impl Symbol {
     }
 }
 
-struct Replay {
-    board: [Option<Symbol>; CELL_COUNT],
-    players: [Option<Uuid>; 2],
-    move_count: usize,
-    winner: Option<Symbol>,
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+struct PlayAction {
+    player: Uuid,
+    cell: u8,
+}
+
+impl ActionLabel for PlayAction {
+    fn label(&self) -> String {
+        format!("Row {}, column {}", self.cell / 3 + 1, self.cell % 3 + 1)
+    }
 }
 
 fn winning_symbol(board: &[Option<Symbol>; CELL_COUNT]) -> Option<Symbol> {
@@ -49,85 +57,76 @@ fn winning_symbol(board: &[Option<Symbol>; CELL_COUNT]) -> Option<Symbol> {
     None
 }
 
-/// Replays the log from an empty board. Actions that are malformed, out of
-/// turn, played by the wrong actor, or on an occupied cell are silently
-/// skipped rather than rejected: the log has no separate validation step, so
-/// every viewer must reach the same board by ignoring the same nonsense.
-fn replay(actions: &[GameAction]) -> Replay {
-    let mut board = [None; CELL_COUNT];
+/// The whole game as one straight-line function over the action log:
+/// `helper.action` blocks on a player until the log supplies their move, so
+/// the code below reads like a normal loop rather than a hand-written replay
+/// pass. Player identity is carried inside `PlayAction` itself (set from the
+/// candidate the options closure was asked about), which is what lets the
+/// game learn who actually made a move without `GameHelper` exposing an
+/// actor separately.
+fn tic_tac_toe(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
+    let mut board: [Option<Symbol>; CELL_COUNT] = [None; CELL_COUNT];
     let mut players: [Option<Uuid>; 2] = [None, None];
     let mut move_count = 0;
-    let mut winner = None;
-    for action in actions {
-        if winner.is_some() || move_count >= CELL_COUNT {
-            break;
+
+    loop {
+        if let Some(winner) = winning_symbol(&board) {
+            helper.action::<PlayAction>(
+                move |_| format!("{} wins!", winner.label()),
+                |_| Vec::new(),
+            )?;
         }
-        let &[cell] = action.action.as_slice() else {
-            continue;
-        };
-        let cell = cell as usize;
-        if cell >= CELL_COUNT || board[cell].is_some() {
-            continue;
+        if move_count >= CELL_COUNT {
+            helper.action::<PlayAction>(|_| "Draw!".to_owned(), |_| Vec::new())?;
         }
+
         let turn = move_count % 2;
-        match players[turn] {
-            Some(expected) if expected != action.actor => continue,
-            None if players[1 - turn] == Some(action.actor) => continue,
-            None => players[turn] = Some(action.actor),
-            _ => {}
+        let symbol = if turn == 0 { Symbol::X } else { Symbol::O };
+        let expected = players[turn];
+        let other = players[1 - turn];
+        let can_move = move |player: Uuid| match expected {
+            Some(expected) => expected == player,
+            None => other != Some(player),
+        };
+        let snapshot = board;
+
+        let play = helper.action::<PlayAction>(
+            move |player| {
+                if can_move(player) {
+                    format!("Your turn ({})", symbol.label())
+                } else {
+                    format!("Waiting for {}...", symbol.label())
+                }
+            },
+            move |player| {
+                if !can_move(player) {
+                    return Vec::new();
+                }
+                snapshot
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, cell)| cell.is_none())
+                    .map(|(cell, _)| PlayAction {
+                        player,
+                        cell: cell as u8,
+                    })
+                    .collect()
+            },
+        )?;
+
+        if players[turn].is_none() {
+            players[turn] = Some(play.player);
         }
-        board[cell] = Some(if turn == 0 { Symbol::X } else { Symbol::O });
+        board[play.cell as usize] = Some(symbol);
         move_count += 1;
-        winner = winning_symbol(&board);
-    }
-    Replay {
-        board,
-        players,
-        move_count,
-        winner,
     }
 }
 
 impl Game for TicTacToe {
     fn show(&self, actions: &[GameAction], player: Uuid) -> GameScreen {
-        let replay = replay(actions);
-        if let Some(winner) = replay.winner {
-            return GameScreen {
-                description: format!("{} wins!", winner.label()),
-                actions: Vec::new(),
-            };
-        }
-        if replay.move_count >= CELL_COUNT {
-            return GameScreen {
-                description: "Draw!".to_owned(),
-                actions: Vec::new(),
-            };
-        }
-        let turn = replay.move_count % 2;
-        let symbol = if turn == 0 { Symbol::X } else { Symbol::O };
-        let can_move = match replay.players[turn] {
-            Some(expected) => expected == player,
-            None => replay.players[1 - turn] != Some(player),
-        };
-        if !can_move {
-            return GameScreen {
-                description: format!("Waiting for {}...", symbol.label()),
-                actions: Vec::new(),
-            };
-        }
-        let actions = replay
-            .board
-            .iter()
-            .enumerate()
-            .filter(|(_, cell)| cell.is_none())
-            .map(|(index, _)| GameActionOption {
-                label: format!("Row {}, column {}", index / 3 + 1, index % 3 + 1),
-                effect: vec![index as u8],
-            })
-            .collect();
-        GameScreen {
-            description: format!("Your turn ({})", symbol.label()),
-            actions,
+        match tic_tac_toe(GameHelper::new(actions, player)) {
+            Ok(never) => match never {},
+            Err(screen) => screen,
         }
     }
 }

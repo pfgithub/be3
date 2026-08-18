@@ -1,5 +1,6 @@
 use uuid::Uuid;
 
+use super::PlayAction;
 use crate::GameAction;
 
 mod draw_ends_the_game_with_no_actions;
@@ -12,6 +13,14 @@ mod winning_line_ends_the_game;
 fn action(actor: Uuid, cell: u8) -> GameAction {
     GameAction {
         actor,
-        action: vec![cell],
+        action: bincode::serialize(&PlayAction {
+            player: actor,
+            cell,
+        })
+        .unwrap(),
     }
+}
+
+fn cell_of(effect: &[u8]) -> u8 {
+    bincode::deserialize::<PlayAction>(effect).unwrap().cell
 }

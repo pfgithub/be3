@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use super::action;
+use super::{action, cell_of};
 use crate::{tic_tac_toe::TicTacToe, Game};
 
 #[test]
@@ -19,5 +19,5 @@ fn occupied_cell_action_is_ignored() {
     assert!(screen
         .actions
         .iter()
-        .all(|option| option.effect != vec![0] && option.effect != vec![1]));
+        .all(|option| cell_of(&option.effect) != 0 && cell_of(&option.effect) != 1));
 }
