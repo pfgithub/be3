@@ -54,7 +54,7 @@ impl EditorKind for InfiniteCanvasEditor {
     const DISPLAY_NAME: &'static str = "Canvas";
     const ICON: MaterialIcon = ICON_DRAW;
     const CAN_REPLACE_CHILD: bool = true;
-    const DEFAULT_ADD: bool = true;
+    const DEFAULT_IMPORTANT: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<InfiniteCanvas>) -> Self {
         Self::new(block, client)

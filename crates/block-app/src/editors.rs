@@ -1239,7 +1239,7 @@ pub(super) trait EditorKind: BlockEditor + Sized + 'static {
     const CAN_REPLACE_CHILD: bool = false;
     /// Whether this editor is common enough to show in the main section of
     /// the add-block picker, rather than below it.
-    const DEFAULT_ADD: bool = false;
+    const DEFAULT_IMPORTANT: bool = false;
 
     fn open(client: &BlockClient, block: BlockHandle<Self::Block>) -> Self;
 
@@ -1318,7 +1318,7 @@ struct EditorRegistration {
     can_add_child: bool,
     can_delete_child: bool,
     can_replace_child: bool,
-    default_add: bool,
+    default_important: bool,
     dynamic_artifact: Option<DynamicArtifactSupport>,
 }
 
@@ -1333,7 +1333,7 @@ impl EditorRegistration {
             can_add_child: E::CAN_ADD_CHILD,
             can_delete_child: E::CAN_DELETE_CHILD,
             can_replace_child: E::CAN_REPLACE_CHILD,
-            default_add: E::DEFAULT_ADD,
+            default_important: E::DEFAULT_IMPORTANT,
             dynamic_artifact: E::dynamic_artifact(),
         }
     }
@@ -1408,7 +1408,7 @@ impl EditorRegistry {
             self.new_block_actions.push((
                 registration.display_name,
                 registration.block_type,
-                registration.default_add,
+                registration.default_important,
             ));
         }
         self.registrations
@@ -1444,7 +1444,7 @@ impl EditorRegistry {
             can_add_child: false,
             can_delete_child: false,
             can_replace_child: false,
-            default_add: false,
+            default_important: false,
             dynamic_artifact: None,
         });
     }
