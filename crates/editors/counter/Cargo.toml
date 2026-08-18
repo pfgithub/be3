@@ -1,5 +1,5 @@
 [package]
-name = "plugin-demo"
+name = "counter"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "plugin-demo-host"
+name = "counter-host"
 path = "src/main.rs"
 
 [dependencies]

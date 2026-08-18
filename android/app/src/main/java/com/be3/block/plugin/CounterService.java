@@ -4,11 +4,11 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.IBinder;
 
-public final class PluginDemoService extends Service {
+public final class CounterService extends Service {
     private static final int MAX_PACKET_BYTES = 1024 * 1024 + 4;
     private volatile IPluginCallback callback;
 
-    static { System.loadLibrary("plugin_demo"); }
+    static { System.loadLibrary("counter"); }
 
     private final IPluginService.Stub binder = new IPluginService.Stub() {
         public void connect(IPluginCallback value) { callback = value; nativeStart(); }

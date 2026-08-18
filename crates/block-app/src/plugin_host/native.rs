@@ -200,6 +200,6 @@ fn access_byte(access: block::BlockAccess) -> u8 {
 
 fn plugin_path() -> PathBuf {
     let mut path = std::env::current_exe().unwrap_or_default();
-    path.set_file_name("plugin-demo-host.exe");
+    path.set_file_name("counter-host.exe");
     path
 }

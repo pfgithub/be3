@@ -28,7 +28,7 @@ public final class PluginHostBridge {
             public void onBindingDied(ComponentName name) { disconnected("Counter plugin binding died"); }
             public void onNullBinding(ComponentName name) { disconnected("Counter plugin returned no Binder"); }
         };
-        Intent intent = new Intent(context, PluginDemoService.class);
+        Intent intent = new Intent(context, CounterService.class);
         if (!context.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
             connection = null;
             return false;

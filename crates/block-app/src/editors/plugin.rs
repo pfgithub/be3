@@ -26,9 +26,9 @@ pub(super) fn counter_manifest() -> PluginManifest {
             main: true,
         }],
         entry_points: EntryPoints {
-            web: Some("/plugin_demo.js".into()),
-            windows: Some("plugin-demo-host.exe".into()),
-            android: Some("com.be3.block.plugin.PluginDemoService".into()),
+            web: Some("/counter.js".into()),
+            windows: Some("counter-host.exe".into()),
+            android: Some("com.be3.block.plugin.CounterService".into()),
         },
         surfaces: vec![
             SurfaceMechanism::WebExternalImage,

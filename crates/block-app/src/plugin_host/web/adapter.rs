@@ -4,7 +4,7 @@ use block_plugin_api::{
 };
 use wasm_bindgen::prelude::*;
 
-const PLUGIN_DEMO_URL: &str = "/plugin_demo.js";
+const COUNTER_URL: &str = "/counter.js";
 
 #[wasm_bindgen(inline_js = "
 const plugins = new Map();
@@ -47,7 +47,7 @@ pub(super) struct WebProtocolAdapter {
 
 impl WebProtocolAdapter {
     pub(super) async fn start(canvas_id: &'static str) -> Result<Self, String> {
-        let hello = web_plugin_start(PLUGIN_DEMO_URL, canvas_id)
+        let hello = web_plugin_start(COUNTER_URL, canvas_id)
             .await
             .map_err(js_error)?
             .to_vec();

@@ -43,13 +43,13 @@ The UI protocol must expose capabilities rather than assume every editor impleme
 
 ### Host runtime
 
-Promote the reusable code under `block-app/src/debug/plugin_demo` into a platform-neutral plugin host. Separate transport, session state, process/WASM lifecycle, input translation, surface presentation, and editor adaptation. `PluginEditor` implements the existing host-side `BlockEditor` during migration and maps its methods to plugin instances and named render regions. This adapter lets plugin and in-process editors coexist until the final cutover.
+Promote the reusable code under `block-app/src/debug/counter` into a platform-neutral plugin host. Separate transport, session state, process/WASM lifecycle, input translation, surface presentation, and editor adaptation. `PluginEditor` implements the existing host-side `BlockEditor` during migration and maps its methods to plugin instances and named render regions. This adapter lets plugin and in-process editors coexist until the final cutover.
 
 The host owns a plugin manager shared by all tabs and embedded editors. It discovers packages, validates manifests, starts at most one runtime per package when practical, routes instance messages, restarts crashed first-party runtimes, and shuts runtimes down when their last instance closes. Requests must be asynchronous: no editor draw call may block on process I/O. Each region displays its most recent frame, queues coalescible input and resize events, and requests repaint when a new frame or host event arrives.
 
 The delegated client exposes the parent client's normal workspace behavior without an additional plugin permission layer. The host still owns editor composition concerns such as cycle prevention, tab navigation, native surface handles, and telling an editor when its UI should be read-only. Treat child processes as trusted first-party executables for this phase. A later sandboxing proposal can add restricted client backends and explicit grants without changing editor code that already targets the `BlockClient` API.
 
-Replace the fixed `plugin-demo` path and global debug window with package lookup and ordinary `EditorRegistry` registrations. Registry entries become data from validated plugin manifests plus host callbacks for opening and creating `PluginEditor` instances. Unsupported, missing, incompatible, and crashed plugins use distinct user-facing states so installation errors are not confused with block permissions or loading.
+Replace the fixed `counter` path and global debug window with package lookup and ordinary `EditorRegistry` registrations. Registry entries become data from validated plugin manifests plus host callbacks for opening and creating `PluginEditor` instances. Unsupported, missing, incompatible, and crashed plugins use distinct user-facing states so installation errors are not confused with block permissions or loading.
 
 ### Rendering and platform support
 
@@ -65,13 +65,13 @@ Split the current demo into three responsibilities:
 
 - `block-plugin-api`: serialization-only protocol types, validation, host and guest session state machines, and attachment descriptors, with no UI framework dependency;
 - a new `block-editor-plugin` guest SDK: instance routing, delegated-client setup, host UI requests, `egui` input adaptation, region rendering, and target entry points;
-- `plugin-demo`: a minimal reference package that declares one test block editor and exercises every stable capability needed by conformance tests.
+- `counter`: a minimal reference package that declares one test block editor and exercises every stable capability needed by conformance tests.
 
 First-party editor packages depend on the guest SDK and `block-client`, but not on `block-app`. They open their typed handles from the delegated client and retain the same read/operate/subscription patterns used today. The delegated build of `block-client` must exclude direct websocket, account-management, and platform transport dependencies that a plugin does not use, keeping plugin artifacts smaller without creating a second client API. Editor-only reusable cores such as `logicgame`, canvas geometry, database layouts, and renderers move with or below their plugin packages rather than remaining reachable through `block-app`.
 
 Split the current text editor into two reusable layers before migrating it. `text-editor-core` remains the UI-independent editing engine for diffing, syntax highlighting, and cursor data. A new `text-editor-view` package owns the editor/view behavior currently in `block-app`, including `egui` interaction, layout, font handling, embeds, selection, cursor presentation, and the adapter that drives `text-editor-core`. The text plugin depends on `text-editor-view` and supplies its delegated `BlockHandle<Text>` and presence access; neither reusable text package depends on `block-app` or plugin transport.
 
-The guest SDK supplies the delegated `BlockClient`, local UI state, named-region callbacks, and declarative editor capabilities. Block state, operations, references, history, and presence use the real `block-client` API rather than SDK-specific imitations. Provide a package template, manifest validation command, build command, and a revised editor guide based on `plugin-demo`.
+The guest SDK supplies the delegated `BlockClient`, local UI state, named-region callbacks, and declarative editor capabilities. Block state, operations, references, history, and presence use the real `block-client` API rather than SDK-specific imitations. Provide a package template, manifest validation command, build command, and a revised editor guide based on `counter`.
 
 ### Migration and completion criteria
 
@@ -90,7 +90,7 @@ The first milestone is deliberately a narrow vertical slice: a real synchronized
 3. **Define the delegated-client protocol.** Add bounded request, completion, error, block-update, and operation-acknowledgement messages that serialize the backend boundary over the existing framed IPC transport.
 4. **Implement the parent client bridge.** Receive delegated requests, execute them through the parent's existing `BlockClient`, and stream resulting events back in order without opening another server connection.
 5. **Implement the child delegated backend.** Construct a `BlockClient` over IPC, populate typed handles from parent events, and preserve the existing optimistic operation and history behavior.
-6. **Define the minimum editor manifest.** Add bounded manifest types for one block type, display metadata, entry points, and a required surface mechanism; give `plugin-demo` a valid manifest.
+6. **Define the minimum editor manifest.** Add bounded manifest types for one block type, display metadata, entry points, and a required surface mechanism; give `counter` a valid manifest.
 7. **Define the minimum UI protocol.** Add instance IDs plus open, resize, input, close, and error messages for one main render region, with codec-limit and ordering tests.
 8. **Extract the minimum host runtime.** Move handshake, process/WASM lifecycle, IPC multiplexing, input queues, and existing surface presentation out of the debug window.
 9. **Extract the minimum guest runtime.** Move handshake, delegated-client setup, single-instance routing, `egui` input, and frame production into `block-editor-plugin`.
@@ -117,7 +117,7 @@ The first milestone is deliberately a narrow vertical slice: a real synchronized
 30. **Complete the guest authoring API.** Expose delegated-client access, declarative regions, theme/font-scale data, host UI actions, and a headless conformance harness.
 31. **Generate the first-party catalog.** Validate manifests during workspace builds, generate deterministic registrations, reject duplicate block types, and load catalog registrations beside native editors.
 32. **Add external discovery and packaging.** Discover desktop packages, resolve explicit overrides, and teach native, web, and Android builds to stage entry points, manifests, and assets.
-33. **Turn `plugin-demo` into the conformance package.** Keep the counter as its reference editor and exercise creation, preview, history, presence, references, multiple instances, and intentional failures.
+33. **Turn `counter` into the conformance package.** Keep the counter as its reference editor and exercise creation, preview, history, presence, references, multiple instances, and intentional failures.
 34. **Migrate compiled logic and calendar.** Package their existing typed-handle editors and preview regions, register their manifests, and remove their in-process modules.
 35. **Migrate pixel art and workspace index.** Package painting, image generation, listings, and child navigation, then remove their native registrations.
 36. **Migrate presentation.** Package slide creation, reference watching, embedded previews, presenter playback, and child actions, then remove its native editor.

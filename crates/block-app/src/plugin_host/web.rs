@@ -20,7 +20,7 @@ use super::presenter::{
     PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, WebFrame,
 };
 use adapter::WebProtocolAdapter;
-const CANVAS_ID: &str = "plugin-demo-canvas";
+const CANVAS_ID: &str = "counter-canvas";
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());

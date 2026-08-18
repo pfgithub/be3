@@ -19,6 +19,6 @@ android {
 
     packaging.jniLibs {
         useLegacyPackaging = false
-        keepDebugSymbols += ["**/libblock_app_lib.so", "**/libplugin_demo.so"]
+        keepDebugSymbols += ["**/libblock_app_lib.so", "**/libcounter.so"]
     }
 }

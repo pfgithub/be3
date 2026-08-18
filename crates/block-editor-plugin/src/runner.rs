@@ -15,7 +15,7 @@ pub(crate) fn run<A: crate::App>(id: &str, name: &str, version: &str) {
         return;
     }
     if arguments.len() != 3 || arguments[1] != "--endpoint" {
-        eprintln!("usage: plugin-demo --transport-test | --endpoint ENDPOINT");
+        eprintln!("usage: counter --transport-test | --endpoint ENDPOINT");
         std::process::exit(2);
     }
     #[cfg(target_os = "windows")]

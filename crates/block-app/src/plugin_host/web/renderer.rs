@@ -5,7 +5,7 @@ use super::super::presenter::SurfacePresenter;
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-/// Registers the renderer that copies the plugin-demo canvas into a texture
+/// Registers the renderer that copies the counter canvas into a texture
 /// each frame. Returns whether a wgpu render backend was available at all;
 /// the debug window shows an error instead of the demo when it is not.
 pub(super) fn install(
@@ -30,13 +30,13 @@ pub(crate) struct WebFrame {
     pub(super) canvas_id: &'static str,
 }
 
-struct PluginDemoTarget {
+struct CounterTarget {
     size: [u32; 2],
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
-/// Owns the destination texture the plugin-demo canvas is copied into and the
+/// Owns the destination texture the counter canvas is copied into and the
 /// pipeline that blits it into egui's own render pass. Rebuilt from the two
 /// independent wgpu devices' canvases meeting only at the browser's
 /// `GPUQueue.copyExternalImageToTexture`, not via any shared wgpu resource.
@@ -44,7 +44,7 @@ pub(crate) struct WebSurfacePresenter {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    target: Option<PluginDemoTarget>,
+    target: Option<CounterTarget>,
 }
 
 impl WebSurfacePresenter {
@@ -156,7 +156,7 @@ impl WebSurfacePresenter {
                 },
             ],
         });
-        self.target = Some(PluginDemoTarget {
+        self.target = Some(CounterTarget {
             size,
             texture,
             bind_group,
