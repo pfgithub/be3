@@ -11,6 +11,7 @@ use crate::{ActionLabel, Game, GameAction, GameHelper, GameScreen};
 pub struct Crazy8s;
 
 const HAND_SIZE: usize = 8;
+const PLAYERS_PER_DECK: usize = 4;
 
 const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
 
@@ -109,14 +110,41 @@ fn full_deck() -> Vec<Card> {
         .collect()
 }
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
-struct JoinAction {
-    player: Uuid,
+/// How many standard decks to shuffle together, using the common house rule
+/// of one extra deck for every four players so there is always enough for
+/// everyone's hand plus a real draw pile.
+fn deck_count_for(player_count: usize) -> usize {
+    player_count.div_ceil(PLAYERS_PER_DECK).max(1)
 }
 
-impl ActionLabel for JoinAction {
+/// Draws one card, reshuffling the discard pile back into the draw pile
+/// first if it has run out. The current top-of-discard card is never part
+/// of `discard_pile` (the caller tracks it separately), so it is never
+/// swept back into the draw pile by this.
+fn draw_from_pile(
+    draw_pile: &mut Vec<Card>,
+    discard_pile: &mut Vec<Card>,
+    rng: &mut ChaCha8Rng,
+) -> Option<Card> {
+    if draw_pile.is_empty() {
+        draw_pile.append(discard_pile);
+        draw_pile.shuffle(rng);
+    }
+    draw_pile.pop()
+}
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+enum LobbyAction {
+    Join { player: Uuid },
+    Start { player: Uuid },
+}
+
+impl ActionLabel for LobbyAction {
     fn label(&self) -> String {
-        "Join the game".to_owned()
+        match self {
+            LobbyAction::Join { .. } => "Join the game".to_owned(),
+            LobbyAction::Start { .. } => "Start the game".to_owned(),
+        }
     }
 }
 
@@ -151,51 +179,69 @@ impl ActionLabel for CardAction {
 }
 
 /// The whole game as one straight-line function over the action log, in the
-/// same style as `tic_tac_toe`. Two players join before anything else can
-/// happen, because the deck shuffle (deterministic like everything else
-/// here) is seeded from both of their ids and cannot be computed from just
-/// one.
+/// same style as `tic_tac_toe`. Any number of players may join a table
+/// before anything else can happen, because the shuffle (deterministic like
+/// everything else here) is seeded from all of their ids and cannot be
+/// computed until who is playing is settled; any already-joined player can
+/// then start the game once at least two have joined, which locks the table
+/// and deals in the number of decks the table size calls for.
 fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
-    let mut players: [Option<Uuid>; 2] = [None, None];
-    for slot in 0..2 {
-        let other = players[1 - slot];
-        let join = helper.action::<JoinAction>(
+    let mut players: Vec<Uuid> = Vec::new();
+    loop {
+        let joined = players.clone();
+        let joined_for_options = joined.clone();
+        let action = helper.action::<LobbyAction>(
             move |player| {
-                if other == Some(player) {
+                if !joined.contains(&player) {
+                    "Join the game".to_owned()
+                } else if joined.len() < 2 {
                     "Waiting for another player to join...".to_owned()
                 } else {
-                    "Join the game".to_owned()
+                    format!("{} players joined - start when ready", joined.len())
                 }
             },
             move |player| {
-                if other == Some(player) {
-                    Vec::new()
+                if !joined_for_options.contains(&player) {
+                    vec![LobbyAction::Join { player }]
+                } else if joined_for_options.len() >= 2 {
+                    vec![LobbyAction::Start { player }]
                 } else {
-                    vec![JoinAction { player }]
+                    Vec::new()
                 }
             },
         )?;
-        players[slot] = Some(join.player);
+        match action {
+            LobbyAction::Join { player } => {
+                if !players.contains(&player) {
+                    players.push(player);
+                }
+            }
+            LobbyAction::Start { .. } => break,
+        }
     }
-    let players = players.map(|player| player.expect("both slots were filled above"));
 
-    let seed = (players[0].as_u128() ^ players[1].as_u128()) as u64;
+    let seed = players.iter().fold(0u128, |acc, id| acc ^ id.as_u128()) as u64;
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let mut deck = full_deck();
-    deck.shuffle(&mut rng);
+    let mut draw_pile: Vec<Card> = (0..deck_count_for(players.len()))
+        .flat_map(|_| full_deck())
+        .collect();
+    draw_pile.shuffle(&mut rng);
 
-    let mut hands = [
-        deck.split_off(deck.len() - HAND_SIZE),
-        deck.split_off(deck.len() - HAND_SIZE),
-    ];
-    let mut top_card = deck.pop().expect("deck has cards left after dealing");
+    let mut hands: Vec<Vec<Card>> = players
+        .iter()
+        .map(|_| draw_pile.split_off(draw_pile.len() - HAND_SIZE))
+        .collect();
+    let mut top_card = draw_pile
+        .pop()
+        .expect("decks scale with the table so there are always cards left after dealing");
+    let mut discard_pile: Vec<Card> = Vec::new();
     let mut current_suit = top_card.suit;
     let mut current_rank = top_card.rank;
     let mut turn = 0usize;
-    let mut consecutive_passes = 0u8;
+    let mut consecutive_passes = 0usize;
 
     loop {
-        for (index, winner) in players.into_iter().enumerate() {
+        for (index, winner) in players.iter().copied().enumerate() {
             if hands[index].is_empty() {
                 helper.action::<CardAction>(
                     move |player| {
@@ -209,16 +255,13 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                 )?;
             }
         }
-        if consecutive_passes >= 2 {
-            helper.action::<CardAction>(
-                |_| "Draw! Neither player can play.".to_owned(),
-                |_| Vec::new(),
-            )?;
+        if consecutive_passes >= players.len() {
+            helper.action::<CardAction>(|_| "Draw! No one can play.".to_owned(), |_| Vec::new())?;
         }
 
         let acting = players[turn];
         let hand_snapshot = hands[turn].clone();
-        let pile_has_cards = !deck.is_empty();
+        let pile_has_cards = !draw_pile.is_empty() || !discard_pile.is_empty();
         let top_label = top_card.label();
 
         let action = helper.action::<CardAction>(
@@ -229,7 +272,7 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                         current_suit.label()
                     )
                 } else {
-                    "Waiting for the other player...".to_owned()
+                    "Waiting for your turn...".to_owned()
                 }
             },
             move |player| {
@@ -269,7 +312,7 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
 
         match action {
             CardAction::Draw { .. } => {
-                if let Some(card) = deck.pop() {
+                if let Some(card) = draw_from_pile(&mut draw_pile, &mut discard_pile, &mut rng) {
                     hands[turn].push(card);
                 }
             }
@@ -281,15 +324,16 @@ fn crazy_8s(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                     .position(|hand_card| *hand_card == card)
                     .expect("a legal play always names a card still in hand");
                 hands[turn].remove(position);
+                discard_pile.push(top_card);
                 top_card = card;
                 current_suit = chosen_suit.unwrap_or(card.suit);
                 current_rank = card.rank;
                 consecutive_passes = 0;
-                turn = 1 - turn;
+                turn = (turn + 1) % players.len();
             }
             CardAction::Pass { .. } => {
                 consecutive_passes += 1;
-                turn = 1 - turn;
+                turn = (turn + 1) % players.len();
             }
         }
     }

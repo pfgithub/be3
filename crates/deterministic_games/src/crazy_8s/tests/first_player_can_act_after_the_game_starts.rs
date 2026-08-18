@@ -1,20 +1,22 @@
 use uuid::Uuid;
 
-use super::{deal, join_action};
+use super::{deal, join_action, start_action};
 use crate::{
     crazy_8s::{Card, CardAction, Crazy8s},
     Game,
 };
 
 #[test]
-fn first_player_can_act_after_both_join() {
+fn first_player_can_act_after_the_game_starts() {
     let p0 = Uuid::new_v4();
     let p1 = Uuid::new_v4();
-    let (hand0, _hand1, deck, top) = deal(p0, p1);
-    let actions = vec![join_action(p0), join_action(p1)];
+    let players = [p0, p1];
+    let (hands, deck, top) = deal(&players);
+    let hand0 = &hands[0];
+    let actions = vec![join_action(p0), join_action(p1), start_action(p0)];
 
     let waiting = Crazy8s.show(&actions, p1);
-    assert_eq!(waiting.description, "Waiting for the other player...");
+    assert_eq!(waiting.description, "Waiting for your turn...");
     assert!(waiting.actions.is_empty());
 
     let screen = Crazy8s.show(&actions, p0);
