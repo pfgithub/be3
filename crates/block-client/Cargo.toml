@@ -8,6 +8,7 @@ license.workspace = true
 base64 = "0.22"
 block = { path = "../block" }
 chacha20poly1305 = "0.10"
+deterministic_games = { path = "../deterministic_games" }
 eips = { version = "0.2.4", features = ["serde"] }
 flate2 = "1"
 futures-channel = "0.3"
