@@ -96,7 +96,7 @@ impl EditorKind for TextEditor {
     const DISPLAY_NAME: &'static str = "Text";
     const ICON: MaterialIcon = ICON_DESCRIPTION;
     const CAN_REPLACE_CHILD: bool = true;
-    const DEFAULT_ADD: bool = true;
+    const DEFAULT_IMPORTANT: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<TextDocument>) -> Self {
         Self::new(block, client)

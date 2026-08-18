@@ -73,7 +73,7 @@ impl EditorKind for WorkspaceIndexEditor {
     const CAN_ADD_CHILD: bool = true;
     const CAN_DELETE_CHILD: bool = true;
     const CAN_REPLACE_CHILD: bool = true;
-    const DEFAULT_ADD: bool = true;
+    const DEFAULT_IMPORTANT: bool = true;
 
     fn open(client: &BlockClient, block: BlockHandle<WorkspaceIndex>) -> Self {
         Self::new(client, block)
