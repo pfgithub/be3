@@ -9,7 +9,7 @@
 - Preserve the behavior of the current `BlockEditor` surface: creation, tabs, embedded live editors, passive previews, top and side regions, intrinsic sizing, pan and zoom, access control, child blocks, navigation actions, presence, and dynamic artifacts.
 - Isolate editor failures. A malformed message, panic, timeout, or crash should close only the affected editor instance and show a recoverable error in its place.
 - Support desktop, web, and Android before the in-process editor path is removed. Every supported target must use its optimized GPU texture-sharing mechanism; pixel buffers and software presentation are not part of the architecture.
-- Turn `crates/plugin-demo` into a small reference editor and conformance fixture built on the production SDK, not a parallel debug-only implementation.
+- Turn `crates/editors/counter` into a small reference editor and conformance fixture built on the production SDK, not a parallel debug-only implementation.
 
 ### Architectural boundary
 

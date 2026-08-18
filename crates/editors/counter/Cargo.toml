@@ -12,8 +12,8 @@ name = "plugin-demo-host"
 path = "src/main.rs"
 
 [dependencies]
-block-client = { path = "../block-client" }
-block-editor-plugin = { path = "../block-editor-plugin" }
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
 uuid = "1"
 
 [target.'cfg(target_os = "android")'.dependencies]
