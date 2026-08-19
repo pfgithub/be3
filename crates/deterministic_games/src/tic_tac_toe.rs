@@ -89,12 +89,12 @@ fn tic_tac_toe(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
                 if !can_move(player) {
                     return;
                 }
-                for cell in 0..CELL_COUNT {
-                    if board[cell].is_none() && action(&cell_label(cell)) {
+                for (cell, value) in board.iter_mut().enumerate() {
+                    if value.is_none() && action(&cell_label(cell)) {
                         if players[turn].is_none() {
                             players[turn] = Some(player);
                         }
-                        board[cell] = Some(symbol);
+                        *value = Some(symbol);
                         return;
                     }
                 }
