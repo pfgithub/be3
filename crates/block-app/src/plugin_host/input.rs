@@ -79,14 +79,6 @@ impl InputAdapter {
         messages
     }
 
-    #[cfg(target_os = "windows")]
-    pub(super) fn frame(&self) -> Message {
-        Message::Input(InputBatch {
-            viewport_request_id: self.request_id,
-            events: Vec::new(),
-        })
-    }
-
     fn normalize_event(
         &mut self,
         event: egui::Event,

@@ -57,10 +57,9 @@ pub(crate) fn editor_ui(
         }
         let (response, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        let mut messages = host
+        let messages = host
             .input
             .update(ui, &response, ui.ctx().pixels_per_point());
-        messages.push(host.input.frame());
         if let Some(process) = &host.process {
             process.send(messages);
             let frames = process.latest_surface();
