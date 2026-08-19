@@ -76,6 +76,7 @@ rodio = "0.20"
 [target.'cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
 arboard = "3.6"
 eframe = { version = "0.34.3", default-features = false, features = ["wayland", "x11"] }
+pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_latest", "thread_safe"] }
 rfd = "0.15"
 wry = "0.55.1"
 

@@ -16,6 +16,7 @@ use crate::blocks::infinite_canvas::InfiniteCanvas;
 use crate::blocks::logic_game::LogicGame;
 use crate::blocks::logic_grid::LogicGrid;
 use crate::blocks::map::Map;
+use crate::blocks::pdf::Pdf;
 use crate::blocks::pixel_art::PixelArt;
 use crate::blocks::pixel_ray_tracer::PixelRayTracer;
 use crate::blocks::presentation::Presentation;
@@ -195,6 +196,7 @@ macro_rules! for_each_source_block_type {
         $apply!(LogicGame);
         $apply!(LogicGrid);
         $apply!(Map);
+        $apply!(Pdf);
         $apply!(PixelArt);
         $apply!(PixelRayTracer);
         $apply!(Presentation);

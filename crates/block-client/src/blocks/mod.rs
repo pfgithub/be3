@@ -13,6 +13,7 @@ pub mod infinite_canvas;
 pub mod logic_game;
 pub mod logic_grid;
 pub mod map;
+pub mod pdf;
 pub mod pixel_art;
 pub mod pixel_ray_tracer;
 pub mod presentation;
