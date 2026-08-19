@@ -194,6 +194,10 @@ impl WindowsSurfacePresenter {
             bind_group,
             fence,
         });
+        eprintln!(
+            "plugin presenter imported DXGI surface generation {} size={}x{}",
+            surface.generation, surface.width, surface.height
+        );
         Ok(())
     }
 }
@@ -233,7 +237,12 @@ impl SurfacePresenter for WindowsSurfacePresenter {
                 .as_raw()
                 .Wait(&imported.fence, frame.synchronization_value)
         }
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+        eprintln!(
+            "plugin presenter queued DXGI frame generation={} synchronization_value={}",
+            frame.generation, frame.synchronization_value
+        );
+        Ok(())
     }
 
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>) {

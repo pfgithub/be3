@@ -94,6 +94,7 @@ impl Process {
                 result
             });
             if let Err(error) = result {
+                eprintln!("plugin host process failed: {error}");
                 status_sender.send(error.to_string()).ok();
             }
         });
@@ -220,6 +221,13 @@ fn drive_windows(
                 incoming.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             match message {
                 Message::Surface(surface) => {
+                    eprintln!(
+                        "plugin host received DXGI surface generation {} size={}x{} attachments={}",
+                        surface.generation,
+                        surface.width,
+                        surface.height,
+                        attachments.len()
+                    );
                     surfaces
                         .send(SurfaceEvent::Surface(surface, attachments))
                         .ok();
@@ -228,6 +236,10 @@ fn drive_windows(
                         .ok();
                 }
                 Message::FrameReady(frame) => {
+                    eprintln!(
+                        "plugin host received DXGI frame generation={} synchronization_value={}",
+                        frame.generation, frame.synchronization_value
+                    );
                     surfaces.send(SurfaceEvent::Frame(frame)).ok();
                 }
                 Message::ShutdownAcknowledged => return Ok(()),

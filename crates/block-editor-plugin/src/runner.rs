@@ -137,8 +137,11 @@ fn run_endpoint<A: crate::App>(
     let started = Instant::now();
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
+    let mut rendered_frames = 0_u64;
     loop {
         let (message, attachments) = carrier.receive()?;
+        let incoming_name = message_name(&message);
+        eprintln!("received {incoming_name} from Windows host");
         drop(attachments);
         let create = match &message {
             Message::CreateViewport(viewport) => {
@@ -179,17 +182,39 @@ fn run_endpoint<A: crate::App>(
             for message in next.render(started.elapsed().as_secs_f64())? {
                 carrier.send(&message, &[])?;
             }
-            eprintln!("rendered first frame for DXGI surface generation {generation}");
+            rendered_frames += 1;
+            eprintln!(
+                "rendered and sent DXGI frame {rendered_frames} for surface generation {generation}"
+            );
             surface = Some(next);
         } else if let Some(surface) = &mut surface {
             for message in surface.render(started.elapsed().as_secs_f64())? {
                 carrier.send(&message, &[])?;
             }
+            rendered_frames += 1;
+            eprintln!(
+                "rendered and sent DXGI frame {rendered_frames} after {}",
+                incoming_name
+            );
         }
         if matches!(session.state(), crate::native::State::Closed) {
             unsafe { CloseHandle(host) };
             return Ok(());
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn message_name(message: &block_plugin_api::Message) -> &'static str {
+    use block_plugin_api::Message;
+    match message {
+        Message::CreateViewport(_) => "CreateViewport",
+        Message::ResizeViewport(_) => "ResizeViewport",
+        Message::Input(_) => "Input",
+        Message::Editor(_) => "Editor",
+        Message::Client(_) => "Client",
+        Message::Shutdown => "Shutdown",
+        _ => "other message",
     }
 }
 
