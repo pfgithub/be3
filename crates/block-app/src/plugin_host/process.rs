@@ -128,8 +128,23 @@ impl Process {
     }
 
     #[cfg(target_os = "windows")]
-    pub(super) fn latest_surface(&self) -> Option<SurfaceEvent> {
-        self.surfaces.try_recv().ok()
+    pub(super) fn latest_surface(&self) -> Vec<SurfaceEvent> {
+        let mut latest = Vec::new();
+        for event in self.surfaces.try_iter() {
+            match &event {
+                SurfaceEvent::Surface(_, _) => {
+                    latest.clear();
+                    latest.push(event);
+                }
+                SurfaceEvent::Frame(_) => {
+                    if matches!(latest.last(), Some(SurfaceEvent::Frame(_))) {
+                        latest.pop();
+                    }
+                    latest.push(event);
+                }
+            }
+        }
+        latest
     }
 
     #[cfg(target_os = "windows")]

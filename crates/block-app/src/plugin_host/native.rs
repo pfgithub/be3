@@ -63,8 +63,9 @@ pub(crate) fn editor_ui(
         messages.push(host.input.frame());
         if let Some(process) = &host.process {
             process.send(messages);
-            if let Some(frame) = process.latest_surface() {
-                host.pending_frame = Some(frame.into());
+            let frames = process.latest_surface();
+            if !frames.is_empty() {
+                host.pending_frame = Some(super::windows::WindowsFrame::Events(frames));
             }
         }
         if !host.opened {
@@ -103,7 +104,7 @@ pub(crate) fn editor_ui(
             let frame = host
                 .pending_frame
                 .take()
-                .unwrap_or(super::windows::WindowsFrame::Paint);
+                .unwrap_or(super::windows::WindowsFrame::Events(Vec::new()));
             painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
                 response.rect,
                 PresenterCallback {

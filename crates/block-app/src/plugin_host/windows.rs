@@ -2,7 +2,7 @@ use super::{
     presenter::{PresenterStatus, SurfacePresenter},
     process::SurfaceEvent,
 };
-use block_plugin_api::{FrameReady, SurfaceDescriptor, WindowsSurfaceLifecycle};
+use block_plugin_api::{SurfaceDescriptor, WindowsSurfaceLifecycle};
 use eframe::egui_wgpu::wgpu;
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use windows::Win32::{
@@ -11,18 +11,7 @@ use windows::Win32::{
 };
 
 pub(super) enum WindowsFrame {
-    Surface(SurfaceDescriptor, Vec<OwnedHandle>),
-    Ready(FrameReady),
-    Paint,
-}
-
-impl From<SurfaceEvent> for WindowsFrame {
-    fn from(event: SurfaceEvent) -> Self {
-        match event {
-            SurfaceEvent::Surface(surface, handles) => Self::Surface(surface, handles),
-            SurfaceEvent::Frame(frame) => Self::Ready(frame),
-        }
-    }
+    Events(Vec<SurfaceEvent>),
 }
 
 struct ImportedSurface {
@@ -213,14 +202,21 @@ impl SurfacePresenter for WindowsSurfacePresenter {
     type Frame = WindowsFrame;
 
     fn replace(&mut self, device: &wgpu::Device, frame: &Self::Frame) -> Result<(), String> {
-        if let WindowsFrame::Surface(surface, handles) = frame {
-            self.import(device, surface, handles)?;
+        let WindowsFrame::Events(events) = frame;
+        for event in events {
+            if let SurfaceEvent::Surface(surface, handles) = event {
+                self.import(device, surface, handles)?;
+            }
         }
         Ok(())
     }
 
     fn prepare(&mut self, queue: &wgpu::Queue, frame: &Self::Frame) -> Result<(), String> {
-        let WindowsFrame::Ready(frame) = frame else {
+        let WindowsFrame::Events(events) = frame;
+        let Some(frame) = events.iter().rev().find_map(|event| match event {
+            SurfaceEvent::Frame(frame) => Some(frame),
+            SurfaceEvent::Surface(_, _) => None,
+        }) else {
             return Ok(());
         };
         self.lifecycle
