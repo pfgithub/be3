@@ -159,6 +159,17 @@ impl Surface {
         })
     }
 
+    pub fn resize<A: crate::App>(
+        self,
+        request_id: u64,
+        metrics: ViewportMetrics,
+        generation: u64,
+    ) -> Result<Self, String> {
+        let mut resized = Self::new::<A>(request_id, metrics, generation)?;
+        resized.egui = self.egui;
+        Ok(resized)
+    }
+
     pub fn descriptor(&self) -> (Message, [RawHandle; 2]) {
         let luid = unsafe {
             self.device

@@ -168,7 +168,10 @@ fn run_endpoint<A: crate::App>(
                 metrics.pixel_width, metrics.pixel_height, metrics.scale_factor
             );
             generation += 1;
-            let mut next = Surface::new::<A>(request_id, metrics, generation)?;
+            let mut next = match surface.take() {
+                Some(previous) => previous.resize::<A>(request_id, metrics, generation)?,
+                None => Surface::new::<A>(request_id, metrics, generation)?,
+            };
             eprintln!("created DXGI surface generation {generation}");
             let (descriptor, handles) = next.descriptor();
             carrier.send(&descriptor, &handles)?;
