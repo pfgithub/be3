@@ -179,6 +179,10 @@ fn handle_client_message(host: &mut Host, message: DelegatedClientMessage) {
             operation,
             ..
         } => {
+            eprintln!(
+                "plugin input host received operation request={request_id} sequence={sequence} bytes={}",
+                operation.len()
+            );
             let Ok(value) = serde_json::from_slice::<serde_json::Value>(&operation) else {
                 return;
             };

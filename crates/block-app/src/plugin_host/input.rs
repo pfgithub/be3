@@ -117,6 +117,16 @@ impl InputAdapter {
                 };
                 self.captured = self.pressed_buttons != 0;
                 let position = pos - rect.min;
+                #[cfg(target_os = "windows")]
+                eprintln!(
+                    "plugin input host pointer button={button:?} pressed={pressed} window=({:.1},{:.1}) local=({:.1},{:.1}) viewport=({:.1},{:.1})",
+                    pos.x,
+                    pos.y,
+                    position.x,
+                    position.y,
+                    rect.width(),
+                    rect.height()
+                );
                 push_modifiers(&mut self.modifiers, modifiers, output);
                 output.push(InputEvent::PointerButton {
                     button: pointer_button(button),

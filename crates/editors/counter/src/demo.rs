@@ -25,10 +25,14 @@ impl block_editor_plugin::App for CounterApp {
         ui.centered_and_justified(|ui| {
             ui.horizontal(|ui| {
                 if ui.button("Remove").clicked() {
+                    #[cfg(target_os = "windows")]
+                    eprintln!("plugin input guest activated remove");
                     block.operate(CounterOperation::Decrement);
                 }
                 ui.label(count.to_string());
                 if ui.button("Add").clicked() {
+                    #[cfg(target_os = "windows")]
+                    eprintln!("plugin input guest activated add");
                     block.operate(CounterOperation::Increment);
                 }
             });

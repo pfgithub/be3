@@ -227,12 +227,18 @@ impl EguiSession {
                 pressed,
                 x,
                 y,
-            } => self.input.events.push(egui::Event::PointerButton {
-                pos: egui::pos2(*x, *y),
-                button: pointer_button(*button),
-                pressed: *pressed,
-                modifiers: self.input.modifiers,
-            }),
+            } => {
+                #[cfg(target_os = "windows")]
+                eprintln!(
+                    "plugin input guest pointer button={button:?} pressed={pressed} local=({x:.1},{y:.1})"
+                );
+                self.input.events.push(egui::Event::PointerButton {
+                    pos: egui::pos2(*x, *y),
+                    button: pointer_button(*button),
+                    pressed: *pressed,
+                    modifiers: self.input.modifiers,
+                });
+            }
             InputEvent::Wheel { x, y, unit } => {
                 self.input.events.push(egui::Event::MouseWheel {
                     unit: wheel_unit(*unit),

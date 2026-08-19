@@ -68,6 +68,7 @@ impl Process {
                     let status_sender = status_sender.clone();
                     thread::spawn(move || {
                         for line in io::BufReader::new(stderr).lines().map_while(Result::ok) {
+                            eprintln!("plugin process: {line}");
                             status_sender.send(format!("Counter plugin: {line}")).ok();
                         }
                     });
