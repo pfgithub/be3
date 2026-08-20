@@ -449,8 +449,9 @@ fn tile_region(visible: Rect, bounds: Rect, scale: f32) -> Rect {
     let width = padded.width().min(DETAIL_MAX_DIM / scale);
     let height = padded.height().min(DETAIL_MAX_DIM / scale);
     let center = visible.center();
-    let x = (center.x - width / 2.0).clamp(padded.min.x, padded.max.x - width);
-    let y = (center.y - height / 2.0).clamp(padded.min.y, padded.max.y - height);
+    let x = (center.x - width / 2.0).clamp(padded.min.x, (padded.max.x - width).max(padded.min.x));
+    let y =
+        (center.y - height / 2.0).clamp(padded.min.y, (padded.max.y - height).max(padded.min.y));
     Rect::from_min_size(Pos2::new(x, y), egui::vec2(width, height))
 }
 
@@ -688,3 +689,6 @@ impl BlockEditor for PdfEditor {
         None
     }
 }
+
+#[cfg(test)]
+mod tests;
