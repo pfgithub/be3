@@ -91,6 +91,10 @@ pub(crate) fn editor_ui(
     });
 }
 
+pub(crate) fn region_size(instance: EditorInstanceId, region: EditorRegion) -> Option<egui::Vec2> {
+    HOST.with(|host| host.borrow().instances.region_size(instance, region))
+}
+
 pub(crate) fn close(ctx: &egui::Context, instance: EditorInstanceId) {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
@@ -176,9 +180,11 @@ fn begin_pass(host: &mut Host, ctx: &egui::Context) {
         host.pending_frame = Some(WindowsFrame::Events(frames));
     }
     let messages = process.client_messages();
+    let sizes = process.region_sizes();
     for message in messages {
         host.instances.client_message(message);
     }
+    host.instances.set_region_sizes(sizes);
 }
 
 fn send(host: &Host, messages: Vec<Message>) {

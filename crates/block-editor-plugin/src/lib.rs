@@ -47,6 +47,11 @@ pub mod __private {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn poll() -> Result<js_sys::Array, wasm_bindgen::JsValue> {
+        crate::web::poll()
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn shutdown() {
         crate::web::shutdown();
     }
@@ -86,6 +91,15 @@ macro_rules! plugin {
             block_editor_plugin::__private::wasm_bindgen::JsValue,
         > {
             block_editor_plugin::__private::receive(frame)
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
+        pub fn poll() -> Result<
+            block_editor_plugin::__private::js_sys::Array,
+            block_editor_plugin::__private::wasm_bindgen::JsValue,
+        > {
+            block_editor_plugin::__private::poll()
         }
 
         #[cfg(target_arch = "wasm32")]

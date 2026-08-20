@@ -38,6 +38,8 @@ pub(super) struct Process {
     layouts: Receiver<block_plugin_api::ScreenLayout>,
     #[cfg(target_os = "windows")]
     clients: Receiver<block_plugin_api::TunnelMessage>,
+    #[cfg(target_os = "windows")]
+    sizes: Receiver<Vec<block_plugin_api::RegionSize>>,
 }
 
 impl Process {
@@ -51,6 +53,8 @@ impl Process {
         let (layout_sender, layouts) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (client_sender, clients) = mpsc::channel();
+        #[cfg(target_os = "windows")]
+        let (size_sender, sizes) = mpsc::channel();
         thread::spawn(move || {
             let result = platform::Endpoint::create().and_then(|endpoint| {
                 let argument = endpoint.argument();
@@ -88,6 +92,7 @@ impl Process {
                         &surface_sender,
                         &layout_sender,
                         &client_sender,
+                        &size_sender,
                     );
                     #[cfg(not(target_os = "windows"))]
                     drive(stream, &mut child, &shutdown_receiver)
@@ -109,6 +114,8 @@ impl Process {
             layouts,
             #[cfg(target_os = "windows")]
             clients,
+            #[cfg(target_os = "windows")]
+            sizes,
         }
     }
 
@@ -152,6 +159,11 @@ impl Process {
     pub(super) fn client_messages(&self) -> Vec<block_plugin_api::TunnelMessage> {
         self.clients.try_iter().collect()
     }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn region_sizes(&self) -> Vec<block_plugin_api::RegionSize> {
+        self.sizes.try_iter().flatten().collect()
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -164,6 +176,7 @@ fn drive_windows(
     surfaces: &Sender<SurfaceEvent>,
     layouts: &Sender<block_plugin_api::ScreenLayout>,
     clients: &Sender<block_plugin_api::TunnelMessage>,
+    sizes: &Sender<Vec<block_plugin_api::RegionSize>>,
 ) -> io::Result<()> {
     use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
     use std::os::windows::io::AsRawHandle;
@@ -244,6 +257,9 @@ fn drive_windows(
                 Message::Client(message) => {
                     clients.send(message).ok();
                 }
+                Message::RegionSizes(message) => {
+                    sizes.send(message).ok();
+                }
                 _ => {}
             }
         }
@@ -304,6 +320,7 @@ fn name(message: &Message) -> &'static str {
     match message {
         Message::Screens(_) => "Screens",
         Message::Layout(_) => "Layout",
+        Message::RegionSizes(_) => "RegionSizes",
         Message::Input(_) => "Input",
         Message::Editor(_) => "Editor",
         Message::Client(_) => "Client",

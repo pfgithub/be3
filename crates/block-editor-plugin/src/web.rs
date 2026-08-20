@@ -108,6 +108,24 @@ pub(crate) fn receive(frame: Vec<u8>) -> Result<js_sys::Array, JsValue> {
         .collect()
 }
 
+pub(crate) fn poll() -> Result<js_sys::Array, JsValue> {
+    let mut messages = Vec::new();
+    SCREENS.with(|screens| {
+        let Some(screens) = screens.borrow().clone() else {
+            return;
+        };
+        messages.extend(screens.borrow_mut().outbound());
+    });
+    messages
+        .into_iter()
+        .map(|message| {
+            encode_frame(&message)
+                .map(|frame| JsValue::from(js_sys::Uint8Array::from(frame.as_slice())))
+                .map_err(protocol_error)
+        })
+        .collect()
+}
+
 pub(crate) fn shutdown() {
     RUNNER.with(|current| {
         if let Some(runner) = current.borrow_mut().take() {

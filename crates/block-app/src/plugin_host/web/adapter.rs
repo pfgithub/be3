@@ -1,6 +1,6 @@
 use block_plugin_api::{
-    encode_frame, Capability, EditorMessage, HostSession, Message, QueueError, ScreenLayout,
-    SessionState, SurfaceMechanism, TunnelMessage,
+    encode_frame, Capability, EditorMessage, HostSession, Message, QueueError, RegionSize,
+    ScreenLayout, SessionState, SurfaceMechanism, TunnelMessage,
 };
 use wasm_bindgen::prelude::*;
 
@@ -23,6 +23,12 @@ export function web_plugin_send(canvasId, frame) {
     return module.receive(frame);
 }
 
+export function web_plugin_poll(canvasId) {
+    const module = plugins.get(canvasId);
+    if (!module) return [];
+    return module.poll();
+}
+
 export function web_plugin_shutdown(canvasId) {
     const module = plugins.get(canvasId);
     if (module) {
@@ -36,6 +42,8 @@ extern "C" {
     async fn web_plugin_start(url: &str, canvas_id: &str) -> Result<js_sys::Uint8Array, JsValue>;
     #[wasm_bindgen(catch)]
     fn web_plugin_send(canvas_id: &str, frame: &[u8]) -> Result<js_sys::Array, JsValue>;
+    #[wasm_bindgen(catch)]
+    fn web_plugin_poll(canvas_id: &str) -> Result<js_sys::Array, JsValue>;
     fn web_plugin_shutdown(canvas_id: &str);
 }
 
@@ -44,6 +52,7 @@ pub(super) struct WebProtocolAdapter {
     session: HostSession,
     client_messages: Vec<TunnelMessage>,
     layout: Option<ScreenLayout>,
+    region_sizes: Vec<RegionSize>,
 }
 
 impl WebProtocolAdapter {
@@ -67,6 +76,7 @@ impl WebProtocolAdapter {
             session,
             client_messages: Vec::new(),
             layout: None,
+            region_sizes: Vec::new(),
         };
         adapter.flush()?;
         if adapter.session.state() != &SessionState::Running {
@@ -98,6 +108,15 @@ impl WebProtocolAdapter {
         std::mem::take(&mut self.client_messages)
     }
 
+    pub(super) fn take_region_sizes(&mut self) -> Vec<RegionSize> {
+        std::mem::take(&mut self.region_sizes)
+    }
+
+    pub(super) fn poll(&mut self) -> Result<(), String> {
+        let responses = web_plugin_poll(self.canvas_id).map_err(js_error)?;
+        self.receive_all(&responses)
+    }
+
     pub(super) fn take_layout(&mut self) -> Option<ScreenLayout> {
         self.layout.take()
     }
@@ -112,14 +131,20 @@ impl WebProtocolAdapter {
         while let Some(message) = self.session.next_outbound() {
             let frame = encode_frame(&message).map_err(|error| error.to_string())?;
             let responses = web_plugin_send(self.canvas_id, &frame).map_err(js_error)?;
-            for response in responses.iter() {
-                let response = js_sys::Uint8Array::new(&response).to_vec();
-                match decode(&response)? {
-                    Message::Client(message) => self.client_messages.push(message),
-                    Message::Layout(layout) => self.layout = Some(layout),
-                    Message::Editor(EditorMessage::Acknowledged { .. }) => {}
-                    message => self.session.receive(message, now()),
-                }
+            self.receive_all(&responses)?;
+        }
+        Ok(())
+    }
+
+    fn receive_all(&mut self, responses: &js_sys::Array) -> Result<(), String> {
+        for response in responses.iter() {
+            let response = js_sys::Uint8Array::new(&response).to_vec();
+            match decode(&response)? {
+                Message::Client(message) => self.client_messages.push(message),
+                Message::Layout(layout) => self.layout = Some(layout),
+                Message::RegionSizes(sizes) => self.region_sizes.extend(sizes),
+                Message::Editor(EditorMessage::Acknowledged { .. }) => {}
+                message => self.session.receive(message, now()),
             }
         }
         Ok(())

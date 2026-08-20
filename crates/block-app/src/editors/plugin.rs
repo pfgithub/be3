@@ -133,7 +133,9 @@ impl BlockEditor for PluginEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let size = egui::vec2(ui.available_width(), toolbar_height(ui));
+        let height = crate::plugin_host::region_size(self.instance, EditorRegion::Toolbar)
+            .map_or_else(|| toolbar_height(ui), |size| size.y.max(1.0));
+        let size = egui::vec2(ui.available_width(), height);
         self.region_ui(ui, editors, EditorRegion::Toolbar, size);
         None
     }

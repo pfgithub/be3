@@ -69,7 +69,7 @@ impl block_editor_plugin::App for CounterApp {
             ui.spinner();
             return;
         };
-        ui.horizontal_centered(|ui| {
+        ui.horizontal(|ui| {
             if ui.button("-").clicked() {
                 self.apply(CounterOperation::Decrement);
             }

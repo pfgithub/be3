@@ -145,6 +145,10 @@ pub(crate) fn editor_ui(
     });
 }
 
+pub(crate) fn region_size(instance: EditorInstanceId, region: EditorRegion) -> Option<egui::Vec2> {
+    STATE.with(|state| state.borrow().instances.region_size(instance, region))
+}
+
 pub(crate) fn close(ctx: &egui::Context, instance: EditorInstanceId) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -199,10 +203,20 @@ fn begin_pass(state: &mut State, ctx: &egui::Context) {
     }
     messages.extend(state.instances.pending());
     send(state, messages);
+    if let Some(adapter) = &mut state.adapter {
+        if let Err(error) = adapter.poll() {
+            state.error = Some(error);
+        }
+    }
     let client_messages = state
         .adapter
         .as_mut()
         .map(WebProtocolAdapter::take_client_messages)
+        .unwrap_or_default();
+    let region_sizes = state
+        .adapter
+        .as_mut()
+        .map(WebProtocolAdapter::take_region_sizes)
         .unwrap_or_default();
     if let Some(layout) = state
         .adapter
@@ -214,6 +228,7 @@ fn begin_pass(state: &mut State, ctx: &egui::Context) {
     for message in client_messages {
         state.instances.client_message(message);
     }
+    state.instances.set_region_sizes(region_sizes);
 }
 
 fn send(state: &mut State, messages: Vec<Message>) {

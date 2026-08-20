@@ -1,8 +1,8 @@
 use block::Block;
 use block_client::{blocks::counter::Counter, BlockClient, BlockHandle, Tunnel};
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenId, ScreenRequest, ScreenSet,
-    TunnelMessage,
+    EditorInstanceId, EditorMessage, EditorRegion, Message, RegionSize, ScreenId, ScreenRequest,
+    ScreenSet, TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -28,6 +28,7 @@ struct Screen {
     input: InputAdapter,
     request: ScreenRequest,
     last_seen: u64,
+    used: Option<egui::Vec2>,
 }
 
 pub(super) struct NextScreens {
@@ -80,6 +81,7 @@ impl Instances {
                     metrics: viewport_metrics(size, scale_factor),
                 },
                 last_seen: pass,
+                used: None,
             }
         });
         screen.request.metrics = viewport_metrics(size, scale_factor);
@@ -125,6 +127,28 @@ impl Instances {
             screens.extend(regions);
         }
         NextScreens { opened, screens }
+    }
+
+    pub(super) fn set_region_sizes(&mut self, sizes: Vec<RegionSize>) {
+        for size in sizes {
+            for entry in self.entries.values_mut() {
+                if let Some(screen) = entry
+                    .screens
+                    .values_mut()
+                    .find(|screen| screen.request.screen == size.screen)
+                {
+                    screen.used = Some(egui::vec2(size.logical_width, size.logical_height));
+                }
+            }
+        }
+    }
+
+    pub(super) fn region_size(
+        &self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+    ) -> Option<egui::Vec2> {
+        self.entries.get(&instance)?.screens.get(&region)?.used
     }
 
     pub(super) fn screen_set(&mut self, screens: Vec<ScreenRequest>) -> Message {

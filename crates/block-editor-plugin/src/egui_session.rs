@@ -1,7 +1,7 @@
 use block_client::TunnelCarrier;
 use block_plugin_api::{
-    EditorInstanceId, EditorRegion, InputEvent, Message, PointerButton, ScreenPlacement,
-    TunnelMessage, WheelUnit,
+    EditorInstanceId, EditorRegion, InputEvent, Message, PointerButton, RegionSize,
+    ScreenPlacement, TunnelMessage, WheelUnit,
 };
 use eframe::egui;
 use std::collections::HashMap;
@@ -18,6 +18,8 @@ pub(crate) struct EguiSession {
 struct RegionState {
     input: egui::RawInput,
     placement: Option<ScreenPlacement>,
+    used: Option<egui::Vec2>,
+    reported: Option<egui::Vec2>,
 }
 
 trait AppUi {
@@ -69,11 +71,15 @@ impl EguiSession {
     }
 
     pub(crate) fn outbound(&mut self) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let sizes = self.region_sizes();
+        if !sizes.is_empty() {
+            messages.push(Message::RegionSizes(sizes));
+        }
         let instance = self.instance;
         let Some(carrier) = &mut self.carrier else {
-            return Vec::new();
+            return messages;
         };
-        let mut messages = Vec::new();
         while let Some(payload) = carrier.try_recv() {
             messages.push(Message::Client(TunnelMessage::Request {
                 instance,
@@ -81,6 +87,33 @@ impl EguiSession {
             }));
         }
         messages
+    }
+
+    fn region_sizes(&mut self) -> Vec<RegionSize> {
+        let mut sizes = Vec::new();
+        for state in self.regions.values_mut() {
+            let (Some(placement), Some(used)) = (state.placement, state.used) else {
+                continue;
+            };
+            if state.reported == Some(used) {
+                continue;
+            }
+            state.reported = Some(used);
+            sizes.push(RegionSize {
+                screen: placement.screen,
+                logical_width: used.x,
+                logical_height: used.y,
+            });
+        }
+        sizes
+    }
+
+    fn used(&mut self, region: EditorRegion, content: egui::Rect) {
+        let origin = self.rect(region).min;
+        let Some(state) = self.regions.get_mut(&region) else {
+            return;
+        };
+        state.used = Some((content.max - origin).max(egui::Vec2::ZERO));
     }
 
     pub(crate) fn client_message(&mut self, message: &TunnelMessage) {
@@ -110,23 +143,29 @@ impl EguiSession {
         let app = &mut self.app;
         let frame =
             egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO);
-        context.run_ui(input, |ui| {
+        let output = context.run_ui(input, |ui| {
             egui::CentralPanel::default()
                 .frame(frame)
                 .show_inside(ui, |ui| app.ui(ui, region));
-        })
+        });
+        self.used(region, context.globally_used_rect());
+        output
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
         let rect = self.rect(region);
         let app = &mut self.app;
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(rect)
-                .id_salt((self.instance.0, region)),
-            |ui| app.ui(ui, region),
-        );
+        let content = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .id_salt((self.instance.0, region)),
+                |ui| app.ui(ui, region),
+            )
+            .response
+            .rect;
+        self.used(region, content);
     }
 
     #[cfg(target_arch = "wasm32")]

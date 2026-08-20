@@ -54,6 +54,13 @@ pub(crate) fn editor_ui(
     }
 }
 
+pub(crate) fn region_size(
+    _instance: block_plugin_api::EditorInstanceId,
+    _region: block_plugin_api::EditorRegion,
+) -> Option<egui::Vec2> {
+    None
+}
+
 fn ensure_bound() {
     let state = STATE.get_or_init(Default::default);
     let Ok(mut state) = state.lock() else {

@@ -16,8 +16,8 @@ mod web;
 mod windows;
 
 #[cfg(target_os = "android")]
-pub(crate) use android::{close, editor_ui};
+pub(crate) use android::{close, editor_ui, region_size};
 #[cfg(target_os = "windows")]
-pub(crate) use native::{close, editor_ui, install};
+pub(crate) use native::{close, editor_ui, install, region_size};
 #[cfg(target_arch = "wasm32")]
-pub(crate) use web::{close, editor_ui, install};
+pub(crate) use web::{close, editor_ui, install, region_size};

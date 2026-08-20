@@ -34,7 +34,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
@@ -73,6 +73,13 @@ pub struct ScreenPlacement {
     pub width: u32,
     pub height: u32,
     pub scale_factor_millis: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RegionSize {
+    pub screen: ScreenId,
+    pub logical_width: f32,
+    pub logical_height: f32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,6 +301,7 @@ pub enum Message {
     HelloRejected(ProtocolError),
     Screens(ScreenSet),
     Layout(ScreenLayout),
+    RegionSizes(Vec<RegionSize>),
     Input(InputBatch),
     SurfaceCapabilities(SurfaceCapabilities),
     Surface(SurfaceDescriptor),
@@ -576,6 +584,7 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
         }
         Message::Screens(value) => collection(value.screens.len()),
         Message::Layout(value) => collection(value.screens.len()),
+        Message::RegionSizes(value) => collection(value.len()),
         Message::SurfaceCapabilities(value) => collection(value.mechanisms.len()),
         Message::Surface(value) => {
             if value.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
