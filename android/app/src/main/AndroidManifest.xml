@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:label="${be3Label}" android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
-        <activity android:name="android.app.NativeActivity" android:configChanges="orientation|keyboardHidden|screenSize|screenLayout" android:exported="true">
+        <activity android:name="com.be3.block.MainActivity" android:configChanges="orientation|keyboardHidden|screenSize|screenLayout" android:exported="true">
             <meta-data android:name="android.app.lib_name" android:value="block_app_lib" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

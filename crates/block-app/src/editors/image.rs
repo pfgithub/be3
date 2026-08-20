@@ -11,6 +11,16 @@ use super::{
     BlockEditor, BlockRenderContext, ConfigurableEditor, CreationOptions, DirectEditorCapabilities,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
+use crate::platform::{FileFilter, FilePicker, PickedFile};
+
+pub(crate) const IMAGE_FILTER: FileFilter = FileFilter {
+    name: "Images",
+    default_file_name: "Image",
+    extensions: &[
+        "bmp", "gif", "ico", "jpg", "jpeg", "png", "pnm", "tga", "tif", "tiff", "webp",
+    ],
+    mime_types: &["image/*"],
+};
 
 const DIRECT_EDITOR_LONG_SIDE: f32 = 1024.0;
 const DIRECT_EDITOR_SHORT_SIDE: f32 = 24.0;
@@ -38,25 +48,30 @@ impl ConfigurableEditor for ImageEditor {
 
 #[derive(Default)]
 pub(crate) struct ChosenImage {
+    picker: FilePicker,
     image: Option<Image>,
     error: Option<String>,
 }
 
 impl CreationOptions for ChosenImage {
     fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        match self.picker.poll(ui.ctx()).map(|file| file.and_then(decode)) {
+            Some(Ok(image)) => {
+                self.image = Some(image);
+                self.error = None;
+            }
+            Some(Err(error)) => {
+                self.image = None;
+                self.error = Some(error);
+            }
+            None => {}
+        }
         ui.horizontal(|ui| {
-            if ui.button("Choose file...").clicked() {
-                match pick_image_file() {
-                    Ok(Some(image)) => {
-                        self.image = Some(image);
-                        self.error = None;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        self.image = None;
-                        self.error = Some(error);
-                    }
-                }
+            if ui
+                .add_enabled(!self.picker.is_open(), egui::Button::new("Choose file..."))
+                .clicked()
+            {
+                self.picker.open(ui.ctx(), &IMAGE_FILTER);
             }
             match &self.image {
                 Some(image) => ui.label(image.source_name()),
@@ -75,6 +90,7 @@ pub(crate) struct ImageEditor {
     texture: Option<TextureHandle>,
     texture_error: Option<String>,
     texture_revision: Option<u64>,
+    picker: FilePicker,
     import_error: Option<String>,
 }
 
@@ -85,6 +101,7 @@ impl ImageEditor {
             texture: None,
             texture_error: None,
             texture_revision: None,
+            picker: FilePicker::default(),
             import_error: None,
         }
     }
@@ -155,52 +172,22 @@ impl ImageEditor {
         painter.add(mesh);
     }
 
-    fn replace_from_file(&mut self) {
-        match pick_image_file() {
-            Ok(Some(image)) => {
+    fn poll_picker(&mut self, context: &egui::Context) {
+        match self.picker.poll(context).map(|file| file.and_then(decode)) {
+            Some(Ok(image)) => {
                 self.block.operate(ImageOperation::Replace { image });
                 self.import_error = None;
             }
-            Ok(None) => {}
-            Err(error) => self.import_error = Some(error),
+            Some(Err(error)) => self.import_error = Some(error),
+            None => {}
         }
     }
 }
 
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter(
-            "Images",
-            &[
-                "bmp", "gif", "ico", "jpg", "jpeg", "png", "pnm", "tga", "tif", "tiff", "webp",
-            ],
-        )
-        .pick_file()
-    else {
-        return Ok(None);
-    };
-    let source_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("Image")
-        .to_owned();
-    let data = std::fs::read(&path)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-    Image::from_compressed(source_name, data)
-        .map(Some)
-        .map_err(|error| format!("Could not import {}: {error}", path.display()))
-}
-
-#[cfg(target_os = "android")]
-pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
-    Err("Choosing an image file is not available on Android".into())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn pick_image_file() -> Result<Option<Image>, String> {
-    Err("Choosing an image file is not available in the browser yet".into())
+pub(crate) fn decode(file: PickedFile) -> Result<Image, String> {
+    let PickedFile { name, data } = file;
+    Image::from_compressed(name.clone(), data)
+        .map_err(|error| format!("Could not import {name}: {error}"))
 }
 
 pub(super) fn create_image_block(
@@ -269,8 +256,15 @@ impl BlockEditor for ImageEditor {
         _editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         ui.heading("Image");
-        if ui.button("Replace image...").clicked() {
-            self.replace_from_file();
+        self.poll_picker(ui.ctx());
+        if ui
+            .add_enabled(
+                !self.picker.is_open(),
+                egui::Button::new("Replace image..."),
+            )
+            .clicked()
+        {
+            self.picker.open(ui.ctx(), &IMAGE_FILTER);
         }
         if let Some(error) = &self.import_error {
             ui.colored_label(ui.visuals().error_fg_color, error);

@@ -7,11 +7,13 @@
 
 use std::sync::mpsc::Receiver;
 
+mod file_picker;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+pub(crate) use file_picker::{FileFilter, FilePicker, PickedFile};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use native::{spawn_request, start_embedded_server, EmbeddedServer};
 #[cfg(target_arch = "wasm32")]

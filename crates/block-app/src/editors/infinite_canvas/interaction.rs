@@ -22,6 +22,36 @@ impl InfiniteCanvasEditor {
         }
     }
 
+    /// The chosen image arrives some frames after the menu item was clicked
+    /// on Android and the web, so it lands where the menu was opened rather
+    /// than wherever the pointer has since moved.
+    pub(super) fn import_picked_image(
+        &mut self,
+        context: &egui::Context,
+        editors: &mut EditorAccess<'_>,
+    ) {
+        match self
+            .image_picker
+            .poll(context)
+            .map(|file| file.and_then(decode_image))
+        {
+            Some(Ok(image)) => {
+                self.image_import_error = None;
+                let center = self
+                    .pending_image_center
+                    .take()
+                    .unwrap_or(self.viewport_center);
+                self.add_imported_image(editors, image, center);
+                self.tool = Tool::Select;
+            }
+            Some(Err(error)) => {
+                self.pending_image_center = None;
+                self.image_import_error = Some(error);
+            }
+            None => {}
+        }
+    }
+
     pub(super) fn import_dropped_images(
         &mut self,
         response: &egui::Response,
@@ -610,16 +640,8 @@ impl InfiniteCanvasEditor {
                         ui.close();
                     }
                     if ui.button("Image…").clicked() {
-                        match pick_image_file() {
-                            Ok(Some(image)) => {
-                                self.image_import_error = None;
-                                let center = self.context_menu_position.unwrap_or_default();
-                                self.add_imported_image(editors, image, center);
-                                self.tool = Tool::Select;
-                            }
-                            Ok(None) => {}
-                            Err(error) => self.image_import_error = Some(error),
-                        }
+                        self.pending_image_center = self.context_menu_position;
+                        self.image_picker.open(ui.ctx(), &IMAGE_FILTER);
                         ui.close();
                     }
                     if ui.button("Block…").clicked() {

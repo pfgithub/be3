@@ -338,6 +338,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                 }
             }
         }
+        self.import_picked_image(&response.ctx, editors);
         if self.focused_editor.is_none() {
             self.import_dropped_images(&response, canvas_rect, editors);
             self.import_clipboard_image(&response, canvas_rect, editors);

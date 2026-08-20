@@ -21,6 +21,14 @@ use super::{
     BlockEditor, ConfigurableEditor, CreationOptions, DirectEditorCapabilities,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
+use crate::platform::{FileFilter, FilePicker, PickedFile};
+
+const PDF_FILTER: FileFilter = FileFilter {
+    name: "PDF",
+    default_file_name: "Document.pdf",
+    extensions: &["pdf"],
+    mime_types: &["application/pdf"],
+};
 
 const DEFAULT_PAGE_SIZE: Vec2 = egui::vec2(612.0, 792.0);
 const BASE_MAX_DIM: f32 = 1600.0;
@@ -53,25 +61,30 @@ impl ConfigurableEditor for PdfEditor {
 
 #[derive(Default)]
 pub(crate) struct ChosenPdf {
+    picker: FilePicker,
     pdf: Option<Pdf>,
     error: Option<String>,
 }
 
 impl CreationOptions for ChosenPdf {
     fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        match self.picker.poll(ui.ctx()).map(|file| file.and_then(decode)) {
+            Some(Ok(pdf)) => {
+                self.pdf = Some(pdf);
+                self.error = None;
+            }
+            Some(Err(error)) => {
+                self.pdf = None;
+                self.error = Some(error);
+            }
+            None => {}
+        }
         ui.horizontal(|ui| {
-            if ui.button("Choose file...").clicked() {
-                match pick_pdf_file() {
-                    Ok(Some(pdf)) => {
-                        self.pdf = Some(pdf);
-                        self.error = None;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        self.pdf = None;
-                        self.error = Some(error);
-                    }
-                }
+            if ui
+                .add_enabled(!self.picker.is_open(), egui::Button::new("Choose file..."))
+                .clicked()
+            {
+                self.picker.open(ui.ctx(), &PDF_FILTER);
             }
             match &self.pdf {
                 Some(pdf) => ui.label(pdf.source_name()),
@@ -145,6 +158,7 @@ pub(crate) struct PdfEditor {
     render_job: Option<(RenderRequest, Receiver<RenderJobResult>)>,
     failed: Option<(u64, usize)>,
     render_error: Option<String>,
+    picker: FilePicker,
     import_error: Option<String>,
 }
 
@@ -160,6 +174,7 @@ impl PdfEditor {
             render_job: None,
             failed: None,
             render_error: None,
+            picker: FilePicker::default(),
             import_error: None,
         }
     }
@@ -419,15 +434,15 @@ impl PdfEditor {
         }
     }
 
-    fn replace_from_file(&mut self) {
-        match pick_pdf_file() {
-            Ok(Some(pdf)) => {
+    fn poll_picker(&mut self, context: &egui::Context) {
+        match self.picker.poll(context).map(|file| file.and_then(decode)) {
+            Some(Ok(pdf)) => {
                 self.block.operate(PdfOperation::Replace { pdf });
                 self.page = 0;
                 self.import_error = None;
             }
-            Ok(None) => {}
-            Err(error) => self.import_error = Some(error),
+            Some(Err(error)) => self.import_error = Some(error),
+            None => {}
         }
     }
 }
@@ -542,24 +557,9 @@ fn bind_next_to_executable() -> Option<Box<dyn pdfium_render::prelude::PdfiumLib
     Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(dir)).ok()
 }
 
-fn pick_pdf_file() -> Result<Option<Pdf>, String> {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("PDF", &["pdf"])
-        .pick_file()
-    else {
-        return Ok(None);
-    };
-    let source_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("Document.pdf")
-        .to_owned();
-    let data = std::fs::read(&path)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-    Pdf::new(source_name, data)
-        .map(Some)
-        .map_err(|error| format!("Could not import {}: {error}", path.display()))
+fn decode(file: PickedFile) -> Result<Pdf, String> {
+    let PickedFile { name, data } = file;
+    Pdf::new(name.clone(), data).map_err(|error| format!("Could not import {name}: {error}"))
 }
 
 impl BlockEditor for PdfEditor {
@@ -646,8 +646,12 @@ impl BlockEditor for PdfEditor {
         if let Some(pdf) = self.block.read() {
             ui.label(pdf.source_name());
         }
-        if ui.button("Replace PDF...").clicked() {
-            self.replace_from_file();
+        self.poll_picker(ui.ctx());
+        if ui
+            .add_enabled(!self.picker.is_open(), egui::Button::new("Replace PDF..."))
+            .clicked()
+        {
+            self.picker.open(ui.ctx(), &PDF_FILTER);
         }
         if let Some(error) = &self.import_error {
             ui.colored_label(ui.visuals().error_fg_color, error);

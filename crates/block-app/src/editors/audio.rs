@@ -18,6 +18,14 @@ use super::{
     BlockEditor, ConfigurableEditor, CreationOptions, DirectEditorCapabilities,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
+use crate::platform::{FileFilter, FilePicker, PickedFile};
+
+const AUDIO_FILTER: FileFilter = FileFilter {
+    name: "Audio",
+    default_file_name: "Audio",
+    extensions: &["mp3", "wav", "ogg", "oga", "flac", "m4a"],
+    mime_types: &["audio/*"],
+};
 
 const DIRECT_EDITOR_SIZE: Vec2 = egui::vec2(320.0, 180.0);
 
@@ -44,25 +52,30 @@ impl ConfigurableEditor for AudioEditor {
 
 #[derive(Default)]
 pub(crate) struct ChosenAudio {
+    picker: FilePicker,
     audio: Option<Audio>,
     error: Option<String>,
 }
 
 impl CreationOptions for ChosenAudio {
     fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        match self.picker.poll(ui.ctx()).map(|file| file.and_then(decode)) {
+            Some(Ok(audio)) => {
+                self.audio = Some(audio);
+                self.error = None;
+            }
+            Some(Err(error)) => {
+                self.audio = None;
+                self.error = Some(error);
+            }
+            None => {}
+        }
         ui.horizontal(|ui| {
-            if ui.button("Choose file...").clicked() {
-                match pick_audio_file() {
-                    Ok(Some(audio)) => {
-                        self.audio = Some(audio);
-                        self.error = None;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        self.audio = None;
-                        self.error = Some(error);
-                    }
-                }
+            if ui
+                .add_enabled(!self.picker.is_open(), egui::Button::new("Choose file..."))
+                .clicked()
+            {
+                self.picker.open(ui.ctx(), &AUDIO_FILTER);
             }
             match &self.audio {
                 Some(audio) => ui.label(audio.source_name()),
@@ -79,6 +92,7 @@ impl CreationOptions for ChosenAudio {
 pub(crate) struct AudioEditor {
     block: BlockHandle<Audio>,
     player: AudioPlayer,
+    picker: FilePicker,
     import_error: Option<String>,
 }
 
@@ -87,19 +101,20 @@ impl AudioEditor {
         Self {
             block,
             player: AudioPlayer::new(),
+            picker: FilePicker::default(),
             import_error: None,
         }
     }
 
-    fn replace_from_file(&mut self) {
-        match pick_audio_file() {
-            Ok(Some(audio)) => {
+    fn poll_picker(&mut self, context: &egui::Context) {
+        match self.picker.poll(context).map(|file| file.and_then(decode)) {
+            Some(Ok(audio)) => {
                 self.block.operate(AudioOperation::Replace { audio });
                 self.player.reset();
                 self.import_error = None;
             }
-            Ok(None) => {}
-            Err(error) => self.import_error = Some(error),
+            Some(Err(error)) => self.import_error = Some(error),
+            None => {}
         }
     }
 }
@@ -109,11 +124,7 @@ fn format_duration(duration: Duration) -> String {
     format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
 }
 
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-const AUDIO_EXTENSIONS: [&str; 6] = ["mp3", "wav", "ogg", "oga", "flac", "m4a"];
-
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-fn guess_audio_media_type(source_name: &str) -> &'static str {
+fn guess_media_type(source_name: &str) -> &'static str {
     match source_name
         .rsplit('.')
         .next()
@@ -129,36 +140,11 @@ fn guess_audio_media_type(source_name: &str) -> &'static str {
     }
 }
 
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-fn pick_audio_file() -> Result<Option<Audio>, String> {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("Audio", &AUDIO_EXTENSIONS)
-        .pick_file()
-    else {
-        return Ok(None);
-    };
-    let source_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("Audio")
-        .to_owned();
-    let media_type = guess_audio_media_type(&source_name);
-    let data = std::fs::read(&path)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-    Audio::new(source_name, media_type, data)
-        .map(Some)
-        .map_err(|error| format!("Could not import {}: {error}", path.display()))
-}
-
-#[cfg(target_os = "android")]
-fn pick_audio_file() -> Result<Option<Audio>, String> {
-    Err("Choosing an audio file is not available on Android".into())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn pick_audio_file() -> Result<Option<Audio>, String> {
-    Err("Choosing an audio file is not available in the browser yet".into())
+fn decode(file: PickedFile) -> Result<Audio, String> {
+    let PickedFile { name, data } = file;
+    let media_type = guess_media_type(&name);
+    Audio::new(name.clone(), media_type, data)
+        .map_err(|error| format!("Could not import {name}: {error}"))
 }
 
 impl BlockEditor for AudioEditor {
@@ -188,8 +174,15 @@ impl BlockEditor for AudioEditor {
         _editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         ui.heading("Audio");
-        if ui.button("Replace audio...").clicked() {
-            self.replace_from_file();
+        self.poll_picker(ui.ctx());
+        if ui
+            .add_enabled(
+                !self.picker.is_open(),
+                egui::Button::new("Replace audio..."),
+            )
+            .clicked()
+        {
+            self.picker.open(ui.ctx(), &AUDIO_FILTER);
         }
         if let Some(error) = &self.import_error {
             ui.colored_label(ui.visuals().error_fg_color, error);

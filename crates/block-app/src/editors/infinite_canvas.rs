@@ -36,12 +36,12 @@ use egui_material_icons::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{block_picker::BlockPicker, presence_color_rgb};
+use crate::{block_picker::BlockPicker, platform::FilePicker, presence_color_rgb};
 
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
-    image::{create_image_block, pick_image_file},
+    image::{create_image_block, decode as decode_image, IMAGE_FILTER},
     name_galley, paint_name, reference_cache, BlockEditor, BlockLabel, BlockRenderContext,
     CreatableEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
@@ -324,6 +324,8 @@ pub(super) struct InfiniteCanvasEditor {
     editing_text: Option<Uuid>,
     focus_text_requested: bool,
     image_import_error: Option<String>,
+    image_picker: FilePicker,
+    pending_image_center: Option<CanvasPoint>,
     pending_file_drop_position: Option<CanvasPoint>,
     clipboard_image_paste: ClipboardImagePaste,
     focused_editor: Option<Uuid>,

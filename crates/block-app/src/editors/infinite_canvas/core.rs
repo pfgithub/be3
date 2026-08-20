@@ -21,6 +21,8 @@ impl InfiniteCanvasEditor {
             editing_text: None,
             focus_text_requested: false,
             image_import_error: None,
+            image_picker: FilePicker::default(),
+            pending_image_center: None,
             pending_file_drop_position: None,
             clipboard_image_paste: ClipboardImagePaste::default(),
             focused_editor: None,
