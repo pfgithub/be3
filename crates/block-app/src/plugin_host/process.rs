@@ -186,39 +186,27 @@ fn drive_windows(
             "plugin handshake was rejected",
         ));
     }
-    let reader = stream.try_clone()?;
-    let peer = child.as_raw_handle() as usize;
-    let (incoming_sender, incoming) = mpsc::channel();
-    thread::spawn(move || {
-        let peer = peer as windows_sys::Win32::Foundation::HANDLE;
-        let mut carrier = WindowsAttachmentCarrier::new(reader, peer);
-        loop {
-            match carrier.receive() {
-                Ok(value) => incoming_sender.send(Ok(value)).ok(),
-                Err(error) => {
-                    incoming_sender.send(Err(error.to_string())).ok();
-                    break;
-                }
-            };
-        }
-    });
-    let mut writer = WindowsAttachmentCarrier::new(stream, peer as _);
+    let peer: windows_sys::Win32::Foundation::HANDLE = child.as_raw_handle().cast();
+    let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
+    let mut carrier = WindowsAttachmentCarrier::new(stream, peer);
     status
         .send("Plugin connected; waiting for a DXGI surface".into())
         .ok();
     loop {
         if shutdown.try_recv().is_ok() {
-            writer
+            carrier
                 .send(&Message::Shutdown, &[])
                 .map_err(carrier_error)?;
             return wait_for_shutdown(child);
         }
         while let Ok(message) = messages.try_recv() {
-            writer.send(&message, &[]).map_err(carrier_error)?;
+            if !matches!(message, Message::Input(_)) {
+                eprintln!("plugin host sending {} to the plugin", name(&message));
+            }
+            carrier.send(&message, &[]).map_err(carrier_error)?;
         }
-        while let Ok(incoming) = incoming.try_recv() {
-            let (message, attachments) =
-                incoming.map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        while pending(pipe)? {
+            let (message, attachments) = carrier.receive().map_err(carrier_error)?;
             match message {
                 Message::Surface(surface) => {
                     eprintln!(
@@ -255,7 +243,39 @@ fn drive_windows(
                 format!("plugin exited unexpectedly: {exit}"),
             ));
         }
-        thread::sleep(Duration::from_millis(5));
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn pending(pipe: windows_sys::Win32::Foundation::HANDLE) -> io::Result<bool> {
+    let mut available = 0;
+    let peeked = unsafe {
+        windows_sys::Win32::System::Pipes::PeekNamedPipe(
+            pipe,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &raw mut available,
+            std::ptr::null_mut(),
+        )
+    };
+    if peeked == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(available > 0)
+}
+
+#[cfg(target_os = "windows")]
+fn name(message: &Message) -> &'static str {
+    match message {
+        Message::CreateViewport(_) => "CreateViewport",
+        Message::ResizeViewport(_) => "ResizeViewport",
+        Message::Input(_) => "Input",
+        Message::Editor(_) => "Editor",
+        Message::Client(_) => "Client",
+        Message::Shutdown => "Shutdown",
+        _ => "a message",
     }
 }
 
