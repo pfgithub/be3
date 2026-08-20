@@ -38,10 +38,6 @@ pub(crate) fn editor_ui(
             );
             return;
         }
-        ui.label(host.process.as_mut().map_or_else(
-            || "Counter plugin is not running".to_owned(),
-            super::process::Process::status,
-        ));
         if let Some(status) = &host.presenter_status {
             use super::presenter::PresenterState;
             match status.get() {

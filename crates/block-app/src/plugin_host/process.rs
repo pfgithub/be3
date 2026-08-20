@@ -24,9 +24,7 @@ pub(super) enum SurfaceEvent {
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) struct Process {
-    status: Receiver<String>,
     shutdown: Sender<()>,
-    latest: String,
     #[cfg(target_os = "windows")]
     messages: Sender<Message>,
     #[cfg(target_os = "windows")]
@@ -37,7 +35,6 @@ pub(super) struct Process {
 
 impl Process {
     pub(super) fn launch(executable: PathBuf) -> Self {
-        let (status_sender, status) = mpsc::channel();
         let (shutdown, shutdown_receiver) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (messages, message_receiver) = mpsc::channel();
@@ -65,17 +62,12 @@ impl Process {
                     )
                 })?;
                 if let Some(stderr) = child.stderr.take() {
-                    let status_sender = status_sender.clone();
                     thread::spawn(move || {
                         for line in io::BufReader::new(stderr).lines().map_while(Result::ok) {
                             eprintln!("plugin process: {line}");
-                            status_sender.send(format!("Counter plugin: {line}")).ok();
                         }
                     });
                 }
-                status_sender
-                    .send("Waiting for plugin handshake".into())
-                    .ok();
                 let result = endpoint.accept(&child).and_then(|stream| {
                     #[cfg(target_os = "windows")]
                     return drive_windows(
@@ -85,23 +77,19 @@ impl Process {
                         &message_receiver,
                         &surface_sender,
                         &client_sender,
-                        &status_sender,
                     );
                     #[cfg(not(target_os = "windows"))]
-                    drive(stream, &mut child, &shutdown_receiver, &status_sender)
+                    drive(stream, &mut child, &shutdown_receiver)
                 });
                 terminate(&mut child);
                 result
             });
             if let Err(error) = result {
                 eprintln!("plugin host process failed: {error}");
-                status_sender.send(error.to_string()).ok();
             }
         });
         Self {
-            status,
             shutdown,
-            latest: "Starting plugin process".into(),
             #[cfg(target_os = "windows")]
             messages,
             #[cfg(target_os = "windows")]
@@ -109,13 +97,6 @@ impl Process {
             #[cfg(target_os = "windows")]
             clients,
         }
-    }
-
-    pub(super) fn status(&mut self) -> String {
-        while let Ok(status) = self.status.try_recv() {
-            self.latest = status;
-        }
-        self.latest.clone()
     }
 
     pub(super) fn shutdown(&mut self) {
@@ -163,7 +144,6 @@ fn drive_windows(
     messages: &Receiver<Message>,
     surfaces: &Sender<SurfaceEvent>,
     clients: &Sender<block_plugin_api::DelegatedClientMessage>,
-    status: &Sender<String>,
 ) -> io::Result<()> {
     use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
     use std::os::windows::io::AsRawHandle;
@@ -189,9 +169,6 @@ fn drive_windows(
     let peer: windows_sys::Win32::Foundation::HANDLE = child.as_raw_handle().cast();
     let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
     let mut carrier = WindowsAttachmentCarrier::new(stream, peer);
-    status
-        .send("Plugin connected; waiting for a DXGI surface".into())
-        .ok();
     loop {
         if shutdown.try_recv().is_ok() {
             carrier
@@ -220,9 +197,6 @@ fn drive_windows(
                     );
                     surfaces
                         .send(SurfaceEvent::Surface(surface, attachments))
-                        .ok();
-                    status
-                        .send("Plugin connected; presenting Windows DXGI surface".into())
                         .ok();
                 }
                 Message::FrameReady(frame) => {
@@ -324,7 +298,6 @@ fn drive<S: Read + Write>(
     mut stream: S,
     child: &mut Child,
     shutdown: &Receiver<()>,
-    status: &Sender<String>,
 ) -> io::Result<()> {
     let started = Instant::now();
     #[allow(unused_mut)]
@@ -352,9 +325,6 @@ fn drive<S: Read + Write>(
             "plugin handshake was rejected",
         ));
     }
-    status
-        .send("Plugin connected; no compatible desktop surface presenter is available".into())
-        .ok();
     loop {
         if shutdown.try_recv().is_ok() {
             session.shutdown(elapsed(started));
