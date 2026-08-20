@@ -410,12 +410,7 @@ fn pdfium_instance() -> Result<&'static Pdfium, &'static str> {
 fn load_pdfium() -> Result<Pdfium, String> {
     let bindings = bind_next_to_executable()
         .map_or_else(Pdfium::bind_to_system_library, Ok)
-        .map_err(|error| {
-            format!(
-                "Could not load the PDFium library: {error}\n\
-                 Run ./scripts/fetch-pdfium.sh to install it."
-            )
-        })?;
+        .map_err(|error| format!("Could not load the PDFium library: {error}"))?;
     Ok(Pdfium::new(bindings))
 }
 
