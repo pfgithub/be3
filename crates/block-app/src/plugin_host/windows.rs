@@ -1,10 +1,13 @@
 use super::{
-    presenter::{PresenterStatus, Regions, SurfacePresenter},
+    presenter::{Regions, SurfacePresenter},
     process::SurfaceEvent,
 };
 use block_plugin_api::{SurfaceDescriptor, WindowsSurfaceLifecycle};
 use eframe::egui_wgpu::wgpu;
-use std::os::windows::io::{AsRawHandle, OwnedHandle};
+use std::{
+    collections::HashMap,
+    os::windows::io::{AsRawHandle, OwnedHandle},
+};
 use windows::Win32::{
     Foundation::HANDLE,
     Graphics::Direct3D12::{ID3D12Fence, ID3D12Resource},
@@ -20,21 +23,27 @@ struct ImportedSurface {
     fence: ID3D12Fence,
 }
 
+#[derive(Default)]
+struct Surface {
+    lifecycle: WindowsSurfaceLifecycle,
+    imported: Option<ImportedSurface>,
+}
+
 pub(super) struct WindowsSurfacePresenter {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     regions: Regions,
-    lifecycle: WindowsSurfaceLifecycle,
-    imported: Option<ImportedSurface>,
+    surfaces: HashMap<u32, Surface>,
 }
 
-pub(super) fn install(context: &eframe::CreationContext<'_>) -> Option<PresenterStatus> {
-    let render_state = context.wgpu_render_state.as_ref()?;
+pub(super) fn install(context: &eframe::CreationContext<'_>) -> bool {
+    let Some(render_state) = context.wgpu_render_state.as_ref() else {
+        return false;
+    };
     if unsafe { render_state.device.as_hal::<wgpu_hal::api::Dx12>() }.is_none() {
-        return None;
+        return false;
     }
-    let status = PresenterStatus::waiting();
     render_state
         .renderer
         .write()
@@ -43,7 +52,7 @@ pub(super) fn install(context: &eframe::CreationContext<'_>) -> Option<Presenter
             &render_state.device,
             render_state.target_format,
         ));
-    Some(status)
+    true
 }
 
 impl WindowsSurfacePresenter {
@@ -106,14 +115,14 @@ impl WindowsSurfacePresenter {
             layout,
             sampler: device.create_sampler(&wgpu::SamplerDescriptor::default()),
             regions: Regions::new(device),
-            lifecycle: WindowsSurfaceLifecycle::default(),
-            imported: None,
+            surfaces: HashMap::new(),
         }
     }
 
     fn import(
         &mut self,
         device: &wgpu::Device,
+        index: u32,
         surface: &SurfaceDescriptor,
         handles: &[OwnedHandle],
     ) -> Result<(), String> {
@@ -121,6 +130,9 @@ impl WindowsSurfacePresenter {
             return Err("Windows DXGI surface did not include texture and fence handles".into());
         }
         let descriptor = self
+            .surfaces
+            .entry(index)
+            .or_default()
             .lifecycle
             .replace(surface)
             .map_err(|error| error.to_string())?;
@@ -196,7 +208,7 @@ impl WindowsSurfacePresenter {
                 },
             ],
         });
-        self.imported = Some(ImportedSurface {
+        self.surfaces.entry(index).or_default().imported = Some(ImportedSurface {
             texture,
             bind_group,
             fence,
@@ -212,17 +224,27 @@ impl WindowsSurfacePresenter {
 impl SurfacePresenter for WindowsSurfacePresenter {
     type Frame = WindowsFrame;
 
-    fn replace(&mut self, device: &wgpu::Device, frame: &Self::Frame) -> Result<(), String> {
+    fn replace(
+        &mut self,
+        device: &wgpu::Device,
+        index: u32,
+        frame: &Self::Frame,
+    ) -> Result<(), String> {
         let WindowsFrame::Events(events) = frame;
         for event in events {
             if let SurfaceEvent::Surface(surface, handles) = event {
-                self.import(device, surface, handles)?;
+                self.import(device, index, surface, handles)?;
             }
         }
         Ok(())
     }
 
-    fn prepare(&mut self, queue: &wgpu::Queue, frame: &Self::Frame) -> Result<(), String> {
+    fn prepare(
+        &mut self,
+        queue: &wgpu::Queue,
+        index: u32,
+        frame: &Self::Frame,
+    ) -> Result<(), String> {
         let WindowsFrame::Events(events) = frame;
         let Some(frame) = events.iter().rev().find_map(|event| match event {
             SurfaceEvent::Frame(frame) => Some(frame),
@@ -230,10 +252,12 @@ impl SurfacePresenter for WindowsSurfacePresenter {
         }) else {
             return Ok(());
         };
-        self.lifecycle
+        let surface = self.surfaces.entry(index).or_default();
+        surface
+            .lifecycle
             .frame_ready(frame.generation, frame.synchronization_value)
             .map_err(|error| error.to_string())?;
-        let imported = self
+        let imported = surface
             .imported
             .as_ref()
             .ok_or_else(|| "frame arrived before its Windows surface".to_owned())?;
@@ -252,8 +276,12 @@ impl SurfacePresenter for WindowsSurfacePresenter {
         &self.regions
     }
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, slot: u32) {
-        if let Some(imported) = &self.imported {
+    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, index: u32, slot: u32) {
+        if let Some(imported) = self
+            .surfaces
+            .get(&index)
+            .and_then(|surface| surface.imported.as_ref())
+        {
             let _ = &imported.texture;
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &imported.bind_group, &[self.regions.offset(slot)]);
@@ -261,8 +289,10 @@ impl SurfacePresenter for WindowsSurfacePresenter {
         }
     }
 
-    fn release(&mut self) {
-        self.imported = None;
-        self.lifecycle.release();
+    fn release(&mut self, index: u32) {
+        if let Some(surface) = self.surfaces.get_mut(&index) {
+            surface.imported = None;
+            surface.lifecycle.release();
+        }
     }
 }

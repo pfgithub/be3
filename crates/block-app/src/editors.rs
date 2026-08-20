@@ -1366,7 +1366,7 @@ impl EditorRegistry {
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
         #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
-        registry.register_counter_plugin();
+        registry.register_plugin::<plugin::counter::CounterPlugin>();
         registry.register::<hotbar::HotbarEditor>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
@@ -1423,30 +1423,30 @@ impl EditorRegistry {
             .insert(registration.block_type, registration);
     }
 
+    /// Registers a block editor that runs as a plugin, out of process or in a
+    /// worker, from the package's own manifest.
     #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
-    fn register_counter_plugin(&mut self) {
-        use block_client::blocks::counter::Counter;
-        use egui_material_icons::icons::ICON_123;
-
-        let manifest = plugin::counter_manifest();
-        manifest
-            .validate()
-            .expect("invalid built-in Counter plugin manifest");
-        let display_name: &'static str = Box::leak(manifest.display_name.into_boxed_str());
+    fn register_plugin<P: plugin::PluginPackage>(&mut self) {
+        let manifest = P::manifest();
+        if let Err(error) = manifest.validate() {
+            panic!(
+                "invalid built-in {} plugin manifest: {error:?}",
+                manifest.identity.name
+            );
+        }
+        let display_name: &'static str = Box::leak(manifest.display_name.clone().into_boxed_str());
         self.insert(EditorRegistration {
-            block_type: Counter::TYPE_ID,
+            block_type: <P::Block as Block>::TYPE_ID,
             display_name,
-            icon: ICON_123,
+            icon: P::ICON,
             create: Some(CreateBlock::Immediate(|client| {
-                Box::new(plugin::PluginEditor::new(
-                    client,
-                    client.create_block(Counter::new()),
+                Box::new(plugin::PluginEditor::<P>::new(
+                    client.create_block(P::Block::default()),
                 ))
             })),
             open: |client, id| {
-                Box::new(plugin::PluginEditor::new(
-                    client,
-                    client.get_block::<Counter>(id),
+                Box::new(plugin::PluginEditor::<P>::new(
+                    client.get_block::<P::Block>(id),
                 ))
             },
             can_add_child: false,

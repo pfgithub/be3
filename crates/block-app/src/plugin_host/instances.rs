@@ -1,11 +1,11 @@
-use block::Block;
-use block_client::{blocks::counter::Counter, BlockClient, BlockHandle, Tunnel};
+use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
     EditorInstanceId, EditorMessage, EditorRegion, Message, RegionSize, ScreenId, ScreenRequest,
     ScreenSet, TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
+use uuid::Uuid;
 
 use super::input::{viewport_metrics, InputAdapter};
 
@@ -18,7 +18,8 @@ pub(super) struct Instances {
 
 struct Instance {
     client: Arc<BlockClient>,
-    block: BlockHandle<Counter>,
+    block_id: Uuid,
+    block_type: Uuid,
     tunnel: Tunnel,
     screens: HashMap<EditorRegion, Screen>,
     opened: bool,
@@ -51,7 +52,8 @@ impl Instances {
         region: EditorRegion,
         context: &egui::Context,
         client: Arc<BlockClient>,
-        block: BlockHandle<Counter>,
+        block_id: Uuid,
+        block_type: Uuid,
         size: egui::Vec2,
         scale_factor: f32,
         pass: u64,
@@ -63,7 +65,8 @@ impl Instances {
             });
             Instance {
                 client,
-                block,
+                block_id,
+                block_type,
                 tunnel,
                 screens: HashMap::new(),
                 opened: false,
@@ -116,12 +119,11 @@ impl Instances {
                 entry.opened = true;
                 opened.push(Message::Editor(EditorMessage::Open {
                     instance,
-                    block_id: entry.block.id().into_bytes(),
-                    block_type: Counter::TYPE_ID.into_bytes(),
+                    block_id: entry.block_id.into_bytes(),
+                    block_type: entry.block_type.into_bytes(),
                     account_id: entry.client.account_id().into_bytes(),
                     workspace_id: entry.client.workspace_id().into_bytes(),
-                    editable: entry.client.block_access(entry.block.id())
-                        == block::BlockAccess::Edit,
+                    editable: entry.client.block_access(entry.block_id) == block::BlockAccess::Edit,
                 }));
             }
             screens.extend(regions);

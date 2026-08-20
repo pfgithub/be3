@@ -1,18 +1,17 @@
 use eframe::egui_wgpu::wgpu;
+use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 
 use super::super::presenter::{Regions, SurfacePresenter};
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-/// Registers the renderer that copies the counter canvas into a texture
-/// each frame. Returns whether a wgpu render backend was available at all;
-/// the debug window shows an error instead of the demo when it is not.
-pub(super) fn install(
-    creation_context: &eframe::CreationContext<'_>,
-) -> Option<super::super::presenter::PresenterStatus> {
+/// Registers the renderer that copies each plugin's canvas into a texture
+/// every frame. Returns whether a wgpu render backend was available at all;
+/// editors show an error instead of the plugin when it is not.
+pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
     let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
-        return None;
+        return false;
     };
     render_state
         .renderer
@@ -22,30 +21,31 @@ pub(super) fn install(
             &render_state.device,
             render_state.target_format,
         ));
-    Some(super::super::presenter::PresenterStatus::waiting())
+    true
 }
 
 pub(crate) struct WebFrame {
     pub(crate) size: [u32; 2],
-    pub(crate) canvas_id: &'static str,
+    pub(crate) canvas_id: String,
 }
 
-struct CounterTarget {
+struct Target {
     size: [u32; 2],
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
-/// Owns the destination texture the counter canvas is copied into and the
-/// pipeline that blits it into egui's own render pass. Rebuilt from the two
-/// independent wgpu devices' canvases meeting only at the browser's
-/// `GPUQueue.copyExternalImageToTexture`, not via any shared wgpu resource.
+/// Owns a destination texture per running plugin, which that plugin's canvas
+/// is copied into, and the pipeline that blits it into egui's own render pass.
+/// Rebuilt from the two independent wgpu devices' canvases meeting only at the
+/// browser's `GPUQueue.copyExternalImageToTexture`, not via any shared wgpu
+/// resource.
 pub(crate) struct WebSurfacePresenter {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     regions: Regions,
-    target: Option<CounterTarget>,
+    targets: HashMap<u32, Target>,
 }
 
 impl WebSurfacePresenter {
@@ -118,14 +118,14 @@ impl WebSurfacePresenter {
             blit_bind_group_layout,
             sampler,
             regions: Regions::new(device),
-            target: None,
+            targets: HashMap::new(),
         }
     }
 
-    fn ensure_target(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+    fn ensure_target(&mut self, device: &wgpu::Device, surface: u32, size: [u32; 2]) {
         if self
-            .target
-            .as_ref()
+            .targets
+            .get(&surface)
             .is_some_and(|target| target.size == size)
         {
             return;
@@ -163,15 +163,18 @@ impl WebSurfacePresenter {
                 },
             ],
         });
-        self.target = Some(CounterTarget {
-            size,
-            texture,
-            bind_group,
-        });
+        self.targets.insert(
+            surface,
+            Target {
+                size,
+                texture,
+                bind_group,
+            },
+        );
     }
 
-    fn copy_from_canvas(&self, queue: &wgpu::Queue, canvas_id: &str) {
-        let Some(target) = &self.target else {
+    fn copy_from_canvas(&self, queue: &wgpu::Queue, surface: u32, canvas_id: &str) {
+        let Some(target) = self.targets.get(&surface) else {
             return;
         };
         let Some(canvas) = canvas_element(canvas_id) else {
@@ -203,8 +206,8 @@ impl WebSurfacePresenter {
         );
     }
 
-    fn blit(&self, render_pass: &mut wgpu::RenderPass<'static>, slot: u32) {
-        let Some(target) = &self.target else {
+    fn blit(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32) {
+        let Some(target) = self.targets.get(&surface) else {
             return;
         };
         render_pass.set_pipeline(&self.blit_pipeline);
@@ -216,16 +219,26 @@ impl WebSurfacePresenter {
 impl SurfacePresenter for WebSurfacePresenter {
     type Frame = WebFrame;
 
-    fn replace(&mut self, device: &wgpu::Device, frame: &Self::Frame) -> Result<(), String> {
+    fn replace(
+        &mut self,
+        device: &wgpu::Device,
+        surface: u32,
+        frame: &Self::Frame,
+    ) -> Result<(), String> {
         if frame.size[0] > 0 && frame.size[1] > 0 {
-            self.ensure_target(device, frame.size);
+            self.ensure_target(device, surface, frame.size);
         }
         Ok(())
     }
 
-    fn prepare(&mut self, queue: &wgpu::Queue, frame: &Self::Frame) -> Result<(), String> {
+    fn prepare(
+        &mut self,
+        queue: &wgpu::Queue,
+        surface: u32,
+        frame: &Self::Frame,
+    ) -> Result<(), String> {
         if frame.size[0] > 0 && frame.size[1] > 0 {
-            self.copy_from_canvas(queue, frame.canvas_id);
+            self.copy_from_canvas(queue, surface, &frame.canvas_id);
         }
         Ok(())
     }
@@ -234,12 +247,12 @@ impl SurfacePresenter for WebSurfacePresenter {
         &self.regions
     }
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, slot: u32) {
-        self.blit(render_pass, slot);
+    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32) {
+        self.blit(render_pass, surface, slot);
     }
 
-    fn release(&mut self) {
-        self.target = None;
+    fn release(&mut self, surface: u32) {
+        self.targets.remove(&surface);
     }
 }
 

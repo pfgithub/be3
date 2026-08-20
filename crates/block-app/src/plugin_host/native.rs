@@ -1,12 +1,14 @@
-use std::{cell::RefCell, path::PathBuf, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, sync::Arc};
 
-use block_client::blocks::counter::Counter;
-use block_plugin_api::{EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenLayout};
+use block_plugin_api::{
+    EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest, ScreenLayout,
+};
 use eframe::egui;
+use uuid::Uuid;
 
 use super::{
     instances::{Instances, NextScreens},
-    presenter::{PresenterCallback, PresenterCommand, PresenterState, Region},
+    presenter::{PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Region},
     process::{Process, SurfaceEvent},
     windows::WindowsFrame,
 };
@@ -17,66 +19,74 @@ thread_local! {
 
 pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     HOST.with(|host| {
-        host.borrow_mut().presenter_status = super::windows::install(creation_context);
+        host.borrow_mut().presenter_available = super::windows::install(creation_context);
     });
 }
 
 pub(crate) fn editor_ui(
     ui: &mut egui::Ui,
+    plugin: &PluginManifest,
     client: Arc<block_client::BlockClient>,
-    block: block_client::BlockHandle<Counter>,
+    block_id: Uuid,
+    block_type: Uuid,
     instance: EditorInstanceId,
     region: EditorRegion,
     size: egui::Vec2,
 ) {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
-        if host.process.is_none() {
-            host.process = Some(Process::launch(plugin_path(), ui.ctx().clone()));
-        }
-        begin_pass(&mut host, ui.ctx());
-        if host.presenter_status.is_none() {
+        if !host.presenter_available {
             ui.colored_label(
                 egui::Color32::RED,
                 "Windows plugins require the D3D12 renderer.",
             );
             return;
         }
-        if let Some(status) = &host.presenter_status {
-            match status.get() {
-                PresenterState::Failed(error) | PresenterState::Unsupported(error) => {
-                    ui.colored_label(
-                        egui::Color32::RED,
-                        format!("Windows plugin presentation failed: {error}"),
-                    );
-                }
-                PresenterState::Waiting | PresenterState::Presenting | PresenterState::Released => {
-                }
+        let Some(surface) = host.surface_for(&plugin.identity.id) else {
+            ui.colored_label(
+                egui::Color32::RED,
+                "Too many plugin runtimes are already presenting.",
+            );
+            return;
+        };
+        let pass = ui.ctx().cumulative_pass_nr();
+        let runtime = host
+            .runtimes
+            .entry(plugin.identity.id.clone())
+            .or_insert_with(|| Runtime::new(surface));
+        if runtime.process.is_none() {
+            runtime.process = Some(Process::launch(plugin_path(plugin), ui.ctx().clone()));
+        }
+        begin_pass(runtime, pass);
+        match runtime.status.get() {
+            PresenterState::Failed(error) | PresenterState::Unsupported(error) => {
+                ui.colored_label(
+                    egui::Color32::RED,
+                    format!("Windows plugin presentation failed: {error}"),
+                );
             }
+            PresenterState::Waiting | PresenterState::Presenting | PresenterState::Released => {}
         }
         let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
-        let pass = host.pass;
-        let screen = host.instances.report(
+        let screen = runtime.instances.report(
             instance,
             region,
             ui.ctx(),
             client,
-            block,
+            block_id,
+            block_type,
             response.rect.size(),
             ui.ctx().pixels_per_point(),
             pass,
         );
-        let messages = host.instances.input(instance, region, |input| {
+        let messages = runtime.instances.input(instance, region, |input| {
             input.update(ui, &response, screen)
         });
-        send(&host, messages);
-        let Some(status) = host.presenter_status.clone() else {
+        runtime.send(messages);
+        let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen) else {
             return;
         };
-        let Some(atlas_region) = Region::of(&host.layout, screen) else {
-            return;
-        };
-        let frame = host
+        let frame = runtime
             .pending_frame
             .take()
             .unwrap_or(WindowsFrame::Events(Vec::new()));
@@ -84,55 +94,86 @@ pub(crate) fn editor_ui(
             response.rect,
             PresenterCallback {
                 command: PresenterCommand::Present(frame),
-                status,
+                status: runtime.status.clone(),
                 region: atlas_region,
             },
         ));
     });
 }
 
-pub(crate) fn region_size(instance: EditorInstanceId, region: EditorRegion) -> Option<egui::Vec2> {
-    HOST.with(|host| host.borrow().instances.region_size(instance, region))
+pub(crate) fn region_size(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    region: EditorRegion,
+) -> Option<egui::Vec2> {
+    HOST.with(|host| {
+        host.borrow()
+            .runtimes
+            .get(plugin_id)?
+            .instances
+            .region_size(instance, region)
+    })
 }
 
-pub(crate) fn close(ctx: &egui::Context, instance: EditorInstanceId) {
+pub(crate) fn close(ctx: &egui::Context, plugin_id: &str, instance: EditorInstanceId) {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
-        if !host.instances.remove(instance) {
+        let Some(runtime) = host.runtimes.get_mut(plugin_id) else {
+            return;
+        };
+        if !runtime.instances.remove(instance) {
             return;
         }
-        send(
-            &host,
-            vec![Message::Editor(EditorMessage::Close { instance })],
-        );
-        if !host.instances.is_empty() {
+        runtime.send(vec![Message::Editor(EditorMessage::Close { instance })]);
+        if !runtime.instances.is_empty() {
             return;
         }
-        if let Some(mut process) = host.process.take() {
+        let Some(mut runtime) = host.runtimes.remove(plugin_id) else {
+            return;
+        };
+        if let Some(mut process) = runtime.process.take() {
             process.shutdown();
         }
-        host.layout = ScreenLayout::default();
-        host.pending_layouts.clear();
-        host.sent.clear();
-        host.pending_frame = None;
-        if let Some(status) = host.presenter_status.clone() {
-            ctx.debug_painter()
-                .add(eframe::egui_wgpu::Callback::new_paint_callback(
-                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
-                    PresenterCallback::<WindowsFrame> {
-                        command: PresenterCommand::Release,
-                        status,
-                        region: Region::default(),
+        ctx.debug_painter()
+            .add(eframe::egui_wgpu::Callback::new_paint_callback(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+                PresenterCallback::<WindowsFrame> {
+                    command: PresenterCommand::Release,
+                    status: runtime.status.clone(),
+                    region: Region {
+                        surface: runtime.surface,
+                        ..Region::default()
                     },
-                ));
-        }
+                },
+            ));
     });
 }
 
 #[derive(Default)]
 struct Host {
+    presenter_available: bool,
+    runtimes: HashMap<String, Runtime>,
+}
+
+impl Host {
+    /// The presenter slot the plugin already holds, or the lowest free one.
+    fn surface_for(&self, plugin_id: &str) -> Option<u32> {
+        if let Some(runtime) = self.runtimes.get(plugin_id) {
+            return Some(runtime.surface);
+        }
+        (0..super::presenter::MAX_SURFACES).find(|surface| {
+            !self
+                .runtimes
+                .values()
+                .any(|runtime| runtime.surface == *surface)
+        })
+    }
+}
+
+struct Runtime {
+    surface: u32,
+    status: PresenterStatus,
     process: Option<Process>,
-    presenter_status: Option<super::presenter::PresenterStatus>,
     pending_frame: Option<WindowsFrame>,
     instances: Instances,
     layout: ScreenLayout,
@@ -141,63 +182,79 @@ struct Host {
     pass: u64,
 }
 
-fn begin_pass(host: &mut Host, ctx: &egui::Context) {
-    let pass = ctx.cumulative_pass_nr();
-    if host.pass == pass {
+impl Runtime {
+    fn new(surface: u32) -> Self {
+        Self {
+            surface,
+            status: PresenterStatus::waiting(),
+            process: None,
+            pending_frame: None,
+            instances: Instances::default(),
+            layout: ScreenLayout::default(),
+            pending_layouts: Vec::new(),
+            sent: Vec::new(),
+            pass: 0,
+        }
+    }
+
+    fn send(&self, messages: Vec<Message>) {
+        if messages.is_empty() {
+            return;
+        }
+        if let Some(process) = &self.process {
+            process.send(messages);
+        }
+    }
+}
+
+fn begin_pass(runtime: &mut Runtime, pass: u64) {
+    if runtime.pass == pass {
         return;
     }
-    let previous = host.pass;
-    host.pass = pass;
-    let NextScreens { opened, screens } = host.instances.next_screens(previous);
+    let previous = runtime.pass;
+    runtime.pass = pass;
+    let NextScreens { opened, screens } = runtime.instances.next_screens(previous);
     let mut messages = opened;
-    if host.sent != screens {
-        host.sent.clone_from(&screens);
-        messages.push(host.instances.screen_set(screens));
+    if runtime.sent != screens {
+        runtime.sent.clone_from(&screens);
+        messages.push(runtime.instances.screen_set(screens));
     }
-    messages.extend(host.instances.pending());
-    send(host, messages);
-    let Some(process) = &host.process else {
+    messages.extend(runtime.instances.pending());
+    runtime.send(messages);
+    let Some(process) = &runtime.process else {
         return;
     };
-    host.pending_layouts.extend(process.layouts());
+    runtime.pending_layouts.extend(process.layouts());
     let frames = process.latest_surface();
     for event in &frames {
         let SurfaceEvent::Surface(descriptor, _) = event else {
             continue;
         };
-        let Some(index) = host
+        let Some(index) = runtime
             .pending_layouts
             .iter()
             .position(|layout| layout.generation == descriptor.generation)
         else {
             continue;
         };
-        host.layout = host.pending_layouts.remove(index);
-        host.pending_layouts
-            .retain(|layout| layout.generation > host.layout.generation);
+        runtime.layout = runtime.pending_layouts.remove(index);
+        runtime
+            .pending_layouts
+            .retain(|layout| layout.generation > runtime.layout.generation);
     }
     if !frames.is_empty() {
-        host.pending_frame = Some(WindowsFrame::Events(frames));
+        runtime.pending_frame = Some(WindowsFrame::Events(frames));
     }
     let messages = process.client_messages();
     let sizes = process.region_sizes();
     for message in messages {
-        host.instances.client_message(message);
+        runtime.instances.client_message(message);
     }
-    host.instances.set_region_sizes(sizes);
+    runtime.instances.set_region_sizes(sizes);
 }
 
-fn send(host: &Host, messages: Vec<Message>) {
-    if messages.is_empty() {
-        return;
-    }
-    if let Some(process) = &host.process {
-        process.send(messages);
-    }
-}
-
-fn plugin_path() -> PathBuf {
+fn plugin_path(plugin: &PluginManifest) -> PathBuf {
     let mut path = std::env::current_exe().unwrap_or_default();
-    path.set_file_name("counter-host.exe");
+    path.set_file_name(plugin.entry_points.windows.as_deref().unwrap_or_default());
     path
 }

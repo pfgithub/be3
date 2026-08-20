@@ -6,62 +6,87 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.IBinder;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public final class PluginHostBridge {
     private static final int MAX_PACKET_BYTES = 1024 * 1024 + 4;
-    private static IPluginService service;
-    private static ServiceConnection connection;
+    private static final Map<String, Runtime> runtimes = new HashMap<>();
 
     static { System.loadLibrary("block_app_lib"); }
 
-    public static synchronized boolean bind(Context context) {
-        if (connection != null || android.os.Build.VERSION.SDK_INT < 26) return false;
-        connection = new ServiceConnection() {
+    private static final class Runtime {
+        IPluginService service;
+        ServiceConnection connection;
+    }
+
+    public static synchronized boolean bind(Context context, String plugin, String serviceClass) {
+        if (runtimes.containsKey(plugin) || android.os.Build.VERSION.SDK_INT < 26) return false;
+        Intent intent;
+        try {
+            intent = new Intent(context, Class.forName(serviceClass));
+        } catch (ClassNotFoundException error) {
+            return false;
+        }
+        Runtime runtime = new Runtime();
+        runtime.connection = new ServiceConnection() {
             public void onServiceConnected(ComponentName name, IBinder binder) {
-                service = IPluginService.Stub.asInterface(binder);
                 try {
-                    binder.linkToDeath(() -> disconnected("Counter plugin process died"), 0);
-                    service.connect(callback);
-                    nativeConnected();
-                } catch (Exception error) { disconnected(error.toString()); }
+                    binder.linkToDeath(() -> disconnected(plugin, "The plugin process died"), 0);
+                    IPluginService service = IPluginService.Stub.asInterface(binder);
+                    service.connect(callback(plugin));
+                    connected(plugin, service);
+                } catch (Exception error) { disconnected(plugin, error.toString()); }
             }
-            public void onServiceDisconnected(ComponentName name) { disconnected("Counter plugin disconnected"); }
-            public void onBindingDied(ComponentName name) { disconnected("Counter plugin binding died"); }
-            public void onNullBinding(ComponentName name) { disconnected("Counter plugin returned no Binder"); }
+            public void onServiceDisconnected(ComponentName name) { disconnected(plugin, "The plugin disconnected"); }
+            public void onBindingDied(ComponentName name) { disconnected(plugin, "The plugin binding died"); }
+            public void onNullBinding(ComponentName name) { disconnected(plugin, "The plugin returned no Binder"); }
         };
-        Intent intent = new Intent(context, CounterService.class);
-        if (!context.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
-            connection = null;
+        runtimes.put(plugin, runtime);
+        if (!context.bindService(intent, runtime.connection, Context.BIND_AUTO_CREATE)) {
+            runtimes.remove(plugin);
             return false;
         }
         return true;
     }
 
-    public static synchronized void send(byte[] frame) throws Exception {
-        if (service == null) throw new IllegalStateException("Counter plugin is not connected");
-        service.send(frame);
+    public static synchronized void send(String plugin, byte[] frame) throws Exception {
+        Runtime runtime = runtimes.get(plugin);
+        if (runtime == null || runtime.service == null) throw new IllegalStateException("The plugin is not connected");
+        runtime.service.send(frame);
     }
 
-    public static synchronized void unbind(Context context) {
-        if (service != null) try { service.shutdown(); } catch (Exception ignored) {}
-        if (connection != null) context.unbindService(connection);
-        service = null;
-        connection = null;
+    public static synchronized void unbind(Context context, String plugin) {
+        Runtime runtime = runtimes.remove(plugin);
+        if (runtime == null) return;
+        if (runtime.service != null) try { runtime.service.shutdown(); } catch (Exception ignored) {}
+        if (runtime.connection != null) context.unbindService(runtime.connection);
     }
 
-    private static final IPluginCallback callback = new IPluginCallback.Stub() {
-        public void onPacket(byte[] frame) {
-            if (frame == null || frame.length > MAX_PACKET_BYTES) nativeDisconnected("Counter plugin packet exceeded the size limit");
-            else nativePacket(frame);
-        }
-        public void onFailure(String message) { nativeDisconnected(message); }
-    };
-
-    private static synchronized void disconnected(String reason) {
-        service = null;
-        nativeDisconnected(reason);
+    private static IPluginCallback callback(String plugin) {
+        return new IPluginCallback.Stub() {
+            public void onPacket(byte[] frame) {
+                if (frame == null || frame.length > MAX_PACKET_BYTES) nativeDisconnected(plugin, "A plugin packet exceeded the size limit");
+                else nativePacket(plugin, frame);
+            }
+            public void onFailure(String message) { nativeDisconnected(plugin, message); }
+        };
     }
 
-    private static native void nativeConnected();
-    private static native void nativeDisconnected(String reason);
-    private static native void nativePacket(byte[] packet);
+    private static synchronized void connected(String plugin, IPluginService service) {
+        Runtime runtime = runtimes.get(plugin);
+        if (runtime == null) return;
+        runtime.service = service;
+        nativeConnected(plugin);
+    }
+
+    private static synchronized void disconnected(String plugin, String reason) {
+        Runtime runtime = runtimes.get(plugin);
+        if (runtime != null) runtime.service = null;
+        nativeDisconnected(plugin, reason);
+    }
+
+    private static native void nativeConnected(String plugin);
+    private static native void nativeDisconnected(String plugin, String reason);
+    private static native void nativePacket(String plugin, byte[] packet);
 }

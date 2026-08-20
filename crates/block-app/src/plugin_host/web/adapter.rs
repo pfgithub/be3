@@ -4,8 +4,6 @@ use block_plugin_api::{
 };
 use wasm_bindgen::prelude::*;
 
-const COUNTER_URL: &str = "/counter.js";
-
 #[wasm_bindgen(inline_js = "
 const plugins = new Map();
 
@@ -48,7 +46,7 @@ extern "C" {
 }
 
 pub(super) struct WebProtocolAdapter {
-    canvas_id: &'static str,
+    canvas_id: String,
     session: HostSession,
     client_messages: Vec<TunnelMessage>,
     layout: Option<ScreenLayout>,
@@ -56,8 +54,8 @@ pub(super) struct WebProtocolAdapter {
 }
 
 impl WebProtocolAdapter {
-    pub(super) async fn start(canvas_id: &'static str) -> Result<Self, String> {
-        let hello = web_plugin_start(COUNTER_URL, canvas_id)
+    pub(super) async fn start(url: String, canvas_id: String) -> Result<Self, String> {
+        let hello = web_plugin_start(&url, &canvas_id)
             .await
             .map_err(js_error)?
             .to_vec();
@@ -80,7 +78,7 @@ impl WebProtocolAdapter {
         };
         adapter.flush()?;
         if adapter.session.state() != &SessionState::Running {
-            web_plugin_shutdown(canvas_id);
+            web_plugin_shutdown(&adapter.canvas_id);
             return Err("The web plugin protocol handshake failed.".to_owned());
         }
         Ok(adapter)
@@ -113,7 +111,7 @@ impl WebProtocolAdapter {
     }
 
     pub(super) fn poll(&mut self) -> Result<(), String> {
-        let responses = web_plugin_poll(self.canvas_id).map_err(js_error)?;
+        let responses = web_plugin_poll(&self.canvas_id).map_err(js_error)?;
         self.receive_all(&responses)
     }
 
@@ -124,13 +122,13 @@ impl WebProtocolAdapter {
     pub(super) fn shutdown(&mut self) {
         self.session.shutdown(now());
         let _ = self.flush();
-        web_plugin_shutdown(self.canvas_id);
+        web_plugin_shutdown(&self.canvas_id);
     }
 
     fn flush(&mut self) -> Result<(), String> {
         while let Some(message) = self.session.next_outbound() {
             let frame = encode_frame(&message).map_err(|error| error.to_string())?;
-            let responses = web_plugin_send(self.canvas_id, &frame).map_err(js_error)?;
+            let responses = web_plugin_send(&self.canvas_id, &frame).map_err(js_error)?;
             self.receive_all(&responses)?;
         }
         Ok(())

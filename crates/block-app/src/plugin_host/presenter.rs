@@ -31,22 +31,37 @@ impl PresenterStatus {
 pub(super) trait SurfacePresenter {
     type Frame;
 
-    fn replace(&mut self, device: &wgpu::Device, frame: &Self::Frame) -> Result<(), String>;
+    fn replace(
+        &mut self,
+        device: &wgpu::Device,
+        surface: u32,
+        frame: &Self::Frame,
+    ) -> Result<(), String>;
 
-    fn prepare(&mut self, queue: &wgpu::Queue, frame: &Self::Frame) -> Result<(), String>;
+    fn prepare(
+        &mut self,
+        queue: &wgpu::Queue,
+        surface: u32,
+        frame: &Self::Frame,
+    ) -> Result<(), String>;
 
     fn regions(&self) -> &Regions;
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, slot: u32);
+    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32);
 
-    fn release(&mut self);
+    fn release(&mut self, surface: u32);
 }
 
+/// How many plugin runtimes can present at once, and how many screens each of
+/// them can address in the shared region buffer.
+pub(super) const MAX_SURFACES: u32 = 8;
 pub(super) const MAX_REGIONS: u32 = 64;
+const MAX_SLOTS: u32 = MAX_SURFACES * MAX_REGIONS;
 
 /// Uniform storage for the atlas sub-rectangle each plugin editor paints. One
-/// slot per screen, addressed through a dynamic bind group offset so several
-/// editors can blit different parts of the same plugin surface in one frame.
+/// slot per screen of every running plugin, addressed through a dynamic bind
+/// group offset so several editors can blit different parts of their plugin's
+/// surface in one frame.
 pub(super) struct Regions {
     buffer: wgpu::Buffer,
     stride: u32,
@@ -54,6 +69,7 @@ pub(super) struct Regions {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Region {
+    pub(super) surface: u32,
     pub(super) slot: u32,
     pub(super) offset: [f32; 2],
     pub(super) scale: [f32; 2],
@@ -62,6 +78,7 @@ pub(super) struct Region {
 impl Default for Region {
     fn default() -> Self {
         Self {
+            surface: 0,
             slot: 0,
             offset: [0.0, 0.0],
             scale: [1.0, 1.0],
@@ -72,23 +89,26 @@ impl Default for Region {
 impl Region {
     pub(super) fn of(
         layout: &block_plugin_api::ScreenLayout,
+        surface: u32,
         screen: block_plugin_api::ScreenId,
     ) -> Option<Self> {
-        if layout.is_empty() {
+        if layout.is_empty() || surface >= MAX_SURFACES {
             return None;
         }
-        let slot = layout
+        let index = layout
             .screens
             .iter()
             .position(|placement| placement.screen == screen)?;
-        if slot >= MAX_REGIONS as usize {
+        if index >= MAX_REGIONS as usize {
             return None;
         }
-        let placement = &layout.screens[slot];
+        let slot = surface * MAX_REGIONS + index as u32;
+        let placement = &layout.screens[index];
         let width = layout.width as f32;
         let height = layout.height as f32;
         Some(Self {
-            slot: slot as u32,
+            surface,
+            slot,
             offset: [placement.x as f32 / width, placement.y as f32 / height],
             scale: [
                 placement.width as f32 / width,
@@ -107,7 +127,7 @@ impl Regions {
         Self {
             buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("plugin surface regions"),
-                size: u64::from(stride) * u64::from(MAX_REGIONS),
+                size: u64::from(stride) * u64::from(MAX_SLOTS),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
@@ -137,7 +157,7 @@ impl Regions {
     }
 
     pub(super) fn write(&self, queue: &wgpu::Queue, region: &Region) {
-        let slot = region.slot.min(MAX_REGIONS - 1);
+        let slot = region.slot.min(MAX_SLOTS - 1);
         let values = [
             region.offset[0],
             region.offset[1],
@@ -152,7 +172,7 @@ impl Regions {
     }
 
     pub(super) fn offset(&self, slot: u32) -> u32 {
-        self.stride * slot.min(MAX_REGIONS - 1)
+        self.stride * slot.min(MAX_SLOTS - 1)
     }
 }
 
@@ -189,16 +209,16 @@ where
         match &self.command {
             PresenterCommand::Present(frame) => {
                 presenter.regions().write(queue, &self.region);
-                if let Err(error) = presenter.replace(device, frame) {
+                if let Err(error) = presenter.replace(device, self.region.surface, frame) {
                     self.status.set(PresenterState::Failed(error));
-                } else if let Err(error) = presenter.prepare(queue, frame) {
+                } else if let Err(error) = presenter.prepare(queue, self.region.surface, frame) {
                     self.status.set(PresenterState::Failed(error));
                 } else {
                     self.status.set(PresenterState::Presenting);
                 }
             }
             PresenterCommand::Release => {
-                presenter.release();
+                presenter.release(self.region.surface);
                 self.status.set(PresenterState::Released);
             }
         }
@@ -213,7 +233,7 @@ where
     ) {
         if matches!(self.command, PresenterCommand::Present(_)) {
             if let Some(presenter) = resources.get::<WebSurfacePresenter>() {
-                presenter.paint(render_pass, self.region.slot);
+                presenter.paint(render_pass, self.region.surface, self.region.slot);
             }
         }
     }

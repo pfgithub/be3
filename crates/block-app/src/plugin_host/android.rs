@@ -1,6 +1,11 @@
-use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
+use block_client::BlockClient;
+use block_plugin_api::{EditorInstanceId, EditorRegion, PluginManifest};
 use eframe::egui;
-use std::sync::{Mutex, OnceLock};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+use uuid::Uuid;
 
 #[derive(Default)]
 enum State {
@@ -11,22 +16,31 @@ enum State {
     Error(String),
 }
 
-static STATE: OnceLock<Mutex<State>> = OnceLock::new();
+static RUNTIMES: OnceLock<Mutex<HashMap<String, State>>> = OnceLock::new();
 
+fn runtimes() -> &'static Mutex<HashMap<String, State>> {
+    RUNTIMES.get_or_init(Default::default)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn editor_ui(
     ui: &mut egui::Ui,
+    plugin: &PluginManifest,
     _client: std::sync::Arc<BlockClient>,
-    _block: BlockHandle<Counter>,
-    instance: block_plugin_api::EditorInstanceId,
-    region: block_plugin_api::EditorRegion,
+    _block_id: Uuid,
+    _block_type: Uuid,
+    instance: EditorInstanceId,
+    region: EditorRegion,
     size: egui::Vec2,
 ) {
-    ensure_bound();
-    let Ok(state) = STATE.get_or_init(Default::default).lock() else {
-        ui.colored_label(egui::Color32::RED, "Counter plugin state is unavailable");
+    let plugin_id = plugin.identity.id.clone();
+    let service = plugin.entry_points.android.clone().unwrap_or_default();
+    ensure_bound(&plugin_id, &service);
+    let Ok(runtimes) = runtimes().lock() else {
+        ui.colored_label(egui::Color32::RED, "Plugin state is unavailable");
         return;
     };
-    match &*state {
+    match runtimes.get(&plugin_id).unwrap_or(&State::Closed) {
         State::Closed | State::Binding => {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -34,17 +48,17 @@ pub(crate) fn editor_ui(
         }
         State::Error(error) => {
             let error = error.clone();
-            drop(state);
+            drop(runtimes);
             ui.vertical_centered(|ui| {
                 ui.colored_label(egui::Color32::RED, error);
                 if ui.button("Retry").clicked() {
-                    close(ui.ctx(), instance);
-                    ensure_bound();
+                    close(ui.ctx(), &plugin_id, instance);
+                    ensure_bound(&plugin_id, &service);
                 }
             });
         }
         State::Connected => {
-            drop(state);
+            drop(runtimes);
             ui.allocate_ui(size, |ui| {
                 ui.centered_and_justified(|ui| {
                     ui.label(format!("TODO: present the plugin's {region:?} region"));
@@ -55,34 +69,39 @@ pub(crate) fn editor_ui(
 }
 
 pub(crate) fn region_size(
-    _instance: block_plugin_api::EditorInstanceId,
-    _region: block_plugin_api::EditorRegion,
+    _plugin_id: &str,
+    _instance: EditorInstanceId,
+    _region: EditorRegion,
 ) -> Option<egui::Vec2> {
     None
 }
 
-fn ensure_bound() {
-    let state = STATE.get_or_init(Default::default);
-    let Ok(mut state) = state.lock() else {
-        return;
-    };
-    if !matches!(*state, State::Closed) {
-        return;
+fn ensure_bound(plugin_id: &str, service: &str) {
+    {
+        let Ok(mut bound) = runtimes().lock() else {
+            return;
+        };
+        let state = bound.entry(plugin_id.to_owned()).or_default();
+        if !matches!(*state, State::Closed) {
+            return;
+        }
+        *state = State::Binding;
     }
-    *state = State::Binding;
-    if let Err(error) = bind() {
-        *state = State::Error(error);
-    }
-}
-
-pub(crate) fn close(_context: &egui::Context, _instance: block_plugin_api::EditorInstanceId) {
-    unbind();
-    if let Ok(mut state) = STATE.get_or_init(Default::default).lock() {
-        *state = State::Closed;
+    if let Err(error) = bind(plugin_id, service) {
+        if let Ok(mut bound) = runtimes().lock() {
+            bound.insert(plugin_id.to_owned(), State::Error(error));
+        }
     }
 }
 
-fn bind() -> Result<(), String> {
+pub(crate) fn close(_context: &egui::Context, plugin_id: &str, _instance: EditorInstanceId) {
+    unbind(plugin_id);
+    if let Ok(mut runtimes) = runtimes().lock() {
+        runtimes.insert(plugin_id.to_owned(), State::Closed);
+    }
+}
+
+fn bind(plugin_id: &str, service: &str) -> Result<(), String> {
     let context = ndk_context::android_context();
     let vm = unsafe { jni::vm::JavaVM::from_raw(context.vm().cast()) };
     let bound = vm
@@ -90,12 +109,20 @@ fn bind() -> Result<(), String> {
             let activity =
                 unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
             let bridge = plugin_host_bridge(environment, &activity)?;
+            let key = environment.new_string(plugin_id)?;
+            let service = environment.new_string(service)?;
             environment
                 .call_static_method(
                     &bridge,
                     jni::jni_str!("bind"),
-                    jni::jni_sig!("(Landroid/content/Context;)Z"),
-                    &[jni::objects::JValue::Object(&activity)],
+                    jni::jni_sig!(
+                        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z"
+                    ),
+                    &[
+                        jni::objects::JValue::Object(&activity),
+                        jni::objects::JValue::Object(&key),
+                        jni::objects::JValue::Object(&service),
+                    ],
                 )
                 .and_then(|value| value.z())
         })
@@ -103,22 +130,26 @@ fn bind() -> Result<(), String> {
     if bound {
         Ok(())
     } else {
-        Err("Counter plugin is unavailable; Android API 26 or newer is required".into())
+        Err("This plugin is unavailable; Android API 26 or newer is required".into())
     }
 }
 
-fn unbind() {
+fn unbind(plugin_id: &str) {
     let context = ndk_context::android_context();
     let vm = unsafe { jni::vm::JavaVM::from_raw(context.vm().cast()) };
     let _ = vm.attach_current_thread_for_scope(|environment| {
         let activity =
             unsafe { jni::objects::JObject::from_raw(environment, context.context().cast()) };
         let bridge = plugin_host_bridge(environment, &activity)?;
+        let key = environment.new_string(plugin_id)?;
         environment.call_static_method(
             &bridge,
             jni::jni_str!("unbind"),
-            jni::jni_sig!("(Landroid/content/Context;)V"),
-            &[jni::objects::JValue::Object(&activity)],
+            jni::jni_sig!("(Landroid/content/Context;Ljava/lang/String;)V"),
+            &[
+                jni::objects::JValue::Object(&activity),
+                jni::objects::JValue::Object(&key),
+            ],
         )?;
         Ok::<_, jni::errors::Error>(())
     });
@@ -148,13 +179,25 @@ fn plugin_host_bridge<'local>(
     environment.cast_local::<jni::objects::JClass<'local>>(class)
 }
 
+fn read_string(environment: &mut jni::EnvUnowned<'_>, value: &jni::objects::JString<'_>) -> String {
+    match environment
+        .with_env(|_| Ok::<_, jni::errors::Error>(value.to_string()))
+        .into_outcome()
+    {
+        jni::Outcome::Ok(value) => value,
+        jni::Outcome::Err(_) | jni::Outcome::Panic(_) => String::new(),
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeConnected(
-    _: jni::EnvUnowned<'_>,
+    mut environment: jni::EnvUnowned<'_>,
     _: jni::objects::JClass<'_>,
+    plugin_id: jni::objects::JString<'_>,
 ) {
-    if let Ok(mut state) = STATE.get_or_init(Default::default).lock() {
-        *state = State::Connected;
+    let plugin_id = read_string(&mut environment, &plugin_id);
+    if let Ok(mut runtimes) = runtimes().lock() {
+        runtimes.insert(plugin_id, State::Connected);
     }
 }
 
@@ -162,17 +205,16 @@ pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeConnecte
 pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeDisconnected(
     mut environment: jni::EnvUnowned<'_>,
     _: jni::objects::JClass<'_>,
+    plugin_id: jni::objects::JString<'_>,
     reason: jni::objects::JString<'_>,
 ) {
-    let reason = match environment
-        .with_env(|_| Ok::<_, jni::errors::Error>(reason.to_string()))
-        .into_outcome()
-    {
-        jni::Outcome::Ok(reason) => reason,
-        jni::Outcome::Err(_) | jni::Outcome::Panic(_) => "Counter plugin disconnected".into(),
-    };
-    if let Ok(mut state) = STATE.get_or_init(Default::default).lock() {
-        *state = State::Error(reason);
+    let plugin_id = read_string(&mut environment, &plugin_id);
+    let mut reason = read_string(&mut environment, &reason);
+    if reason.is_empty() {
+        reason = "The plugin disconnected".to_owned();
+    }
+    if let Ok(mut runtimes) = runtimes().lock() {
+        runtimes.insert(plugin_id, State::Error(reason));
     }
 }
 
@@ -180,6 +222,7 @@ pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativeDisconne
 pub extern "system" fn Java_com_be3_block_plugin_PluginHostBridge_nativePacket(
     _: jni::EnvUnowned<'_>,
     _: jni::objects::JClass<'_>,
+    _: jni::objects::JString<'_>,
     _: jni::objects::JByteArray<'_>,
 ) {
 }

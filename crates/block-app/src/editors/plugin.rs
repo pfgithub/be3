@@ -1,68 +1,59 @@
 use block::Block;
-use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
-use block_plugin_api::{
-    CreationMode, EditorInstanceId, EditorRegion, EntryPoints, PluginIdentity, PluginManifest,
-    SurfaceMechanism,
-};
+use block_client::BlockHandle;
+use block_plugin_api::{EditorInstanceId, EditorRegion, PluginManifest};
 use eframe::egui;
-use std::sync::atomic::{AtomicU64, Ordering};
+use egui_material_icons::MaterialIcon;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, OnceLock,
+};
+
+pub(super) mod counter;
 
 use super::{
     BlockEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
     DirectEditorViewport, EditorAccess, EditorAction,
 };
 
-pub(super) fn counter_manifest() -> PluginManifest {
-    PluginManifest {
-        identity: PluginIdentity {
-            id: "be3.counter".into(),
-            name: "Counter".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        },
-        block_type: Counter::TYPE_ID.into_bytes(),
-        display_name: "Counter".into(),
-        icon: "123".into(),
-        creation: CreationMode::Immediate,
-        regions: vec![
-            EditorRegion::Main,
-            EditorRegion::Toolbar,
-            EditorRegion::LeftSidebar,
-            EditorRegion::RightSidebar,
-        ],
-        entry_points: EntryPoints {
-            web: Some("/counter.js".into()),
-            windows: Some("counter-host.exe".into()),
-            android: Some("com.be3.block.plugin.CounterService".into()),
-        },
-        surfaces: vec![
-            SurfaceMechanism::WebExternalImage,
-            SurfaceMechanism::WindowsDxgi,
-            SurfaceMechanism::AndroidHardwareBuffer,
-        ],
-    }
+/// A first-party editor package: the block type it edits, its manifest, and
+/// the app-side presentation the host keeps ownership of.
+pub(super) trait PluginPackage: 'static {
+    type Block: Block + Default;
+
+    const ICON: MaterialIcon;
+
+    fn manifest() -> Arc<PluginManifest>;
+}
+
+/// Builds a package's manifest once and hands out shared references to it.
+pub(super) fn cached_manifest(
+    cache: &'static OnceLock<Arc<PluginManifest>>,
+    build: impl FnOnce() -> PluginManifest,
+) -> Arc<PluginManifest> {
+    Arc::clone(cache.get_or_init(|| Arc::new(build())))
 }
 
 static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
-pub(super) struct PluginEditor {
-    block: BlockHandle<Counter>,
+pub(super) struct PluginEditor<P: PluginPackage> {
+    plugin: Arc<PluginManifest>,
+    block: BlockHandle<P::Block>,
     instance: EditorInstanceId,
-    regions: Vec<EditorRegion>,
     context: Option<egui::Context>,
 }
 
-impl PluginEditor {
-    pub(super) fn new(_client: &BlockClient, block: BlockHandle<Counter>) -> Self {
+impl<P: PluginPackage> PluginEditor<P> {
+    pub(super) fn new(block: BlockHandle<P::Block>) -> Self {
         Self {
+            plugin: P::manifest(),
             block,
             instance: EditorInstanceId(NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed)),
-            regions: counter_manifest().regions,
             context: None,
         }
     }
 
     fn has_region(&self, region: EditorRegion) -> bool {
-        self.regions.contains(&region)
+        self.plugin.regions.contains(&region)
     }
 
     fn region_ui(
@@ -78,8 +69,10 @@ impl PluginEditor {
         self.context = Some(ui.ctx().clone());
         crate::plugin_host::editor_ui(
             ui,
+            &self.plugin,
             editors.client_handle(),
-            self.block.clone(),
+            self.block.id(),
+            <P::Block as Block>::TYPE_ID,
             self.instance,
             region,
             size,
@@ -88,18 +81,18 @@ impl PluginEditor {
 
     fn close(&mut self) {
         if let Some(context) = self.context.take() {
-            crate::plugin_host::close(&context, self.instance);
+            crate::plugin_host::close(&context, &self.plugin.identity.id, self.instance);
         }
     }
 }
 
-impl Drop for PluginEditor {
+impl<P: PluginPackage> Drop for PluginEditor<P> {
     fn drop(&mut self) {
         self.close();
     }
 }
 
-impl BlockEditor for PluginEditor {
+impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
     fn block(&self) -> &dyn block_client::BlockHandleAccess {
         &self.block
     }
@@ -133,8 +126,12 @@ impl BlockEditor for PluginEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let height = crate::plugin_host::region_size(self.instance, EditorRegion::Toolbar)
-            .map_or_else(|| toolbar_height(ui), |size| size.y.max(1.0));
+        let height = crate::plugin_host::region_size(
+            &self.plugin.identity.id,
+            self.instance,
+            EditorRegion::Toolbar,
+        )
+        .map_or_else(|| toolbar_height(ui), |size| size.y.max(1.0));
         let size = egui::vec2(ui.available_width(), height);
         self.region_ui(ui, editors, EditorRegion::Toolbar, size);
         None

@@ -1,0 +1,48 @@
+use block::Block;
+use block_client::blocks::counter::Counter;
+use block_plugin_api::{
+    CreationMode, EditorRegion, EntryPoints, PluginIdentity, PluginManifest, SurfaceMechanism,
+};
+use egui_material_icons::{icons::ICON_123, MaterialIcon};
+use std::sync::{Arc, OnceLock};
+
+use super::PluginPackage;
+
+pub(in crate::editors) struct CounterPlugin;
+
+impl PluginPackage for CounterPlugin {
+    type Block = Counter;
+
+    const ICON: MaterialIcon = ICON_123;
+
+    fn manifest() -> Arc<PluginManifest> {
+        static MANIFEST: OnceLock<Arc<PluginManifest>> = OnceLock::new();
+        super::cached_manifest(&MANIFEST, || PluginManifest {
+            identity: PluginIdentity {
+                id: "be3.counter".into(),
+                name: "Counter".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            block_type: Counter::TYPE_ID.into_bytes(),
+            display_name: "Counter".into(),
+            icon: "123".into(),
+            creation: CreationMode::Immediate,
+            regions: vec![
+                EditorRegion::Main,
+                EditorRegion::Toolbar,
+                EditorRegion::LeftSidebar,
+                EditorRegion::RightSidebar,
+            ],
+            entry_points: EntryPoints {
+                web: Some("/counter.js".into()),
+                windows: Some("counter-host.exe".into()),
+                android: Some("com.be3.block.plugin.CounterService".into()),
+            },
+            surfaces: vec![
+                SurfaceMechanism::WebExternalImage,
+                SurfaceMechanism::WindowsDxgi,
+                SurfaceMechanism::AndroidHardwareBuffer,
+            ],
+        })
+    }
+}
