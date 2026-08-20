@@ -199,8 +199,10 @@ fn drive_windows(
                 .map_err(carrier_error)?;
             return wait_for_shutdown(child);
         }
-        while let Ok(message) = messages.try_recv() {
-            if !matches!(message, Message::Input(_)) {
+        let mut outbound: Vec<Message> = messages.try_iter().collect();
+        coalesce_resizes(&mut outbound);
+        for message in outbound {
+            if !matches!(message, Message::Input(_) | Message::ResizeViewport(_)) {
                 eprintln!("plugin host sending {} to the plugin", name(&message));
             }
             carrier.send(&message, &[]).map_err(carrier_error)?;
@@ -224,10 +226,6 @@ fn drive_windows(
                         .ok();
                 }
                 Message::FrameReady(frame) => {
-                    eprintln!(
-                        "plugin host received DXGI frame generation={} synchronization_value={}",
-                        frame.generation, frame.synchronization_value
-                    );
                     surfaces.send(SurfaceEvent::Frame(frame)).ok();
                 }
                 Message::ShutdownAcknowledged => return Ok(()),
@@ -245,6 +243,22 @@ fn drive_windows(
         }
         thread::sleep(Duration::from_millis(2));
     }
+}
+
+#[cfg(target_os = "windows")]
+fn coalesce_resizes(messages: &mut Vec<Message>) {
+    let Some(last) = messages
+        .iter()
+        .rposition(|message| matches!(message, Message::ResizeViewport(_)))
+    else {
+        return;
+    };
+    let mut index = 0;
+    messages.retain(|message| {
+        let keep = index == last || !matches!(message, Message::ResizeViewport(_));
+        index += 1;
+        keep
+    });
 }
 
 #[cfg(target_os = "windows")]

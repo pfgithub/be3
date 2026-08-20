@@ -133,89 +133,99 @@ fn run_endpoint<A: crate::App>(
         return Err(std::io::Error::last_os_error().into());
     }
     eprintln!("opened the host process for DXGI handle transfer");
+    let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
     let mut carrier = WindowsAttachmentCarrier::new(stream, host);
     let started = Instant::now();
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
-    let mut rendered_frames = 0_u64;
     loop {
-        let (message, attachments) = carrier.receive()?;
-        let incoming_name = message_name(&message);
-        eprintln!("received {incoming_name} from Windows host");
-        drop(attachments);
-        let create = match &message {
-            Message::CreateViewport(viewport) => {
-                Some((viewport.request_id, viewport.metrics.clone()))
-            }
-            Message::ResizeViewport(metrics) => Some((1, metrics.clone())),
-            _ => None,
-        };
-        if let (Message::Input(input), Some(surface)) = (&message, &mut surface) {
-            surface.input(input);
+        let mut batch = vec![carrier.receive()?.0];
+        while pending(pipe)? {
+            batch.push(carrier.receive()?.0);
         }
-        if matches!(message, Message::Editor(_) | Message::Client(_)) {
-            if let Some(surface) = &mut surface {
-                for response in surface.receive(&message) {
-                    carrier.send(&response, &[])?;
+        let mut viewport = None;
+        let mut deferred = Vec::new();
+        for message in batch {
+            match &message {
+                Message::CreateViewport(create) => {
+                    viewport = Some((create.request_id, create.metrics.clone()));
+                }
+                Message::ResizeViewport(metrics) => {
+                    let request_id = viewport.as_ref().map_or(1, |(request_id, _)| *request_id);
+                    viewport = Some((request_id, metrics.clone()));
+                }
+                Message::Input(_) | Message::Editor(_) | Message::Client(_) => {
+                    deferred.push(message.clone());
+                }
+                _ => {}
+            }
+            for response in session.receive(message) {
+                carrier.send(&response, &[])?;
+            }
+            if matches!(session.state(), crate::native::State::Closed) {
+                unsafe { CloseHandle(host) };
+                return Ok(());
+            }
+        }
+        let replaced = match viewport
+            .filter(|(_, metrics)| metrics.pixel_width > 0 && metrics.pixel_height > 0)
+        {
+            Some((request_id, metrics))
+                if surface.as_ref().map(Surface::metrics) != Some(&metrics) =>
+            {
+                eprintln!(
+                    "creating DXGI surface {}x{} at scale {}",
+                    metrics.pixel_width, metrics.pixel_height, metrics.scale_factor
+                );
+                generation += 1;
+                surface = Some(match surface.take() {
+                    Some(previous) => previous.resize(request_id, metrics, generation)?,
+                    None => Surface::new::<A>(request_id, metrics, generation)?,
+                });
+                true
+            }
+            _ => false,
+        };
+        if let Some(surface) = &mut surface {
+            if replaced {
+                let (descriptor, handles) = surface.descriptor();
+                carrier.send(&descriptor, &handles)?;
+                eprintln!("transferred DXGI surface generation {generation}");
+            }
+            for message in &deferred {
+                match message {
+                    Message::Input(input) => surface.input(input),
+                    _ => {
+                        for response in surface.receive(message) {
+                            carrier.send(&response, &[])?;
+                        }
+                    }
                 }
             }
-        }
-        for response in session.receive(message) {
-            carrier.send(&response, &[])?;
-        }
-        if let Some((request_id, metrics)) =
-            create.filter(|(_, metrics)| metrics.pixel_width > 0 && metrics.pixel_height > 0)
-        {
-            eprintln!(
-                "creating DXGI surface {}x{} at scale {}",
-                metrics.pixel_width, metrics.pixel_height, metrics.scale_factor
-            );
-            generation += 1;
-            let mut next = match surface.take() {
-                Some(previous) => previous.resize::<A>(request_id, metrics, generation)?,
-                None => Surface::new::<A>(request_id, metrics, generation)?,
-            };
-            eprintln!("created DXGI surface generation {generation}");
-            let (descriptor, handles) = next.descriptor();
-            carrier.send(&descriptor, &handles)?;
-            eprintln!("transferred DXGI surface generation {generation}");
-            for message in next.render(started.elapsed().as_secs_f64())? {
-                carrier.send(&message, &[])?;
-            }
-            rendered_frames += 1;
-            eprintln!(
-                "rendered and sent DXGI frame {rendered_frames} for surface generation {generation}"
-            );
-            surface = Some(next);
-        } else if let Some(surface) = &mut surface {
             for message in surface.render(started.elapsed().as_secs_f64())? {
                 carrier.send(&message, &[])?;
             }
-            rendered_frames += 1;
-            eprintln!(
-                "rendered and sent DXGI frame {rendered_frames} after {}",
-                incoming_name
-            );
-        }
-        if matches!(session.state(), crate::native::State::Closed) {
-            unsafe { CloseHandle(host) };
-            return Ok(());
         }
     }
 }
 
 #[cfg(target_os = "windows")]
-fn message_name(message: &block_plugin_api::Message) -> &'static str {
-    use block_plugin_api::Message;
-    match message {
-        Message::CreateViewport(_) => "CreateViewport",
-        Message::ResizeViewport(_) => "ResizeViewport",
-        Message::Input(_) => "Input",
-        Message::Editor(_) => "Editor",
-        Message::Client(_) => "Client",
-        Message::Shutdown => "Shutdown",
-        _ => "other message",
+fn pending(pipe: windows_sys::Win32::Foundation::HANDLE) -> std::io::Result<bool> {
+    let mut available = 0;
+    let peeked = unsafe {
+        windows_sys::Win32::System::Pipes::PeekNamedPipe(
+            pipe,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &raw mut available,
+            std::ptr::null_mut(),
+        )
+    };
+    if peeked == 0 {
+        return Err(std::io::Error::last_os_error());
     }
+    Ok(available > 0)
 }
 
 #[cfg(all(not(target_arch = "wasm32"), unix))]

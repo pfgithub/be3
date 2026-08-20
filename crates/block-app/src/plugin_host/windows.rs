@@ -238,10 +238,6 @@ impl SurfacePresenter for WindowsSurfacePresenter {
                 .Wait(&imported.fence, frame.synchronization_value)
         }
         .map_err(|error| error.to_string())?;
-        eprintln!(
-            "plugin presenter queued DXGI frame generation={} synchronization_value={}",
-            frame.generation, frame.synchronization_value
-        );
         Ok(())
     }
 
