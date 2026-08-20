@@ -51,8 +51,6 @@ pub(super) struct PluginEditor {
     context: Option<egui::Context>,
 }
 
-const TOOLBAR_HEIGHT: f32 = 28.0;
-
 impl PluginEditor {
     pub(super) fn new(_client: &BlockClient, block: BlockHandle<Counter>) -> Self {
         Self {
@@ -135,7 +133,7 @@ impl BlockEditor for PluginEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let size = egui::vec2(ui.available_width(), TOOLBAR_HEIGHT);
+        let size = egui::vec2(ui.available_width(), toolbar_height(ui));
         self.region_ui(ui, editors, EditorRegion::Toolbar, size);
         None
     }
@@ -183,4 +181,12 @@ impl BlockEditor for PluginEditor {
     fn tab_closed(&mut self) {
         self.close();
     }
+}
+
+fn toolbar_height(ui: &egui::Ui) -> f32 {
+    let spacing = ui.spacing();
+    spacing
+        .interact_size
+        .y
+        .max(ui.text_style_height(&egui::TextStyle::Body) + 2.0 * spacing.button_padding.y)
 }

@@ -108,8 +108,12 @@ impl EguiSession {
         state.input.focused = input.focused;
         state.input.modifiers = input.modifiers;
         let app = &mut self.app;
+        let frame =
+            egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO);
         context.run_ui(input, |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| app.ui(ui, region));
+            egui::CentralPanel::default()
+                .frame(frame)
+                .show_inside(ui, |ui| app.ui(ui, region));
         })
     }
 
