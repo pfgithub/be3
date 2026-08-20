@@ -13,10 +13,10 @@ use std::{
 
 use block::{
     Account, Block, BlockAccess, BlockAccessEntry, BlockHistory, BlockHistoryTransaction,
-    BlockOperation, BlockParent, BlockReference, BlockReferenceList, BlockUpdate, ClientId,
-    ClientMessage, CommandKind, ErrorCode, HistoryDirection, ManagementClientMessage,
-    ManagementErrorCode, ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage,
-    Workspace, WorkspaceInvitation, WorkspaceRole,
+    BlockOperation, BlockParent, BlockReference, BlockReferenceList, BlockUpdate, ClientEnvelope,
+    ClientId, ClientMessage, CommandKind, ErrorCode, HistoryDirection, ManagementClientMessage,
+    ManagementErrorCode, ManagementServerMessage, OperationRecord, ReferenceDelta, ServerEnvelope,
+    ServerMessage, Workspace, WorkspaceInvitation, WorkspaceRole,
 };
 use block_ref::{BlockRef, WorktreeMembership};
 use futures_channel::mpsc;
@@ -44,7 +44,7 @@ type PresenceStore = HashMap<Uuid, HashMap<(ClientId, Uuid), Vec<u8>>>;
 
 type PostedPresence = HashMap<(Uuid, Uuid), Vec<u8>>;
 
-use transport::{Socket, SocketMessage};
+use transport::{Link, Socket, SocketMessage, TunnelSocket};
 
 /// Sends commands to the worker. Sending never blocks, so the UI thread can
 /// queue work from inside a frame, and the same channel drives the worker
@@ -383,79 +383,96 @@ pub struct BlockClient {
     watched_reference_lists: Arc<RwLock<HashMap<BlockReferenceList, Weak<ReferenceListShared>>>>,
     block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
     presence: Arc<RwLock<PresenceStore>>,
-    delegated_failure: Arc<RwLock<Option<String>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DelegatedRequest {
-    Watch {
-        id: Uuid,
-        block_type: Uuid,
-    },
-    Unwatch {
-        id: Uuid,
-    },
-    Operate {
-        id: Uuid,
-        operation_id: Uuid,
-        sequence: u64,
-        operation: Vec<u8>,
-    },
+/// The client half of a tunnel: whatever the worker would have sent over its
+/// own websocket, and whatever arrives for it. Opaque on purpose, since only
+/// [`BlockClient::tunneled`] has any use for it.
+pub struct TunnelEndpoint {
+    outgoing: mpsc::UnboundedSender<String>,
+    incoming: mpsc::UnboundedReceiver<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DelegatedEvent {
-    Snapshot {
-        id: Uuid,
-        block_type: Uuid,
-        author: Uuid,
-        sequence: u64,
-        access: BlockAccess,
-        data: Vec<u8>,
-    },
-    Acknowledged {
-        id: Uuid,
-        operation_id: Uuid,
-        sequence: u64,
-    },
-    RemoteOperation {
-        id: Uuid,
-        operation_id: Uuid,
-        author: Uuid,
-        sequence: u64,
-        operation: Vec<u8>,
-    },
-    AccessChanged {
-        id: Uuid,
-        access: BlockAccess,
-    },
-    Error(String),
-    Disconnected(String),
+/// The carrying half of a tunnel, held by whoever ferries its frames to a
+/// client that does have a server connection.
+pub struct TunnelCarrier {
+    outgoing: mpsc::UnboundedSender<String>,
+    incoming: mpsc::UnboundedReceiver<String>,
 }
 
-pub struct DelegatedClientEndpoint {
-    requests: mpsc::UnboundedSender<DelegatedRequest>,
-    events: mpsc::UnboundedReceiver<DelegatedEvent>,
+impl TunnelCarrier {
+    /// Delivers a server message, as JSON, to the tunnelled client.
+    pub fn send(&self, text: String) {
+        let _ = self.outgoing.unbounded_send(text);
+    }
+
+    /// Takes the next client message, as JSON, the tunnelled client wants
+    /// sent to the server.
+    pub fn try_recv(&mut self) -> Option<String> {
+        self.incoming.try_recv().ok()
+    }
+
+    /// Waits for the next client message, for a carrier that is not driven by
+    /// a frame loop. Returns `None` once the tunnelled client is gone.
+    pub async fn recv(&mut self) -> Option<String> {
+        self.incoming.next().await
+    }
 }
 
-pub struct DelegatedHostEndpoint {
-    pub requests: mpsc::UnboundedReceiver<DelegatedRequest>,
-    pub events: mpsc::UnboundedSender<DelegatedEvent>,
-}
-
-pub fn delegated_channel() -> (DelegatedClientEndpoint, DelegatedHostEndpoint) {
-    let (request_tx, request_rx) = mpsc::unbounded();
-    let (event_tx, event_rx) = mpsc::unbounded();
+/// Creates a tunnel. [`BlockClient::tunneled`] runs a client over the
+/// endpoint; the carrier is passed to whoever can reach a real connection,
+/// which hands its frames to [`BlockClient::open_tunnel`] on the other side.
+pub fn tunnel_channel() -> (TunnelEndpoint, TunnelCarrier) {
+    let (to_server, from_client) = mpsc::unbounded();
+    let (to_client, from_server) = mpsc::unbounded();
     (
-        DelegatedClientEndpoint {
-            requests: request_tx,
-            events: event_rx,
+        TunnelEndpoint {
+            outgoing: to_server,
+            incoming: from_server,
         },
-        DelegatedHostEndpoint {
-            requests: request_rx,
-            events: event_tx,
+        TunnelCarrier {
+            outgoing: to_client,
+            incoming: from_client,
         },
     )
+}
+
+/// One of the clients a connection is carrying for somebody else. Frames go
+/// out over the connection tagged with this tunnel's id, so the server treats
+/// them as a separate client with its own watches and presence.
+pub struct Tunnel {
+    client: Uuid,
+    commands: CommandSender,
+    incoming: mpsc::UnboundedReceiver<String>,
+}
+
+impl Tunnel {
+    /// Sends a client message, as JSON, to the server on this tunnel's behalf.
+    pub fn send(&self, text: String) {
+        let _ = self.commands.send(WorkerCommand::TunnelMessage {
+            client: self.client,
+            text,
+        });
+    }
+
+    /// Takes the next server message, as JSON, addressed to this tunnel.
+    pub fn try_recv(&mut self) -> Option<String> {
+        self.incoming.try_recv().ok()
+    }
+
+    /// Waits for the next server message, for a carrier that is not driven by
+    /// a frame loop. Returns `None` once the connection is gone.
+    pub async fn recv(&mut self) -> Option<String> {
+        self.incoming.next().await
+    }
+}
+
+impl Drop for Tunnel {
+    fn drop(&mut self) {
+        let _ = self.commands.send(WorkerCommand::CloseTunnel {
+            client: self.client,
+        });
+    }
 }
 
 /// A sharing request that is still in flight. The UI polls it each frame rather
@@ -724,7 +741,6 @@ impl BlockClient {
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
         let block_access = Arc::new(RwLock::new(HashMap::new()));
         let presence = Arc::new(RwLock::new(HashMap::new()));
-        let delegated_failure = Arc::new(RwLock::new(None));
         let worker_access = Arc::clone(&access);
         let worker_debug = Arc::clone(&debug);
         let worker_client_debug = Arc::clone(&client_debug);
@@ -756,15 +772,13 @@ impl BlockClient {
             watched_reference_lists,
             block_access,
             presence,
-            delegated_failure,
         }
     }
 
-    pub fn delegated(
-        account_id: Uuid,
-        workspace_id: Uuid,
-        endpoint: DelegatedClientEndpoint,
-    ) -> Self {
+    /// Runs a client whose frames are carried by another client's connection
+    /// instead of one of its own. It behaves exactly like a connected client:
+    /// the server gives it its own watches, presence and sequencing.
+    pub fn tunneled(account_id: Uuid, workspace_id: Uuid, endpoint: TunnelEndpoint) -> Self {
         let (commands, command_rx) = mpsc::unbounded();
         let commands = CommandSender(commands);
         let id = Uuid::new_v4();
@@ -786,13 +800,16 @@ impl BlockClient {
         let watched_reference_lists = Arc::new(RwLock::new(HashMap::new()));
         let block_access = Arc::new(RwLock::new(HashMap::new()));
         let presence = Arc::new(RwLock::new(HashMap::new()));
-        let delegated_failure = Arc::new(RwLock::new(None));
-        transport::spawn_worker(delegated_worker_main(
+        transport::spawn_worker(tunneled_worker_main(
             command_rx,
             endpoint,
+            shutdown.clone(),
             Arc::clone(&access),
+            Arc::clone(&debug),
+            Arc::clone(&client_debug),
+            Arc::clone(&cached_blocks),
             Arc::clone(&block_access),
-            Arc::clone(&delegated_failure),
+            Arc::clone(&presence),
         ));
         Self {
             id,
@@ -809,12 +826,21 @@ impl BlockClient {
             watched_reference_lists,
             block_access,
             presence,
-            delegated_failure,
         }
     }
 
-    pub fn delegated_failure(&self) -> Option<String> {
-        self.delegated_failure.read().clone()
+    /// Opens another client on this client's connection, for code that cannot
+    /// reach the server itself. Its frames are forwarded as they are; the
+    /// server sees a separate client sharing the connection's identity.
+    pub fn open_tunnel(&self) -> Tunnel {
+        let client = Uuid::new_v4();
+        let (responses, incoming) = mpsc::unbounded();
+        self.send(WorkerCommand::OpenTunnel { client, responses });
+        Tunnel {
+            client,
+            commands: self.commands.clone(),
+            incoming,
+        }
     }
 
     /// Connects to the block websocket of the server at `url`, which is the same
@@ -1786,157 +1812,21 @@ enum WorkerCommand {
         account_id: Uuid,
         access: BlockAccess,
     },
+    OpenTunnel {
+        client: Uuid,
+        responses: mpsc::UnboundedSender<String>,
+    },
+    TunnelMessage {
+        client: Uuid,
+        text: String,
+    },
+    CloseTunnel {
+        client: Uuid,
+    },
     Synchronize(oneshot::Sender<()>),
     PauseSending,
     StepSending,
     ResumeSending,
-}
-
-async fn delegated_worker_main(
-    commands: mpsc::UnboundedReceiver<WorkerCommand>,
-    endpoint: DelegatedClientEndpoint,
-    access: Arc<RwLock<()>>,
-    block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
-    failure: Arc<RwLock<Option<String>>>,
-) {
-    let DelegatedClientEndpoint {
-        mut requests,
-        events,
-    } = endpoint;
-    let mut commands = commands.fuse();
-    let mut events = events.fuse();
-    let mut blocks = HashMap::<Uuid, Arc<dyn ErasedBlock>>::new();
-    let mut in_flight = HashMap::<Uuid, (Uuid, u64)>::new();
-    loop {
-        futures_util::select! {
-            command = commands.next() => {
-                let Some(command) = command else {
-                    for id in blocks.keys().copied() {
-                        let _ = requests.unbounded_send(DelegatedRequest::Unwatch { id });
-                    }
-                    return;
-                };
-                match command {
-                    WorkerCommand::AddBlock(block) => {
-                        let id = block.id();
-                        if blocks.is_empty() && block.initial_data().is_none() {
-                            let block_type = block.block_type_id();
-                            blocks.insert(id, block);
-                            if requests.unbounded_send(DelegatedRequest::Watch { id, block_type }).is_err() {
-                                *failure.write() = Some("delegated host disconnected".into());
-                                return;
-                            }
-                        } else {
-                            *failure.write() = Some("delegated clients may watch one existing block".into());
-                        }
-                    }
-                    WorkerCommand::Operate { id } => {
-                        delegated_send_update(id, &blocks, &mut in_flight, &mut requests, &failure);
-                    }
-                    _ => {
-                        *failure.write() = Some("operation is unavailable to delegated clients".into());
-                    }
-                }
-            },
-            event = events.next() => {
-                let Some(event) = event else {
-                    *failure.write() = Some("delegated host disconnected".into());
-                    return;
-                };
-                match event {
-                    DelegatedEvent::Snapshot { id, block_type, author, sequence, access: granted, data } => {
-                        let Some(block) = blocks.get(&id) else {
-                            *failure.write() = Some("snapshot referenced an unknown block".into());
-                            continue;
-                        };
-                        if block.block_type_id() != block_type || block.author().is_some() {
-                            *failure.write() = Some("snapshot did not match the delegated watch".into());
-                            continue;
-                        }
-                        let _guard = access.write();
-                        block.resolve_authored(
-                            author,
-                            crypto::encode(&data),
-                            sequence,
-                            Vec::new(),
-                            BlockParent::Orphaned,
-                            BTreeMap::new(),
-                        );
-                        block_access.write().insert(id, granted);
-                        delegated_send_update(id, &blocks, &mut in_flight, &mut requests, &failure);
-                    }
-                    DelegatedEvent::Acknowledged { id, operation_id, sequence } => {
-                        if in_flight.remove(&operation_id) != Some((id, sequence)) {
-                            *failure.write() = Some("stale delegated acknowledgement".into());
-                            continue;
-                        }
-                        if let Some(block) = blocks.get(&id) {
-                            let _guard = access.write();
-                            block.acknowledge(operation_id, sequence);
-                            delegated_send_update(id, &blocks, &mut in_flight, &mut requests, &failure);
-                        }
-                    }
-                    DelegatedEvent::RemoteOperation { id, operation_id, author, sequence, operation } => {
-                        let Some(block) = blocks.get(&id) else {
-                            *failure.write() = Some("remote operation referenced an unknown block".into());
-                            continue;
-                        };
-                        let _guard = access.write();
-                        block.remote_operation(OperationRecord {
-                            seq: sequence,
-                            operation_id,
-                            author,
-                            operation: crypto::encode(&operation),
-                            references: ReferenceDelta::default(),
-                        });
-                    }
-                    DelegatedEvent::AccessChanged { id, access } => {
-                        if blocks.contains_key(&id) {
-                            block_access.write().insert(id, access);
-                        } else {
-                            *failure.write() = Some("access update referenced an unknown block".into());
-                        }
-                    }
-                    DelegatedEvent::Error(message) | DelegatedEvent::Disconnected(message) => {
-                        *failure.write() = Some(message);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn delegated_send_update(
-    id: Uuid,
-    blocks: &HashMap<Uuid, Arc<dyn ErasedBlock>>,
-    in_flight: &mut HashMap<Uuid, (Uuid, u64)>,
-    requests: &mut mpsc::UnboundedSender<DelegatedRequest>,
-    failure: &RwLock<Option<String>>,
-) {
-    let Some(block) = blocks.get(&id) else {
-        *failure.write() = Some("operation referenced an unknown delegated block".into());
-        return;
-    };
-    let Some(update) = block.next_update() else {
-        return;
-    };
-    let Some(sequence) = update.seq else {
-        *failure.write() = Some("CRDT blocks are unavailable to delegated clients".into());
-        return;
-    };
-    in_flight.insert(update.operation_id, (id, sequence));
-    if requests
-        .unbounded_send(DelegatedRequest::Operate {
-            id,
-            operation_id: update.operation_id,
-            sequence,
-            operation: crypto::decode(&update.operation),
-        })
-        .is_err()
-    {
-        *failure.write() = Some("delegated host disconnected".into());
-    }
 }
 
 async fn worker_main(
@@ -1980,6 +1870,29 @@ async fn worker_main(
     }
 }
 
+async fn tunneled_worker_main(
+    mut commands: mpsc::UnboundedReceiver<WorkerCommand>,
+    endpoint: TunnelEndpoint,
+    shutdown: Shutdown,
+    access: Arc<RwLock<()>>,
+    debug: Arc<RwLock<NetworkDebugSnapshot>>,
+    client_debug: Arc<RwLock<ClientDebugSnapshot>>,
+    cached_blocks: Arc<RwLock<HashMap<Uuid, CachedBlock>>>,
+    block_access: Arc<RwLock<HashMap<Uuid, BlockAccess>>>,
+    presence: Arc<RwLock<PresenceStore>>,
+) {
+    let mut state = WorkerState::new(
+        access,
+        debug,
+        client_debug,
+        cached_blocks,
+        block_access,
+        presence,
+    );
+    let socket = Link::Tunnel(TunnelSocket::new(endpoint.outgoing, endpoint.incoming));
+    run_link(socket, &shutdown, &mut state, &mut commands).await;
+}
+
 /// The websocket endpoint for a server URL. The blocks websocket shares the
 /// server's host and scheme with the management endpoint, and carries the
 /// connection's identity in its query string.
@@ -2003,19 +1916,28 @@ async fn run_connected(
     commands: &mut mpsc::UnboundedReceiver<WorkerCommand>,
 ) {
     let url = websocket_url(&url, &token, workspace_id);
-    let mut socket = match Socket::connect(&url).await {
+    let socket = match Socket::connect(&url).await {
         Ok(socket) => socket,
         Err(error) => return stop_or_fatal(shutdown, error),
     };
+    run_link(Link::Socket(socket), shutdown, state, commands).await;
+}
+
+async fn run_link(
+    mut socket: Link,
+    shutdown: &Shutdown,
+    state: &mut WorkerState,
+    commands: &mut mpsc::UnboundedReceiver<WorkerCommand>,
+) {
     state.connected = true;
     state.queue_initial_requests();
 
     loop {
         while state.can_send() {
-            let Some(message) = state.outbound.pop_front() else {
+            let Some(envelope) = state.next_outbound() else {
                 break;
             };
-            let text = serde_json::to_string(&message).unwrap_or_else(|error| {
+            let text = serde_json::to_string(&envelope).unwrap_or_else(|error| {
                 fatal(format!("failed to serialize client message: {error}"))
             });
             if let Err(error) = socket.send_text(text.clone()).await {
@@ -2051,10 +1973,15 @@ async fn run_connected(
                 match message {
                     SocketMessage::Text(text) => {
                         state.record_traffic(NetworkDirection::Received, text.clone());
-                        let message: ServerMessage = serde_json::from_str(&text)
+                        let envelope: ServerEnvelope = serde_json::from_str(&text)
                             .unwrap_or_else(|error| fatal(format!("invalid server message: {error}: {text}")));
-                        state.handle_server_message(message);
-                        state.finish_synchronization();
+                        match envelope.client {
+                            Some(client) => state.deliver_to_tunnel(client, envelope.message),
+                            None => {
+                                state.handle_server_message(envelope.message);
+                                state.finish_synchronization();
+                            }
+                        }
                     }
                     SocketMessage::Ping(length) => {
                         state.record_traffic(
@@ -2089,6 +2016,10 @@ struct WorkerState {
     reference_lists: HashMap<BlockReferenceList, Arc<ReferenceListShared>>,
     requests: HashMap<Uuid, PendingRequest>,
     outbound: VecDeque<ClientMessage>,
+    /// Frames from the clients this one is carrying, kept apart from its own
+    /// so that neither queue can hold the other up.
+    tunnel_outbound: VecDeque<ClientEnvelope>,
+    tunnels: HashMap<Uuid, mpsc::UnboundedSender<String>>,
     deferred: VecDeque<DeferredRequest>,
     synchronization_waiters: Vec<oneshot::Sender<()>>,
     sending_paused: bool,
@@ -2117,6 +2048,8 @@ impl WorkerState {
             reference_lists: HashMap::new(),
             requests: HashMap::new(),
             outbound: VecDeque::new(),
+            tunnel_outbound: VecDeque::new(),
+            tunnels: HashMap::new(),
             deferred: VecDeque::new(),
             synchronization_waiters: Vec::new(),
             sending_paused: false,
@@ -2279,6 +2212,20 @@ impl WorkerState {
                     self.steps_remaining = self.steps_remaining.saturating_add(1);
                 }
             }
+            WorkerCommand::OpenTunnel { client, responses } => {
+                self.tunnels.insert(client, responses);
+            }
+            WorkerCommand::TunnelMessage { client, text } => self.tunnel_message(client, text),
+            WorkerCommand::CloseTunnel { client } => {
+                if self.tunnels.remove(&client).is_some() {
+                    self.tunnel_outbound.push_back(ClientEnvelope::new(
+                        Some(client),
+                        ClientMessage::CloseClient {
+                            request_id: Uuid::new_v4(),
+                        },
+                    ));
+                }
+            }
             WorkerCommand::ResumeSending => {
                 self.sending_paused = false;
                 self.steps_remaining = 0;
@@ -2289,6 +2236,48 @@ impl WorkerState {
 
     fn can_send(&self) -> bool {
         !self.sending_paused || self.steps_remaining > 0
+    }
+
+    fn next_outbound(&mut self) -> Option<ClientEnvelope> {
+        if let Some(envelope) = self.tunnel_outbound.pop_front() {
+            return Some(envelope);
+        }
+        self.outbound
+            .pop_front()
+            .map(|message| ClientEnvelope::new(None, message))
+    }
+
+    fn deliver_to_tunnel(&mut self, client: Uuid, message: ServerMessage) {
+        let Some(tunnel) = self.tunnels.get(&client) else {
+            return;
+        };
+        let text = serde_json::to_string(&message)
+            .unwrap_or_else(|error| fatal(format!("failed to serialize server message: {error}")));
+        if tunnel.unbounded_send(text).is_err() {
+            self.tunnels.remove(&client);
+        }
+    }
+
+    fn tunnel_message(&mut self, client: Uuid, text: String) {
+        if !self.tunnels.contains_key(&client) {
+            return;
+        }
+        match serde_json::from_str::<ClientMessage>(&text) {
+            Ok(message) => self
+                .tunnel_outbound
+                .push_back(ClientEnvelope::new(Some(client), message)),
+            Err(error) => self.deliver_to_tunnel(
+                client,
+                ServerMessage::Error {
+                    request_id: None,
+                    command: None,
+                    id: None,
+                    code: ErrorCode::InvalidMessage,
+                    message: format!("invalid tunnelled command JSON: {error}"),
+                    expected_seq: None,
+                },
+            ),
+        }
     }
 
     fn message_sent(&mut self, payload: String) {
@@ -3199,6 +3188,9 @@ fn client_message_debug_entry(message: &ClientMessage) -> ClientDebugEntry {
         ),
         ClientMessage::UnwatchBlock { request_id, id } => {
             ("Unwatch block", format!("request {request_id}, block {id}"))
+        }
+        ClientMessage::CloseClient { request_id } => {
+            ("Close client", format!("request {request_id}"))
         }
         ClientMessage::SetPresence {
             request_id,

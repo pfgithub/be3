@@ -25,6 +25,12 @@ defined by the session layer; it may not reorder retained messages. A timeout,
 malformed frame, invalid ordering, or unsupported capability is reported with
 a structured error before disconnect when the transport remains usable.
 
+Client messages tunnel the block protocol between an editor instance's own
+block client and the host's server connection. Their payloads are opaque JSON
+bounded by `MAX_BLOCK_PAYLOAD_BYTES`: the host forwards them in both
+directions without interpreting them, and the server treats each instance as a
+separate client of the one connection.
+
 Surface messages may declare at most 16 native attachments. Each declaration
 records the resource type and whether ownership is borrowed or transferred.
 Declaration order is the attachment order in the platform carrier. A missing,

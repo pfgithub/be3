@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{fs, net::TcpListener};
 use uuid::Uuid;
 
+mod a_tunnelled_client_shares_the_hosts_connection;
 mod batched_updates_are_observed_together;
 mod client_orders_parent_assignment_after_creation_and_reference_updates;
 mod crdt_text_clients_converge_after_concurrent_insertions;

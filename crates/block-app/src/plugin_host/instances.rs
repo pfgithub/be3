@@ -1,8 +1,7 @@
 use block::Block;
-use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
+use block_client::{blocks::counter::Counter, BlockClient, BlockHandle, Tunnel};
 use block_plugin_api::{
-    DelegatedClientMessage, EditorInstanceId, EditorMessage, Message, ScreenId, ScreenRequest,
-    ScreenSet,
+    EditorInstanceId, EditorMessage, Message, ScreenId, ScreenRequest, ScreenSet, TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -19,13 +18,12 @@ pub(super) struct Instances {
 struct Instance {
     client: Arc<BlockClient>,
     block: BlockHandle<Counter>,
+    tunnel: Tunnel,
     input: InputAdapter,
     screen: ScreenId,
     request: ScreenRequest,
     last_seen: u64,
     opened: bool,
-    sequence: u64,
-    pending_watch: Option<u64>,
 }
 
 pub(super) struct NextScreens {
@@ -34,10 +32,6 @@ pub(super) struct NextScreens {
 }
 
 impl Instances {
-    pub(super) fn block(&self, instance: EditorInstanceId) -> Option<BlockHandle<Counter>> {
-        self.entries.get(&instance).map(|entry| entry.block.clone())
-    }
-
     pub(super) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -58,9 +52,11 @@ impl Instances {
         let next_screen = &mut self.next_screen;
         let entry = self.entries.entry(instance).or_insert_with(|| {
             *next_screen += 1;
+            let tunnel = client.open_tunnel();
             Instance {
                 client,
                 block,
+                tunnel,
                 input: InputAdapter::default(),
                 screen: ScreenId(*next_screen),
                 request: ScreenRequest {
@@ -71,8 +67,6 @@ impl Instances {
                 },
                 last_seen: pass,
                 opened: false,
-                sequence: 0,
-                pending_watch: None,
             }
         });
         entry.request.metrics = viewport_metrics(size, scale_factor);
@@ -130,137 +124,33 @@ impl Instances {
             .unwrap_or_default()
     }
 
+    /// Takes whatever the server has sent back for each instance's client, so
+    /// it can be handed to the plugin runtime.
     pub(super) fn pending(&mut self) -> Vec<Message> {
-        let instances: Vec<_> = self
-            .entries
-            .iter()
-            .filter(|(_, entry)| entry.pending_watch.is_some())
-            .map(|(instance, _)| *instance)
-            .collect();
         let mut messages = Vec::new();
-        for instance in instances {
-            let Some(request_id) = self.entries[&instance].pending_watch else {
-                continue;
-            };
-            if let Some(message) = self.snapshot(instance, request_id) {
-                self.entries.get_mut(&instance).unwrap().pending_watch = None;
-                messages.push(message);
-            }
-        }
-        messages
-    }
-
-    pub(super) fn client_message(
-        &mut self,
-        message: DelegatedClientMessage,
-        operate: impl FnOnce(&[u8]) -> bool,
-    ) -> Vec<Message> {
-        match message {
-            DelegatedClientMessage::Watch {
-                instance,
-                request_id,
-                ..
-            } => match self.snapshot(instance, request_id) {
-                Some(message) => vec![message],
-                None => {
-                    if let Some(entry) = self.entries.get_mut(&instance) {
-                        entry.pending_watch = Some(request_id);
-                    }
-                    Vec::new()
-                }
-            },
-            DelegatedClientMessage::Unwatch {
-                instance,
-                request_id,
-                ..
-            } => vec![Message::Editor(EditorMessage::Acknowledged {
-                instance,
-                request_id,
-            })],
-            DelegatedClientMessage::Operate {
-                instance,
-                request_id,
-                block_id,
-                operation_id,
-                sequence,
-                operation,
-            } => {
-                if !operate(&operation) {
-                    return Vec::new();
-                }
-                let Some(entry) = self.entries.get_mut(&instance) else {
-                    return Vec::new();
-                };
-                entry.sequence = sequence;
-                let mut messages = vec![Message::Client(DelegatedClientMessage::Acknowledge {
-                    instance,
-                    request_id,
-                    block_id,
-                    operation_id,
-                    sequence,
-                })];
-                messages.extend(self.fan_out(instance, block_id, operation_id, &operation));
-                messages
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    fn fan_out(
-        &mut self,
-        author: EditorInstanceId,
-        block_id: [u8; 16],
-        operation_id: [u8; 16],
-        operation: &[u8],
-    ) -> Vec<Message> {
         let mut instances: Vec<_> = self.entries.keys().copied().collect();
         instances.sort_by_key(|instance| instance.0);
-        let mut messages = Vec::new();
         for instance in instances {
-            if instance == author {
-                continue;
-            }
             let entry = self.entries.get_mut(&instance).unwrap();
-            if entry.block.id().into_bytes() != block_id {
-                continue;
+            while let Some(payload) = entry.tunnel.try_recv() {
+                messages.push(Message::Client(TunnelMessage::Response {
+                    instance,
+                    payload,
+                }));
             }
-            entry.sequence += 1;
-            messages.push(Message::Client(DelegatedClientMessage::RemoteOperation {
-                instance,
-                block_id,
-                operation_id,
-                sequence: entry.sequence,
-                operation: operation.to_vec(),
-            }));
         }
         messages
     }
 
-    fn snapshot(&mut self, instance: EditorInstanceId, request_id: u64) -> Option<Message> {
-        let entry = self.entries.get_mut(&instance)?;
-        let data = entry.client.block_state_bytes(entry.block.id())?;
-        entry.sequence = entry.block.revision();
-        Some(Message::Client(DelegatedClientMessage::Snapshot {
-            instance,
-            request_id,
-            block_id: entry.block.id().into_bytes(),
-            author: entry
-                .block
-                .author()
-                .unwrap_or(entry.client.account_id())
-                .into_bytes(),
-            sequence: entry.sequence,
-            access: access_byte(entry.client.block_access(entry.block.id())),
-            data,
-        }))
-    }
-}
-
-fn access_byte(access: block::BlockAccess) -> u8 {
-    match access {
-        block::BlockAccess::None => 0,
-        block::BlockAccess::KnowExists => 1,
-        block::BlockAccess::View => 2,
-        block::BlockAccess::Edit => 3,
+    /// Forwards a plugin's client message to the server over the host's own
+    /// connection, where it is served as a client in its own right.
+    pub(super) fn client_message(&mut self, message: TunnelMessage) {
+        let TunnelMessage::Request { instance, payload } = message else {
+            return;
+        };
+        let Some(entry) = self.entries.get(&instance) else {
+            return;
+        };
+        entry.tunnel.send(payload);
     }
 }

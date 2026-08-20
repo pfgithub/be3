@@ -18,9 +18,10 @@ use argon2::{
 };
 use block::{
     Account, BlockAccess, BlockAccessEntry, BlockOperation, BlockParent, BlockReference,
-    BlockReferenceList, ClientMessage, CommandKind, ErrorCode, ManagementClientMessage,
-    ManagementErrorCode, ManagementServerMessage, OperationRecord, ReferenceDelta, ServerMessage,
-    Workspace, WorkspaceInvitation, WorkspaceRole, MAX_PROPERTY_VALUE_BYTES,
+    BlockReferenceList, ClientEnvelope, ClientMessage, CommandKind, ErrorCode,
+    ManagementClientMessage, ManagementErrorCode, ManagementServerMessage, OperationRecord,
+    ReferenceDelta, ServerEnvelope, ServerMessage, Workspace, WorkspaceInvitation, WorkspaceRole,
+    MAX_PROPERTY_VALUE_BYTES,
 };
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
@@ -218,8 +219,8 @@ async fn handle_block_connection(
 ) -> Result<(), ServerError> {
     let workspace_id = identity.workspace_id;
     let (mut sink, mut source) = socket.split();
-    let (outbound, mut outbound_rx) = mpsc::unbounded_channel();
-    let client_id = watch_hub.next_client_id();
+    let (sender, mut outbound_rx) = mpsc::unbounded_channel();
+    let mut clients = Clients::new(&watch_hub, sender);
 
     loop {
         tokio::select! {
@@ -229,15 +230,33 @@ async fn handle_block_connection(
             Some(message) = source.next() => {
                 match message? {
                     Message::Text(text) => {
+                        let envelope = match serde_json::from_str::<ClientEnvelope>(&text) {
+                            Ok(envelope) => envelope,
+                            Err(error) => {
+                                let response = ServerEnvelope::new(None, invalid_message(error));
+                                sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
+                                continue;
+                            }
+                        };
+                        let ClientEnvelope { client, message: command } = envelope;
+                        if let ClientMessage::CloseClient { request_id } = command {
+                            let response =
+                                clients.close(&store, &watch_hub, client, request_id).await;
+                            let response = ServerEnvelope::new(client, response);
+                            sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
+                            continue;
+                        }
+                        let (client_id, outbound) = clients.get_or_open(&watch_hub, client);
                         let (response, notification) =
-                            handle_text_message(
+                            handle_command(
                                 &store,
                                 &watch_hub,
                                 client_id,
                                 identity,
-                                outbound.clone(),
-                                &text,
+                                outbound,
+                                command,
                             ).await;
+                        let response = ServerEnvelope::new(client, response);
                         sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
                         if let Some(notification) = notification {
                             match notification {
@@ -254,14 +273,14 @@ async fn handle_block_connection(
                     Message::Close(_) => break,
                     Message::Ping(payload) => sink.send(Message::Pong(payload)).await?,
                     Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {
-                        let response = ServerMessage::Error {
+                        let response = ServerEnvelope::new(None, ServerMessage::Error {
                             request_id: None,
                             command: None,
                             id: None,
                             code: ErrorCode::UnsupportedMessage,
                             message: "only JSON text websocket messages are supported".into(),
                             expected_seq: None,
-                        };
+                        });
                         sink.send(Message::Text(serde_json::to_string(&response)?)).await?;
                     }
                 }
@@ -270,8 +289,93 @@ async fn handle_block_connection(
         }
     }
 
-    watch_hub.remove_client(&store, client_id).await;
+    clients.remove_all(&store, &watch_hub).await;
     Ok(())
+}
+
+/// Every client a single connection is serving. The connection always has one
+/// of its own, addressed by an absent envelope id; the rest are opened by name
+/// the first time a frame arrives for them and live until they are closed or
+/// the connection ends.
+struct Clients {
+    sender: mpsc::UnboundedSender<ServerEnvelope>,
+    connection: ClientId,
+    carried: HashMap<Uuid, ClientId>,
+}
+
+impl Clients {
+    fn new(watch_hub: &WatchHub, sender: mpsc::UnboundedSender<ServerEnvelope>) -> Self {
+        Self {
+            connection: watch_hub.next_client_id(),
+            sender,
+            carried: HashMap::new(),
+        }
+    }
+
+    fn get_or_open(
+        &mut self,
+        watch_hub: &WatchHub,
+        client: Option<Uuid>,
+    ) -> (ClientId, OutboundMessages) {
+        let client_id = match client {
+            None => self.connection,
+            Some(client) => *self
+                .carried
+                .entry(client)
+                .or_insert_with(|| watch_hub.next_client_id()),
+        };
+        let outbound = OutboundMessages {
+            client,
+            sender: self.sender.clone(),
+        };
+        (client_id, outbound)
+    }
+
+    async fn close(
+        &mut self,
+        store: &BlockStore,
+        watch_hub: &WatchHub,
+        client: Option<Uuid>,
+        request_id: Uuid,
+    ) -> ServerMessage {
+        let Some(client) = client else {
+            return ServerMessage::Error {
+                request_id: Some(request_id),
+                command: Some(CommandKind::CloseClient),
+                id: None,
+                code: ErrorCode::UnsupportedMessage,
+                message: "a connection's own client is closed with the connection".into(),
+                expected_seq: None,
+            };
+        };
+        if let Some(client_id) = self.carried.remove(&client) {
+            watch_hub.remove_client(store, client_id).await;
+        }
+        ServerMessage::Ok {
+            request_id,
+            command: CommandKind::CloseClient,
+            id: client,
+            seq: None,
+            operation_id: None,
+        }
+    }
+
+    async fn remove_all(&mut self, store: &BlockStore, watch_hub: &WatchHub) {
+        for client_id in std::iter::once(self.connection).chain(self.carried.values().copied()) {
+            watch_hub.remove_client(store, client_id).await;
+        }
+    }
+}
+
+fn invalid_message(error: serde_json::Error) -> ServerMessage {
+    ServerMessage::Error {
+        request_id: None,
+        command: None,
+        id: None,
+        code: ErrorCode::InvalidMessage,
+        message: format!("invalid command JSON: {error}"),
+        expected_seq: None,
+    }
 }
 
 /// Answers one management command over HTTP. The connection carries a single
@@ -473,36 +577,19 @@ fn not_watching(request_id: Uuid, command: CommandKind, id: Uuid) -> ServerMessa
     }
 }
 
-async fn handle_text_message(
+async fn handle_command(
     store: &BlockStore,
     watch_hub: &WatchHub,
     client_id: ClientId,
     identity: Identity,
     outbound: OutboundMessages,
-    text: &str,
+    command: ClientMessage,
 ) -> (ServerMessage, Option<ServerMessage>) {
     let Identity {
         account_id,
         workspace_id,
         ..
     } = identity;
-    let command = match serde_json::from_str::<ClientMessage>(text) {
-        Ok(command) => command,
-        Err(error) => {
-            return (
-                ServerMessage::Error {
-                    request_id: None,
-                    command: None,
-                    id: None,
-                    code: ErrorCode::InvalidMessage,
-                    message: format!("invalid command JSON: {error}"),
-                    expected_seq: None,
-                },
-                None,
-            );
-        }
-    };
-
     match command {
         ClientMessage::CreateBlock {
             request_id,
@@ -982,11 +1069,25 @@ async fn handle_text_message(
             };
             (response, None)
         }
+        ClientMessage::CloseClient { .. } => unreachable!("closing is handled by the connection"),
     }
 }
 
 use block::ClientId;
-type OutboundMessages = mpsc::UnboundedSender<ServerMessage>;
+
+/// Where a watcher's notifications go: the connection's outbound queue, plus
+/// the client of that connection they are addressed to.
+#[derive(Clone)]
+struct OutboundMessages {
+    client: Option<Uuid>,
+    sender: mpsc::UnboundedSender<ServerEnvelope>,
+}
+
+impl OutboundMessages {
+    fn send(&self, message: ServerMessage) {
+        let _ = self.sender.send(ServerEnvelope::new(self.client, message));
+    }
+}
 
 /// Identifies a watcher's view of the workspace. Two accounts watching the same
 /// list can see different blocks, so their subscriptions are tracked apart.
@@ -1065,7 +1166,7 @@ impl WatchHub {
         let entries = watchers.entry((identity.workspace_id, id)).or_default();
         for (&other_id, watch) in entries.iter() {
             for (&presence_id, data) in &watch.presence {
-                let _ = outbound.send(ServerMessage::Presence {
+                outbound.send(ServerMessage::Presence {
                     id,
                     client_id: other_id,
                     presence_id,
@@ -1235,7 +1336,7 @@ impl WatchHub {
     ) {
         for (identity, outbound) in deliveries {
             if store.access((*identity).into()).await.get(id).can_view() {
-                let _ = outbound.send(message.clone());
+                outbound.send(message.clone());
             }
         }
     }
@@ -1289,7 +1390,7 @@ impl WatchHub {
             for watch in entries.values_mut() {
                 if watch.last != blocks {
                     watch.last.clone_from(&blocks);
-                    let _ = watch.outbound.send(ServerMessage::ReferencesUpdated {
+                    watch.outbound.send(ServerMessage::ReferencesUpdated {
                         list,
                         blocks: blocks.clone(),
                     });
@@ -1316,7 +1417,7 @@ impl WatchHub {
         };
         for (identity, outbound) in deliveries {
             if store.access(identity.into()).await.get(id).can_view() {
-                let _ = outbound.send(message.clone());
+                outbound.send(message.clone());
             }
         }
     }
@@ -1351,7 +1452,7 @@ impl WatchHub {
                 .filter(|operation| access.get(operation.id).can_view())
                 .collect();
             if !operations.is_empty() {
-                let _ = outbound.send(ServerMessage::BatchUpdated { operations });
+                outbound.send(ServerMessage::BatchUpdated { operations });
             }
         }
     }

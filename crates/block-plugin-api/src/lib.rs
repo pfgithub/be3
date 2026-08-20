@@ -34,7 +34,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
@@ -254,63 +254,20 @@ pub enum EditorMessage {
     },
 }
 
+/// A block-client frame tunnelled between an editor instance's client and the
+/// host's connection. The payloads are the ordinary JSON of the block
+/// protocol, so the host forwards them without needing to understand them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DelegatedClientMessage {
-    Watch {
+pub enum TunnelMessage {
+    /// A client message on its way to the server.
+    Request {
         instance: EditorInstanceId,
-        request_id: u64,
-        block_id: [u8; 16],
-        block_type: [u8; 16],
+        payload: String,
     },
-    Unwatch {
+    /// A server message on its way back to the instance's client.
+    Response {
         instance: EditorInstanceId,
-        request_id: u64,
-        block_id: [u8; 16],
-    },
-    Snapshot {
-        instance: EditorInstanceId,
-        request_id: u64,
-        block_id: [u8; 16],
-        author: [u8; 16],
-        sequence: u64,
-        access: u8,
-        data: Vec<u8>,
-    },
-    Operate {
-        instance: EditorInstanceId,
-        request_id: u64,
-        block_id: [u8; 16],
-        operation_id: [u8; 16],
-        sequence: u64,
-        operation: Vec<u8>,
-    },
-    Acknowledge {
-        instance: EditorInstanceId,
-        request_id: u64,
-        block_id: [u8; 16],
-        operation_id: [u8; 16],
-        sequence: u64,
-    },
-    RemoteOperation {
-        instance: EditorInstanceId,
-        block_id: [u8; 16],
-        operation_id: [u8; 16],
-        sequence: u64,
-        operation: Vec<u8>,
-    },
-    AccessChanged {
-        instance: EditorInstanceId,
-        block_id: [u8; 16],
-        access: u8,
-    },
-    Error {
-        instance: EditorInstanceId,
-        request_id: Option<u64>,
-        message: String,
-    },
-    Disconnected {
-        instance: EditorInstanceId,
-        message: String,
+        payload: String,
     },
 }
 
@@ -333,7 +290,7 @@ pub enum Message {
     Shutdown,
     ShutdownAcknowledged,
     Editor(EditorMessage),
-    Client(DelegatedClientMessage),
+    Client(TunnelMessage),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -639,24 +596,13 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
     }
 }
 
-fn validate_client(message: &DelegatedClientMessage) -> Result<(), DecodeError> {
-    match message {
-        DelegatedClientMessage::Snapshot { data, .. }
-        | DelegatedClientMessage::Operate {
-            operation: data, ..
-        }
-        | DelegatedClientMessage::RemoteOperation {
-            operation: data, ..
-        } => {
-            if data.len() > MAX_BLOCK_PAYLOAD_BYTES {
-                Err(DecodeError::LimitExceeded("block payload"))
-            } else {
-                Ok(())
-            }
-        }
-        DelegatedClientMessage::Error { message, .. }
-        | DelegatedClientMessage::Disconnected { message, .. } => string(message),
-        _ => Ok(()),
+fn validate_client(message: &TunnelMessage) -> Result<(), DecodeError> {
+    let (TunnelMessage::Request { payload, .. } | TunnelMessage::Response { payload, .. }) =
+        message;
+    if payload.len() > MAX_BLOCK_PAYLOAD_BYTES {
+        Err(DecodeError::LimitExceeded("block payload"))
+    } else {
+        Ok(())
     }
 }
 

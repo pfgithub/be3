@@ -1,9 +1,7 @@
 use std::{cell::RefCell, path::PathBuf, sync::Arc};
 
-use block_client::blocks::counter::{Counter, CounterOperation};
-use block_plugin_api::{
-    DelegatedClientMessage, EditorInstanceId, EditorMessage, Message, ScreenLayout,
-};
+use block_client::blocks::counter::Counter;
+use block_plugin_api::{EditorInstanceId, EditorMessage, Message, ScreenLayout};
 use eframe::egui;
 
 use super::{
@@ -176,8 +174,9 @@ fn begin_pass(host: &mut Host, ctx: &egui::Context) {
     if !frames.is_empty() {
         host.pending_frame = Some(WindowsFrame::Events(frames));
     }
-    for message in process.client_messages() {
-        handle_client_message(host, message);
+    let messages = process.client_messages();
+    for message in messages {
+        host.instances.client_message(message);
     }
 }
 
@@ -188,29 +187,6 @@ fn send(host: &Host, messages: Vec<Message>) {
     if let Some(process) = &host.process {
         process.send(messages);
     }
-}
-
-fn handle_client_message(host: &mut Host, message: DelegatedClientMessage) {
-    let block = match &message {
-        DelegatedClientMessage::Operate { instance, .. } => host.instances.block(*instance),
-        _ => None,
-    };
-    let responses = host.instances.client_message(message, |operation| {
-        let Some(block) = block else {
-            return false;
-        };
-        let Some(operation) = decode_operation(operation) else {
-            return false;
-        };
-        block.operate(operation);
-        true
-    });
-    send(host, responses);
-}
-
-fn decode_operation(operation: &[u8]) -> Option<CounterOperation> {
-    let value = serde_json::from_slice::<serde_json::Value>(operation).ok()?;
-    serde_json::from_value(value.get("Operate")?.clone()).ok()
 }
 
 fn plugin_path() -> PathBuf {

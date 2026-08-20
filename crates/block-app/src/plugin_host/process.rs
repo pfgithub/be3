@@ -32,7 +32,7 @@ pub(super) struct Process {
     #[cfg(target_os = "windows")]
     layouts: Receiver<block_plugin_api::ScreenLayout>,
     #[cfg(target_os = "windows")]
-    clients: Receiver<block_plugin_api::DelegatedClientMessage>,
+    clients: Receiver<block_plugin_api::TunnelMessage>,
 }
 
 impl Process {
@@ -143,7 +143,7 @@ impl Process {
     }
 
     #[cfg(target_os = "windows")]
-    pub(super) fn client_messages(&self) -> Vec<block_plugin_api::DelegatedClientMessage> {
+    pub(super) fn client_messages(&self) -> Vec<block_plugin_api::TunnelMessage> {
         self.clients.try_iter().collect()
     }
 }
@@ -156,7 +156,7 @@ fn drive_windows(
     messages: &Receiver<Message>,
     surfaces: &Sender<SurfaceEvent>,
     layouts: &Sender<block_plugin_api::ScreenLayout>,
-    clients: &Sender<block_plugin_api::DelegatedClientMessage>,
+    clients: &Sender<block_plugin_api::TunnelMessage>,
 ) -> io::Result<()> {
     use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
     use std::os::windows::io::AsRawHandle;

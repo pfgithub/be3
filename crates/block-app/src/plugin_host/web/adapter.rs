@@ -1,6 +1,6 @@
 use block_plugin_api::{
-    encode_frame, Capability, DelegatedClientMessage, EditorMessage, HostSession, Message,
-    QueueError, ScreenLayout, SessionState, SurfaceMechanism,
+    encode_frame, Capability, EditorMessage, HostSession, Message, QueueError, ScreenLayout,
+    SessionState, SurfaceMechanism, TunnelMessage,
 };
 use wasm_bindgen::prelude::*;
 
@@ -42,7 +42,7 @@ extern "C" {
 pub(super) struct WebProtocolAdapter {
     canvas_id: &'static str,
     session: HostSession,
-    client_messages: Vec<DelegatedClientMessage>,
+    client_messages: Vec<TunnelMessage>,
     layout: Option<ScreenLayout>,
 }
 
@@ -94,7 +94,7 @@ impl WebProtocolAdapter {
         }
     }
 
-    pub(super) fn take_client_messages(&mut self) -> Vec<DelegatedClientMessage> {
+    pub(super) fn take_client_messages(&mut self) -> Vec<TunnelMessage> {
         std::mem::take(&mut self.client_messages)
     }
 

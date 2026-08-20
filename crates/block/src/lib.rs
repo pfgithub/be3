@@ -438,6 +438,7 @@ pub enum CommandKind {
     ListBlockAccess,
     SetBlockAccess,
     SetBlockProperty,
+    CloseClient,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -456,6 +457,41 @@ pub enum ErrorCode {
     ReferencedBlockNotFound,
     StorageError,
     UnsupportedMessage,
+}
+
+/// One websocket frame from a client. A single connection carries any number of
+/// separate clients: `client` names which of them a frame belongs to, and is
+/// absent for the connection's own client. Each one gets its own watches,
+/// presence and sequencing on the server, exactly as if it had dialled in on a
+/// connection of its own.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct ClientEnvelope {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<Uuid>,
+    #[serde(flatten)]
+    pub message: ClientMessage,
+}
+
+/// One websocket frame from the server, addressed to the client of the
+/// connection named by `client`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct ServerEnvelope {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<Uuid>,
+    #[serde(flatten)]
+    pub message: ServerMessage,
+}
+
+impl ClientEnvelope {
+    pub fn new(client: Option<Uuid>, message: ClientMessage) -> Self {
+        Self { client, message }
+    }
+}
+
+impl ServerEnvelope {
+    pub fn new(client: Option<Uuid>, message: ServerMessage) -> Self {
+        Self { client, message }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -535,6 +571,11 @@ pub enum ClientMessage {
         account_id: Uuid,
         access: BlockAccess,
     },
+    /// Ends one of the connection's clients, releasing its watches and
+    /// presence. The connection itself stays open for its other clients.
+    CloseClient {
+        request_id: Uuid,
+    },
 }
 
 impl ClientMessage {
@@ -551,6 +592,7 @@ impl ClientMessage {
             | Self::UnwatchReferences { request_id, .. }
             | Self::ListBlockAccess { request_id, .. }
             | Self::SetBlockAccess { request_id, .. }
+            | Self::CloseClient { request_id }
             | Self::SetBlockProperty { request_id, .. } => *request_id,
         }
     }

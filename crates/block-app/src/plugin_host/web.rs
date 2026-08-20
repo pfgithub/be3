@@ -1,9 +1,7 @@
 use std::cell::RefCell;
 
 use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
-use block_plugin_api::{
-    DelegatedClientMessage, EditorInstanceId, EditorMessage, Message, ScreenLayout,
-};
+use block_plugin_api::{EditorInstanceId, EditorMessage, Message, ScreenLayout};
 use eframe::egui;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
@@ -211,7 +209,7 @@ fn begin_pass(state: &mut State, ctx: &egui::Context) {
         state.layout = layout;
     }
     for message in client_messages {
-        handle_client_message(state, message);
+        state.instances.client_message(message);
     }
 }
 
@@ -225,38 +223,6 @@ fn send(state: &mut State, messages: Vec<Message>) {
     if let Err(error) = adapter.send(messages) {
         state.error = Some(error);
     }
-}
-
-fn handle_client_message(state: &mut State, message: DelegatedClientMessage) {
-    let block = match &message {
-        DelegatedClientMessage::Operate { instance, .. } => state.instances.block(*instance),
-        _ => None,
-    };
-    let mut failure = None;
-    let responses = state.instances.client_message(message, |operation| {
-        let Some(block) = block else {
-            return false;
-        };
-        match decode_operation(operation) {
-            Some(operation) => {
-                block.operate(operation);
-                true
-            }
-            None => {
-                failure = Some("Counter plugin sent a malformed operation".to_owned());
-                false
-            }
-        }
-    });
-    if let Some(failure) = failure {
-        state.error = Some(failure);
-    }
-    send(state, responses);
-}
-
-fn decode_operation(operation: &[u8]) -> Option<block_client::blocks::counter::CounterOperation> {
-    let value = serde_json::from_slice::<serde_json::Value>(operation).ok()?;
-    serde_json::from_value(value.get("Operate")?.clone()).ok()
 }
 
 fn create_canvas() {

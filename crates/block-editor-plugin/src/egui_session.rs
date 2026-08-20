@@ -1,8 +1,6 @@
-use block::Block;
-use block_client::{DelegatedEvent, DelegatedHostEndpoint, DelegatedRequest};
+use block_client::TunnelCarrier;
 use block_plugin_api::{
-    DelegatedClientMessage, EditorInstanceId, InputEvent, Message, PointerButton, ScreenPlacement,
-    WheelUnit,
+    EditorInstanceId, InputEvent, Message, PointerButton, ScreenPlacement, TunnelMessage, WheelUnit,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -12,8 +10,7 @@ pub(crate) struct EguiSession {
     instance: EditorInstanceId,
     input: egui::RawInput,
     placement: Option<ScreenPlacement>,
-    endpoint: Option<DelegatedHostEndpoint>,
-    request_id: u64,
+    carrier: Option<TunnelCarrier>,
 }
 
 trait AppUi {
@@ -38,19 +35,18 @@ impl EguiSession {
             instance,
             input: egui::RawInput::default(),
             placement: None,
-            endpoint: None,
-            request_id: 1,
+            carrier: None,
         }
     }
 
     pub(crate) fn connect(&mut self, block_id: Uuid, account_id: Uuid, workspace_id: Uuid) {
-        if self.endpoint.is_some() {
+        if self.carrier.is_some() {
             return;
         }
-        let (endpoint, host) = block_client::delegated_channel();
-        let client = block_client::BlockClient::delegated(account_id, workspace_id, endpoint);
+        let (endpoint, carrier) = block_client::tunnel_channel();
+        let client = block_client::BlockClient::tunneled(account_id, workspace_id, endpoint);
         self.app.connect(client, block_id);
-        self.endpoint = Some(host);
+        self.carrier = Some(carrier);
     }
 
     pub(crate) fn place(&mut self, placement: ScreenPlacement) {
@@ -59,100 +55,26 @@ impl EguiSession {
 
     pub(crate) fn outbound(&mut self) -> Vec<Message> {
         let instance = self.instance;
-        let Some(endpoint) = &mut self.endpoint else {
+        let Some(carrier) = &mut self.carrier else {
             return Vec::new();
         };
         let mut messages = Vec::new();
-        while let Ok(request) = endpoint.requests.try_recv() {
-            let request_id = self.request_id;
-            self.request_id += 1;
-            let message = match request {
-                DelegatedRequest::Watch { id, block_type } => DelegatedClientMessage::Watch {
-                    instance,
-                    request_id,
-                    block_id: id.into_bytes(),
-                    block_type: block_type.into_bytes(),
-                },
-                DelegatedRequest::Unwatch { id } => DelegatedClientMessage::Unwatch {
-                    instance,
-                    request_id,
-                    block_id: id.into_bytes(),
-                },
-                DelegatedRequest::Operate {
-                    id,
-                    operation_id,
-                    sequence,
-                    operation,
-                } => DelegatedClientMessage::Operate {
-                    instance,
-                    request_id,
-                    block_id: id.into_bytes(),
-                    operation_id: operation_id.into_bytes(),
-                    sequence,
-                    operation,
-                },
-            };
-            messages.push(Message::Client(message));
+        while let Some(payload) = carrier.try_recv() {
+            messages.push(Message::Client(TunnelMessage::Request {
+                instance,
+                payload,
+            }));
         }
         messages
     }
 
-    pub(crate) fn client_message(&mut self, message: &DelegatedClientMessage) {
-        let Some(endpoint) = &mut self.endpoint else {
+    pub(crate) fn client_message(&mut self, message: &TunnelMessage) {
+        let Some(carrier) = &self.carrier else {
             return;
         };
-        let event = match message {
-            DelegatedClientMessage::Snapshot {
-                block_id,
-                author,
-                sequence,
-                access,
-                data,
-                ..
-            } => DelegatedEvent::Snapshot {
-                id: Uuid::from_bytes(*block_id),
-                block_type: block_client::blocks::counter::Counter::TYPE_ID,
-                author: Uuid::from_bytes(*author),
-                sequence: *sequence,
-                access: decode_access(*access),
-                data: data.clone(),
-            },
-            DelegatedClientMessage::Acknowledge {
-                block_id,
-                operation_id,
-                sequence,
-                ..
-            } => DelegatedEvent::Acknowledged {
-                id: Uuid::from_bytes(*block_id),
-                operation_id: Uuid::from_bytes(*operation_id),
-                sequence: *sequence,
-            },
-            DelegatedClientMessage::RemoteOperation {
-                block_id,
-                operation_id,
-                sequence,
-                operation,
-                ..
-            } => DelegatedEvent::RemoteOperation {
-                id: Uuid::from_bytes(*block_id),
-                operation_id: Uuid::from_bytes(*operation_id),
-                author: Uuid::nil(),
-                sequence: *sequence,
-                operation: operation.clone(),
-            },
-            DelegatedClientMessage::AccessChanged {
-                block_id, access, ..
-            } => DelegatedEvent::AccessChanged {
-                id: Uuid::from_bytes(*block_id),
-                access: decode_access(*access),
-            },
-            DelegatedClientMessage::Error { message, .. } => DelegatedEvent::Error(message.clone()),
-            DelegatedClientMessage::Disconnected { message, .. } => {
-                DelegatedEvent::Disconnected(message.clone())
-            }
-            _ => return,
-        };
-        let _ = endpoint.events.unbounded_send(event);
+        if let TunnelMessage::Response { payload, .. } = message {
+            carrier.send(payload.clone());
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -263,15 +185,6 @@ impl EguiSession {
             }
             InputEvent::Focus(focused) => self.input.focused = *focused,
         }
-    }
-}
-
-fn decode_access(access: u8) -> block::BlockAccess {
-    match access {
-        3 => block::BlockAccess::Edit,
-        2 => block::BlockAccess::View,
-        1 => block::BlockAccess::KnowExists,
-        _ => block::BlockAccess::None,
     }
 }
 

@@ -116,17 +116,8 @@ impl Screens {
     }
 }
 
-fn instance_of_client(message: &block_plugin_api::DelegatedClientMessage) -> EditorInstanceId {
-    use block_plugin_api::DelegatedClientMessage as Client;
-    match message {
-        Client::Watch { instance, .. }
-        | Client::Unwatch { instance, .. }
-        | Client::Snapshot { instance, .. }
-        | Client::Operate { instance, .. }
-        | Client::Acknowledge { instance, .. }
-        | Client::RemoteOperation { instance, .. }
-        | Client::AccessChanged { instance, .. }
-        | Client::Error { instance, .. }
-        | Client::Disconnected { instance, .. } => *instance,
-    }
+fn instance_of_client(message: &block_plugin_api::TunnelMessage) -> EditorInstanceId {
+    use block_plugin_api::TunnelMessage as Tunnel;
+    let (Tunnel::Request { instance, .. } | Tunnel::Response { instance, .. }) = message;
+    *instance
 }
