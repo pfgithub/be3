@@ -39,7 +39,7 @@ TODO: you can share documents with agents and have them edit them. agents should
 
 TODO: you can make a website. when you edit a document in it, it prompts you to publush changes?
 
-TODO: the share menu includes anything with access, for example if ot is a third party block and the vendor is able to edit its contents without you
+TODO: the share menu includes anything with access, for example if of is a third party block and the vendor is able to edit its contents without you
 
 TODO: chat. it has to not get slow based on the number of messages.
 
@@ -48,6 +48,8 @@ TODO: we might provide our own ui framework, or maybe egui is good enough
 TODO: 3rd party plugin viewer
 
 TODO: components we create require you to know who you're sharing with. eg: for inviting someone to edit a block, both need to confirm, it doesn't show up in an inbox.
+
+TODO: all of the default tools we provide are of reasonable quality for the class of tool they are. if they're not, they're hidden in a menu or opt-in until they get to that target quality.
 
 ## Development
 
