@@ -12,9 +12,14 @@ mod web;
 #[cfg(target_os = "windows")]
 mod windows_surface;
 
+pub use block_plugin_api::EditorRegion;
+
 pub trait App: Default + 'static {
     fn connect(&mut self, _client: block_client::BlockClient, _block_id: uuid::Uuid) {}
     fn ui(&mut self, ui: &mut egui::Ui);
+    fn toolbar_ui(&mut self, _ui: &mut egui::Ui) {}
+    fn left_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
+    fn right_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
 }
 
 #[doc(hidden)]

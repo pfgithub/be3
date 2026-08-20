@@ -23,10 +23,28 @@ fn screen(
     pixel_height: u32,
     scale_factor: f32,
 ) -> ScreenRequest {
+    region_screen(
+        EditorRegion::Main,
+        screen,
+        instance,
+        pixel_width,
+        pixel_height,
+        scale_factor,
+    )
+}
+
+fn region_screen(
+    region: EditorRegion,
+    screen: u64,
+    instance: u64,
+    pixel_width: u32,
+    pixel_height: u32,
+    scale_factor: f32,
+) -> ScreenRequest {
     ScreenRequest {
         screen: ScreenId(screen),
         instance: EditorInstanceId(instance),
-        region: "main".into(),
+        region,
         metrics: ViewportMetrics {
             logical_width: pixel_width as f32 / scale_factor,
             logical_height: pixel_height as f32 / scale_factor,
@@ -46,4 +64,5 @@ mod rejects_malformed_payload;
 mod rejects_oversized_block_payload;
 mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
+mod stacked_layout_keeps_each_region;
 mod stacked_layout_stacks_screens;

@@ -1,5 +1,7 @@
 use super::*;
-use block_plugin_api::{HelloAccepted, InputBatch, ScreenRequest, ScreenSet, ViewportMetrics};
+use block_plugin_api::{
+    EditorRegion, HelloAccepted, InputBatch, ScreenRequest, ScreenSet, ViewportMetrics,
+};
 
 fn accept(session: &mut ClientSession) {
     session.receive(Message::HelloAccepted(HelloAccepted {
@@ -24,7 +26,7 @@ fn screen(screen: ScreenId, instance: EditorInstanceId) -> ScreenRequest {
     ScreenRequest {
         screen,
         instance,
-        region: "main".into(),
+        region: EditorRegion::Main,
         metrics: ViewportMetrics {
             logical_width: 100.0,
             logical_height: 100.0,

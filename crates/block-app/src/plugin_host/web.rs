@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
-use block_plugin_api::{EditorInstanceId, EditorMessage, Message, ScreenLayout};
+use block_plugin_api::{EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenLayout};
 use eframe::egui;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
@@ -82,6 +82,8 @@ pub(crate) fn editor_ui(
     client: Arc<BlockClient>,
     block: BlockHandle<Counter>,
     instance: EditorInstanceId,
+    region: EditorRegion,
+    size: egui::Vec2,
 ) {
     open();
     STATE.with(|state| {
@@ -106,11 +108,11 @@ pub(crate) fn editor_ui(
             }
             return;
         }
-        let (response, painter) =
-            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
         let pass = state.pass;
         let screen = state.instances.report(
             instance,
+            region,
             ui.ctx(),
             client,
             block,
@@ -118,26 +120,26 @@ pub(crate) fn editor_ui(
             ui.ctx().pixels_per_point(),
             pass,
         );
-        let messages = state
-            .instances
-            .input(instance, |input| input.update(ui, &response, screen));
+        let messages = state.instances.input(instance, region, |input| {
+            input.update(ui, &response, screen)
+        });
         send(&mut state, messages);
         let Some(status) = state.presenter_status.clone() else {
             return;
         };
-        let Some(region) = Region::of(&state.layout, screen) else {
+        let Some(atlas_region) = Region::of(&state.layout, screen) else {
             return;
         };
-        let size = [state.layout.width, state.layout.height];
+        let atlas_size = [state.layout.width, state.layout.height];
         painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
             response.rect,
             PresenterCallback {
                 command: PresenterCommand::Present(renderer::WebFrame {
-                    size,
+                    size: atlas_size,
                     canvas_id: CANVAS_ID,
                 }),
                 status,
-                region,
+                region: atlas_region,
             },
         ));
     });

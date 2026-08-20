@@ -22,7 +22,7 @@ impl eframe::App for WebApp {
         let mut screens = self.screens.borrow_mut();
         for placement in screens.placements() {
             if let Some(session) = screens.session(placement.instance) {
-                session.show(ui);
+                session.show(ui, placement.region);
             }
         }
     }
@@ -35,7 +35,7 @@ impl eframe::App for WebApp {
         let mut screens = self.screens.borrow_mut();
         for placement in screens.placements() {
             if let Some(session) = screens.session(placement.instance) {
-                session.append_input(input);
+                session.append_input(placement.region, input);
             }
         }
     }

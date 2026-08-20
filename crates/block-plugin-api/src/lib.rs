@@ -34,7 +34,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
@@ -53,7 +53,7 @@ pub struct ScreenId(pub u64);
 pub struct ScreenRequest {
     pub screen: ScreenId,
     pub instance: EditorInstanceId,
-    pub region: String,
+    pub region: EditorRegion,
     pub metrics: ViewportMetrics,
 }
 
@@ -67,6 +67,7 @@ pub struct ScreenSet {
 pub struct ScreenPlacement {
     pub screen: ScreenId,
     pub instance: EditorInstanceId,
+    pub region: EditorRegion,
     pub x: u32,
     pub y: u32,
     pub width: u32,
@@ -99,6 +100,7 @@ impl ScreenLayout {
             layout.screens.push(ScreenPlacement {
                 screen: request.screen,
                 instance: request.instance,
+                region: request.region,
                 x: 0,
                 y: layout.height,
                 width: metrics.pixel_width,
@@ -143,10 +145,21 @@ pub enum CreationMode {
     Immediate,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EditorRegion {
-    pub id: String,
-    pub main: bool,
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EditorRegion {
+    Main,
+    Toolbar,
+    LeftSidebar,
+    RightSidebar,
+}
+
+impl EditorRegion {
+    pub const ALL: [Self; 4] = [
+        Self::Main,
+        Self::Toolbar,
+        Self::LeftSidebar,
+        Self::RightSidebar,
+    ];
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,10 +194,13 @@ impl PluginManifest {
         {
             return Err(ManifestError::InvalidIdentity);
         }
-        if self.regions.len() != 1 || !self.regions[0].main {
+        if !self.regions.contains(&EditorRegion::Main)
+            || EditorRegion::ALL
+                .iter()
+                .any(|region| self.regions.iter().filter(|it| *it == region).count() > 1)
+        {
             return Err(ManifestError::InvalidRegions);
         }
-        manifest_string("region id", &self.regions[0].id)?;
         if self.entry_points.web.is_none()
             && self.entry_points.windows.is_none()
             && self.entry_points.android.is_none()
@@ -558,13 +574,7 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             }
             Ok(())
         }
-        Message::Screens(value) => {
-            collection(value.screens.len())?;
-            for screen in &value.screens {
-                string(&screen.region)?;
-            }
-            Ok(())
-        }
+        Message::Screens(value) => collection(value.screens.len()),
         Message::Layout(value) => collection(value.screens.len()),
         Message::SurfaceCapabilities(value) => collection(value.mechanisms.len()),
         Message::Surface(value) => {

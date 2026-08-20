@@ -1,6 +1,4 @@
-use block_plugin_api::{
-    EditorInstanceId, FrameReady, Message, ScreenLayout, WindowsSurfaceDescriptor,
-};
+use block_plugin_api::{FrameReady, Message, ScreenId, ScreenLayout, WindowsSurfaceDescriptor};
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::collections::HashMap;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
@@ -28,7 +26,7 @@ pub struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
     texture: wgpu::Texture,
-    panes: HashMap<EditorInstanceId, Pane>,
+    panes: HashMap<ScreenId, Pane>,
     fence: ID3D12Fence,
     resource_handle: OwnedHandle,
     fence_handle: OwnedHandle,
@@ -151,20 +149,17 @@ impl Surface {
             let Some(session) = screens.session(placement.instance) else {
                 continue;
             };
-            let pane = self
-                .panes
-                .entry(placement.instance)
-                .or_insert_with(|| Pane {
-                    context: egui::Context::default(),
-                    renderer: egui_wgpu::Renderer::new(
-                        &self.device,
-                        wgpu::TextureFormat::Bgra8Unorm,
-                        egui_wgpu::RendererOptions::default(),
-                    ),
-                });
-            let output = session.run(&pane.context, phase);
+            let pane = self.panes.entry(placement.screen).or_insert_with(|| Pane {
+                context: egui::Context::default(),
+                renderer: egui_wgpu::Renderer::new(
+                    &self.device,
+                    wgpu::TextureFormat::Bgra8Unorm,
+                    egui_wgpu::RendererOptions::default(),
+                ),
+            });
+            let output = session.run(placement.region, &pane.context, phase);
             repaint = repaint.min(repaint_delay(&output));
-            let scale = session.scale_factor();
+            let scale = session.scale_factor(placement.region);
             let paint_jobs = pane.context.tessellate(output.shapes, scale);
             for (id, delta) in &output.textures_delta.set {
                 pane.renderer
@@ -207,17 +202,17 @@ impl Surface {
                 pane.renderer
                     .render(&mut pass.forget_lifetime(), &paint_jobs, &screen);
             }
-            freed.push((placement.instance, output.textures_delta.free));
+            freed.push((placement.screen, output.textures_delta.free));
         }
-        self.panes.retain(|instance, _| {
+        self.panes.retain(|screen, _| {
             placements
                 .iter()
-                .any(|placement| placement.instance == *instance)
+                .any(|placement| placement.screen == *screen)
         });
         self.queue
             .submit(commands.into_iter().chain([encoder.finish()]));
-        for (instance, textures) in freed {
-            if let Some(pane) = self.panes.get_mut(&instance) {
+        for (screen, textures) in freed {
+            if let Some(pane) = self.panes.get_mut(&screen) {
                 for id in &textures {
                     pane.renderer.free_texture(id);
                 }

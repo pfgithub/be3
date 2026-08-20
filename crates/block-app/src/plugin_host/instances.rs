@@ -1,7 +1,8 @@
 use block::Block;
 use block_client::{blocks::counter::Counter, BlockClient, BlockHandle, Tunnel};
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, Message, ScreenId, ScreenRequest, ScreenSet, TunnelMessage,
+    EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenId, ScreenRequest, ScreenSet,
+    TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -19,11 +20,14 @@ struct Instance {
     client: Arc<BlockClient>,
     block: BlockHandle<Counter>,
     tunnel: Tunnel,
+    screens: HashMap<EditorRegion, Screen>,
+    opened: bool,
+}
+
+struct Screen {
     input: InputAdapter,
-    screen: ScreenId,
     request: ScreenRequest,
     last_seen: u64,
-    opened: bool,
 }
 
 pub(super) struct NextScreens {
@@ -43,6 +47,7 @@ impl Instances {
     pub(super) fn report(
         &mut self,
         instance: EditorInstanceId,
+        region: EditorRegion,
         context: &egui::Context,
         client: Arc<BlockClient>,
         block: BlockHandle<Counter>,
@@ -50,9 +55,7 @@ impl Instances {
         scale_factor: f32,
         pass: u64,
     ) -> ScreenId {
-        let next_screen = &mut self.next_screen;
         let entry = self.entries.entry(instance).or_insert_with(|| {
-            *next_screen += 1;
             let tunnel = client.open_tunnel({
                 let context = context.clone();
                 move || context.request_repaint()
@@ -61,21 +64,27 @@ impl Instances {
                 client,
                 block,
                 tunnel,
-                input: InputAdapter::default(),
-                screen: ScreenId(*next_screen),
-                request: ScreenRequest {
-                    screen: ScreenId(*next_screen),
-                    instance,
-                    region: "main".into(),
-                    metrics: viewport_metrics(size, scale_factor),
-                },
-                last_seen: pass,
+                screens: HashMap::new(),
                 opened: false,
             }
         });
-        entry.request.metrics = viewport_metrics(size, scale_factor);
-        entry.last_seen = pass;
-        entry.screen
+        let next_screen = &mut self.next_screen;
+        let screen = entry.screens.entry(region).or_insert_with(|| {
+            *next_screen += 1;
+            Screen {
+                input: InputAdapter::default(),
+                request: ScreenRequest {
+                    screen: ScreenId(*next_screen),
+                    instance,
+                    region,
+                    metrics: viewport_metrics(size, scale_factor),
+                },
+                last_seen: pass,
+            }
+        });
+        screen.request.metrics = viewport_metrics(size, scale_factor);
+        screen.last_seen = pass;
+        screen.request.screen
     }
 
     pub(super) fn next_screens(&mut self, pass: u64) -> NextScreens {
@@ -87,9 +96,20 @@ impl Instances {
             let Some(entry) = self.entries.get_mut(&instance) else {
                 continue;
             };
-            if entry.last_seen < pass {
+            let mut regions: Vec<_> = entry
+                .screens
+                .values()
+                .filter(|screen| {
+                    screen.last_seen >= pass
+                        && screen.request.metrics.pixel_width > 0
+                        && screen.request.metrics.pixel_height > 0
+                })
+                .map(|screen| screen.request.clone())
+                .collect();
+            if regions.is_empty() {
                 continue;
             }
+            regions.sort_by_key(|request| request.screen.0);
             if !entry.opened {
                 entry.opened = true;
                 opened.push(Message::Editor(EditorMessage::Open {
@@ -102,9 +122,7 @@ impl Instances {
                         == block::BlockAccess::Edit,
                 }));
             }
-            if entry.request.metrics.pixel_width > 0 && entry.request.metrics.pixel_height > 0 {
-                screens.push(entry.request.clone());
-            }
+            screens.extend(regions);
         }
         NextScreens { opened, screens }
     }
@@ -120,11 +138,13 @@ impl Instances {
     pub(super) fn input(
         &mut self,
         instance: EditorInstanceId,
+        region: EditorRegion,
         update: impl FnOnce(&mut InputAdapter) -> Vec<Message>,
     ) -> Vec<Message> {
         self.entries
             .get_mut(&instance)
-            .map(|entry| update(&mut entry.input))
+            .and_then(|entry| entry.screens.get_mut(&region))
+            .map(|screen| update(&mut screen.input))
             .unwrap_or_default()
     }
 

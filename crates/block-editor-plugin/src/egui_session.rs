@@ -1,21 +1,28 @@
 use block_client::TunnelCarrier;
 use block_plugin_api::{
-    EditorInstanceId, InputEvent, Message, PointerButton, ScreenPlacement, TunnelMessage, WheelUnit,
+    EditorInstanceId, EditorRegion, InputEvent, Message, PointerButton, ScreenPlacement,
+    TunnelMessage, WheelUnit,
 };
 use eframe::egui;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub(crate) struct EguiSession {
     app: Box<dyn AppUi>,
     instance: EditorInstanceId,
+    regions: HashMap<EditorRegion, RegionState>,
+    carrier: Option<TunnelCarrier>,
+}
+
+#[derive(Default)]
+struct RegionState {
     input: egui::RawInput,
     placement: Option<ScreenPlacement>,
-    carrier: Option<TunnelCarrier>,
 }
 
 trait AppUi {
     fn connect(&mut self, client: block_client::BlockClient, block_id: Uuid);
-    fn ui(&mut self, ui: &mut egui::Ui);
+    fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
 }
 
 impl<A: crate::App> AppUi for A {
@@ -23,8 +30,13 @@ impl<A: crate::App> AppUi for A {
         crate::App::connect(self, client, block_id);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui) {
-        crate::App::ui(self, ui);
+    fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
+        match region {
+            EditorRegion::Main => crate::App::ui(self, ui),
+            EditorRegion::Toolbar => crate::App::toolbar_ui(self, ui),
+            EditorRegion::LeftSidebar => crate::App::left_sidebar_ui(self, ui),
+            EditorRegion::RightSidebar => crate::App::right_sidebar_ui(self, ui),
+        }
     }
 }
 
@@ -33,8 +45,7 @@ impl EguiSession {
         Self {
             app: Box::new(A::default()),
             instance,
-            input: egui::RawInput::default(),
-            placement: None,
+            regions: HashMap::new(),
             carrier: None,
         }
     }
@@ -49,8 +60,12 @@ impl EguiSession {
         self.carrier = Some(carrier);
     }
 
-    pub(crate) fn place(&mut self, placement: ScreenPlacement) {
-        self.placement = Some(placement);
+    pub(crate) fn place(&mut self, placements: &[ScreenPlacement]) {
+        self.regions
+            .retain(|region, _| placements.iter().any(|it| it.region == *region));
+        for placement in placements {
+            self.regions.entry(placement.region).or_default().placement = Some(*placement);
+        }
     }
 
     pub(crate) fn outbound(&mut self) -> Vec<Message> {
@@ -78,45 +93,62 @@ impl EguiSession {
     }
 
     #[cfg(target_os = "windows")]
-    pub(crate) fn run(&mut self, context: &egui::Context, time: f64) -> egui::FullOutput {
-        context.set_pixels_per_point(self.scale_factor());
-        self.input.screen_rect = Some(self.rect());
-        self.input.time = Some(time);
-        let input = std::mem::take(&mut self.input);
-        self.input.focused = input.focused;
-        self.input.modifiers = input.modifiers;
+    pub(crate) fn run(
+        &mut self,
+        region: EditorRegion,
+        context: &egui::Context,
+        time: f64,
+    ) -> egui::FullOutput {
+        context.set_pixels_per_point(self.scale_factor(region));
+        let rect = self.rect(region);
+        let state = self.regions.entry(region).or_default();
+        state.input.screen_rect = Some(rect);
+        state.input.time = Some(time);
+        let input = std::mem::take(&mut state.input);
+        state.input.focused = input.focused;
+        state.input.modifiers = input.modifiers;
+        let app = &mut self.app;
         context.run_ui(input, |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| self.app.ui(ui));
+            egui::CentralPanel::default().show_inside(ui, |ui| app.ui(ui, region));
         })
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
-        let rect = self.rect();
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
+        let rect = self.rect(region);
+        let app = &mut self.app;
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(rect)
-                .id_salt(self.instance.0),
-            |ui| self.app.ui(ui),
+                .id_salt((self.instance.0, region)),
+            |ui| app.ui(ui, region),
         );
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn append_input(&mut self, input: &mut egui::RawInput) {
-        input.events.append(&mut self.input.events);
-        input.modifiers = self.input.modifiers;
-        input.focused |= self.input.focused;
+    pub(crate) fn append_input(&mut self, region: EditorRegion, input: &mut egui::RawInput) {
+        let Some(state) = self.regions.get_mut(&region) else {
+            return;
+        };
+        input.events.append(&mut state.input.events);
+        input.modifiers = state.input.modifiers;
+        input.focused |= state.input.focused;
     }
 
     #[cfg(target_os = "windows")]
-    pub(crate) fn scale_factor(&self) -> f32 {
-        self.placement
-            .as_ref()
-            .map_or(1.0, ScreenPlacement::scale_factor)
+    pub(crate) fn scale_factor(&self, region: EditorRegion) -> f32 {
+        self.placement(region)
+            .map_or(1.0, |placement| placement.scale_factor())
     }
 
-    fn rect(&self) -> egui::Rect {
-        let Some(placement) = &self.placement else {
+    fn placement(&self, region: EditorRegion) -> Option<&ScreenPlacement> {
+        self.regions
+            .get(&region)
+            .and_then(|state| state.placement.as_ref())
+    }
+
+    fn rect(&self, region: EditorRegion) -> egui::Rect {
+        let Some(placement) = self.placement(region) else {
             return egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO);
         };
         let scale = placement.scale_factor();
@@ -129,10 +161,13 @@ impl EguiSession {
         )
     }
 
-    pub(crate) fn input(&mut self, event: &InputEvent) {
-        let origin = self.rect().min.to_vec2();
+    pub(crate) fn input(&mut self, region: EditorRegion, event: &InputEvent) {
+        let origin = self.rect(region).min.to_vec2();
+        let Some(state) = self.regions.get_mut(&region) else {
+            return;
+        };
         match event {
-            InputEvent::PointerMoved { x, y } => self
+            InputEvent::PointerMoved { x, y } => state
                 .input
                 .events
                 .push(egui::Event::PointerMoved(egui::pos2(*x, *y) + origin)),
@@ -142,19 +177,19 @@ impl EguiSession {
                 x,
                 y,
             } => {
-                self.input.events.push(egui::Event::PointerButton {
+                state.input.events.push(egui::Event::PointerButton {
                     pos: egui::pos2(*x, *y) + origin,
                     button: pointer_button(*button),
                     pressed: *pressed,
-                    modifiers: self.input.modifiers,
+                    modifiers: state.input.modifiers,
                 });
             }
             InputEvent::Wheel { x, y, unit } => {
-                self.input.events.push(egui::Event::MouseWheel {
+                state.input.events.push(egui::Event::MouseWheel {
                     unit: wheel_unit(*unit),
                     delta: egui::vec2(*x, *y),
                     phase: egui::TouchPhase::Move,
-                    modifiers: self.input.modifiers,
+                    modifiers: state.input.modifiers,
                 });
             }
             InputEvent::Key {
@@ -164,18 +199,18 @@ impl EguiSession {
                 ..
             } => {
                 if let Some(key) = egui::Key::from_name(logical) {
-                    self.input.events.push(egui::Event::Key {
+                    state.input.events.push(egui::Event::Key {
                         key,
                         physical_key: None,
                         pressed: *pressed,
                         repeat: *repeat,
-                        modifiers: self.input.modifiers,
+                        modifiers: state.input.modifiers,
                     });
                 }
             }
-            InputEvent::Text(text) => self.input.events.push(egui::Event::Text(text.clone())),
+            InputEvent::Text(text) => state.input.events.push(egui::Event::Text(text.clone())),
             InputEvent::Modifiers(modifiers) => {
-                self.input.modifiers = egui::Modifiers {
+                state.input.modifiers = egui::Modifiers {
                     alt: modifiers.alt,
                     ctrl: modifiers.control,
                     shift: modifiers.shift,
@@ -183,7 +218,7 @@ impl EguiSession {
                     command: modifiers.command,
                 };
             }
-            InputEvent::Focus(focused) => self.input.focused = *focused,
+            InputEvent::Focus(focused) => state.input.focused = *focused,
         }
     }
 }

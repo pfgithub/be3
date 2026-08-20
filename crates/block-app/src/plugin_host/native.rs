@@ -1,7 +1,7 @@
 use std::{cell::RefCell, path::PathBuf, sync::Arc};
 
 use block_client::blocks::counter::Counter;
-use block_plugin_api::{EditorInstanceId, EditorMessage, Message, ScreenLayout};
+use block_plugin_api::{EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenLayout};
 use eframe::egui;
 
 use super::{
@@ -26,6 +26,8 @@ pub(crate) fn editor_ui(
     client: Arc<block_client::BlockClient>,
     block: block_client::BlockHandle<Counter>,
     instance: EditorInstanceId,
+    region: EditorRegion,
+    size: egui::Vec2,
 ) {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
@@ -52,11 +54,11 @@ pub(crate) fn editor_ui(
                 }
             }
         }
-        let (response, painter) =
-            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
         let pass = host.pass;
         let screen = host.instances.report(
             instance,
+            region,
             ui.ctx(),
             client,
             block,
@@ -64,14 +66,14 @@ pub(crate) fn editor_ui(
             ui.ctx().pixels_per_point(),
             pass,
         );
-        let messages = host
-            .instances
-            .input(instance, |input| input.update(ui, &response, screen));
+        let messages = host.instances.input(instance, region, |input| {
+            input.update(ui, &response, screen)
+        });
         send(&host, messages);
         let Some(status) = host.presenter_status.clone() else {
             return;
         };
-        let Some(region) = Region::of(&host.layout, screen) else {
+        let Some(atlas_region) = Region::of(&host.layout, screen) else {
             return;
         };
         let frame = host
@@ -83,7 +85,7 @@ pub(crate) fn editor_ui(
             PresenterCallback {
                 command: PresenterCommand::Present(frame),
                 status,
-                region,
+                region: atlas_region,
             },
         ));
     });

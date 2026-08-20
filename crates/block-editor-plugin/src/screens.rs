@@ -1,5 +1,5 @@
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, Message, ScreenId, ScreenLayout, ScreenRequest,
+    EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenId, ScreenLayout, ScreenRequest,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -62,14 +62,14 @@ impl Screens {
                 self.relayout();
             }
             Message::Input(batch) => {
-                let Some(instance) = self.instance_of(batch.screen) else {
+                let Some((instance, region)) = self.screen(batch.screen) else {
                     return;
                 };
                 let Some(session) = self.sessions.get_mut(&instance) else {
                     return;
                 };
                 for event in &batch.events {
-                    session.input(event);
+                    session.input(region, event);
                 }
             }
             Message::Client(message) => {
@@ -98,20 +98,25 @@ impl Screens {
         self.sessions.get_mut(&instance)
     }
 
-    fn instance_of(&self, screen: ScreenId) -> Option<EditorInstanceId> {
+    fn screen(&self, screen: ScreenId) -> Option<(EditorInstanceId, EditorRegion)> {
         self.layout
             .placement(screen)
-            .map(|placement| placement.instance)
+            .map(|placement| (placement.instance, placement.region))
     }
 
     fn relayout(&mut self) {
         let generation = self.layout.generation;
         self.layout = ScreenLayout::stacked(&self.requests);
         self.layout.generation = generation;
+        let mut placements: HashMap<EditorInstanceId, Vec<_>> = HashMap::new();
         for placement in &self.layout.screens {
-            if let Some(session) = self.sessions.get_mut(&placement.instance) {
-                session.place(*placement);
-            }
+            placements
+                .entry(placement.instance)
+                .or_default()
+                .push(*placement);
+        }
+        for (instance, session) in &mut self.sessions {
+            session.place(placements.get(instance).map_or(&[], Vec::as_slice));
         }
     }
 }

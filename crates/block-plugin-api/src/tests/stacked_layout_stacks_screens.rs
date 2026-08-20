@@ -16,6 +16,7 @@ fn stacked_layout_stacks_screens() {
         Some(&ScreenPlacement {
             screen: ScreenId(1),
             instance: EditorInstanceId(1),
+            region: EditorRegion::Main,
             x: 0,
             y: 0,
             width: 300,
@@ -28,6 +29,7 @@ fn stacked_layout_stacks_screens() {
         Some(&ScreenPlacement {
             screen: ScreenId(3),
             instance: EditorInstanceId(3),
+            region: EditorRegion::Main,
             x: 0,
             y: 200,
             width: 500,

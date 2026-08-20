@@ -1,9 +1,40 @@
 use block_client::blocks::counter::{Counter, CounterOperation};
 use block_editor_plugin::egui;
 
-#[derive(Default)]
 pub struct CounterApp {
     block: Option<block_client::BlockHandle<Counter>>,
+    step: i64,
+    applied: u64,
+}
+
+impl Default for CounterApp {
+    fn default() -> Self {
+        Self {
+            block: None,
+            step: 1,
+            applied: 0,
+        }
+    }
+}
+
+impl CounterApp {
+    fn count(&self) -> Option<i64> {
+        let block = self.block.as_ref()?;
+        let counter = block.read()?;
+        let count = counter.count();
+        drop(counter);
+        Some(count)
+    }
+
+    fn apply(&mut self, operation: CounterOperation) {
+        let Some(block) = &self.block else {
+            return;
+        };
+        for _ in 0..self.step.max(1) {
+            block.operate(operation.clone());
+        }
+        self.applied += 1;
+    }
 }
 
 impl block_editor_plugin::App for CounterApp {
@@ -12,30 +43,82 @@ impl block_editor_plugin::App for CounterApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        let Some(block) = &self.block else {
+        let Some(count) = self.count() else {
             ui.spinner();
             return;
         };
-        let Some(counter) = block.read() else {
-            ui.spinner();
-            return;
-        };
-        let count = counter.count();
-        drop(counter);
         ui.centered_and_justified(|ui| {
             ui.horizontal(|ui| {
                 if ui.button("Remove").clicked() {
                     #[cfg(target_os = "windows")]
                     eprintln!("plugin input guest activated remove");
-                    block.operate(CounterOperation::Decrement);
+                    self.apply(CounterOperation::Decrement);
                 }
                 ui.label(count.to_string());
                 if ui.button("Add").clicked() {
                     #[cfg(target_os = "windows")]
                     eprintln!("plugin input guest activated add");
-                    block.operate(CounterOperation::Increment);
+                    self.apply(CounterOperation::Increment);
                 }
             });
         });
+    }
+
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(count) = self.count() else {
+            ui.spinner();
+            return;
+        };
+        ui.horizontal_centered(|ui| {
+            if ui.button("-").clicked() {
+                self.apply(CounterOperation::Decrement);
+            }
+            if ui.button("+").clicked() {
+                self.apply(CounterOperation::Increment);
+            }
+            ui.separator();
+            ui.label(format!("Count: {count}"));
+            ui.separator();
+            ui.label(format!("Step: {}", self.step));
+        });
+    }
+
+    fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Step");
+        for step in [1, 5, 10] {
+            if ui
+                .selectable_label(self.step == step, step.to_string())
+                .clicked()
+            {
+                self.step = step;
+            }
+        }
+        ui.separator();
+        ui.heading("Actions");
+        if ui.button("Add step").clicked() {
+            self.apply(CounterOperation::Increment);
+        }
+        if ui.button("Remove step").clicked() {
+            self.apply(CounterOperation::Decrement);
+        }
+    }
+
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Details");
+        match self.count() {
+            Some(count) => {
+                ui.label(format!("Value: {count}"));
+                ui.label(format!(
+                    "Parity: {}",
+                    if count % 2 == 0 { "even" } else { "odd" }
+                ));
+                ui.label(format!("Doubled: {}", count.saturating_mul(2)));
+            }
+            None => {
+                ui.spinner();
+            }
+        }
+        ui.separator();
+        ui.label(format!("Edits this session: {}", self.applied));
     }
 }

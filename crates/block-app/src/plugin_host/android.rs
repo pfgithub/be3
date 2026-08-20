@@ -1,7 +1,4 @@
-use block_client::{
-    blocks::counter::{Counter, CounterOperation},
-    BlockClient, BlockHandle,
-};
+use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
 use eframe::egui;
 use std::sync::{Mutex, OnceLock};
 
@@ -19,8 +16,10 @@ static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 pub(crate) fn editor_ui(
     ui: &mut egui::Ui,
     _client: std::sync::Arc<BlockClient>,
-    block: BlockHandle<Counter>,
-    _instance: block_plugin_api::EditorInstanceId,
+    _block: BlockHandle<Counter>,
+    instance: block_plugin_api::EditorInstanceId,
+    region: block_plugin_api::EditorRegion,
+    size: egui::Vec2,
 ) {
     ensure_bound();
     let Ok(state) = STATE.get_or_init(Default::default).lock() else {
@@ -39,30 +38,16 @@ pub(crate) fn editor_ui(
             ui.vertical_centered(|ui| {
                 ui.colored_label(egui::Color32::RED, error);
                 if ui.button("Retry").clicked() {
-                    close(ui.ctx(), _instance);
+                    close(ui.ctx(), instance);
                     ensure_bound();
                 }
             });
         }
         State::Connected => {
             drop(state);
-            let Some(counter) = block.read() else {
+            ui.allocate_ui(size, |ui| {
                 ui.centered_and_justified(|ui| {
-                    ui.spinner();
-                });
-                return;
-            };
-            let count = counter.count();
-            drop(counter);
-            ui.centered_and_justified(|ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Remove").clicked() {
-                        block.operate(CounterOperation::Decrement);
-                    }
-                    ui.label(count.to_string());
-                    if ui.button("Add").clicked() {
-                        block.operate(CounterOperation::Increment);
-                    }
+                    ui.label(format!("TODO: present the plugin's {region:?} region"));
                 });
             });
         }
