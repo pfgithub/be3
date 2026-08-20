@@ -284,6 +284,14 @@ jobs:
         if: matrix.client
         run: cargo build --release --target ${{ matrix.target }} -p block-app --bins
 
+      # The PDF editor renders through PDFium, a native library that is not
+      # statically linked, so the distributed client needs a copy of it
+      # sitting next to the executable.
+      - name: Fetch PDFium
+        if: matrix.client
+        shell: bash
+        run: ./scripts/fetch-pdfium.sh --release --target ${{ matrix.target }}
+
       - name: Build and stage the desktop plugin
         if: matrix.client
         shell: bash
@@ -308,6 +316,10 @@ jobs:
                         "target/${{ matrix.target }}/release/$binary.exe"; do
               if [ -f "$path" ]; then cp "$path" dist/; fi
             done
+          done
+          for library in libpdfium.so libpdfium.dylib pdfium.dll; do
+            path="target/${{ matrix.target }}/release/$library"
+            if [ -f "$path" ]; then cp "$path" dist/; fi
           done
           if [ -d dist/plugin-package ]; then cp -R dist/plugin-package/. dist/; fi
           ls -l dist
