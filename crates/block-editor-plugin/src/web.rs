@@ -2,21 +2,29 @@ use block_plugin_api::{decode_frame, encode_frame, Message};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 
+use crate::screens::Screens;
+
 thread_local! {
     static RUNNER: RefCell<Option<eframe::WebRunner>> = const { RefCell::new(None) };
     static SESSION: RefCell<crate::native::ClientSession> = RefCell::default();
-    static EGUI_SESSION: RefCell<Option<Rc<RefCell<crate::egui_session::EguiSession>>>> = const { RefCell::new(None) };
+    static SCREENS: RefCell<Option<Rc<RefCell<Screens>>>> = const { RefCell::new(None) };
     static EGUI_CONTEXT: RefCell<Option<eframe::egui::Context>> = const { RefCell::new(None) };
     static CANVAS_ID: RefCell<String> = const { RefCell::new(String::new()) };
+    static LAYOUT: RefCell<block_plugin_api::ScreenLayout> = RefCell::default();
 }
 
 struct WebApp {
-    session: Rc<RefCell<crate::egui_session::EguiSession>>,
+    screens: Rc<RefCell<Screens>>,
 }
 
 impl eframe::App for WebApp {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
-        self.session.borrow_mut().show(ui);
+        let mut screens = self.screens.borrow_mut();
+        for placement in screens.placements() {
+            if let Some(session) = screens.session(placement.instance) {
+                session.show(ui);
+            }
+        }
     }
 
     fn raw_input_hook(
@@ -24,7 +32,12 @@ impl eframe::App for WebApp {
         _context: &eframe::egui::Context,
         input: &mut eframe::egui::RawInput,
     ) {
-        self.session.borrow_mut().append_input(input);
+        let mut screens = self.screens.borrow_mut();
+        for placement in screens.placements() {
+            if let Some(session) = screens.session(placement.instance) {
+                session.append_input(input);
+            }
+        }
     }
 }
 
@@ -47,8 +60,8 @@ pub(crate) async fn start<A: crate::App>(canvas_id: String) -> Result<(), JsValu
         .get_element_by_id(&canvas_id)
         .ok_or_else(|| JsValue::from_str(&format!("no element id {canvas_id}")))?
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
-    let session = Rc::new(RefCell::new(crate::egui_session::EguiSession::new::<A>()));
-    let app_session = Rc::clone(&session);
+    let screens = Rc::new(RefCell::new(Screens::new::<A>()));
+    let app_screens = Rc::clone(&screens);
     let runner = eframe::WebRunner::new();
     runner
         .start(
@@ -59,14 +72,15 @@ pub(crate) async fn start<A: crate::App>(canvas_id: String) -> Result<(), JsValu
                     *current.borrow_mut() = Some(creation_context.egui_ctx.clone());
                 });
                 Ok(Box::new(WebApp {
-                    session: app_session,
+                    screens: app_screens,
                 }))
             }),
         )
         .await?;
     SESSION.with(|current| *current.borrow_mut() = crate::native::ClientSession::default());
-    EGUI_SESSION.with(|current| *current.borrow_mut() = Some(session));
+    SCREENS.with(|current| *current.borrow_mut() = Some(screens));
     CANVAS_ID.with(|current| *current.borrow_mut() = canvas_id);
+    LAYOUT.with(|current| *current.borrow_mut() = Default::default());
     RUNNER.with(|current| current.replace(Some(runner)));
     Ok(())
 }
@@ -82,13 +96,8 @@ pub(crate) fn hello(id: &str, name: &str, version: &str) -> Result<Vec<u8>, JsVa
 
 pub(crate) fn receive(frame: Vec<u8>) -> Result<js_sys::Array, JsValue> {
     let message = decode_frame(&frame).map_err(protocol_error)?;
-    dispatch(&message);
-    let mut responses = SESSION.with(|session| session.borrow_mut().receive(message));
-    EGUI_SESSION.with(|session| {
-        if let Some(session) = session.borrow_mut().as_mut() {
-            responses.extend(session.borrow_mut().outbound());
-        }
-    });
+    let mut responses = dispatch(&message);
+    responses.extend(SESSION.with(|session| session.borrow_mut().receive(message)));
     responses
         .into_iter()
         .map(|message| {
@@ -105,34 +114,42 @@ pub(crate) fn shutdown() {
             runner.destroy();
         }
     });
-    EGUI_SESSION.with(|current| current.borrow_mut().take());
+    SCREENS.with(|current| current.borrow_mut().take());
     EGUI_CONTEXT.with(|current| current.borrow_mut().take());
 }
 
-fn dispatch(message: &Message) {
-    if let Some(metrics) = match message {
-        Message::CreateViewport(viewport) => Some(&viewport.metrics),
-        Message::ResizeViewport(metrics) => Some(metrics),
-        _ => None,
-    } {
-        CANVAS_ID.with(|canvas_id| {
-            plugin_resize(
-                &canvas_id.borrow(),
-                metrics.logical_width,
-                metrics.logical_height,
-            );
-        });
-    }
-    EGUI_SESSION.with(|session| {
-        if let Some(session) = session.borrow_mut().as_mut() {
-            session.borrow_mut().receive(message);
+fn dispatch(message: &Message) -> Vec<Message> {
+    let mut responses = Vec::new();
+    SCREENS.with(|screens| {
+        let Some(screens) = screens.borrow().clone() else {
+            return;
+        };
+        let mut screens = screens.borrow_mut();
+        screens.receive(message);
+        let layout = screens.layout().clone();
+        if !LAYOUT.with(|current| current.borrow().same_placements(&layout)) {
+            let scale = layout
+                .screens
+                .first()
+                .map_or(1.0, block_plugin_api::ScreenPlacement::scale_factor);
+            CANVAS_ID.with(|canvas_id| {
+                plugin_resize(
+                    &canvas_id.borrow(),
+                    layout.width as f32 / scale,
+                    layout.height as f32 / scale,
+                )
+            });
+            LAYOUT.with(|current| *current.borrow_mut() = layout.clone());
+            responses.push(Message::Layout(layout));
         }
+        responses.extend(screens.outbound());
     });
     EGUI_CONTEXT.with(|context| {
         if let Some(context) = context.borrow().as_ref() {
             context.request_repaint();
         }
     });
+    responses
 }
 
 fn protocol_error(error: impl std::fmt::Display) -> JsValue {

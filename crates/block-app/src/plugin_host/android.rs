@@ -20,6 +20,7 @@ pub(crate) fn editor_ui(
     ui: &mut egui::Ui,
     _client: std::sync::Arc<BlockClient>,
     block: BlockHandle<Counter>,
+    _instance: block_plugin_api::EditorInstanceId,
 ) {
     ensure_bound();
     let Ok(state) = STATE.get_or_init(Default::default).lock() else {
@@ -38,7 +39,7 @@ pub(crate) fn editor_ui(
             ui.vertical_centered(|ui| {
                 ui.colored_label(egui::Color32::RED, error);
                 if ui.button("Retry").clicked() {
-                    close(ui.ctx());
+                    close(ui.ctx(), _instance);
                     ensure_bound();
                 }
             });
@@ -82,7 +83,7 @@ fn ensure_bound() {
     }
 }
 
-pub(crate) fn close(_context: &egui::Context) {
+pub(crate) fn close(_context: &egui::Context, _instance: block_plugin_api::EditorInstanceId) {
     unbind();
     if let Ok(mut state) = STATE.get_or_init(Default::default).lock() {
         *state = State::Closed;

@@ -28,7 +28,7 @@ fn running_session() -> HostSession {
 
 fn input(event: InputEvent) -> Message {
     Message::Input(InputBatch {
-        viewport_request_id: 7,
+        screen: crate::ScreenId(7),
         events: vec![event],
     })
 }

@@ -46,6 +46,86 @@ pub const MAX_BLOCK_PAYLOAD_BYTES: usize = 256 * 1024;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorInstanceId(pub u64);
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenId(pub u64);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScreenRequest {
+    pub screen: ScreenId,
+    pub instance: EditorInstanceId,
+    pub region: String,
+    pub metrics: ViewportMetrics,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScreenSet {
+    pub request_id: u64,
+    pub screens: Vec<ScreenRequest>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenPlacement {
+    pub screen: ScreenId,
+    pub instance: EditorInstanceId,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor_millis: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenLayout {
+    pub generation: u64,
+    pub width: u32,
+    pub height: u32,
+    pub screens: Vec<ScreenPlacement>,
+}
+
+impl ScreenPlacement {
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor_millis as f32 / 1000.0
+    }
+}
+
+impl ScreenLayout {
+    pub fn stacked(screens: &[ScreenRequest]) -> Self {
+        let mut layout = Self::default();
+        for request in screens {
+            let metrics = &request.metrics;
+            if metrics.pixel_width == 0 || metrics.pixel_height == 0 {
+                continue;
+            }
+            layout.screens.push(ScreenPlacement {
+                screen: request.screen,
+                instance: request.instance,
+                x: 0,
+                y: layout.height,
+                width: metrics.pixel_width,
+                height: metrics.pixel_height,
+                scale_factor_millis: (metrics.scale_factor * 1000.0).round().max(1.0) as u32,
+            });
+            layout.width = layout.width.max(metrics.pixel_width);
+            layout.height += metrics.pixel_height;
+        }
+        layout
+    }
+
+    pub fn placement(&self, screen: ScreenId) -> Option<&ScreenPlacement> {
+        self.screens
+            .iter()
+            .find(|placement| placement.screen == screen)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    pub fn same_placements(&self, other: &Self) -> bool {
+        self.width == other.width && self.height == other.height && self.screens == other.screens
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub identity: PluginIdentity,
@@ -155,15 +235,6 @@ pub enum EditorMessage {
         account_id: [u8; 16],
         workspace_id: [u8; 16],
         editable: bool,
-        metrics: ViewportMetrics,
-    },
-    Resize {
-        instance: EditorInstanceId,
-        metrics: ViewportMetrics,
-    },
-    Input {
-        instance: EditorInstanceId,
-        batch: InputBatch,
     },
     EditabilityChanged {
         instance: EditorInstanceId,
@@ -171,14 +242,6 @@ pub enum EditorMessage {
     },
     Close {
         instance: EditorInstanceId,
-    },
-    Surface {
-        instance: EditorInstanceId,
-        descriptor: SurfaceDescriptor,
-    },
-    Frame {
-        instance: EditorInstanceId,
-        frame: FrameReady,
     },
     Acknowledged {
         instance: EditorInstanceId,
@@ -256,8 +319,8 @@ pub enum Message {
     Hello(Hello),
     HelloAccepted(HelloAccepted),
     HelloRejected(ProtocolError),
-    CreateViewport(CreateViewport),
-    ResizeViewport(ViewportMetrics),
+    Screens(ScreenSet),
+    Layout(ScreenLayout),
     Input(InputBatch),
     SurfaceCapabilities(SurfaceCapabilities),
     Surface(SurfaceDescriptor),
@@ -312,12 +375,6 @@ pub enum SurfaceMechanism {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CreateViewport {
-    pub request_id: u64,
-    pub metrics: ViewportMetrics,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ViewportMetrics {
     pub logical_width: f32,
     pub logical_height: f32,
@@ -328,7 +385,7 @@ pub struct ViewportMetrics {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputBatch {
-    pub viewport_request_id: u64,
+    pub screen: ScreenId,
     pub events: Vec<InputEvent>,
 }
 
@@ -544,6 +601,14 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             }
             Ok(())
         }
+        Message::Screens(value) => {
+            collection(value.screens.len())?;
+            for screen in &value.screens {
+                string(&screen.region)?;
+            }
+            Ok(())
+        }
+        Message::Layout(value) => collection(value.screens.len()),
         Message::SurfaceCapabilities(value) => collection(value.mechanisms.len()),
         Message::Surface(value) => {
             if value.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
@@ -569,25 +634,6 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
 
 fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
     match message {
-        EditorMessage::Input { batch, .. } => {
-            collection(batch.events.len())?;
-            for event in &batch.events {
-                if let InputEvent::Key { logical, .. } | InputEvent::Text(logical) = event {
-                    string(logical)?;
-                }
-            }
-            Ok(())
-        }
-        EditorMessage::Surface { descriptor, .. } => {
-            if descriptor.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
-                return Err(DecodeError::LimitExceeded("surface descriptor"));
-            }
-            collection(descriptor.attachments.len())
-        }
-        EditorMessage::Frame { frame, .. } => {
-            collection(frame.damage.len())?;
-            collection(frame.attachments.len())
-        }
         EditorMessage::Failure { message, .. } => string(message),
         _ => Ok(()),
     }

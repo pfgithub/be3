@@ -16,6 +16,27 @@ fn hello() -> Message {
     })
 }
 
+fn screen(
+    screen: u64,
+    instance: u64,
+    pixel_width: u32,
+    pixel_height: u32,
+    scale_factor: f32,
+) -> ScreenRequest {
+    ScreenRequest {
+        screen: ScreenId(screen),
+        instance: EditorInstanceId(instance),
+        region: "main".into(),
+        metrics: ViewportMetrics {
+            logical_width: pixel_width as f32 / scale_factor,
+            logical_height: pixel_height as f32 / scale_factor,
+            pixel_width,
+            pixel_height,
+            scale_factor,
+        },
+    }
+}
+
 mod frame_round_trips;
 mod manifest_validation;
 mod multiplexed_messages_round_trip;
@@ -25,3 +46,4 @@ mod rejects_malformed_payload;
 mod rejects_oversized_block_payload;
 mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
+mod stacked_layout_stacks_screens;

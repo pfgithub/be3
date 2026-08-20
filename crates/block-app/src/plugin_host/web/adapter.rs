@@ -1,6 +1,6 @@
 use block_plugin_api::{
     encode_frame, Capability, DelegatedClientMessage, EditorMessage, HostSession, Message,
-    QueueError, SessionState, SurfaceMechanism,
+    QueueError, ScreenLayout, SessionState, SurfaceMechanism,
 };
 use wasm_bindgen::prelude::*;
 
@@ -43,6 +43,7 @@ pub(super) struct WebProtocolAdapter {
     canvas_id: &'static str,
     session: HostSession,
     client_messages: Vec<DelegatedClientMessage>,
+    layout: Option<ScreenLayout>,
 }
 
 impl WebProtocolAdapter {
@@ -65,6 +66,7 @@ impl WebProtocolAdapter {
             canvas_id,
             session,
             client_messages: Vec::new(),
+            layout: None,
         };
         adapter.flush()?;
         if adapter.session.state() != &SessionState::Running {
@@ -77,9 +79,8 @@ impl WebProtocolAdapter {
     pub(super) fn send(&mut self, messages: Vec<Message>) -> Result<(), String> {
         for message in messages {
             match &message {
-                Message::CreateViewport(viewport) => {
-                    self.session
-                        .enqueue_request(viewport.request_id, message, now())
+                Message::Screens(set) => {
+                    self.session.enqueue_request(set.request_id, message, now())
                 }
                 _ => self.session.enqueue(message),
             }
@@ -93,13 +94,12 @@ impl WebProtocolAdapter {
         }
     }
 
-    pub(super) fn send_plugin(&mut self, message: Message) -> Result<(), String> {
-        self.session.enqueue(message).map_err(queue_error)?;
-        self.flush()
-    }
-
     pub(super) fn take_client_messages(&mut self) -> Vec<DelegatedClientMessage> {
         std::mem::take(&mut self.client_messages)
+    }
+
+    pub(super) fn take_layout(&mut self) -> Option<ScreenLayout> {
+        self.layout.take()
     }
 
     pub(super) fn shutdown(&mut self) {
@@ -116,6 +116,7 @@ impl WebProtocolAdapter {
                 let response = js_sys::Uint8Array::new(&response).to_vec();
                 match decode(&response)? {
                     Message::Client(message) => self.client_messages.push(message),
+                    Message::Layout(layout) => self.layout = Some(layout),
                     Message::Editor(EditorMessage::Acknowledged { .. }) => {}
                     message => self.session.receive(message, now()),
                 }

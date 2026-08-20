@@ -1,5 +1,5 @@
 use super::{
-    presenter::{PresenterStatus, SurfacePresenter},
+    presenter::{PresenterStatus, Regions, SurfacePresenter},
     process::SurfaceEvent,
 };
 use block_plugin_api::{SurfaceDescriptor, WindowsSurfaceLifecycle};
@@ -24,6 +24,7 @@ pub(super) struct WindowsSurfacePresenter {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    regions: Regions,
     lifecycle: WindowsSurfaceLifecycle,
     imported: Option<ImportedSurface>,
 }
@@ -67,6 +68,7 @@ impl WindowsSurfacePresenter {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                Regions::layout_entry(),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -103,6 +105,7 @@ impl WindowsSurfacePresenter {
             pipeline,
             layout,
             sampler: device.create_sampler(&wgpu::SamplerDescriptor::default()),
+            regions: Regions::new(device),
             lifecycle: WindowsSurfaceLifecycle::default(),
             imported: None,
         }
@@ -187,6 +190,10 @@ impl WindowsSurfacePresenter {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.regions.binding(),
+                },
             ],
         });
         self.imported = Some(ImportedSurface {
@@ -241,11 +248,15 @@ impl SurfacePresenter for WindowsSurfacePresenter {
         Ok(())
     }
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>) {
+    fn regions(&self) -> &Regions {
+        &self.regions
+    }
+
+    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, slot: u32) {
         if let Some(imported) = &self.imported {
             let _ = &imported.texture;
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, &imported.bind_group, &[]);
+            render_pass.set_bind_group(0, &imported.bind_group, &[self.regions.offset(slot)]);
             render_pass.draw(0..3, 0..1);
         }
     }

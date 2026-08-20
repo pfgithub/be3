@@ -1,7 +1,7 @@
 use eframe::egui_wgpu::wgpu;
 use wasm_bindgen::JsCast;
 
-use super::super::presenter::SurfacePresenter;
+use super::super::presenter::{Regions, SurfacePresenter};
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -26,8 +26,8 @@ pub(super) fn install(
 }
 
 pub(crate) struct WebFrame {
-    pub(super) size: [u32; 2],
-    pub(super) canvas_id: &'static str,
+    pub(crate) size: [u32; 2],
+    pub(crate) canvas_id: &'static str,
 }
 
 struct CounterTarget {
@@ -44,6 +44,7 @@ pub(crate) struct WebSurfacePresenter {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    regions: Regions,
     target: Option<CounterTarget>,
 }
 
@@ -71,6 +72,7 @@ impl WebSurfacePresenter {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    Regions::layout_entry(),
                 ],
             });
         let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -115,6 +117,7 @@ impl WebSurfacePresenter {
             blit_pipeline,
             blit_bind_group_layout,
             sampler,
+            regions: Regions::new(device),
             target: None,
         }
     }
@@ -153,6 +156,10 @@ impl WebSurfacePresenter {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.regions.binding(),
                 },
             ],
         });
@@ -196,12 +203,12 @@ impl WebSurfacePresenter {
         );
     }
 
-    fn blit(&self, render_pass: &mut wgpu::RenderPass<'static>) {
+    fn blit(&self, render_pass: &mut wgpu::RenderPass<'static>, slot: u32) {
         let Some(target) = &self.target else {
             return;
         };
         render_pass.set_pipeline(&self.blit_pipeline);
-        render_pass.set_bind_group(0, &target.bind_group, &[]);
+        render_pass.set_bind_group(0, &target.bind_group, &[self.regions.offset(slot)]);
         render_pass.draw(0..3, 0..1);
     }
 }
@@ -223,8 +230,12 @@ impl SurfacePresenter for WebSurfacePresenter {
         Ok(())
     }
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>) {
-        self.blit(render_pass);
+    fn regions(&self) -> &Regions {
+        &self.regions
+    }
+
+    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, slot: u32) {
+        self.blit(render_pass, slot);
     }
 
     fn release(&mut self) {

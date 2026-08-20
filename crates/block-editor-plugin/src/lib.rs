@@ -5,6 +5,8 @@ mod egui_session;
 pub mod native;
 #[cfg(not(target_arch = "wasm32"))]
 mod runner;
+#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+mod screens;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_os = "windows")]

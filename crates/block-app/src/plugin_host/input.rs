@@ -1,29 +1,15 @@
 use block_plugin_api::{
-    CreateViewport, InputBatch, InputEvent, Message, Modifiers, PhysicalKey, PointerButton,
+    InputBatch, InputEvent, Message, Modifiers, PhysicalKey, PointerButton, ScreenId,
     ViewportMetrics, WheelUnit,
 };
 use eframe::egui;
 
+#[derive(Default)]
 pub(super) struct InputAdapter {
-    request_id: u64,
-    metrics: Option<ViewportMetrics>,
     captured: bool,
     pressed_buttons: u8,
     focused: bool,
     modifiers: Modifiers,
-}
-
-impl Default for InputAdapter {
-    fn default() -> Self {
-        Self {
-            request_id: 1,
-            metrics: None,
-            captured: false,
-            pressed_buttons: 0,
-            focused: false,
-            modifiers: Modifiers::default(),
-        }
-    }
 }
 
 impl InputAdapter {
@@ -31,22 +17,8 @@ impl InputAdapter {
         &mut self,
         ui: &egui::Ui,
         response: &egui::Response,
-        scale_factor: f32,
+        screen: ScreenId,
     ) -> Vec<Message> {
-        let mut messages = Vec::new();
-        let metrics = viewport_metrics(response.rect.size(), scale_factor);
-        match &self.metrics {
-            None => messages.push(Message::CreateViewport(CreateViewport {
-                request_id: self.request_id,
-                metrics: metrics.clone(),
-            })),
-            Some(previous) if previous != &metrics => {
-                messages.push(Message::ResizeViewport(metrics.clone()));
-            }
-            _ => {}
-        }
-        self.metrics = Some(metrics.clone());
-
         if response.clicked() {
             response.request_focus();
         }
@@ -58,7 +30,7 @@ impl InputAdapter {
             self.focused = focused;
         }
 
-        if metrics.pixel_width != 0 && metrics.pixel_height != 0 {
+        if response.rect.width() > 0.0 && response.rect.height() > 0.0 {
             for event in events {
                 self.normalize_event(
                     event,
@@ -70,13 +42,13 @@ impl InputAdapter {
             }
         }
 
-        if !normalized.is_empty() {
-            messages.push(Message::Input(InputBatch {
-                viewport_request_id: self.request_id,
-                events: normalized,
-            }));
+        if normalized.is_empty() {
+            return Vec::new();
         }
-        messages
+        vec![Message::Input(InputBatch {
+            screen,
+            events: normalized,
+        })]
     }
 
     fn normalize_event(
@@ -171,7 +143,7 @@ impl InputAdapter {
     }
 }
 
-fn viewport_metrics(size: egui::Vec2, scale_factor: f32) -> ViewportMetrics {
+pub(super) fn viewport_metrics(size: egui::Vec2, scale_factor: f32) -> ViewportMetrics {
     let logical_width = size.x.max(0.0);
     let logical_height = size.y.max(0.0);
     ViewportMetrics {

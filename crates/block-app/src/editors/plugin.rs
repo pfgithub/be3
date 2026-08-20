@@ -1,9 +1,11 @@
 use block::Block;
 use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
 use block_plugin_api::{
-    CreationMode, EditorRegion, EntryPoints, PluginIdentity, PluginManifest, SurfaceMechanism,
+    CreationMode, EditorInstanceId, EditorRegion, EntryPoints, PluginIdentity, PluginManifest,
+    SurfaceMechanism,
 };
 use eframe::egui;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{
     BlockEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
@@ -38,8 +40,11 @@ pub(super) fn counter_manifest() -> PluginManifest {
     }
 }
 
+static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
+
 pub(super) struct PluginEditor {
     block: BlockHandle<Counter>,
+    instance: EditorInstanceId,
     context: Option<egui::Context>,
 }
 
@@ -47,8 +52,21 @@ impl PluginEditor {
     pub(super) fn new(_client: &BlockClient, block: BlockHandle<Counter>) -> Self {
         Self {
             block,
+            instance: EditorInstanceId(NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed)),
             context: None,
         }
+    }
+
+    fn close(&mut self) {
+        if let Some(context) = self.context.take() {
+            crate::plugin_host::close(&context, self.instance);
+        }
+    }
+}
+
+impl Drop for PluginEditor {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
@@ -88,13 +106,16 @@ impl BlockEditor for PluginEditor {
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         self.context = Some(ui.ctx().clone());
-        crate::plugin_host::editor_ui(ui, _editors.client_handle(), self.block.clone());
+        crate::plugin_host::editor_ui(
+            ui,
+            _editors.client_handle(),
+            self.block.clone(),
+            self.instance,
+        );
         None
     }
 
     fn tab_closed(&mut self) {
-        if let Some(context) = &self.context {
-            crate::plugin_host::close(context);
-        }
+        self.close();
     }
 }

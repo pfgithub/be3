@@ -1,6 +1,8 @@
 use block_plugin_api::{
-    Capability, ErrorCode, Hello, Message, PluginIdentity, ProtocolError, PROTOCOL_VERSION,
+    Capability, EditorInstanceId, ErrorCode, Hello, Message, PluginIdentity, ProtocolError,
+    ScreenId, PROTOCOL_VERSION,
 };
+use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -12,9 +14,9 @@ pub enum State {
 
 pub struct ClientSession {
     state: State,
-    viewport_request_id: Option<u64>,
+    screens: HashSet<ScreenId>,
     plugin: PluginIdentity,
-    editor_instance: Option<block_plugin_api::EditorInstanceId>,
+    instances: HashSet<EditorInstanceId>,
 }
 
 impl Default for ClientSession {
@@ -27,13 +29,13 @@ impl ClientSession {
     pub fn new(id: &str, name: &str, version: &str) -> Self {
         Self {
             state: State::AwaitingHello,
-            viewport_request_id: None,
+            screens: HashSet::new(),
             plugin: PluginIdentity {
                 id: id.into(),
                 name: name.into(),
                 version: version.into(),
             },
-            editor_instance: None,
+            instances: HashSet::new(),
         }
     }
     pub fn state(&self) -> State {
@@ -76,29 +78,28 @@ impl ClientSession {
                 Ok(Vec::new())
             }
             (State::AwaitingHello, Message::HelloRejected(error)) => Err(error.message),
-            (State::Running, Message::CreateViewport(viewport)) => {
-                if self.viewport_request_id.is_some() {
-                    Err("a viewport already exists".into())
+            (State::Running, Message::Screens(set)) => {
+                if set
+                    .screens
+                    .iter()
+                    .any(|screen| !self.instances.contains(&screen.instance))
+                {
+                    Err("a screen referenced an unopened editor instance".into())
                 } else {
-                    self.viewport_request_id = Some(viewport.request_id);
+                    self.screens = set.screens.iter().map(|screen| screen.screen).collect();
                     Ok(vec![Message::Acknowledged {
-                        request_id: viewport.request_id,
+                        request_id: set.request_id,
                     }])
                 }
             }
-            (State::Running, Message::ResizeViewport(_)) if self.viewport_request_id.is_some() => {
-                Ok(Vec::new())
-            }
-            (State::Running, Message::Input(input))
-                if self.viewport_request_id == Some(input.viewport_request_id) =>
-            {
+            (State::Running, Message::Input(input)) if self.screens.contains(&input.screen) => {
                 Ok(Vec::new())
             }
             (
                 State::Running,
                 Message::Editor(block_plugin_api::EditorMessage::Open { instance, .. }),
-            ) if self.editor_instance.is_none() => {
-                self.editor_instance = Some(instance);
+            ) if !self.instances.contains(&instance) => {
+                self.instances.insert(instance);
                 Ok(vec![Message::Editor(
                     block_plugin_api::EditorMessage::Acknowledged {
                         instance,
@@ -107,25 +108,17 @@ impl ClientSession {
                 )])
             }
             (
-                State::Running,
-                Message::Editor(block_plugin_api::EditorMessage::Resize { instance, .. }),
-            )
-            | (
-                State::Running,
-                Message::Editor(block_plugin_api::EditorMessage::Input { instance, .. }),
-            )
-            | (
                 State::Running,
                 Message::Editor(block_plugin_api::EditorMessage::EditabilityChanged {
                     instance,
                     ..
                 }),
-            ) if self.editor_instance == Some(instance) => Ok(Vec::new()),
+            ) if self.instances.contains(&instance) => Ok(Vec::new()),
             (
                 State::Running,
                 Message::Editor(block_plugin_api::EditorMessage::Close { instance }),
-            ) if self.editor_instance == Some(instance) => {
-                self.editor_instance = None;
+            ) if self.instances.contains(&instance) => {
+                self.instances.remove(&instance);
                 Ok(vec![Message::Editor(
                     block_plugin_api::EditorMessage::Acknowledged {
                         instance,
@@ -133,9 +126,7 @@ impl ClientSession {
                     },
                 )])
             }
-            (State::Running, Message::Client(_)) if self.editor_instance.is_some() => {
-                Ok(Vec::new())
-            }
+            (State::Running, Message::Client(_)) if !self.instances.is_empty() => Ok(Vec::new()),
             (State::Running, Message::Ping { nonce }) => Ok(vec![Message::Pong { nonce }]),
             (State::Running, Message::Shutdown) => {
                 self.state = State::Closed;

@@ -30,6 +30,8 @@ pub(super) struct Process {
     #[cfg(target_os = "windows")]
     surfaces: Receiver<SurfaceEvent>,
     #[cfg(target_os = "windows")]
+    layouts: Receiver<block_plugin_api::ScreenLayout>,
+    #[cfg(target_os = "windows")]
     clients: Receiver<block_plugin_api::DelegatedClientMessage>,
 }
 
@@ -40,6 +42,8 @@ impl Process {
         let (messages, message_receiver) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (surface_sender, surfaces) = mpsc::channel();
+        #[cfg(target_os = "windows")]
+        let (layout_sender, layouts) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (client_sender, clients) = mpsc::channel();
         thread::spawn(move || {
@@ -76,6 +80,7 @@ impl Process {
                         &shutdown_receiver,
                         &message_receiver,
                         &surface_sender,
+                        &layout_sender,
                         &client_sender,
                     );
                     #[cfg(not(target_os = "windows"))]
@@ -94,6 +99,8 @@ impl Process {
             messages,
             #[cfg(target_os = "windows")]
             surfaces,
+            #[cfg(target_os = "windows")]
+            layouts,
             #[cfg(target_os = "windows")]
             clients,
         }
@@ -131,6 +138,11 @@ impl Process {
     }
 
     #[cfg(target_os = "windows")]
+    pub(super) fn layouts(&self) -> Vec<block_plugin_api::ScreenLayout> {
+        self.layouts.try_iter().collect()
+    }
+
+    #[cfg(target_os = "windows")]
     pub(super) fn client_messages(&self) -> Vec<block_plugin_api::DelegatedClientMessage> {
         self.clients.try_iter().collect()
     }
@@ -143,6 +155,7 @@ fn drive_windows(
     shutdown: &Receiver<()>,
     messages: &Receiver<Message>,
     surfaces: &Sender<SurfaceEvent>,
+    layouts: &Sender<block_plugin_api::ScreenLayout>,
     clients: &Sender<block_plugin_api::DelegatedClientMessage>,
 ) -> io::Result<()> {
     use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
@@ -177,9 +190,9 @@ fn drive_windows(
             return wait_for_shutdown(child);
         }
         let mut outbound: Vec<Message> = messages.try_iter().collect();
-        coalesce_resizes(&mut outbound);
+        coalesce_screens(&mut outbound);
         for message in outbound {
-            if !matches!(message, Message::Input(_) | Message::ResizeViewport(_)) {
+            if !matches!(message, Message::Input(_)) {
                 eprintln!("plugin host sending {} to the plugin", name(&message));
             }
             carrier.send(&message, &[]).map_err(carrier_error)?;
@@ -202,6 +215,14 @@ fn drive_windows(
                 Message::FrameReady(frame) => {
                     surfaces.send(SurfaceEvent::Frame(frame)).ok();
                 }
+                Message::Layout(layout) => {
+                    eprintln!(
+                        "plugin host received layout generation {} with {} screens",
+                        layout.generation,
+                        layout.screens.len()
+                    );
+                    layouts.send(layout).ok();
+                }
                 Message::ShutdownAcknowledged => return Ok(()),
                 Message::Client(message) => {
                     clients.send(message).ok();
@@ -220,16 +241,16 @@ fn drive_windows(
 }
 
 #[cfg(target_os = "windows")]
-fn coalesce_resizes(messages: &mut Vec<Message>) {
+fn coalesce_screens(messages: &mut Vec<Message>) {
     let Some(last) = messages
         .iter()
-        .rposition(|message| matches!(message, Message::ResizeViewport(_)))
+        .rposition(|message| matches!(message, Message::Screens(_)))
     else {
         return;
     };
     let mut index = 0;
     messages.retain(|message| {
-        let keep = index == last || !matches!(message, Message::ResizeViewport(_));
+        let keep = index == last || !matches!(message, Message::Screens(_));
         index += 1;
         keep
     });
@@ -257,8 +278,8 @@ fn pending(pipe: windows_sys::Win32::Foundation::HANDLE) -> io::Result<bool> {
 #[cfg(target_os = "windows")]
 fn name(message: &Message) -> &'static str {
     match message {
-        Message::CreateViewport(_) => "CreateViewport",
-        Message::ResizeViewport(_) => "ResizeViewport",
+        Message::Screens(_) => "Screens",
+        Message::Layout(_) => "Layout",
         Message::Input(_) => "Input",
         Message::Editor(_) => "Editor",
         Message::Client(_) => "Client",

@@ -3,6 +3,14 @@ struct BlitOutput {
     @location(0) uv: vec2<f32>,
 };
 
+struct Region {
+    offset: vec2<f32>,
+    scale: vec2<f32>,
+};
+
+@group(0) @binding(2)
+var<uniform> region: Region;
+
 @vertex
 fn blit_vertex(@builtin(vertex_index) index: u32) -> BlitOutput {
     var corners = array<vec2<f32>, 3>(
@@ -13,7 +21,8 @@ fn blit_vertex(@builtin(vertex_index) index: u32) -> BlitOutput {
     let corner = corners[index];
     var output: BlitOutput;
     output.position = vec4<f32>(corner, 0.0, 1.0);
-    output.uv = vec2<f32>((corner.x + 1.0) * 0.5, (1.0 - corner.y) * 0.5);
+    let uv = vec2<f32>((corner.x + 1.0) * 0.5, (1.0 - corner.y) * 0.5);
+    output.uv = region.offset + uv * region.scale;
     return output;
 }
 

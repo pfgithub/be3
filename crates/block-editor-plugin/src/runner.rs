@@ -136,29 +136,20 @@ fn run_endpoint<A: crate::App>(
     let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
     let mut carrier = WindowsAttachmentCarrier::new(stream, host);
     let started = Instant::now();
+    let mut screens = crate::screens::Screens::new::<A>();
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
+    let mut request_id = 0;
     loop {
         let mut batch = vec![carrier.receive()?.0];
         while pending(pipe)? {
             batch.push(carrier.receive()?.0);
         }
-        let mut viewport = None;
-        let mut deferred = Vec::new();
         for message in batch {
-            match &message {
-                Message::CreateViewport(create) => {
-                    viewport = Some((create.request_id, create.metrics.clone()));
-                }
-                Message::ResizeViewport(metrics) => {
-                    let request_id = viewport.as_ref().map_or(1, |(request_id, _)| *request_id);
-                    viewport = Some((request_id, metrics.clone()));
-                }
-                Message::Input(_) | Message::Editor(_) | Message::Client(_) => {
-                    deferred.push(message.clone());
-                }
-                _ => {}
+            if let Message::Screens(set) = &message {
+                request_id = set.request_id;
             }
+            screens.receive(&message);
             for response in session.receive(message) {
                 carrier.send(&response, &[])?;
             }
@@ -167,44 +158,40 @@ fn run_endpoint<A: crate::App>(
                 return Ok(());
             }
         }
-        let replaced = match viewport
-            .filter(|(_, metrics)| metrics.pixel_width > 0 && metrics.pixel_height > 0)
-        {
-            Some((request_id, metrics))
-                if surface.as_ref().map(Surface::metrics) != Some(&metrics) =>
-            {
-                eprintln!(
-                    "creating DXGI surface {}x{} at scale {}",
-                    metrics.pixel_width, metrics.pixel_height, metrics.scale_factor
-                );
-                generation += 1;
-                surface = Some(match surface.take() {
-                    Some(previous) => previous.resize(request_id, metrics, generation)?,
-                    None => Surface::new::<A>(request_id, metrics, generation)?,
-                });
-                true
-            }
-            _ => false,
-        };
+        let layout = screens.layout().clone();
+        let replaced = !layout.is_empty()
+            && !surface
+                .as_ref()
+                .is_some_and(|surface| surface.layout().same_placements(&layout));
+        if replaced {
+            generation += 1;
+            screens.set_generation(generation);
+            let mut layout = layout;
+            layout.generation = generation;
+            eprintln!(
+                "creating DXGI surface {}x{} for {} screens",
+                layout.width,
+                layout.height,
+                layout.screens.len()
+            );
+            surface = Some(match surface.take() {
+                Some(previous) => previous.resize(request_id, layout.clone(), generation)?,
+                None => Surface::new(request_id, layout.clone(), generation)?,
+            });
+            carrier.send(&Message::Layout(layout), &[])?;
+        }
         if let Some(surface) = &mut surface {
             if replaced {
                 let (descriptor, handles) = surface.descriptor();
                 carrier.send(&descriptor, &handles)?;
                 eprintln!("transferred DXGI surface generation {generation}");
             }
-            for message in &deferred {
-                match message {
-                    Message::Input(input) => surface.input(input),
-                    _ => {
-                        for response in surface.receive(message) {
-                            carrier.send(&response, &[])?;
-                        }
-                    }
-                }
-            }
-            for message in surface.render(started.elapsed().as_secs_f64())? {
+            for message in surface.render(&mut screens, started.elapsed().as_secs_f64())? {
                 carrier.send(&message, &[])?;
             }
+        }
+        for message in screens.outbound() {
+            carrier.send(&message, &[])?;
         }
     }
 }

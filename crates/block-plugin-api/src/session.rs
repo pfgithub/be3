@@ -1,7 +1,6 @@
 use crate::{
     decode_frame, Capability, DecodeError, ErrorCode, HelloAccepted, InputBatch, InputEvent,
-    Message, ProtocolError, ViewportMetrics, MAX_QUEUED_MESSAGES, PROTOCOL_VERSION,
-    REQUEST_TIMEOUT_MILLISECONDS,
+    Message, ProtocolError, MAX_QUEUED_MESSAGES, PROTOCOL_VERSION, REQUEST_TIMEOUT_MILLISECONDS,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -228,12 +227,12 @@ fn coalesce(queue: &mut VecDeque<Message>, incoming: &Message) -> bool {
         return false;
     };
     match (last, incoming) {
-        (Message::ResizeViewport(current), Message::ResizeViewport(incoming)) => {
+        (Message::Screens(current), Message::Screens(incoming)) => {
             *current = incoming.clone();
             true
         }
         (Message::Input(current), Message::Input(incoming))
-            if current.viewport_request_id == incoming.viewport_request_id
+            if current.screen == incoming.screen
                 && current.events.len() == 1
                 && incoming.events.len() == 1 =>
         {
@@ -268,12 +267,6 @@ fn coalesce_input(current: &mut InputEvent, incoming: &InputEvent) -> bool {
             true
         }
         _ => false,
-    }
-}
-
-impl From<ViewportMetrics> for Message {
-    fn from(metrics: ViewportMetrics) -> Self {
-        Self::ResizeViewport(metrics)
     }
 }
 

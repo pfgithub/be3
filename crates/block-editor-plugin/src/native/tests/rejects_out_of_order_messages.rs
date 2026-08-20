@@ -4,7 +4,7 @@ use super::*;
 fn rejects_out_of_order_messages() {
     let mut session = ClientSession::default();
     let responses = session.receive(Message::Input(InputBatch {
-        viewport_request_id: 1,
+        screen: ScreenId(1),
         events: Vec::new(),
     }));
     assert!(matches!(responses.as_slice(), [Message::Error(_)]));

@@ -4,14 +4,7 @@ use super::*;
 fn opens_and_closes_editor_instance() {
     let mut session = ClientSession::new("be3.counter", "Counter", "1");
     accept(&mut session);
-    let instance = block_plugin_api::EditorInstanceId(4);
-    let metrics = ViewportMetrics {
-        logical_width: 100.0,
-        logical_height: 50.0,
-        pixel_width: 200,
-        pixel_height: 100,
-        scale_factor: 2.0,
-    };
+    let instance = EditorInstanceId(4);
     let opened = session.receive(Message::Editor(block_plugin_api::EditorMessage::Open {
         instance,
         block_id: [1; 16],
@@ -19,7 +12,6 @@ fn opens_and_closes_editor_instance() {
         account_id: [3; 16],
         workspace_id: [4; 16],
         editable: true,
-        metrics,
     }));
     assert_eq!(
         opened,

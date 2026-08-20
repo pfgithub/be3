@@ -7,20 +7,16 @@ fn accepts_ordered_lifecycle() {
     accept(&mut session);
     assert_eq!(session.state(), State::Running);
 
-    let responses = session.receive(Message::CreateViewport(block_plugin_api::CreateViewport {
+    let instance = EditorInstanceId(1);
+    open(&mut session, instance);
+    let responses = session.receive(Message::Screens(ScreenSet {
         request_id: 7,
-        metrics: ViewportMetrics {
-            logical_width: 100.0,
-            logical_height: 100.0,
-            pixel_width: 100,
-            pixel_height: 100,
-            scale_factor: 1.0,
-        },
+        screens: vec![screen(ScreenId(3), instance)],
     }));
     assert_eq!(responses, vec![Message::Acknowledged { request_id: 7 }]);
     assert!(session
         .receive(Message::Input(InputBatch {
-            viewport_request_id: 7,
+            screen: ScreenId(3),
             events: Vec::new(),
         }))
         .is_empty());

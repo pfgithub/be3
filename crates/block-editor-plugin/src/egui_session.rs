@@ -1,18 +1,18 @@
 use block::Block;
 use block_client::{DelegatedEvent, DelegatedHostEndpoint, DelegatedRequest};
 use block_plugin_api::{
-    DelegatedClientMessage, EditorInstanceId, EditorMessage, InputEvent, Message, PointerButton,
-    ViewportMetrics, WheelUnit,
+    DelegatedClientMessage, EditorInstanceId, InputEvent, Message, PointerButton, ScreenPlacement,
+    WheelUnit,
 };
 use eframe::egui;
 use uuid::Uuid;
 
 pub(crate) struct EguiSession {
     app: Box<dyn AppUi>,
+    instance: EditorInstanceId,
     input: egui::RawInput,
-    metrics: Option<ViewportMetrics>,
+    placement: Option<ScreenPlacement>,
     endpoint: Option<DelegatedHostEndpoint>,
-    instance: Option<EditorInstanceId>,
     request_id: u64,
 }
 
@@ -32,64 +32,33 @@ impl<A: crate::App> AppUi for A {
 }
 
 impl EguiSession {
-    pub(crate) fn new<A: crate::App>() -> Self {
+    pub(crate) fn new<A: crate::App>(instance: EditorInstanceId) -> Self {
         Self {
             app: Box::new(A::default()),
+            instance,
             input: egui::RawInput::default(),
-            metrics: None,
+            placement: None,
             endpoint: None,
-            instance: None,
             request_id: 1,
         }
     }
-}
 
-impl EguiSession {
-    pub(crate) fn receive(&mut self, message: &Message) {
-        match message {
-            Message::CreateViewport(viewport) => self.metrics = Some(viewport.metrics.clone()),
-            Message::ResizeViewport(metrics) => self.metrics = Some(metrics.clone()),
-            Message::Input(batch) => {
-                for event in &batch.events {
-                    self.input(event);
-                }
-            }
-            Message::Editor(EditorMessage::Open {
-                instance,
-                block_id,
-                account_id,
-                workspace_id,
-                metrics,
-                ..
-            }) if self.endpoint.is_none() => {
-                let (endpoint, host) = block_client::delegated_channel();
-                let client = block_client::BlockClient::delegated(
-                    Uuid::from_bytes(*account_id),
-                    Uuid::from_bytes(*workspace_id),
-                    endpoint,
-                );
-                self.app.connect(client, Uuid::from_bytes(*block_id));
-                self.metrics = Some(metrics.clone());
-                self.endpoint = Some(host);
-                self.instance = Some(*instance);
-            }
-            Message::Editor(EditorMessage::Resize { metrics, .. }) => {
-                self.metrics = Some(metrics.clone());
-            }
-            Message::Editor(EditorMessage::Input { batch, .. }) => {
-                for event in &batch.events {
-                    self.input(event);
-                }
-            }
-            Message::Client(message) => self.client_message(message),
-            _ => {}
+    pub(crate) fn connect(&mut self, block_id: Uuid, account_id: Uuid, workspace_id: Uuid) {
+        if self.endpoint.is_some() {
+            return;
         }
+        let (endpoint, host) = block_client::delegated_channel();
+        let client = block_client::BlockClient::delegated(account_id, workspace_id, endpoint);
+        self.app.connect(client, block_id);
+        self.endpoint = Some(host);
+    }
+
+    pub(crate) fn place(&mut self, placement: ScreenPlacement) {
+        self.placement = Some(placement);
     }
 
     pub(crate) fn outbound(&mut self) -> Vec<Message> {
-        let Some(instance) = self.instance else {
-            return Vec::new();
-        };
+        let instance = self.instance;
         let Some(endpoint) = &mut self.endpoint else {
             return Vec::new();
         };
@@ -128,7 +97,7 @@ impl EguiSession {
         messages
     }
 
-    fn client_message(&mut self, message: &DelegatedClientMessage) {
+    pub(crate) fn client_message(&mut self, message: &DelegatedClientMessage) {
         let Some(endpoint) = &mut self.endpoint else {
             return;
         };
@@ -188,13 +157,8 @@ impl EguiSession {
 
     #[cfg(target_os = "windows")]
     pub(crate) fn run(&mut self, context: &egui::Context, time: f64) -> egui::FullOutput {
-        if let Some(metrics) = &self.metrics {
-            context.set_pixels_per_point(metrics.scale_factor);
-            self.input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(metrics.logical_width, metrics.logical_height),
-            ));
-        }
+        context.set_pixels_per_point(self.scale_factor());
+        self.input.screen_rect = Some(self.rect());
         self.input.time = Some(time);
         let input = std::mem::take(&mut self.input);
         self.input.focused = input.focused;
@@ -206,34 +170,58 @@ impl EguiSession {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn show(&mut self, ui: &mut egui::Ui) {
-        self.app.ui(ui);
+        let rect = self.rect();
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .id_salt(self.instance.0),
+            |ui| self.app.ui(ui),
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn append_input(&mut self, input: &mut egui::RawInput) {
         input.events.append(&mut self.input.events);
         input.modifiers = self.input.modifiers;
-        input.focused = self.input.focused;
+        input.focused |= self.input.focused;
     }
 
-    fn input(&mut self, event: &InputEvent) {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn scale_factor(&self) -> f32 {
+        self.placement
+            .as_ref()
+            .map_or(1.0, ScreenPlacement::scale_factor)
+    }
+
+    fn rect(&self) -> egui::Rect {
+        let Some(placement) = &self.placement else {
+            return egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO);
+        };
+        let scale = placement.scale_factor();
+        egui::Rect::from_min_size(
+            egui::pos2(placement.x as f32 / scale, placement.y as f32 / scale),
+            egui::vec2(
+                placement.width as f32 / scale,
+                placement.height as f32 / scale,
+            ),
+        )
+    }
+
+    pub(crate) fn input(&mut self, event: &InputEvent) {
+        let origin = self.rect().min.to_vec2();
         match event {
             InputEvent::PointerMoved { x, y } => self
                 .input
                 .events
-                .push(egui::Event::PointerMoved(egui::pos2(*x, *y))),
+                .push(egui::Event::PointerMoved(egui::pos2(*x, *y) + origin)),
             InputEvent::PointerButton {
                 button,
                 pressed,
                 x,
                 y,
             } => {
-                #[cfg(target_os = "windows")]
-                eprintln!(
-                    "plugin input guest pointer button={button:?} pressed={pressed} local=({x:.1},{y:.1})"
-                );
                 self.input.events.push(egui::Event::PointerButton {
-                    pos: egui::pos2(*x, *y),
+                    pos: egui::pos2(*x, *y) + origin,
                     button: pointer_button(*button),
                     pressed: *pressed,
                     modifiers: self.input.modifiers,

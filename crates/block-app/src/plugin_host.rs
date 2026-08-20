@@ -2,6 +2,8 @@
 mod android;
 #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
 mod input;
+#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+mod instances;
 #[cfg(target_os = "windows")]
 mod native;
 #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
