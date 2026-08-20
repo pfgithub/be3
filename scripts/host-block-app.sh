@@ -18,5 +18,5 @@ wait
 
 echo "Running servers..."
 cargo run -p block-server -- --disable-registration &
-sudo caddy run --config ./scripts/web/Caddyfile &
+sudo BE3_DOMAIN_NAME="$BE3_DOMAIN_NAME" BE3_BACKEND_URL="$BE3_BACKEND_URL" caddy run --config ./scripts/web/Caddyfile &
 wait
