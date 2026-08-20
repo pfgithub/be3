@@ -6,7 +6,7 @@ cleanup() {
 trap cleanup INT
 
 echo "Note: set BE3_DOMAIN_NAME / BE3_BACKEND_URL"
-: "${BE_DOMAIN_NAME:=blocks.pfg.pw}"
+: "${BE3_DOMAIN_NAME:=blocks.pfg.pw}"
 : "${BE3_BACKEND_URL:=127.0.0.1:9090}"
 echo "BE3_DOMAIN_NAME=$BE3_DOMAIN_NAME"
 echo "BE3_BACKEND_URL=$BE3_BACKEND_URL"
