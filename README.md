@@ -14,6 +14,19 @@ Basic setup:
 
 install rustup, `rustup default stable`, install cargo-nextest
 
+```
+# run app
+./scripts/run-block-app
+
+# test app
+./scripts/verify.sh
+
+# run for web
+./scripts/build-block-web.sh
+cargo run -p block-server -- --disable-registration
+
+```
+
 ## Desktop plugin demo
 
 Build the plugin for the same target as `block-app`, optionally staging the
