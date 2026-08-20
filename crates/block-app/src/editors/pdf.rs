@@ -23,8 +23,10 @@ use super::{
 };
 
 const DEFAULT_PAGE_SIZE: Vec2 = egui::vec2(850.0, 1100.0);
-const RENDER_TARGET_WIDTH: i32 = 1600;
-const RENDER_MAX_HEIGHT: i32 = 4000;
+const RENDER_MAX_DIM: u32 = 4096;
+const TILE_MARGIN_FACTOR: f32 = 0.5;
+const TILE_MIN_SCALE_FACTOR: f32 = 0.4;
+const TILE_MAX_SCALE_FACTOR: f32 = 1.15;
 
 impl EditorKind for PdfEditor {
     type Block = Pdf;
@@ -83,21 +85,63 @@ impl CreationOptions for ChosenPdf {
 struct RenderedPage {
     page_count: usize,
     page_index: usize,
+    page_size_pts: Vec2,
+    tile_origin_pts: Pos2,
+    tile_size_pts: Vec2,
     width: u32,
     height: u32,
     rgba: Vec<u8>,
 }
 
-type RenderJobResult = ((u64, usize), Result<RenderedPage, String>);
+#[derive(Clone, Copy)]
+struct RenderRequest {
+    revision: u64,
+    page: usize,
+    scale: f32,
+    origin_pts: Pos2,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Clone, Copy)]
+struct TileCoverage {
+    revision: u64,
+    page: usize,
+    scale: f32,
+    origin_pts: Pos2,
+    size_pts: Vec2,
+}
+
+impl TileCoverage {
+    fn satisfies(&self, revision: u64, page: usize, scale: f32, origin: Pos2, size: Vec2) -> bool {
+        if self.revision != revision || self.page != page {
+            return false;
+        }
+        if scale > self.scale * TILE_MAX_SCALE_FACTOR || scale < self.scale * TILE_MIN_SCALE_FACTOR
+        {
+            return false;
+        }
+        const EPS: f32 = 0.5;
+        let visible = egui::Rect::from_min_size(origin, size);
+        let tile = egui::Rect::from_min_size(self.origin_pts, self.size_pts);
+        visible.min.x >= tile.min.x - EPS
+            && visible.min.y >= tile.min.y - EPS
+            && visible.max.x <= tile.max.x + EPS
+            && visible.max.y <= tile.max.y + EPS
+    }
+}
+
+type RenderJobResult = Result<RenderedPage, String>;
 
 pub(crate) struct PdfEditor {
     block: BlockHandle<Pdf>,
     page: usize,
     page_count: Option<usize>,
-    page_size: Option<Vec2>,
+    page_size_pts: Option<Vec2>,
     texture: Option<TextureHandle>,
-    texture_key: Option<(u64, usize)>,
-    render_job: Option<Receiver<RenderJobResult>>,
+    tile: Option<TileCoverage>,
+    render_job: Option<(RenderRequest, Receiver<RenderJobResult>)>,
+    failed_request: Option<TileCoverage>,
     render_error: Option<String>,
     import_error: Option<String>,
 }
@@ -108,19 +152,27 @@ impl PdfEditor {
             block,
             page: 0,
             page_count: None,
-            page_size: None,
+            page_size_pts: None,
             texture: None,
-            texture_key: None,
+            tile: None,
             render_job: None,
+            failed_request: None,
             render_error: None,
             import_error: None,
         }
     }
 
-    fn ensure_texture(&mut self, context: &egui::Context) -> bool {
-        if let Some(receiver) = &self.render_job {
+    fn ensure_texture(
+        &mut self,
+        context: &egui::Context,
+        page_rect: egui::Rect,
+        visible_rect: egui::Rect,
+        pixels_per_point: f32,
+    ) -> bool {
+        if let Some((request, receiver)) = &self.render_job {
             match receiver.try_recv() {
-                Ok((job_key, result)) => {
+                Ok(result) => {
+                    let request = *request;
                     self.render_job = None;
                     match result {
                         Ok(rendered) => {
@@ -128,9 +180,9 @@ impl PdfEditor {
                             if self.page >= rendered.page_count {
                                 self.page = rendered.page_index;
                             }
-                            self.page_size =
-                                Some(egui::vec2(rendered.width as f32, rendered.height as f32));
+                            self.page_size_pts = Some(rendered.page_size_pts);
                             self.render_error = None;
+                            self.failed_request = None;
                             let image = egui::ColorImage::from_rgba_unmultiplied(
                                 [rendered.width as usize, rendered.height as usize],
                                 &rendered.rgba,
@@ -144,11 +196,26 @@ impl PdfEditor {
                                     egui::TextureOptions::LINEAR,
                                 ));
                             }
-                            self.texture_key = Some((job_key.0, rendered.page_index));
+                            self.tile = Some(TileCoverage {
+                                revision: request.revision,
+                                page: rendered.page_index,
+                                scale: request.scale,
+                                origin_pts: rendered.tile_origin_pts,
+                                size_pts: rendered.tile_size_pts,
+                            });
                         }
                         Err(error) => {
                             self.render_error = Some(error);
-                            self.texture_key = Some(job_key);
+                            self.failed_request = Some(TileCoverage {
+                                revision: request.revision,
+                                page: request.page,
+                                scale: request.scale,
+                                origin_pts: request.origin_pts,
+                                size_pts: egui::vec2(
+                                    request.width as f32 / request.scale,
+                                    request.height as f32 / request.scale,
+                                ),
+                            });
                         }
                     }
                 }
@@ -161,42 +228,103 @@ impl PdfEditor {
             return false;
         };
         let revision = self.block.revision();
-        let key = (revision, self.page);
-        if self.texture_key == Some(key) {
+        drop(pdf);
+
+        if visible_rect.width() <= 0.0 || visible_rect.height() <= 0.0 || page_rect.width() <= 0.0 {
             return self.texture.is_some();
         }
+
+        let page_size_pts = self.page_size_pts.unwrap_or(DEFAULT_PAGE_SIZE);
+        let screen_pts_per_pdf_pt = page_rect.width() / page_size_pts.x;
+        let scale = (screen_pts_per_pdf_pt * pixels_per_point).max(0.001);
+        let inv = 1.0 / screen_pts_per_pdf_pt;
+        let origin_pts = Pos2::new(
+            (visible_rect.min.x - page_rect.min.x) * inv,
+            (visible_rect.min.y - page_rect.min.y) * inv,
+        );
+        let size_pts = egui::vec2(visible_rect.width() * inv, visible_rect.height() * inv);
+
+        let satisfied = self
+            .tile
+            .is_some_and(|tile| tile.satisfies(revision, self.page, scale, origin_pts, size_pts));
+        if satisfied {
+            return self.texture.is_some();
+        }
+
+        let already_failed = self.failed_request.is_some_and(|failed| {
+            failed.satisfies(revision, self.page, scale, origin_pts, size_pts)
+        });
+        if already_failed {
+            return self.texture.is_some();
+        }
+
         if self.render_job.is_none() {
+            let pdf = self.block.read().expect("checked above");
             let data = pdf.data().to_vec();
             drop(pdf);
+
+            let margin = size_pts * TILE_MARGIN_FACTOR;
+            let mut padded_origin = origin_pts - margin;
+            let mut padded_size = size_pts + margin * 2.0;
+            padded_origin.x = padded_origin.x.max(0.0).min(page_size_pts.x);
+            padded_origin.y = padded_origin.y.max(0.0).min(page_size_pts.y);
+            padded_size.x = padded_size
+                .x
+                .min(page_size_pts.x - padded_origin.x)
+                .max(1.0);
+            padded_size.y = padded_size
+                .y
+                .min(page_size_pts.y - padded_origin.y)
+                .max(1.0);
+
+            let width = ((padded_size.x * scale).round() as u32).clamp(1, RENDER_MAX_DIM);
+            let height = ((padded_size.y * scale).round() as u32).clamp(1, RENDER_MAX_DIM);
+
+            let request = RenderRequest {
+                revision,
+                page: self.page,
+                scale,
+                origin_pts: padded_origin,
+                width,
+                height,
+            };
             let repaint = context.clone();
             let page = self.page;
             let (sender, receiver) = mpsc::channel();
             thread::Builder::new()
                 .name("pdf-render".into())
                 .spawn(move || {
-                    let result = render_page(&data, page);
-                    let _ = sender.send((key, result));
+                    let result = render_page(&data, page, scale, padded_origin, width, height);
+                    let _ = sender.send(result);
                     repaint.request_repaint();
                 })
                 .expect("failed to start pdf render job");
-            self.render_job = Some(receiver);
+            self.render_job = Some((request, receiver));
         }
         self.texture.is_some()
     }
 
-    fn paint_texture(&self, ui: &mut egui::Ui) -> egui::Response {
+    fn paint_texture(&self, ui: &mut egui::Ui, page_rect: egui::Rect) -> egui::Response {
         let available = ui.available_size().max(Vec2::splat(1.0));
         let (rect, response) = ui.allocate_exact_size(available, Sense::drag());
-        match &self.texture {
-            Some(texture) => {
-                ui.painter_at(rect).image(
+        match (&self.texture, self.tile) {
+            (Some(texture), Some(tile)) => {
+                let page_size_pts = self.page_size_pts.unwrap_or(DEFAULT_PAGE_SIZE);
+                let screen_pts_per_pdf_pt = page_rect.width() / page_size_pts.x;
+                let tile_rect = egui::Rect::from_min_size(
+                    page_rect.min + tile.origin_pts.to_vec2() * screen_pts_per_pdf_pt,
+                    tile.size_pts * screen_pts_per_pdf_pt,
+                );
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(page_rect.intersect(rect), 0.0, Color32::WHITE);
+                painter.image(
                     texture.id(),
-                    rect,
+                    tile_rect.intersect(rect),
                     egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                     Color32::WHITE,
                 );
             }
-            None => {
+            _ => {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     ui.centered_and_justified(|ui| {
                         if let Some(error) = &self.render_error {
@@ -224,7 +352,14 @@ impl PdfEditor {
     }
 }
 
-fn render_page(data: &[u8], page: usize) -> Result<RenderedPage, String> {
+fn render_page(
+    data: &[u8],
+    page: usize,
+    scale: f32,
+    origin_pts: Pos2,
+    width: u32,
+    height: u32,
+) -> Result<RenderedPage, String> {
     let pdfium = pdfium_instance().map_err(str::to_owned)?;
     let document = pdfium
         .load_pdf_from_byte_slice(data, None)
@@ -236,17 +371,30 @@ fn render_page(data: &[u8], page: usize) -> Result<RenderedPage, String> {
     }
     let index = page.min(page_count - 1);
     let pdf_page = pages.get(index as i32).map_err(|error| error.to_string())?;
+    let page_size_pts = egui::vec2(pdf_page.width().value, pdf_page.height().value);
     let config = PdfRenderConfig::new()
-        .set_target_width(RENDER_TARGET_WIDTH)
-        .set_maximum_height(RENDER_MAX_HEIGHT);
+        .scale_page_by_factor(scale)
+        .set_fixed_size(width as i32, height as i32)
+        .set_origin(
+            -(origin_pts.x * scale).round() as i32,
+            -(origin_pts.y * scale).round() as i32,
+        );
     let bitmap = pdf_page
         .render_with_config(&config)
         .map_err(|error| error.to_string())?;
+    let rendered_width = bitmap.width() as u32;
+    let rendered_height = bitmap.height() as u32;
     Ok(RenderedPage {
         page_count,
         page_index: index,
-        width: bitmap.width() as u32,
-        height: bitmap.height() as u32,
+        page_size_pts,
+        tile_origin_pts: origin_pts,
+        tile_size_pts: egui::vec2(
+            rendered_width as f32 / scale,
+            rendered_height as f32 / scale,
+        ),
+        width: rendered_width,
+        height: rendered_height,
         rgba: bitmap.as_rgba_bytes(),
     })
 }
@@ -311,7 +459,7 @@ impl BlockEditor for PdfEditor {
     }
 
     fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
-        Some(self.page_size.unwrap_or(DEFAULT_PAGE_SIZE))
+        Some(self.page_size_pts.unwrap_or(DEFAULT_PAGE_SIZE))
     }
 
     fn direct_editor_top_bar(
@@ -380,8 +528,11 @@ impl BlockEditor for PdfEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.ensure_texture(ui.ctx());
-        let response = self.paint_texture(ui);
+        let page_rect = ui.max_rect();
+        let visible_rect = page_rect.intersect(ui.clip_rect());
+        let pixels_per_point = ui.ctx().pixels_per_point();
+        self.ensure_texture(ui.ctx(), page_rect, visible_rect, pixels_per_point);
+        let response = self.paint_texture(ui, page_rect);
         if response.dragged() {
             viewport.pan(response.drag_delta());
         }
