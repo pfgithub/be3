@@ -43,6 +43,7 @@ impl Instances {
     pub(super) fn report(
         &mut self,
         instance: EditorInstanceId,
+        context: &egui::Context,
         client: Arc<BlockClient>,
         block: BlockHandle<Counter>,
         size: egui::Vec2,
@@ -52,7 +53,10 @@ impl Instances {
         let next_screen = &mut self.next_screen;
         let entry = self.entries.entry(instance).or_insert_with(|| {
             *next_screen += 1;
-            let tunnel = client.open_tunnel();
+            let tunnel = client.open_tunnel({
+                let context = context.clone();
+                move || context.request_repaint()
+            });
             Instance {
                 client,
                 block,

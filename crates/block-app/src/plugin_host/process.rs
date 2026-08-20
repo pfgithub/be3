@@ -23,6 +23,11 @@ pub(super) enum SurfaceEvent {
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[cfg(target_os = "windows")]
+const BUSY_POLL: Duration = Duration::from_millis(1);
+#[cfg(target_os = "windows")]
+const IDLE_POLL: Duration = Duration::from_millis(32);
+
 pub(super) struct Process {
     shutdown: Sender<()>,
     #[cfg(target_os = "windows")]
@@ -36,7 +41,7 @@ pub(super) struct Process {
 }
 
 impl Process {
-    pub(super) fn launch(executable: PathBuf) -> Self {
+    pub(super) fn launch(executable: PathBuf, repaint: eframe::egui::Context) -> Self {
         let (shutdown, shutdown_receiver) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (messages, message_receiver) = mpsc::channel();
@@ -77,6 +82,7 @@ impl Process {
                     return drive_windows(
                         stream,
                         &mut child,
+                        &repaint,
                         &shutdown_receiver,
                         &message_receiver,
                         &surface_sender,
@@ -152,6 +158,7 @@ impl Process {
 fn drive_windows(
     mut stream: std::fs::File,
     child: &mut Child,
+    repaint: &eframe::egui::Context,
     shutdown: &Receiver<()>,
     messages: &Receiver<Message>,
     surfaces: &Sender<SurfaceEvent>,
@@ -182,6 +189,7 @@ fn drive_windows(
     let peer: windows_sys::Win32::Foundation::HANDLE = child.as_raw_handle().cast();
     let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
     let mut carrier = WindowsAttachmentCarrier::new(stream, peer);
+    let mut wait = BUSY_POLL;
     loop {
         if shutdown.try_recv().is_ok() {
             carrier
@@ -189,7 +197,14 @@ fn drive_windows(
                 .map_err(carrier_error)?;
             return wait_for_shutdown(child);
         }
-        let mut outbound: Vec<Message> = messages.try_iter().collect();
+        let mut outbound = Vec::new();
+        match messages.recv_timeout(wait) {
+            Ok(message) => outbound.push(message),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => thread::sleep(wait),
+        }
+        outbound.extend(messages.try_iter());
+        let sent = !outbound.is_empty();
         coalesce_screens(&mut outbound);
         for message in outbound {
             if !matches!(message, Message::Input(_)) {
@@ -197,7 +212,9 @@ fn drive_windows(
             }
             carrier.send(&message, &[]).map_err(carrier_error)?;
         }
+        let mut received = false;
         while pending(pipe)? {
+            received = true;
             let (message, attachments) = carrier.receive().map_err(carrier_error)?;
             match message {
                 Message::Surface(surface) => {
@@ -230,13 +247,20 @@ fn drive_windows(
                 _ => {}
             }
         }
+        if received {
+            repaint.request_repaint();
+        }
         if let Some(exit) = child.try_wait()? {
             return Err(io::Error::new(
                 io::ErrorKind::ConnectionAborted,
                 format!("plugin exited unexpectedly: {exit}"),
             ));
         }
-        thread::sleep(Duration::from_millis(2));
+        wait = if sent || received {
+            BUSY_POLL
+        } else {
+            (wait * 2).min(IDLE_POLL)
+        };
     }
 }
 

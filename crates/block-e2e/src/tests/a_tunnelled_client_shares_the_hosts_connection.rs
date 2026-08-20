@@ -22,7 +22,7 @@ async fn a_tunnelled_client_shares_the_hosts_connection() {
 
     let (endpoint, carrier) = block_client::tunnel_channel();
     let guest = BlockClient::tunneled(account_id, workspace_id, endpoint);
-    let pump = tokio::spawn(carry(host.open_tunnel(), carrier));
+    let pump = tokio::spawn(carry(host.open_tunnel(|| {}), carrier));
 
     let guest_block = guest.get_block::<Counter>(block_id);
     timeout(guest_block.loaded()).await;

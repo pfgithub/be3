@@ -140,11 +140,17 @@ fn run_endpoint<A: crate::App>(
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
     let mut request_id = 0;
+    let mut repaint_at: Option<Instant> = None;
     loop {
-        let mut batch = vec![carrier.receive()?.0];
+        let mut batch = Vec::new();
+        match repaint_at {
+            Some(deadline) => wait_until(pipe, deadline)?,
+            None => batch.push(carrier.receive()?.0),
+        }
         while pending(pipe)? {
             batch.push(carrier.receive()?.0);
         }
+        let received = !batch.is_empty();
         for message in batch {
             if let Message::Screens(set) = &message {
                 request_id = set.request_id;
@@ -186,14 +192,42 @@ fn run_endpoint<A: crate::App>(
                 carrier.send(&descriptor, &handles)?;
                 eprintln!("transferred DXGI surface generation {generation}");
             }
-            for message in surface.render(&mut screens, started.elapsed().as_secs_f64())? {
-                carrier.send(&message, &[])?;
+            let due = repaint_at.is_some_and(|deadline| deadline <= Instant::now());
+            if received || replaced || due {
+                let (messages, repaint) =
+                    surface.render(&mut screens, started.elapsed().as_secs_f64())?;
+                for message in messages {
+                    carrier.send(&message, &[])?;
+                }
+                repaint_at = repaint.map(|delay| Instant::now() + delay);
             }
         }
         for message in screens.outbound() {
             carrier.send(&message, &[])?;
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn wait_until(
+    pipe: windows_sys::Win32::Foundation::HANDLE,
+    deadline: std::time::Instant,
+) -> std::io::Result<()> {
+    const SHORTEST_POLL: std::time::Duration = std::time::Duration::from_millis(1);
+    const LONGEST_POLL: std::time::Duration = std::time::Duration::from_millis(16);
+    while !pending(pipe)? {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let remaining = deadline - now;
+        std::thread::sleep(
+            (remaining / 4)
+                .clamp(SHORTEST_POLL, LONGEST_POLL)
+                .min(remaining),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

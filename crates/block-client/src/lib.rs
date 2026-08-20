@@ -437,6 +437,13 @@ pub fn tunnel_channel() -> (TunnelEndpoint, TunnelCarrier) {
     )
 }
 
+pub type TunnelWake = Arc<dyn Fn() + Send + Sync>;
+
+struct TunnelSink {
+    responses: mpsc::UnboundedSender<String>,
+    wake: TunnelWake,
+}
+
 /// One of the clients a connection is carrying for somebody else. Frames go
 /// out over the connection tagged with this tunnel's id, so the server treats
 /// them as a separate client with its own watches and presence.
@@ -832,10 +839,14 @@ impl BlockClient {
     /// Opens another client on this client's connection, for code that cannot
     /// reach the server itself. Its frames are forwarded as they are; the
     /// server sees a separate client sharing the connection's identity.
-    pub fn open_tunnel(&self) -> Tunnel {
+    pub fn open_tunnel(&self, wake: impl Fn() + Send + Sync + 'static) -> Tunnel {
         let client = Uuid::new_v4();
         let (responses, incoming) = mpsc::unbounded();
-        self.send(WorkerCommand::OpenTunnel { client, responses });
+        self.send(WorkerCommand::OpenTunnel {
+            client,
+            responses,
+            wake: Arc::new(wake),
+        });
         Tunnel {
             client,
             commands: self.commands.clone(),
@@ -1815,6 +1826,7 @@ enum WorkerCommand {
     OpenTunnel {
         client: Uuid,
         responses: mpsc::UnboundedSender<String>,
+        wake: TunnelWake,
     },
     TunnelMessage {
         client: Uuid,
@@ -2019,7 +2031,7 @@ struct WorkerState {
     /// Frames from the clients this one is carrying, kept apart from its own
     /// so that neither queue can hold the other up.
     tunnel_outbound: VecDeque<ClientEnvelope>,
-    tunnels: HashMap<Uuid, mpsc::UnboundedSender<String>>,
+    tunnels: HashMap<Uuid, TunnelSink>,
     deferred: VecDeque<DeferredRequest>,
     synchronization_waiters: Vec<oneshot::Sender<()>>,
     sending_paused: bool,
@@ -2212,8 +2224,12 @@ impl WorkerState {
                     self.steps_remaining = self.steps_remaining.saturating_add(1);
                 }
             }
-            WorkerCommand::OpenTunnel { client, responses } => {
-                self.tunnels.insert(client, responses);
+            WorkerCommand::OpenTunnel {
+                client,
+                responses,
+                wake,
+            } => {
+                self.tunnels.insert(client, TunnelSink { responses, wake });
             }
             WorkerCommand::TunnelMessage { client, text } => self.tunnel_message(client, text),
             WorkerCommand::CloseTunnel { client } => {
@@ -2253,8 +2269,10 @@ impl WorkerState {
         };
         let text = serde_json::to_string(&message)
             .unwrap_or_else(|error| fatal(format!("failed to serialize server message: {error}")));
-        if tunnel.unbounded_send(text).is_err() {
+        if tunnel.responses.unbounded_send(text).is_err() {
             self.tunnels.remove(&client);
+        } else {
+            (tunnel.wake)();
         }
     }
 

@@ -111,6 +111,7 @@ pub(crate) fn editor_ui(
         let pass = state.pass;
         let screen = state.instances.report(
             instance,
+            ui.ctx(),
             client,
             block,
             response.rect.size(),

@@ -30,11 +30,9 @@ pub(crate) fn editor_ui(
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if host.process.is_none() {
-            host.process = Some(Process::launch(plugin_path()));
+            host.process = Some(Process::launch(plugin_path(), ui.ctx().clone()));
         }
         begin_pass(&mut host, ui.ctx());
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(16));
         if host.presenter_status.is_none() {
             ui.colored_label(
                 egui::Color32::RED,
@@ -59,6 +57,7 @@ pub(crate) fn editor_ui(
         let pass = host.pass;
         let screen = host.instances.report(
             instance,
+            ui.ctx(),
             client,
             block,
             response.rect.size(),

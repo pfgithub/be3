@@ -4,6 +4,7 @@ use block_plugin_api::{
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::collections::HashMap;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
+use std::time::Duration;
 use windows::Win32::{
     Foundation::GENERIC_ALL,
     Graphics::{
@@ -134,7 +135,7 @@ impl Surface {
         &mut self,
         screens: &mut crate::screens::Screens,
         phase: f64,
-    ) -> Result<Vec<Message>, String> {
+    ) -> Result<(Vec<Message>, Option<Duration>), String> {
         let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -144,6 +145,7 @@ impl Surface {
         let mut commands = Vec::new();
         let mut cleared = false;
         let mut freed = Vec::new();
+        let mut repaint = Duration::MAX;
         let placements = self.layout.screens.clone();
         for placement in &placements {
             let Some(session) = screens.session(placement.instance) else {
@@ -161,6 +163,7 @@ impl Surface {
                     ),
                 });
             let output = session.run(&pane.context, phase);
+            repaint = repaint.min(repaint_delay(&output));
             let scale = session.scale_factor();
             let paint_jobs = pane.context.tessellate(output.shapes, scale);
             for (id, delta) in &output.textures_delta.set {
@@ -225,13 +228,25 @@ impl Surface {
             .ok_or_else(|| "the plugin queue is not D3D12".to_owned())?;
         unsafe { hal_queue.as_raw().Signal(&self.fence, self.fence_value) }
             .map_err(|error| error.to_string())?;
-        Ok(vec![Message::FrameReady(FrameReady {
-            generation: self.generation,
-            damage: Vec::new(),
-            synchronization_value: self.fence_value,
-            attachments: Vec::new(),
-        })])
+        Ok((
+            vec![Message::FrameReady(FrameReady {
+                generation: self.generation,
+                damage: Vec::new(),
+                synchronization_value: self.fence_value,
+                attachments: Vec::new(),
+            })],
+            (repaint < Duration::MAX).then(|| repaint.max(MINIMUM_FRAME_INTERVAL)),
+        ))
     }
+}
+
+const MINIMUM_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
+
+fn repaint_delay(output: &egui::FullOutput) -> Duration {
+    output
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .map_or(Duration::MAX, |viewport| viewport.repaint_delay)
 }
 
 fn shared_texture(
