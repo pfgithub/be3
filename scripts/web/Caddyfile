@@ -1,0 +1,10 @@
+{$BE3_DOMAIN_NAME} {
+    handle /api* {
+        reverse_proxy {$BE3_BACKEND_URL}
+    }
+    handle {
+        file_server {
+            root target/web
+        }
+    }
+}

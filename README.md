@@ -16,14 +16,16 @@ install rustup, `rustup default stable`, install cargo-nextest
 
 ```
 # run app
-./scripts/run-block-app
+./scripts/run-block-app.sh
 
 # test app
 ./scripts/verify.sh
 
 # run for web
-./scripts/build-block-web.sh
-cargo run -p block-server -- --disable-registration
+./scripts/host-block-app.sh
+
+# build apk for android
+./scripts/build-block-android.sh
 
 ```
 
