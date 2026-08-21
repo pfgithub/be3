@@ -24,19 +24,32 @@ mod windows;
 
 #[cfg(target_os = "windows")]
 pub(crate) use native::{
-    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size,
-    preview, region_size, take_created,
+    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size, kill,
+    preview, region_size, running, take_created,
 };
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
 pub(crate) use unavailable::{
-    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size,
-    preview, region_size, take_created,
+    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size, kill,
+    preview, region_size, running, take_created,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::{
-    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size,
-    preview, region_size, take_created,
+    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size, kill,
+    preview, region_size, running, take_created,
 };
+
+pub(crate) struct RuntimeStatus {
+    pub(crate) plugin_id: String,
+    pub(crate) surface: u32,
+    pub(crate) state: String,
+    pub(crate) instances: Vec<InstanceStatus>,
+}
+
+pub(crate) struct InstanceStatus {
+    pub(crate) instance: EditorInstanceId,
+    pub(crate) block: Option<Uuid>,
+    pub(crate) regions: Vec<EditorRegion>,
+}
 
 pub(crate) struct PreviewSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,

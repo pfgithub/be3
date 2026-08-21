@@ -30,17 +30,52 @@ struct State {
 }
 
 impl State {
-    /// The presenter slot the plugin already holds, or the lowest free one.
-    fn surface_for(&self, plugin_id: &str) -> Option<u32> {
+    /// The presenter slot the plugin already holds, the lowest free one, or
+    /// the one taken back from the runtime that has been idle longest.
+    fn surface_for(&mut self, plugin_id: &str, context: &egui::Context) -> Option<u32> {
         if let Some(runtime) = self.runtimes.get(plugin_id) {
             return Some(runtime.surface);
         }
-        (0..super::presenter::MAX_SURFACES).find(|surface| {
+        let free = (0..super::presenter::MAX_SURFACES).find(|surface| {
             !self
                 .runtimes
                 .values()
                 .any(|runtime| runtime.surface == *surface)
-        })
+        });
+        if let Some(surface) = free {
+            return Some(surface);
+        }
+        let idle = self
+            .runtimes
+            .iter()
+            .filter(|(_, runtime)| runtime.instances.is_empty())
+            .min_by_key(|(_, runtime)| runtime.pass)
+            .map(|(id, _)| id.clone())?;
+        self.shutdown(context, &idle)
+    }
+
+    fn shutdown(&mut self, context: &egui::Context, plugin_id: &str) -> Option<u32> {
+        let mut runtime = self.runtimes.remove(plugin_id)?;
+        if let Some(mut adapter) = runtime.adapter.take() {
+            adapter.shutdown();
+        }
+        if !runtime.starting {
+            remove_canvas(&runtime.canvas_id);
+        }
+        context
+            .debug_painter()
+            .add(eframe::egui_wgpu::Callback::new_paint_callback(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+                PresenterCallback::<renderer::WebFrame> {
+                    command: PresenterCommand::Release,
+                    status: runtime.status.clone(),
+                    region: Region {
+                        surface: runtime.surface,
+                        ..Region::default()
+                    },
+                },
+            ));
+        Some(runtime.surface)
     }
 }
 
@@ -133,13 +168,13 @@ pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     });
 }
 
-fn open(plugin: &PluginManifest) {
+fn open(plugin: &PluginManifest, context: &egui::Context) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         if !state.render_available {
             return;
         }
-        let Some(surface) = state.surface_for(&plugin.identity.id) else {
+        let Some(surface) = state.surface_for(&plugin.identity.id, context) else {
             return;
         };
         let plugin_id = plugin.identity.id.clone();
@@ -196,7 +231,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         region,
         size,
     } = slot;
-    open(plugin);
+    open(plugin, ui.ctx());
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         if !state.render_available {
@@ -277,7 +312,7 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
         corners,
         opacity,
     } = slot;
-    open(plugin);
+    open(plugin, painter.ctx());
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         if !state.render_available {
@@ -419,7 +454,7 @@ pub(crate) fn intrinsic_size(plugin_id: &str, instance: EditorInstanceId) -> Opt
     })
 }
 
-pub(crate) fn close(ctx: &egui::Context, plugin_id: &str, instance: EditorInstanceId) {
+pub(crate) fn close(_ctx: &egui::Context, plugin_id: &str, instance: EditorInstanceId) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
@@ -429,30 +464,34 @@ pub(crate) fn close(ctx: &egui::Context, plugin_id: &str, instance: EditorInstan
             return;
         }
         runtime.send(vec![Message::Editor(EditorMessage::Close { instance })]);
-        if !runtime.instances.is_empty() {
-            return;
-        }
-        let Some(mut runtime) = state.runtimes.remove(plugin_id) else {
-            return;
-        };
-        if let Some(mut adapter) = runtime.adapter.take() {
-            adapter.shutdown();
-        }
-        if !runtime.starting {
-            remove_canvas(&runtime.canvas_id);
-        }
-        ctx.debug_painter()
-            .add(eframe::egui_wgpu::Callback::new_paint_callback(
-                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
-                PresenterCallback::<renderer::WebFrame> {
-                    command: PresenterCommand::Release,
-                    status: runtime.status.clone(),
-                    region: Region {
-                        surface: runtime.surface,
-                        ..Region::default()
-                    },
+    });
+}
+
+pub(crate) fn running() -> Vec<super::RuntimeStatus> {
+    STATE.with(|state| {
+        let state = state.borrow();
+        let mut running: Vec<_> = state
+            .runtimes
+            .iter()
+            .map(|(plugin_id, runtime)| super::RuntimeStatus {
+                plugin_id: plugin_id.clone(),
+                surface: runtime.surface,
+                state: match (&runtime.error, runtime.adapter.is_some()) {
+                    (Some(error), _) => error.clone(),
+                    (None, true) => "running".to_owned(),
+                    (None, false) => "starting".to_owned(),
                 },
-            ));
+                instances: runtime.instances.statuses(),
+            })
+            .collect();
+        running.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+        running
+    })
+}
+
+pub(crate) fn kill(ctx: &egui::Context, plugin_id: &str) {
+    STATE.with(|state| {
+        state.borrow_mut().shutdown(ctx, plugin_id);
     });
 }
 

@@ -718,6 +718,10 @@ impl BlockApp {
                         performance::open();
                         ui.close();
                     }
+                    if ui.button("Plugins").clicked() {
+                        crate::debug::plugins::open();
+                        ui.close();
+                    }
                     if ui.button("Version").clicked() {
                         crate::debug::version::open();
                         ui.close();

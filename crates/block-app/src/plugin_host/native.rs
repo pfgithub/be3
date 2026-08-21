@@ -46,7 +46,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             );
             return None;
         }
-        let Some(surface) = host.surface_for(&plugin.identity.id) else {
+        let Some(surface) = host.surface_for(&plugin.identity.id, ui.ctx()) else {
             ui.colored_label(
                 egui::Color32::RED,
                 "Too many plugin runtimes are already presenting.",
@@ -124,10 +124,10 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
         if !host.presenter_available {
             return false;
         }
-        let Some(surface) = host.surface_for(&plugin.identity.id) else {
+        let context = painter.ctx().clone();
+        let Some(surface) = host.surface_for(&plugin.identity.id, &context) else {
             return false;
         };
-        let context = painter.ctx().clone();
         let pass = context.cumulative_pass_nr();
         let runtime = host
             .runtimes
@@ -251,7 +251,7 @@ pub(crate) fn intrinsic_size(plugin_id: &str, instance: EditorInstanceId) -> Opt
     })
 }
 
-pub(crate) fn close(ctx: &egui::Context, plugin_id: &str, instance: EditorInstanceId) {
+pub(crate) fn close(_ctx: &egui::Context, plugin_id: &str, instance: EditorInstanceId) {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         let Some(runtime) = host.runtimes.get_mut(plugin_id) else {
@@ -261,12 +261,71 @@ pub(crate) fn close(ctx: &egui::Context, plugin_id: &str, instance: EditorInstan
             return;
         }
         runtime.send(vec![Message::Editor(EditorMessage::Close { instance })]);
-        if !runtime.instances.is_empty() {
-            return;
+    });
+}
+
+pub(crate) fn running() -> Vec<super::RuntimeStatus> {
+    HOST.with(|host| {
+        let host = host.borrow();
+        let mut running: Vec<_> = host
+            .runtimes
+            .iter()
+            .map(|(plugin_id, runtime)| super::RuntimeStatus {
+                plugin_id: plugin_id.clone(),
+                surface: runtime.surface,
+                state: match runtime.status.get() {
+                    PresenterState::Waiting => "waiting".to_owned(),
+                    PresenterState::Presenting => "presenting".to_owned(),
+                    PresenterState::Released => "released".to_owned(),
+                    PresenterState::Failed(error) | PresenterState::Unsupported(error) => error,
+                },
+                instances: runtime.instances.statuses(),
+            })
+            .collect();
+        running.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+        running
+    })
+}
+
+pub(crate) fn kill(ctx: &egui::Context, plugin_id: &str) {
+    HOST.with(|host| {
+        host.borrow_mut().shutdown(ctx, plugin_id);
+    });
+}
+
+#[derive(Default)]
+struct Host {
+    presenter_available: bool,
+    runtimes: HashMap<String, Runtime>,
+}
+
+impl Host {
+    /// The presenter slot the plugin already holds, the lowest free one, or
+    /// the one taken back from the runtime that has been idle longest.
+    fn surface_for(&mut self, plugin_id: &str, ctx: &egui::Context) -> Option<u32> {
+        if let Some(runtime) = self.runtimes.get(plugin_id) {
+            return Some(runtime.surface);
         }
-        let Some(mut runtime) = host.runtimes.remove(plugin_id) else {
-            return;
-        };
+        let free = (0..super::presenter::MAX_SURFACES).find(|surface| {
+            !self
+                .runtimes
+                .values()
+                .any(|runtime| runtime.surface == *surface)
+        });
+        if let Some(surface) = free {
+            return Some(surface);
+        }
+        let idle = self
+            .runtimes
+            .iter()
+            .filter(|(_, runtime)| runtime.instances.is_empty())
+            .min_by_key(|(_, runtime)| runtime.pass)
+            .map(|(id, _)| id.clone())?;
+        self.shutdown(ctx, &idle)
+    }
+
+    fn shutdown(&mut self, ctx: &egui::Context, plugin_id: &str) -> Option<u32> {
+        let mut runtime = self.runtimes.remove(plugin_id)?;
         if let Some(mut process) = runtime.process.take() {
             process.shutdown();
         }
@@ -282,27 +341,7 @@ pub(crate) fn close(ctx: &egui::Context, plugin_id: &str, instance: EditorInstan
                     },
                 },
             ));
-    });
-}
-
-#[derive(Default)]
-struct Host {
-    presenter_available: bool,
-    runtimes: HashMap<String, Runtime>,
-}
-
-impl Host {
-    /// The presenter slot the plugin already holds, or the lowest free one.
-    fn surface_for(&self, plugin_id: &str) -> Option<u32> {
-        if let Some(runtime) = self.runtimes.get(plugin_id) {
-            return Some(runtime.surface);
-        }
-        (0..super::presenter::MAX_SURFACES).find(|surface| {
-            !self
-                .runtimes
-                .values()
-                .any(|runtime| runtime.surface == *surface)
-        })
+        Some(runtime.surface)
     }
 }
 

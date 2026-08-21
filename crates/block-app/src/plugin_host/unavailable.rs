@@ -80,3 +80,9 @@ pub(crate) fn intrinsic_size(_plugin_id: &str, _instance: EditorInstanceId) -> O
 }
 
 pub(crate) fn close(_ctx: &egui::Context, _plugin_id: &str, _instance: EditorInstanceId) {}
+
+pub(crate) fn running() -> Vec<super::RuntimeStatus> {
+    Vec::new()
+}
+
+pub(crate) fn kill(_ctx: &egui::Context, _plugin_id: &str) {}

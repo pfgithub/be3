@@ -1131,8 +1131,6 @@ pub(super) trait CreationOptions: Default {
 /// how to turn them into an editor.
 pub(super) trait PendingCreation {
     fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> bool;
-    /// Makes the block the dialog was filled in for, or answers `None` while
-    /// the editor making it has yet to report back.
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String>;
 }
 

@@ -235,6 +235,24 @@ impl Instances {
             .is_some_and(|entry| entry.drag_accepted)
     }
 
+    pub(super) fn statuses(&self) -> Vec<super::InstanceStatus> {
+        let mut statuses: Vec<_> = self
+            .entries
+            .iter()
+            .map(|(instance, entry)| {
+                let mut regions: Vec<_> = entry.screens.keys().copied().collect();
+                regions.sort_by_key(|region| format!("{region:?}"));
+                super::InstanceStatus {
+                    instance: *instance,
+                    block: entry.block.map(|block| block.id),
+                    regions,
+                }
+            })
+            .collect();
+        statuses.sort_by_key(|status| status.instance.0);
+        statuses
+    }
+
     pub(super) fn creation_ready(&self, instance: EditorInstanceId) -> bool {
         self.entries
             .get(&instance)
