@@ -37,8 +37,8 @@ use block_client::{
     blocks::workspace_index::BlockEntry, BlockClient, BlockHandle, BlockHandleAccess,
     BlockHistoryHandle, BlockRelationships,
 };
-use block_ui::BlockTypes;
 pub(super) use block_ui::{name_galley, paint_name, BlockLabel};
+use block_ui::{BlockTypeEntry, BlockTypes};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_LOCK, MaterialIcon};
 use uuid::Uuid;
@@ -1198,6 +1198,7 @@ impl EditorRegistration {
 pub struct EditorRegistry {
     registrations: HashMap<Uuid, EditorRegistration>,
     new_block_actions: Vec<(&'static str, Uuid, bool)>,
+    plugin_block_types: Arc<Vec<block_plugin_api::BlockTypeDescriptor>>,
 }
 
 impl EditorRegistry {
@@ -1205,6 +1206,7 @@ impl EditorRegistry {
         let mut registry = Self {
             registrations: HashMap::new(),
             new_block_actions: Vec::new(),
+            plugin_block_types: Arc::default(),
         };
         registry.register_configurable::<audio::AudioEditor>();
         registry.register_creatable::<calendar::CalendarEditor>();
@@ -1235,7 +1237,33 @@ impl EditorRegistry {
         registry.register_creatable::<video::VideoEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         registry.register_creatable::<workspace_index::WorkspaceIndexEditor>();
+        registry.plugin_block_types =
+            Arc::new(plugin::block_type_descriptors(registry.block_types()));
         registry
+    }
+
+    /// What a plugin editor needs to name and illustrate the block types it
+    /// lists, built once so it can be handed to every plugin runtime.
+    fn block_types(&self) -> Vec<(Uuid, BlockTypeEntry)> {
+        let mut types: Vec<_> = self
+            .registrations
+            .values()
+            .map(|registration| {
+                (
+                    registration.block_type,
+                    BlockTypeEntry {
+                        display_name: registration.display_name.to_owned(),
+                        icon: Some(registration.icon),
+                    },
+                )
+            })
+            .collect();
+        types.sort_by_key(|(block_type, _)| *block_type);
+        types
+    }
+
+    pub(super) fn plugin_block_types(&self) -> &Arc<Vec<block_plugin_api::BlockTypeDescriptor>> {
+        &self.plugin_block_types
     }
 
     /// Registers an editor for a block type that is only ever produced by
@@ -1302,10 +1330,10 @@ impl EditorRegistry {
                     client.get_block::<P::Block>(id),
                 ))
             },
-            can_add_child: false,
-            can_delete_child: false,
-            can_replace_child: false,
-            default_important: false,
+            can_add_child: manifest.children.add,
+            can_delete_child: manifest.children.delete,
+            can_replace_child: manifest.children.replace,
+            default_important: manifest.important,
             dynamic_artifact: None,
         });
     }

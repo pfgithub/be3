@@ -181,7 +181,11 @@ impl WebProtocolAdapter {
                     self.repaint = frame.repaint_after_micros.map(Duration::from_micros);
                 }
                 Message::Editor(EditorMessage::Acknowledged { .. }) => {}
-                Message::Editor(message @ EditorMessage::OpenBlock { .. }) => {
+                Message::Editor(
+                    message @ (EditorMessage::OpenBlock { .. }
+                    | EditorMessage::DragAccepted { .. }
+                    | EditorMessage::IntrinsicSize { .. }),
+                ) => {
                     self.editor_messages.push(message);
                 }
                 message => self.session.receive(message, now()),

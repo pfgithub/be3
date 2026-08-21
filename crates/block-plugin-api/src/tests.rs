@@ -55,6 +55,8 @@ fn region_screen(
     }
 }
 
+mod block_types_round_trip;
+mod drag_messages_round_trip;
 mod frame_round_trips;
 mod manifest_validation;
 mod multiplexed_messages_round_trip;

@@ -1,19 +1,21 @@
 use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, EditorRegion, Message, RegionSize, ScreenId, ScreenRequest,
-    ScreenSet, TunnelMessage,
+    BlockTypeDescriptor, EditorInstanceId, EditorMessage, EditorRegion, Message, RegionSize,
+    ScreenId, ScreenRequest, ScreenSet, TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
-use super::input::{viewport_metrics, InputAdapter};
+use super::input::{viewport_metrics, BlockDragEvent, InputAdapter};
 
 #[derive(Default)]
 pub(super) struct Instances {
     entries: HashMap<EditorInstanceId, Instance>,
     next_screen: u64,
     request_id: u64,
+    block_types: Option<Arc<Vec<BlockTypeDescriptor>>>,
+    sent_block_types: bool,
 }
 
 struct Instance {
@@ -24,6 +26,8 @@ struct Instance {
     screens: HashMap<EditorRegion, Screen>,
     opened: bool,
     opens: Vec<(Uuid, Uuid)>,
+    drag_accepted: bool,
+    intrinsic: Option<egui::Vec2>,
 }
 
 struct Screen {
@@ -31,6 +35,7 @@ struct Screen {
     request: ScreenRequest,
     last_seen: u64,
     used: Option<egui::Vec2>,
+    dragging: bool,
 }
 
 pub(super) struct NextScreens {
@@ -55,10 +60,14 @@ impl Instances {
         client: Arc<BlockClient>,
         block_id: Uuid,
         block_type: Uuid,
+        block_types: &Arc<Vec<BlockTypeDescriptor>>,
         size: egui::Vec2,
         scale_factor: f32,
         pass: u64,
     ) -> ScreenId {
+        if self.block_types.is_none() {
+            self.block_types = Some(Arc::clone(block_types));
+        }
         let entry = self.entries.entry(instance).or_insert_with(|| {
             let tunnel = client.open_tunnel({
                 let context = context.clone();
@@ -72,6 +81,8 @@ impl Instances {
                 screens: HashMap::new(),
                 opened: false,
                 opens: Vec::new(),
+                drag_accepted: false,
+                intrinsic: None,
             }
         });
         let next_screen = &mut self.next_screen;
@@ -87,6 +98,7 @@ impl Instances {
                 },
                 last_seen: pass,
                 used: None,
+                dragging: false,
             }
         });
         screen.request.metrics = viewport_metrics(size, scale_factor);
@@ -99,6 +111,12 @@ impl Instances {
         instances.sort_by_key(|instance| instance.0);
         let mut opened = Vec::new();
         let mut screens = Vec::new();
+        if !self.sent_block_types {
+            if let Some(block_types) = &self.block_types {
+                self.sent_block_types = true;
+                opened.push(Message::BlockTypes(block_types.as_ref().clone()));
+            }
+        }
         for instance in instances {
             let Some(entry) = self.entries.get_mut(&instance) else {
                 continue;
@@ -145,6 +163,55 @@ impl Instances {
                 }
             }
         }
+    }
+
+    /// Tells an instance about a block being dragged over one of its
+    /// regions, and about a drag that has moved off it again.
+    pub(super) fn drag(
+        &mut self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        event: Option<BlockDragEvent>,
+    ) -> Vec<Message> {
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return Vec::new();
+        };
+        let Some(screen) = entry.screens.get_mut(&region) else {
+            return Vec::new();
+        };
+        match event {
+            Some(event) => {
+                screen.dragging = !event.dropped;
+                if event.dropped {
+                    entry.drag_accepted = false;
+                }
+                vec![Message::Editor(EditorMessage::DragOver {
+                    instance,
+                    region,
+                    x: event.position.x,
+                    y: event.position.y,
+                    block_id: event.block_id.into_bytes(),
+                    block_type: event.block_type.into_bytes(),
+                    dropped: event.dropped,
+                })]
+            }
+            None if screen.dragging => {
+                screen.dragging = false;
+                entry.drag_accepted = false;
+                vec![Message::Editor(EditorMessage::DragLeft { instance })]
+            }
+            None => Vec::new(),
+        }
+    }
+
+    pub(super) fn drag_accepted(&self, instance: EditorInstanceId) -> bool {
+        self.entries
+            .get(&instance)
+            .is_some_and(|entry| entry.drag_accepted)
+    }
+
+    pub(super) fn intrinsic_size(&self, instance: EditorInstanceId) -> Option<egui::Vec2> {
+        self.entries.get(&instance)?.intrinsic
     }
 
     pub(super) fn region_size(
@@ -197,20 +264,34 @@ impl Instances {
     /// Records an instance's request to have another block opened, to be
     /// picked up by the editor the next time it draws.
     pub(super) fn editor_message(&mut self, message: EditorMessage) {
-        let EditorMessage::OpenBlock {
-            instance,
-            block_id,
-            block_type,
-        } = message
-        else {
-            return;
-        };
-        let Some(entry) = self.entries.get_mut(&instance) else {
-            return;
-        };
-        entry
-            .opens
-            .push((Uuid::from_bytes(block_id), Uuid::from_bytes(block_type)));
+        match message {
+            EditorMessage::OpenBlock {
+                instance,
+                block_id,
+                block_type,
+            } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry
+                        .opens
+                        .push((Uuid::from_bytes(block_id), Uuid::from_bytes(block_type)));
+                }
+            }
+            EditorMessage::DragAccepted { instance, accepted } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.drag_accepted = accepted;
+                }
+            }
+            EditorMessage::IntrinsicSize {
+                instance,
+                width,
+                height,
+            } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.intrinsic = Some(egui::vec2(width, height));
+                }
+            }
+            _ => {}
+        }
     }
 
     pub(super) fn take_open(&mut self, instance: EditorInstanceId) -> Option<(Uuid, Uuid)> {

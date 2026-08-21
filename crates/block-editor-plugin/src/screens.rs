@@ -1,16 +1,20 @@
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenId, ScreenLayout, ScreenRequest,
+    BlockTypeDescriptor, EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenId,
+    ScreenLayout, ScreenRequest,
 };
-use std::collections::HashMap;
+use block_ui::{BlockCatalog, BlockTypeEntry};
+use eframe::egui;
+use std::{collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
-use crate::egui_session::EguiSession;
+use crate::{egui_session::EguiSession, host::BlockDrag};
 
 pub(crate) struct Screens {
     sessions: HashMap<EditorInstanceId, EguiSession>,
     open: fn(EditorInstanceId) -> EguiSession,
     requests: Vec<ScreenRequest>,
     layout: ScreenLayout,
+    block_types: Rc<BlockCatalog>,
 }
 
 impl Screens {
@@ -20,6 +24,7 @@ impl Screens {
             open: EguiSession::new::<A>,
             requests: Vec::new(),
             layout: ScreenLayout::default(),
+            block_types: Rc::new(BlockCatalog::default()),
         }
     }
 
@@ -45,6 +50,7 @@ impl Screens {
                     .sessions
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance));
+                session.set_block_types(Rc::clone(&self.block_types));
                 session.connect(
                     Uuid::from_bytes(*block_id),
                     Uuid::from_bytes(*account_id),
@@ -75,6 +81,38 @@ impl Screens {
             Message::Client(message) => {
                 if let Some(session) = self.sessions.get_mut(&instance_of_client(message)) {
                     session.client_message(message);
+                }
+            }
+            Message::BlockTypes(descriptors) => {
+                self.block_types = Rc::new(catalog(descriptors));
+                for session in self.sessions.values() {
+                    session.set_block_types(Rc::clone(&self.block_types));
+                }
+            }
+            Message::Editor(EditorMessage::DragOver {
+                instance,
+                region,
+                x,
+                y,
+                block_id,
+                block_type,
+                dropped,
+            }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.set_drag(Some((
+                        *region,
+                        BlockDrag {
+                            position: egui::pos2(*x, *y),
+                            block_id: Uuid::from_bytes(*block_id),
+                            block_type: Uuid::from_bytes(*block_type),
+                            dropped: *dropped,
+                        },
+                    )));
+                }
+            }
+            Message::Editor(EditorMessage::DragLeft { instance }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.set_drag(None);
                 }
             }
             _ => {}
@@ -120,4 +158,18 @@ fn instance_of_client(message: &block_plugin_api::TunnelMessage) -> EditorInstan
     use block_plugin_api::TunnelMessage as Tunnel;
     let (Tunnel::Request { instance, .. } | Tunnel::Response { instance, .. }) = message;
     *instance
+}
+
+fn catalog(descriptors: &[BlockTypeDescriptor]) -> BlockCatalog {
+    BlockCatalog::new(descriptors.iter().map(|descriptor| {
+        let codepoint: &'static str = Box::leak(descriptor.icon_codepoint.clone().into_boxed_str());
+        (
+            Uuid::from_bytes(descriptor.block_type),
+            BlockTypeEntry {
+                display_name: descriptor.display_name.clone(),
+                icon: (!codepoint.is_empty())
+                    .then(|| egui_material_icons::MaterialIcon::new(codepoint)),
+            },
+        )
+    }))
 }

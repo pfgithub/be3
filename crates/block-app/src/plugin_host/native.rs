@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, path::PathBuf, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf};
 
 use block_plugin_api::{
     EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest, ScreenLayout,
@@ -11,6 +11,7 @@ use super::{
     presenter::{PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Region},
     process::{Process, SurfaceEvent},
     windows::WindowsFrame,
+    EditorSlot,
 };
 
 thread_local! {
@@ -23,16 +24,17 @@ pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     });
 }
 
-pub(crate) fn editor_ui(
-    ui: &mut egui::Ui,
-    plugin: &PluginManifest,
-    client: Arc<block_client::BlockClient>,
-    block_id: Uuid,
-    block_type: Uuid,
-    instance: EditorInstanceId,
-    region: EditorRegion,
-    size: egui::Vec2,
-) -> Option<(Uuid, Uuid)> {
+pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid, Uuid)> {
+    let EditorSlot {
+        plugin,
+        block_types,
+        client,
+        block_id,
+        block_type,
+        instance,
+        region,
+        size,
+    } = slot;
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if !host.presenter_available {
@@ -75,6 +77,7 @@ pub(crate) fn editor_ui(
             client,
             block_id,
             block_type,
+            block_types,
             response.rect.size(),
             ui.ctx().pixels_per_point(),
             pass,
@@ -83,6 +86,13 @@ pub(crate) fn editor_ui(
             input.update(ui, &response, screen)
         });
         runtime.send(messages);
+        let drag = super::input::block_drag(&response);
+        let hovering = drag.as_ref().is_some_and(|drag| !drag.dropped);
+        let messages = runtime.instances.drag(instance, region, drag);
+        runtime.send(messages);
+        if hovering && runtime.instances.drag_accepted(instance) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
+        }
         let open_request = runtime.instances.take_open(instance);
         let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen) else {
             return open_request;
@@ -114,6 +124,16 @@ pub(crate) fn region_size(
             .get(plugin_id)?
             .instances
             .region_size(instance, region)
+    })
+}
+
+pub(crate) fn intrinsic_size(plugin_id: &str, instance: EditorInstanceId) -> Option<egui::Vec2> {
+    HOST.with(|host| {
+        host.borrow()
+            .runtimes
+            .get(plugin_id)?
+            .instances
+            .intrinsic_size(instance)
     })
 }
 

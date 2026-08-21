@@ -3,6 +3,36 @@ use block_plugin_api::{
     ViewportMetrics, WheelUnit,
 };
 use eframe::egui;
+use uuid::Uuid;
+
+use crate::editors::SidebarDragPayload;
+
+/// A block the app is dragging over a plugin region, in that region's own
+/// coordinates.
+pub(super) struct BlockDragEvent {
+    pub(super) position: egui::Vec2,
+    pub(super) block_id: Uuid,
+    pub(super) block_type: Uuid,
+    pub(super) dropped: bool,
+}
+
+/// Reads a sidebar drag hovering over, or released on, a plugin region.
+pub(super) fn block_drag(response: &egui::Response) -> Option<BlockDragEvent> {
+    let (payload, dropped) = match response.dnd_release_payload::<SidebarDragPayload>() {
+        Some(payload) => (payload, true),
+        None => (response.dnd_hover_payload::<SidebarDragPayload>()?, false),
+    };
+    let pointer = response
+        .ctx
+        .pointer_interact_pos()
+        .unwrap_or_else(|| response.rect.center());
+    Some(BlockDragEvent {
+        position: pointer - response.rect.min,
+        block_id: payload.reference.id,
+        block_type: payload.reference.block_type,
+        dropped,
+    })
+}
 
 #[derive(Default)]
 pub(super) struct InputAdapter {

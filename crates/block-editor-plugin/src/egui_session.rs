@@ -3,11 +3,12 @@ use block_plugin_api::{
     EditorInstanceId, EditorMessage, EditorRegion, InputEvent, Message, PointerButton, RegionSize,
     ScreenPlacement, TunnelMessage, WheelUnit,
 };
+use block_ui::BlockCatalog;
 use eframe::egui;
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
-use crate::EditorHost;
+use crate::{host::BlockDrag, EditorHost};
 
 pub(crate) struct EguiSession {
     app: Box<dyn AppUi>,
@@ -15,6 +16,8 @@ pub(crate) struct EguiSession {
     regions: HashMap<EditorRegion, RegionState>,
     carrier: Option<TunnelCarrier>,
     host: EditorHost,
+    drag: Option<(EditorRegion, BlockDrag)>,
+    intrinsic: Option<egui::Vec2>,
 }
 
 #[derive(Default)]
@@ -28,6 +31,7 @@ struct RegionState {
 trait AppUi {
     fn connect(&mut self, host: EditorHost, client: block_client::BlockClient, block_id: Uuid);
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
 }
 
 impl<A: crate::App> AppUi for A {
@@ -43,6 +47,10 @@ impl<A: crate::App> AppUi for A {
             EditorRegion::RightSidebar => crate::App::right_sidebar_ui(self, ui),
         }
     }
+
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
+        crate::App::intrinsic_size(self)
+    }
 }
 
 impl EguiSession {
@@ -53,7 +61,17 @@ impl EguiSession {
             regions: HashMap::new(),
             carrier: None,
             host: EditorHost::default(),
+            drag: None,
+            intrinsic: None,
         }
+    }
+
+    pub(crate) fn set_block_types(&self, catalog: Rc<BlockCatalog>) {
+        self.host.set_block_types(catalog);
+    }
+
+    pub(crate) fn set_drag(&mut self, drag: Option<(EditorRegion, BlockDrag)>) {
+        self.drag = drag;
     }
 
     pub(crate) fn connect(&mut self, block_id: Uuid, account_id: Uuid, workspace_id: Uuid) {
@@ -81,6 +99,23 @@ impl EguiSession {
             messages.push(Message::RegionSizes(sizes));
         }
         let instance = self.instance;
+        if let Some(accepted) = self.host.take_drag_accepted() {
+            messages.push(Message::Editor(EditorMessage::DragAccepted {
+                instance,
+                accepted,
+            }));
+        }
+        let intrinsic = self.app.intrinsic_size();
+        if intrinsic != self.intrinsic {
+            self.intrinsic = intrinsic;
+            if let Some(size) = intrinsic {
+                messages.push(Message::Editor(EditorMessage::IntrinsicSize {
+                    instance,
+                    width: size.x,
+                    height: size.y,
+                }));
+            }
+        }
         for (block_id, block_type) in self.host.take_opens() {
             messages.push(Message::Editor(EditorMessage::OpenBlock {
                 instance,
@@ -150,6 +185,14 @@ impl EguiSession {
         let input = std::mem::take(&mut state.input);
         state.input.focused = input.focused;
         state.input.modifiers = input.modifiers;
+        let drag = self.drag.and_then(|(dragged, drag)| {
+            (dragged == region).then(|| BlockDrag {
+                position: drag.position + rect.min.to_vec2(),
+                ..drag
+            })
+        });
+        self.host.set_drag(drag);
+        let delivered_drop = drag.is_some_and(|drag| drag.dropped);
         let app = &mut self.app;
         let frame =
             egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO);
@@ -158,6 +201,10 @@ impl EguiSession {
                 .frame(frame)
                 .show_inside(ui, |ui| app.ui(ui, region));
         });
+        self.host.set_drag(None);
+        if delivered_drop {
+            self.drag = None;
+        }
         self.used(region, context.globally_used_rect());
         output
     }

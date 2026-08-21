@@ -12,6 +12,9 @@ fn manifest_validation() {
         display_name: "Counter".into(),
         icon: "123".into(),
         creation: CreationMode::Immediate,
+        children: ChildOperations::default(),
+        important: false,
+        resize: ResizeMode::Both,
         regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
         entry_points: EntryPoints {
             web: Some("/counter.js".into()),

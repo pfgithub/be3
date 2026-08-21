@@ -1,22 +1,31 @@
-use std::sync::Arc;
-
-use block_client::BlockClient;
-use block_plugin_api::{EditorInstanceId, EditorRegion, PluginManifest};
+use block_plugin_api::{EditorInstanceId, EditorRegion};
 use eframe::egui;
 use uuid::Uuid;
 
+use super::EditorSlot;
+
 pub(crate) fn install(_creation_context: &eframe::CreationContext<'_>) {}
 
-pub(crate) fn editor_ui(
-    ui: &mut egui::Ui,
-    plugin: &PluginManifest,
-    _client: Arc<BlockClient>,
-    _block_id: Uuid,
-    _block_type: Uuid,
-    _instance: EditorInstanceId,
-    _region: EditorRegion,
-    _size: egui::Vec2,
-) -> Option<(Uuid, Uuid)> {
+pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid, Uuid)> {
+    let EditorSlot {
+        plugin,
+        block_types,
+        client,
+        block_id,
+        block_type,
+        instance,
+        region,
+        size,
+    } = slot;
+    let _ = (
+        block_types,
+        client,
+        block_id,
+        block_type,
+        instance,
+        region,
+        size,
+    );
     ui.colored_label(
         egui::Color32::RED,
         format!("{} is not supported on this platform.", plugin.display_name),
@@ -29,6 +38,10 @@ pub(crate) fn region_size(
     _instance: EditorInstanceId,
     _region: EditorRegion,
 ) -> Option<egui::Vec2> {
+    None
+}
+
+pub(crate) fn intrinsic_size(_plugin_id: &str, _instance: EditorInstanceId) -> Option<egui::Vec2> {
     None
 }
 

@@ -1,7 +1,8 @@
 use block::Block;
 use block_client::blocks::hotbar::Hotbar;
 use block_plugin_api::{
-    CreationMode, EditorRegion, EntryPoints, PluginIdentity, PluginManifest, SurfaceMechanism,
+    ChildOperations, CreationMode, EditorRegion, EntryPoints, PluginIdentity, PluginManifest,
+    ResizeMode, SurfaceMechanism,
 };
 use egui_material_icons::{icons::ICON_WIDGETS, MaterialIcon};
 use std::sync::{Arc, OnceLock};
@@ -27,6 +28,9 @@ impl PluginPackage for HotbarPlugin {
             display_name: "Hotbar".into(),
             icon: "widgets".into(),
             creation: CreationMode::None,
+            children: ChildOperations::default(),
+            important: false,
+            resize: ResizeMode::Both,
             regions: vec![EditorRegion::Main],
             entry_points: EntryPoints {
                 web: Some("/hotbar.js".into()),

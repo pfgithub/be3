@@ -25,7 +25,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 9;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
@@ -133,9 +133,41 @@ pub struct PluginManifest {
     pub display_name: String,
     pub icon: String,
     pub creation: CreationMode,
+    pub children: ChildOperations,
+    pub important: bool,
+    pub resize: ResizeMode,
     pub regions: Vec<EditorRegion>,
     pub entry_points: EntryPoints,
     pub surfaces: Vec<SurfaceMechanism>,
+}
+
+/// Which of the host's structural edits an editor's block type accepts, so
+/// the host can offer them around an editor it does not draw itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildOperations {
+    pub add: bool,
+    pub delete: bool,
+    pub replace: bool,
+}
+
+/// How an embedded editor may be resized by whatever holds it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResizeMode {
+    None,
+    Horizontal,
+    Vertical,
+    #[default]
+    Both,
+}
+
+/// One registered block type as the host describes it to a plugin, so an
+/// editor can name and illustrate the blocks it lists. The icon is the
+/// codepoint of the host's icon font, not a name to look up.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockTypeDescriptor {
+    pub block_type: [u8; 16],
+    pub display_name: String,
+    pub icon_codepoint: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,6 +287,34 @@ pub enum EditorMessage {
         block_id: [u8; 16],
         block_type: [u8; 16],
     },
+    /// A block the host is dragging over one of an instance's regions, in
+    /// that region's own logical coordinates, and whether it has been let go.
+    DragOver {
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        x: f32,
+        y: f32,
+        block_id: [u8; 16],
+        block_type: [u8; 16],
+        dropped: bool,
+    },
+    /// The drag the host last reported has moved off the instance.
+    DragLeft {
+        instance: EditorInstanceId,
+    },
+    /// The instance's answer to the drag it was last told about: whether it
+    /// would take the block, which the host shows through the cursor.
+    DragAccepted {
+        instance: EditorInstanceId,
+        accepted: bool,
+    },
+    /// The size an instance would like to be given wherever the host embeds
+    /// it, in logical points.
+    IntrinsicSize {
+        instance: EditorInstanceId,
+        width: f32,
+        height: f32,
+    },
     Acknowledged {
         instance: EditorInstanceId,
         request_id: u64,
@@ -304,6 +364,7 @@ pub enum Message {
     ShutdownAcknowledged,
     Editor(EditorMessage),
     Client(TunnelMessage),
+    BlockTypes(Vec<BlockTypeDescriptor>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -593,6 +654,14 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
         }
         Message::Editor(value) => validate_editor(value),
         Message::Client(value) => validate_client(value),
+        Message::BlockTypes(value) => {
+            collection(value.len())?;
+            for descriptor in value {
+                string(&descriptor.display_name)?;
+                string(&descriptor.icon_codepoint)?;
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }

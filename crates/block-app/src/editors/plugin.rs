@@ -1,6 +1,8 @@
 use block::Block;
 use block_client::BlockHandle;
-use block_plugin_api::{EditorInstanceId, EditorRegion, PluginManifest};
+use block_plugin_api::{
+    BlockTypeDescriptor, EditorInstanceId, EditorRegion, PluginManifest, ResizeMode,
+};
 use eframe::egui;
 use egui_material_icons::MaterialIcon;
 use std::sync::{
@@ -25,6 +27,25 @@ pub(super) trait PluginPackage: 'static {
     const ICON: MaterialIcon;
 
     fn manifest() -> Arc<PluginManifest>;
+}
+
+/// The registered block types as a plugin sees them, built once for every
+/// runtime that has to name and illustrate blocks it only holds a reference
+/// to.
+pub(super) fn block_type_descriptors(
+    types: impl IntoIterator<Item = (uuid::Uuid, block_ui::BlockTypeEntry)>,
+) -> Vec<BlockTypeDescriptor> {
+    types
+        .into_iter()
+        .map(|(block_type, entry)| BlockTypeDescriptor {
+            block_type: block_type.into_bytes(),
+            display_name: entry.display_name,
+            icon_codepoint: entry
+                .icon
+                .map(|icon| icon.codepoint.to_owned())
+                .unwrap_or_default(),
+        })
+        .collect()
 }
 
 /// Builds a package's manifest once and hands out shared references to it.
@@ -71,13 +92,16 @@ impl<P: PluginPackage> PluginEditor<P> {
         self.context = Some(ui.ctx().clone());
         let (id, block_type) = crate::plugin_host::editor_ui(
             ui,
-            &self.plugin,
-            editors.client_handle(),
-            self.block.id(),
-            <P::Block as Block>::TYPE_ID,
-            self.instance,
-            region,
-            size,
+            crate::plugin_host::EditorSlot {
+                plugin: &self.plugin,
+                block_types: editors.registry().plugin_block_types(),
+                client: editors.client_handle(),
+                block_id: self.block.id(),
+                block_type: <P::Block as Block>::TYPE_ID,
+                instance: self.instance,
+                region,
+                size,
+            },
         )?;
         Some(EditorAction::OpenBlock { id, block_type })
     }
@@ -113,14 +137,22 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
     }
 
     fn direct_editor_resize(&self) -> DirectEditorResize {
-        DirectEditorResize::Both
+        match self.plugin.resize {
+            ResizeMode::None => DirectEditorResize::None,
+            ResizeMode::Horizontal => DirectEditorResize::Horizontal,
+            ResizeMode::Vertical => DirectEditorResize::Vertical,
+            ResizeMode::Both => DirectEditorResize::Both,
+        }
     }
 
     fn direct_editor_intrinsic_size(
         &mut self,
         _editors: &mut EditorAccess<'_>,
     ) -> Option<egui::Vec2> {
-        Some(egui::vec2(420.0, 240.0))
+        Some(
+            crate::plugin_host::intrinsic_size(&self.plugin.identity.id, self.instance)
+                .unwrap_or_else(|| egui::vec2(420.0, 240.0)),
+        )
     }
 
     fn direct_editor_top_bar(

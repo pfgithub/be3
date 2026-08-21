@@ -961,6 +961,7 @@ dependencies = [
  "block 0.1.0",
  "block-client",
  "block-plugin-api",
+ "block-ui",
  "eframe",
  "egui_material_icons",
  "futures-util",

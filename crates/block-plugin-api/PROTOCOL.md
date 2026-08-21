@@ -35,6 +35,22 @@ An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a
 request for a block the host cannot open is discarded.
 
+The host describes its registered block types once per plugin runtime, before
+the first editor instance is opened, so an editor can name and illustrate
+blocks it only holds a reference to. Each description carries the block type,
+its display name, and the codepoint of the host's icon font.
+
+The host reports a block dragged over an editor instance's region in that
+region's own logical coordinates, once per frame while it hovers, once more
+when it is let go, and reports that the drag has moved off the instance again.
+An instance answers with whether it would take the block, which only decides
+the cursor the host shows; a drop is delivered whether or not it was accepted.
+
+An editor instance may report the size it would like to be given wherever the
+host embeds it. It is a request, not a constraint: the host may embed the
+instance at any size, and falls back to its own default until an instance
+reports one.
+
 Surface messages may declare at most 16 native attachments. Each declaration
 records the resource type and whether ownership is borrowed or transferred.
 Declaration order is the attachment order in the platform carrier. A missing,

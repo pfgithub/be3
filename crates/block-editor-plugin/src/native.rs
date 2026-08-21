@@ -127,6 +127,14 @@ impl ClientSession {
                 )])
             }
             (State::Running, Message::Client(_)) if !self.instances.is_empty() => Ok(Vec::new()),
+            (State::Running, Message::BlockTypes(_)) => Ok(Vec::new()),
+            (
+                State::Running,
+                Message::Editor(
+                    block_plugin_api::EditorMessage::DragOver { instance, .. }
+                    | block_plugin_api::EditorMessage::DragLeft { instance },
+                ),
+            ) if self.instances.contains(&instance) => Ok(Vec::new()),
             (State::Running, Message::Ping { nonce }) => Ok(vec![Message::Pong { nonce }]),
             (State::Running, Message::Shutdown) => {
                 self.state = State::Closed;

@@ -19,7 +19,8 @@ mod web_surface;
 mod windows_surface;
 
 pub use block_plugin_api::EditorRegion;
-pub use host::EditorHost;
+pub use block_ui;
+pub use host::{BlockDrag, EditorHost};
 
 pub trait App: Default + 'static {
     fn connect(
@@ -30,6 +31,9 @@ pub trait App: Default + 'static {
     ) {
     }
     fn ui(&mut self, ui: &mut egui::Ui);
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
+        None
+    }
     fn toolbar_ui(&mut self, _ui: &mut egui::Ui) {}
     fn left_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
     fn right_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
