@@ -35,9 +35,6 @@ pub(crate) use web::{
     aspect_ratio, close, creation_content, editor_ui, install, intrinsic_size, preview, region_size,
 };
 
-/// The block itself, drawn by its editor wherever the host paints the block
-/// rather than the editor: the quad to fill, in the painter's coordinates,
-/// and how faded it is drawn.
 pub(crate) struct PreviewSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
@@ -49,10 +46,6 @@ pub(crate) struct PreviewSlot<'a> {
     pub(crate) opacity: f32,
 }
 
-/// The size a preview asks its editor to draw at: the quad's bounding box,
-/// rounded up in whole steps of pixels so that panning and zooming do not
-/// resize the plugin's surface every frame, and capped so that a block blown
-/// up on a canvas cannot ask for an enormous one.
 #[cfg_attr(
     not(any(target_arch = "wasm32", target_os = "windows")),
     allow(dead_code)
@@ -70,21 +63,15 @@ pub(crate) fn preview_size(size: egui::Vec2, scale_factor: f32) -> egui::Vec2 {
         / scale
 }
 
-/// One region of one open editor instance, as the host hands it to whichever
-/// plugin runtime this platform has.
 pub(crate) struct EditorSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
-    /// The block being edited, or nothing for the dialog that fills in a
-    /// block the editor has not made yet.
     pub(crate) block: Option<EditorBlock>,
     pub(crate) instance: EditorInstanceId,
     pub(crate) region: EditorRegion,
     pub(crate) size: egui::Vec2,
 }
 
-/// The block an editor instance is opened on, and the client it reaches it
-/// through.
 pub(crate) struct EditorBlock {
     pub(crate) client: Arc<BlockClient>,
     pub(crate) id: Uuid,

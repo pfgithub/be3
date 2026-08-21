@@ -3,6 +3,7 @@ use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use super::*;
 
 mod image_accepts_valid_compressed_data;
+mod image_decodes_to_rgba_pixels;
 mod image_implicit_name_uses_source_name;
 mod image_rejects_invalid_compressed_data;
 mod image_replace_operation_replaces_image;

@@ -60,22 +60,13 @@ pub(super) trait SurfacePresenter {
 pub(super) const MAX_SURFACES: u32 = 8;
 pub(super) const MAX_REGIONS: u32 = 64;
 const MAX_SLOTS: u32 = MAX_SURFACES * MAX_REGIONS;
-/// One slot: the atlas offset and scale, the quad's four clip-space corners,
-/// and its opacity, padded out to a uniform stride.
 const REGION_BYTES: u64 = 64;
 
-/// Uniform storage for the atlas sub-rectangle each plugin editor paints, and
-/// the quad it is painted onto. One slot per screen of every running plugin,
-/// addressed through a dynamic bind group offset so several editors can blit
-/// different parts of their plugin's surface in one frame.
 pub(super) struct Regions {
     buffer: wgpu::Buffer,
     stride: u32,
 }
 
-/// The quad a region is painted onto: its four corners in points, going
-/// clockwise from the top left of the region, the rectangle egui gave the
-/// paint callback, and how faded it is drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Quad {
     pub(super) rect: egui::Rect,
@@ -197,10 +188,6 @@ impl Regions {
         })
     }
 
-    /// Writes one slot, turning the quad's corners into the clip space of the
-    /// viewport egui sets for the paint callback. That viewport is the
-    /// callback's rectangle clamped to the screen, so the same clamping is
-    /// repeated here to keep a partly off-screen quad in place.
     pub(super) fn write(
         &self,
         queue: &wgpu::Queue,

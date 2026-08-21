@@ -24,8 +24,6 @@ pub(super) struct Instances {
 
 struct Instance {
     context: egui::Context,
-    /// What the instance is open on: a block of its own, or nothing at all
-    /// while it is the dialog that fills in a new one.
     block: Option<InstanceBlock>,
     creation: Option<String>,
     screens: HashMap<EditorRegion, Screen>,
@@ -44,7 +42,6 @@ struct InstanceBlock {
     tunnel: Tunnel,
 }
 
-/// A file an instance asked for, being chosen in the host's own picker.
 struct PendingPick {
     request_id: u64,
     picker: FilePicker,
@@ -240,7 +237,6 @@ impl Instances {
             .is_some_and(|entry| entry.drag_accepted)
     }
 
-    /// The block a creation dialog is offering to make, as JSON.
     pub(super) fn creation_content(&self, instance: EditorInstanceId) -> Option<&str> {
         self.entries.get(&instance)?.creation.as_deref()
     }
@@ -398,7 +394,6 @@ impl Instances {
     }
 }
 
-/// The filter an instance asked for, as the host's own picker takes it.
 fn host_filter(filter: block_plugin_api::FileFilter) -> FileFilter {
     FileFilter {
         name: filter.name,

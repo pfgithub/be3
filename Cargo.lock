@@ -4335,6 +4335,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "image_block"
+version = "0.1.0"
+dependencies = [
+ "block-client",
+ "block-editor-plugin",
+ "uuid",
+]
+
+[[package]]
 name = "imagesize"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -14,6 +14,7 @@ use std::sync::{
 pub(super) mod checklist;
 pub(super) mod counter;
 pub(super) mod hotbar;
+pub(super) mod image;
 pub(super) mod workspace_index;
 
 use super::{
@@ -30,9 +31,6 @@ pub(super) trait PluginPackage: 'static {
 
     fn manifest() -> Arc<PluginManifest>;
 
-    /// The block the new-block menu makes for this package. A package whose
-    /// manifest fills its block in through the editor's own dialog first has
-    /// none to make here.
     fn new_block(client: &BlockClient) -> Option<BlockHandle<Self::Block>>;
 }
 
@@ -69,9 +67,6 @@ fn next_instance() -> EditorInstanceId {
     EditorInstanceId(NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed))
 }
 
-/// The dialog an editor draws itself when its block cannot be made until the
-/// user has filled something in. The editor offers the block it would make as
-/// it goes, and the host creates it once the dialog is accepted.
 pub(super) struct PluginCreation<P: PluginPackage> {
     plugin: Arc<PluginManifest>,
     instance: EditorInstanceId,
@@ -131,8 +126,6 @@ impl<P: PluginPackage> PendingCreation for PluginCreation<P> {
     }
 }
 
-/// How tall an editor's creation dialog is drawn before it has said how much
-/// room it wants.
 const CREATION_DIALOG_HEIGHT: f32 = 96.0;
 
 pub(super) struct PluginEditor<P: PluginPackage> {

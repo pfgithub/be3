@@ -150,9 +150,6 @@ pub struct ChildOperations {
     pub replace: bool,
 }
 
-/// How much of itself an editor gives an embed that holds it. `Preview`
-/// leaves the host drawing a placeholder until the user focuses the embed, so
-/// the plugin runtime only starts once it is actually being used.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InteractionMode {
     Preview,
@@ -161,8 +158,6 @@ pub enum InteractionMode {
     Playback,
 }
 
-/// What the host may do with an editor's frame, and how much of the block's
-/// own shape it has to respect when it draws it outside the editor.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorCapabilities {
     pub rotation: bool,
@@ -193,8 +188,6 @@ pub struct BlockTypeDescriptor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CreationMode {
     Immediate,
-    /// The block cannot be made until the editor has been asked for what goes
-    /// in it, so the host opens the editor's own creation dialog first.
     Dialog,
     /// The block is only ever made by something else, so the host offers no
     /// way to create one.
@@ -207,9 +200,6 @@ pub enum EditorRegion {
     Toolbar,
     LeftSidebar,
     RightSidebar,
-    /// The block itself, drawn wherever the host shows it without opening the
-    /// editor: a canvas, a slide, a block embedded in text. The host maps the
-    /// region onto whatever quad it is drawing, so the editor fills it.
     Preview,
 }
 
@@ -336,32 +326,23 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         accepted: bool,
     },
-    /// An instance asking the host to choose a file for it. Only the host
-    /// knows how a file is chosen on the platform it runs on.
     PickFile {
         instance: EditorInstanceId,
         request_id: u64,
         filter: FileFilter,
     },
-    /// What the host's file picker answered a `PickFile` request with.
     FilePicked {
         instance: EditorInstanceId,
         request_id: u64,
         pick: FilePick,
     },
-    /// An instance opened as the dialog that fills in a new block, rather
-    /// than as the editor of one that exists.
     OpenCreation {
         instance: EditorInstanceId,
     },
-    /// The block a creation dialog would make, as the JSON of its contents,
-    /// or nothing while it is still incomplete.
     CreationContent {
         instance: EditorInstanceId,
         payload: Option<String>,
     },
-    /// The shape of the block an instance is editing, for the host to hold
-    /// its preview to wherever it draws one.
     AspectRatio {
         instance: EditorInstanceId,
         ratio: f32,
@@ -384,8 +365,6 @@ pub enum EditorMessage {
     },
 }
 
-/// What an instance offers the user to choose from. Each platform reads the
-/// part of it that its own picker can use.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileFilter {
     pub name: String,
@@ -394,8 +373,6 @@ pub struct FileFilter {
     pub mime_types: Vec<String>,
 }
 
-/// How a file request ended: a file the host read, a picker the user closed,
-/// or a file the host could not read.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FilePick {
     Chosen { name: String, data: Vec<u8> },
@@ -739,8 +716,6 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             collection(filter.mime_types.len())?;
             strings(filter.extensions.iter().chain(&filter.mime_types))
         }
-        // The contents of a block are as unbounded as they are over the
-        // tunnel, so they are not held to the string limit.
         EditorMessage::CreationContent { .. } => Ok(()),
         EditorMessage::FilePicked { pick, .. } => match pick {
             FilePick::Chosen { name, .. } => string(name),

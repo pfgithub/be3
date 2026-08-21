@@ -49,12 +49,12 @@ use self::font::{BytePosition, DocumentLayout, LineLayout, ResolvedEmbed, TextRe
 use self::timings::{FrameProfile, PaintTimings};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    embedded_editor_frame_size, embedded_editor_ui,
-    image::create_image_block,
-    paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
-    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING,
-    EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
+    embedded_editor_frame_size, embedded_editor_ui, paint_name,
+    plugin::image::create_image_block,
+    BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+    EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);

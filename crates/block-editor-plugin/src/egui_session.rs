@@ -104,8 +104,6 @@ impl EguiSession {
         self.carrier = Some(carrier);
     }
 
-    /// Opens the session as the dialog that fills in a new block, which has
-    /// no block of its own and so no client either.
     pub(crate) fn connect_creation(&mut self) {
         if self.creating {
             return;
@@ -251,8 +249,6 @@ impl EguiSession {
         self.host.set_drag(drag);
         let delivered_drop = drag.is_some_and(|drag| drag.dropped);
         let app = &mut self.app;
-        // A preview is drawn over whatever the host is painting, so it is
-        // given no background of its own.
         let frame = if region == EditorRegion::Preview {
             egui::Frame::NONE
         } else {

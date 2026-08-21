@@ -15,7 +15,8 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         region,
         size,
     } = slot;
-    let _ = (block_types, block, instance, region, size);
+    let _ = (block_types, instance, region, size);
+    let _ = block.map(|block| (block.client, block.id, block.block_type));
     ui.colored_label(
         egui::Color32::RED,
         format!("{} is not supported on this platform.", plugin.display_name),

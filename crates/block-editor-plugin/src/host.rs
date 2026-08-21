@@ -20,7 +20,6 @@ pub struct BlockDrag {
     pub dropped: bool,
 }
 
-/// A file the host's picker read for an editor instance.
 pub struct PickedFile {
     pub name: String,
     pub data: Vec<u8>,
@@ -64,9 +63,6 @@ impl EditorHost {
         self.drag_accepted.set(Some(accepted));
     }
 
-    /// Asks the host to choose a file, which only it can do on every platform
-    /// the app runs on. The answer arrives on a later frame, under the
-    /// request identifier this returns.
     pub fn pick_file(&self, filter: FileFilter) -> u64 {
         let request = self.next_pick.get() + 1;
         self.next_pick.set(request);
@@ -74,19 +70,14 @@ impl EditorHost {
         request
     }
 
-    /// Takes the host's answer to a file request, once it has one.
     pub fn take_pick(&self, request: u64) -> Option<FilePick> {
         self.picked.borrow_mut().remove(&request)
     }
 
-    /// Offers the host the block this creation dialog would make. The host
-    /// creates it, and opens it, when the user accepts the dialog.
     pub fn propose_block(&self, block: &impl serde::Serialize) {
         self.set_proposal(serde_json::to_string(block).ok());
     }
 
-    /// Withdraws the block this creation dialog was offering, leaving the
-    /// dialog incomplete.
     pub fn withdraw_block(&self) {
         self.set_proposal(None);
     }
@@ -130,16 +121,12 @@ impl EditorHost {
         self.picked.borrow_mut().insert(request, pick);
     }
 
-    /// The block this creation dialog is offering, once it has changed.
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
     pub(crate) fn take_proposal(&self) -> Option<Option<String>> {
         self.proposed.take().then(|| self.proposal.borrow().clone())
     }
 }
 
-/// A file request kept across frames, mirroring the picker the host itself
-/// draws with: opened once, then polled until it answers. A picker the user
-/// closed answers nothing at all.
 #[derive(Default)]
 pub struct FilePicker {
     request: Option<u64>,
@@ -154,8 +141,6 @@ impl FilePicker {
         self.request.is_some()
     }
 
-    /// Returns the chosen file once the picker closes, or why it could not be
-    /// read.
     pub fn poll(&mut self, host: &EditorHost) -> Option<Result<PickedFile, String>> {
         let pick = host.take_pick(self.request?)?;
         self.request = None;

@@ -33,6 +33,11 @@ struct ImageData {
 }
 
 impl Image {
+    pub const FILE_EXTENSIONS: &'static [&'static str] = &[
+        "bmp", "gif", "ico", "jpg", "jpeg", "png", "pnm", "tga", "tif", "tiff", "webp",
+    ];
+    pub const MIME_TYPES: &'static [&'static str] = &["image/*"];
+
     pub fn from_compressed(source_name: impl Into<String>, data: Vec<u8>) -> Result<Self, String> {
         let format = image::guess_format(&data).map_err(|error| error.to_string())?;
         let decoded = image::load_from_memory_with_format(&data, format)
@@ -68,6 +73,13 @@ impl Image {
 
     pub fn data(&self) -> &[u8] {
         &self.data
+    }
+
+    pub fn decode_rgba(&self) -> Result<Vec<u8>, String> {
+        Ok(image::load_from_memory(&self.data)
+            .map_err(|error| error.to_string())?
+            .into_rgba8()
+            .into_raw())
     }
 }
 

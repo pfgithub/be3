@@ -6,10 +6,10 @@
 
 2. Create the plugin package
 
-- crates/editors/foo/Cargo.toml — copy checklist's: crate-type = ["cdylib", "rlib"], a [[bin]] name = "foo-host", deps block-client, block-editor-plugin, uuid. The package name is the wasm artifact stem, so a multi-word editor uses underscores (workspace_index, with a workspace_index-host binary).
+- crates/editors/foo/Cargo.toml — copy checklist's: crate-type = ["cdylib", "rlib"], a [[bin]] name = "foo-host", deps block-client, block-editor-plugin, uuid. The package name is the wasm artifact stem, so a multi-word editor uses underscores (workspace_index, with a workspace_index-host binary). It also has to be a name no crate the workspace depends on already has, so the image editor's package is image_block; the display name in the manifest is what the user sees.
 - crates/editors/foo/src/lib.rs — block_editor_plugin::plugin!(app::FooApp, "be3.foo", "Foo");
 - crates/editors/foo/src/main.rs — fn main() { #[cfg(not(target_arch = "wasm32"))] foo::run(); }.
-- crates/editors/foo/src/app.rs — impl block_editor_plugin::App: connect stores client.get_block(block_id), then ui, toolbar_ui, left_sidebar_ui, right_sidebar_ui reading through block.read() and writing through block.operate(...). Local-only view state lives in the struct. block_editor_plugin installs the Material icon font into every plugin context and re-exports egui_material_icons, so icons come from block_editor_plugin::egui_material_icons::icons rather than a dependency of the package.
+- crates/editors/foo/src/app.rs — impl block_editor_plugin::App: connect stores client.get_block(block_id), then ui, toolbar_ui, left_sidebar_ui, right_sidebar_ui, preview_ui reading through block.read() and writing through block.operate(...). Local-only view state lives in the struct. Every region is drawn by an egui context of its own, so anything uploaded to a context — a texture above all — is kept per region rather than once for the app. block_editor_plugin installs the Material icon font into every plugin context and re-exports egui_material_icons, so icons come from block_editor_plugin::egui_material_icons::icons rather than a dependency of the package.
 - Root Cargo.toml — add "crates/editors/foo" to members.
 
 What connect's EditorHost offers, for anything the plugin cannot do itself:
@@ -17,12 +17,19 @@ What connect's EditorHost offers, for anything the plugin cannot do itself:
 - open_block(id, block_type) — opens another block in a tab of its own.
 - block_types() — the host's registered block types, for naming and illustrating a block this editor only holds a reference to. Pass it to block_ui::BlockLabel (re-exported as block_editor_plugin::block_ui) so labels match the rest of the app, including how an automatic name is italicized.
 - drag() — the block the app is dragging over the region being drawn, in that region's own coordinates, and whether it has been let go. Draw the drop feedback yourself and answer accept_drag(bool), which decides the cursor the host shows.
+- pick_file(filter) — the host's own file picker, the only one that works on desktop, Android and the browser alike. block_editor_plugin::FilePicker wraps it the way the app's own picker works: open(&host, filter), is_open(), and poll(&host) until it answers.
+- propose_block(&block) / withdraw_block() — what a creation dialog offers the host to create (see below).
 
-App::intrinsic_size reports the size the editor wants wherever the host embeds it (a canvas, a text block). Leave it unimplemented to take the host's default.
+App::intrinsic_size reports the size the editor wants wherever the host embeds it (a canvas, a text block). App::aspect_ratio reports the shape of the block, which the host holds a preview to. Leave either unimplemented to take the host's default.
+
+Drawing the block itself: an editor that lists EditorRegion::Preview is asked to draw its block wherever the host paints it rather than opening it — a canvas entity, a slide, a block embedded in text. The host maps that region onto the quad it is painting, straight from the plugin's surface, so preview_ui fills the region it is given and lets the host place, rotate and fade it. The region has no background of its own, so whatever is behind the block shows through.
+
+Filling in a new block: an editor whose block cannot exist until the user has chosen something (the file behind an image) sets CreationMode::Dialog and implements connect_creation and creation_ui. It has no block and no client, draws inside the host's shared dialog frame, and hands over the block it would make with propose_block; the host creates and opens it when the dialog is accepted, and withdraw_block leaves the dialog incomplete again.
 
 3. Register it with the host
 
-- crates/block-app/src/editors/plugin/foo.rs — a FooPlugin unit struct implementing PluginPackage: type Block, const ICON, and manifest() built through super::cached_manifest with the plugin id, block type, display name, regions, entry points (/foo.js, foo-host.exe) and surface mechanisms. Use CreationMode::Immediate for a block a user can make from the new-block menu, or CreationMode::None for one only another block ever produces. children says which of the host's structural edits the block type accepts, important puts it in the main section of the add-block picker, and resize says how an embedded instance may be resized. The manifest must pass validate() — it's asserted at registry construction.
+- crates/block-app/src/editors/plugin/foo.rs — a FooPlugin unit struct implementing PluginPackage: type Block, const ICON, new_block (the block the new-block menu makes, or None when a dialog fills it in), and manifest() built through super::cached_manifest with the plugin id, block type, display name, regions, entry points (/foo.js, foo-host.exe) and surface mechanisms. Use CreationMode::Immediate for a block a user can make from the new-block menu, CreationMode::Dialog for one the editor has to ask about first, or CreationMode::None for one only another block ever produces. children says which of the host's structural edits the block type accepts, important puts it in the main section of the add-block picker, interaction says whether an embedded instance is live or only previewed until it is focused, capabilities carries rotation, aspect ratio and pan-and-zoom, and resize says how an embedded instance may be resized. The manifest must pass validate() — it's asserted at registry construction.
+- Anything else in block-app that made this block type — importing an image onto a canvas, say — creates a PluginEditor<FooPlugin> and hands it to EditorAccess::insert. Keep those helpers next to the package's registration.
 - crates/block-app/src/editors/plugin.rs — add pub(super) mod foo;.
 - crates/block-app/src/editors.rs — add registry.register_plugin::<plugin::foo::FooPlugin>();
 

@@ -106,8 +106,6 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
     })
 }
 
-/// Draws the block itself, by giving its editor a region of its own and
-/// mapping that region onto the quad the host is painting.
 pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
     let PreviewSlot {
         plugin,
@@ -199,7 +197,6 @@ pub(crate) fn region_size(
     })
 }
 
-/// The block an editor's creation dialog is offering to make, as JSON.
 pub(crate) fn creation_content(plugin_id: &str, instance: EditorInstanceId) -> Option<String> {
     HOST.with(|host| {
         host.borrow()
