@@ -1,6 +1,7 @@
 cleanup() {
     echo "Killing"
     kill 0
+    wait
 }
 
 trap cleanup INT
