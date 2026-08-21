@@ -71,6 +71,7 @@ pub(super) struct PluginCreation<P: PluginPackage> {
     plugin: Arc<PluginManifest>,
     instance: EditorInstanceId,
     context: Option<egui::Context>,
+    committed: bool,
     package: std::marker::PhantomData<P>,
 }
 
@@ -80,6 +81,7 @@ impl<P: PluginPackage> PluginCreation<P> {
             plugin: P::manifest(),
             instance: next_instance(),
             context: None,
+            committed: false,
             package: std::marker::PhantomData,
         }
     }
@@ -107,22 +109,34 @@ impl<P: PluginPackage> PendingCreation for PluginCreation<P> {
             crate::plugin_host::EditorSlot {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
+                client: editors.client_handle(),
                 block: None,
                 instance: self.instance,
                 region: EditorRegion::Main,
                 size: egui::vec2(ui.available_width(), height),
             },
         );
-        crate::plugin_host::creation_content(&self.plugin.identity.id, self.instance).is_some()
+        crate::plugin_host::creation_ready(&self.plugin.identity.id, self.instance)
     }
 
-    fn create(&mut self, client: &BlockClient) -> Result<Box<dyn BlockEditor>, String> {
-        let content = crate::plugin_host::creation_content(&self.plugin.identity.id, self.instance)
-            .ok_or("Fill in the options first")?;
-        let block: P::Block = serde_json::from_str(&content).map_err(|error| {
-            format!("{} could not be created: {error}", self.plugin.display_name)
-        })?;
-        Ok(Box::new(PluginEditor::<P>::new(client.create_block(block))))
+    fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String> {
+        if !self.committed {
+            self.committed = true;
+            crate::plugin_host::commit_creation(&self.plugin.identity.id, self.instance);
+        }
+        match crate::plugin_host::take_created(&self.plugin.identity.id, self.instance) {
+            None => Ok(None),
+            Some(Ok(block_id)) => Ok(Some(Box::new(PluginEditor::<P>::new(
+                client.get_block::<P::Block>(block_id),
+            )))),
+            Some(Err(error)) => {
+                self.committed = false;
+                Err(format!(
+                    "{} could not be created: {error}",
+                    self.plugin.display_name
+                ))
+            }
+        }
     }
 }
 
@@ -165,8 +179,8 @@ impl<P: PluginPackage> PluginEditor<P> {
             crate::plugin_host::EditorSlot {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
+                client: editors.client_handle(),
                 block: Some(crate::plugin_host::EditorBlock {
-                    client: editors.client_handle(),
                     id: self.block.id(),
                     block_type: <P::Block as Block>::TYPE_ID,
                 }),

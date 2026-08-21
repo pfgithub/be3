@@ -33,11 +33,12 @@ them, and the server treats each instance as a separate client of the one
 connection.
 
 An editor whose block cannot be made until something has been filled in is
-opened as a creation dialog instead of on a block: it has no block and no
-client, and draws in its main region only. It offers the block it would make
-as the JSON of that block's contents, withdrawing the offer while the dialog
-is incomplete, and the host creates and opens the block when the user accepts
-the dialog.
+opened as a creation dialog instead of on a block: it has a client of its own
+but no block, and draws in its main region only. It reports whether the dialog
+has been filled in, which is what lets the user accept it. On acceptance the
+host asks the instance to commit, and the instance creates the block through
+its own client and answers with the block's id, or with why it could not be
+created; the host then opens the block it was given.
 
 An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a

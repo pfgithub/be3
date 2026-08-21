@@ -25,7 +25,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 12;
+pub const PROTOCOL_VERSION: u16 = 13;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -338,10 +338,19 @@ pub enum EditorMessage {
     },
     OpenCreation {
         instance: EditorInstanceId,
+        account_id: [u8; 16],
+        workspace_id: [u8; 16],
     },
-    CreationContent {
+    CreationReady {
         instance: EditorInstanceId,
-        payload: Option<String>,
+        ready: bool,
+    },
+    CommitCreation {
+        instance: EditorInstanceId,
+    },
+    CreationBlock {
+        instance: EditorInstanceId,
+        outcome: CreationOutcome,
     },
     AspectRatio {
         instance: EditorInstanceId,
@@ -371,6 +380,12 @@ pub struct FileFilter {
     pub default_file_name: String,
     pub extensions: Vec<String>,
     pub mime_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CreationOutcome {
+    Created([u8; 16]),
+    Failed(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -716,7 +731,10 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             collection(filter.mime_types.len())?;
             strings(filter.extensions.iter().chain(&filter.mime_types))
         }
-        EditorMessage::CreationContent { .. } => Ok(()),
+        EditorMessage::CreationBlock { outcome, .. } => match outcome {
+            CreationOutcome::Created(_) => Ok(()),
+            CreationOutcome::Failed(message) => string(message),
+        },
         EditorMessage::FilePicked { pick, .. } => match pick {
             FilePick::Chosen { name, .. } => string(name),
             FilePick::Failed(message) => string(message),

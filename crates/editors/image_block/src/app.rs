@@ -30,10 +30,16 @@ struct Editing {
     block: BlockHandle<Image>,
 }
 
+struct Creating {
+    host: EditorHost,
+    client: BlockClient,
+    chosen: Option<Image>,
+}
+
 #[derive(Default)]
 pub struct ImageApp {
     editing: Option<Editing>,
-    creation: Option<(EditorHost, Option<Image>)>,
+    creation: Option<Creating>,
     picker: FilePicker,
     error: Option<String>,
     panes: HashMap<Pane, Decoded>,
@@ -50,22 +56,35 @@ impl block_editor_plugin::App for ImageApp {
         });
     }
 
-    fn connect_creation(&mut self, host: EditorHost) {
-        self.creation = Some((host, None));
+    fn connect_creation(&mut self, host: EditorHost, client: BlockClient) {
+        self.creation = Some(Creating {
+            host,
+            client,
+            chosen: None,
+        });
+    }
+
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let creation = self
+            .creation
+            .as_mut()
+            .ok_or("this editor is not filling in a block")?;
+        let image = creation.chosen.take().ok_or("no file was chosen")?;
+        Ok(creation.client.create_block(image).id())
     }
 
     fn creation_ui(&mut self, ui: &mut egui::Ui) {
-        let Some((host, chosen)) = &mut self.creation else {
+        let Some(Creating { host, chosen, .. }) = &mut self.creation else {
             return;
         };
         match self.picker.poll(host).map(|file| file.and_then(decode)) {
             Some(Ok(image)) => {
-                host.propose_block(&image);
+                host.set_creation_ready(true);
                 *chosen = Some(image);
                 self.error = None;
             }
             Some(Err(error)) => {
-                host.withdraw_block();
+                host.set_creation_ready(false);
                 *chosen = None;
                 self.error = Some(error);
             }

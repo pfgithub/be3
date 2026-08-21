@@ -10,13 +10,14 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
     let EditorSlot {
         plugin,
         block_types,
+        client,
         block,
         instance,
         region,
         size,
     } = slot;
-    let _ = (block_types, instance, region, size);
-    let _ = block.map(|block| (block.client, block.id, block.block_type));
+    let _ = (block_types, client, instance, region, size);
+    let _ = block.map(|block| (block.id, block.block_type));
     ui.colored_label(
         egui::Color32::RED,
         format!("{} is not supported on this platform.", plugin.display_name),
@@ -49,7 +50,16 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
     false
 }
 
-pub(crate) fn creation_content(_plugin_id: &str, _instance: EditorInstanceId) -> Option<String> {
+pub(crate) fn creation_ready(_plugin_id: &str, _instance: EditorInstanceId) -> bool {
+    false
+}
+
+pub(crate) fn commit_creation(_plugin_id: &str, _instance: EditorInstanceId) {}
+
+pub(crate) fn take_created(
+    _plugin_id: &str,
+    _instance: EditorInstanceId,
+) -> Option<Result<Uuid, String>> {
     None
 }
 

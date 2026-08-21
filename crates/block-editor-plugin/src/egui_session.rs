@@ -1,7 +1,7 @@
 use block_client::TunnelCarrier;
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, EditorRegion, FilePick, InputEvent, Message, PointerButton,
-    RegionSize, ScreenPlacement, TunnelMessage, WheelUnit,
+    CreationOutcome, EditorInstanceId, EditorMessage, EditorRegion, FilePick, InputEvent, Message,
+    PointerButton, RegionSize, ScreenPlacement, TunnelMessage, WheelUnit,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -20,6 +20,7 @@ pub(crate) struct EguiSession {
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     creating: bool,
+    created: Option<CreationOutcome>,
 }
 
 #[derive(Default)]
@@ -32,7 +33,8 @@ struct RegionState {
 
 trait AppUi {
     fn connect(&mut self, host: EditorHost, client: block_client::BlockClient, block_id: Uuid);
-    fn connect_creation(&mut self, host: EditorHost);
+    fn connect_creation(&mut self, host: EditorHost, client: block_client::BlockClient);
+    fn create_block(&mut self) -> Result<Uuid, String>;
     fn creation_ui(&mut self, ui: &mut egui::Ui);
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
     fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
@@ -44,8 +46,12 @@ impl<A: crate::App> AppUi for A {
         crate::App::connect(self, host, client, block_id);
     }
 
-    fn connect_creation(&mut self, host: EditorHost) {
-        crate::App::connect_creation(self, host);
+    fn connect_creation(&mut self, host: EditorHost, client: block_client::BlockClient) {
+        crate::App::connect_creation(self, host, client);
+    }
+
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        crate::App::create_block(self)
     }
 
     fn creation_ui(&mut self, ui: &mut egui::Ui) {
@@ -83,6 +89,7 @@ impl EguiSession {
             intrinsic: None,
             aspect_ratio: None,
             creating: false,
+            created: None,
         }
     }
 
@@ -95,21 +102,42 @@ impl EguiSession {
     }
 
     pub(crate) fn connect(&mut self, block_id: Uuid, account_id: Uuid, workspace_id: Uuid) {
-        if self.carrier.is_some() {
+        let Some(client) = self.client(account_id, workspace_id) else {
             return;
-        }
-        let (endpoint, carrier) = block_client::tunnel_channel();
-        let client = block_client::BlockClient::tunneled(account_id, workspace_id, endpoint);
+        };
         self.app.connect(self.host.clone(), client, block_id);
-        self.carrier = Some(carrier);
     }
 
-    pub(crate) fn connect_creation(&mut self) {
-        if self.creating {
+    pub(crate) fn connect_creation(&mut self, account_id: Uuid, workspace_id: Uuid) {
+        let Some(client) = self.client(account_id, workspace_id) else {
             return;
-        }
+        };
         self.creating = true;
-        self.app.connect_creation(self.host.clone());
+        self.app.connect_creation(self.host.clone(), client);
+    }
+
+    pub(crate) fn commit_creation(&mut self) {
+        self.created = Some(match self.app.create_block() {
+            Ok(block_id) => CreationOutcome::Created(block_id.into_bytes()),
+            Err(error) => CreationOutcome::Failed(error),
+        });
+    }
+
+    fn client(
+        &mut self,
+        account_id: Uuid,
+        workspace_id: Uuid,
+    ) -> Option<block_client::BlockClient> {
+        if self.carrier.is_some() {
+            return None;
+        }
+        let (endpoint, carrier) = block_client::tunnel_channel();
+        self.carrier = Some(carrier);
+        Some(block_client::BlockClient::tunneled(
+            account_id,
+            workspace_id,
+            endpoint,
+        ))
     }
 
     pub(crate) fn place(&mut self, placements: &[ScreenPlacement]) {
@@ -154,10 +182,16 @@ impl EguiSession {
                 }));
             }
         }
-        if let Some(payload) = self.host.take_proposal() {
-            messages.push(Message::Editor(EditorMessage::CreationContent {
+        if let Some(ready) = self.host.take_creation_ready() {
+            messages.push(Message::Editor(EditorMessage::CreationReady {
                 instance,
-                payload,
+                ready,
+            }));
+        }
+        if let Some(outcome) = self.created.take() {
+            messages.push(Message::Editor(EditorMessage::CreationBlock {
+                instance,
+                outcome,
             }));
         }
         for (request_id, filter) in self.host.take_picks() {

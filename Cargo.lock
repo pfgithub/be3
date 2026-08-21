@@ -968,7 +968,6 @@ dependencies = [
  "js-sys",
  "pollster 0.4.0",
  "serde",
- "serde_json",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",

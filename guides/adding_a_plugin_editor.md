@@ -18,13 +18,13 @@ What connect's EditorHost offers, for anything the plugin cannot do itself:
 - block_types() — the host's registered block types, for naming and illustrating a block this editor only holds a reference to. Pass it to block_ui::BlockLabel (re-exported as block_editor_plugin::block_ui) so labels match the rest of the app, including how an automatic name is italicized.
 - drag() — the block the app is dragging over the region being drawn, in that region's own coordinates, and whether it has been let go. Draw the drop feedback yourself and answer accept_drag(bool), which decides the cursor the host shows.
 - pick_file(filter) — the host's own file picker, the only one that works on desktop, Android and the browser alike. block_editor_plugin::FilePicker wraps it the way the app's own picker works: open(&host, filter), is_open(), and poll(&host) until it answers.
-- propose_block(&block) / withdraw_block() — what a creation dialog offers the host to create (see below).
+- set_creation_ready(bool) — whether a creation dialog has been filled in, which is what lets the user accept it (see below).
 
 App::intrinsic_size reports the size the editor wants wherever the host embeds it (a canvas, a text block). App::aspect_ratio reports the shape of the block, which the host holds a preview to. Leave either unimplemented to take the host's default.
 
 Drawing the block itself: an editor that lists EditorRegion::Preview is asked to draw its block wherever the host paints it rather than opening it — a canvas entity, a slide, a block embedded in text. The host maps that region onto the quad it is painting, straight from the plugin's surface, so preview_ui fills the region it is given and lets the host place, rotate and fade it. The region has no background of its own, so whatever is behind the block shows through.
 
-Filling in a new block: an editor whose block cannot exist until the user has chosen something (the file behind an image) sets CreationMode::Dialog and implements connect_creation and creation_ui. It has no block and no client, draws inside the host's shared dialog frame, and hands over the block it would make with propose_block; the host creates and opens it when the dialog is accepted, and withdraw_block leaves the dialog incomplete again.
+Filling in a new block: an editor whose block cannot exist until the user has chosen something (the file behind an image) sets CreationMode::Dialog and implements connect_creation, creation_ui and create_block. It has a client of its own but no block, and draws inside the host's shared dialog frame. set_creation_ready(true) tells the host the dialog may be accepted; on acceptance the host calls create_block, which makes the block through the instance's own client and answers with its id or with why it could not be made. The host then opens the block it was given, so one plugin runtime serves the dialog and the editor that follows it.
 
 3. Register it with the host
 

@@ -37,8 +37,8 @@ pub struct EditorHost {
     picks: Rc<RefCell<Vec<(u64, FileFilter)>>>,
     picked: Rc<RefCell<HashMap<u64, FilePick>>>,
     next_pick: Rc<Cell<u64>>,
-    proposal: Rc<RefCell<Option<String>>>,
-    proposed: Rc<Cell<bool>>,
+    creation_ready: Rc<Cell<bool>>,
+    creation_changed: Rc<Cell<bool>>,
 }
 
 impl EditorHost {
@@ -74,21 +74,12 @@ impl EditorHost {
         self.picked.borrow_mut().remove(&request)
     }
 
-    pub fn propose_block(&self, block: &impl serde::Serialize) {
-        self.set_proposal(serde_json::to_string(block).ok());
-    }
-
-    pub fn withdraw_block(&self) {
-        self.set_proposal(None);
-    }
-
-    fn set_proposal(&self, payload: Option<String>) {
-        let mut proposal = self.proposal.borrow_mut();
-        if *proposal == payload {
+    pub fn set_creation_ready(&self, ready: bool) {
+        if self.creation_ready.get() == ready {
             return;
         }
-        *proposal = payload;
-        self.proposed.set(true);
+        self.creation_ready.set(ready);
+        self.creation_changed.set(true);
     }
 
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
@@ -122,8 +113,10 @@ impl EditorHost {
     }
 
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
-    pub(crate) fn take_proposal(&self) -> Option<Option<String>> {
-        self.proposed.take().then(|| self.proposal.borrow().clone())
+    pub(crate) fn take_creation_ready(&self) -> Option<bool> {
+        self.creation_changed
+            .take()
+            .then(|| self.creation_ready.get())
     }
 }
 

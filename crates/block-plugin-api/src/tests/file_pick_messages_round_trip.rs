@@ -18,7 +18,7 @@ fn file_pick_messages_round_trip() {
             request_id: 3,
             pick: FilePick::Chosen {
                 name: "photo.png".into(),
-                data: vec![0, 1, 2, 3],
+                data: vec![7; MAX_STRING_BYTES + 1],
             },
         }),
         Message::Editor(EditorMessage::FilePicked {

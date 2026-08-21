@@ -57,13 +57,25 @@ impl Screens {
                     Uuid::from_bytes(*workspace_id),
                 );
             }
-            Message::Editor(EditorMessage::OpenCreation { instance }) => {
+            Message::Editor(EditorMessage::OpenCreation {
+                instance,
+                account_id,
+                workspace_id,
+            }) => {
                 let session = self
                     .sessions
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance));
                 session.set_block_types(Rc::clone(&self.block_types));
-                session.connect_creation();
+                session.connect_creation(
+                    Uuid::from_bytes(*account_id),
+                    Uuid::from_bytes(*workspace_id),
+                );
+            }
+            Message::Editor(EditorMessage::CommitCreation { instance }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.commit_creation();
+                }
             }
             Message::Editor(EditorMessage::Close { instance }) => {
                 self.sessions.remove(instance);

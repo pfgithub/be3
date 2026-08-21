@@ -31,6 +31,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
     let EditorSlot {
         plugin,
         block_types,
+        client,
         block,
         instance,
         region,
@@ -75,6 +76,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             instance,
             region,
             ui.ctx(),
+            &client,
             block,
             block_types,
             response.rect.size(),
@@ -141,8 +143,8 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
             instance,
             EditorRegion::Preview,
             &context,
+            &client,
             Some(EditorBlock {
-                client,
                 id: block_id,
                 block_type,
             }),
@@ -197,14 +199,35 @@ pub(crate) fn region_size(
     })
 }
 
-pub(crate) fn creation_content(plugin_id: &str, instance: EditorInstanceId) -> Option<String> {
+pub(crate) fn creation_ready(plugin_id: &str, instance: EditorInstanceId) -> bool {
     HOST.with(|host| {
         host.borrow()
             .runtimes
-            .get(plugin_id)?
+            .get(plugin_id)
+            .is_some_and(|runtime| runtime.instances.creation_ready(instance))
+    })
+}
+
+pub(crate) fn commit_creation(plugin_id: &str, instance: EditorInstanceId) {
+    HOST.with(|host| {
+        let host = host.borrow();
+        let Some(runtime) = host.runtimes.get(plugin_id) else {
+            return;
+        };
+        runtime.send(runtime.instances.commit_creation(instance));
+    });
+}
+
+pub(crate) fn take_created(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+) -> Option<Result<Uuid, String>> {
+    HOST.with(|host| {
+        host.borrow_mut()
+            .runtimes
+            .get_mut(plugin_id)?
             .instances
-            .creation_content(instance)
-            .map(str::to_owned)
+            .take_created(instance)
     })
 }
 

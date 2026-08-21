@@ -1131,7 +1131,9 @@ pub(super) trait CreationOptions: Default {
 /// how to turn them into an editor.
 pub(super) trait PendingCreation {
     fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> bool;
-    fn create(&mut self, client: &BlockClient) -> Result<Box<dyn BlockEditor>, String>;
+    /// Makes the block the dialog was filled in for, or answers `None` while
+    /// the editor making it has yet to report back.
+    fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String>;
 }
 
 struct EditorCreation<E: ConfigurableEditor> {
@@ -1143,9 +1145,9 @@ impl<E: ConfigurableEditor> PendingCreation for EditorCreation<E> {
         self.options.ui(ui)
     }
 
-    fn create(&mut self, client: &BlockClient) -> Result<Box<dyn BlockEditor>, String> {
+    fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String> {
         E::create(client, std::mem::take(&mut self.options))
-            .map(|editor| Box::new(editor) as Box<dyn BlockEditor>)
+            .map(|editor| Some(Box::new(editor) as Box<dyn BlockEditor>))
     }
 }
 

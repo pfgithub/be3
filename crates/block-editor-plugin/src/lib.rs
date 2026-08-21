@@ -30,8 +30,11 @@ pub trait App: Default + 'static {
         _block_id: uuid::Uuid,
     ) {
     }
-    fn connect_creation(&mut self, _host: EditorHost) {}
+    fn connect_creation(&mut self, _host: EditorHost, _client: block_client::BlockClient) {}
     fn creation_ui(&mut self, _ui: &mut egui::Ui) {}
+    fn create_block(&mut self) -> Result<uuid::Uuid, String> {
+        Err("this editor does not create blocks".into())
+    }
     fn ui(&mut self, ui: &mut egui::Ui);
     fn preview_ui(&mut self, _ui: &mut egui::Ui) {}
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {

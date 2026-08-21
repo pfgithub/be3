@@ -31,6 +31,7 @@ enum BlockPickerTab {
 struct PendingBlock {
     block_type: Uuid,
     creation: Box<dyn PendingCreation>,
+    creating: bool,
 }
 
 pub struct BlockPickerResult {
@@ -222,6 +223,7 @@ impl BlockPicker {
                 self.pending_block = Some(PendingBlock {
                     block_type,
                     creation,
+                    creating: false,
                 });
                 None
             }
@@ -256,7 +258,7 @@ impl BlockPicker {
                 ui.separator();
                 ui.horizontal(|ui| {
                     create = ui
-                        .add_enabled(ready, egui::Button::new("Create"))
+                        .add_enabled(ready && !pending.creating, egui::Button::new("Create"))
                         .on_disabled_hover_text("Fill in the options first")
                         .clicked();
                     cancel = ui.button("Cancel").clicked();
@@ -265,17 +267,22 @@ impl BlockPicker {
         if cancel || response.should_close() {
             return None;
         }
-        if !create {
+        if !create && !pending.creating {
             self.pending_block = Some(pending);
             return None;
         }
+        pending.creating = true;
         match pending.creation.create(editors.client()) {
-            Ok(editor) => Some(Self::finish_creation(
+            Ok(Some(editor)) => Some(Self::finish_creation(
                 editors,
                 editor,
                 pending.block_type,
                 parent,
             )),
+            Ok(None) => {
+                self.pending_block = Some(pending);
+                None
+            }
             Err(error) => {
                 self.error = Some(error);
                 None
