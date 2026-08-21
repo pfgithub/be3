@@ -6,7 +6,6 @@ Guides (read if they are relevant):
 - guides/adding_a_plugin_editor.md
 
 Tooling:
-- The codebase-memory-mcp knowledge graph indexes this repo under the project key `home-exedev-be3`, not `be3` — pass that key to `search_graph`/`query_graph`/`get_code_snippet`/etc.
 - Remember that subagents also read AGENTS.md automatically, so there is no need to reiterate information in here when spawning a subagent.
 
 Functionality:
