@@ -7,4 +7,5 @@ cd "$repository"
 
 ./scripts/fetch-pdfium.sh
 cargo build -p counter --bin counter-host
+cargo build -p checklist --bin checklist-host
 cargo run -p block-app "$@"

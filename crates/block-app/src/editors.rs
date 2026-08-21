@@ -1366,7 +1366,10 @@ impl EditorRegistry {
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
         #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
-        registry.register_plugin::<plugin::counter::CounterPlugin>();
+        {
+            registry.register_plugin::<plugin::checklist::ChecklistPlugin>();
+            registry.register_plugin::<plugin::counter::CounterPlugin>();
+        }
         registry.register::<hotbar::HotbarEditor>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();

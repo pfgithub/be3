@@ -24,6 +24,7 @@ Main folders:
 Block types (the core, in `crates/block-client/src/blocks/<name>.rs`; each is defined by a state struct, an operation enum, and `apply_operation`):
 - `audio` — an uploaded audio clip (source name, media type, raw bytes). No undo/redo history.
 - `calendar` — a list of scheduled events (title, start/end time).
+- `checklist` — an ordered list of items, each with text and a done flag; edited by the checklist plugin editor.
 - `compiled_logic` — a `logic_grid` circuit compiled into a reusable component (shape, ports) that can be placed inside other circuits.
 - `database` — a database's rows, each a map of field ID to value, against a schema defined by `database_schema`.
 - `database_schema` — the field definitions (name, type, enum options) shared by a `database` and its `database_view`s.
@@ -48,6 +49,7 @@ Editor types (the view, in `crates/block-app/src/editors/<name>.rs`; each reads 
 - `audio` — playback UI for an `Audio` block.
 - `browser_tab` — the embedded native webview for a `WebBrowserTab` block; unavailable on Android/web, where `unsupported` is shown instead.
 - `calendar` — day/week/month view over a `Calendar` block's events.
+- `checklist` — not in `block-app`: a plugin editor package (`crates/editors/checklist`) run through the plugin host, like `counter`.
 - `compiled_logic` — read-only inspector for a compiled logic component's metadata.
 - `database_schema` — add, remove, and rename fields and enum options on a `DatabaseSchema`.
 - `database_view` — the `spreadsheet`, `kanban`, and `scatter` layouts over a `Database` through a `DatabaseView`.

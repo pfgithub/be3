@@ -14,6 +14,7 @@ members = [
     "crates/citygenerator",
     "crates/logicgame",
     "crates/cvl2",
+    "crates/editors/checklist",
     "crates/editors/counter",
     "crates/block-editor-plugin",
     "crates/block-plugin-api",

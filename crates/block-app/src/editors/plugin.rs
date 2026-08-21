@@ -8,6 +8,7 @@ use std::sync::{
     Arc, OnceLock,
 };
 
+pub(super) mod checklist;
 pub(super) mod counter;
 
 use super::{

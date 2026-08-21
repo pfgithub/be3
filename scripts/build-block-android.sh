@@ -81,10 +81,12 @@ export AR_aarch64_linux_android="$toolchain/llvm-ar"
 
 cargo build -p block-app --lib --target aarch64-linux-android
 cargo build -p counter --lib --target aarch64-linux-android
+cargo build -p checklist --lib --target aarch64-linux-android
 
 mkdir -p "$native_libraries" "$(dirname "$apk")"
 cp "$repository/target/aarch64-linux-android/debug/libblock_app_lib.so" "$native_libraries/"
 cp "$repository/target/aarch64-linux-android/debug/libcounter.so" "$native_libraries/"
+cp "$repository/target/aarch64-linux-android/debug/libchecklist.so" "$native_libraries/"
 cp "$cpp_runtime" "$native_libraries/"
 
 (

@@ -80,14 +80,15 @@ Build the plugin for the same target as `block-app`, optionally staging the
 application executable with it:
 
 ```sh
-./scripts/build-counter.sh --target x86_64-unknown-linux-gnu --profile release --app-executable target/x86_64-unknown-linux-gnu/release/block-app
-./scripts/build-counter.sh --target x86_64-pc-windows-msvc --profile release --app-executable target/x86_64-pc-windows-msvc/release/block-app.exe
-./scripts/build-counter.sh --target aarch64-apple-darwin --profile release --app-executable target/aarch64-apple-darwin/release/block-app --sign-identity 'Developer ID Application: Example'
+./scripts/build-plugin.sh --plugin counter --target x86_64-unknown-linux-gnu --profile release --app-executable target/x86_64-unknown-linux-gnu/release/block-app
+./scripts/build-plugin.sh --plugin checklist --target x86_64-pc-windows-msvc --profile release --app-executable target/x86_64-pc-windows-msvc/release/block-app.exe
+./scripts/build-plugin.sh --plugin counter --target aarch64-apple-darwin --profile release --app-executable target/aarch64-apple-darwin/release/block-app --sign-identity 'Developer ID Application: Example'
 ```
 
-The default output is `target/counter/<target>/<profile>`. Linux stages
-`bin` and `libexec/be3`, Windows uses a private `counter` directory beside
-the app, and macOS creates `Block.app/Contents/MacOS`. Use `--output DIRECTORY`
+The plugin packages live in `crates/editors`; run the script once per plugin.
+The default output is `target/plugins/<plugin>/<target>/<profile>`. Linux
+stages `bin` and `libexec/be3`, Windows uses a private directory named after
+the plugin beside the app, and macOS creates `Block.app/Contents/MacOS`. Use `--output DIRECTORY`
 to select another package root and repeat `--runtime-dependency PATH` for each
 non-system shared library or DLL. Windows launches without inherited `PATH`
 lookup. macOS signs the plugin and then the complete bundle when both

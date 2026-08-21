@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+plugin=''
 target=''
 profile='debug'
 output_directory=''
@@ -11,6 +12,10 @@ runtime_dependencies=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --plugin)
+            plugin="$2"
+            shift 2
+            ;;
         --target)
             target="$2"
             shift 2
@@ -42,8 +47,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$target" ]]; then
-    echo 'Usage: build-counter.sh --target TARGET [--profile debug|release] [--output DIRECTORY] [--app-executable PATH] [--sign-identity IDENTITY] [--runtime-dependency PATH]' >&2
+if [[ -z "$plugin" || -z "$target" ]]; then
+    echo 'Usage: build-plugin.sh --plugin PACKAGE --target TARGET [--profile debug|release] [--output DIRECTORY] [--app-executable PATH] [--sign-identity IDENTITY] [--runtime-dependency PATH]' >&2
     exit 1
 fi
 if [[ "$profile" != 'debug' && "$profile" != 'release' ]]; then
@@ -57,7 +62,7 @@ fi
 
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -z "$output_directory" ]]; then
-    output_directory="$repository/target/counter/$target/$profile"
+    output_directory="$repository/target/plugins/$plugin/$target/$profile"
 fi
 
 profile_arguments=()
@@ -65,13 +70,13 @@ if [[ "$profile" == 'release' ]]; then
     profile_arguments=(--release)
 fi
 
-cargo build -p counter --bin counter-host --target "$target" "${profile_arguments[@]}"
+cargo build -p "$plugin" --bin "$plugin-host" --target "$target" "${profile_arguments[@]}"
 
 extension=''
 case "$target" in
     *-windows-*) extension='.exe' ;;
 esac
-source_executable="$repository/target/$target/$profile/counter-host$extension"
+source_executable="$repository/target/$target/$profile/$plugin-host$extension"
 if [[ ! -f "$source_executable" ]]; then
     echo "cargo did not produce $source_executable" >&2
     exit 1
@@ -83,7 +88,7 @@ case "$target" in
         app_directory="$destination_directory"
         ;;
     *-windows-*)
-        destination_directory="$output_directory/counter"
+        destination_directory="$output_directory/$plugin"
         app_directory="$output_directory"
         ;;
     *-linux-*)
@@ -97,7 +102,7 @@ case "$target" in
 esac
 
 mkdir -p "$destination_directory"
-cp "$source_executable" "$destination_directory/counter$extension"
+cp "$source_executable" "$destination_directory/$plugin$extension"
 if [[ -n "$app_executable" ]]; then
     if [[ ! -f "$app_executable" ]]; then
         echo "Application executable does not exist: $app_executable" >&2
@@ -119,7 +124,7 @@ if [[ "$target" == *-apple-darwin && -n "$sign_identity" ]]; then
         echo 'codesign was not found; macOS signing requires Xcode command-line tools' >&2
         exit 1
     fi
-    codesign --force --options runtime --sign "$sign_identity" "$destination_directory/counter"
+    codesign --force --options runtime --sign "$sign_identity" "$destination_directory/$plugin"
     if [[ -n "$app_executable" ]]; then
         codesign --force --options runtime --sign "$sign_identity" "$output_directory/Block.app"
     fi
@@ -128,4 +133,4 @@ elif [[ -n "$sign_identity" ]]; then
     exit 1
 fi
 
-echo "Staged counter in $destination_directory"
+echo "Staged $plugin in $destination_directory"

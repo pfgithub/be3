@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# The editor plugin packages the web build serves alongside the app.
+plugins=(checklist counter)
 wasi_sysroot=''
 release=false
 while [[ $# -gt 0 ]]; do
@@ -63,17 +65,19 @@ if $release; then
     profile_arguments=(--release)
 fi
 
-echo 'Building counter for wasm32-wasip1...'
-cargo build -p counter --target wasm32-wasip1 "${profile_arguments[@]}"
-counter="$repository/target/wasm32-wasip1/$profile_directory/counter.wasm"
-if [[ ! -f "$counter" ]]; then
-    echo "cargo did not produce $counter" >&2
-    exit 1
-fi
-
-echo 'Generating JavaScript bindings for counter...'
 mkdir -p "$output_directory"
-"$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$counter"
+for plugin in "${plugins[@]}"; do
+    echo "Building $plugin for wasm32-wasip1..."
+    cargo build -p "$plugin" --target wasm32-wasip1 "${profile_arguments[@]}"
+    plugin_wasm="$repository/target/wasm32-wasip1/$profile_directory/$plugin.wasm"
+    if [[ ! -f "$plugin_wasm" ]]; then
+        echo "cargo did not produce $plugin_wasm" >&2
+        exit 1
+    fi
+
+    echo "Generating JavaScript bindings for $plugin..."
+    "$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$plugin_wasm"
+done
 
 if [[ -z "$wasi_sysroot" ]]; then
     wasi_sysroot="$tools_directory/wasi-sysroot"
