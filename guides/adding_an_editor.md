@@ -219,7 +219,28 @@ Use `registry.register_configurable::<...>()` for editors that implement `Config
 
 The registration automatically adds creatable types to block pickers and teaches the app how to open cached blocks of that type.
 
-## 8. Testing and verification
+`EditorRegistry::new` has no platform gates: every editor is registered on every platform, and every block type can be created everywhere.
+
+## 8. Editors that need a platform-specific library
+
+Some editors are built on something only one platform has — pdfium for the PDF editor, a native webview for the browser tab. Keep the editor itself platform independent and put only the part that needs the library behind a `cfg`, in a submodule of the editor:
+
+```rust
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+mod pdfium;
+#[cfg(any(target_os = "android", target_arch = "wasm32"))]
+mod unsupported;
+```
+
+Both submodules expose the same interface, and the `unsupported` one fails with a message saying the platform cannot do it. The editor then works everywhere — it opens, it takes input, its block can be created and edited — and shows that message where the content it cannot produce would go. The platform-specific dependency stays behind the matching `cfg` in `Cargo.toml`.
+
+Dead-code warnings on the platforms without the real implementation are silenced where the item is defined:
+
+```rust
+#[cfg_attr(any(target_os = "android", target_arch = "wasm32"), allow(dead_code))]
+```
+
+## 9. Testing and verification
 
 Do not add tests for GUI behavior. Put deterministic data behavior in the block model and test it in `block-client` instead. Note any interactions that still require manual testing in the final handoff.
 

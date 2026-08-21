@@ -1,7 +1,4 @@
 mod audio;
-// The embedded browser is a native webview. Android and the browser sandbox
-// have no equivalent, so those builds fall back to UnsupportedEditor.
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 mod browser_tab;
 mod calendar;
 mod clipboard;
@@ -16,13 +13,9 @@ pub(crate) mod infinite_canvas;
 mod logic_game;
 mod logic_grid;
 mod map;
-// PDF rendering uses pdfium, a native library that is only bundled for
-// desktop. Android and the browser sandbox fall back to UnsupportedEditor.
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 mod pdf;
 mod pixel_art;
 mod pixel_ray_tracer;
-#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
 mod plugin;
 mod presentation;
 mod scene_3d;
@@ -1363,16 +1356,12 @@ impl EditorRegistry {
         registry.register_configurable::<image::ImageEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
-        #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
-        {
-            registry.register_plugin::<plugin::checklist::ChecklistPlugin>();
-            registry.register_plugin::<plugin::counter::CounterPlugin>();
-            registry.register_plugin::<plugin::hotbar::HotbarPlugin>();
-        }
+        registry.register_plugin::<plugin::checklist::ChecklistPlugin>();
+        registry.register_plugin::<plugin::counter::CounterPlugin>();
+        registry.register_plugin::<plugin::hotbar::HotbarPlugin>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
-        #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
         registry.register_configurable::<pdf::PdfEditor>();
         registry.register_creatable::<pixel_art::PixelArtEditor>();
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
@@ -1384,7 +1373,6 @@ impl EditorRegistry {
         registry.register_creatable::<version_control_data::VersionControlDataEditor>();
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<video::VideoEditor>();
-        #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         registry.register_creatable::<workspace_index::WorkspaceIndexEditor>();
         registry
@@ -1426,7 +1414,6 @@ impl EditorRegistry {
 
     /// Registers a block editor that runs as a plugin, out of process or in a
     /// worker, from the package's own manifest.
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
     fn register_plugin<P: plugin::PluginPackage>(&mut self) {
         let manifest = P::manifest();
         if let Err(error) = manifest.validate() {

@@ -6,7 +6,6 @@ mod files;
 mod panic_guard;
 mod performance;
 mod platform;
-#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
 mod plugin_host;
 mod share;
 mod slide_templates;
@@ -99,7 +98,6 @@ fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> 
         Box::new(move |creation_context| {
             egui_material_icons::initialize(&creation_context.egui_ctx);
             editors::install_render_resources(creation_context);
-            #[cfg(target_os = "windows")]
             plugin_host::install(creation_context);
             BlockApp::new(storage_root).map(|app| Box::new(app) as Box<dyn eframe::App>)
         }),

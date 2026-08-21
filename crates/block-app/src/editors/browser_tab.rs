@@ -1,5 +1,14 @@
+#[cfg(any(target_os = "android", target_arch = "wasm32"))]
+mod unsupported;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+mod webview;
+
 use std::sync::mpsc::{self, Receiver, Sender};
 
+use super::{
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
+    EditorAction, EditorKind,
+};
 use block_client::{
     blocks::web_browser_tab::{HistoryItem, WebBrowserTab, WebBrowserTabOperation},
     BlockClient, BlockHandle,
@@ -9,15 +18,10 @@ use egui_material_icons::{
     icons::{ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_LANGUAGE, ICON_REFRESH},
     MaterialIcon,
 };
-use wry::{
-    dpi::{PhysicalPosition, PhysicalSize},
-    NewWindowResponse, PageLoadEvent, Rect as WebViewRect, WebView, WebViewBuilder,
-};
-
-use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
-};
+#[cfg(any(target_os = "android", target_arch = "wasm32"))]
+use unsupported::WebView;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+use webview::WebView;
 
 const DIRECT_EDITOR_SIZE: egui::Vec2 = egui::Vec2::new(1024.0, 768.0);
 
@@ -38,29 +42,16 @@ impl CreatableEditor for WebBrowserTabEditor {
     }
 }
 
-const HISTORY_SCRIPT: &str = r#"
-(() => {
-    const send = (kind, value) => window.ipc.postMessage(`${kind}:${value}`);
-    const pushState = history.pushState.bind(history);
-    const replaceState = history.replaceState.bind(history);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct Bounds {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
 
-    history.pushState = (...args) => {
-        const result = pushState(...args);
-        send("push", location.href);
-        return result;
-    };
-    history.replaceState = (...args) => {
-        const result = replaceState(...args);
-        send("replace", location.href);
-        return result;
-    };
-    history.go = (delta = 0) => send("history", Number(delta) || 0);
-    history.back = () => send("history", -1);
-    history.forward = () => send("history", 1);
-})();
-"#;
-
-enum BrowserEvent {
+#[cfg_attr(any(target_os = "android", target_arch = "wasm32"), allow(dead_code))]
+pub(super) enum BrowserEvent {
     Navigate(String),
     Finished(String),
     Push(String),
@@ -75,7 +66,7 @@ pub(super) struct WebBrowserTabEditor {
     address: String,
     error: Option<String>,
     visible: bool,
-    bounds: Option<WebViewRect>,
+    bounds: Option<Bounds>,
     webview: Option<WebView>,
     events: Receiver<BrowserEvent>,
     event_sender: Sender<BrowserEvent>,
@@ -116,44 +107,7 @@ impl WebBrowserTabEditor {
         let url = tab.current().url.clone();
         drop(tab);
 
-        let navigation_events = self.event_sender.clone();
-        let page_events = self.event_sender.clone();
-        let ipc_events = self.event_sender.clone();
-        let new_window_events = self.event_sender.clone();
-        let title_events = self.event_sender.clone();
-        let webview = WebViewBuilder::new()
-            .with_url(&url)
-            .with_visible(false)
-            .with_focused(false)
-            .with_bounds(WebViewRect {
-                position: PhysicalPosition::new(0, 0).into(),
-                size: PhysicalSize::new(1, 1).into(),
-            })
-            .with_initialization_script(HISTORY_SCRIPT)
-            .with_navigation_handler(move |url| {
-                let _ = navigation_events.send(BrowserEvent::Navigate(url));
-                true
-            })
-            .with_on_page_load_handler(move |event, url| {
-                if matches!(event, PageLoadEvent::Finished) {
-                    let _ = page_events.send(BrowserEvent::Finished(url));
-                }
-            })
-            .with_ipc_handler(move |request| {
-                if let Some(event) = ipc_event(request.body()) {
-                    let _ = ipc_events.send(event);
-                }
-            })
-            .with_document_title_changed_handler(move |title| {
-                let _ = title_events.send(BrowserEvent::Title(title));
-            })
-            .with_new_window_req_handler(move |url, _features| {
-                let _ = new_window_events.send(BrowserEvent::NewWindow(url));
-                NewWindowResponse::Deny
-            })
-            .build_as_child(frame);
-
-        match webview {
+        match WebView::new(frame, &url, &self.event_sender) {
             Ok(webview) => {
                 self.address.clone_from(&url);
                 self.programmatic_navigation = Some(url.clone());
@@ -165,7 +119,7 @@ impl WebBrowserTabEditor {
                 self.error = None;
             }
             Err(error) => {
-                self.error = Some(error.to_string());
+                self.error = Some(error);
                 self.creation_failed = true;
             }
         }
@@ -242,7 +196,7 @@ impl WebBrowserTabEditor {
         let url = self
             .webview
             .as_ref()
-            .and_then(|webview| webview.url().ok())
+            .and_then(WebView::url)
             .unwrap_or_else(|| tab.current().url.clone());
         drop(tab);
         self.block
@@ -284,12 +238,12 @@ impl WebBrowserTabEditor {
         let url = selected.1.clone();
         self.address.clone_from(&url);
         let natural = self.natural_navigation.as_deref() == Some(&url);
-        let current = self.webview.as_ref().and_then(|webview| webview.url().ok());
+        let current = self.webview.as_ref().and_then(WebView::url);
         if !natural && current.as_deref() != Some(&url) {
             if let Some(webview) = &self.webview {
                 self.programmatic_navigation = Some(url.clone());
                 if let Err(error) = webview.load_url(&url) {
-                    self.error = Some(error.to_string());
+                    self.error = Some(error);
                     self.programmatic_navigation = None;
                 }
             }
@@ -299,17 +253,11 @@ impl WebBrowserTabEditor {
 
     fn update_bounds(&mut self, context: &egui::Context, rect: egui::Rect) {
         let pixels_per_point = context.pixels_per_point();
-        let bounds = WebViewRect {
-            position: PhysicalPosition::new(
-                (rect.min.x * pixels_per_point).round() as i32,
-                (rect.min.y * pixels_per_point).round() as i32,
-            )
-            .into(),
-            size: PhysicalSize::new(
-                (rect.width() * pixels_per_point).round().max(1.0) as u32,
-                (rect.height() * pixels_per_point).round().max(1.0) as u32,
-            )
-            .into(),
+        let bounds = Bounds {
+            x: (rect.min.x * pixels_per_point).round() as i32,
+            y: (rect.min.y * pixels_per_point).round() as i32,
+            width: (rect.width() * pixels_per_point).round().max(1.0) as u32,
+            height: (rect.height() * pixels_per_point).round().max(1.0) as u32,
         };
         if self.bounds == Some(bounds) {
             return;
@@ -318,7 +266,7 @@ impl WebBrowserTabEditor {
             return;
         };
         if let Err(error) = webview.set_bounds(bounds) {
-            self.error = Some(error.to_string());
+            self.error = Some(error);
         } else {
             self.bounds = Some(bounds);
         }
@@ -332,7 +280,7 @@ impl WebBrowserTabEditor {
             return;
         };
         if let Err(error) = webview.set_visible(visible) {
-            self.error = Some(error.to_string());
+            self.error = Some(error);
         } else {
             self.visible = visible;
             if !visible {
@@ -346,7 +294,7 @@ impl WebBrowserTabEditor {
             return;
         };
         if let Err(error) = webview.focus_parent() {
-            self.error = Some(error.to_string());
+            self.error = Some(error);
         }
     }
 
@@ -471,7 +419,7 @@ impl BlockEditor for WebBrowserTabEditor {
         } else if reload {
             if let Some(webview) = &self.webview {
                 if let Err(error) = webview.reload() {
-                    self.error = Some(error.to_string());
+                    self.error = Some(error);
                 }
             }
         }
@@ -496,8 +444,13 @@ impl BlockEditor for WebBrowserTabEditor {
     ) -> Option<EditorAction> {
         self.displayed_last_frame = true;
         if self.webview.is_none() {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
+            ui.centered_and_justified(|ui| match &self.error {
+                Some(error) => {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+                None => {
+                    ui.spinner();
+                }
             });
             return None;
         }
@@ -510,16 +463,6 @@ impl BlockEditor for WebBrowserTabEditor {
             self.set_visible(false);
         }
         None
-    }
-}
-
-fn ipc_event(message: &str) -> Option<BrowserEvent> {
-    let (kind, value) = message.split_once(':')?;
-    match kind {
-        "push" => Some(BrowserEvent::Push(value.into())),
-        "replace" => Some(BrowserEvent::Replace(value.into())),
-        "history" => value.parse().ok().map(BrowserEvent::History),
-        _ => None,
     }
 }
 

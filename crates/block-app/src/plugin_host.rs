@@ -8,6 +8,8 @@ mod native;
 mod presenter;
 #[cfg(target_os = "windows")]
 mod process;
+#[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
+mod unavailable;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_os = "windows")]
@@ -15,5 +17,7 @@ mod windows;
 
 #[cfg(target_os = "windows")]
 pub(crate) use native::{close, editor_ui, install, region_size};
+#[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
+pub(crate) use unavailable::{close, editor_ui, install, region_size};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::{close, editor_ui, install, region_size};

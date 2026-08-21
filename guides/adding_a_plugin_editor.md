@@ -18,7 +18,7 @@
 - crates/block-app/src/editors/plugin.rs — add pub(super) mod foo;.
 - crates/block-app/src/editors.rs — add registry.register_plugin::<plugin::foo::FooPlugin>();
 
-Nothing else in block-app changes: the generic PluginEditor<P> and the per-package plugin host handle tabs, regions, input, tunnelled client and surface slots.
+Nothing else in block-app changes: the generic PluginEditor<P> and the per-package plugin host handle tabs, regions, input, tunnelled client and surface slots. The registration is not gated by platform: a plugin host exists for wasm and Windows, and platforms without one (plugin_host/unavailable.rs) still create and open the block, drawing an error in place of the plugin's surface.
 
 4. Build scripts
 
@@ -29,5 +29,5 @@ Nothing else in block-app changes: the generic PluginEditor<P> and the per-packa
 6. Docs and verification
 
 - AGENTS.md — one line under Block types and one under Editor types.
-- Run ./scripts/verify.sh, then ./scripts/build-block-web.sh, since the plugin host paths only compile for wasm/Windows and verify.sh doesn't cover them. Windows can't be compiled from this VM, so manifest/entry-point mistakes there only surface in CI.
+- Run ./scripts/verify.sh, then ./scripts/build-block-web.sh, since the real plugin host only compiles for wasm/Windows and verify.sh builds the placeholder host instead. Windows can't be compiled from this VM, so manifest/entry-point mistakes there only surface in CI.
 
