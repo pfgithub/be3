@@ -36,12 +36,10 @@ impl PluginPackage for CounterPlugin {
             entry_points: EntryPoints {
                 web: Some("/counter.js".into()),
                 windows: Some("counter-host.exe".into()),
-                android: Some("com.be3.block.plugin.CounterService".into()),
             },
             surfaces: vec![
                 SurfaceMechanism::WebExternalImage,
                 SurfaceMechanism::WindowsDxgi,
-                SurfaceMechanism::AndroidHardwareBuffer,
             ],
         })
     }

@@ -36,12 +36,10 @@ impl PluginPackage for ChecklistPlugin {
             entry_points: EntryPoints {
                 web: Some("/checklist.js".into()),
                 windows: Some("checklist-host.exe".into()),
-                android: Some("com.be3.block.plugin.ChecklistService".into()),
             },
             surfaces: vec![
                 SurfaceMechanism::WebExternalImage,
                 SurfaceMechanism::WindowsDxgi,
-                SurfaceMechanism::AndroidHardwareBuffer,
             ],
         })
     }
