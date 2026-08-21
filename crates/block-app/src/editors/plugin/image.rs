@@ -21,8 +21,6 @@ impl PluginPackage for ImagePlugin {
 
     const ICON: MaterialIcon = ICON_IMAGE;
 
-    /// An image block is the file it was imported from, so it is only ever
-    /// made by the editor's own creation dialog.
     fn new_block(_client: &BlockClient) -> Option<BlockHandle<Image>> {
         None
     }
@@ -65,8 +63,6 @@ impl PluginPackage for ImagePlugin {
     }
 }
 
-/// What a picker offers wherever the app itself imports an image, rather than
-/// the editor.
 pub(in crate::editors) fn image_filter() -> FileFilter {
     FileFilter::new("Images", "Image", Image::FILE_EXTENSIONS, Image::MIME_TYPES)
 }
@@ -77,8 +73,6 @@ pub(in crate::editors) fn decode(file: PickedFile) -> Result<Image, String> {
         .map_err(|error| format!("Could not import {name}: {error}"))
 }
 
-/// Adds an image the app imported for an editor that holds it, such as a
-/// canvas or a block of text.
 pub(in crate::editors) fn create_image_block(
     editors: &mut EditorAccess<'_>,
     image: Image,

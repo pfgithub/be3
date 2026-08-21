@@ -11,9 +11,6 @@ const LOADING_FILL: egui::Color32 = egui::Color32::from_gray(35);
 const INTRINSIC_LONG_SIDE: f32 = 1024.0;
 const INTRINSIC_SHORT_SIDE: f32 = 24.0;
 
-/// Which of the editor's regions a texture was uploaded for. Every region is
-/// drawn by an egui context of its own, so each one keeps its own copy of the
-/// decoded image.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Pane {
     Main,
@@ -57,8 +54,6 @@ impl block_editor_plugin::App for ImageApp {
         self.creation = Some((host, None));
     }
 
-    /// An image block is the file it was imported from, so a new one starts
-    /// by choosing that file.
     fn creation_ui(&mut self, ui: &mut egui::Ui) {
         let Some((host, chosen)) = &mut self.creation else {
             return;
@@ -126,8 +121,6 @@ impl block_editor_plugin::App for ImageApp {
         );
     }
 
-    /// The block as the host paints it: the image alone, filling whatever
-    /// quad it is being drawn on.
     fn preview_ui(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         ui.allocate_rect(rect, egui::Sense::hover());
@@ -170,8 +163,6 @@ impl block_editor_plugin::App for ImageApp {
         }
     }
 
-    /// Big enough to work on without being larger than the screen, and never
-    /// so thin that a long, narrow image disappears.
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         let size = self.image_size()?;
         let scale = (INTRINSIC_LONG_SIDE / size.x.max(size.y))
@@ -193,9 +184,6 @@ impl ImageApp {
             .then(|| egui::vec2(image.width() as f32, image.height() as f32))
     }
 
-    /// The image as a texture of the context drawing `pane`, decoded again
-    /// whenever the block changes. An error means the image could not be
-    /// decoded; no error at all means it has not arrived yet.
     fn texture(
         &mut self,
         pane: Pane,
