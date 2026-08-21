@@ -67,10 +67,9 @@ pub(in crate::editors) fn image_filter() -> FileFilter {
     FileFilter::new("Images", "Image", Image::FILE_EXTENSIONS, Image::MIME_TYPES)
 }
 
-pub(in crate::editors) fn decode(file: PickedFile) -> Result<Image, String> {
+pub(in crate::editors) fn imported_image(file: PickedFile) -> Image {
     let PickedFile { name, data } = file;
-    Image::from_compressed(name.clone(), data)
-        .map_err(|error| format!("Could not import {name}: {error}"))
+    Image::new(name, data)
 }
 
 pub(in crate::editors) fn create_image_block(

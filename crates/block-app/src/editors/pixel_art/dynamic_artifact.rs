@@ -79,7 +79,7 @@ fn generate(art: &PixelArt, source_name: &str, settings: &ImageSettings) -> Resu
             ExtendedColorType::Rgba8,
         )
         .map_err(|error| error.to_string())?;
-    Image::from_compressed(format!("{source_name} Export"), png)
+    Ok(Image::new(format!("{source_name} Export"), png))
 }
 
 /// Repeats every pixel `scale` times in both directions.

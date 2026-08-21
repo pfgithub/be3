@@ -33,7 +33,7 @@ impl InfiniteCanvasEditor {
         match self
             .image_picker
             .poll(context)
-            .map(|file| file.and_then(decode_image))
+            .map(|file| file.map(imported_image))
         {
             Some(Ok(image)) => {
                 self.image_import_error = None;
@@ -117,20 +117,12 @@ impl InfiniteCanvasEditor {
                     }
                 },
             };
-            match ImageBlock::from_compressed(source_name.clone(), bytes) {
-                Ok(image) => {
-                    let offset = IMPORT_CASCADE_OFFSET * index as f32;
-                    self.add_imported_image(
-                        editors,
-                        image,
-                        CanvasPoint::new(base.x + offset, base.y + offset),
-                    );
-                }
-                Err(error) => {
-                    self.image_import_error =
-                        Some(format!("Could not import {source_name}: {error}"));
-                }
-            }
+            let offset = IMPORT_CASCADE_OFFSET * index as f32;
+            self.add_imported_image(
+                editors,
+                ImageBlock::new(source_name.clone(), bytes),
+                CanvasPoint::new(base.x + offset, base.y + offset),
+            );
         }
     }
 

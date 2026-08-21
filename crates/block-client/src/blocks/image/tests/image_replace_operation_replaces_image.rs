@@ -4,8 +4,8 @@ use super::{png_bytes, Image, ImageOperation};
 
 #[test]
 fn image_replace_operation_replaces_image() {
-    let mut image = Image::from_compressed("before.png", png_bytes()).unwrap();
-    let replacement = Image::from_compressed("after.png", png_bytes()).unwrap();
+    let mut image = Image::new("before.png", png_bytes());
+    let replacement = Image::new("after.png", vec![1, 2, 3]);
 
     Image::apply_operation(
         &mut image,

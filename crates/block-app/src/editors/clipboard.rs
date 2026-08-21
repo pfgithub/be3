@@ -59,12 +59,7 @@ fn read_clipboard_image() -> ClipboardImagePasteResult {
     ) {
         return ClipboardImagePasteResult::Error(format!("Could not encode pasted image: {error}"));
     }
-    match Image::from_compressed("Pasted Image.png", encoded) {
-        Ok(image) => ClipboardImagePasteResult::Image(image),
-        Err(error) => {
-            ClipboardImagePasteResult::Error(format!("Could not import pasted image: {error}"))
-        }
-    }
+    ClipboardImagePasteResult::Image(Image::new("Pasted Image.png", encoded))
 }
 
 /// Android has no image clipboard, and the browser only exposes one through an

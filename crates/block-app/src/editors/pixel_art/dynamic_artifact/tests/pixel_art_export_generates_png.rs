@@ -23,7 +23,6 @@ fn pixel_art_export_generates_png() {
         .into_rgba8();
 
     assert_eq!(generated.source_name(), "Sprite Export");
-    assert_eq!(generated.media_type(), "image/png");
     assert_eq!(decoded.dimensions(), (32, 32));
     assert_eq!(decoded.get_pixel(0, 0).0, [12, 34, 56, 78]);
     assert_eq!(decoded.get_pixel(1, 0).0, [0, 0, 0, 0]);

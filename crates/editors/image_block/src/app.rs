@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use block_client::{
-    blocks::image::{Image, ImageOperation},
+    blocks::image::{Image, ImageMetadata, ImageOperation},
     BlockClient, BlockHandle,
 };
 use block_editor_plugin::{egui, EditorHost, FileFilter, FilePicker, PickedFile};
@@ -77,7 +77,7 @@ impl block_editor_plugin::App for ImageApp {
         let Some(Creating { host, chosen, .. }) = &mut self.creation else {
             return;
         };
-        match self.picker.poll(host).map(|file| file.and_then(decode)) {
+        match self.picker.poll(host).map(|file| file.and_then(imported)) {
             Some(Ok(image)) => {
                 host.set_creation_ready(true);
                 *chosen = Some(image);
@@ -159,7 +159,7 @@ impl block_editor_plugin::App for ImageApp {
         match self
             .picker
             .poll(&editing.host)
-            .map(|file| file.and_then(decode))
+            .map(|file| file.and_then(imported))
         {
             Some(Ok(image)) => {
                 editing.block.operate(ImageOperation::Replace { image });
@@ -198,9 +198,8 @@ impl block_editor_plugin::App for ImageApp {
 
 impl ImageApp {
     fn image_size(&self) -> Option<egui::Vec2> {
-        let image = self.editing.as_ref()?.block.read()?;
-        (image.width() != 0 && image.height() != 0)
-            .then(|| egui::vec2(image.width() as f32, image.height() as f32))
+        let (width, height) = self.editing.as_ref()?.block.read()?.size()?;
+        (width != 0 && height != 0).then(|| egui::vec2(width as f32, height as f32))
     }
 
     fn texture(
@@ -228,23 +227,40 @@ impl ImageApp {
         let Some(image) = editing.block.read() else {
             return Err(None);
         };
-        let pixels = match image.decode_rgba() {
-            Ok(pixels) => pixels,
-            Err(error) => {
-                decoded.error = Some(error);
-                return Err(decoded.error.clone());
-            }
-        };
-        let size = [image.width() as usize, image.height() as usize];
+        if let ImageMetadata::Failed(error) = image.metadata() {
+            decoded.error = Some(error.clone());
+            return Err(decoded.error.clone());
+        }
         let name = format!("image-block-{}", editing.block.id());
+        let recorded = image.metadata().clone();
+        let result = crate::decode::decode(image.data());
         drop(image);
-        let texture = context.load_texture(
-            name,
-            egui::ColorImage::from_rgba_unmultiplied(size, &pixels),
-            egui::TextureOptions::LINEAR,
-        );
-        decoded.texture = Some(texture.clone());
-        Ok(texture)
+        match result {
+            Ok(found) => {
+                if recorded != found.metadata {
+                    editing.block.operate(ImageOperation::SetMetadata {
+                        metadata: found.metadata,
+                    });
+                }
+                let texture = context.load_texture(
+                    name,
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [found.width as usize, found.height as usize],
+                        &found.pixels,
+                    ),
+                    egui::TextureOptions::LINEAR,
+                );
+                decoded.texture = Some(texture.clone());
+                Ok(texture)
+            }
+            Err(error) => {
+                editing.block.operate(ImageOperation::SetMetadata {
+                    metadata: ImageMetadata::Failed(error.clone()),
+                });
+                decoded.error = Some(error);
+                Err(decoded.error.clone())
+            }
+        }
     }
 }
 
@@ -272,8 +288,8 @@ fn filter() -> FileFilter {
     }
 }
 
-fn decode(file: PickedFile) -> Result<Image, String> {
+fn imported(file: PickedFile) -> Result<Image, String> {
     let PickedFile { name, data } = file;
-    Image::from_compressed(name.clone(), data)
-        .map_err(|error| format!("Could not import {name}: {error}"))
+    crate::decode::decode(&data).map_err(|error| format!("Could not import {name}: {error}"))?;
+    Ok(Image::new(name, data))
 }

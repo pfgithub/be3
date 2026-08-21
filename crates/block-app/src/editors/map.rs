@@ -495,12 +495,11 @@ impl MapEditor {
                     }
                 },
             };
-            match ImageBlock::from_compressed(source_name.clone(), bytes) {
-                Ok(image) => self.add_imported_image(editors, image, position),
-                Err(error) => {
-                    self.import_error = Some(format!("Could not import {source_name}: {error}"));
-                }
-            }
+            self.add_imported_image(
+                editors,
+                ImageBlock::new(source_name.clone(), bytes),
+                position,
+            );
         }
     }
 

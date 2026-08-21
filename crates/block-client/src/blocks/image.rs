@@ -1,15 +1,12 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use block::{Block, NoHistory};
-use image::GenericImageView;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Image {
     source_name: String,
-    media_type: String,
-    width: u32,
-    height: u32,
+    metadata: ImageMetadata,
     #[serde(
         serialize_with = "serialize_data",
         deserialize_with = "deserialize_data"
@@ -17,19 +14,24 @@ pub struct Image {
     data: Vec<u8>,
 }
 
+/// What the editor found when it decoded the image, which no other client has
+/// to decode it again to know.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub enum ImageMetadata {
+    #[default]
+    Undecoded,
+    Decoded {
+        media_type: String,
+        width: u32,
+        height: u32,
+    },
+    Failed(String),
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub enum ImageOperation {
     Replace { image: Image },
-}
-
-#[derive(Deserialize)]
-struct ImageData {
-    source_name: String,
-    media_type: String,
-    width: u32,
-    height: u32,
-    #[serde(deserialize_with = "deserialize_data")]
-    data: Vec<u8>,
+    SetMetadata { metadata: ImageMetadata },
 }
 
 impl Image {
@@ -38,67 +40,31 @@ impl Image {
     ];
     pub const MIME_TYPES: &'static [&'static str] = &["image/*"];
 
-    pub fn from_compressed(source_name: impl Into<String>, data: Vec<u8>) -> Result<Self, String> {
-        let format = image::guess_format(&data).map_err(|error| error.to_string())?;
-        let decoded = image::load_from_memory_with_format(&data, format)
-            .map_err(|error| error.to_string())?;
-        let (width, height) = decoded.dimensions();
-        if width == 0 || height == 0 {
-            return Err("image dimensions must be nonzero".into());
-        }
-        Ok(Self {
+    pub fn new(source_name: impl Into<String>, data: Vec<u8>) -> Self {
+        Self {
             source_name: source_name.into(),
-            media_type: format.to_mime_type().into(),
-            width,
-            height,
+            metadata: ImageMetadata::Undecoded,
             data,
-        })
+        }
     }
 
     pub fn source_name(&self) -> &str {
         &self.source_name
     }
 
-    pub fn media_type(&self) -> &str {
-        &self.media_type
+    pub const fn metadata(&self) -> &ImageMetadata {
+        &self.metadata
     }
 
-    pub const fn width(&self) -> u32 {
-        self.width
-    }
-
-    pub const fn height(&self) -> u32 {
-        self.height
+    pub fn size(&self) -> Option<(u32, u32)> {
+        match self.metadata {
+            ImageMetadata::Decoded { width, height, .. } => Some((width, height)),
+            ImageMetadata::Undecoded | ImageMetadata::Failed(_) => None,
+        }
     }
 
     pub fn data(&self) -> &[u8] {
         &self.data
-    }
-
-    pub fn decode_rgba(&self) -> Result<Vec<u8>, String> {
-        Ok(image::load_from_memory(&self.data)
-            .map_err(|error| error.to_string())?
-            .into_rgba8()
-            .into_raw())
-    }
-}
-
-impl<'de> Deserialize<'de> for Image {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let data = ImageData::deserialize(deserializer)?;
-        let image = Self::from_compressed(data.source_name, data.data).map_err(D::Error::custom)?;
-        if image.media_type != data.media_type
-            || image.width != data.width
-            || image.height != data.height
-        {
-            return Err(D::Error::custom(
-                "image metadata does not match compressed data",
-            ));
-        }
-        Ok(image)
     }
 }
 
@@ -111,6 +77,7 @@ impl Block for Image {
     fn apply_operation(image: &mut Self, operation: &Self::Operation) {
         match operation {
             ImageOperation::Replace { image: replacement } => *image = replacement.clone(),
+            ImageOperation::SetMetadata { metadata } => image.metadata = metadata.clone(),
         }
     }
 

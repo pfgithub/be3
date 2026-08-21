@@ -926,7 +926,6 @@ dependencies = [
  "flate2",
  "futures-channel",
  "futures-util",
- "image",
  "js-sys",
  "logicgame",
  "parking_lot",
@@ -4339,6 +4338,7 @@ version = "0.1.0"
 dependencies = [
  "block-client",
  "block-editor-plugin",
+ "image",
  "uuid",
 ]
 
