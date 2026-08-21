@@ -23,11 +23,52 @@ mod web;
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub(crate) use native::{close, editor_ui, install, intrinsic_size, region_size};
+pub(crate) use native::{
+    aspect_ratio, close, editor_ui, install, intrinsic_size, preview, region_size,
+};
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
-pub(crate) use unavailable::{close, editor_ui, install, intrinsic_size, region_size};
+pub(crate) use unavailable::{
+    aspect_ratio, close, editor_ui, install, intrinsic_size, preview, region_size,
+};
 #[cfg(target_arch = "wasm32")]
-pub(crate) use web::{close, editor_ui, install, intrinsic_size, region_size};
+pub(crate) use web::{
+    aspect_ratio, close, editor_ui, install, intrinsic_size, preview, region_size,
+};
+
+/// The block itself, drawn by its editor wherever the host paints the block
+/// rather than the editor: the quad to fill, in the painter's coordinates,
+/// and how faded it is drawn.
+pub(crate) struct PreviewSlot<'a> {
+    pub(crate) plugin: &'a PluginManifest,
+    pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
+    pub(crate) client: Arc<BlockClient>,
+    pub(crate) block_id: Uuid,
+    pub(crate) block_type: Uuid,
+    pub(crate) instance: EditorInstanceId,
+    pub(crate) corners: [egui::Pos2; 4],
+    pub(crate) opacity: f32,
+}
+
+/// The size a preview asks its editor to draw at: the quad's bounding box,
+/// rounded up in whole steps of pixels so that panning and zooming do not
+/// resize the plugin's surface every frame, and capped so that a block blown
+/// up on a canvas cannot ask for an enormous one.
+#[cfg_attr(
+    not(any(target_arch = "wasm32", target_os = "windows")),
+    allow(dead_code)
+)]
+pub(crate) fn preview_size(size: egui::Vec2, scale_factor: f32) -> egui::Vec2 {
+    const STEP: f32 = 64.0;
+    const MAXIMUM: f32 = 2048.0;
+    let scale = scale_factor.max(f32::EPSILON);
+    let pixels = size * scale;
+    egui::vec2(
+        (pixels.x / STEP).ceil() * STEP,
+        (pixels.y / STEP).ceil() * STEP,
+    )
+    .clamp(egui::Vec2::splat(STEP), egui::Vec2::splat(MAXIMUM))
+        / scale
+}
 
 /// One region of one open editor instance, as the host hands it to whichever
 /// plugin runtime this platform has.

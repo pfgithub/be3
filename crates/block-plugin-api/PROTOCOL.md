@@ -53,6 +53,12 @@ when it is let go, and reports that the drag has moved off the instance again.
 An instance answers with whether it would take the block, which only decides
 the cursor the host shows; a drop is delivered whether or not it was accepted.
 
+An editor may be given a preview region as well as the regions it is edited
+in. The host maps that region onto whatever quad it paints the block on, so
+the editor fills the region and lets the host place, rotate and fade it. An
+instance may also report the shape of its block, which the host holds its
+preview to; it is a request in the same sense as the embedded size below.
+
 An editor instance may report the size it would like to be given wherever the
 host embeds it. It is a request, not a constraint: the host may embed the
 instance at any size, and falls back to its own default until an instance

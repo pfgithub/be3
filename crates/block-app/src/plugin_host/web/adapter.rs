@@ -185,6 +185,7 @@ impl WebProtocolAdapter {
                     message @ (EditorMessage::OpenBlock { .. }
                     | EditorMessage::DragAccepted { .. }
                     | EditorMessage::IntrinsicSize { .. }
+                    | EditorMessage::AspectRatio { .. }
                     | EditorMessage::PickFile { .. }),
                 ) => {
                     self.editor_messages.push(message);

@@ -101,7 +101,7 @@ impl WebSurfacePresenter {
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: target_format,
-                    blend: None,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -217,7 +217,7 @@ impl WebSurfacePresenter {
         };
         render_pass.set_pipeline(&self.blit_pipeline);
         render_pass.set_bind_group(0, &target.bind_group, &[self.regions.offset(slot)]);
-        render_pass.draw(0..3, 0..1);
+        render_pass.draw(0..6, 0..1);
     }
 }
 

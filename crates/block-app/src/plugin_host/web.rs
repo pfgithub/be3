@@ -12,8 +12,10 @@ pub(super) mod renderer;
 
 use super::{
     instances::{Instances, NextScreens},
-    presenter::{PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Region},
-    EditorSlot,
+    presenter::{
+        PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
+    },
+    preview_size, EditorSlot, PreviewSlot,
 };
 use adapter::WebProtocolAdapter;
 
@@ -253,25 +255,98 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
         }
         let open_request = runtime.instances.take_open(instance);
-        let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen) else {
+        let Some(atlas_region) = Region::of(
+            &runtime.layout,
+            runtime.surface,
+            screen,
+            Quad::upright(response.rect),
+        ) else {
             return open_request;
         };
-        let atlas_size = [runtime.layout.width, runtime.layout.height];
-        painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
-            response.rect,
-            PresenterCallback {
-                command: PresenterCommand::Present(renderer::WebFrame {
-                    size: atlas_size,
-                    canvas_id: runtime.canvas_id.clone(),
-                    plugin_id: runtime.plugin_id.clone(),
-                    pass,
-                }),
-                status: runtime.status.clone(),
-                region: atlas_region,
-            },
-        ));
+        painter.add(present(runtime, response.rect, atlas_region, pass));
         open_request
     })
+}
+
+/// Draws the block itself, by giving its editor a region of its own and
+/// mapping that region onto the quad the host is painting.
+pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
+    let PreviewSlot {
+        plugin,
+        block_types,
+        client,
+        block_id,
+        block_type,
+        instance,
+        corners,
+        opacity,
+    } = slot;
+    open(plugin);
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.render_available {
+            return false;
+        }
+        let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
+            return false;
+        };
+        let context = painter.ctx().clone();
+        runtime.context = Some(context.clone());
+        begin_pass(runtime, &context, context.cumulative_pass_nr());
+        if runtime.error.is_some() {
+            return false;
+        }
+        let rect = egui::Rect::from_points(&corners);
+        let scale_factor = context.pixels_per_point();
+        let pass = runtime.pass;
+        let screen = runtime.instances.report(
+            instance,
+            EditorRegion::Preview,
+            &context,
+            client,
+            block_id,
+            block_type,
+            block_types,
+            preview_size(rect.size(), scale_factor),
+            scale_factor,
+            pass,
+        );
+        let Some(atlas_region) = Region::of(
+            &runtime.layout,
+            runtime.surface,
+            screen,
+            Quad {
+                rect,
+                corners,
+                opacity,
+            },
+        ) else {
+            return false;
+        };
+        painter.add(present(runtime, rect, atlas_region, pass));
+        true
+    })
+}
+
+fn present(
+    runtime: &Runtime,
+    rect: egui::Rect,
+    region: Region,
+    pass: u64,
+) -> egui::epaint::PaintCallback {
+    eframe::egui_wgpu::Callback::new_paint_callback(
+        rect,
+        PresenterCallback {
+            command: PresenterCommand::Present(renderer::WebFrame {
+                size: [runtime.layout.width, runtime.layout.height],
+                canvas_id: runtime.canvas_id.clone(),
+                plugin_id: runtime.plugin_id.clone(),
+                pass,
+            }),
+            status: runtime.status.clone(),
+            region,
+        },
+    )
 }
 
 pub(crate) fn region_size(
@@ -286,6 +361,17 @@ pub(crate) fn region_size(
             .get(plugin_id)?
             .instances
             .region_size(instance, region)
+    })
+}
+
+pub(crate) fn aspect_ratio(plugin_id: &str, instance: EditorInstanceId) -> Option<f32> {
+    STATE.with(|state| {
+        state
+            .borrow()
+            .runtimes
+            .get(plugin_id)?
+            .instances
+            .aspect_ratio(instance)
     })
 }
 

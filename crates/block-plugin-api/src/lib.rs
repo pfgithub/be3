@@ -25,7 +25,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 10;
+pub const PROTOCOL_VERSION: u16 = 11;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -134,6 +134,7 @@ pub struct PluginManifest {
     pub children: ChildOperations,
     pub important: bool,
     pub interaction: InteractionMode,
+    pub capabilities: EditorCapabilities,
     pub resize: ResizeMode,
     pub regions: Vec<EditorRegion>,
     pub entry_points: EntryPoints,
@@ -158,6 +159,15 @@ pub enum InteractionMode {
     #[default]
     Live,
     Playback,
+}
+
+/// What the host may do with an editor's frame, and how much of the block's
+/// own shape it has to respect when it draws it outside the editor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorCapabilities {
+    pub rotation: bool,
+    pub preserve_aspect_ratio: bool,
+    pub pan_and_zoom: bool,
 }
 
 /// How an embedded editor may be resized by whatever holds it.
@@ -194,14 +204,19 @@ pub enum EditorRegion {
     Toolbar,
     LeftSidebar,
     RightSidebar,
+    /// The block itself, drawn wherever the host shows it without opening the
+    /// editor: a canvas, a slide, a block embedded in text. The host maps the
+    /// region onto whatever quad it is drawing, so the editor fills it.
+    Preview,
 }
 
 impl EditorRegion {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Main,
         Self::Toolbar,
         Self::LeftSidebar,
         Self::RightSidebar,
+        Self::Preview,
     ];
 }
 
@@ -330,6 +345,12 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         request_id: u64,
         pick: FilePick,
+    },
+    /// The shape of the block an instance is editing, for the host to hold
+    /// its preview to wherever it draws one.
+    AspectRatio {
+        instance: EditorInstanceId,
+        ratio: f32,
     },
     /// The size an instance would like to be given wherever the host embeds
     /// it, in logical points.

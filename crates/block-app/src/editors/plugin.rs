@@ -17,8 +17,8 @@ pub(super) mod hotbar;
 pub(super) mod workspace_index;
 
 use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
-    DirectEditorViewport, EditorAccess, EditorAction,
+    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
+    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
 };
 
 /// A first-party editor package: the block type it edits, its manifest, and
@@ -126,11 +126,39 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
         &self.block
     }
 
+    fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
+        if !self.has_region(EditorRegion::Preview) {
+            return false;
+        }
+        self.context = Some(context.painter.ctx().clone());
+        crate::plugin_host::preview(
+            context.painter,
+            crate::plugin_host::PreviewSlot {
+                plugin: &self.plugin,
+                block_types: editors.registry().plugin_block_types(),
+                client: editors.client_handle(),
+                block_id: self.block.id(),
+                block_type: <P::Block as Block>::TYPE_ID,
+                instance: self.instance,
+                corners: context.corners,
+                opacity: context.opacity,
+            },
+        )
+    }
+
+    fn render_aspect_ratio(&self) -> Option<f32> {
+        crate::plugin_host::aspect_ratio(&self.plugin.identity.id, self.instance)
+    }
+
+    fn default_preserve_aspect_ratio(&self) -> bool {
+        self.plugin.capabilities.preserve_aspect_ratio
+    }
+
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: false,
+            allow_rotation: self.plugin.capabilities.rotation,
+            preserve_aspect_ratio: self.plugin.capabilities.preserve_aspect_ratio,
+            supports_pan_and_zoom: self.plugin.capabilities.pan_and_zoom,
         }
     }
 

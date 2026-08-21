@@ -1,8 +1,8 @@
 use block::Block;
 use block_client::blocks::checklist::Checklist;
 use block_plugin_api::{
-    ChildOperations, CreationMode, EditorRegion, EntryPoints, InteractionMode, PluginIdentity,
-    PluginManifest, ResizeMode, SurfaceMechanism,
+    ChildOperations, CreationMode, EditorCapabilities, EditorRegion, EntryPoints, InteractionMode,
+    PluginIdentity, PluginManifest, ResizeMode, SurfaceMechanism,
 };
 use egui_material_icons::{icons::ICON_CHECKLIST, MaterialIcon};
 use std::sync::{Arc, OnceLock};
@@ -31,6 +31,7 @@ impl PluginPackage for ChecklistPlugin {
             children: ChildOperations::default(),
             important: false,
             interaction: InteractionMode::Live,
+            capabilities: EditorCapabilities::default(),
             resize: ResizeMode::Both,
             regions: vec![
                 EditorRegion::Main,

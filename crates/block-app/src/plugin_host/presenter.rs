@@ -1,6 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use eframe::egui_wgpu::{self, wgpu};
+use eframe::{
+    egui,
+    egui_wgpu::{self, wgpu},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PresenterState {
@@ -57,14 +60,48 @@ pub(super) trait SurfacePresenter {
 pub(super) const MAX_SURFACES: u32 = 8;
 pub(super) const MAX_REGIONS: u32 = 64;
 const MAX_SLOTS: u32 = MAX_SURFACES * MAX_REGIONS;
+/// One slot: the atlas offset and scale, the quad's four clip-space corners,
+/// and its opacity, padded out to a uniform stride.
+const REGION_BYTES: u64 = 64;
 
-/// Uniform storage for the atlas sub-rectangle each plugin editor paints. One
-/// slot per screen of every running plugin, addressed through a dynamic bind
-/// group offset so several editors can blit different parts of their plugin's
-/// surface in one frame.
+/// Uniform storage for the atlas sub-rectangle each plugin editor paints, and
+/// the quad it is painted onto. One slot per screen of every running plugin,
+/// addressed through a dynamic bind group offset so several editors can blit
+/// different parts of their plugin's surface in one frame.
 pub(super) struct Regions {
     buffer: wgpu::Buffer,
     stride: u32,
+}
+
+/// The quad a region is painted onto: its four corners in points, going
+/// clockwise from the top left of the region, the rectangle egui gave the
+/// paint callback, and how faded it is drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Quad {
+    pub(super) rect: egui::Rect,
+    pub(super) corners: [egui::Pos2; 4],
+    pub(super) opacity: f32,
+}
+
+impl Quad {
+    pub(super) fn upright(rect: egui::Rect) -> Self {
+        Self {
+            rect,
+            corners: [
+                rect.left_top(),
+                rect.right_top(),
+                rect.right_bottom(),
+                rect.left_bottom(),
+            ],
+            opacity: 1.0,
+        }
+    }
+}
+
+impl Default for Quad {
+    fn default() -> Self {
+        Self::upright(egui::Rect::ZERO)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -73,6 +110,7 @@ pub(super) struct Region {
     pub(super) slot: u32,
     pub(super) offset: [f32; 2],
     pub(super) scale: [f32; 2],
+    pub(super) quad: Quad,
 }
 
 impl Default for Region {
@@ -82,6 +120,7 @@ impl Default for Region {
             slot: 0,
             offset: [0.0, 0.0],
             scale: [1.0, 1.0],
+            quad: Quad::default(),
         }
     }
 }
@@ -91,6 +130,7 @@ impl Region {
         layout: &block_plugin_api::ScreenLayout,
         surface: u32,
         screen: block_plugin_api::ScreenId,
+        quad: Quad,
     ) -> Option<Self> {
         if layout.is_empty() || surface >= MAX_SURFACES {
             return None;
@@ -114,6 +154,7 @@ impl Region {
                 placement.width as f32 / width,
                 placement.height as f32 / height,
             ],
+            quad,
         })
     }
 }
@@ -123,7 +164,7 @@ impl Regions {
         let stride = device
             .limits()
             .min_uniform_buffer_offset_alignment
-            .max(std::mem::size_of::<[f32; 4]>() as u32);
+            .max(REGION_BYTES as u32);
         Self {
             buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("plugin surface regions"),
@@ -142,7 +183,7 @@ impl Regions {
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: true,
-                min_binding_size: wgpu::BufferSize::new(16),
+                min_binding_size: wgpu::BufferSize::new(REGION_BYTES),
             },
             count: None,
         }
@@ -152,18 +193,38 @@ impl Regions {
         wgpu::BindingResource::Buffer(wgpu::BufferBinding {
             buffer: &self.buffer,
             offset: 0,
-            size: wgpu::BufferSize::new(16),
+            size: wgpu::BufferSize::new(REGION_BYTES),
         })
     }
 
-    pub(super) fn write(&self, queue: &wgpu::Queue, region: &Region) {
+    /// Writes one slot, turning the quad's corners into the clip space of the
+    /// viewport egui sets for the paint callback. That viewport is the
+    /// callback's rectangle clamped to the screen, so the same clamping is
+    /// repeated here to keep a partly off-screen quad in place.
+    pub(super) fn write(
+        &self,
+        queue: &wgpu::Queue,
+        region: &Region,
+        screen: &egui_wgpu::ScreenDescriptor,
+    ) {
         let slot = region.slot.min(MAX_SLOTS - 1);
-        let values = [
-            region.offset[0],
-            region.offset[1],
-            region.scale[0],
-            region.scale[1],
-        ];
+        let scale = screen.pixels_per_point;
+        let width = screen.size_in_pixels[0] as f32;
+        let height = screen.size_in_pixels[1] as f32;
+        let rect = region.quad.rect;
+        let left = (scale * rect.min.x).round().clamp(0.0, width);
+        let right = (scale * rect.max.x).round().clamp(left, width);
+        let top = (scale * rect.min.y).round().clamp(0.0, height);
+        let bottom = (scale * rect.max.y).round().clamp(top, height);
+        let viewport = egui::vec2((right - left).max(1.0), (bottom - top).max(1.0));
+        let mut values = [0.0; 16];
+        values[..2].copy_from_slice(&region.offset);
+        values[2..4].copy_from_slice(&region.scale);
+        for (index, corner) in region.quad.corners.iter().enumerate() {
+            values[4 + index * 2] = (corner.x * scale - left) / viewport.x * 2.0 - 1.0;
+            values[5 + index * 2] = 1.0 - (corner.y * scale - top) / viewport.y * 2.0;
+        }
+        values[12] = region.quad.opacity.clamp(0.0, 1.0);
         queue.write_buffer(
             &self.buffer,
             u64::from(self.stride) * u64::from(slot),
@@ -196,7 +257,7 @@ where
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
@@ -208,7 +269,9 @@ where
         };
         match &self.command {
             PresenterCommand::Present(frame) => {
-                presenter.regions().write(queue, &self.region);
+                presenter
+                    .regions()
+                    .write(queue, &self.region, screen_descriptor);
                 if let Err(error) = presenter.replace(device, self.region.surface, frame) {
                     self.status.set(PresenterState::Failed(error));
                 } else if let Err(error) = presenter.prepare(queue, self.region.surface, frame) {

@@ -30,6 +30,7 @@ struct Instance {
     opens: Vec<(Uuid, Uuid)>,
     drag_accepted: bool,
     intrinsic: Option<egui::Vec2>,
+    aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
 }
 
@@ -93,6 +94,7 @@ impl Instances {
                 opens: Vec::new(),
                 drag_accepted: false,
                 intrinsic: None,
+                aspect_ratio: None,
                 picks: Vec::new(),
             }
         });
@@ -221,6 +223,10 @@ impl Instances {
             .is_some_and(|entry| entry.drag_accepted)
     }
 
+    pub(super) fn aspect_ratio(&self, instance: EditorInstanceId) -> Option<f32> {
+        self.entries.get(&instance)?.aspect_ratio
+    }
+
     pub(super) fn intrinsic_size(&self, instance: EditorInstanceId) -> Option<egui::Vec2> {
         self.entries.get(&instance)?.intrinsic
     }
@@ -321,6 +327,11 @@ impl Instances {
                     let mut picker = FilePicker::default();
                     picker.open(&entry.context, &host_filter(filter));
                     entry.picks.push(PendingPick { request_id, picker });
+                }
+            }
+            EditorMessage::AspectRatio { instance, ratio } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.aspect_ratio = Some(ratio);
                 }
             }
             EditorMessage::IntrinsicSize {

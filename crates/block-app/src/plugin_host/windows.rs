@@ -285,7 +285,7 @@ impl SurfacePresenter for WindowsSurfacePresenter {
             let _ = &imported.texture;
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &imported.bind_group, &[self.regions.offset(slot)]);
-            render_pass.draw(0..3, 0..1);
+            render_pass.draw(0..6, 0..1);
         }
     }
 

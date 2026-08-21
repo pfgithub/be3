@@ -31,7 +31,16 @@ pub trait App: Default + 'static {
     ) {
     }
     fn ui(&mut self, ui: &mut egui::Ui);
+    /// Draws the block itself, filling whatever the host maps this region
+    /// onto: a canvas, a slide, a block embedded in text. The region is
+    /// stretched over that quad, so nothing here should try to letterbox
+    /// itself.
+    fn preview_ui(&mut self, _ui: &mut egui::Ui) {}
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
+        None
+    }
+    /// The shape of the block, for the host to hold its preview to.
+    fn aspect_ratio(&mut self) -> Option<f32> {
         None
     }
     fn toolbar_ui(&mut self, _ui: &mut egui::Ui) {}

@@ -8,10 +8,13 @@ use uuid::Uuid;
 
 use super::{
     instances::{Instances, NextScreens},
-    presenter::{PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Region},
+    presenter::{
+        PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
+    },
+    preview_size,
     process::{Process, SurfaceEvent},
     windows::WindowsFrame,
-    EditorSlot,
+    EditorSlot, PreviewSlot,
 };
 
 thread_local! {
@@ -94,23 +97,94 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
         }
         let open_request = runtime.instances.take_open(instance);
-        let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen) else {
+        let Some(atlas_region) = Region::of(
+            &runtime.layout,
+            runtime.surface,
+            screen,
+            Quad::upright(response.rect),
+        ) else {
             return open_request;
         };
-        let frame = runtime
-            .pending_frame
-            .take()
-            .unwrap_or(WindowsFrame::Events(Vec::new()));
-        painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
-            response.rect,
-            PresenterCallback {
-                command: PresenterCommand::Present(frame),
-                status: runtime.status.clone(),
-                region: atlas_region,
-            },
-        ));
+        painter.add(present(runtime, response.rect, atlas_region));
         open_request
     })
+}
+
+/// Draws the block itself, by giving its editor a region of its own and
+/// mapping that region onto the quad the host is painting.
+pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
+    let PreviewSlot {
+        plugin,
+        block_types,
+        client,
+        block_id,
+        block_type,
+        instance,
+        corners,
+        opacity,
+    } = slot;
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        if !host.presenter_available {
+            return false;
+        }
+        let Some(surface) = host.surface_for(&plugin.identity.id) else {
+            return false;
+        };
+        let context = painter.ctx().clone();
+        let pass = context.cumulative_pass_nr();
+        let runtime = host
+            .runtimes
+            .entry(plugin.identity.id.clone())
+            .or_insert_with(|| Runtime::new(surface));
+        if runtime.process.is_none() {
+            runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
+        }
+        begin_pass(runtime, pass);
+        let rect = egui::Rect::from_points(&corners);
+        let scale_factor = context.pixels_per_point();
+        let screen = runtime.instances.report(
+            instance,
+            EditorRegion::Preview,
+            &context,
+            client,
+            block_id,
+            block_type,
+            block_types,
+            preview_size(rect.size(), scale_factor),
+            scale_factor,
+            pass,
+        );
+        let Some(atlas_region) = Region::of(
+            &runtime.layout,
+            runtime.surface,
+            screen,
+            Quad {
+                rect,
+                corners,
+                opacity,
+            },
+        ) else {
+            return false;
+        };
+        painter.add(present(runtime, rect, atlas_region));
+        true
+    })
+}
+
+fn present(runtime: &mut Runtime, rect: egui::Rect, region: Region) -> egui::epaint::PaintCallback {
+    let frame = runtime
+        .pending_frame
+        .take()
+        .unwrap_or(WindowsFrame::Events(Vec::new()));
+    eframe::egui_wgpu::Callback::new_paint_callback(
+        rect,
+        PresenterCallback {
+            command: PresenterCommand::Present(frame),
+            status: runtime.status.clone(),
+            region,
+        },
+    )
 }
 
 pub(crate) fn region_size(
@@ -124,6 +198,16 @@ pub(crate) fn region_size(
             .get(plugin_id)?
             .instances
             .region_size(instance, region)
+    })
+}
+
+pub(crate) fn aspect_ratio(plugin_id: &str, instance: EditorInstanceId) -> Option<f32> {
+    HOST.with(|host| {
+        host.borrow()
+            .runtimes
+            .get(plugin_id)?
+            .instances
+            .aspect_ratio(instance)
     })
 }
 

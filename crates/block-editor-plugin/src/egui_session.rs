@@ -18,6 +18,7 @@ pub(crate) struct EguiSession {
     host: EditorHost,
     drag: Option<(EditorRegion, BlockDrag)>,
     intrinsic: Option<egui::Vec2>,
+    aspect_ratio: Option<f32>,
 }
 
 #[derive(Default)]
@@ -32,6 +33,7 @@ trait AppUi {
     fn connect(&mut self, host: EditorHost, client: block_client::BlockClient, block_id: Uuid);
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
     fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
+    fn aspect_ratio(&mut self) -> Option<f32>;
 }
 
 impl<A: crate::App> AppUi for A {
@@ -45,11 +47,16 @@ impl<A: crate::App> AppUi for A {
             EditorRegion::Toolbar => crate::App::toolbar_ui(self, ui),
             EditorRegion::LeftSidebar => crate::App::left_sidebar_ui(self, ui),
             EditorRegion::RightSidebar => crate::App::right_sidebar_ui(self, ui),
+            EditorRegion::Preview => crate::App::preview_ui(self, ui),
         }
     }
 
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         crate::App::intrinsic_size(self)
+    }
+
+    fn aspect_ratio(&mut self) -> Option<f32> {
+        crate::App::aspect_ratio(self)
     }
 }
 
@@ -63,6 +70,7 @@ impl EguiSession {
             host: EditorHost::default(),
             drag: None,
             intrinsic: None,
+            aspect_ratio: None,
         }
     }
 
@@ -113,6 +121,16 @@ impl EguiSession {
                     instance,
                     width: size.x,
                     height: size.y,
+                }));
+            }
+        }
+        let aspect_ratio = self.app.aspect_ratio();
+        if aspect_ratio != self.aspect_ratio {
+            self.aspect_ratio = aspect_ratio;
+            if let Some(ratio) = aspect_ratio {
+                messages.push(Message::Editor(EditorMessage::AspectRatio {
+                    instance,
+                    ratio,
                 }));
             }
         }
@@ -205,8 +223,13 @@ impl EguiSession {
         self.host.set_drag(drag);
         let delivered_drop = drag.is_some_and(|drag| drag.dropped);
         let app = &mut self.app;
-        let frame =
-            egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO);
+        // A preview is drawn over whatever the host is painting, so it is
+        // given no background of its own.
+        let frame = if region == EditorRegion::Preview {
+            egui::Frame::NONE
+        } else {
+            egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO)
+        };
         let output = context.run_ui(input, |ui| {
             egui::CentralPanel::default()
                 .frame(frame)
