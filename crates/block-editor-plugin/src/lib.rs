@@ -2,6 +2,7 @@ pub use eframe::egui;
 
 #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
 mod egui_session;
+mod host;
 pub mod native;
 #[cfg(not(target_arch = "wasm32"))]
 mod runner;
@@ -13,9 +14,16 @@ mod web;
 mod windows_surface;
 
 pub use block_plugin_api::EditorRegion;
+pub use host::EditorHost;
 
 pub trait App: Default + 'static {
-    fn connect(&mut self, _client: block_client::BlockClient, _block_id: uuid::Uuid) {}
+    fn connect(
+        &mut self,
+        _host: EditorHost,
+        _client: block_client::BlockClient,
+        _block_id: uuid::Uuid,
+    ) {
+    }
     fn ui(&mut self, ui: &mut egui::Ui);
     fn toolbar_ui(&mut self, _ui: &mut egui::Ui) {}
     fn left_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}

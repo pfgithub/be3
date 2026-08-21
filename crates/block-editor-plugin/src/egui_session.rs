@@ -1,17 +1,20 @@
 use block_client::TunnelCarrier;
 use block_plugin_api::{
-    EditorInstanceId, EditorRegion, InputEvent, Message, PointerButton, RegionSize,
+    EditorInstanceId, EditorMessage, EditorRegion, InputEvent, Message, PointerButton, RegionSize,
     ScreenPlacement, TunnelMessage, WheelUnit,
 };
 use eframe::egui;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::EditorHost;
+
 pub(crate) struct EguiSession {
     app: Box<dyn AppUi>,
     instance: EditorInstanceId,
     regions: HashMap<EditorRegion, RegionState>,
     carrier: Option<TunnelCarrier>,
+    host: EditorHost,
 }
 
 #[derive(Default)]
@@ -23,13 +26,13 @@ struct RegionState {
 }
 
 trait AppUi {
-    fn connect(&mut self, client: block_client::BlockClient, block_id: Uuid);
+    fn connect(&mut self, host: EditorHost, client: block_client::BlockClient, block_id: Uuid);
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
 }
 
 impl<A: crate::App> AppUi for A {
-    fn connect(&mut self, client: block_client::BlockClient, block_id: Uuid) {
-        crate::App::connect(self, client, block_id);
+    fn connect(&mut self, host: EditorHost, client: block_client::BlockClient, block_id: Uuid) {
+        crate::App::connect(self, host, client, block_id);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
@@ -49,6 +52,7 @@ impl EguiSession {
             instance,
             regions: HashMap::new(),
             carrier: None,
+            host: EditorHost::default(),
         }
     }
 
@@ -58,7 +62,7 @@ impl EguiSession {
         }
         let (endpoint, carrier) = block_client::tunnel_channel();
         let client = block_client::BlockClient::tunneled(account_id, workspace_id, endpoint);
-        self.app.connect(client, block_id);
+        self.app.connect(self.host.clone(), client, block_id);
         self.carrier = Some(carrier);
     }
 
@@ -77,6 +81,13 @@ impl EguiSession {
             messages.push(Message::RegionSizes(sizes));
         }
         let instance = self.instance;
+        for (block_id, block_type) in self.host.take_opens() {
+            messages.push(Message::Editor(EditorMessage::OpenBlock {
+                instance,
+                block_id: block_id.into_bytes(),
+                block_type: block_type.into_bytes(),
+            }));
+        }
         let Some(carrier) = &mut self.carrier else {
             return messages;
         };

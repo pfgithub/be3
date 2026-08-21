@@ -31,6 +31,10 @@ bounded by `MAX_BLOCK_PAYLOAD_BYTES`: the host forwards them in both
 directions without interpreting them, and the server treats each instance as a
 separate client of the one connection.
 
+An editor instance may ask the host to open another block in its own tab.
+The host decides whether to honour the request; it is not answered, and a
+request for a block the host cannot open is discarded.
+
 Surface messages may declare at most 16 native attachments. Each declaration
 records the resource type and whether ownership is borrowed or transferred.
 Declaration order is the attachment order in the platform carrier. A missing,

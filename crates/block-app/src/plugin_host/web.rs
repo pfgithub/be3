@@ -155,7 +155,7 @@ pub(crate) fn editor_ui(
     instance: EditorInstanceId,
     region: EditorRegion,
     size: egui::Vec2,
-) {
+) -> Option<(Uuid, Uuid)> {
     open(plugin);
     STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -164,14 +164,14 @@ pub(crate) fn editor_ui(
                 egui::Color32::RED,
                 "wgpu is not available in this build.".to_owned(),
             );
-            return;
+            return None;
         }
         let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
             ui.colored_label(
                 egui::Color32::RED,
                 "Too many plugin runtimes are already presenting.",
             );
-            return;
+            return None;
         };
         begin_pass(runtime, ui.ctx().cumulative_pass_nr());
         let presenter_error = match runtime.status.get() {
@@ -185,7 +185,7 @@ pub(crate) fn editor_ui(
                 runtime.error = None;
                 runtime.open = false;
             }
-            return;
+            return None;
         }
         let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
         let pass = runtime.pass;
@@ -204,8 +204,9 @@ pub(crate) fn editor_ui(
             input.update(ui, &response, screen)
         });
         runtime.send(messages);
+        let open_request = runtime.instances.take_open(instance);
         let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen) else {
-            return;
+            return open_request;
         };
         let atlas_size = [runtime.layout.width, runtime.layout.height];
         painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
@@ -219,7 +220,8 @@ pub(crate) fn editor_ui(
                 region: atlas_region,
             },
         ));
-    });
+        open_request
+    })
 }
 
 pub(crate) fn region_size(
@@ -301,6 +303,11 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
         .as_mut()
         .map(WebProtocolAdapter::take_client_messages)
         .unwrap_or_default();
+    let editor_messages = runtime
+        .adapter
+        .as_mut()
+        .map(WebProtocolAdapter::take_editor_messages)
+        .unwrap_or_default();
     let region_sizes = runtime
         .adapter
         .as_mut()
@@ -315,6 +322,9 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
     }
     for message in client_messages {
         runtime.instances.client_message(message);
+    }
+    for message in editor_messages {
+        runtime.instances.editor_message(message);
     }
     runtime.instances.set_region_sizes(region_sizes);
 }

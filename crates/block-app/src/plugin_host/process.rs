@@ -39,6 +39,8 @@ pub(super) struct Process {
     #[cfg(target_os = "windows")]
     clients: Receiver<block_plugin_api::TunnelMessage>,
     #[cfg(target_os = "windows")]
+    editors: Receiver<block_plugin_api::EditorMessage>,
+    #[cfg(target_os = "windows")]
     sizes: Receiver<Vec<block_plugin_api::RegionSize>>,
 }
 
@@ -53,6 +55,8 @@ impl Process {
         let (layout_sender, layouts) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (client_sender, clients) = mpsc::channel();
+        #[cfg(target_os = "windows")]
+        let (editor_sender, editors) = mpsc::channel();
         #[cfg(target_os = "windows")]
         let (size_sender, sizes) = mpsc::channel();
         thread::spawn(move || {
@@ -92,6 +96,7 @@ impl Process {
                         &surface_sender,
                         &layout_sender,
                         &client_sender,
+                        &editor_sender,
                         &size_sender,
                     );
                     #[cfg(not(target_os = "windows"))]
@@ -114,6 +119,8 @@ impl Process {
             layouts,
             #[cfg(target_os = "windows")]
             clients,
+            #[cfg(target_os = "windows")]
+            editors,
             #[cfg(target_os = "windows")]
             sizes,
         }
@@ -161,6 +168,11 @@ impl Process {
     }
 
     #[cfg(target_os = "windows")]
+    pub(super) fn editor_messages(&self) -> Vec<block_plugin_api::EditorMessage> {
+        self.editors.try_iter().collect()
+    }
+
+    #[cfg(target_os = "windows")]
     pub(super) fn region_sizes(&self) -> Vec<block_plugin_api::RegionSize> {
         self.sizes.try_iter().flatten().collect()
     }
@@ -176,6 +188,7 @@ fn drive_windows(
     surfaces: &Sender<SurfaceEvent>,
     layouts: &Sender<block_plugin_api::ScreenLayout>,
     clients: &Sender<block_plugin_api::TunnelMessage>,
+    editors: &Sender<block_plugin_api::EditorMessage>,
     sizes: &Sender<Vec<block_plugin_api::RegionSize>>,
 ) -> io::Result<()> {
     use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
@@ -256,6 +269,9 @@ fn drive_windows(
                 Message::ShutdownAcknowledged => return Ok(()),
                 Message::Client(message) => {
                     clients.send(message).ok();
+                }
+                Message::Editor(message) => {
+                    editors.send(message).ok();
                 }
                 Message::RegionSizes(message) => {
                     sizes.send(message).ok();

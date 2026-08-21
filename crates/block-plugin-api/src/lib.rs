@@ -25,7 +25,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
@@ -141,6 +141,9 @@ pub struct PluginManifest {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CreationMode {
     Immediate,
+    /// The block is only ever made by something else, so the host offers no
+    /// way to create one.
+    None,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,6 +247,13 @@ pub enum EditorMessage {
     },
     Close {
         instance: EditorInstanceId,
+    },
+    /// An editor instance asking the host to open another block in its own
+    /// tab, the way a link inside the editor would.
+    OpenBlock {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        block_type: [u8; 16],
     },
     Acknowledged {
         instance: EditorInstanceId,

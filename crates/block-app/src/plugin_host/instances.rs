@@ -23,6 +23,7 @@ struct Instance {
     tunnel: Tunnel,
     screens: HashMap<EditorRegion, Screen>,
     opened: bool,
+    opens: Vec<(Uuid, Uuid)>,
 }
 
 struct Screen {
@@ -70,6 +71,7 @@ impl Instances {
                 tunnel,
                 screens: HashMap::new(),
                 opened: false,
+                opens: Vec::new(),
             }
         });
         let next_screen = &mut self.next_screen;
@@ -190,6 +192,34 @@ impl Instances {
             }
         }
         messages
+    }
+
+    /// Records an instance's request to have another block opened, to be
+    /// picked up by the editor the next time it draws.
+    pub(super) fn editor_message(&mut self, message: EditorMessage) {
+        let EditorMessage::OpenBlock {
+            instance,
+            block_id,
+            block_type,
+        } = message
+        else {
+            return;
+        };
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return;
+        };
+        entry
+            .opens
+            .push((Uuid::from_bytes(block_id), Uuid::from_bytes(block_type)));
+    }
+
+    pub(super) fn take_open(&mut self, instance: EditorInstanceId) -> Option<(Uuid, Uuid)> {
+        let entry = self.entries.get_mut(&instance)?;
+        if entry.opens.is_empty() {
+            None
+        } else {
+            Some(entry.opens.remove(0))
+        }
     }
 
     /// Forwards a plugin's client message to the server over the host's own

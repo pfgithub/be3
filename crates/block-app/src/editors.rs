@@ -1441,11 +1441,16 @@ impl EditorRegistry {
             block_type: <P::Block as Block>::TYPE_ID,
             display_name,
             icon: P::ICON,
-            create: Some(CreateBlock::Immediate(|client| {
-                Box::new(plugin::PluginEditor::<P>::new(
-                    client.create_block(P::Block::default()),
-                ))
-            })),
+            create: match manifest.creation {
+                block_plugin_api::CreationMode::Immediate => {
+                    Some(CreateBlock::Immediate(|client| {
+                        Box::new(plugin::PluginEditor::<P>::new(
+                            client.create_block(P::Block::default()),
+                        ))
+                    }))
+                }
+                block_plugin_api::CreationMode::None => None,
+            },
             open: |client, id| {
                 Box::new(plugin::PluginEditor::<P>::new(
                     client.get_block::<P::Block>(id),

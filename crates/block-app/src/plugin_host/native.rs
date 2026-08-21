@@ -32,7 +32,7 @@ pub(crate) fn editor_ui(
     instance: EditorInstanceId,
     region: EditorRegion,
     size: egui::Vec2,
-) {
+) -> Option<(Uuid, Uuid)> {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if !host.presenter_available {
@@ -40,14 +40,14 @@ pub(crate) fn editor_ui(
                 egui::Color32::RED,
                 "Windows plugins require the D3D12 renderer.",
             );
-            return;
+            return None;
         }
         let Some(surface) = host.surface_for(&plugin.identity.id) else {
             ui.colored_label(
                 egui::Color32::RED,
                 "Too many plugin runtimes are already presenting.",
             );
-            return;
+            return None;
         };
         let pass = ui.ctx().cumulative_pass_nr();
         let runtime = host
@@ -83,8 +83,9 @@ pub(crate) fn editor_ui(
             input.update(ui, &response, screen)
         });
         runtime.send(messages);
+        let open_request = runtime.instances.take_open(instance);
         let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen) else {
-            return;
+            return open_request;
         };
         let frame = runtime
             .pending_frame
@@ -98,7 +99,8 @@ pub(crate) fn editor_ui(
                 region: atlas_region,
             },
         ));
-    });
+        open_request
+    })
 }
 
 pub(crate) fn region_size(
@@ -246,9 +248,13 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
         runtime.pending_frame = Some(WindowsFrame::Events(frames));
     }
     let messages = process.client_messages();
+    let editor_messages = process.editor_messages();
     let sizes = process.region_sizes();
     for message in messages {
         runtime.instances.client_message(message);
+    }
+    for message in editor_messages {
+        runtime.instances.editor_message(message);
     }
     runtime.instances.set_region_sizes(sizes);
 }

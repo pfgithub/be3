@@ -49,6 +49,7 @@ pub(super) struct WebProtocolAdapter {
     canvas_id: String,
     session: HostSession,
     client_messages: Vec<TunnelMessage>,
+    editor_messages: Vec<EditorMessage>,
     layout: Option<ScreenLayout>,
     region_sizes: Vec<RegionSize>,
 }
@@ -73,6 +74,7 @@ impl WebProtocolAdapter {
             canvas_id,
             session,
             client_messages: Vec::new(),
+            editor_messages: Vec::new(),
             layout: None,
             region_sizes: Vec::new(),
         };
@@ -104,6 +106,10 @@ impl WebProtocolAdapter {
 
     pub(super) fn take_client_messages(&mut self) -> Vec<TunnelMessage> {
         std::mem::take(&mut self.client_messages)
+    }
+
+    pub(super) fn take_editor_messages(&mut self) -> Vec<EditorMessage> {
+        std::mem::take(&mut self.editor_messages)
     }
 
     pub(super) fn take_region_sizes(&mut self) -> Vec<RegionSize> {
@@ -142,6 +148,9 @@ impl WebProtocolAdapter {
                 Message::Layout(layout) => self.layout = Some(layout),
                 Message::RegionSizes(sizes) => self.region_sizes.extend(sizes),
                 Message::Editor(EditorMessage::Acknowledged { .. }) => {}
+                Message::Editor(message @ EditorMessage::OpenBlock { .. }) => {
+                    self.editor_messages.push(message);
+                }
                 message => self.session.receive(message, now()),
             }
         }

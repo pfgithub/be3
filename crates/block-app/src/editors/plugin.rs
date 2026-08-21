@@ -63,12 +63,12 @@ impl<P: PluginPackage> PluginEditor<P> {
         editors: &mut EditorAccess<'_>,
         region: EditorRegion,
         size: egui::Vec2,
-    ) {
+    ) -> Option<EditorAction> {
         if !self.has_region(region) {
-            return;
+            return None;
         }
         self.context = Some(ui.ctx().clone());
-        crate::plugin_host::editor_ui(
+        let (id, block_type) = crate::plugin_host::editor_ui(
             ui,
             &self.plugin,
             editors.client_handle(),
@@ -77,7 +77,8 @@ impl<P: PluginPackage> PluginEditor<P> {
             self.instance,
             region,
             size,
-        );
+        )?;
+        Some(EditorAction::OpenBlock { id, block_type })
     }
 
     fn close(&mut self) {
@@ -134,8 +135,7 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
         )
         .map_or_else(|| toolbar_height(ui), |size| size.y.max(1.0));
         let size = egui::vec2(ui.available_width(), height);
-        self.region_ui(ui, editors, EditorRegion::Toolbar, size);
-        None
+        self.region_ui(ui, editors, EditorRegion::Toolbar, size)
     }
 
     fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
@@ -148,8 +148,7 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::LeftSidebar, size);
-        None
+        self.region_ui(ui, editors, EditorRegion::LeftSidebar, size)
     }
 
     fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
@@ -162,8 +161,7 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::RightSidebar, size);
-        None
+        self.region_ui(ui, editors, EditorRegion::RightSidebar, size)
     }
 
     fn direct_editor_ui(
@@ -174,8 +172,7 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::Main, size);
-        None
+        self.region_ui(ui, editors, EditorRegion::Main, size)
     }
 
     fn tab_closed(&mut self) {

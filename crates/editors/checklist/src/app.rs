@@ -74,7 +74,12 @@ impl ChecklistApp {
 }
 
 impl block_editor_plugin::App for ChecklistApp {
-    fn connect(&mut self, client: block_client::BlockClient, block_id: uuid::Uuid) {
+    fn connect(
+        &mut self,
+        _host: block_editor_plugin::EditorHost,
+        client: block_client::BlockClient,
+        block_id: uuid::Uuid,
+    ) {
         self.block = Some(client.get_block(block_id));
     }
 
