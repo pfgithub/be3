@@ -13,6 +13,7 @@ use std::sync::{
 pub(super) mod checklist;
 pub(super) mod counter;
 pub(super) mod hotbar;
+pub(super) mod workspace_index;
 
 use super::{
     BlockEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,

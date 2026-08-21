@@ -1,0 +1,21 @@
+[package]
+name = "workspace_index"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "workspace_index-host"
+path = "src/main.rs"
+
+[dependencies]
+block = { path = "../../block" }
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
+uuid = "1"
+
+[lints]
+workspace = true

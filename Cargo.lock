@@ -10813,6 +10813,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "workspace_index"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "uuid",
+]
+
+[[package]]
 name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

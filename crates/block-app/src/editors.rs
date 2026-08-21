@@ -26,7 +26,6 @@ mod unsupported;
 mod version_control_data;
 mod version_control_worktree;
 mod video;
-mod workspace_index;
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -1236,7 +1235,7 @@ impl EditorRegistry {
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<video::VideoEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
-        registry.register_creatable::<workspace_index::WorkspaceIndexEditor>();
+        registry.register_plugin::<plugin::workspace_index::WorkspaceIndexPlugin>();
         registry.plugin_block_types =
             Arc::new(plugin::block_type_descriptors(registry.block_types()));
         registry

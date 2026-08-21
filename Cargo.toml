@@ -18,6 +18,7 @@ members = [
     "crates/editors/checklist",
     "crates/editors/counter",
     "crates/editors/hotbar",
+    "crates/editors/workspace_index",
     "crates/block-editor-plugin",
     "crates/block-plugin-api",
     "crates/gpui-demo",
