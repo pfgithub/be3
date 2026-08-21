@@ -318,6 +318,19 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         accepted: bool,
     },
+    /// An instance asking the host to choose a file for it. Only the host
+    /// knows how a file is chosen on the platform it runs on.
+    PickFile {
+        instance: EditorInstanceId,
+        request_id: u64,
+        filter: FileFilter,
+    },
+    /// What the host's file picker answered a `PickFile` request with.
+    FilePicked {
+        instance: EditorInstanceId,
+        request_id: u64,
+        pick: FilePick,
+    },
     /// The size an instance would like to be given wherever the host embeds
     /// it, in logical points.
     IntrinsicSize {
@@ -334,6 +347,25 @@ pub enum EditorMessage {
         request_id: Option<u64>,
         message: String,
     },
+}
+
+/// What an instance offers the user to choose from. Each platform reads the
+/// part of it that its own picker can use.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileFilter {
+    pub name: String,
+    pub default_file_name: String,
+    pub extensions: Vec<String>,
+    pub mime_types: Vec<String>,
+}
+
+/// How a file request ended: a file the host read, a picker the user closed,
+/// or a file the host could not read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FilePick {
+    Chosen { name: String, data: Vec<u8> },
+    Cancelled,
+    Failed(String),
 }
 
 /// A block-client frame tunnelled between an editor instance's client and the
@@ -665,6 +697,18 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
 fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
     match message {
         EditorMessage::Failure { message, .. } => string(message),
+        EditorMessage::PickFile { filter, .. } => {
+            string(&filter.name)?;
+            string(&filter.default_file_name)?;
+            collection(filter.extensions.len())?;
+            collection(filter.mime_types.len())?;
+            strings(filter.extensions.iter().chain(&filter.mime_types))
+        }
+        EditorMessage::FilePicked { pick, .. } => match pick {
+            FilePick::Chosen { name, .. } => string(name),
+            FilePick::Failed(message) => string(message),
+            FilePick::Cancelled => Ok(()),
+        },
         _ => Ok(()),
     }
 }

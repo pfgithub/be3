@@ -79,7 +79,7 @@ fn show(filter: &FileFilter, sender: Sender<PickResult>) -> Result<(), String> {
 /// The `accept` attribute takes MIME types and dotted extensions alike, and
 /// browsers differ in which they honour, so it is given both.
 fn accept(filter: &FileFilter) -> String {
-    let mime_types = filter.mime_types.iter().map(|mime| (*mime).to_owned());
+    let mime_types = filter.mime_types.iter().cloned();
     let extensions = filter.extensions.iter().map(|end| format!(".{end}"));
     mime_types.chain(extensions).collect::<Vec<_>>().join(",")
 }

@@ -36,6 +36,12 @@ An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a
 request for a block the host cannot open is discarded.
 
+An editor instance may ask the host to choose a file for it, which only the
+host can do on every platform the app runs on. The request carries the filter
+the picker offers and is answered exactly once, with the file the host read,
+the picker the user closed, or why the file could not be read. Requests are
+identified per instance and may be outstanding together.
+
 The host describes its registered block types once per plugin runtime, before
 the first editor instance is opened, so an editor can name and illustrate
 blocks it only holds a reference to. Each description carries the block type,

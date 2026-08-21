@@ -132,7 +132,8 @@ impl ClientSession {
                 State::Running,
                 Message::Editor(
                     block_plugin_api::EditorMessage::DragOver { instance, .. }
-                    | block_plugin_api::EditorMessage::DragLeft { instance },
+                    | block_plugin_api::EditorMessage::DragLeft { instance }
+                    | block_plugin_api::EditorMessage::FilePicked { instance, .. },
                 ),
             ) if self.instances.contains(&instance) => Ok(Vec::new()),
             (State::Running, Message::Ping { nonce }) => Ok(vec![Message::Pong { nonce }]),

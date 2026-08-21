@@ -1,13 +1,14 @@
 use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
-    BlockTypeDescriptor, EditorInstanceId, EditorMessage, EditorRegion, Message, RegionSize,
-    ScreenId, ScreenRequest, ScreenSet, TunnelMessage,
+    BlockTypeDescriptor, EditorInstanceId, EditorMessage, EditorRegion, FilePick, Message,
+    RegionSize, ScreenId, ScreenRequest, ScreenSet, TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
 use super::input::{viewport_metrics, BlockDragEvent, InputAdapter};
+use crate::platform::{FileFilter, FilePicker};
 
 #[derive(Default)]
 pub(super) struct Instances {
@@ -19,6 +20,7 @@ pub(super) struct Instances {
 }
 
 struct Instance {
+    context: egui::Context,
     client: Arc<BlockClient>,
     block_id: Uuid,
     block_type: Uuid,
@@ -28,6 +30,13 @@ struct Instance {
     opens: Vec<(Uuid, Uuid)>,
     drag_accepted: bool,
     intrinsic: Option<egui::Vec2>,
+    picks: Vec<PendingPick>,
+}
+
+/// A file an instance asked for, being chosen in the host's own picker.
+struct PendingPick {
+    request_id: u64,
+    picker: FilePicker,
 }
 
 struct Screen {
@@ -74,6 +83,7 @@ impl Instances {
                 move || context.request_repaint()
             });
             Instance {
+                context: context.clone(),
                 client,
                 block_id,
                 block_type,
@@ -83,6 +93,7 @@ impl Instances {
                 opens: Vec::new(),
                 drag_accepted: false,
                 intrinsic: None,
+                picks: Vec::new(),
             }
         });
         let next_screen = &mut self.next_screen;
@@ -257,6 +268,26 @@ impl Instances {
                     payload,
                 }));
             }
+            let context = entry.context.clone();
+            let mut picks = std::mem::take(&mut entry.picks);
+            picks.retain_mut(|pending| {
+                let pick = match pending.picker.poll(&context) {
+                    Some(Ok(file)) => FilePick::Chosen {
+                        name: file.name,
+                        data: file.data,
+                    },
+                    Some(Err(error)) => FilePick::Failed(error),
+                    None if pending.picker.is_open() => return true,
+                    None => FilePick::Cancelled,
+                };
+                messages.push(Message::Editor(EditorMessage::FilePicked {
+                    instance,
+                    request_id: pending.request_id,
+                    pick,
+                }));
+                false
+            });
+            self.entries.get_mut(&instance).unwrap().picks = picks;
         }
         messages
     }
@@ -279,6 +310,17 @@ impl Instances {
             EditorMessage::DragAccepted { instance, accepted } => {
                 if let Some(entry) = self.entries.get_mut(&instance) {
                     entry.drag_accepted = accepted;
+                }
+            }
+            EditorMessage::PickFile {
+                instance,
+                request_id,
+                filter,
+            } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    let mut picker = FilePicker::default();
+                    picker.open(&entry.context, &host_filter(filter));
+                    entry.picks.push(PendingPick { request_id, picker });
                 }
             }
             EditorMessage::IntrinsicSize {
@@ -313,5 +355,15 @@ impl Instances {
             return;
         };
         entry.tunnel.send(payload);
+    }
+}
+
+/// The filter an instance asked for, as the host's own picker takes it.
+fn host_filter(filter: block_plugin_api::FileFilter) -> FileFilter {
+    FileFilter {
+        name: filter.name,
+        default_file_name: filter.default_file_name,
+        extensions: filter.extensions,
+        mime_types: filter.mime_types,
     }
 }

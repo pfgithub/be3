@@ -1,7 +1,7 @@
 use block_client::TunnelCarrier;
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, EditorRegion, InputEvent, Message, PointerButton, RegionSize,
-    ScreenPlacement, TunnelMessage, WheelUnit,
+    EditorInstanceId, EditorMessage, EditorRegion, FilePick, InputEvent, Message, PointerButton,
+    RegionSize, ScreenPlacement, TunnelMessage, WheelUnit,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -116,6 +116,13 @@ impl EguiSession {
                 }));
             }
         }
+        for (request_id, filter) in self.host.take_picks() {
+            messages.push(Message::Editor(EditorMessage::PickFile {
+                instance,
+                request_id,
+                filter,
+            }));
+        }
         for (block_id, block_type) in self.host.take_opens() {
             messages.push(Message::Editor(EditorMessage::OpenBlock {
                 instance,
@@ -160,6 +167,10 @@ impl EguiSession {
             return;
         };
         state.used = Some((content.max - origin).max(egui::Vec2::ZERO));
+    }
+
+    pub(crate) fn file_picked(&self, request_id: u64, pick: FilePick) {
+        self.host.set_pick(request_id, pick);
     }
 
     pub(crate) fn client_message(&mut self, message: &TunnelMessage) {

@@ -110,6 +110,15 @@ impl Screens {
                     )));
                 }
             }
+            Message::Editor(EditorMessage::FilePicked {
+                instance,
+                request_id,
+                pick,
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.file_picked(*request_id, pick.clone());
+                }
+            }
             Message::Editor(EditorMessage::DragLeft { instance }) => {
                 if let Some(session) = self.sessions.get_mut(instance) {
                     session.set_drag(None);

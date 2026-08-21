@@ -25,12 +25,9 @@ use pdfium::spawn_render_job;
 #[cfg(any(target_os = "android", target_arch = "wasm32"))]
 use unsupported::spawn_render_job;
 
-const PDF_FILTER: FileFilter = FileFilter {
-    name: "PDF",
-    default_file_name: "Document.pdf",
-    extensions: &["pdf"],
-    mime_types: &["application/pdf"],
-};
+fn pdf_filter() -> FileFilter {
+    FileFilter::new("PDF", "Document.pdf", &["pdf"], &["application/pdf"])
+}
 
 const DEFAULT_PAGE_SIZE: Vec2 = egui::vec2(612.0, 792.0);
 const DETAIL_MAX_DIM: f32 = 4096.0;
@@ -84,7 +81,7 @@ impl CreationOptions for ChosenPdf {
                 .add_enabled(!self.picker.is_open(), egui::Button::new("Choose file..."))
                 .clicked()
             {
-                self.picker.open(ui.ctx(), &PDF_FILTER);
+                self.picker.open(ui.ctx(), &pdf_filter());
             }
             match &self.pdf {
                 Some(pdf) => ui.label(pdf.source_name()),
@@ -555,7 +552,7 @@ impl BlockEditor for PdfEditor {
             .add_enabled(!self.picker.is_open(), egui::Button::new("Replace PDF..."))
             .clicked()
         {
-            self.picker.open(ui.ctx(), &PDF_FILTER);
+            self.picker.open(ui.ctx(), &pdf_filter());
         }
         if let Some(error) = &self.import_error {
             ui.colored_label(ui.visuals().error_fg_color, error);

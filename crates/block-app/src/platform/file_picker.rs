@@ -35,17 +35,34 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// What a picker offers to choose from. Each platform reads the part of this it
 /// can use: a desktop dialog filters by extension, Android matches MIME types,
 /// and a browser accepts both.
+#[derive(Clone, Default)]
 pub(crate) struct FileFilter {
     #[cfg_attr(any(target_os = "android", target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) name: &'static str,
-    pub(crate) default_file_name: &'static str,
+    pub(crate) name: String,
+    pub(crate) default_file_name: String,
     #[cfg_attr(target_os = "android", allow(dead_code))]
-    pub(crate) extensions: &'static [&'static str],
+    pub(crate) extensions: Vec<String>,
     #[cfg_attr(
         all(not(target_os = "android"), not(target_arch = "wasm32")),
         allow(dead_code)
     )]
-    pub(crate) mime_types: &'static [&'static str],
+    pub(crate) mime_types: Vec<String>,
+}
+
+impl FileFilter {
+    pub(crate) fn new(
+        name: &str,
+        default_file_name: &str,
+        extensions: &[&str],
+        mime_types: &[&str],
+    ) -> Self {
+        Self {
+            name: name.to_owned(),
+            default_file_name: default_file_name.to_owned(),
+            extensions: extensions.iter().map(|it| (*it).to_owned()).collect(),
+            mime_types: mime_types.iter().map(|it| (*it).to_owned()).collect(),
+        }
+    }
 }
 
 pub(crate) struct PickedFile {
@@ -58,13 +75,13 @@ type PickResult = Result<Option<PickedFile>, String>;
 #[derive(Default)]
 pub(crate) struct FilePicker {
     pending: Option<Receiver<PickResult>>,
-    default_file_name: &'static str,
+    default_file_name: String,
 }
 
 impl FilePicker {
-    pub(crate) fn open(&mut self, context: &egui::Context, filter: &'static FileFilter) {
+    pub(crate) fn open(&mut self, context: &egui::Context, filter: &FileFilter) {
         self.pending = Some(open(filter));
-        self.default_file_name = filter.default_file_name;
+        self.default_file_name.clone_from(&filter.default_file_name);
         context.request_repaint_after(POLL_INTERVAL);
     }
 
@@ -89,7 +106,7 @@ impl FilePicker {
         // block always gets something readable to show instead.
         if let Ok(file) = &mut file {
             if file.name.is_empty() {
-                file.name = self.default_file_name.to_owned();
+                file.name.clone_from(&self.default_file_name);
             }
         }
         Some(file)

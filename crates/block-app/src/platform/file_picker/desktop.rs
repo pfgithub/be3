@@ -14,8 +14,9 @@ pub(super) fn open(filter: &FileFilter) -> Receiver<PickResult> {
 }
 
 fn pick(filter: &FileFilter) -> PickResult {
+    let extensions: Vec<&str> = filter.extensions.iter().map(String::as_str).collect();
     let Some(path) = rfd::FileDialog::new()
-        .add_filter(filter.name, filter.extensions)
+        .add_filter(&filter.name, &extensions)
         .pick_file()
     else {
         return Ok(None);

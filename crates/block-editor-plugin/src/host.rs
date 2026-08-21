@@ -1,8 +1,11 @@
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     rc::Rc,
 };
 
+pub use block_plugin_api::FileFilter;
+use block_plugin_api::FilePick;
 use block_ui::BlockCatalog;
 use eframe::egui;
 use uuid::Uuid;
@@ -17,6 +20,12 @@ pub struct BlockDrag {
     pub dropped: bool,
 }
 
+/// A file the host's picker read for an editor instance.
+pub struct PickedFile {
+    pub name: String,
+    pub data: Vec<u8>,
+}
+
 /// An editor instance's way of asking the host for something the plugin
 /// cannot do itself. Cloning it shares the same queue, so a copy kept on a
 /// widget still reaches the instance it came from.
@@ -26,6 +35,9 @@ pub struct EditorHost {
     block_types: Rc<RefCell<Rc<BlockCatalog>>>,
     drag: Rc<Cell<Option<BlockDrag>>>,
     drag_accepted: Rc<Cell<Option<bool>>>,
+    picks: Rc<RefCell<Vec<(u64, FileFilter)>>>,
+    picked: Rc<RefCell<HashMap<u64, FilePick>>>,
+    next_pick: Rc<Cell<u64>>,
 }
 
 impl EditorHost {
@@ -50,6 +62,21 @@ impl EditorHost {
         self.drag_accepted.set(Some(accepted));
     }
 
+    /// Asks the host to choose a file, which only it can do on every platform
+    /// the app runs on. The answer arrives on a later frame, under the
+    /// request identifier this returns.
+    pub fn pick_file(&self, filter: FileFilter) -> u64 {
+        let request = self.next_pick.get() + 1;
+        self.next_pick.set(request);
+        self.picks.borrow_mut().push((request, filter));
+        request
+    }
+
+    /// Takes the host's answer to a file request, once it has one.
+    pub fn take_pick(&self, request: u64) -> Option<FilePick> {
+        self.picked.borrow_mut().remove(&request)
+    }
+
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
     pub(crate) fn take_opens(&self) -> Vec<(Uuid, Uuid)> {
         std::mem::take(&mut self.opens.borrow_mut())
@@ -68,5 +95,45 @@ impl EditorHost {
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
     pub(crate) fn take_drag_accepted(&self) -> Option<bool> {
         self.drag_accepted.take()
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    pub(crate) fn take_picks(&self) -> Vec<(u64, FileFilter)> {
+        std::mem::take(&mut self.picks.borrow_mut())
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    pub(crate) fn set_pick(&self, request: u64, pick: FilePick) {
+        self.picked.borrow_mut().insert(request, pick);
+    }
+}
+
+/// A file request kept across frames, mirroring the picker the host itself
+/// draws with: opened once, then polled until it answers. A picker the user
+/// closed answers nothing at all.
+#[derive(Default)]
+pub struct FilePicker {
+    request: Option<u64>,
+}
+
+impl FilePicker {
+    pub fn open(&mut self, host: &EditorHost, filter: FileFilter) {
+        self.request = Some(host.pick_file(filter));
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.request.is_some()
+    }
+
+    /// Returns the chosen file once the picker closes, or why it could not be
+    /// read.
+    pub fn poll(&mut self, host: &EditorHost) -> Option<Result<PickedFile, String>> {
+        let pick = host.take_pick(self.request?)?;
+        self.request = None;
+        match pick {
+            FilePick::Chosen { name, data } => Some(Ok(PickedFile { name, data })),
+            FilePick::Cancelled => None,
+            FilePick::Failed(error) => Some(Err(error)),
+        }
     }
 }

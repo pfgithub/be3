@@ -43,7 +43,7 @@ use block_client::references;
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
-    image::{create_image_block, decode as decode_image, IMAGE_FILTER},
+    image::{create_image_block, decode as decode_image, image_filter},
     name_galley, paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
     DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
     EditorAccess, EditorAction, EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING,

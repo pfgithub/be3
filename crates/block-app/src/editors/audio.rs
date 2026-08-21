@@ -20,12 +20,14 @@ use super::{
 };
 use crate::platform::{FileFilter, FilePicker, PickedFile};
 
-const AUDIO_FILTER: FileFilter = FileFilter {
-    name: "Audio",
-    default_file_name: "Audio",
-    extensions: &["mp3", "wav", "ogg", "oga", "flac", "m4a"],
-    mime_types: &["audio/*"],
-};
+fn audio_filter() -> FileFilter {
+    FileFilter::new(
+        "Audio",
+        "Audio",
+        &["mp3", "wav", "ogg", "oga", "flac", "m4a"],
+        &["audio/*"],
+    )
+}
 
 const DIRECT_EDITOR_SIZE: Vec2 = egui::vec2(320.0, 180.0);
 
@@ -75,7 +77,7 @@ impl CreationOptions for ChosenAudio {
                 .add_enabled(!self.picker.is_open(), egui::Button::new("Choose file..."))
                 .clicked()
             {
-                self.picker.open(ui.ctx(), &AUDIO_FILTER);
+                self.picker.open(ui.ctx(), &audio_filter());
             }
             match &self.audio {
                 Some(audio) => ui.label(audio.source_name()),
@@ -182,7 +184,7 @@ impl BlockEditor for AudioEditor {
             )
             .clicked()
         {
-            self.picker.open(ui.ctx(), &AUDIO_FILTER);
+            self.picker.open(ui.ctx(), &audio_filter());
         }
         if let Some(error) = &self.import_error {
             ui.colored_label(ui.visuals().error_fg_color, error);

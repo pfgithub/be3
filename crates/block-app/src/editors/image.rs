@@ -13,14 +13,16 @@ use super::{
 };
 use crate::platform::{FileFilter, FilePicker, PickedFile};
 
-pub(crate) const IMAGE_FILTER: FileFilter = FileFilter {
-    name: "Images",
-    default_file_name: "Image",
-    extensions: &[
-        "bmp", "gif", "ico", "jpg", "jpeg", "png", "pnm", "tga", "tif", "tiff", "webp",
-    ],
-    mime_types: &["image/*"],
-};
+pub(crate) fn image_filter() -> FileFilter {
+    FileFilter::new(
+        "Images",
+        "Image",
+        &[
+            "bmp", "gif", "ico", "jpg", "jpeg", "png", "pnm", "tga", "tif", "tiff", "webp",
+        ],
+        &["image/*"],
+    )
+}
 
 const DIRECT_EDITOR_LONG_SIDE: f32 = 1024.0;
 const DIRECT_EDITOR_SHORT_SIDE: f32 = 24.0;
@@ -71,7 +73,7 @@ impl CreationOptions for ChosenImage {
                 .add_enabled(!self.picker.is_open(), egui::Button::new("Choose file..."))
                 .clicked()
             {
-                self.picker.open(ui.ctx(), &IMAGE_FILTER);
+                self.picker.open(ui.ctx(), &image_filter());
             }
             match &self.image {
                 Some(image) => ui.label(image.source_name()),
@@ -264,7 +266,7 @@ impl BlockEditor for ImageEditor {
             )
             .clicked()
         {
-            self.picker.open(ui.ctx(), &IMAGE_FILTER);
+            self.picker.open(ui.ctx(), &image_filter());
         }
         if let Some(error) = &self.import_error {
             ui.colored_label(ui.visuals().error_fg_color, error);

@@ -20,7 +20,7 @@ mod windows_surface;
 
 pub use block_plugin_api::EditorRegion;
 pub use block_ui;
-pub use host::{BlockDrag, EditorHost};
+pub use host::{BlockDrag, EditorHost, FileFilter, FilePicker, PickedFile};
 
 pub trait App: Default + 'static {
     fn connect(

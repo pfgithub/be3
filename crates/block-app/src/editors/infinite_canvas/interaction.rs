@@ -641,7 +641,7 @@ impl InfiniteCanvasEditor {
                     }
                     if ui.button("Image…").clicked() {
                         self.pending_image_center = self.context_menu_position;
-                        self.image_picker.open(ui.ctx(), &IMAGE_FILTER);
+                        self.image_picker.open(ui.ctx(), &image_filter());
                         ui.close();
                     }
                     if ui.button("Block…").clicked() {
