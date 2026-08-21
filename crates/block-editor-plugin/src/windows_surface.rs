@@ -1,6 +1,5 @@
-use block_plugin_api::{FrameReady, Message, ScreenId, ScreenLayout, WindowsSurfaceDescriptor};
-use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
-use std::collections::HashMap;
+use block_plugin_api::{FrameReady, Message, ScreenLayout, WindowsSurfaceDescriptor};
+use eframe::egui_wgpu::wgpu;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::time::Duration;
 use windows::Win32::{
@@ -17,16 +16,15 @@ use windows::Win32::{
     },
 };
 
-struct Pane {
-    context: egui::Context,
-    renderer: egui_wgpu::Renderer,
-}
+use crate::panes::Panes;
+
+const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 
 pub struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
     texture: wgpu::Texture,
-    panes: HashMap<ScreenId, Pane>,
+    panes: Panes,
     fence: ID3D12Fence,
     resource_handle: OwnedHandle,
     fence_handle: OwnedHandle,
@@ -70,7 +68,7 @@ impl Surface {
             device,
             queue,
             texture,
-            panes: HashMap::new(),
+            panes: Panes::new(TARGET_FORMAT, None),
             fence,
             resource_handle,
             fence_handle,
@@ -140,88 +138,17 @@ impl Surface {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let mut commands = Vec::new();
-        let mut cleared = false;
-        let mut freed = Vec::new();
-        let mut repaint = Duration::MAX;
-        let placements = self.layout.screens.clone();
-        for placement in &placements {
-            let Some(session) = screens.session(placement.instance) else {
-                continue;
-            };
-            let pane = self.panes.entry(placement.screen).or_insert_with(|| Pane {
-                context: {
-                    let context = egui::Context::default();
-                    egui_material_icons::initialize(&context);
-                    context
-                },
-                renderer: egui_wgpu::Renderer::new(
-                    &self.device,
-                    wgpu::TextureFormat::Bgra8Unorm,
-                    egui_wgpu::RendererOptions::default(),
-                ),
-            });
-            let output = session.run(placement.region, &pane.context, phase);
-            repaint = repaint.min(repaint_delay(&output));
-            let scale = session.scale_factor(placement.region);
-            let paint_jobs = pane.context.tessellate(output.shapes, scale);
-            for (id, delta) in &output.textures_delta.set {
-                pane.renderer
-                    .update_texture(&self.device, &self.queue, *id, delta);
-            }
-            let screen = egui_wgpu::ScreenDescriptor {
-                size_in_pixels: [self.layout.width, self.layout.height],
-                pixels_per_point: scale,
-            };
-            commands.extend(pane.renderer.update_buffers(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                &paint_jobs,
-                &screen,
-            ));
-            {
-                let load = if cleared {
-                    wgpu::LoadOp::Load
-                } else {
-                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                };
-                cleared = true;
-                let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("plugin pane"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pane.renderer
-                    .render(&mut pass.forget_lifetime(), &paint_jobs, &screen);
-            }
-            freed.push((placement.screen, output.textures_delta.free));
-        }
-        self.panes.retain(|screen, _| {
-            placements
-                .iter()
-                .any(|placement| placement.screen == *screen)
-        });
+        let painted = self.panes.paint(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &view,
+            &self.layout,
+            screens,
+            phase,
+        );
         self.queue
-            .submit(commands.into_iter().chain([encoder.finish()]));
-        for (screen, textures) in freed {
-            if let Some(pane) = self.panes.get_mut(&screen) {
-                for id in &textures {
-                    pane.renderer.free_texture(id);
-                }
-            }
-        }
+            .submit(painted.commands.into_iter().chain([encoder.finish()]));
         self.fence_value += 1;
         let hal_queue = unsafe { self.queue.as_hal::<wgpu_hal::api::Dx12>() }
             .ok_or_else(|| "the plugin queue is not D3D12".to_owned())?;
@@ -232,20 +159,12 @@ impl Surface {
                 generation: self.generation,
                 damage: Vec::new(),
                 synchronization_value: self.fence_value,
+                repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
                 attachments: Vec::new(),
             })],
-            (repaint < Duration::MAX).then(|| repaint.max(MINIMUM_FRAME_INTERVAL)),
+            painted.repaint,
         ))
     }
-}
-
-const MINIMUM_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
-
-fn repaint_delay(output: &egui::FullOutput) -> Duration {
-    output
-        .viewport_output
-        .get(&egui::ViewportId::ROOT)
-        .map_or(Duration::MAX, |viewport| viewport.repaint_delay)
 }
 
 fn shared_texture(
@@ -302,7 +221,7 @@ fn shared_texture(
     let hal_texture = unsafe {
         wgpu_hal::dx12::Device::texture_from_raw(
             resource,
-            wgpu::TextureFormat::Bgra8Unorm,
+            TARGET_FORMAT,
             wgpu::TextureDimension::D2,
             size,
             1,
@@ -318,7 +237,7 @@ fn shared_texture(
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Bgra8Unorm,
+                format: TARGET_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],

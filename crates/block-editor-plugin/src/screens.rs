@@ -89,11 +89,6 @@ impl Screens {
         messages
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn placements(&self) -> Vec<block_plugin_api::ScreenPlacement> {
-        self.layout.screens.clone()
-    }
-
     pub(crate) fn session(&mut self, instance: EditorInstanceId) -> Option<&mut EguiSession> {
         self.sessions.get_mut(&instance)
     }

@@ -45,6 +45,7 @@ impl State {
 
 struct Runtime {
     surface: u32,
+    plugin_id: String,
     canvas_id: String,
     url: String,
     open: bool,
@@ -56,12 +57,17 @@ struct Runtime {
     layout: ScreenLayout,
     sent: Vec<block_plugin_api::ScreenRequest>,
     pass: u64,
+    context: Option<egui::Context>,
+    dirty: bool,
+    rendered_pass: u64,
+    repaint_at: Option<f64>,
 }
 
 impl Runtime {
     fn new(plugin: &PluginManifest, surface: u32) -> Self {
         Self {
             surface,
+            plugin_id: plugin.identity.id.clone(),
             canvas_id: format!("plugin-canvas-{}", plugin.identity.id),
             url: plugin.entry_points.web.clone().unwrap_or_default(),
             open: false,
@@ -73,6 +79,10 @@ impl Runtime {
             layout: ScreenLayout::default(),
             sent: Vec::new(),
             pass: 0,
+            context: None,
+            dirty: false,
+            rendered_pass: u64::MAX,
+            repaint_at: None,
         }
     }
 
@@ -83,9 +93,35 @@ impl Runtime {
         let Some(adapter) = &mut self.adapter else {
             return;
         };
+        self.dirty = true;
         if let Err(error) = adapter.send(messages) {
             self.error = Some(error);
         }
+    }
+
+    fn take_output(&mut self) -> bool {
+        let Some(adapter) = &mut self.adapter else {
+            return false;
+        };
+        let client_messages = adapter.take_client_messages();
+        let editor_messages = adapter.take_editor_messages();
+        let region_sizes = adapter.take_region_sizes();
+        let layout = adapter.take_layout();
+        let received = !client_messages.is_empty()
+            || !editor_messages.is_empty()
+            || !region_sizes.is_empty()
+            || layout.is_some();
+        if let Some(layout) = layout {
+            self.layout = layout;
+        }
+        for message in client_messages {
+            self.instances.client_message(message);
+        }
+        for message in editor_messages {
+            self.instances.editor_message(message);
+        }
+        self.instances.set_region_sizes(region_sizes);
+        received
     }
 }
 
@@ -141,6 +177,9 @@ fn open(plugin: &PluginManifest) {
                         remove_canvas(&canvas_id);
                     }
                 }
+                if let Some(context) = &runtime.context {
+                    context.request_repaint();
+                }
             });
         });
     });
@@ -173,7 +212,8 @@ pub(crate) fn editor_ui(
             );
             return None;
         };
-        begin_pass(runtime, ui.ctx().cumulative_pass_nr());
+        runtime.context = Some(ui.ctx().clone());
+        begin_pass(runtime, ui.ctx(), ui.ctx().cumulative_pass_nr());
         let presenter_error = match runtime.status.get() {
             PresenterState::Unsupported(error) | PresenterState::Failed(error) => Some(error),
             _ => None,
@@ -215,6 +255,8 @@ pub(crate) fn editor_ui(
                 command: PresenterCommand::Present(renderer::WebFrame {
                     size: atlas_size,
                     canvas_id: runtime.canvas_id.clone(),
+                    plugin_id: runtime.plugin_id.clone(),
+                    pass,
                 }),
                 status: runtime.status.clone(),
                 region: atlas_region,
@@ -276,7 +318,7 @@ pub(crate) fn close(ctx: &egui::Context, plugin_id: &str, instance: EditorInstan
     });
 }
 
-fn begin_pass(runtime: &mut Runtime, pass: u64) {
+fn begin_pass(runtime: &mut Runtime, context: &egui::Context, pass: u64) {
     if runtime.pass == pass {
         return;
     }
@@ -292,41 +334,83 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
         messages.push(runtime.instances.screen_set(screens));
     }
     messages.extend(runtime.instances.pending());
+    let awaited = messages.iter().any(|message| {
+        matches!(
+            message,
+            Message::Client(_) | Message::Editor(EditorMessage::Open { .. })
+        )
+    });
     runtime.send(messages);
     if let Some(adapter) = &mut runtime.adapter {
         if let Err(error) = adapter.poll() {
             runtime.error = Some(error);
         }
     }
-    let client_messages = runtime
-        .adapter
-        .as_mut()
-        .map(WebProtocolAdapter::take_client_messages)
-        .unwrap_or_default();
-    let editor_messages = runtime
-        .adapter
-        .as_mut()
-        .map(WebProtocolAdapter::take_editor_messages)
-        .unwrap_or_default();
-    let region_sizes = runtime
-        .adapter
-        .as_mut()
-        .map(WebProtocolAdapter::take_region_sizes)
-        .unwrap_or_default();
-    if let Some(layout) = runtime
-        .adapter
-        .as_mut()
-        .and_then(WebProtocolAdapter::take_layout)
-    {
-        runtime.layout = layout;
+    let received = runtime.take_output();
+    if awaited || received {
+        context.request_repaint();
     }
-    for message in client_messages {
-        runtime.instances.client_message(message);
-    }
-    for message in editor_messages {
-        runtime.instances.editor_message(message);
-    }
-    runtime.instances.set_region_sizes(region_sizes);
+}
+
+pub(super) fn render(plugin_id: &str, pass: u64) -> bool {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
+            return false;
+        };
+        if runtime.rendered_pass == pass || runtime.adapter.is_none() {
+            return false;
+        }
+        runtime.rendered_pass = pass;
+        let due = match runtime.repaint_at {
+            Some(deadline) if deadline <= now() + REPAINT_SLACK_MILLISECONDS => true,
+            Some(deadline) => {
+                if let Some(context) = &runtime.context {
+                    context.request_repaint_after(std::time::Duration::from_secs_f64(
+                        (deadline - now()) / 1000.0,
+                    ));
+                }
+                false
+            }
+            None => false,
+        };
+        if !runtime.dirty && !due {
+            return false;
+        }
+        runtime.dirty = false;
+        runtime.repaint_at = None;
+        let repaint = match runtime.adapter.as_mut().unwrap().render() {
+            Ok(repaint) => repaint,
+            Err(error) => {
+                runtime.error = Some(error);
+                if let Some(context) = &runtime.context {
+                    context.request_repaint();
+                }
+                return false;
+            }
+        };
+        let received = runtime.take_output();
+        let Some(context) = runtime.context.clone() else {
+            return true;
+        };
+        if received {
+            context.request_repaint();
+        }
+        if let Some(delay) = repaint {
+            runtime.repaint_at = Some(now() + delay.as_secs_f64() * 1000.0);
+            context.request_repaint_after(delay);
+        }
+        true
+    })
+}
+
+const REPAINT_SLACK_MILLISECONDS: f64 = 2.0;
+
+fn now() -> f64 {
+    web_sys::window()
+        .and_then(|window| window.performance())
+        .map(|performance| performance.now())
+        .unwrap_or_default()
 }
 
 fn create_canvas(canvas_id: &str) {

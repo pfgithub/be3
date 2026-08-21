@@ -136,7 +136,6 @@ impl EguiSession {
         }
     }
 
-    #[cfg(target_os = "windows")]
     pub(crate) fn run(
         &mut self,
         region: EditorRegion,
@@ -163,33 +162,6 @@ impl EguiSession {
         output
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn show(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
-        let rect = self.rect(region);
-        let app = &mut self.app;
-        let content = ui
-            .scope_builder(
-                egui::UiBuilder::new()
-                    .max_rect(rect)
-                    .id_salt((self.instance.0, region)),
-                |ui| app.ui(ui, region),
-            )
-            .response
-            .rect;
-        self.used(region, content);
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn append_input(&mut self, region: EditorRegion, input: &mut egui::RawInput) {
-        let Some(state) = self.regions.get_mut(&region) else {
-            return;
-        };
-        input.events.append(&mut state.input.events);
-        input.modifiers = state.input.modifiers;
-        input.focused |= state.input.focused;
-    }
-
-    #[cfg(target_os = "windows")]
     pub(crate) fn scale_factor(&self, region: EditorRegion) -> f32 {
         self.placement(region)
             .map_or(1.0, |placement| placement.scale_factor())

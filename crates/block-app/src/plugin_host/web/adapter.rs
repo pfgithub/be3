@@ -2,6 +2,7 @@ use block_plugin_api::{
     encode_frame, Capability, EditorMessage, HostSession, Message, QueueError, RegionSize,
     ScreenLayout, SessionState, SurfaceMechanism, TunnelMessage,
 };
+use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(inline_js = "
@@ -15,16 +16,28 @@ export async function web_plugin_start(url, canvasId) {
     return module.hello();
 }
 
-export function web_plugin_send(canvasId, frame) {
+export function web_plugin_send(canvasId, frames) {
     const module = plugins.get(canvasId);
     if (!module) throw new Error('the web plugin is not running');
-    return module.receive(frame);
+    const responses = [];
+    for (const frame of frames) {
+        for (const response of module.receive(frame)) {
+            responses.push(response);
+        }
+    }
+    return responses;
 }
 
 export function web_plugin_poll(canvasId) {
     const module = plugins.get(canvasId);
     if (!module) return [];
     return module.poll();
+}
+
+export function web_plugin_render(canvasId) {
+    const module = plugins.get(canvasId);
+    if (!module) return [];
+    return module.render();
 }
 
 export function web_plugin_shutdown(canvasId) {
@@ -39,9 +52,11 @@ extern "C" {
     #[wasm_bindgen(catch)]
     async fn web_plugin_start(url: &str, canvas_id: &str) -> Result<js_sys::Uint8Array, JsValue>;
     #[wasm_bindgen(catch)]
-    fn web_plugin_send(canvas_id: &str, frame: &[u8]) -> Result<js_sys::Array, JsValue>;
+    fn web_plugin_send(canvas_id: &str, frames: js_sys::Array) -> Result<js_sys::Array, JsValue>;
     #[wasm_bindgen(catch)]
     fn web_plugin_poll(canvas_id: &str) -> Result<js_sys::Array, JsValue>;
+    #[wasm_bindgen(catch)]
+    fn web_plugin_render(canvas_id: &str) -> Result<js_sys::Array, JsValue>;
     fn web_plugin_shutdown(canvas_id: &str);
 }
 
@@ -52,6 +67,7 @@ pub(super) struct WebProtocolAdapter {
     editor_messages: Vec<EditorMessage>,
     layout: Option<ScreenLayout>,
     region_sizes: Vec<RegionSize>,
+    repaint: Option<Duration>,
 }
 
 impl WebProtocolAdapter {
@@ -77,6 +93,7 @@ impl WebProtocolAdapter {
             editor_messages: Vec::new(),
             layout: None,
             region_sizes: Vec::new(),
+            repaint: None,
         };
         adapter.flush()?;
         if adapter.session.state() != &SessionState::Running {
@@ -121,6 +138,13 @@ impl WebProtocolAdapter {
         self.receive_all(&responses)
     }
 
+    pub(super) fn render(&mut self) -> Result<Option<Duration>, String> {
+        self.repaint = None;
+        let responses = web_plugin_render(&self.canvas_id).map_err(js_error)?;
+        self.receive_all(&responses)?;
+        Ok(self.repaint.take())
+    }
+
     pub(super) fn take_layout(&mut self) -> Option<ScreenLayout> {
         self.layout.take()
     }
@@ -132,12 +156,18 @@ impl WebProtocolAdapter {
     }
 
     fn flush(&mut self) -> Result<(), String> {
-        while let Some(message) = self.session.next_outbound() {
-            let frame = encode_frame(&message).map_err(|error| error.to_string())?;
-            let responses = web_plugin_send(&self.canvas_id, &frame).map_err(js_error)?;
+        loop {
+            let frames = js_sys::Array::new();
+            while let Some(message) = self.session.next_outbound() {
+                let frame = encode_frame(&message).map_err(|error| error.to_string())?;
+                frames.push(&js_sys::Uint8Array::from(frame.as_slice()).into());
+            }
+            if frames.length() == 0 {
+                return Ok(());
+            }
+            let responses = web_plugin_send(&self.canvas_id, frames).map_err(js_error)?;
             self.receive_all(&responses)?;
         }
-        Ok(())
     }
 
     fn receive_all(&mut self, responses: &js_sys::Array) -> Result<(), String> {
@@ -147,6 +177,9 @@ impl WebProtocolAdapter {
                 Message::Client(message) => self.client_messages.push(message),
                 Message::Layout(layout) => self.layout = Some(layout),
                 Message::RegionSizes(sizes) => self.region_sizes.extend(sizes),
+                Message::FrameReady(frame) => {
+                    self.repaint = frame.repaint_after_micros.map(Duration::from_micros);
+                }
                 Message::Editor(EditorMessage::Acknowledged { .. }) => {}
                 Message::Editor(message @ EditorMessage::OpenBlock { .. }) => {
                     self.editor_messages.push(message);

@@ -25,7 +25,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
@@ -462,6 +462,7 @@ pub struct FrameReady {
     pub generation: u64,
     pub damage: Vec<DamageRect>,
     pub synchronization_value: u64,
+    pub repaint_after_micros: Option<u64>,
     pub attachments: Vec<AttachmentDescriptor>,
 }
 

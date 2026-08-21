@@ -5,12 +5,16 @@ pub use egui_material_icons;
 mod egui_session;
 mod host;
 pub mod native;
+#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+mod panes;
 #[cfg(not(target_arch = "wasm32"))]
 mod runner;
 #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
 mod screens;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod web_surface;
 #[cfg(target_os = "windows")]
 mod windows_surface;
 
@@ -58,6 +62,11 @@ pub mod __private {
     #[cfg(target_arch = "wasm32")]
     pub fn poll() -> Result<js_sys::Array, wasm_bindgen::JsValue> {
         crate::web::poll()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn render() -> Result<js_sys::Array, wasm_bindgen::JsValue> {
+        crate::web::render()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -109,6 +118,15 @@ macro_rules! plugin {
             block_editor_plugin::__private::wasm_bindgen::JsValue,
         > {
             block_editor_plugin::__private::poll()
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
+        pub fn render() -> Result<
+            block_editor_plugin::__private::js_sys::Array,
+            block_editor_plugin::__private::wasm_bindgen::JsValue,
+        > {
+            block_editor_plugin::__private::render()
         }
 
         #[cfg(target_arch = "wasm32")]
