@@ -41,10 +41,10 @@ use self::tiles::{TileId, TileWorker, SOURCE_MAX_ZOOM};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     image::create_image_block,
-    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
     BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
 };
+use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
 /// Size of the whole world (the intrinsic content) at 100% viewport zoom.
 const WORLD_POINTS: f32 = 1024.0;

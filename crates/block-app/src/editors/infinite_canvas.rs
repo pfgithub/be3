@@ -38,14 +38,16 @@ use uuid::Uuid;
 
 use crate::{block_picker::BlockPicker, platform::FilePicker, presence_color_rgb};
 
+use block_client::references;
+
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     embedded_editor_ui,
     image::{create_image_block, decode as decode_image, IMAGE_FILTER},
-    name_galley, paint_name, reference_cache, BlockEditor, BlockLabel, BlockRenderContext,
-    CreatableEditor, DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
-    EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
+    name_galley, paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING,
+    EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 impl EditorKind for InfiniteCanvasEditor {
@@ -339,6 +341,6 @@ pub(super) struct InfiniteCanvasEditor {
     grouped_inspector_edit_active: bool,
     last_foreground: CanvasColor,
     last_fill: Option<CanvasColor>,
-    reference_cache: reference_cache::ReferenceResolutionCache,
-    pending_entities: reference_cache::ReferenceClassificationQueue<(Uuid, CanvasTransform)>,
+    reference_cache: references::ReferenceResolutionCache,
+    pending_entities: references::ReferenceClassificationQueue<(Uuid, CanvasTransform)>,
 }

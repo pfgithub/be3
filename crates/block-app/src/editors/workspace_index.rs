@@ -14,10 +14,10 @@ use egui_material_icons::{
 use uuid::Uuid;
 
 use super::{
-    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
     BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
     EditorAction, EditorKind, SidebarDragPayload,
 };
+use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
 const DIRECT_EDITOR_WIDTH: f32 = 400.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 24.0;

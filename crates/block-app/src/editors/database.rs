@@ -15,10 +15,10 @@ use egui_material_icons::{icons::ICON_DATABASE, MaterialIcon};
 use uuid::Uuid;
 
 use super::{
-    database_schema, reference_cache::ReferenceResolutionCache, BlockEditor, BlockLabel,
-    CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind,
+    database_schema, BlockEditor, BlockLabel, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
+use block_client::references::ReferenceResolutionCache;
 
 const DIRECT_EDITOR_WIDTH: f32 = 400.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 24.0;

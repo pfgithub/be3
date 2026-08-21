@@ -1,27 +1,64 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    future::Future,
+    sync::{
+        mpsc::{self, Receiver},
+        Arc,
+    },
+};
 
-use block_client::{
+use uuid::Uuid;
+
+use crate::{
     block_ref::BlockRef, blocks::version_control_worktree::VersionControlWorktreeMembership,
     BlockClient,
 };
-use uuid::Uuid;
 
-use crate::platform;
+/// The result of a request started with [`spawn_request`], polled from a view
+/// each frame so drawing never waits on the network.
+pub type RequestResult<T> = Receiver<T>;
+
+/// Runs `future` wherever this build runs client work — a scratch runtime on
+/// its own thread natively, a task on the event loop in the browser — and
+/// delivers its result to the returned channel.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn spawn_request<T>(future: impl Future<Output = T> + Send + 'static) -> RequestResult<T>
+where
+    T: Send + 'static,
+{
+    let (sender, receiver) = mpsc::channel();
+    crate::transport::spawn_worker(async move {
+        let _ = sender.send(future.await);
+    });
+    receiver
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn spawn_request<T>(future: impl Future<Output = T> + 'static) -> RequestResult<T>
+where
+    T: 'static,
+{
+    let (sender, receiver) = mpsc::channel();
+    crate::transport::spawn_worker(async move {
+        let _ = sender.send(future.await);
+    });
+    receiver
+}
 
 #[derive(Default)]
-pub(super) struct ReferenceResolutionCache {
+pub struct ReferenceResolutionCache {
     resolved: HashMap<BlockRef, Option<Uuid>>,
-    pending: Vec<(BlockRef, platform::RequestResult<Option<Uuid>>)>,
+    pending: Vec<(BlockRef, RequestResult<Option<Uuid>>)>,
 }
 
 impl ReferenceResolutionCache {
-    pub(super) fn peek(&self, reference: &BlockRef) -> Option<Uuid> {
+    pub fn peek(&self, reference: &BlockRef) -> Option<Uuid> {
         reference
             .as_direct()
             .or_else(|| self.resolved.get(reference).copied().flatten())
     }
 
-    pub(super) fn poll(&mut self) {
+    pub fn poll(&mut self) {
         let mut finished = Vec::new();
         self.pending
             .retain(|(reference, receiver)| match receiver.try_recv() {
@@ -37,7 +74,7 @@ impl ReferenceResolutionCache {
         }
     }
 
-    pub(super) fn resolve(
+    pub fn resolve(
         &mut self,
         client: &Arc<BlockClient>,
         referencing_id: Uuid,
@@ -55,7 +92,7 @@ impl ReferenceResolutionCache {
             .any(|(pending, _)| *pending == reference)
         {
             let client = Arc::clone(client);
-            let receiver = platform::spawn_request(async move {
+            let receiver = spawn_request(async move {
                 client
                     .resolve_reference(
                         referencing_id,
@@ -71,11 +108,11 @@ impl ReferenceResolutionCache {
 }
 
 struct PendingClassification<T> {
-    receiver: platform::RequestResult<BlockRef>,
+    receiver: RequestResult<BlockRef>,
     payload: T,
 }
 
-pub(super) struct ReferenceClassificationQueue<T> {
+pub struct ReferenceClassificationQueue<T> {
     pending: Vec<PendingClassification<T>>,
 }
 
@@ -88,7 +125,7 @@ impl<T> Default for ReferenceClassificationQueue<T> {
 }
 
 impl<T> ReferenceClassificationQueue<T> {
-    pub(super) fn push(
+    pub fn push(
         &mut self,
         client: &Arc<BlockClient>,
         referencing_id: Uuid,
@@ -96,7 +133,7 @@ impl<T> ReferenceClassificationQueue<T> {
         payload: T,
     ) {
         let client = Arc::clone(client);
-        let receiver = platform::spawn_request(async move {
+        let receiver = spawn_request(async move {
             client
                 .classify_reference(referencing_id, target_id, &VersionControlWorktreeMembership)
                 .await
@@ -105,7 +142,7 @@ impl<T> ReferenceClassificationQueue<T> {
             .push(PendingClassification { receiver, payload });
     }
 
-    pub(super) fn poll(&mut self) -> Vec<(BlockRef, T)> {
+    pub fn poll(&mut self) -> Vec<(BlockRef, T)> {
         let mut finished = Vec::new();
         let mut still_pending = Vec::new();
         for item in self.pending.drain(..) {

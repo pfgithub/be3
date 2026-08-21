@@ -17,9 +17,10 @@ use egui_material_icons::{
 use uuid::Uuid;
 
 use super::{
-    reference_cache::ReferenceResolutionCache, BlockEditor, DirectEditorCapabilities,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
+    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
+    EditorKind,
 };
+use block_client::references::ReferenceResolutionCache;
 
 const DIRECT_EDITOR_WIDTH: f32 = 460.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 28.0;

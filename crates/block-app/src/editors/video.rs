@@ -26,10 +26,10 @@ use uuid::Uuid;
 use crate::block_picker::BlockPicker;
 
 use super::{
-    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
     BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities, DirectEditorResize,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
+use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
 use self::timeline::{MAX_PIXELS_PER_FRAME, MIN_PIXELS_PER_FRAME};
 

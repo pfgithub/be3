@@ -29,10 +29,10 @@ use self::scatter::ScatterView;
 use self::spreadsheet::SpreadsheetView;
 
 use super::{
-    reference_cache::ReferenceResolutionCache, BlockEditor, BlockRenderContext, CreatableEditor,
-    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
+use block_client::references::ReferenceResolutionCache;
 
 /// The database's schema, rows, and fields, plus the view's own settings.
 struct DatabaseViewData {

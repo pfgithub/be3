@@ -21,11 +21,10 @@ use uuid::Uuid;
 
 use self::binary_addition::BinaryAdditionQuiz;
 use super::{
-    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
-    settings::RootSetting,
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    settings::RootSetting, BlockEditor, CreatableEditor, DirectEditorCapabilities,
+    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
+use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
 const DIRECT_EDITOR_WIDTH: f32 = 720.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 26.0;

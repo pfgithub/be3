@@ -34,8 +34,8 @@ impl InfiniteCanvasEditor {
             grouped_inspector_edit_active: false,
             last_foreground: CanvasEntityStyle::default().foreground,
             last_fill: CanvasEntityStyle::default().fill,
-            reference_cache: reference_cache::ReferenceResolutionCache::default(),
-            pending_entities: reference_cache::ReferenceClassificationQueue::default(),
+            reference_cache: references::ReferenceResolutionCache::default(),
+            pending_entities: references::ReferenceClassificationQueue::default(),
         }
     }
 

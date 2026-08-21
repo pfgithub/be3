@@ -32,6 +32,7 @@ pub mod blocks;
 mod crypto;
 pub mod presence;
 pub mod properties;
+pub mod references;
 mod transport;
 pub mod version_control_checkout;
 pub mod version_control_commit;

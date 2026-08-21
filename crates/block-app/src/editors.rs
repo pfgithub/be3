@@ -26,7 +26,6 @@ mod pixel_ray_tracer;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "android"))]
 mod plugin;
 mod presentation;
-mod reference_cache;
 mod scene_3d;
 pub(crate) mod settings;
 mod text;

@@ -22,12 +22,11 @@ use uuid::Uuid;
 use crate::{block_picker::BlockPicker, slide_templates::SlideTemplate};
 
 use super::{
-    fit_rect, paint_block_fallback, rect_corners,
-    reference_cache::{ReferenceClassificationQueue, ReferenceResolutionCache},
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind,
+    fit_rect, paint_block_fallback, rect_corners, BlockEditor, BlockRenderContext, CreatableEditor,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorKind,
 };
+use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
 const THUMBNAIL_SIZE: Vec2 = egui::vec2(176.0, 104.0);
