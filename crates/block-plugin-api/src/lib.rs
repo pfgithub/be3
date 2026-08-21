@@ -25,7 +25,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 11;
+pub const PROTOCOL_VERSION: u16 = 12;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -193,6 +193,9 @@ pub struct BlockTypeDescriptor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CreationMode {
     Immediate,
+    /// The block cannot be made until the editor has been asked for what goes
+    /// in it, so the host opens the editor's own creation dialog first.
+    Dialog,
     /// The block is only ever made by something else, so the host offers no
     /// way to create one.
     None,
@@ -345,6 +348,17 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         request_id: u64,
         pick: FilePick,
+    },
+    /// An instance opened as the dialog that fills in a new block, rather
+    /// than as the editor of one that exists.
+    OpenCreation {
+        instance: EditorInstanceId,
+    },
+    /// The block a creation dialog would make, as the JSON of its contents,
+    /// or nothing while it is still incomplete.
+    CreationContent {
+        instance: EditorInstanceId,
+        payload: Option<String>,
     },
     /// The shape of the block an instance is editing, for the host to hold
     /// its preview to wherever it draws one.
@@ -725,6 +739,9 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             collection(filter.mime_types.len())?;
             strings(filter.extensions.iter().chain(&filter.mime_types))
         }
+        // The contents of a block are as unbounded as they are over the
+        // tunnel, so they are not held to the string limit.
+        EditorMessage::CreationContent { .. } => Ok(()),
         EditorMessage::FilePicked { pick, .. } => match pick {
             FilePick::Chosen { name, .. } => string(name),
             FilePick::Failed(message) => string(message),

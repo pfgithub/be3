@@ -1,5 +1,5 @@
 use block::Block;
-use block_client::blocks::hotbar::Hotbar;
+use block_client::{blocks::hotbar::Hotbar, BlockClient, BlockHandle};
 use block_plugin_api::{
     ChildOperations, CreationMode, EditorCapabilities, EditorRegion, EntryPoints, InteractionMode,
     PluginIdentity, PluginManifest, ResizeMode, SurfaceMechanism,
@@ -15,6 +15,10 @@ impl PluginPackage for HotbarPlugin {
     type Block = Hotbar;
 
     const ICON: MaterialIcon = ICON_WIDGETS;
+
+    fn new_block(client: &BlockClient) -> Option<BlockHandle<Hotbar>> {
+        Some(client.create_block(Hotbar::default()))
+    }
 
     fn manifest() -> Arc<PluginManifest> {
         static MANIFEST: OnceLock<Arc<PluginManifest>> = OnceLock::new();

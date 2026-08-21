@@ -56,6 +56,7 @@ fn region_screen(
 }
 
 mod block_types_round_trip;
+mod creation_messages_round_trip;
 mod drag_messages_round_trip;
 mod file_pick_messages_round_trip;
 mod frame_round_trips;

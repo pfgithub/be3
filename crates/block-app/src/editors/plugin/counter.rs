@@ -1,5 +1,5 @@
 use block::Block;
-use block_client::blocks::counter::Counter;
+use block_client::{blocks::counter::Counter, BlockClient, BlockHandle};
 use block_plugin_api::{
     ChildOperations, CreationMode, EditorCapabilities, EditorRegion, EntryPoints, InteractionMode,
     PluginIdentity, PluginManifest, ResizeMode, SurfaceMechanism,
@@ -15,6 +15,10 @@ impl PluginPackage for CounterPlugin {
     type Block = Counter;
 
     const ICON: MaterialIcon = ICON_123;
+
+    fn new_block(client: &BlockClient) -> Option<BlockHandle<Counter>> {
+        Some(client.create_block(Counter::default()))
+    }
 
     fn manifest() -> Arc<PluginManifest> {
         static MANIFEST: OnceLock<Arc<PluginManifest>> = OnceLock::new();

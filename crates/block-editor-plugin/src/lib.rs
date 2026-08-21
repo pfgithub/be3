@@ -30,6 +30,13 @@ pub trait App: Default + 'static {
         _block_id: uuid::Uuid,
     ) {
     }
+    /// Sets the app up as the dialog that fills in a new block, rather than
+    /// as the editor of one that exists. Only an editor whose manifest asks
+    /// for a creation dialog is ever connected this way.
+    fn connect_creation(&mut self, _host: EditorHost) {}
+    /// Draws the dialog that fills in a new block. What it collects is handed
+    /// to the host with `EditorHost::propose_block`.
+    fn creation_ui(&mut self, _ui: &mut egui::Ui) {}
     fn ui(&mut self, ui: &mut egui::Ui);
     /// Draws the block itself, filling whatever the host maps this region
     /// onto: a canvas, a slide, a block embedded in text. The region is

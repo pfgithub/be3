@@ -38,6 +38,8 @@ pub struct EditorHost {
     picks: Rc<RefCell<Vec<(u64, FileFilter)>>>,
     picked: Rc<RefCell<HashMap<u64, FilePick>>>,
     next_pick: Rc<Cell<u64>>,
+    proposal: Rc<RefCell<Option<String>>>,
+    proposed: Rc<Cell<bool>>,
 }
 
 impl EditorHost {
@@ -77,6 +79,27 @@ impl EditorHost {
         self.picked.borrow_mut().remove(&request)
     }
 
+    /// Offers the host the block this creation dialog would make. The host
+    /// creates it, and opens it, when the user accepts the dialog.
+    pub fn propose_block(&self, block: &impl serde::Serialize) {
+        self.set_proposal(serde_json::to_string(block).ok());
+    }
+
+    /// Withdraws the block this creation dialog was offering, leaving the
+    /// dialog incomplete.
+    pub fn withdraw_block(&self) {
+        self.set_proposal(None);
+    }
+
+    fn set_proposal(&self, payload: Option<String>) {
+        let mut proposal = self.proposal.borrow_mut();
+        if *proposal == payload {
+            return;
+        }
+        *proposal = payload;
+        self.proposed.set(true);
+    }
+
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
     pub(crate) fn take_opens(&self) -> Vec<(Uuid, Uuid)> {
         std::mem::take(&mut self.opens.borrow_mut())
@@ -105,6 +128,12 @@ impl EditorHost {
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
     pub(crate) fn set_pick(&self, request: u64, pick: FilePick) {
         self.picked.borrow_mut().insert(request, pick);
+    }
+
+    /// The block this creation dialog is offering, once it has changed.
+    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    pub(crate) fn take_proposal(&self) -> Option<Option<String>> {
+        self.proposed.take().then(|| self.proposal.borrow().clone())
     }
 }
 

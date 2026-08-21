@@ -1,5 +1,5 @@
 use block::Block;
-use block_client::blocks::workspace_index::WorkspaceIndex;
+use block_client::{blocks::workspace_index::WorkspaceIndex, BlockClient, BlockHandle};
 use block_plugin_api::{
     ChildOperations, CreationMode, EditorCapabilities, EditorRegion, EntryPoints, InteractionMode,
     PluginIdentity, PluginManifest, ResizeMode, SurfaceMechanism,
@@ -15,6 +15,10 @@ impl PluginPackage for WorkspaceIndexPlugin {
     type Block = WorkspaceIndex;
 
     const ICON: MaterialIcon = ICON_FOLDER;
+
+    fn new_block(client: &BlockClient) -> Option<BlockHandle<WorkspaceIndex>> {
+        Some(client.create_block(WorkspaceIndex::default()))
+    }
 
     fn manifest() -> Arc<PluginManifest> {
         static MANIFEST: OnceLock<Arc<PluginManifest>> = OnceLock::new();

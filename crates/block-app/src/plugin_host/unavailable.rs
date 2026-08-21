@@ -10,22 +10,12 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
     let EditorSlot {
         plugin,
         block_types,
-        client,
-        block_id,
-        block_type,
+        block,
         instance,
         region,
         size,
     } = slot;
-    let _ = (
-        block_types,
-        client,
-        block_id,
-        block_type,
-        instance,
-        region,
-        size,
-    );
+    let _ = (block_types, block, instance, region, size);
     ui.colored_label(
         egui::Color32::RED,
         format!("{} is not supported on this platform.", plugin.display_name),
@@ -56,6 +46,10 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
         opacity,
     );
     false
+}
+
+pub(crate) fn creation_content(_plugin_id: &str, _instance: EditorInstanceId) -> Option<String> {
+    None
 }
 
 pub(crate) fn aspect_ratio(_plugin_id: &str, _instance: EditorInstanceId) -> Option<f32> {

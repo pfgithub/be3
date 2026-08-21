@@ -1,5 +1,5 @@
 use block::Block;
-use block_client::blocks::checklist::Checklist;
+use block_client::{blocks::checklist::Checklist, BlockClient, BlockHandle};
 use block_plugin_api::{
     ChildOperations, CreationMode, EditorCapabilities, EditorRegion, EntryPoints, InteractionMode,
     PluginIdentity, PluginManifest, ResizeMode, SurfaceMechanism,
@@ -15,6 +15,10 @@ impl PluginPackage for ChecklistPlugin {
     type Block = Checklist;
 
     const ICON: MaterialIcon = ICON_CHECKLIST;
+
+    fn new_block(client: &BlockClient) -> Option<BlockHandle<Checklist>> {
+        Some(client.create_block(Checklist::default()))
+    }
 
     fn manifest() -> Arc<PluginManifest> {
         static MANIFEST: OnceLock<Arc<PluginManifest>> = OnceLock::new();

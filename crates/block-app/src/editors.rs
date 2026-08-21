@@ -1131,7 +1131,7 @@ pub(super) trait CreationOptions: Default {
 /// A creation dialog waiting on the user: the options being filled in, and
 /// how to turn them into an editor.
 pub(super) trait PendingCreation {
-    fn ui(&mut self, ui: &mut egui::Ui) -> bool;
+    fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> bool;
     fn create(&mut self, client: &BlockClient) -> Result<Box<dyn BlockEditor>, String>;
 }
 
@@ -1140,7 +1140,7 @@ struct EditorCreation<E: ConfigurableEditor> {
 }
 
 impl<E: ConfigurableEditor> PendingCreation for EditorCreation<E> {
-    fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+    fn ui(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) -> bool {
         self.options.ui(ui)
     }
 
@@ -1317,11 +1317,14 @@ impl EditorRegistry {
             create: match manifest.creation {
                 block_plugin_api::CreationMode::Immediate => {
                     Some(CreateBlock::Immediate(|client| {
-                        Box::new(plugin::PluginEditor::<P>::new(
-                            client.create_block(P::Block::default()),
-                        ))
+                        let block = P::new_block(client)
+                            .expect("a plugin that creates its block outright must make one");
+                        Box::new(plugin::PluginEditor::<P>::new(block))
                     }))
                 }
+                block_plugin_api::CreationMode::Dialog => Some(CreateBlock::Configured(|| {
+                    Box::new(plugin::PluginCreation::<P>::new())
+                })),
                 block_plugin_api::CreationMode::None => None,
             },
             open: |client, id| {

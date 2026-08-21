@@ -14,7 +14,7 @@ use super::{
     preview_size,
     process::{Process, SurfaceEvent},
     windows::WindowsFrame,
-    EditorSlot, PreviewSlot,
+    EditorBlock, EditorSlot, PreviewSlot,
 };
 
 thread_local! {
@@ -31,9 +31,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
     let EditorSlot {
         plugin,
         block_types,
-        client,
-        block_id,
-        block_type,
+        block,
         instance,
         region,
         size,
@@ -77,9 +75,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             instance,
             region,
             ui.ctx(),
-            client,
-            block_id,
-            block_type,
+            block,
             block_types,
             response.rect.size(),
             ui.ctx().pixels_per_point(),
@@ -147,9 +143,11 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
             instance,
             EditorRegion::Preview,
             &context,
-            client,
-            block_id,
-            block_type,
+            Some(EditorBlock {
+                client,
+                id: block_id,
+                block_type,
+            }),
             block_types,
             preview_size(rect.size(), scale_factor),
             scale_factor,
@@ -198,6 +196,18 @@ pub(crate) fn region_size(
             .get(plugin_id)?
             .instances
             .region_size(instance, region)
+    })
+}
+
+/// The block an editor's creation dialog is offering to make, as JSON.
+pub(crate) fn creation_content(plugin_id: &str, instance: EditorInstanceId) -> Option<String> {
+    HOST.with(|host| {
+        host.borrow()
+            .runtimes
+            .get(plugin_id)?
+            .instances
+            .creation_content(instance)
+            .map(str::to_owned)
     })
 }
 

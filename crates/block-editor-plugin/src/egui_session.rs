@@ -19,6 +19,7 @@ pub(crate) struct EguiSession {
     drag: Option<(EditorRegion, BlockDrag)>,
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
+    creating: bool,
 }
 
 #[derive(Default)]
@@ -31,6 +32,8 @@ struct RegionState {
 
 trait AppUi {
     fn connect(&mut self, host: EditorHost, client: block_client::BlockClient, block_id: Uuid);
+    fn connect_creation(&mut self, host: EditorHost);
+    fn creation_ui(&mut self, ui: &mut egui::Ui);
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
     fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
     fn aspect_ratio(&mut self) -> Option<f32>;
@@ -39,6 +42,14 @@ trait AppUi {
 impl<A: crate::App> AppUi for A {
     fn connect(&mut self, host: EditorHost, client: block_client::BlockClient, block_id: Uuid) {
         crate::App::connect(self, host, client, block_id);
+    }
+
+    fn connect_creation(&mut self, host: EditorHost) {
+        crate::App::connect_creation(self, host);
+    }
+
+    fn creation_ui(&mut self, ui: &mut egui::Ui) {
+        crate::App::creation_ui(self, ui);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
@@ -71,6 +82,7 @@ impl EguiSession {
             drag: None,
             intrinsic: None,
             aspect_ratio: None,
+            creating: false,
         }
     }
 
@@ -90,6 +102,16 @@ impl EguiSession {
         let client = block_client::BlockClient::tunneled(account_id, workspace_id, endpoint);
         self.app.connect(self.host.clone(), client, block_id);
         self.carrier = Some(carrier);
+    }
+
+    /// Opens the session as the dialog that fills in a new block, which has
+    /// no block of its own and so no client either.
+    pub(crate) fn connect_creation(&mut self) {
+        if self.creating {
+            return;
+        }
+        self.creating = true;
+        self.app.connect_creation(self.host.clone());
     }
 
     pub(crate) fn place(&mut self, placements: &[ScreenPlacement]) {
@@ -133,6 +155,12 @@ impl EguiSession {
                     ratio,
                 }));
             }
+        }
+        if let Some(payload) = self.host.take_proposal() {
+            messages.push(Message::Editor(EditorMessage::CreationContent {
+                instance,
+                payload,
+            }));
         }
         for (request_id, filter) in self.host.take_picks() {
             messages.push(Message::Editor(EditorMessage::PickFile {
@@ -230,10 +258,17 @@ impl EguiSession {
         } else {
             egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO)
         };
+        let creating = self.creating;
         let output = context.run_ui(input, |ui| {
-            egui::CentralPanel::default()
-                .frame(frame)
-                .show_inside(ui, |ui| app.ui(ui, region));
+            egui::CentralPanel::default().frame(frame).show_inside(ui, {
+                |ui| {
+                    if creating {
+                        app.creation_ui(ui);
+                    } else {
+                        app.ui(ui, region);
+                    }
+                }
+            });
         });
         self.host.set_drag(None);
         if delivered_drop {

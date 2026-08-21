@@ -1,5 +1,5 @@
 use block::Block;
-use block_client::BlockHandle;
+use block_client::{BlockClient, BlockHandle};
 use block_plugin_api::{
     BlockTypeDescriptor, EditorInstanceId, EditorRegion, InteractionMode, PluginManifest,
     ResizeMode,
@@ -18,17 +18,22 @@ pub(super) mod workspace_index;
 
 use super::{
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
+    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, PendingCreation,
 };
 
 /// A first-party editor package: the block type it edits, its manifest, and
 /// the app-side presentation the host keeps ownership of.
 pub(super) trait PluginPackage: 'static {
-    type Block: Block + Default;
+    type Block: Block;
 
     const ICON: MaterialIcon;
 
     fn manifest() -> Arc<PluginManifest>;
+
+    /// The block the new-block menu makes for this package. A package whose
+    /// manifest fills its block in through the editor's own dialog first has
+    /// none to make here.
+    fn new_block(client: &BlockClient) -> Option<BlockHandle<Self::Block>>;
 }
 
 /// The registered block types as a plugin sees them, built once for every
@@ -60,6 +65,76 @@ pub(super) fn cached_manifest(
 
 static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
+fn next_instance() -> EditorInstanceId {
+    EditorInstanceId(NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The dialog an editor draws itself when its block cannot be made until the
+/// user has filled something in. The editor offers the block it would make as
+/// it goes, and the host creates it once the dialog is accepted.
+pub(super) struct PluginCreation<P: PluginPackage> {
+    plugin: Arc<PluginManifest>,
+    instance: EditorInstanceId,
+    context: Option<egui::Context>,
+    package: std::marker::PhantomData<P>,
+}
+
+impl<P: PluginPackage> PluginCreation<P> {
+    pub(super) fn new() -> Self {
+        Self {
+            plugin: P::manifest(),
+            instance: next_instance(),
+            context: None,
+            package: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<P: PluginPackage> Drop for PluginCreation<P> {
+    fn drop(&mut self) {
+        if let Some(context) = self.context.take() {
+            crate::plugin_host::close(&context, &self.plugin.identity.id, self.instance);
+        }
+    }
+}
+
+impl<P: PluginPackage> PendingCreation for PluginCreation<P> {
+    fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> bool {
+        self.context = Some(ui.ctx().clone());
+        let height = crate::plugin_host::region_size(
+            &self.plugin.identity.id,
+            self.instance,
+            EditorRegion::Main,
+        )
+        .map_or(CREATION_DIALOG_HEIGHT, |size| size.y.max(1.0));
+        crate::plugin_host::editor_ui(
+            ui,
+            crate::plugin_host::EditorSlot {
+                plugin: &self.plugin,
+                block_types: editors.registry().plugin_block_types(),
+                block: None,
+                instance: self.instance,
+                region: EditorRegion::Main,
+                size: egui::vec2(ui.available_width(), height),
+            },
+        );
+        crate::plugin_host::creation_content(&self.plugin.identity.id, self.instance).is_some()
+    }
+
+    fn create(&mut self, client: &BlockClient) -> Result<Box<dyn BlockEditor>, String> {
+        let content = crate::plugin_host::creation_content(&self.plugin.identity.id, self.instance)
+            .ok_or("Fill in the options first")?;
+        let block: P::Block = serde_json::from_str(&content).map_err(|error| {
+            format!("{} could not be created: {error}", self.plugin.display_name)
+        })?;
+        Ok(Box::new(PluginEditor::<P>::new(client.create_block(block))))
+    }
+}
+
+/// How tall an editor's creation dialog is drawn before it has said how much
+/// room it wants.
+const CREATION_DIALOG_HEIGHT: f32 = 96.0;
+
 pub(super) struct PluginEditor<P: PluginPackage> {
     plugin: Arc<PluginManifest>,
     block: BlockHandle<P::Block>,
@@ -72,7 +147,7 @@ impl<P: PluginPackage> PluginEditor<P> {
         Self {
             plugin: P::manifest(),
             block,
-            instance: EditorInstanceId(NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed)),
+            instance: next_instance(),
             context: None,
         }
     }
@@ -97,9 +172,11 @@ impl<P: PluginPackage> PluginEditor<P> {
             crate::plugin_host::EditorSlot {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
-                client: editors.client_handle(),
-                block_id: self.block.id(),
-                block_type: <P::Block as Block>::TYPE_ID,
+                block: Some(crate::plugin_host::EditorBlock {
+                    client: editors.client_handle(),
+                    id: self.block.id(),
+                    block_type: <P::Block as Block>::TYPE_ID,
+                }),
                 instance: self.instance,
                 region,
                 size,

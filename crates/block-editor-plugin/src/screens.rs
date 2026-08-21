@@ -57,6 +57,14 @@ impl Screens {
                     Uuid::from_bytes(*workspace_id),
                 );
             }
+            Message::Editor(EditorMessage::OpenCreation { instance }) => {
+                let session = self
+                    .sessions
+                    .entry(*instance)
+                    .or_insert_with(|| (self.open)(*instance));
+                session.set_block_types(Rc::clone(&self.block_types));
+                session.connect_creation();
+            }
             Message::Editor(EditorMessage::Close { instance }) => {
                 self.sessions.remove(instance);
                 self.requests

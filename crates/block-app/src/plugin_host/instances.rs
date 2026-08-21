@@ -7,7 +7,10 @@ use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
-use super::input::{viewport_metrics, BlockDragEvent, InputAdapter};
+use super::{
+    input::{viewport_metrics, BlockDragEvent, InputAdapter},
+    EditorBlock,
+};
 use crate::platform::{FileFilter, FilePicker};
 
 #[derive(Default)]
@@ -21,10 +24,10 @@ pub(super) struct Instances {
 
 struct Instance {
     context: egui::Context,
-    client: Arc<BlockClient>,
-    block_id: Uuid,
-    block_type: Uuid,
-    tunnel: Tunnel,
+    /// What the instance is open on: a block of its own, or nothing at all
+    /// while it is the dialog that fills in a new one.
+    block: Option<InstanceBlock>,
+    creation: Option<String>,
     screens: HashMap<EditorRegion, Screen>,
     opened: bool,
     opens: Vec<(Uuid, Uuid)>,
@@ -32,6 +35,13 @@ struct Instance {
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
+}
+
+struct InstanceBlock {
+    client: Arc<BlockClient>,
+    id: Uuid,
+    block_type: Uuid,
+    tunnel: Tunnel,
 }
 
 /// A file an instance asked for, being chosen in the host's own picker.
@@ -67,9 +77,7 @@ impl Instances {
         instance: EditorInstanceId,
         region: EditorRegion,
         context: &egui::Context,
-        client: Arc<BlockClient>,
-        block_id: Uuid,
-        block_type: Uuid,
+        block: Option<EditorBlock>,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
         size: egui::Vec2,
         scale_factor: f32,
@@ -79,16 +87,22 @@ impl Instances {
             self.block_types = Some(Arc::clone(block_types));
         }
         let entry = self.entries.entry(instance).or_insert_with(|| {
-            let tunnel = client.open_tunnel({
-                let context = context.clone();
-                move || context.request_repaint()
+            let block = block.map(|block| {
+                let tunnel = block.client.open_tunnel({
+                    let context = context.clone();
+                    move || context.request_repaint()
+                });
+                InstanceBlock {
+                    client: block.client,
+                    id: block.id,
+                    block_type: block.block_type,
+                    tunnel,
+                }
             });
             Instance {
                 context: context.clone(),
-                client,
-                block_id,
-                block_type,
-                tunnel,
+                block,
+                creation: None,
                 screens: HashMap::new(),
                 opened: false,
                 opens: Vec::new(),
@@ -150,14 +164,17 @@ impl Instances {
             regions.sort_by_key(|request| request.screen.0);
             if !entry.opened {
                 entry.opened = true;
-                opened.push(Message::Editor(EditorMessage::Open {
-                    instance,
-                    block_id: entry.block_id.into_bytes(),
-                    block_type: entry.block_type.into_bytes(),
-                    account_id: entry.client.account_id().into_bytes(),
-                    workspace_id: entry.client.workspace_id().into_bytes(),
-                    editable: entry.client.block_access(entry.block_id) == block::BlockAccess::Edit,
-                }));
+                opened.push(match &entry.block {
+                    Some(block) => Message::Editor(EditorMessage::Open {
+                        instance,
+                        block_id: block.id.into_bytes(),
+                        block_type: block.block_type.into_bytes(),
+                        account_id: block.client.account_id().into_bytes(),
+                        workspace_id: block.client.workspace_id().into_bytes(),
+                        editable: block.client.block_access(block.id) == block::BlockAccess::Edit,
+                    }),
+                    None => Message::Editor(EditorMessage::OpenCreation { instance }),
+                });
             }
             screens.extend(regions);
         }
@@ -223,6 +240,11 @@ impl Instances {
             .is_some_and(|entry| entry.drag_accepted)
     }
 
+    /// The block a creation dialog is offering to make, as JSON.
+    pub(super) fn creation_content(&self, instance: EditorInstanceId) -> Option<&str> {
+        self.entries.get(&instance)?.creation.as_deref()
+    }
+
     pub(super) fn aspect_ratio(&self, instance: EditorInstanceId) -> Option<f32> {
         self.entries.get(&instance)?.aspect_ratio
     }
@@ -268,11 +290,13 @@ impl Instances {
         instances.sort_by_key(|instance| instance.0);
         for instance in instances {
             let entry = self.entries.get_mut(&instance).unwrap();
-            while let Some(payload) = entry.tunnel.try_recv() {
-                messages.push(Message::Client(TunnelMessage::Response {
-                    instance,
-                    payload,
-                }));
+            if let Some(block) = &mut entry.block {
+                while let Some(payload) = block.tunnel.try_recv() {
+                    messages.push(Message::Client(TunnelMessage::Response {
+                        instance,
+                        payload,
+                    }));
+                }
             }
             let context = entry.context.clone();
             let mut picks = std::mem::take(&mut entry.picks);
@@ -329,6 +353,11 @@ impl Instances {
                     entry.picks.push(PendingPick { request_id, picker });
                 }
             }
+            EditorMessage::CreationContent { instance, payload } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.creation = payload;
+                }
+            }
             EditorMessage::AspectRatio { instance, ratio } => {
                 if let Some(entry) = self.entries.get_mut(&instance) {
                     entry.aspect_ratio = Some(ratio);
@@ -362,10 +391,10 @@ impl Instances {
         let TunnelMessage::Request { instance, payload } = message else {
             return;
         };
-        let Some(entry) = self.entries.get(&instance) else {
+        let Some(Some(block)) = self.entries.get(&instance).map(|entry| &entry.block) else {
             return;
         };
-        entry.tunnel.send(payload);
+        block.tunnel.send(payload);
     }
 }
 

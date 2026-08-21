@@ -97,7 +97,10 @@ impl ClientSession {
             }
             (
                 State::Running,
-                Message::Editor(block_plugin_api::EditorMessage::Open { instance, .. }),
+                Message::Editor(
+                    block_plugin_api::EditorMessage::Open { instance, .. }
+                    | block_plugin_api::EditorMessage::OpenCreation { instance },
+                ),
             ) if !self.instances.contains(&instance) => {
                 self.instances.insert(instance);
                 Ok(vec![Message::Editor(

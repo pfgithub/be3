@@ -24,15 +24,15 @@ mod windows;
 
 #[cfg(target_os = "windows")]
 pub(crate) use native::{
-    aspect_ratio, close, editor_ui, install, intrinsic_size, preview, region_size,
+    aspect_ratio, close, creation_content, editor_ui, install, intrinsic_size, preview, region_size,
 };
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
 pub(crate) use unavailable::{
-    aspect_ratio, close, editor_ui, install, intrinsic_size, preview, region_size,
+    aspect_ratio, close, creation_content, editor_ui, install, intrinsic_size, preview, region_size,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::{
-    aspect_ratio, close, editor_ui, install, intrinsic_size, preview, region_size,
+    aspect_ratio, close, creation_content, editor_ui, install, intrinsic_size, preview, region_size,
 };
 
 /// The block itself, drawn by its editor wherever the host paints the block
@@ -75,10 +75,18 @@ pub(crate) fn preview_size(size: egui::Vec2, scale_factor: f32) -> egui::Vec2 {
 pub(crate) struct EditorSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
-    pub(crate) client: Arc<BlockClient>,
-    pub(crate) block_id: Uuid,
-    pub(crate) block_type: Uuid,
+    /// The block being edited, or nothing for the dialog that fills in a
+    /// block the editor has not made yet.
+    pub(crate) block: Option<EditorBlock>,
     pub(crate) instance: EditorInstanceId,
     pub(crate) region: EditorRegion,
     pub(crate) size: egui::Vec2,
+}
+
+/// The block an editor instance is opened on, and the client it reaches it
+/// through.
+pub(crate) struct EditorBlock {
+    pub(crate) client: Arc<BlockClient>,
+    pub(crate) id: Uuid,
+    pub(crate) block_type: Uuid,
 }

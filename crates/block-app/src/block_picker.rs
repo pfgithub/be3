@@ -252,7 +252,7 @@ impl BlockPicker {
                 ui.set_min_width(320.0);
                 ui.heading(format!("New {title}"));
                 ui.add_space(8.0);
-                let ready = pending.creation.ui(ui);
+                let ready = pending.creation.ui(ui, editors);
                 ui.separator();
                 ui.horizontal(|ui| {
                     create = ui
