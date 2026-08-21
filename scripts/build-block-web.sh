@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # The editor plugin packages the web build serves alongside the app.
-plugins=(checklist counter)
+plugins=(checklist counter hotbar)
 wasi_sysroot=''
 release=false
 while [[ $# -gt 0 ]]; do

@@ -12,7 +12,7 @@ Overview:
 
 Main folders:
 - `crates/block` — shared protocol and data-model crate with no I/O: `Account`, `Workspace`, permission types, the `Block`/`BlockHistory` traits, and the `ClientMessage`/`ServerMessage` sync protocol. Depended on by both client and server.
-- `crates/block-client` — client-side runtime: `BlockClient`/`BlockHandle` (read/operate/undo-redo on a block), the websocket transport (native and web variants), and `blocks/` — one module per block type, listed under "Block types" below. Also owns `properties` (generic block metadata like name) and `presence`.
+- `crates/block-client` — client-side runtime: `BlockClient`/`BlockHandle` (read/operate/undo-redo on a block), the websocket transport (native and web variants), and `blocks/` — one module per block type, listed under "Block types" below. Also owns `properties` (generic block metadata like name), `presence`, and `references` (the reference resolution/classification caches shared by `block-app` and plugin editors).
 - `crates/block-app` — the `egui` app (desktop, Android, and web/wasm) that end users run: `editors/` has one module per editor, listed under "Editor types" below, plus `app_state` (local persisted app settings), `block_picker` (create/link-block UI), `files` (workspace tree sidebar), `share` (permission-sharing dialog), `platform` (native vs. web glue), and `debug` (developer-facing inspection tools).
 - `crates/block-server` — the sync server: a combined websocket + minimal HTTP server (`http.rs`) backed by SQLite, handling auth, block storage, and broadcasting operations to connected clients.
 - `crates/block-e2e` — end-to-end tests that run a real server and client together; no library code of its own beyond test support.
@@ -30,7 +30,7 @@ Block types (the core, in `crates/block-client/src/blocks/<name>.rs`; each is de
 - `database_schema` — the field definitions (name, type, enum options) shared by a `database` and its `database_view`s.
 - `database_view` — a saved view over a `database`: spreadsheet, kanban, or scatter, its sort order, and, for kanban/scatter, which field(s) drive the layout.
 - `gui_builder` — a design-only layout of nested widgets (headings, labels, buttons, text fields, containers).
-- `hotbar` — the tool/component palette shared by a game's logic grids, registered under the workspace's root `Settings` block so a pinned component is offered in every circuit.
+- `hotbar` — the tool/component palette shared by a game's logic grids, registered under the workspace's root `Settings` block so a pinned component is offered in every circuit; edited by the hotbar plugin editor.
 - `image` — an uploaded raster image (dimensions, media type, raw bytes). No undo/redo history.
 - `infinite_canvas` — a freeform 2D canvas of positioned, styled entities (shapes, text, embedded block references).
 - `logic_game` — the built-in logic-circuit curriculum: levels tied to `logicgame` challenges, the player's `logic_grid` attempts, and quiz answers.
@@ -54,7 +54,7 @@ Editor types (the view, in `crates/block-app/src/editors/<name>.rs`; each reads 
 - `database_schema` — add, remove, and rename fields and enum options on a `DatabaseSchema`.
 - `database_view` — the `spreadsheet`, `kanban`, and `scatter` layouts over a `Database` through a `DatabaseView`.
 - `gui_builder` — the drag-and-drop widget surface (`surface.rs`) and property inspector (`inspector.rs`) for a `GuiBuilder` layout; `dynamic_artifact/` exports it as generated Rust UI code.
-- `hotbar` — editor for the shared tool palette: add, remove, and reorder slots and folders.
+- `hotbar` — not in `block-app`: a plugin editor package (`crates/editors/hotbar`) run through the plugin host, listing what is pinned so a component can be unpinned or opened.
 - `image` — viewer and import UI for an `Image` block.
 - `infinite_canvas` — the freeform canvas editor; see the internal `core.rs`/view split noted above for how it divides into `core.rs`, `interaction.rs`, `painting.rs`, `inspector.rs`, and `geometry.rs`.
 - `logic_game` — level-select and quiz UI for the built-in logic curriculum (`binary_addition.rs`).

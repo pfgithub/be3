@@ -11,7 +11,6 @@ mod database_schema;
 mod database_view;
 mod deterministic_game;
 mod gui_builder;
-mod hotbar;
 pub(crate) mod image;
 pub(crate) mod infinite_canvas;
 mod logic_game;
@@ -1368,8 +1367,8 @@ impl EditorRegistry {
         {
             registry.register_plugin::<plugin::checklist::ChecklistPlugin>();
             registry.register_plugin::<plugin::counter::CounterPlugin>();
+            registry.register_plugin::<plugin::hotbar::HotbarPlugin>();
         }
-        registry.register::<hotbar::HotbarEditor>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
