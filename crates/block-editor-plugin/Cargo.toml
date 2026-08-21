@@ -9,6 +9,7 @@ block-client = { path = "../block-client" }
 block = { path = "../block" }
 block-plugin-api = { path = "../block-plugin-api" }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "wgpu"] }
+egui_material_icons = "0.6.0"
 futures-util = "0.3"
 uuid = "1"
 

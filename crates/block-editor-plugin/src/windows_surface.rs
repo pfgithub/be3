@@ -150,7 +150,11 @@ impl Surface {
                 continue;
             };
             let pane = self.panes.entry(placement.screen).or_insert_with(|| Pane {
-                context: egui::Context::default(),
+                context: {
+                    let context = egui::Context::default();
+                    egui_material_icons::initialize(&context);
+                    context
+                },
                 renderer: egui_wgpu::Renderer::new(
                     &self.device,
                     wgpu::TextureFormat::Bgra8Unorm,

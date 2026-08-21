@@ -10,7 +10,11 @@ use block_client::{
     references::ReferenceResolutionCache,
     BlockClient, BlockHandle,
 };
-use block_editor_plugin::{egui, EditorHost};
+use block_editor_plugin::{
+    egui,
+    egui_material_icons::icons::{ICON_DELETE, ICON_FOLDER},
+    EditorHost,
+};
 use uuid::Uuid;
 
 /// A hotbar is arranged from inside the grid editor that uses it. This shows
@@ -51,7 +55,7 @@ impl HotbarApp {
                         ui.weak(format!("{name} (locked)"));
                     }
                     HotbarSlot::Folder { name, .. } => {
-                        ui.label(name);
+                        ui.label(format!("{} {name}", ICON_FOLDER.codepoint));
                     }
                     HotbarSlot::Component { name, compiled } => {
                         let resolved_id = resolved.get(compiled).copied().flatten();
@@ -66,7 +70,11 @@ impl HotbarApp {
                         } else {
                             ui.weak(format!("{title} (broken link)"));
                         }
-                        if ui.small_button("Unpin").clicked() {
+                        if ui
+                            .small_button(ICON_DELETE)
+                            .on_hover_text("Unpin")
+                            .clicked()
+                        {
                             *unpin = Some(*compiled);
                         }
                     }

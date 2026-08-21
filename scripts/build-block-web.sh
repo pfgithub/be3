@@ -65,20 +65,6 @@ if $release; then
     profile_arguments=(--release)
 fi
 
-mkdir -p "$output_directory"
-for plugin in "${plugins[@]}"; do
-    echo "Building $plugin for wasm32-wasip1..."
-    cargo build -p "$plugin" --target wasm32-wasip1 "${profile_arguments[@]}"
-    plugin_wasm="$repository/target/wasm32-wasip1/$profile_directory/$plugin.wasm"
-    if [[ ! -f "$plugin_wasm" ]]; then
-        echo "cargo did not produce $plugin_wasm" >&2
-        exit 1
-    fi
-
-    echo "Generating JavaScript bindings for $plugin..."
-    "$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$plugin_wasm"
-done
-
 if [[ -z "$wasi_sysroot" ]]; then
     wasi_sysroot="$tools_directory/wasi-sysroot"
     if [[ ! -d "$wasi_sysroot/include" ]]; then
@@ -111,6 +97,20 @@ export HARFBUZZ_SYS_NO_PKG_CONFIG='1'
 linker_search_path="$wasi_sysroot/lib/wasm32-wasip1/noeh"
 setjmp_library="$wasi_sysroot/lib/wasm32-wasip1/libsetjmp.a"
 export RUSTFLAGS="-C link-arg=-L$linker_search_path -C link-arg=$setjmp_library"
+
+mkdir -p "$output_directory"
+for plugin in "${plugins[@]}"; do
+    echo "Building $plugin for wasm32-wasip1..."
+    cargo build -p "$plugin" --target wasm32-wasip1 "${profile_arguments[@]}"
+    plugin_wasm="$repository/target/wasm32-wasip1/$profile_directory/$plugin.wasm"
+    if [[ ! -f "$plugin_wasm" ]]; then
+        echo "cargo did not produce $plugin_wasm" >&2
+        exit 1
+    fi
+
+    echo "Generating JavaScript bindings for $plugin..."
+    "$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$plugin_wasm"
+done
 
 echo 'Building block-app for wasm32-wasip1...'
 cargo build -p block-app --lib --target wasm32-wasip1 "${profile_arguments[@]}"

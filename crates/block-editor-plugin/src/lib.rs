@@ -1,4 +1,5 @@
 pub use eframe::egui;
+pub use egui_material_icons;
 
 #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
 mod egui_session;

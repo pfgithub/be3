@@ -68,6 +68,7 @@ pub(crate) async fn start<A: crate::App>(canvas_id: String) -> Result<(), JsValu
             canvas,
             eframe::WebOptions::default(),
             Box::new(move |creation_context| {
+                egui_material_icons::initialize(&creation_context.egui_ctx);
                 EGUI_CONTEXT.with(|current| {
                     *current.borrow_mut() = Some(creation_context.egui_ctx.clone());
                 });

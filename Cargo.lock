@@ -961,6 +961,7 @@ dependencies = [
  "block-client",
  "block-plugin-api",
  "eframe",
+ "egui_material_icons",
  "futures-util",
  "js-sys",
  "pollster 0.4.0",
