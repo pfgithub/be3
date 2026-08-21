@@ -37,6 +37,8 @@ use block_client::{
     blocks::workspace_index::BlockEntry, BlockClient, BlockHandle, BlockHandleAccess,
     BlockHistoryHandle, BlockRelationships,
 };
+use block_ui::BlockTypes;
+pub(super) use block_ui::{name_galley, paint_name, BlockLabel};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_LOCK, MaterialIcon};
 use uuid::Uuid;
@@ -234,148 +236,6 @@ fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
         egui::Vec2::new(available.width(), available.width() / ratio)
     };
     egui::Rect::from_center_size(available.center(), size)
-}
-
-/// A block's icon and display name, along with whether the name was
-/// auto-derived from the block's content rather than chosen by the user.
-/// Shared by every place in the app that shows a block's name, so an
-/// automatic name can be marked as such (e.g. italicized) consistently.
-pub(super) struct BlockLabel {
-    pub block_type: Uuid,
-    pub icon: Option<MaterialIcon>,
-    pub name: String,
-    pub automatic: bool,
-}
-
-impl BlockLabel {
-    fn new(
-        registry: &EditorRegistry,
-        block_type: Uuid,
-        name: Option<&block_client::properties::BlockName>,
-    ) -> Self {
-        let (name, automatic) = match name.filter(|name| !name.value.is_empty()) {
-            Some(name) => (name.value.clone(), !name.manual),
-            None => (
-                registry
-                    .display_name(block_type)
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| "Untitled".to_owned()),
-                true,
-            ),
-        };
-        Self {
-            block_type,
-            icon: registry.icon(block_type),
-            name,
-            automatic,
-        }
-    }
-
-    /// For a block type and its raw property map, e.g. from a
-    /// [`BlockReference`] or [`block_client::CachedBlock`].
-    pub(super) fn for_properties(
-        registry: &EditorRegistry,
-        block_type: Uuid,
-        properties: &std::collections::BTreeMap<Uuid, Vec<u8>>,
-    ) -> Self {
-        Self::new(
-            registry,
-            block_type,
-            block_client::properties::read_name(properties).as_ref(),
-        )
-    }
-
-    /// For a listed [`BlockReference`].
-    pub(super) fn for_reference(registry: &EditorRegistry, reference: &BlockReference) -> Self {
-        Self::for_properties(registry, reference.block_type, &reference.properties)
-    }
-
-    /// For a [`block_client::CachedBlock`].
-    pub(super) fn for_cached(
-        registry: &EditorRegistry,
-        cached: &block_client::CachedBlock,
-    ) -> Self {
-        Self::for_properties(registry, cached.block_type, &cached.properties)
-    }
-
-    /// For a block whose editor is open locally.
-    pub(super) fn for_handle(registry: &EditorRegistry, handle: &dyn BlockHandleAccess) -> Self {
-        Self::new(registry, handle.block_type(), handle.block_name().as_ref())
-    }
-
-    /// The name alone, italicized if it was auto-derived rather than chosen
-    /// by the user.
-    pub(super) fn rich_text(&self) -> egui::RichText {
-        let text = egui::RichText::new(&self.name);
-        if self.automatic {
-            text.italics()
-        } else {
-            text
-        }
-    }
-
-    /// Icon and name combined for a widget (button, label, ...), the name
-    /// italicized if automatic.
-    pub(super) fn widget_text(&self, style: &egui::Style) -> egui::WidgetText {
-        let Some(icon) = self.icon else {
-            return self.rich_text().into();
-        };
-        let mut job = egui::text::LayoutJob::default();
-        egui::RichText::new(format!("{} ", icon.codepoint)).append_to(
-            &mut job,
-            style,
-            egui::FontSelection::Style(egui::TextStyle::Button),
-            egui::Align::Center,
-        );
-        self.rich_text().append_to(
-            &mut job,
-            style,
-            egui::FontSelection::Style(egui::TextStyle::Button),
-            egui::Align::Center,
-        );
-        job.into()
-    }
-}
-
-/// Lays out `text` for direct painting, matching
-/// [`egui::Painter::layout_no_wrap`] but italicizing it when `automatic` -
-/// for marking an auto-derived block name in painter-based (non-widget)
-/// rendering.
-pub(super) fn name_galley(
-    painter: &egui::Painter,
-    text: &str,
-    font_id: egui::FontId,
-    color: egui::Color32,
-    automatic: bool,
-) -> std::sync::Arc<egui::Galley> {
-    if !automatic {
-        return painter.layout_no_wrap(text.to_owned(), font_id, color);
-    }
-    painter.layout_job(egui::text::LayoutJob::single_section(
-        text.to_owned(),
-        egui::text::TextFormat {
-            font_id,
-            color,
-            italics: true,
-            ..Default::default()
-        },
-    ))
-}
-
-/// [`egui::Painter::text`], but italicizing the text when `automatic`.
-pub(super) fn paint_name(
-    painter: &egui::Painter,
-    pos: egui::Pos2,
-    anchor: egui::Align2,
-    text: &str,
-    font_id: egui::FontId,
-    color: egui::Color32,
-    automatic: bool,
-) -> egui::Rect {
-    let galley = name_galley(painter, text, font_id, color, automatic);
-    let rect = anchor.anchor_size(pos, galley.size());
-    painter.galley(rect.min, galley, color);
-    rect
 }
 
 /// Stands in for a block whose preview could not be drawn, naming the block
@@ -1534,5 +1394,15 @@ impl EditorRegistry {
             || Box::new(UnsupportedEditor::new(id, block_type)) as Box<dyn BlockEditor>,
             |registration| (registration.open)(client, id),
         )
+    }
+}
+
+impl BlockTypes for EditorRegistry {
+    fn display_name(&self, block_type: Uuid) -> Option<&str> {
+        Self::display_name(self, block_type)
+    }
+
+    fn icon(&self, block_type: Uuid) -> Option<MaterialIcon> {
+        Self::icon(self, block_type)
     }
 }

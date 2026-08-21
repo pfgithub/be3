@@ -1,0 +1,15 @@
+[package]
+name = "block-ui"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+block = { path = "../block" }
+block-client = { path = "../block-client" }
+egui = "0.34.3"
+egui_material_icons = "0.6.0"
+uuid = "1"
+
+[lints]
+workspace = true

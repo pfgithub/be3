@@ -856,6 +856,7 @@ dependencies = [
  "block-client",
  "block-plugin-api",
  "block-server",
+ "block-ui",
  "bytemuck",
  "deterministic_games",
  "eframe",
@@ -1011,6 +1012,17 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "block-ui"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "egui",
+ "egui_material_icons",
  "uuid",
 ]
 
