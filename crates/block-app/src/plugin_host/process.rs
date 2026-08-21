@@ -1,6 +1,4 @@
-use block_plugin_api::{
-    encode_frame, Capability, HostSession, Message, SessionState, MAX_FRAME_BYTES,
-};
+use block_plugin_api::{encode_frame, Capability, HostSession, Message, SessionState};
 use std::{
     io,
     path::PathBuf,
@@ -438,12 +436,6 @@ fn read_message(stream: &mut impl Read) -> io::Result<Message> {
     let mut header = [0; 4];
     stream.read_exact(&mut header)?;
     let length = u32::from_be_bytes(header) as usize;
-    if length > MAX_FRAME_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "plugin sent an oversized frame",
-        ));
-    }
     let mut frame = Vec::with_capacity(length + 4);
     frame.extend_from_slice(&header);
     frame.resize(length + 4, 0);

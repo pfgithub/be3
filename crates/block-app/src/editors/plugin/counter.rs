@@ -1,8 +1,8 @@
 use block::Block;
 use block_client::blocks::counter::Counter;
 use block_plugin_api::{
-    ChildOperations, CreationMode, EditorRegion, EntryPoints, PluginIdentity, PluginManifest,
-    ResizeMode, SurfaceMechanism,
+    ChildOperations, CreationMode, EditorRegion, EntryPoints, InteractionMode, PluginIdentity,
+    PluginManifest, ResizeMode, SurfaceMechanism,
 };
 use egui_material_icons::{icons::ICON_123, MaterialIcon};
 use std::sync::{Arc, OnceLock};
@@ -30,6 +30,7 @@ impl PluginPackage for CounterPlugin {
             creation: CreationMode::Immediate,
             children: ChildOperations::default(),
             important: false,
+            interaction: InteractionMode::Live,
             resize: ResizeMode::Both,
             regions: vec![
                 EditorRegion::Main,

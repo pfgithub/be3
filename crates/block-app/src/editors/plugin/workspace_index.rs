@@ -1,8 +1,8 @@
 use block::Block;
 use block_client::blocks::workspace_index::WorkspaceIndex;
 use block_plugin_api::{
-    ChildOperations, CreationMode, EditorRegion, EntryPoints, PluginIdentity, PluginManifest,
-    ResizeMode, SurfaceMechanism,
+    ChildOperations, CreationMode, EditorRegion, EntryPoints, InteractionMode, PluginIdentity,
+    PluginManifest, ResizeMode, SurfaceMechanism,
 };
 use egui_material_icons::{icons::ICON_FOLDER, MaterialIcon};
 use std::sync::{Arc, OnceLock};
@@ -34,6 +34,7 @@ impl PluginPackage for WorkspaceIndexPlugin {
                 replace: true,
             },
             important: true,
+            interaction: InteractionMode::Preview,
             resize: ResizeMode::None,
             regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
             entry_points: EntryPoints {

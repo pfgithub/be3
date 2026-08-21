@@ -25,14 +25,12 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 9;
-pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+pub const PROTOCOL_VERSION: u16 = 10;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
 pub const MAX_QUEUED_MESSAGES: usize = 256;
 pub const REQUEST_TIMEOUT_MILLISECONDS: u64 = 5_000;
-pub const MAX_BLOCK_PAYLOAD_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorInstanceId(pub u64);
@@ -135,6 +133,7 @@ pub struct PluginManifest {
     pub creation: CreationMode,
     pub children: ChildOperations,
     pub important: bool,
+    pub interaction: InteractionMode,
     pub resize: ResizeMode,
     pub regions: Vec<EditorRegion>,
     pub entry_points: EntryPoints,
@@ -148,6 +147,17 @@ pub struct ChildOperations {
     pub add: bool,
     pub delete: bool,
     pub replace: bool,
+}
+
+/// How much of itself an editor gives an embed that holds it. `Preview`
+/// leaves the host drawing a placeholder until the user focuses the embed, so
+/// the plugin runtime only starts once it is actually being used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InteractionMode {
+    Preview,
+    #[default]
+    Live,
+    Playback,
 }
 
 /// How an embedded editor may be resized by whatever holds it.
@@ -554,7 +564,6 @@ pub enum ErrorCode {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
-    FrameTooLarge { length: usize, maximum: usize },
     TruncatedFrame { expected: usize, available: usize },
     MalformedPayload,
     LimitExceeded(&'static str),
@@ -573,12 +582,6 @@ pub fn encode_frame(message: &Message) -> Result<Vec<u8>, DecodeError> {
     let payload = codec()
         .serialize(message)
         .map_err(|_| DecodeError::MalformedPayload)?;
-    if payload.len() > MAX_FRAME_BYTES {
-        return Err(DecodeError::FrameTooLarge {
-            length: payload.len(),
-            maximum: MAX_FRAME_BYTES,
-        });
-    }
     let mut frame = Vec::with_capacity(4 + payload.len());
     frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     frame.extend_from_slice(&payload);
@@ -593,12 +596,6 @@ pub fn decode_frame(frame: &[u8]) -> Result<Message, DecodeError> {
         });
     }
     let length = u32::from_be_bytes(frame[..4].try_into().unwrap()) as usize;
-    if length > MAX_FRAME_BYTES {
-        return Err(DecodeError::FrameTooLarge {
-            length,
-            maximum: MAX_FRAME_BYTES,
-        });
-    }
     if frame.len() != length + 4 {
         return Err(DecodeError::TruncatedFrame {
             expected: length + 4,
@@ -653,7 +650,6 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             Ok(())
         }
         Message::Editor(value) => validate_editor(value),
-        Message::Client(value) => validate_client(value),
         Message::BlockTypes(value) => {
             collection(value.len())?;
             for descriptor in value {
@@ -670,16 +666,6 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
     match message {
         EditorMessage::Failure { message, .. } => string(message),
         _ => Ok(()),
-    }
-}
-
-fn validate_client(message: &TunnelMessage) -> Result<(), DecodeError> {
-    let (TunnelMessage::Request { payload, .. } | TunnelMessage::Response { payload, .. }) =
-        message;
-    if payload.len() > MAX_BLOCK_PAYLOAD_BYTES {
-        Err(DecodeError::LimitExceeded("block payload"))
-    } else {
-        Ok(())
     }
 }
 
@@ -709,7 +695,6 @@ fn strings<'a>(values: impl IntoIterator<Item = &'a String>) -> Result<(), Decod
 fn codec() -> impl Options {
     bincode::DefaultOptions::new()
         .with_fixint_encoding()
-        .with_limit(MAX_FRAME_BYTES as u64)
         .reject_trailing_bytes()
 }
 

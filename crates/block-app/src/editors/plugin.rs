@@ -1,7 +1,8 @@
 use block::Block;
 use block_client::BlockHandle;
 use block_plugin_api::{
-    BlockTypeDescriptor, EditorInstanceId, EditorRegion, PluginManifest, ResizeMode,
+    BlockTypeDescriptor, EditorInstanceId, EditorRegion, InteractionMode, PluginManifest,
+    ResizeMode,
 };
 use eframe::egui;
 use egui_material_icons::MaterialIcon;
@@ -134,7 +135,11 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
     }
 
     fn direct_editor_interaction(&self) -> DirectEditorInteraction {
-        DirectEditorInteraction::Live
+        match self.plugin.interaction {
+            InteractionMode::Preview => DirectEditorInteraction::Preview,
+            InteractionMode::Live => DirectEditorInteraction::Live,
+            InteractionMode::Playback => DirectEditorInteraction::Playback,
+        }
     }
 
     fn direct_editor_resize(&self) -> DirectEditorResize {

@@ -14,6 +14,7 @@ fn manifest_validation() {
         creation: CreationMode::Immediate,
         children: ChildOperations::default(),
         important: false,
+        interaction: InteractionMode::Live,
         resize: ResizeMode::Both,
         regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
         entry_points: EntryPoints {

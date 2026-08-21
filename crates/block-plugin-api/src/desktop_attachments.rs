@@ -1,4 +1,4 @@
-use crate::{decode_frame, encode_frame, AttachmentError, Message, MAX_FRAME_BYTES};
+use crate::{decode_frame, encode_frame, AttachmentError, Message};
 use std::{fmt, io};
 
 #[derive(Debug)]
@@ -86,9 +86,6 @@ mod unix {
             let mut header = [0; 4];
             let attachments = receive_header(self.stream.as_raw_fd(), &mut header)?;
             let length = u32::from_be_bytes(header) as usize;
-            if length > MAX_FRAME_BYTES {
-                return Err(CarrierError::Protocol);
-            }
             let mut frame = Vec::with_capacity(length + 4);
             frame.extend_from_slice(&header);
             frame.resize(length + 4, 0);
@@ -324,9 +321,6 @@ mod windows {
             let mut header = [0; 4];
             self.stream.read_exact(&mut header)?;
             let length = u32::from_be_bytes(header) as usize;
-            if length > MAX_FRAME_BYTES {
-                return Err(CarrierError::Protocol);
-            }
             let mut frame = Vec::with_capacity(length + 4);
             frame.extend_from_slice(&header);
             frame.resize(length + 4, 0);

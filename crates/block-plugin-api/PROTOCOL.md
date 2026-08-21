@@ -1,7 +1,8 @@
 # Block plugin protocol
 
 Every wire message is a four-byte, network-order payload length followed by a
-bincode payload. Receivers reject payloads larger than `MAX_FRAME_BYTES`,
+bincode payload. A frame is bounded only by that length, so a message carrying
+a whole block or an imported file needs no chunking. Receivers reject
 truncated or trailing data, unknown message variants, and values exceeding the
 published string, collection, or opaque-descriptor limits. Implementations
 must also bound pending messages to `MAX_QUEUED_MESSAGES` and requests to
@@ -27,9 +28,9 @@ a structured error before disconnect when the transport remains usable.
 
 Client messages tunnel the block protocol between an editor instance's own
 block client and the host's server connection. Their payloads are opaque JSON
-bounded by `MAX_BLOCK_PAYLOAD_BYTES`: the host forwards them in both
-directions without interpreting them, and the server treats each instance as a
-separate client of the one connection.
+of any length: the host forwards them in both directions without interpreting
+them, and the server treats each instance as a separate client of the one
+connection.
 
 An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a

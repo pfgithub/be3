@@ -36,7 +36,7 @@ fn transport(
     version: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::native::{ClientSession, State};
-    use block_plugin_api::{decode_frame, encode_frame, MAX_FRAME_BYTES};
+    use block_plugin_api::{decode_frame, encode_frame};
     let mut session = ClientSession::new(id, name, version);
     output.write_all(&encode_frame(&session.hello())?)?;
     output.flush()?;
@@ -49,9 +49,6 @@ fn transport(
             Err(error) => return Err(error.into()),
         }
         let length = u32::from_be_bytes(header) as usize;
-        if length > MAX_FRAME_BYTES {
-            return Err(format!("frame length {length} exceeds limit").into());
-        }
         let mut frame = Vec::with_capacity(length + 4);
         frame.extend_from_slice(&header);
         frame.resize(length + 4, 0);
@@ -90,7 +87,6 @@ fn run_endpoint<A: crate::App>(
     use crate::{native::ClientSession, windows_surface::Surface};
     use block_plugin_api::{
         decode_frame, desktop_attachments::WindowsAttachmentCarrier, encode_frame, Message,
-        MAX_FRAME_BYTES,
     };
     use std::{
         io::{Read, Write},
@@ -113,9 +109,6 @@ fn run_endpoint<A: crate::App>(
     let mut header = [0; 4];
     stream.read_exact(&mut header)?;
     let length = u32::from_be_bytes(header) as usize;
-    if length > MAX_FRAME_BYTES {
-        return Err("host handshake frame exceeds limit".into());
-    }
     let mut frame = Vec::with_capacity(length + 4);
     frame.extend_from_slice(&header);
     frame.resize(length + 4, 0);

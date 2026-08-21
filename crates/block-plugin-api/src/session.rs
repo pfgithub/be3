@@ -216,7 +216,6 @@ impl HostSession {
 fn decode_failure(error: DecodeError) -> SessionFailure {
     match error {
         DecodeError::MalformedPayload
-        | DecodeError::FrameTooLarge { .. }
         | DecodeError::TruncatedFrame { .. }
         | DecodeError::LimitExceeded(_) => SessionFailure::MalformedMessage,
     }
