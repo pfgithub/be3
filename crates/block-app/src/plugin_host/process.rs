@@ -233,7 +233,11 @@ fn drive_windows(
         let sent = !outbound.is_empty();
         coalesce_screens(&mut outbound);
         for message in outbound {
-            if !matches!(message, Message::Input(_)) {
+            if !matches!(
+                message,
+                Message::Input(_)
+                    | Message::Editor(block_plugin_api::EditorMessage::DragOver { .. })
+            ) {
                 eprintln!("plugin host sending {} to the plugin", name(&message));
             }
             carrier.send(&message, &[]).map_err(carrier_error)?;
