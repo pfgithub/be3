@@ -2,8 +2,6 @@ use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-mod android_packet;
-mod android_surface;
 mod attachment;
 #[cfg(any(unix, windows))]
 pub mod desktop_attachments;
@@ -11,13 +9,6 @@ mod linux_surface;
 mod macos_surface;
 mod session;
 mod windows_surface;
-
-pub use android_packet::{AndroidPacket, AndroidPacketError};
-pub use android_surface::{
-    AndroidSurfaceDescriptor, AndroidSurfaceError, AndroidSurfaceLifecycle, AndroidSurfaceState,
-    ANDROID_HARDWARE_BUFFER_FORMAT_R8G8B8A8_UNORM, ANDROID_HARDWARE_BUFFER_USAGE_GPU_COLOR_OUTPUT,
-    ANDROID_HARDWARE_BUFFER_USAGE_GPU_SAMPLED_IMAGE,
-};
 pub use attachment::{
     validate_attachments, AttachmentDescriptor, AttachmentError, AttachmentOwnership,
     AttachmentType, MAX_ATTACHMENTS,
@@ -173,7 +164,6 @@ impl EditorRegion {
 pub struct EntryPoints {
     pub web: Option<String>,
     pub windows: Option<String>,
-    pub android: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -208,19 +198,12 @@ impl PluginManifest {
         {
             return Err(ManifestError::InvalidRegions);
         }
-        if self.entry_points.web.is_none()
-            && self.entry_points.windows.is_none()
-            && self.entry_points.android.is_none()
-        {
+        if self.entry_points.web.is_none() && self.entry_points.windows.is_none() {
             return Err(ManifestError::MissingEntryPoint);
         }
-        for entry in [
-            &self.entry_points.web,
-            &self.entry_points.windows,
-            &self.entry_points.android,
-        ]
-        .into_iter()
-        .flatten()
+        for entry in [&self.entry_points.web, &self.entry_points.windows]
+            .into_iter()
+            .flatten()
         {
             manifest_string("entry point", entry)?;
         }
@@ -228,11 +211,7 @@ impl PluginManifest {
             || self.surfaces.contains(&SurfaceMechanism::WebExternalImage);
         let windows_valid = self.entry_points.windows.is_none()
             || self.surfaces.contains(&SurfaceMechanism::WindowsDxgi);
-        let android_valid = self.entry_points.android.is_none()
-            || self
-                .surfaces
-                .contains(&SurfaceMechanism::AndroidHardwareBuffer);
-        if !web_valid || !windows_valid || !android_valid {
+        if !web_valid || !windows_valid {
             return Err(ManifestError::MissingSurface);
         }
         Ok(())
@@ -352,7 +331,6 @@ pub enum SurfaceMechanism {
     MacOsIoSurface,
     WindowsDxgi,
     LinuxDmaBuf,
-    AndroidHardwareBuffer,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

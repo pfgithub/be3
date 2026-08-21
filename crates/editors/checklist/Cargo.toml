@@ -16,8 +16,5 @@ block-client = { path = "../../block-client" }
 block-editor-plugin = { path = "../../block-editor-plugin" }
 uuid = "1"
 
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.22"
-
 [lints]
 workspace = true
