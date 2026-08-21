@@ -7,6 +7,7 @@ use block_client::{
 use block_editor_plugin::{egui, EditorHost, FileFilter, FilePicker, PickedFile};
 use uuid::Uuid;
 
+const LOADING_FILL: egui::Color32 = egui::Color32::from_gray(35);
 const INTRINSIC_LONG_SIDE: f32 = 1024.0;
 const INTRINSIC_SHORT_SIDE: f32 = 24.0;
 
@@ -93,9 +94,6 @@ impl block_editor_plugin::App for ImageApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        let Some(size) = self.image_size() else {
-            return;
-        };
         let texture = match self.texture(Pane::Main, ui.ctx()) {
             Ok(texture) => texture,
             Err(error) => {
@@ -109,6 +107,9 @@ impl block_editor_plugin::App for ImageApp {
                 });
                 return;
             }
+        };
+        let Some(size) = self.image_size() else {
+            return;
         };
         let available = ui.available_size().max(egui::Vec2::splat(1.0));
         let aspect = size.x / size.y;
@@ -128,12 +129,14 @@ impl block_editor_plugin::App for ImageApp {
     /// The block as the host paints it: the image alone, filling whatever
     /// quad it is being drawn on.
     fn preview_ui(&mut self, ui: &mut egui::Ui) {
-        let Ok(texture) = self.texture(Pane::Preview, ui.ctx()) else {
-            return;
-        };
         let rect = ui.available_rect_before_wrap();
         ui.allocate_rect(rect, egui::Sense::hover());
-        paint(ui.painter(), &texture, rect);
+        match self.texture(Pane::Preview, ui.ctx()) {
+            Ok(texture) => paint(ui.painter(), &texture, rect),
+            Err(_) => {
+                ui.painter().rect_filled(rect, 0.0, LOADING_FILL);
+            }
+        }
     }
 
     fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
