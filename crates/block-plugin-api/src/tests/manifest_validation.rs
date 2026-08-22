@@ -21,10 +21,12 @@ fn manifest_validation() {
         entry_points: EntryPoints {
             web: Some("/counter.js".into()),
             windows: Some("counter.exe".into()),
+            linux: Some("counter-host".into()),
         },
         surfaces: vec![
             SurfaceMechanism::WebExternalImage,
             SurfaceMechanism::WindowsDxgi,
+            SurfaceMechanism::LinuxDmaBuf,
         ],
     };
     assert_eq!(manifest.validate(), Ok(()));
@@ -36,6 +38,12 @@ fn manifest_validation() {
     let mut invalid = manifest.clone();
     invalid.regions = vec![EditorRegion::LeftSidebar];
     assert_eq!(invalid.validate(), Err(ManifestError::InvalidRegions));
+
+    let mut invalid = manifest.clone();
+    invalid
+        .surfaces
+        .retain(|surface| *surface != SurfaceMechanism::LinuxDmaBuf);
+    assert_eq!(invalid.validate(), Err(ManifestError::MissingSurface));
 
     let mut invalid = manifest;
     invalid.surfaces.clear();

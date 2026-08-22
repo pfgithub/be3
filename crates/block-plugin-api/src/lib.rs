@@ -27,7 +27,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 16;
+pub const PROTOCOL_VERSION: u16 = 17;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -223,6 +223,8 @@ pub struct EntryPoints {
     pub web: Option<String>,
     #[serde(default)]
     pub windows: Option<String>,
+    #[serde(default)]
+    pub linux: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -278,20 +280,24 @@ impl PluginManifest {
         {
             return Err(ManifestError::InvalidRegions);
         }
-        if self.entry_points.web.is_none() && self.entry_points.windows.is_none() {
+        let entries = [
+            &self.entry_points.web,
+            &self.entry_points.windows,
+            &self.entry_points.linux,
+        ];
+        if entries.iter().all(|entry| entry.is_none()) {
             return Err(ManifestError::MissingEntryPoint);
         }
-        for entry in [&self.entry_points.web, &self.entry_points.windows]
-            .into_iter()
-            .flatten()
-        {
+        for entry in entries.into_iter().flatten() {
             manifest_string("entry point", entry)?;
         }
         let web_valid = self.entry_points.web.is_none()
             || self.surfaces.contains(&SurfaceMechanism::WebExternalImage);
         let windows_valid = self.entry_points.windows.is_none()
             || self.surfaces.contains(&SurfaceMechanism::WindowsDxgi);
-        if !web_valid || !windows_valid {
+        let linux_valid = self.entry_points.linux.is_none()
+            || self.surfaces.contains(&SurfaceMechanism::LinuxDmaBuf);
+        if !web_valid || !windows_valid || !linux_valid {
             return Err(ManifestError::MissingSurface);
         }
         Ok(())

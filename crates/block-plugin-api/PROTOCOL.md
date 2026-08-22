@@ -95,6 +95,14 @@ host embeds it. It is a request, not a constraint: the host may embed the
 instance at any size, and falls back to its own default until an instance
 reports one.
 
+A surface is transferred as native graphics resources, never as pixels: the
+Windows mechanism shares a D3D12 texture and fence, and the Linux one shares
+the dma-buf planes of a single image. A Linux surface declares one attachment
+per plane and no fence, so the plugin publishes a frame only once the work
+writing it has retired, and the monotonic synchronization value in its
+descriptor tells the host which frame it is looking at rather than what to
+wait on.
+
 Surface messages may declare at most 16 native attachments. Each declaration
 records the resource type and whether ownership is borrowed or transferred.
 Declaration order is the attachment order in the platform carrier. A missing,

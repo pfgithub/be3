@@ -81,7 +81,7 @@ impl LinuxSurfaceDescriptor {
         if plane_count == 0
             || plane_count > MAX_PLANES
             || surface.opaque.len() != HEADER_LENGTH + plane_count * PLANE_LENGTH
-            || surface.attachments.len() != plane_count + 1
+            || surface.attachments.len() != plane_count
         {
             return Err(LinuxSurfaceError::MalformedDescriptor);
         }
@@ -115,17 +115,13 @@ impl LinuxSurfaceDescriptor {
         width: u32,
         height: u32,
     ) -> SurfaceDescriptor {
-        let mut attachments = vec![
+        let attachments = vec![
             AttachmentDescriptor {
                 attachment_type: AttachmentType::Image,
                 ownership: AttachmentOwnership::Transferred,
             };
             self.planes.len()
         ];
-        attachments.push(AttachmentDescriptor {
-            attachment_type: AttachmentType::Synchronization,
-            ownership: AttachmentOwnership::Transferred,
-        });
         SurfaceDescriptor {
             request_id,
             generation,
@@ -165,17 +161,10 @@ fn validate_surface(surface: &SurfaceDescriptor) -> Result<(), LinuxSurfaceError
         return Err(LinuxSurfaceError::UnsupportedAlphaMode);
     }
     if surface.attachments.is_empty()
-        || surface.attachments.last()
-            != Some(&AttachmentDescriptor {
-                attachment_type: AttachmentType::Synchronization,
-                ownership: AttachmentOwnership::Transferred,
-            })
-        || surface.attachments[..surface.attachments.len() - 1]
-            .iter()
-            .any(|attachment| {
-                attachment.attachment_type != AttachmentType::Image
-                    || attachment.ownership != AttachmentOwnership::Transferred
-            })
+        || surface.attachments.iter().any(|attachment| {
+            attachment.attachment_type != AttachmentType::Image
+                || attachment.ownership != AttachmentOwnership::Transferred
+        })
     {
         return Err(LinuxSurfaceError::InvalidAttachments);
     }

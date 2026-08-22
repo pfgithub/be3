@@ -20,4 +20,5 @@ fn manifest_from_json_reads_a_document() {
     );
     assert_eq!(manifest.entry_points.web.as_deref(), Some("counter.js"));
     assert_eq!(manifest.entry_points.windows, None);
+    assert_eq!(manifest.entry_points.linux, None);
 }
