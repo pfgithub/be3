@@ -369,6 +369,7 @@ impl EguiSession {
                     modifiers: state.input.modifiers,
                 });
             }
+            InputEvent::Zoom { factor } => state.input.events.push(egui::Event::Zoom(*factor)),
             InputEvent::Key {
                 logical,
                 pressed,

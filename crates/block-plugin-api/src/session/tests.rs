@@ -33,6 +33,7 @@ fn input(event: InputEvent) -> Message {
     })
 }
 
+mod coalesced_zoom_gestures_multiply;
 mod disconnect_fails_the_session;
 mod malformed_payload_fails_the_session;
 mod queue_saturation_preserves_ordered_input;

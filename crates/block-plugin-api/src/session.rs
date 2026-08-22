@@ -260,6 +260,10 @@ fn coalesce_input(current: &mut InputEvent, incoming: &InputEvent) -> bool {
             *y += new_y;
             true
         }
+        (InputEvent::Zoom { factor }, InputEvent::Zoom { factor: incoming }) => {
+            *factor *= incoming;
+            true
+        }
         (InputEvent::Modifiers(current), InputEvent::Modifiers(incoming))
             if current == incoming =>
         {

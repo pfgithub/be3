@@ -27,7 +27,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 13;
+pub const PROTOCOL_VERSION: u16 = 14;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -529,6 +529,9 @@ pub enum InputEvent {
         x: f32,
         y: f32,
         unit: WheelUnit,
+    },
+    Zoom {
+        factor: f32,
     },
     Key {
         physical: PhysicalKey,

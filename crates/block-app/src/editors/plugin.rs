@@ -225,6 +225,14 @@ impl BlockEditor for PluginEditor {
         }
     }
 
+    fn direct_editor_fills_viewport(&self) -> bool {
+        self.plugin.capabilities.pan_and_zoom
+    }
+
+    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
+        self.plugin.capabilities.pan_and_zoom
+    }
+
     fn direct_editor_interaction(&self) -> DirectEditorInteraction {
         match self.plugin.interaction {
             InteractionMode::Preview => DirectEditorInteraction::Preview,

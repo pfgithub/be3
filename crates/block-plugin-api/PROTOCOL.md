@@ -26,6 +26,12 @@ defined by the session layer; it may not reorder retained messages. A timeout,
 malformed frame, invalid ordering, or unsupported capability is reported with
 a structured error before disconnect when the transport remains usable.
 
+Input events carry pointer, wheel, key, text, focus and zoom-gesture input in
+the region's own logical coordinates. A pinch or trackpad zoom is its own
+event, carrying the factor the view is asked to grow by; a wheel turned with
+the zoom modifier held stays a wheel event, which the receiver reads as a zoom
+of its own. Consecutive zoom gestures coalesce by multiplying their factors.
+
 Client messages tunnel the block protocol between an editor instance's own
 block client and the host's server connection. Their payloads are opaque JSON
 of any length: the host forwards them in both directions without interpreting

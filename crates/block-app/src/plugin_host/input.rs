@@ -142,6 +142,9 @@ impl InputAdapter {
                     unit: wheel_unit(unit),
                 });
             }
+            egui::Event::Zoom(factor) if hovered => {
+                output.push(InputEvent::Zoom { factor });
+            }
             egui::Event::Key {
                 key,
                 physical_key,

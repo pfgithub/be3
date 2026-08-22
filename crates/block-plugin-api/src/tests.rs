@@ -70,3 +70,4 @@ mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
 mod stacked_layout_keeps_each_region;
 mod stacked_layout_stacks_screens;
+mod zoom_gesture_round_trips;
