@@ -55,6 +55,7 @@ fn region_screen(
     }
 }
 
+mod artifact_messages_round_trip;
 mod block_types_round_trip;
 mod creation_messages_round_trip;
 mod drag_messages_round_trip;
@@ -64,6 +65,7 @@ mod manifest_validation;
 mod multiplexed_messages_round_trip;
 mod open_block_request_round_trips;
 mod region_sizes_round_trip;
+mod rejects_artifact_settings_over_limit;
 mod rejects_collection_over_limit;
 mod rejects_malformed_payload;
 mod rejects_truncated_frame;

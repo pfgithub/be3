@@ -1,7 +1,7 @@
 use block_client::TunnelCarrier;
 use block_plugin_api::{
-    CreationOutcome, EditorInstanceId, EditorMessage, EditorRegion, FilePick, InputEvent, Message,
-    PointerButton, RegionSize, ScreenPlacement, TunnelMessage, WheelUnit,
+    ArtifactDescription, CreationOutcome, EditorInstanceId, EditorMessage, EditorRegion, FilePick,
+    InputEvent, Message, PointerButton, RegionSize, ScreenPlacement, TunnelMessage, WheelUnit,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -21,6 +21,35 @@ pub(crate) struct EguiSession {
     aspect_ratio: Option<f32>,
     creating: bool,
     created: Option<CreationOutcome>,
+    artifact: Option<ArtifactState>,
+}
+
+/// The settings the host holds for an artifact, the copy its settings region
+/// edits, and what has yet to be reported back.
+struct ArtifactState {
+    data: Vec<u8>,
+    draft: Vec<u8>,
+    described: Option<Vec<u8>>,
+    edited: bool,
+    regenerating: bool,
+}
+
+impl ArtifactState {
+    fn new(data: Vec<u8>) -> Self {
+        Self {
+            draft: data.clone(),
+            data,
+            described: None,
+            edited: false,
+            regenerating: false,
+        }
+    }
+
+    fn settings(&mut self, data: Vec<u8>) {
+        self.draft.clone_from(&data);
+        self.data = data;
+        self.edited = false;
+    }
 }
 
 #[derive(Default)]
@@ -36,6 +65,16 @@ trait AppUi {
     fn connect_creation(&mut self, host: EditorHost, client: block_client::BlockClient);
     fn create_block(&mut self) -> Result<Uuid, String>;
     fn creation_ui(&mut self, ui: &mut egui::Ui);
+    fn connect_artifact(
+        &mut self,
+        host: EditorHost,
+        client: block_client::BlockClient,
+        artifact: crate::Artifact,
+    );
+    fn describe_artifact(&mut self, data: &[u8]) -> ArtifactDescription;
+    fn artifact_settings_ui(&mut self, ui: &mut egui::Ui, data: &mut Vec<u8>);
+    fn regenerate_artifact(&mut self, data: &[u8]);
+    fn poll_artifact(&mut self) -> Option<Result<(), String>>;
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
     fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
     fn aspect_ratio(&mut self) -> Option<f32>;
@@ -58,6 +97,37 @@ impl<A: crate::App> AppUi for A {
         crate::App::creation_ui(self, ui);
     }
 
+    fn connect_artifact(
+        &mut self,
+        host: EditorHost,
+        client: block_client::BlockClient,
+        artifact: crate::Artifact,
+    ) {
+        crate::App::connect_artifact(self, host, client, artifact);
+    }
+
+    fn describe_artifact(&mut self, data: &[u8]) -> ArtifactDescription {
+        match crate::App::describe_artifact(self, data) {
+            Ok(description) => ArtifactDescription::Described {
+                source: description.source.into_bytes(),
+                summary: description.summary,
+            },
+            Err(error) => ArtifactDescription::Unreadable(error),
+        }
+    }
+
+    fn artifact_settings_ui(&mut self, ui: &mut egui::Ui, data: &mut Vec<u8>) {
+        crate::App::artifact_settings_ui(self, ui, data);
+    }
+
+    fn regenerate_artifact(&mut self, data: &[u8]) {
+        crate::App::regenerate_artifact(self, data);
+    }
+
+    fn poll_artifact(&mut self) -> Option<Result<(), String>> {
+        crate::App::poll_artifact(self)
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
         match region {
             EditorRegion::Main => crate::App::ui(self, ui),
@@ -65,6 +135,7 @@ impl<A: crate::App> AppUi for A {
             EditorRegion::LeftSidebar => crate::App::left_sidebar_ui(self, ui),
             EditorRegion::RightSidebar => crate::App::right_sidebar_ui(self, ui),
             EditorRegion::Preview => crate::App::preview_ui(self, ui),
+            EditorRegion::ArtifactSettings => {}
         }
     }
 
@@ -90,6 +161,7 @@ impl EguiSession {
             aspect_ratio: None,
             creating: false,
             created: None,
+            artifact: None,
         }
     }
 
@@ -119,6 +191,43 @@ impl EguiSession {
         self.creating = true;
         self.host.set_editable(true);
         self.app.connect_creation(self.host.clone(), client);
+    }
+
+    pub(crate) fn connect_artifact(
+        &mut self,
+        block_id: Uuid,
+        block_type: Uuid,
+        account_id: Uuid,
+        workspace_id: Uuid,
+        data: Vec<u8>,
+    ) {
+        self.artifact = Some(ArtifactState::new(data));
+        let Some(client) = self.client(account_id, workspace_id) else {
+            return;
+        };
+        self.host.set_editable(true);
+        self.app.connect_artifact(
+            self.host.clone(),
+            client,
+            crate::Artifact {
+                block_id,
+                block_type,
+            },
+        );
+    }
+
+    pub(crate) fn artifact_settings(&mut self, data: Vec<u8>) {
+        if let Some(artifact) = &mut self.artifact {
+            artifact.settings(data);
+        }
+    }
+
+    pub(crate) fn regenerate_artifact(&mut self, data: &[u8]) {
+        let Some(artifact) = &mut self.artifact else {
+            return;
+        };
+        artifact.regenerating = true;
+        self.app.regenerate_artifact(data);
     }
 
     pub(crate) fn commit_creation(&mut self) {
@@ -192,6 +301,35 @@ impl EguiSession {
                 instance,
                 ready,
             }));
+        }
+        if let Some(artifact) = &mut self.artifact {
+            if artifact.described.as_deref() != Some(artifact.data.as_slice()) {
+                artifact.described = Some(artifact.data.clone());
+                let description = self.app.describe_artifact(&artifact.data);
+                messages.push(Message::Editor(EditorMessage::ArtifactDescribed {
+                    instance,
+                    description,
+                }));
+            }
+            if artifact.edited {
+                artifact.edited = false;
+                messages.push(Message::Editor(EditorMessage::ArtifactEdited {
+                    instance,
+                    data: artifact.draft.clone(),
+                }));
+            }
+            if artifact.regenerating {
+                if let Some(result) = self.app.poll_artifact() {
+                    artifact.regenerating = false;
+                    messages.push(Message::Editor(EditorMessage::ArtifactRegenerated {
+                        instance,
+                        outcome: match result {
+                            Ok(()) => block_plugin_api::RegenerationOutcome::Done,
+                            Err(error) => block_plugin_api::RegenerationOutcome::Failed(error),
+                        },
+                    }));
+                }
+            }
         }
         if let Some(outcome) = self.created.take() {
             messages.push(Message::Editor(EditorMessage::CreationBlock {
@@ -294,17 +432,24 @@ impl EguiSession {
             egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO)
         };
         let creating = self.creating;
+        let artifact = &mut self.artifact;
+        let mut draft = artifact
+            .as_mut()
+            .filter(|_| region == EditorRegion::ArtifactSettings)
+            .map(|artifact| std::mem::take(&mut artifact.draft));
         let output = context.run_ui(input, |ui| {
             egui::CentralPanel::default().frame(frame).show_inside(ui, {
-                |ui| {
-                    if creating {
-                        app.creation_ui(ui);
-                    } else {
-                        app.ui(ui, region);
-                    }
+                |ui| match (&mut draft, creating) {
+                    (Some(draft), _) => app.artifact_settings_ui(ui, draft),
+                    (None, true) => app.creation_ui(ui),
+                    (None, false) => app.ui(ui, region),
                 }
             });
         });
+        if let (Some(artifact), Some(draft)) = (artifact.as_mut(), draft) {
+            artifact.edited |= artifact.draft != draft;
+            artifact.draft = draft;
+        }
         self.host.set_drag(None);
         if delivered_drop {
             self.drag = None;

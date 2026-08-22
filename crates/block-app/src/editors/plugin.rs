@@ -13,11 +13,13 @@ use uuid::Uuid;
 pub(crate) mod discovery;
 
 use super::{
-    BlockEditor, BlockRenderContext, CreationStep, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
-    PendingCreation,
+    ArtifactSession, ArtifactStatus, BlockEditor, BlockRenderContext, CreationStep,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    EditorAccess, EditorAction, EditorRegistry, PendingCreation,
 };
-use crate::plugin_host::{CreationSlot, CreationState};
+use crate::plugin_host::{
+    ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, InstanceRole,
+};
 
 /// The registered block types as a plugin sees them, built once for every
 /// runtime that has to name and illustrate blocks it only holds a reference
@@ -76,7 +78,7 @@ impl PluginCreation {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
                 client: editors.client_handle(),
-                block: None,
+                role: InstanceRole::Creation,
                 instance: self.instance,
                 region: EditorRegion::Main,
                 size: egui::vec2(ui.available_width(), height),
@@ -193,7 +195,7 @@ impl PluginEditor {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
                 client: editors.client_handle(),
-                block: Some(crate::plugin_host::EditorBlock {
+                role: InstanceRole::Editor(EditorBlock {
                     id: self.block.id(),
                     block_type: self.block.block_type(),
                 }),
@@ -359,3 +361,134 @@ fn toolbar_height(ui: &egui::Ui) -> f32 {
         .y
         .max(ui.text_style_height(&egui::TextStyle::Body) + 2.0 * spacing.button_padding.y)
 }
+
+/// The instance kept open for one dynamic artifact a plugin's block type
+/// generated, which answers for it until the artifact is closed.
+pub(super) struct PluginArtifact {
+    plugin: Arc<PluginManifest>,
+    block: EditorBlock,
+    instance: EditorInstanceId,
+    context: Option<egui::Context>,
+    resync: bool,
+    outcome: Option<Result<(), String>>,
+    regenerating: bool,
+}
+
+impl PluginArtifact {
+    pub(super) fn new(plugin: Arc<PluginManifest>, target_id: Uuid, target_type: Uuid) -> Self {
+        Self {
+            plugin,
+            block: EditorBlock {
+                id: target_id,
+                block_type: target_type,
+            },
+            instance: next_instance(),
+            context: None,
+            resync: false,
+            outcome: None,
+            regenerating: false,
+        }
+    }
+}
+
+impl Drop for PluginArtifact {
+    fn drop(&mut self) {
+        if let Some(context) = self.context.take() {
+            crate::plugin_host::close(&context, &self.plugin.identity.id, self.instance);
+        }
+    }
+}
+
+impl ArtifactSession for PluginArtifact {
+    fn poll(
+        &mut self,
+        ctx: &egui::Context,
+        registry: &EditorRegistry,
+        client: &Arc<BlockClient>,
+        data: &[u8],
+    ) -> ArtifactStatus {
+        self.context = Some(ctx.clone());
+        let state = crate::plugin_host::artifact(
+            ctx,
+            ArtifactSlot {
+                plugin: &self.plugin,
+                block_types: registry.plugin_block_types(),
+                client: Arc::clone(client),
+                instance: self.instance,
+                block: self.block,
+                data,
+                resync: std::mem::take(&mut self.resync),
+            },
+        );
+        if let Some(outcome) =
+            crate::plugin_host::take_artifact_outcome(&self.plugin.identity.id, self.instance)
+        {
+            self.regenerating = false;
+            self.outcome = Some(outcome);
+        }
+        match state {
+            ArtifactState::Starting => ArtifactStatus::Starting,
+            ArtifactState::Described { source, summary } => {
+                ArtifactStatus::Described { source, summary }
+            }
+            ArtifactState::Failed(error) => ArtifactStatus::Failed(error),
+        }
+    }
+
+    fn settings_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        registry: &EditorRegistry,
+        client: &Arc<BlockClient>,
+        draft: &mut Vec<u8>,
+    ) {
+        self.context = Some(ui.ctx().clone());
+        let height = crate::plugin_host::region_size(
+            &self.plugin.identity.id,
+            self.instance,
+            EditorRegion::ArtifactSettings,
+        )
+        .map_or(ARTIFACT_SETTINGS_HEIGHT, |size| size.y.max(1.0));
+        crate::plugin_host::editor_ui(
+            ui,
+            crate::plugin_host::EditorSlot {
+                plugin: &self.plugin,
+                block_types: registry.plugin_block_types(),
+                client: Arc::clone(client),
+                role: InstanceRole::Artifact(self.block),
+                instance: self.instance,
+                region: EditorRegion::ArtifactSettings,
+                size: egui::vec2(ui.available_width(), height),
+            },
+        );
+        if let Some(edited) =
+            crate::plugin_host::artifact_draft(&self.plugin.identity.id, self.instance)
+        {
+            *draft = edited;
+        }
+    }
+
+    fn summary(&self, _draft: &[u8]) -> Option<String> {
+        None
+    }
+
+    fn cancel_settings(&mut self) {
+        self.resync = true;
+    }
+
+    fn regenerate(&mut self, _client: &Arc<BlockClient>, data: &[u8]) {
+        self.outcome = None;
+        self.regenerating = true;
+        crate::plugin_host::regenerate_artifact(&self.plugin.identity.id, self.instance, data);
+    }
+
+    fn take_outcome(&mut self) -> Option<Result<(), String>> {
+        self.outcome.take()
+    }
+
+    fn regenerating(&self) -> bool {
+        self.regenerating
+    }
+}
+
+const ARTIFACT_SETTINGS_HEIGHT: f32 = 72.0;

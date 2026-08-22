@@ -24,18 +24,21 @@ mod windows;
 
 #[cfg(target_os = "windows")]
 pub(crate) use native::{
-    aspect_ratio, close, commit_creation, creation, creation_ready, editor_ui, install,
-    intrinsic_size, kill, preview, region_size, running, take_created,
+    artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
+    editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
+    take_artifact_outcome, take_created,
 };
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
 pub(crate) use unavailable::{
-    aspect_ratio, close, commit_creation, creation, creation_ready, editor_ui, install,
-    intrinsic_size, kill, preview, region_size, running, take_created,
+    artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
+    editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
+    take_artifact_outcome, take_created,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::{
-    aspect_ratio, close, commit_creation, creation, creation_ready, editor_ui, install,
-    intrinsic_size, kill, preview, region_size, running, take_created,
+    artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
+    editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
+    take_artifact_outcome, take_created,
 };
 
 pub(crate) struct RuntimeStatus {
@@ -96,7 +99,7 @@ pub(crate) struct EditorSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
     pub(crate) client: Arc<BlockClient>,
-    pub(crate) block: Option<EditorBlock>,
+    pub(crate) role: InstanceRole,
     pub(crate) instance: EditorInstanceId,
     pub(crate) region: EditorRegion,
     pub(crate) size: egui::Vec2,
@@ -106,4 +109,46 @@ pub(crate) struct EditorSlot<'a> {
 pub(crate) struct EditorBlock {
     pub(crate) id: Uuid,
     pub(crate) block_type: Uuid,
+}
+
+/// What an instance was opened for: a block it edits, a block it is filling
+/// in, or a dynamic artifact one of its blocks generated.
+#[derive(Clone, Copy)]
+pub(crate) enum InstanceRole {
+    Editor(EditorBlock),
+    Creation,
+    Artifact(EditorBlock),
+}
+
+impl InstanceRole {
+    pub(crate) fn block(self) -> Option<EditorBlock> {
+        match self {
+            Self::Editor(block) | Self::Artifact(block) => Some(block),
+            Self::Creation => None,
+        }
+    }
+}
+
+/// An instance kept open to describe, edit and rebuild one dynamic artifact.
+pub(crate) struct ArtifactSlot<'a> {
+    pub(crate) plugin: &'a PluginManifest,
+    pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
+    pub(crate) client: Arc<BlockClient>,
+    pub(crate) instance: EditorInstanceId,
+    pub(crate) block: EditorBlock,
+    pub(crate) data: &'a [u8],
+    /// Hands the settings over again even when they have not changed, so a
+    /// dismissed dialog's edits are thrown away.
+    pub(crate) resync: bool,
+}
+
+/// What the plugin has said about the settings the host last handed it.
+#[cfg_attr(
+    not(any(target_arch = "wasm32", target_os = "windows")),
+    allow(dead_code)
+)]
+pub(crate) enum ArtifactState {
+    Starting,
+    Described { source: Uuid, summary: String },
+    Failed(String),
 }

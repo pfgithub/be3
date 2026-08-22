@@ -99,7 +99,8 @@ impl ClientSession {
                 State::Running,
                 Message::Editor(
                     block_plugin_api::EditorMessage::Open { instance, .. }
-                    | block_plugin_api::EditorMessage::OpenCreation { instance, .. },
+                    | block_plugin_api::EditorMessage::OpenCreation { instance, .. }
+                    | block_plugin_api::EditorMessage::OpenArtifact { instance, .. },
                 ),
             ) if !self.instances.contains(&instance) => {
                 self.instances.insert(instance);
@@ -137,7 +138,9 @@ impl ClientSession {
                     block_plugin_api::EditorMessage::DragOver { instance, .. }
                     | block_plugin_api::EditorMessage::DragLeft { instance }
                     | block_plugin_api::EditorMessage::CommitCreation { instance }
-                    | block_plugin_api::EditorMessage::FilePicked { instance, .. },
+                    | block_plugin_api::EditorMessage::FilePicked { instance, .. }
+                    | block_plugin_api::EditorMessage::ArtifactSettings { instance, .. }
+                    | block_plugin_api::EditorMessage::RegenerateArtifact { instance, .. },
                 ),
             ) if self.instances.contains(&instance) => Ok(Vec::new()),
             (State::Running, Message::Ping { nonce }) => Ok(vec![Message::Pong { nonce }]),

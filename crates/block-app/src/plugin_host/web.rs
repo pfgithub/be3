@@ -1,7 +1,8 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use block_plugin_api::{
-    EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest, ScreenLayout,
+    ArtifactDescription, EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest,
+    ScreenLayout,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -15,7 +16,8 @@ use super::{
     presenter::{
         PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
     },
-    preview_size, CreationSlot, CreationState, EditorBlock, EditorSlot, PreviewSlot,
+    preview_size, ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock,
+    EditorSlot, InstanceRole, PreviewSlot,
 };
 use adapter::WebProtocolAdapter;
 
@@ -233,7 +235,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         plugin,
         block_types,
         client,
-        block,
+        role,
         instance,
         region,
         size,
@@ -277,7 +279,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             region,
             ui.ctx(),
             &client,
-            block,
+            role,
             block_types,
             response.rect.size(),
             ui.ctx().pixels_per_point(),
@@ -342,6 +344,92 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
     })
 }
 
+pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> ArtifactState {
+    let ArtifactSlot {
+        plugin,
+        block_types,
+        client,
+        instance,
+        block,
+        data,
+        resync,
+    } = slot;
+    open(plugin, context);
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.render_available {
+            return ArtifactState::Failed("wgpu is not available in this build.".to_owned());
+        }
+        let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
+            return ArtifactState::Failed(
+                "Too many plugin runtimes are already presenting.".to_owned(),
+            );
+        };
+        runtime.context = Some(context.clone());
+        begin_pass(runtime, context, context.cumulative_pass_nr());
+        if let Some(error) = runtime.error.clone() {
+            return ArtifactState::Failed(error);
+        }
+        let messages = runtime.instances.report_artifact(
+            instance,
+            context,
+            &client,
+            block_types,
+            block,
+            data,
+            resync,
+        );
+        runtime.send(messages);
+        match runtime.instances.artifact_description(instance) {
+            Some(ArtifactDescription::Described { source, summary }) => ArtifactState::Described {
+                source: Uuid::from_bytes(source),
+                summary,
+            },
+            Some(ArtifactDescription::Unreadable(error)) => ArtifactState::Failed(error),
+            None => {
+                context.request_repaint();
+                ArtifactState::Starting
+            }
+        }
+    })
+}
+
+pub(crate) fn artifact_draft(plugin_id: &str, instance: EditorInstanceId) -> Option<Vec<u8>> {
+    STATE.with(|state| {
+        state
+            .borrow()
+            .runtimes
+            .get(plugin_id)?
+            .instances
+            .artifact_draft(instance)
+    })
+}
+
+pub(crate) fn regenerate_artifact(plugin_id: &str, instance: EditorInstanceId, data: &[u8]) {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
+            return;
+        };
+        let messages = runtime.instances.regenerate_artifact(instance, data);
+        runtime.send(messages);
+    });
+}
+
+pub(crate) fn take_artifact_outcome(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+) -> Option<Result<(), String>> {
+    STATE.with(|state| {
+        state
+            .borrow_mut()
+            .runtimes
+            .get_mut(plugin_id)?
+            .instances
+            .take_artifact_outcome(instance)
+    })
+}
+
 pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
     let PreviewSlot {
         plugin,
@@ -376,7 +464,7 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
             EditorRegion::Preview,
             &context,
             &client,
-            Some(EditorBlock {
+            InstanceRole::Editor(EditorBlock {
                 id: block_id,
                 block_type,
             }),
@@ -555,7 +643,8 @@ fn begin_pass(runtime: &mut Runtime, context: &egui::Context, pass: u64) {
     let awaited = messages.iter().any(|message| {
         matches!(
             message,
-            Message::Client(_) | Message::Editor(EditorMessage::Open { .. })
+            Message::Client(_)
+                | Message::Editor(EditorMessage::Open { .. } | EditorMessage::OpenArtifact { .. })
         )
     });
     runtime.send(messages);

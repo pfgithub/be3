@@ -2,7 +2,7 @@ use block_plugin_api::{EditorInstanceId, EditorRegion};
 use eframe::egui;
 use uuid::Uuid;
 
-use super::{CreationSlot, CreationState, EditorSlot, PreviewSlot};
+use super::{ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorSlot, PreviewSlot};
 
 pub(crate) fn install(_creation_context: &eframe::CreationContext<'_>) {}
 
@@ -11,13 +11,13 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         plugin,
         block_types,
         client,
-        block,
+        role,
         instance,
         region,
         size,
     } = slot;
     let _ = (block_types, client, instance, region, size);
-    let _ = block.map(|block| (block.id, block.block_type));
+    let _ = role.block().map(|block| (block.id, block.block_type));
     ui.colored_label(
         egui::Color32::RED,
         format!("{} is not supported on this platform.", plugin.display_name),
@@ -37,6 +37,36 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
         "{} is not supported on this platform.",
         plugin.display_name
     ))
+}
+
+pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> ArtifactState {
+    let ArtifactSlot {
+        plugin,
+        block_types,
+        client,
+        instance,
+        block,
+        data,
+        resync,
+    } = slot;
+    let _ = (context, block_types, client, instance, block, data, resync);
+    ArtifactState::Failed(format!(
+        "{} is not supported on this platform.",
+        plugin.display_name
+    ))
+}
+
+pub(crate) fn artifact_draft(_plugin_id: &str, _instance: EditorInstanceId) -> Option<Vec<u8>> {
+    None
+}
+
+pub(crate) fn regenerate_artifact(_plugin_id: &str, _instance: EditorInstanceId, _data: &[u8]) {}
+
+pub(crate) fn take_artifact_outcome(
+    _plugin_id: &str,
+    _instance: EditorInstanceId,
+) -> Option<Result<(), String>> {
+    None
 }
 
 pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {

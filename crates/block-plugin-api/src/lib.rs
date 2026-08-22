@@ -27,7 +27,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 14;
+pub const PROTOCOL_VERSION: u16 = 15;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -203,15 +203,19 @@ pub enum EditorRegion {
     LeftSidebar,
     RightSidebar,
     Preview,
+    /// The settings of a dynamic artifact the editor's block type generated,
+    /// drawn inside the host's own dialog.
+    ArtifactSettings,
 }
 
 impl EditorRegion {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Main,
         Self::Toolbar,
         Self::LeftSidebar,
         Self::RightSidebar,
         Self::Preview,
+        Self::ArtifactSettings,
     ];
 }
 
@@ -377,6 +381,44 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         outcome: CreationOutcome,
     },
+    /// An instance opened on a dynamic artifact one of this editor's blocks
+    /// generated, rather than on a block of its own: it describes the
+    /// artifact, edits its settings and rebuilds it.
+    OpenArtifact {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        block_type: [u8; 16],
+        account_id: [u8; 16],
+        workspace_id: [u8; 16],
+        data: Vec<u8>,
+    },
+    /// The settings the host holds for the artifact, whenever they change
+    /// outside the instance's own settings region.
+    ArtifactSettings {
+        instance: EditorInstanceId,
+        data: Vec<u8>,
+    },
+    /// What the instance reads out of the settings it was last given.
+    ArtifactDescribed {
+        instance: EditorInstanceId,
+        description: ArtifactDescription,
+    },
+    /// The settings the instance's settings region has edited so far, which
+    /// the host stores on the artifact when the user applies them.
+    ArtifactEdited {
+        instance: EditorInstanceId,
+        data: Vec<u8>,
+    },
+    /// Rebuilds the artifact from these settings, through the instance's own
+    /// client.
+    RegenerateArtifact {
+        instance: EditorInstanceId,
+        data: Vec<u8>,
+    },
+    ArtifactRegenerated {
+        instance: EditorInstanceId,
+        outcome: RegenerationOutcome,
+    },
     AspectRatio {
         instance: EditorInstanceId,
         ratio: f32,
@@ -405,6 +447,20 @@ pub struct FileFilter {
     pub default_file_name: String,
     pub extensions: Vec<String>,
     pub mime_types: Vec<String>,
+}
+
+/// What an editor makes of an artifact's settings: the block it was generated
+/// from and what the settings currently produce, or why they cannot be read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArtifactDescription {
+    Described { source: [u8; 16], summary: String },
+    Unreadable(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegenerationOutcome {
+    Done,
+    Failed(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -763,12 +819,32 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             CreationOutcome::Created(_) => Ok(()),
             CreationOutcome::Failed(message) => string(message),
         },
+        EditorMessage::ArtifactDescribed { description, .. } => match description {
+            ArtifactDescription::Described { summary, .. } => string(summary),
+            ArtifactDescription::Unreadable(message) => string(message),
+        },
+        EditorMessage::ArtifactRegenerated { outcome, .. } => match outcome {
+            RegenerationOutcome::Done => Ok(()),
+            RegenerationOutcome::Failed(message) => string(message),
+        },
+        EditorMessage::OpenArtifact { data, .. }
+        | EditorMessage::ArtifactSettings { data, .. }
+        | EditorMessage::ArtifactEdited { data, .. }
+        | EditorMessage::RegenerateArtifact { data, .. } => descriptor(data),
         EditorMessage::FilePicked { pick, .. } => match pick {
             FilePick::Chosen { name, .. } => string(name),
             FilePick::Failed(message) => string(message),
             FilePick::Cancelled => Ok(()),
         },
         _ => Ok(()),
+    }
+}
+
+fn descriptor(data: &[u8]) -> Result<(), DecodeError> {
+    if data.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
+        Err(DecodeError::LimitExceeded("artifact settings"))
+    } else {
+        Ok(())
     }
 }
 

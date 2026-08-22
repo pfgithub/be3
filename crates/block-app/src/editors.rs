@@ -1067,8 +1067,9 @@ pub trait DynamicArtifactRegeneration {
     fn poll(&mut self) -> Option<Result<(), String>>;
 }
 
-/// What a source block type can tell the app about the artifacts it produces.
-/// The descriptor payload is opaque to everything but these functions.
+/// What a native source block type can tell the app about the artifacts it
+/// produces. The descriptor payload is opaque to everything but these
+/// functions.
 #[derive(Clone, Copy)]
 pub(super) struct DynamicArtifactSupport {
     /// The block the artifact was generated from.
@@ -1078,6 +1079,120 @@ pub(super) struct DynamicArtifactSupport {
     /// Edits the payload in place; `true` when the settings changed.
     pub settings_ui: fn(&mut egui::Ui, &mut Vec<u8>) -> bool,
     pub regenerate: RegenerateDynamicArtifact,
+}
+
+/// Whichever of them a source block type has: functions the app calls
+/// directly, or the plugin that owns the block type.
+enum ArtifactProvider {
+    Native(DynamicArtifactSupport),
+    Plugin(Arc<PluginManifest>),
+}
+
+/// What one artifact block's source can say about it: where it came from, what
+/// its settings produce, and how to rebuild it. A native editor answers on the
+/// spot; a plugin's answers arrive from its runtime, so a session is kept for
+/// as long as the artifact is on screen.
+pub(super) trait ArtifactSession {
+    /// Keeps the session going for this frame and answers what is known about
+    /// `data`, the settings the artifact currently carries.
+    fn poll(
+        &mut self,
+        ctx: &egui::Context,
+        registry: &EditorRegistry,
+        client: &Arc<BlockClient>,
+        data: &[u8],
+    ) -> ArtifactStatus;
+    /// Draws the settings dialog's contents, leaving the edited settings in
+    /// `draft`.
+    fn settings_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        registry: &EditorRegistry,
+        client: &Arc<BlockClient>,
+        draft: &mut Vec<u8>,
+    );
+    /// What `draft` would produce, when the source describes it rather than
+    /// drawing it itself.
+    fn summary(&self, draft: &[u8]) -> Option<String>;
+    /// Throws away whatever the settings dialog had edited.
+    fn cancel_settings(&mut self);
+    fn regenerate(&mut self, client: &Arc<BlockClient>, data: &[u8]);
+    fn take_outcome(&mut self) -> Option<Result<(), String>>;
+    fn regenerating(&self) -> bool;
+}
+
+pub(super) enum ArtifactStatus {
+    /// The source has not answered yet.
+    Starting,
+    Described {
+        source: Uuid,
+        summary: String,
+    },
+    Failed(String),
+}
+
+struct NativeArtifactSession {
+    support: DynamicArtifactSupport,
+    target_id: Uuid,
+    target_type: Uuid,
+    regeneration: Option<Box<dyn DynamicArtifactRegeneration>>,
+    outcome: Option<Result<(), String>>,
+}
+
+impl ArtifactSession for NativeArtifactSession {
+    fn poll(
+        &mut self,
+        _ctx: &egui::Context,
+        _registry: &EditorRegistry,
+        _client: &Arc<BlockClient>,
+        data: &[u8],
+    ) -> ArtifactStatus {
+        if let Some(regeneration) = &mut self.regeneration {
+            if let Some(result) = regeneration.poll() {
+                self.regeneration = None;
+                self.outcome = Some(result);
+            }
+        }
+        match (self.support.source)(data) {
+            Ok(source) => ArtifactStatus::Described {
+                source,
+                summary: (self.support.summary)(data),
+            },
+            Err(error) => ArtifactStatus::Failed(error),
+        }
+    }
+
+    fn settings_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _registry: &EditorRegistry,
+        _client: &Arc<BlockClient>,
+        draft: &mut Vec<u8>,
+    ) {
+        (self.support.settings_ui)(ui, draft);
+    }
+
+    fn summary(&self, draft: &[u8]) -> Option<String> {
+        Some((self.support.summary)(draft))
+    }
+
+    fn cancel_settings(&mut self) {}
+
+    fn regenerate(&mut self, client: &Arc<BlockClient>, data: &[u8]) {
+        self.outcome = None;
+        match (self.support.regenerate)(client, self.target_id, self.target_type, data) {
+            Ok(regeneration) => self.regeneration = Some(regeneration),
+            Err(error) => self.outcome = Some(Err(error)),
+        }
+    }
+
+    fn take_outcome(&mut self) -> Option<Result<(), String>> {
+        self.outcome.take()
+    }
+
+    fn regenerating(&self) -> bool {
+        self.regeneration.is_some()
+    }
 }
 
 /// How an editor is registered. Only the block type, name, icon and `open`
@@ -1204,7 +1319,7 @@ struct EditorRegistration {
     can_delete_child: bool,
     can_replace_child: bool,
     default_important: bool,
-    dynamic_artifact: Option<DynamicArtifactSupport>,
+    dynamic_artifact: Option<ArtifactProvider>,
 }
 
 impl EditorRegistration {
@@ -1221,7 +1336,7 @@ impl EditorRegistration {
             can_delete_child: E::CAN_DELETE_CHILD,
             can_replace_child: E::CAN_REPLACE_CHILD,
             default_important: E::DEFAULT_IMPORTANT,
-            dynamic_artifact: E::dynamic_artifact(),
+            dynamic_artifact: E::dynamic_artifact().map(ArtifactProvider::Native),
         }
     }
 }
@@ -1362,7 +1477,10 @@ impl EditorRegistry {
             can_delete_child: manifest.children.delete,
             can_replace_child: manifest.children.replace,
             default_important: manifest.important,
-            dynamic_artifact: None,
+            dynamic_artifact: manifest
+                .regions
+                .contains(&block_plugin_api::EditorRegion::ArtifactSettings)
+                .then(|| ArtifactProvider::Plugin(Arc::clone(&manifest))),
         });
     }
 
@@ -1409,33 +1527,35 @@ impl EditorRegistry {
             .is_some_and(|registration| registration.can_replace_child)
     }
 
-    /// The functions that describe and rebuild artifacts made by `source_type`.
-    pub(super) fn dynamic_artifact(
+    /// A session that describes and rebuilds one artifact `source_type` made.
+    pub(super) fn artifact_session(
         &self,
         source_type: Uuid,
-    ) -> Result<DynamicArtifactSupport, String> {
+        target_id: Uuid,
+        target_type: Uuid,
+    ) -> Result<Box<dyn ArtifactSession>, String> {
         let registration = self
             .registrations
             .get(&source_type)
             .ok_or_else(|| format!("unsupported dynamic artifact source type {source_type}"))?;
-        registration.dynamic_artifact.ok_or_else(|| {
-            format!(
+        match &registration.dynamic_artifact {
+            Some(ArtifactProvider::Native(support)) => Ok(Box::new(NativeArtifactSession {
+                support: *support,
+                target_id,
+                target_type,
+                regeneration: None,
+                outcome: None,
+            })),
+            Some(ArtifactProvider::Plugin(manifest)) => Ok(Box::new(plugin::PluginArtifact::new(
+                Arc::clone(manifest),
+                target_id,
+                target_type,
+            ))),
+            None => Err(format!(
                 "{} blocks do not generate dynamic artifacts",
                 registration.display_name
-            )
-        })
-    }
-
-    pub fn regenerate_dynamic_artifact(
-        &self,
-        source_type: Uuid,
-        client: &BlockClient,
-        target_id: Uuid,
-        target_type: Uuid,
-        data: &[u8],
-    ) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
-        let support = self.dynamic_artifact(source_type)?;
-        (support.regenerate)(client, target_id, target_type, data)
+            )),
+        }
     }
 
     pub(super) fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<BlockCreation> {

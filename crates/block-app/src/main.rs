@@ -34,9 +34,8 @@ use block_client::{
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
-    direct_editor_tab_ui, settings::RootSettings, BlockEditor, BlockLabel,
-    DynamicArtifactRegeneration, DynamicArtifactSupport, EditorAccess, EditorAction,
-    EditorRegistry, SidebarDragPayload, SidebarDragSource,
+    direct_editor_tab_ui, settings::RootSettings, ArtifactSession, ArtifactStatus, BlockEditor,
+    BlockLabel, EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};
@@ -220,7 +219,9 @@ struct BlockApp {
     /// Tabs currently showing their block's raw serialized data instead of
     /// its editor.
     debug_tabs: HashSet<Uuid>,
-    dynamic_artifact_regenerations: HashMap<Uuid, Box<dyn DynamicArtifactRegeneration>>,
+    /// The session that answers for each open artifact, kept for as long as
+    /// its bar is on screen.
+    dynamic_artifact_sessions: HashMap<Uuid, Box<dyn ArtifactSession>>,
     dynamic_artifact_errors: HashMap<Uuid, String>,
     /// Settings being edited in an artifact bar, until they are applied.
     dynamic_artifact_settings: HashMap<Uuid, Vec<u8>>,
@@ -621,7 +622,7 @@ impl BlockApp {
             editors: HashMap::new(),
             editor_access: HashMap::new(),
             debug_tabs: HashSet::new(),
-            dynamic_artifact_regenerations: HashMap::new(),
+            dynamic_artifact_sessions: HashMap::new(),
             dynamic_artifact_errors: HashMap::new(),
             dynamic_artifact_settings: HashMap::new(),
             dynamic_artifact_settings_open: None,
@@ -1201,7 +1202,7 @@ impl BlockApp {
         self.opened_via.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
-        self.dynamic_artifact_regenerations.clear();
+        self.dynamic_artifact_sessions.clear();
         self.dynamic_artifact_errors.clear();
         self.dynamic_artifact_settings.clear();
         self.dynamic_artifact_settings_open = None;
@@ -1561,7 +1562,7 @@ impl BlockApp {
         self.opened_via.clear();
         self.registry = EditorRegistry::new();
         self.editors.clear();
-        self.dynamic_artifact_regenerations.clear();
+        self.dynamic_artifact_sessions.clear();
         self.dynamic_artifact_errors.clear();
         self.dynamic_artifact_settings.clear();
         self.dynamic_artifact_settings_open = None;
@@ -2032,7 +2033,7 @@ impl BlockApp {
         self.parents.remove(&id);
         self.references.remove(&id);
         self.backrefs.remove(&id);
-        self.dynamic_artifact_regenerations.remove(&id);
+        self.dynamic_artifact_sessions.remove(&id);
         self.dynamic_artifact_errors.remove(&id);
         self.forget_dynamic_artifact_dialogs(id);
         if let Some(editor) = self.editors.get_mut(&id) {
@@ -2307,16 +2308,28 @@ impl BlockApp {
         let Some(descriptor) = self.client.dynamic_artifact(id) else {
             // A block that has just been unlinked keeps its tab open.
             self.forget_dynamic_artifact_dialogs(id);
+            self.dynamic_artifact_sessions.remove(&id);
             return None;
         };
 
-        let completed = self
-            .dynamic_artifact_regenerations
-            .get_mut(&id)
-            .and_then(|regeneration| regeneration.poll());
-        if let Some(result) = completed {
-            self.dynamic_artifact_regenerations.remove(&id);
-            match result {
+        // The session is held outside `self` while the bar draws, so the bar
+        // can read the rest of the app around it.
+        let mut session = self.dynamic_artifact_sessions.remove(&id);
+        let mut unsupported = None;
+        if session.is_none() {
+            match self
+                .registry
+                .artifact_session(descriptor.source_type, id, block_type)
+            {
+                Ok(started) => session = Some(started),
+                Err(error) => unsupported = Some(error),
+            }
+        }
+        let status = session
+            .as_mut()
+            .map(|session| session.poll(ui.ctx(), &self.registry, &self.client, &descriptor.data));
+        if let Some(outcome) = session.as_mut().and_then(|session| session.take_outcome()) {
+            match outcome {
                 Ok(()) => {
                     self.dynamic_artifact_errors.remove(&id);
                 }
@@ -2326,8 +2339,10 @@ impl BlockApp {
             }
         }
 
-        let support = self.registry.dynamic_artifact(descriptor.source_type);
-        let running = self.dynamic_artifact_regenerations.contains_key(&id);
+        let running = session
+            .as_ref()
+            .is_some_and(|session| session.regenerating());
+        let described = matches!(status, Some(ArtifactStatus::Described { .. }));
         // The artifact is read-only in its editor, but rebuilding it is an edit
         // like any other, so it needs edit access to the block itself.
         let can_regenerate = self.client.block_access(id).can_edit();
@@ -2346,19 +2361,32 @@ impl BlockApp {
                         "{} Dynamic artifact",
                         ICON_DYNAMIC_ARTIFACT.codepoint
                     ));
-                    match &support {
-                        Ok(support) => {
-                            navigate = self.show_dynamic_artifact_source(ui, &descriptor, *support);
+                    match &status {
+                        Some(ArtifactStatus::Described { source, summary }) => {
+                            navigate = self.show_dynamic_artifact_source(
+                                ui,
+                                descriptor.source_type,
+                                *source,
+                            );
                             ui.separator();
-                            ui.weak((support.summary)(&descriptor.data));
+                            ui.weak(summary);
                             open_settings = ui
                                 .add_enabled(can_regenerate, egui::Button::new(ICON_SETTINGS))
                                 .on_hover_text("Settings")
                                 .on_disabled_hover_text(NO_EDIT_ACCESS)
                                 .clicked();
                         }
-                        Err(error) => {
+                        Some(ArtifactStatus::Starting) => {
+                            ui.spinner();
+                        }
+                        Some(ArtifactStatus::Failed(error)) => {
                             ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                        None => {
+                            ui.colored_label(
+                                ui.visuals().error_fg_color,
+                                unsupported.as_deref().unwrap_or_default(),
+                            );
                         }
                     }
                     if running {
@@ -2366,7 +2394,7 @@ impl BlockApp {
                     }
                     regenerate = ui
                         .add_enabled(
-                            can_regenerate && !running && support.is_ok(),
+                            can_regenerate && !running && described,
                             egui::Button::new(ICON_REFRESH),
                         )
                         .on_hover_text("Regenerate")
@@ -2391,12 +2419,12 @@ impl BlockApp {
         }
         let mut apply = None;
         if self.dynamic_artifact_settings_open == Some(id) {
-            match &support {
-                Ok(support) => {
+            match session.as_mut().filter(|_| described) {
+                Some(session) => {
                     match self.show_dynamic_artifact_settings(
-                        ui.ctx(),
+                        ui,
                         &descriptor,
-                        *support,
+                        session.as_mut(),
                         &mut draft,
                     ) {
                         ModalOutcome::Open => {}
@@ -2405,26 +2433,30 @@ impl BlockApp {
                             self.dynamic_artifact_settings_open = None;
                         }
                         ModalOutcome::Dismissed => {
+                            session.cancel_settings();
                             draft = None;
                             self.dynamic_artifact_settings_open = None;
                         }
                     }
                 }
-                Err(_) => self.dynamic_artifact_settings_open = None,
+                None => self.dynamic_artifact_settings_open = None,
             }
         }
+        let mut unlinked = false;
         if self.dynamic_artifact_unlink == Some(id) {
             match show_dynamic_artifact_unlink(ui.ctx()) {
                 ModalOutcome::Open => {}
                 ModalOutcome::Accepted(()) => {
                     self.client.clear_dynamic_artifact(id);
-                    self.dynamic_artifact_regenerations.remove(&id);
                     self.dynamic_artifact_errors.remove(&id);
                     self.forget_dynamic_artifact_dialogs(id);
-                    return navigate;
+                    unlinked = true;
                 }
                 ModalOutcome::Dismissed => self.dynamic_artifact_unlink = None,
             }
+        }
+        if unlinked {
+            return navigate;
         }
         if let Some(data) = apply {
             self.client.set_dynamic_artifact(
@@ -2434,21 +2466,25 @@ impl BlockApp {
                     data: data.clone(),
                 },
             );
-            self.regenerate_dynamic_artifact(id, block_type, descriptor.source_type, &data);
+            if let Some(session) = session.as_mut() {
+                session.regenerate(&self.client, &data);
+            }
+            self.dynamic_artifact_errors.remove(&id);
             draft = None;
         } else if regenerate {
-            self.regenerate_dynamic_artifact(
-                id,
-                block_type,
-                descriptor.source_type,
-                &descriptor.data,
-            );
+            if let Some(session) = session.as_mut() {
+                session.regenerate(&self.client, &descriptor.data);
+            }
+            self.dynamic_artifact_errors.remove(&id);
         }
         if let Some(draft) = draft {
             self.dynamic_artifact_settings.insert(id, draft);
         }
-        if self.dynamic_artifact_regenerations.contains_key(&id) {
-            ui.ctx().request_repaint();
+        if let Some(session) = session {
+            if session.regenerating() {
+                ui.ctx().request_repaint();
+            }
+            self.dynamic_artifact_sessions.insert(id, session);
         }
         navigate
     }
@@ -2587,24 +2623,17 @@ impl BlockApp {
     fn show_dynamic_artifact_source(
         &self,
         ui: &mut egui::Ui,
-        descriptor: &DynamicArtifactDescriptor,
-        support: DynamicArtifactSupport,
+        source_type: Uuid,
+        source: Uuid,
     ) -> Option<BlockTabHistoryItem> {
-        let source = match (support.source)(&descriptor.data) {
-            Ok(source) => source,
-            Err(error) => {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-                return None;
-            }
-        };
         ui.weak("Generated from");
         let label = self.client.cached_block(source).map_or_else(
             || BlockLabel {
-                block_type: descriptor.source_type,
-                icon: self.registry.icon(descriptor.source_type),
+                block_type: source_type,
+                icon: self.registry.icon(source_type),
                 name: self
                     .registry
-                    .display_name(descriptor.source_type)
+                    .display_name(source_type)
                     .unwrap_or("source block")
                     .to_owned(),
                 automatic: true,
@@ -2616,7 +2645,7 @@ impl BlockApp {
             .clicked()
             .then_some(BlockTabHistoryItem {
                 id: source,
-                block_type: descriptor.source_type,
+                block_type: source_type,
             })
     }
 
@@ -2625,21 +2654,23 @@ impl BlockApp {
     /// because a menu closes as soon as something inside it is clicked.
     fn show_dynamic_artifact_settings(
         &self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         descriptor: &DynamicArtifactDescriptor,
-        support: DynamicArtifactSupport,
+        session: &mut dyn ArtifactSession,
         draft: &mut Option<Vec<u8>>,
     ) -> ModalOutcome<Vec<u8>> {
         let mut outcome = ModalOutcome::Open;
         let response =
-            egui::Modal::new(egui::Id::new("dynamic-artifact-settings")).show(ctx, |ui| {
+            egui::Modal::new(egui::Id::new("dynamic-artifact-settings")).show(ui.ctx(), |ui| {
                 ui.set_width(320.0);
                 ui.heading("Dynamic artifact settings");
                 ui.add_space(12.0);
                 let data = draft.get_or_insert_with(|| descriptor.data.clone());
-                (support.settings_ui)(ui, data);
-                ui.add_space(12.0);
-                ui.weak((support.summary)(data));
+                session.settings_ui(ui, &self.registry, &self.client, data);
+                if let Some(summary) = session.summary(data) {
+                    ui.add_space(12.0);
+                    ui.weak(summary);
+                }
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     if ui
@@ -2658,30 +2689,6 @@ impl BlockApp {
             outcome = ModalOutcome::Dismissed;
         }
         outcome
-    }
-
-    fn regenerate_dynamic_artifact(
-        &mut self,
-        id: Uuid,
-        block_type: Uuid,
-        source_type: Uuid,
-        data: &[u8],
-    ) {
-        self.dynamic_artifact_errors.remove(&id);
-        match self.registry.regenerate_dynamic_artifact(
-            source_type,
-            &self.client,
-            id,
-            block_type,
-            data,
-        ) {
-            Ok(regeneration) => {
-                self.dynamic_artifact_regenerations.insert(id, regeneration);
-            }
-            Err(error) => {
-                self.dynamic_artifact_errors.insert(id, error);
-            }
-        }
     }
 
     fn handle_editor_action(&mut self, tab_id: Uuid, action: EditorAction) {

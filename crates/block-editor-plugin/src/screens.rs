@@ -74,6 +74,37 @@ impl Screens {
                     Uuid::from_bytes(*workspace_id),
                 );
             }
+            Message::Editor(EditorMessage::OpenArtifact {
+                instance,
+                block_id,
+                block_type,
+                account_id,
+                workspace_id,
+                data,
+            }) => {
+                let session = self
+                    .sessions
+                    .entry(*instance)
+                    .or_insert_with(|| (self.open)(*instance));
+                session.set_block_types(Rc::clone(&self.block_types));
+                session.connect_artifact(
+                    Uuid::from_bytes(*block_id),
+                    Uuid::from_bytes(*block_type),
+                    Uuid::from_bytes(*account_id),
+                    Uuid::from_bytes(*workspace_id),
+                    data.clone(),
+                );
+            }
+            Message::Editor(EditorMessage::ArtifactSettings { instance, data }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.artifact_settings(data.clone());
+                }
+            }
+            Message::Editor(EditorMessage::RegenerateArtifact { instance, data }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.regenerate_artifact(data);
+                }
+            }
             Message::Editor(EditorMessage::CommitCreation { instance }) => {
                 if let Some(session) = self.sessions.get_mut(instance) {
                     session.commit_creation();

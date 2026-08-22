@@ -46,6 +46,18 @@ host asks the instance to commit, and the instance creates the block through
 its own client and answers with the block's id, or with why it could not be
 created; the host then opens the block it was given.
 
+An editor whose block type generates dynamic artifacts is also opened on an
+artifact: an instance with a client of its own, the artifact's block and the
+opaque settings the host stores on it. The instance answers with the block the
+artifact was generated from and a short description of what the settings
+produce, or with why they cannot be read, and repeats that answer whenever the
+settings change. The host sends the settings again whenever it changes them
+itself; the instance's settings region edits its own copy and reports every
+edit, which the host stores on the artifact only once the user applies it. A
+regeneration request carries the settings to rebuild from and is answered
+exactly once, after the instance has written the artifact through its own
+client, with success or with why it failed.
+
 An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a
 request for a block the host cannot open is discarded.

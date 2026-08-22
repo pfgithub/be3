@@ -1,7 +1,8 @@
 use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
-    BlockTypeDescriptor, CreationOutcome, EditorInstanceId, EditorMessage, EditorRegion, FilePick,
-    Message, RegionSize, ScreenId, ScreenRequest, ScreenSet, TunnelMessage,
+    ArtifactDescription, BlockTypeDescriptor, CreationOutcome, EditorInstanceId, EditorMessage,
+    EditorRegion, FilePick, Message, RegenerationOutcome, RegionSize, ScreenId, ScreenRequest,
+    ScreenSet, TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -9,7 +10,7 @@ use uuid::Uuid;
 
 use super::{
     input::{viewport_metrics, BlockDragEvent, InputAdapter},
-    EditorBlock,
+    EditorBlock, InstanceRole,
 };
 use crate::platform::{FileFilter, FilePicker};
 
@@ -26,7 +27,8 @@ struct Instance {
     context: egui::Context,
     client: Arc<BlockClient>,
     tunnel: Tunnel,
-    block: Option<EditorBlock>,
+    role: InstanceRole,
+    artifact: ArtifactState,
     creation_ready: bool,
     created: Option<Result<Uuid, String>>,
     screens: HashMap<EditorRegion, Screen>,
@@ -38,8 +40,18 @@ struct Instance {
     picks: Vec<PendingPick>,
 }
 
+/// What the host knows about an artifact instance: the settings it has handed
+/// over, and what the plugin has answered about them.
+#[derive(Default)]
+struct ArtifactState {
+    data: Vec<u8>,
+    description: Option<ArtifactDescription>,
+    draft: Option<Vec<u8>>,
+    outcome: Option<Result<(), String>>,
+}
+
 impl Instance {
-    fn new(context: &egui::Context, client: &Arc<BlockClient>, block: Option<EditorBlock>) -> Self {
+    fn new(context: &egui::Context, client: &Arc<BlockClient>, role: InstanceRole) -> Self {
         let tunnel = client.open_tunnel({
             let context = context.clone();
             move || context.request_repaint()
@@ -48,7 +60,8 @@ impl Instance {
             context: context.clone(),
             client: Arc::clone(client),
             tunnel,
-            block,
+            role,
+            artifact: ArtifactState::default(),
             creation_ready: false,
             created: None,
             screens: HashMap::new(),
@@ -95,7 +108,7 @@ impl Instances {
         region: EditorRegion,
         context: &egui::Context,
         client: &Arc<BlockClient>,
-        block: Option<EditorBlock>,
+        role: InstanceRole,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
         size: egui::Vec2,
         scale_factor: f32,
@@ -107,7 +120,7 @@ impl Instances {
         let entry = self
             .entries
             .entry(instance)
-            .or_insert_with(|| Instance::new(context, client, block));
+            .or_insert_with(|| Instance::new(context, client, role));
         let next_screen = &mut self.next_screen;
         let screen = entry.screens.entry(region).or_insert_with(|| {
             *next_screen += 1;
@@ -141,8 +154,76 @@ impl Instances {
         }
         self.entries
             .entry(instance)
-            .or_insert_with(|| Instance::new(context, client, None))
+            .or_insert_with(|| Instance::new(context, client, InstanceRole::Creation))
             .opened
+    }
+
+    /// Keeps an instance that serves a dynamic artifact open, and hands it the
+    /// settings the host holds whenever they change.
+    pub(super) fn report_artifact(
+        &mut self,
+        instance: EditorInstanceId,
+        context: &egui::Context,
+        client: &Arc<BlockClient>,
+        block_types: &Arc<Vec<BlockTypeDescriptor>>,
+        block: EditorBlock,
+        data: &[u8],
+        resync: bool,
+    ) -> Vec<Message> {
+        if self.block_types.is_none() {
+            self.block_types = Some(Arc::clone(block_types));
+        }
+        let entry = self.entries.entry(instance).or_insert_with(|| {
+            let mut entry = Instance::new(context, client, InstanceRole::Artifact(block));
+            entry.artifact.data = data.to_vec();
+            entry
+        });
+        if entry.artifact.data == data && !resync {
+            return Vec::new();
+        }
+        entry.artifact.data = data.to_vec();
+        entry.artifact.draft = None;
+        if !entry.opened {
+            return Vec::new();
+        }
+        vec![Message::Editor(EditorMessage::ArtifactSettings {
+            instance,
+            data: data.to_vec(),
+        })]
+    }
+
+    pub(super) fn artifact_description(
+        &self,
+        instance: EditorInstanceId,
+    ) -> Option<ArtifactDescription> {
+        self.entries.get(&instance)?.artifact.description.clone()
+    }
+
+    /// The settings the instance's settings region has edited so far.
+    pub(super) fn artifact_draft(&self, instance: EditorInstanceId) -> Option<Vec<u8>> {
+        self.entries.get(&instance)?.artifact.draft.clone()
+    }
+
+    pub(super) fn regenerate_artifact(
+        &mut self,
+        instance: EditorInstanceId,
+        data: &[u8],
+    ) -> Vec<Message> {
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return Vec::new();
+        };
+        entry.artifact.outcome = None;
+        vec![Message::Editor(EditorMessage::RegenerateArtifact {
+            instance,
+            data: data.to_vec(),
+        })]
+    }
+
+    pub(super) fn take_artifact_outcome(
+        &mut self,
+        instance: EditorInstanceId,
+    ) -> Option<Result<(), String>> {
+        self.entries.get_mut(&instance)?.artifact.outcome.take()
     }
 
     pub(super) fn next_screens(&mut self, pass: u64) -> NextScreens {
@@ -170,7 +251,7 @@ impl Instances {
                 })
                 .map(|screen| screen.request.clone())
                 .collect();
-            if regions.is_empty() && entry.block.is_some() {
+            if regions.is_empty() && matches!(entry.role, InstanceRole::Editor(_)) {
                 continue;
             }
             regions.sort_by_key(|request| request.screen.0);
@@ -178,8 +259,8 @@ impl Instances {
                 entry.opened = true;
                 let account_id = entry.client.account_id().into_bytes();
                 let workspace_id = entry.client.workspace_id().into_bytes();
-                opened.push(match &entry.block {
-                    Some(block) => Message::Editor(EditorMessage::Open {
+                opened.push(match entry.role {
+                    InstanceRole::Editor(block) => Message::Editor(EditorMessage::Open {
                         instance,
                         block_id: block.id.into_bytes(),
                         block_type: block.block_type.into_bytes(),
@@ -187,10 +268,18 @@ impl Instances {
                         workspace_id,
                         editable: entry.client.block_access(block.id) == block::BlockAccess::Edit,
                     }),
-                    None => Message::Editor(EditorMessage::OpenCreation {
+                    InstanceRole::Creation => Message::Editor(EditorMessage::OpenCreation {
                         instance,
                         account_id,
                         workspace_id,
+                    }),
+                    InstanceRole::Artifact(block) => Message::Editor(EditorMessage::OpenArtifact {
+                        instance,
+                        block_id: block.id.into_bytes(),
+                        block_type: block.block_type.into_bytes(),
+                        account_id,
+                        workspace_id,
+                        data: entry.artifact.data.clone(),
                     }),
                 });
             }
@@ -267,7 +356,7 @@ impl Instances {
                 regions.sort_by_key(|region| format!("{region:?}"));
                 super::InstanceStatus {
                     instance: *instance,
-                    block: entry.block.map(|block| block.id),
+                    block: entry.role.block().map(|block| block.id),
                     regions,
                 }
             })
@@ -412,6 +501,27 @@ impl Instances {
                     entry.created = Some(match outcome {
                         CreationOutcome::Created(block_id) => Ok(Uuid::from_bytes(block_id)),
                         CreationOutcome::Failed(error) => Err(error),
+                    });
+                }
+            }
+            EditorMessage::ArtifactDescribed {
+                instance,
+                description,
+            } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.artifact.description = Some(description);
+                }
+            }
+            EditorMessage::ArtifactEdited { instance, data } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.artifact.draft = Some(data);
+                }
+            }
+            EditorMessage::ArtifactRegenerated { instance, outcome } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.artifact.outcome = Some(match outcome {
+                        RegenerationOutcome::Done => Ok(()),
+                        RegenerationOutcome::Failed(error) => Err(error),
                     });
                 }
             }
