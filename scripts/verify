@@ -11,8 +11,8 @@
 # survives.
 #
 # Usage:
-#   ./scripts/verify.sh
-#   ./scripts/verify.sh --check
+#   ./scripts/verify
+#   ./scripts/verify --check
 
 set -euo pipefail
 

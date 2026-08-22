@@ -4,7 +4,7 @@
 //! CoreAudio, WASAPI or (on Android) Oboe depending on the platform. The web
 //! build cannot: cpal's Web Audio backend only targets `wasm32-unknown-unknown`,
 //! and this project's browser build targets `wasm32-wasip1` instead (see
-//! `scripts/build-block-web.sh`), so it talks to `<audio>` directly through
+//! `./scripts/build --target web`), so it talks to `<audio>` directly through
 //! `web-sys`.
 
 use std::time::Duration;

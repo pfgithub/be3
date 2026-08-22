@@ -70,8 +70,8 @@ A dependency that only exists on some targets belongs behind a [target.'cfg(...)
 
 6. Build scripts
 
-Nothing to edit: build-block-web.sh, run-block-app.sh and build-block-android.sh all scan crates/editors/*/manifest.json, and ./scripts/build-plugin.sh --plugin foo --target ... stages plugins/<plugin id>/ off the package name. Repeat --runtime-dependency PATH for a shared library the plugin needs beside it.
+Nothing to edit: ./scripts/build scans crates/editors/*/manifest.json for every target and stages plugins/<plugin id>/ off the package name. ./scripts/build --target TRIPLE --release --output DIRECTORY packages the app, the server and every plugin for a cross target.
 
 7. Verification
 
-Run ./scripts/verify.sh, then ./scripts/build-block-web.sh, since the real plugin host only compiles for wasm/Windows and verify.sh builds the placeholder host instead. Windows can't be compiled from this VM, so manifest/entry-point mistakes there only surface in CI.
+Run ./scripts/verify, then ./scripts/build --target web, since the real plugin host only compiles for wasm/Windows and verify builds the placeholder host instead. Windows can't be compiled from this VM, so manifest/entry-point mistakes there only surface in CI.

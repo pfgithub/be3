@@ -2,18 +2,18 @@
 
 set -euo pipefail
 
-release=false
-target=''
-target_given=false
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+triple=''
+output=''
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --release)
-            release=true
-            shift
+        --triple)
+            triple="$2"
+            shift 2
             ;;
-        --target)
-            target="$2"
-            target_given=true
+        --output)
+            output="$2"
             shift 2
             ;;
         *)
@@ -23,91 +23,48 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-assert_command() {
-    if ! command -v "$1" > /dev/null; then
-        echo "$1 was not found on PATH. $2" >&2
-        exit 1
-    fi
-}
-
 assert_command curl 'Install curl.'
 assert_command tar 'Install tar.'
 
-if [[ -z "$target" ]]; then
-    case "$(uname -s)" in
-        Linux) os='linux' ;;
-        Darwin) os='mac' ;;
-        MINGW*|MSYS*|CYGWIN*) os='windows' ;;
-        *)
-            echo "Unsupported platform: $(uname -s)" >&2
-            exit 1
-            ;;
-    esac
-    case "$(uname -m)" in
-        x86_64|amd64) cpu='x86_64' ;;
-        aarch64|arm64) cpu='aarch64' ;;
-        *)
-            echo "Unsupported architecture: $(uname -m)" >&2
-            exit 1
-            ;;
-    esac
-    case "$os" in
-        linux) target="$cpu-unknown-linux-gnu" ;;
-        mac) target="$cpu-apple-darwin" ;;
-        windows) target="$cpu-pc-windows-msvc" ;;
-    esac
+if [[ -z "$triple" || -z "$output" ]]; then
+    echo 'Usage: fetch-pdfium.sh --triple TRIPLE --output DIRECTORY' >&2
+    exit 1
 fi
 
-case "$target" in
+case "$triple" in
     x86_64-unknown-linux-gnu)
         asset='pdfium-linux-x64'
         library_path='lib/libpdfium.so'
-        library_name='libpdfium.so'
         ;;
     aarch64-unknown-linux-gnu)
         asset='pdfium-linux-arm64'
         library_path='lib/libpdfium.so'
-        library_name='libpdfium.so'
         ;;
     x86_64-apple-darwin)
         asset='pdfium-mac-x64'
         library_path='lib/libpdfium.dylib'
-        library_name='libpdfium.dylib'
         ;;
     aarch64-apple-darwin)
         asset='pdfium-mac-arm64'
         library_path='lib/libpdfium.dylib'
-        library_name='libpdfium.dylib'
         ;;
     x86_64-pc-windows-msvc|x86_64-pc-windows-gnu)
         asset='pdfium-win-x64'
         library_path='bin/pdfium.dll'
-        library_name='pdfium.dll'
         ;;
     aarch64-pc-windows-msvc|aarch64-pc-windows-gnu)
         asset='pdfium-win-arm64'
         library_path='bin/pdfium.dll'
-        library_name='pdfium.dll'
         ;;
     *)
-        echo "No PDFium binary is known for target $target" >&2
+        echo "No PDFium binary is known for target $triple" >&2
         exit 1
         ;;
 esac
+library_name="$(basename "$library_path")"
 
-repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-profile_directory='debug'
-if $release; then
-    profile_directory='release'
-fi
-if $target_given; then
-    output_directory="$repository/target/$target/$profile_directory"
-else
-    output_directory="$repository/target/$profile_directory"
-fi
-
-mkdir -p "$output_directory"
-destination="$output_directory/$library_name"
+mkdir -p "$output"
+destination="$output/$library_name"
 if [[ -f "$destination" ]]; then
     echo "PDFium is already present at $destination"
     exit 0

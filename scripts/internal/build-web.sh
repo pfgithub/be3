@@ -2,8 +2,10 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 wasi_sysroot=''
-release=false
+profile='debug'
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --wasi-sysroot)
@@ -11,7 +13,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --release)
-            release=true
+            profile='release'
             shift
             ;;
         *)
@@ -21,34 +23,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-assert_command() {
-    if ! command -v "$1" > /dev/null; then
-        echo "$1 was not found on PATH. $2" >&2
-        exit 1
-    fi
-}
-
 assert_command cargo 'Install Rust from https://rustup.rs.'
 assert_command clang 'Install LLVM and put its bin directory on PATH.'
 assert_command llvm-ar 'Install LLVM and put its bin directory on PATH.'
-
-repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-# The editor plugins the web build serves alongside the app: every package
-# under crates/editors that ships a manifest.
-manifest_field() {
-    sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -1
-}
-
-plugins=()
-for manifest in "$repository"/crates/editors/*/manifest.json; do
-    [[ -f "$manifest" ]] || continue
-    plugins+=("$(basename "$(dirname "$manifest")")")
-done
-if [[ ${#plugins[@]} -eq 0 ]]; then
-    echo 'No plugin manifests were found under crates/editors' >&2
-    exit 1
-fi
+cd "$repository"
 
 tools_directory="$repository/target/tools"
 output_directory="$repository/target/web"
@@ -57,8 +35,7 @@ wasm_bindgen_version='0.2.122'
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 wasm_bindgen="$cargo_home/bin/wasm-bindgen"
 
-installed_targets="$(rustup target list --installed)"
-if ! grep -qx 'wasm32-wasip1' <<< "$installed_targets"; then
+if ! rustup target list --installed | grep -qx 'wasm32-wasip1'; then
     echo 'Installing the wasm32-wasip1 Rust target...'
     rustup target add wasm32-wasip1
 fi
@@ -67,17 +44,14 @@ if [[ ! -x "$wasm_bindgen" ]]; then
     echo "Installing wasm-bindgen-cli $wasm_bindgen_version..."
     cargo install wasm-bindgen-cli --version "$wasm_bindgen_version"
 fi
-
 if [[ ! -x "$wasm_bindgen" ]]; then
     echo "wasm-bindgen was not installed at $wasm_bindgen" >&2
     exit 1
 fi
 
-profile_directory='debug'
-profile_arguments=()
-if $release; then
-    profile_directory='release'
-    profile_arguments=(--release)
+cargo_arguments=()
+if [[ "$profile" == 'release' ]]; then
+    cargo_arguments+=(--release)
 fi
 
 if [[ -z "$wasi_sysroot" ]]; then
@@ -93,7 +67,6 @@ if [[ -z "$wasi_sysroot" ]]; then
         rm "$archive"
     fi
 fi
-
 if [[ ! -d "$wasi_sysroot/include" ]]; then
     echo "no WASI sysroot at $wasi_sysroot" >&2
     exit 1
@@ -109,55 +82,35 @@ export CFLAGS_wasm32_wasip1="$compiler_flags"
 export CXXFLAGS_wasm32_wasip1="$compiler_flags"
 export CXXSTDLIB_wasm32_wasip1='c++'
 export HARFBUZZ_SYS_NO_PKG_CONFIG='1'
-linker_search_path="$wasi_sysroot/lib/wasm32-wasip1/noeh"
-setjmp_library="$wasi_sysroot/lib/wasm32-wasip1/libsetjmp.a"
-export RUSTFLAGS="-C link-arg=-L$linker_search_path -C link-arg=$setjmp_library"
+export RUSTFLAGS="-C link-arg=-L$wasi_sysroot/lib/wasm32-wasip1/noeh -C link-arg=$wasi_sysroot/lib/wasm32-wasip1/libsetjmp.a"
 
+load_plugins
 plugins_directory="$output_directory/plugins"
 rm -rf "$plugins_directory"
 mkdir -p "$plugins_directory"
 plugin_ids=()
 for plugin in "${plugins[@]}"; do
-    manifest="$repository/crates/editors/$plugin/manifest.json"
-    plugin_id="$(manifest_field "$manifest" id)"
-    if [[ -z "$plugin_id" ]]; then
-        echo "$manifest has no plugin id" >&2
-        exit 1
-    fi
-
+    id="$(plugin_id "$plugin")"
     echo "Building $plugin for wasm32-wasip1..."
-    cargo build -p "$plugin" --target wasm32-wasip1 "${profile_arguments[@]}"
-    plugin_wasm="$repository/target/wasm32-wasip1/$profile_directory/$plugin.wasm"
+    cargo build -p "$plugin" --target wasm32-wasip1 "${cargo_arguments[@]}"
+    plugin_wasm="$repository/target/wasm32-wasip1/$profile/$plugin.wasm"
     if [[ ! -f "$plugin_wasm" ]]; then
         echo "cargo did not produce $plugin_wasm" >&2
         exit 1
     fi
 
     echo "Generating JavaScript bindings for $plugin..."
-    plugin_directory="$plugins_directory/$plugin_id"
+    plugin_directory="$plugins_directory/$id"
     mkdir -p "$plugin_directory"
     "$wasm_bindgen" --target web --no-typescript --out-dir "$plugin_directory" "$plugin_wasm"
-    cp "$manifest" "$plugin_directory/manifest.json"
-    plugin_ids+=("$plugin_id")
+    cp "$(plugin_manifest "$plugin")" "$plugin_directory/manifest.json"
+    plugin_ids+=("$id")
 done
-
-# The browser cannot list a directory, so the app is served an index of the
-# plugin directories to read the manifests out of.
-{
-    echo '['
-    for index in "${!plugin_ids[@]}"; do
-        separator=','
-        if [[ $index -eq $((${#plugin_ids[@]} - 1)) ]]; then
-            separator=''
-        fi
-        echo "  \"${plugin_ids[$index]}\"$separator"
-    done
-    echo ']'
-} > "$plugins_directory/index.json"
+write_plugin_index "$plugins_directory" "${plugin_ids[@]}"
 
 echo 'Building block-app for wasm32-wasip1...'
-cargo build -p block-app --lib --target wasm32-wasip1 "${profile_arguments[@]}"
-wasm="$repository/target/wasm32-wasip1/$profile_directory/block_app_lib.wasm"
+cargo build -p block-app --lib --target wasm32-wasip1 "${cargo_arguments[@]}"
+wasm="$repository/target/wasm32-wasip1/$profile/block_app_lib.wasm"
 if [[ ! -f "$wasm" ]]; then
     echo "cargo did not produce $wasm" >&2
     exit 1
@@ -166,10 +119,8 @@ fi
 echo 'Generating JavaScript bindings...'
 mkdir -p "$output_directory"
 "$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$wasm"
-cp "$repository/scripts/web/index.html" "$output_directory"
-cp "$repository/scripts/web/wasi.js" "$output_directory"
+cp "$internal/web/index.html" "$output_directory"
+cp "$internal/web/wasi.js" "$output_directory"
 
 size="$(du -h "$output_directory/block_app_lib_bg.wasm" | cut -f1)"
 printf '\nWrote %s (%s of WebAssembly).\n' "$output_directory" "$size"
-echo 'Serve it over HTTP, for example:'
-echo '    caddy file-server --root target/web'

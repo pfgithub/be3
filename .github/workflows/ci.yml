@@ -48,7 +48,7 @@ jobs:
         with:
           version: 0.15.2
 
-      - run: ./scripts/verify.sh --check
+      - run: ./scripts/verify --check
 
   web:
     name: web bundle
@@ -94,7 +94,7 @@ jobs:
           path: target/tools
           key: wasi-sysroot-33
 
-      - run: ./scripts/build-block-web.sh --release
+      - run: ./scripts/build --target web --release
 
       - uses: actions/upload-artifact@v7
         with:
@@ -189,7 +189,7 @@ jobs:
       # Give it its own application ID and label instead, so it installs
       # side by side with a local build rather than colliding with it.
       - run: >-
-          ./scripts/build-block-android.sh
+          ./scripts/build --target android
           --android-sdk "$ANDROID_SDK_ROOT"
           --application-id com.be3.block.ci
           --label "Block (CI)"
@@ -277,52 +277,14 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build the standalone server
-        run: cargo build --release --target ${{ matrix.target }} -p block-server --bins
-
-      - name: Build the client
-        if: matrix.client
-        run: cargo build --release --target ${{ matrix.target }} -p block-app --bins
-
-      # The PDF editor renders through PDFium, a native library that is not
-      # statically linked, so the distributed client needs a copy of it
-      # sitting next to the executable.
-      - name: Fetch PDFium
-        if: matrix.client
+      # The client build also stages every plugin under crates/editors beside
+      # the app and fetches PDFium, which the PDF plugin loads at runtime.
+      - name: Build
         shell: bash
-        run: ./scripts/fetch-pdfium.sh --release --target ${{ matrix.target }}
-
-      - name: Build and stage the desktop plugin
-        if: matrix.client
-        shell: bash
-        run: |
-          extension=''
-          if [ "${{ runner.os }}" = Windows ]; then extension='.exe'; fi
-          arguments=(
-            --target "${{ matrix.target }}"
-            --profile release
-            --output dist/plugin-package
-            --app-executable "target/${{ matrix.target }}/release/block-app$extension"
-          )
-          if [ "${{ runner.os }}" = macOS ]; then arguments+=(--sign-identity -); fi
-          ./scripts/build-plugin-demo.sh "${arguments[@]}"
-
-      - name: Collect the binaries
-        shell: bash
-        run: |
-          mkdir -p dist
-          for binary in block-server; do
-            for path in "target/${{ matrix.target }}/release/$binary" \
-                        "target/${{ matrix.target }}/release/$binary.exe"; do
-              if [ -f "$path" ]; then cp "$path" dist/; fi
-            done
-          done
-          for library in libpdfium.so libpdfium.dylib pdfium.dll; do
-            path="target/${{ matrix.target }}/release/$library"
-            if [ -f "$path" ]; then cp "$path" dist/; fi
-          done
-          if [ -d dist/plugin-package ]; then cp -R dist/plugin-package/. dist/; fi
-          ls -l dist
+        run: >-
+          ./scripts/build --target ${{ matrix.target }} --release --output dist
+          ${{ matrix.client && ' ' || '--no-client' }}
+          ${{ runner.os == 'macOS' && '--sign-identity -' || ' ' }}
 
       - uses: actions/upload-artifact@v7
         with:

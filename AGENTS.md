@@ -26,9 +26,9 @@ Tests:
 
 Verification:
 - These are the allowed commands for verification:
-  - `./scripts/verify.sh`: always run this one before committing.
-  - `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build-block-android.sh --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
-  - `./scripts/build-block-web.sh`: run this for changes that affect features specific to web
+  - `./scripts/verify`: always run this one before committing.
+  - `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build --target android --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
+  - `./scripts/build --target web`: run this for changes that affect features specific to web
 - Do not perform any further verification. Do not use the browser tool. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work. Do not try building for other platforms.
 - After running verification, commit and push changes in git.
 - When there are multiple or large changes, split them up into tasks and verify, commit, and push after each one.

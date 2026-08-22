@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 android_sdk="${ANDROID_HOME:-}"
 application_id='com.be3.block'
 application_label='Block'
@@ -19,6 +21,10 @@ while [[ $# -gt 0 ]]; do
             application_label="$2"
             shift 2
             ;;
+        --release)
+            echo 'The Android build only produces a debug APK' >&2
+            exit 1
+            ;;
         *)
             echo "Unknown argument: $1" >&2
             exit 1
@@ -30,7 +36,6 @@ if [[ -z "$android_sdk" && "${OS:-}" == "Windows_NT" ]]; then
     android_sdk="${LOCALAPPDATA:-}/Android/Sdk"
 fi
 android_sdk="${android_sdk:-${ANDROID_SDK_ROOT:-}}"
-
 if [[ -z "$android_sdk" ]]; then
     echo 'No Android SDK was found. Pass --android-sdk or set ANDROID_HOME.' >&2
     exit 1
@@ -38,7 +43,6 @@ fi
 
 ndk_version='29.0.14206865'
 build_tools_version='35.0.0'
-repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ndk="$android_sdk/ndk/$ndk_version"
 zipalign="$android_sdk/build-tools/$build_tools_version/zipalign"
 apksigner="$android_sdk/build-tools/$build_tools_version/apksigner"
@@ -80,42 +84,22 @@ export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
 export CXX_aarch64_linux_android="$toolchain/aarch64-linux-android26-clang++"
 export AR_aarch64_linux_android="$toolchain/llvm-ar"
 
+cd "$repository"
 cargo build -p block-app --lib --target aarch64-linux-android
 cargo build -p counter --lib --target aarch64-linux-android
 cargo build -p checklist --lib --target aarch64-linux-android
 
-manifest_field() {
-    sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -1
-}
-
-# There is no plugin runtime on Android, but the app still discovers plugins
-# so their blocks can be created, listed and opened. Mirror the same
-# plugins/<plugin id>/manifest.json layout into the app's assets.
+load_plugins
 rm -rf "$assets/plugins"
 mkdir -p "$assets/plugins"
 plugin_ids=()
-for manifest in "$repository"/crates/editors/*/manifest.json; do
-    [[ -f "$manifest" ]] || continue
-    plugin_id="$(manifest_field "$manifest" id)"
-    if [[ -z "$plugin_id" ]]; then
-        echo "$manifest has no plugin id" >&2
-        exit 1
-    fi
-    mkdir -p "$assets/plugins/$plugin_id"
-    cp "$manifest" "$assets/plugins/$plugin_id/manifest.json"
-    plugin_ids+=("$plugin_id")
+for plugin in "${plugins[@]}"; do
+    id="$(plugin_id "$plugin")"
+    mkdir -p "$assets/plugins/$id"
+    cp "$(plugin_manifest "$plugin")" "$assets/plugins/$id/manifest.json"
+    plugin_ids+=("$id")
 done
-{
-    echo '['
-    for index in "${!plugin_ids[@]}"; do
-        separator=','
-        if [[ $index -eq $((${#plugin_ids[@]} - 1)) ]]; then
-            separator=''
-        fi
-        echo "  \"${plugin_ids[$index]}\"$separator"
-    done
-    echo ']'
-} > "$assets/plugins/index.json"
+write_plugin_index "$assets/plugins" "${plugin_ids[@]}"
 
 mkdir -p "$native_libraries" "$(dirname "$apk")"
 cp "$repository/target/aarch64-linux-android/debug/libblock_app_lib.so" "$native_libraries/"

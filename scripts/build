@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/internal/common.sh"
+
+usage() {
+    cat >&2 <<'USAGE'
+Usage: ./scripts/build [--target TARGET] [options...]
+
+TARGET is native (the default), web, android, or a Rust target triple to
+cross-compile the native app and its plugins for.
+
+Native options:  [--release] [--triple TRIPLE] [--output DIRECTORY]
+                 [--no-client] [--no-server] [--sign-identity IDENTITY]
+Web options:     [--release] [--wasi-sysroot DIRECTORY]
+Android options: [--android-sdk DIRECTORY] [--application-id ID] [--label LABEL]
+USAGE
+}
+
+target='native'
+arguments=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target)
+            target="$2"
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            arguments+=("$1")
+            shift
+            ;;
+    esac
+done
+
+case "$target" in
+    native)
+        exec "$internal/build-native.sh" "${arguments[@]}"
+        ;;
+    web)
+        exec "$internal/build-web.sh" "${arguments[@]}"
+        ;;
+    android)
+        exec "$internal/build-android.sh" "${arguments[@]}"
+        ;;
+    *-*-*)
+        exec "$internal/build-native.sh" --triple "$target" "${arguments[@]}"
+        ;;
+    *)
+        echo "Unknown target: $target" >&2
+        usage
+        exit 1
+        ;;
+esac
