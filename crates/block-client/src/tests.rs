@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use super::*;
 
 mod a_read_guard_blocks_background_updates;
+mod a_refused_block_resolves_when_the_server_creates_it;
+mod a_refused_read_leaves_the_block_unresolved;
 mod block_handle_history_is_shared_by_clones;
 mod block_urls_include_workspace_and_reject_malformed_paths;
 mod block_urls_parse_repo_relative_references;

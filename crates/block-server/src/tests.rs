@@ -4,6 +4,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 mod a_database_from_another_schema_is_refused;
 mod a_parent_need_not_reference_its_child;
+mod a_watcher_without_access_is_not_told_a_block_was_created;
 mod access_flows_down_to_owned_children_and_up_to_parents;
 mod account_login_is_case_insensitive;
 mod account_registration_rejects_duplicates;
@@ -52,6 +53,7 @@ mod sequence_errors_include_the_expected_sequence;
 mod shared_protocol_round_trips_over_websocket;
 mod sharing_requires_edit_access_to_the_block;
 mod watches_reference_changes_until_unwatched;
+mod watching_a_block_before_it_exists_delivers_it_on_creation;
 mod workspace_invites_require_administrator_membership;
 mod workspace_state_survives_a_server_restart;
 mod workspaces_isolate_identical_block_ids_and_notifications;

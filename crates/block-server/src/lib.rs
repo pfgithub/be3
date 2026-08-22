@@ -264,7 +264,9 @@ async fn handle_block_connection(
                                     watch_hub.broadcast_batch(&store, workspace_id, operations).await;
                                 }
                                 notification => {
-                                    watch_hub.broadcast(&store, workspace_id, notification).await;
+                                    watch_hub
+                                        .broadcast(&store, workspace_id, client_id, notification)
+                                        .await;
                                 }
                             }
                         }
@@ -615,7 +617,9 @@ async fn handle_command(
             }
             let lock = store.lock_for(workspace_id, id).await;
             let _guard = lock.lock().await;
-            let response = match store
+            let snapshot = data.clone();
+            let created_properties = properties.clone();
+            match store
                 .create_block_unlocked(
                     workspace_id,
                     id,
@@ -632,17 +636,31 @@ async fn handle_command(
                     if watch {
                         watch_hub.watch(identity, id, client_id, outbound).await;
                     }
-                    ServerMessage::Ok {
-                        request_id,
-                        command: CommandKind::CreateBlock,
-                        id,
-                        seq: None,
-                        operation_id: None,
-                    }
+                    (
+                        ServerMessage::Ok {
+                            request_id,
+                            command: CommandKind::CreateBlock,
+                            id,
+                            seq: None,
+                            operation_id: None,
+                        },
+                        Some(ServerMessage::BlockCreated {
+                            id,
+                            block_type,
+                            author: account_id,
+                            snapshot,
+                            snapshot_seq: 0,
+                            parent: BlockParent::Orphaned,
+                            properties: created_properties,
+                            access: BlockAccess::None,
+                        }),
+                    )
                 }
-                Err(error) => error.to_response(request_id, CommandKind::CreateBlock, id),
-            };
-            (response, None)
+                Err(error) => (
+                    error.to_response(request_id, CommandKind::CreateBlock, id),
+                    None,
+                ),
+            }
         }
         ClientMessage::UpdateBlock {
             request_id,
@@ -656,7 +674,7 @@ async fn handle_command(
         } => {
             let access = store.access(identity).await;
             let existing = store.existing_blocks(workspace_id, &references.after).await;
-            if !access.get(id).can_edit()
+            if !store.target_access(identity, id).await.can_edit()
                 || references.after.iter().any(|reference| {
                     existing.contains(reference) && !access.get(*reference).can_know_exists()
                 })
@@ -744,13 +762,19 @@ async fn handle_command(
                 );
             }
             let access = store.access(identity).await;
-            let referenced: Vec<_> = updates
+            let touched: Vec<_> = updates
                 .iter()
-                .flat_map(|update| update.references.after.iter().copied())
+                .map(|update| update.id)
+                .chain(
+                    updates
+                        .iter()
+                        .flat_map(|update| update.references.after.iter().copied()),
+                )
                 .collect();
-            let existing = store.existing_blocks(workspace_id, &referenced).await;
+            let existing = store.existing_blocks(workspace_id, &touched).await;
             let denied = updates.iter().find(|update| {
-                !access.get(update.id).can_edit()
+                !existing.contains(&update.id)
+                    || !access.get(update.id).can_edit()
                     || update.references.after.iter().any(|reference| {
                         existing.contains(reference) && !access.get(*reference).can_know_exists()
                     })
@@ -827,8 +851,11 @@ async fn handle_command(
             id,
             watch,
         } => {
-            let access = store.access(identity).await.get(id);
+            let access = store.target_access(identity, id).await;
             if !access.can_view() {
+                if watch {
+                    watch_hub.watch(identity, id, client_id, outbound).await;
+                }
                 return (
                     permission_denied(request_id, CommandKind::ReadBlock, id),
                     None,
@@ -878,7 +905,7 @@ async fn handle_command(
             presence_id,
             data,
         } => {
-            if !store.access(identity).await.get(id).can_view() {
+            if !store.target_access(identity, id).await.can_view() {
                 return (
                     permission_denied(request_id, CommandKind::SetPresence, id),
                     None,
@@ -942,7 +969,7 @@ async fn handle_command(
                         || access.get(parent).can_edit()
                 }
             };
-            if !access.get(id).can_edit() || !parent_allowed {
+            if !store.target_access(identity, id).await.can_edit() || !parent_allowed {
                 return (
                     permission_denied(request_id, CommandKind::SetBlockParent, id),
                     None,
@@ -968,7 +995,7 @@ async fn handle_command(
             key,
             value,
         } => {
-            if !store.access(identity).await.get(id).can_edit() {
+            if !store.target_access(identity, id).await.can_edit() {
                 return (
                     permission_denied(request_id, CommandKind::SetBlockProperty, id),
                     None,
@@ -1032,7 +1059,7 @@ async fn handle_command(
             )
         }
         ClientMessage::ListBlockAccess { request_id, id } => {
-            if !store.access(identity).await.get(id).can_edit() {
+            if !store.target_access(identity, id).await.can_edit() {
                 return (
                     permission_denied(request_id, CommandKind::ListBlockAccess, id),
                     None,
@@ -1055,7 +1082,7 @@ async fn handle_command(
             account_id: target_id,
             access,
         } => {
-            if !store.access(identity).await.get(id).can_edit() {
+            if !store.target_access(identity, id).await.can_edit() {
                 return (
                     permission_denied(request_id, CommandKind::SetBlockAccess, id),
                     None,
@@ -1408,26 +1435,43 @@ impl WatchHub {
         }
     }
 
-    async fn broadcast(&self, store: &BlockStore, workspace_id: Uuid, message: ServerMessage) {
+    async fn broadcast(
+        &self,
+        store: &BlockStore,
+        workspace_id: Uuid,
+        origin: ClientId,
+        message: ServerMessage,
+    ) {
         let Some(id) = message.id() else {
             return;
         };
+        let skip_origin = matches!(message, ServerMessage::BlockCreated { .. });
         let deliveries: Vec<_> = {
             let watchers = self.watchers.lock().await;
             watchers
                 .get(&(workspace_id, id))
                 .map(|entries| {
                     entries
-                        .values()
-                        .map(|watch| (watch.identity, watch.outbound.clone()))
+                        .iter()
+                        .filter(|(&client_id, _)| !skip_origin || client_id != origin)
+                        .map(|(_, watch)| (watch.identity, watch.outbound.clone()))
                         .collect()
                 })
                 .unwrap_or_default()
         };
         for (identity, outbound) in deliveries {
-            if store.access(identity.into()).await.get(id).can_view() {
-                outbound.send(message.clone());
+            let access = store.access(identity.into()).await.get(id);
+            if !access.can_view() {
+                continue;
             }
+            let mut message = message.clone();
+            if let ServerMessage::BlockCreated {
+                access: recipient, ..
+            } = &mut message
+            {
+                *recipient = access;
+            }
+            outbound.send(message);
         }
     }
 
@@ -2113,6 +2157,17 @@ impl BlockStore {
         transaction.commit()?;
         *workspace = updated;
         Ok(value)
+    }
+
+    async fn target_access(&self, identity: Identity, id: Uuid) -> BlockAccess {
+        if !self
+            .existing_blocks(identity.workspace_id, &[id])
+            .await
+            .contains(&id)
+        {
+            return BlockAccess::None;
+        }
+        self.access(identity).await.get(id)
     }
 
     async fn existing_blocks(&self, workspace_id: Uuid, ids: &[Uuid]) -> HashSet<Uuid> {

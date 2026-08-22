@@ -2627,6 +2627,47 @@ impl WorkerState {
                     self.maybe_send_update(operation.id);
                 }
             }
+            ServerMessage::BlockCreated {
+                id,
+                block_type,
+                author,
+                snapshot,
+                snapshot_seq,
+                parent,
+                properties,
+                access,
+            } => {
+                let guard = Arc::clone(&self.access);
+                let _guard = guard.write();
+                self.record_access(id, access);
+                let properties = crypto::decode_properties(properties);
+                if let Some(block) = self.blocks.get(&id) {
+                    if !block.is_ready() {
+                        if block.block_type_id() != block_type {
+                            fatal(format!(
+                                "block {id} has type {block_type}, expected {}",
+                                block.block_type_id()
+                            ));
+                        }
+                        block.resolve_authored(
+                            author,
+                            snapshot,
+                            snapshot_seq,
+                            Vec::new(),
+                            parent,
+                            properties.clone(),
+                        );
+                    }
+                }
+                self.cache_block(CachedBlock {
+                    id,
+                    block_type,
+                    author,
+                    properties,
+                });
+                drop(_guard);
+                self.maybe_send_update(id);
+            }
             ServerMessage::BatchOk { .. } => fatal("invalid batch response command"),
             ServerMessage::Error {
                 request_id,
@@ -2828,6 +2869,11 @@ impl WorkerState {
                 _ => BlockAccess::View,
             };
             self.lower_access(id, ceiling);
+            if command == Some(CommandKind::ReadBlock) {
+                if let Some(block) = self.blocks.get(&id) {
+                    block.read_refused();
+                }
+            }
         }
     }
 
@@ -3334,6 +3380,8 @@ trait ErasedBlock: Send + Sync {
     fn remote_operation(&self, operation: OperationRecord);
     fn is_synchronized(&self) -> bool;
     fn has_local_changes(&self) -> bool;
+    fn is_ready(&self) -> bool;
+    fn read_refused(&self);
 }
 
 struct TypedBlock<B: Block> {
@@ -3492,6 +3540,7 @@ struct TypedState<B: Block> {
     in_flight: HashSet<Uuid>,
     buffered: BTreeMap<u64, OperationRecord>,
     ready: bool,
+    unavailable: bool,
 }
 
 struct PendingOperation<B, O> {
@@ -3562,6 +3611,7 @@ impl<B: Block> TypedBlock<B> {
                 in_flight: HashSet::new(),
                 buffered: BTreeMap::new(),
                 ready: false,
+                unavailable: false,
             }),
             loaded: watch::channel(false).0,
             changed: watch::channel(()).0,
@@ -3597,6 +3647,7 @@ impl<B: Block> TypedBlock<B> {
                 in_flight: HashSet::new(),
                 buffered: BTreeMap::new(),
                 ready: false,
+                unavailable: false,
             }),
             loaded: watch::channel(false).0,
             changed: watch::channel(()).0,
@@ -3905,11 +3956,12 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
 
     fn debug_snapshot(&self) -> BlockDebugSnapshot {
         let state = self.state.read();
-        let synchronized = state.ready
-            && state.pending.is_empty()
-            && state.in_flight.is_empty()
-            && state.buffered.is_empty()
-            && (!B::CRDT || state.confirmed_seq >= state.acknowledged_seq);
+        let synchronized = state.unavailable
+            || (state.ready
+                && state.pending.is_empty()
+                && state.in_flight.is_empty()
+                && state.buffered.is_empty()
+                && (!B::CRDT || state.confirmed_seq >= state.acknowledged_seq));
         let has_local_changes = (state.initial.is_some() && !state.ready)
             || !state.pending.is_empty()
             || !state.in_flight.is_empty();
@@ -4053,6 +4105,9 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
         }
         state.confirmed_seq = seq;
         state.ready = true;
+        state.unavailable = false;
+        self.drain_buffered(&mut state);
+        drop(state);
         self.loaded.send_replace(true);
     }
 
@@ -4152,17 +4207,14 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             return;
         }
         state.buffered.entry(record.seq).or_insert(record);
-        loop {
-            let next_seq = state.confirmed_seq + 1;
-            let Some(record) = state.buffered.remove(&next_seq) else {
-                break;
-            };
-            self.apply_remote_operation(&mut state, record);
-        }
+        self.drain_buffered(&mut state);
     }
 
     fn is_synchronized(&self) -> bool {
         let state = self.state.read();
+        if state.unavailable {
+            return true;
+        }
         state.ready
             && state.pending.is_empty()
             && state.in_flight.is_empty()
@@ -4176,9 +4228,30 @@ impl<B: Block> ErasedBlock for TypedBlock<B> {
             || !state.pending.is_empty()
             || !state.in_flight.is_empty()
     }
+
+    fn is_ready(&self) -> bool {
+        self.state.read().ready
+    }
+
+    fn read_refused(&self) {
+        self.state.write().unavailable = true;
+    }
 }
 
 impl<B: Block> TypedBlock<B> {
+    fn drain_buffered(&self, state: &mut TypedState<B>) {
+        if !state.ready && state.confirmed.is_none() {
+            return;
+        }
+        loop {
+            let next_seq = state.confirmed_seq + 1;
+            let Some(record) = state.buffered.remove(&next_seq) else {
+                break;
+            };
+            self.apply_remote_operation(state, record);
+        }
+    }
+
     fn recompute_pending_references(&self, state: &mut TypedState<B>) {
         let Some(mut value) = state.confirmed.clone() else {
             return;

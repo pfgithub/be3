@@ -630,6 +630,17 @@ pub enum ServerMessage {
         command: CommandKind,
         operations: Vec<BlockOperation>,
     },
+    BlockCreated {
+        id: Uuid,
+        #[serde(rename = "type")]
+        block_type: Uuid,
+        author: Uuid,
+        snapshot: Vec<u8>,
+        snapshot_seq: u64,
+        parent: BlockParent,
+        properties: BTreeMap<Uuid, Vec<u8>>,
+        access: BlockAccess,
+    },
     Error {
         #[serde(skip_serializing_if = "Option::is_none")]
         request_id: Option<Uuid>,
@@ -688,6 +699,7 @@ impl ServerMessage {
         match self {
             Self::Ok { id, .. }
             | Self::ReadBlock { id, .. }
+            | Self::BlockCreated { id, .. }
             | Self::BlockUpdated { id, .. }
             | Self::BlockPropertyUpdated { id, .. }
             | Self::BlockAccessList { id, .. }
