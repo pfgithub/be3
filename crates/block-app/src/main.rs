@@ -520,7 +520,7 @@ struct RenameState {
 #[derive(Clone, Copy)]
 enum BlockPickerTarget {
     Root,
-    Block(Uuid),
+    Block { parent: Uuid, open: bool },
 }
 
 impl BlockApp {
@@ -1677,21 +1677,26 @@ impl BlockApp {
         self.block_types.insert(result.id, result.block_type);
         match target {
             BlockPickerTarget::Root => self.open_tab(result.id, result.block_type),
-            BlockPickerTarget::Block(parent) => self.queue_placement(
-                BlockReference {
-                    id: result.id,
-                    block_type: result.block_type,
-                    author: result.author,
-                    properties: result.properties,
-                    parent: BlockParent::Orphaned,
-                    references: 0,
-                    dynamic_artifact: false,
-                    // The account just made or linked the block, so it is theirs.
-                    access: BlockAccess::Edit,
-                },
-                parent,
-                result.linked,
-            ),
+            BlockPickerTarget::Block { parent, open } => {
+                self.queue_placement(
+                    BlockReference {
+                        id: result.id,
+                        block_type: result.block_type,
+                        author: result.author,
+                        properties: result.properties,
+                        parent: BlockParent::Orphaned,
+                        references: 0,
+                        dynamic_artifact: false,
+                        // The account just made or linked the block, so it is theirs.
+                        access: BlockAccess::Edit,
+                    },
+                    parent,
+                    result.linked,
+                );
+                if open {
+                    self.open_tab(result.id, result.block_type);
+                }
+            }
         }
     }
 
@@ -1703,7 +1708,7 @@ impl BlockApp {
             // and the parent only takes the reference once its editor has
             // loaded, which can be several frames later. Leave the block
             // orphaned; the queued placement sets the parent after that.
-            BlockPickerTarget::Block(_) => BlockParent::Orphaned,
+            BlockPickerTarget::Block { .. } => BlockParent::Orphaned,
         };
         let active = self.active_tab.unwrap_or(Uuid::nil());
         let access = self.editor_access(active);
@@ -2580,7 +2585,10 @@ impl BlockApp {
         if let Some((reference, source, is_reference, action)) = context_action {
             match action {
                 BlockContextMenuAction::Picker => {
-                    self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
+                    self.block_picker_target = Some(BlockPickerTarget::Block {
+                        parent: reference.id,
+                        open: false,
+                    });
                 }
                 BlockContextMenuAction::SetParent(parent) => {
                     self.set_block_parent(reference.id, parent);
@@ -2940,7 +2948,10 @@ impl BlockApp {
         if let Some((reference, source, is_reference, action)) = context_action {
             match action {
                 BlockContextMenuAction::Picker => {
-                    self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
+                    self.block_picker_target = Some(BlockPickerTarget::Block {
+                        parent: reference.id,
+                        open: false,
+                    });
                 }
                 BlockContextMenuAction::SetParent(parent) => {
                     self.set_block_parent(reference.id, parent);

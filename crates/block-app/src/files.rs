@@ -368,8 +368,10 @@ impl BlockApp {
                     is_reference,
                 ) {
                     Some(BlockContextMenuAction::Picker) => {
-                        self.block_picker_target =
-                            Some(BlockPickerTarget::Block(reference.id));
+                        self.block_picker_target = Some(BlockPickerTarget::Block {
+                            parent: reference.id,
+                            open: true,
+                        });
                     }
                     Some(BlockContextMenuAction::SetParent(parent)) => {
                         self.set_block_parent(reference.id, parent);
@@ -397,7 +399,10 @@ impl BlockApp {
             if can_add_child {
                 ui.add_enabled_ui(can_add_here, |ui| {
                     if ui.button(ICON_ADD).clicked() {
-                        self.block_picker_target = Some(BlockPickerTarget::Block(reference.id));
+                        self.block_picker_target = Some(BlockPickerTarget::Block {
+                            parent: reference.id,
+                            open: true,
+                        });
                         self.block_picker.open(picker_excluded.clone());
                     }
                 })
