@@ -203,8 +203,6 @@ pub enum EditorRegion {
     LeftSidebar,
     RightSidebar,
     Preview,
-    /// The settings of a dynamic artifact the editor's block type generated,
-    /// drawn inside the host's own dialog.
     ArtifactSettings,
 }
 
@@ -381,9 +379,6 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         outcome: CreationOutcome,
     },
-    /// An instance opened on a dynamic artifact one of this editor's blocks
-    /// generated, rather than on a block of its own: it describes the
-    /// artifact, edits its settings and rebuilds it.
     OpenArtifact {
         instance: EditorInstanceId,
         block_id: [u8; 16],
@@ -392,25 +387,18 @@ pub enum EditorMessage {
         workspace_id: [u8; 16],
         data: Vec<u8>,
     },
-    /// The settings the host holds for the artifact, whenever they change
-    /// outside the instance's own settings region.
     ArtifactSettings {
         instance: EditorInstanceId,
         data: Vec<u8>,
     },
-    /// What the instance reads out of the settings it was last given.
     ArtifactDescribed {
         instance: EditorInstanceId,
         description: ArtifactDescription,
     },
-    /// The settings the instance's settings region has edited so far, which
-    /// the host stores on the artifact when the user applies them.
     ArtifactEdited {
         instance: EditorInstanceId,
         data: Vec<u8>,
     },
-    /// Rebuilds the artifact from these settings, through the instance's own
-    /// client.
     RegenerateArtifact {
         instance: EditorInstanceId,
         data: Vec<u8>,
@@ -419,8 +407,6 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         outcome: RegenerationOutcome,
     },
-    /// The cursor the instance wants shown over one of its regions, which
-    /// only the host can put on the window.
     Cursor {
         instance: EditorInstanceId,
         region: EditorRegion,
@@ -456,8 +442,6 @@ pub struct FileFilter {
     pub mime_types: Vec<String>,
 }
 
-/// The cursors an editor may ask for, named for what they mean rather than
-/// for any one toolkit's spelling of them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CursorIcon {
     #[default]
@@ -479,8 +463,6 @@ pub enum CursorIcon {
     ResizeNwSe,
 }
 
-/// What an editor makes of an artifact's settings: the block it was generated
-/// from and what the settings currently produce, or why they cannot be read.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArtifactDescription {
     Described { source: [u8; 16], summary: String },

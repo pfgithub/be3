@@ -219,8 +219,6 @@ struct BlockApp {
     /// Tabs currently showing their block's raw serialized data instead of
     /// its editor.
     debug_tabs: HashSet<Uuid>,
-    /// The session that answers for each open artifact, kept for as long as
-    /// its bar is on screen.
     dynamic_artifact_sessions: HashMap<Uuid, Box<dyn ArtifactSession>>,
     dynamic_artifact_errors: HashMap<Uuid, String>,
     /// Settings being edited in an artifact bar, until they are applied.
@@ -2312,8 +2310,6 @@ impl BlockApp {
             return None;
         };
 
-        // The session is held outside `self` while the bar draws, so the bar
-        // can read the rest of the app around it.
         let mut session = self.dynamic_artifact_sessions.remove(&id);
         let mut unsupported = None;
         if session.is_none() {

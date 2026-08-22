@@ -362,8 +362,6 @@ fn toolbar_height(ui: &egui::Ui) -> f32 {
         .max(ui.text_style_height(&egui::TextStyle::Body) + 2.0 * spacing.button_padding.y)
 }
 
-/// The instance kept open for one dynamic artifact a plugin's block type
-/// generated, which answers for it until the artifact is closed.
 pub(super) struct PluginArtifact {
     plugin: Arc<PluginManifest>,
     block: EditorBlock,

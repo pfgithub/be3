@@ -137,8 +137,6 @@ pub fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) {
     }
 }
 
-/// Rebuilding one exported image, which waits for both blocks to load before
-/// it can write anything.
 pub struct Regeneration {
     source: BlockHandle<PixelArt>,
     target: BlockHandle<Image>,

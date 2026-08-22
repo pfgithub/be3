@@ -22,8 +22,6 @@ const MAX_RECENT_COLORS: usize = 12;
 const EMBEDDED_LONG_SIDE: f32 = 256.0;
 const EMBEDDED_SHORT_SIDE: f32 = 24.0;
 
-/// Every region draws into a context of its own, so the artwork is uploaded
-/// once per region rather than once per editor.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaneKey {
     Main,
@@ -36,7 +34,6 @@ pub struct Editing {
     pub block: BlockHandle<PixelArt>,
 }
 
-/// An instance serving an exported image rather than an artwork.
 struct Exporting {
     client: BlockClient,
     block_id: Uuid,
@@ -243,15 +240,12 @@ impl PixelArtApp {
         Some((art.width(), art.height()))
     }
 
-    /// Whether the artwork may be changed, which only the host knows.
     pub(crate) fn editable(&self) -> bool {
         self.editing
             .as_ref()
             .is_none_or(|editing| editing.host.editable())
     }
 
-    /// Brings one region's copy of the artwork up to date, answering with the
-    /// size it now holds.
     pub(crate) fn refresh_pane(
         &mut self,
         context: &egui::Context,
@@ -328,8 +322,6 @@ impl PixelArtApp {
         }
     }
 
-    /// Exports the artwork as an image block that stays linked to it, and asks
-    /// the host to open it.
     pub(crate) fn export(&mut self) {
         let Some(editing) = &self.editing else {
             return;

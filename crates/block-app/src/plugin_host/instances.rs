@@ -40,8 +40,6 @@ struct Instance {
     picks: Vec<PendingPick>,
 }
 
-/// What the host knows about an artifact instance: the settings it has handed
-/// over, and what the plugin has answered about them.
 #[derive(Default)]
 struct ArtifactState {
     data: Vec<u8>,
@@ -160,8 +158,6 @@ impl Instances {
             .opened
     }
 
-    /// Keeps an instance that serves a dynamic artifact open, and hands it the
-    /// settings the host holds whenever they change.
     pub(super) fn report_artifact(
         &mut self,
         instance: EditorInstanceId,
@@ -201,7 +197,6 @@ impl Instances {
         self.entries.get(&instance)?.artifact.description.clone()
     }
 
-    /// The settings the instance's settings region has edited so far.
     pub(super) fn artifact_draft(&self, instance: EditorInstanceId) -> Option<Vec<u8>> {
         self.entries.get(&instance)?.artifact.draft.clone()
     }
@@ -403,7 +398,6 @@ impl Instances {
         self.entries.get(&instance)?.screens.get(&region)?.used
     }
 
-    /// The cursor the instance asked for over one of its regions.
     pub(super) fn cursor(
         &self,
         instance: EditorInstanceId,

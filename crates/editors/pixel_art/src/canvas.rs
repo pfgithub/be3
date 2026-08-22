@@ -15,8 +15,6 @@ pub const ZOOM_STEP: f32 = 1.25;
 const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 32.0;
 
-/// Where the artwork sits in the region the editor is given: a multiple of the
-/// scale that fits it, and an offset from the centre.
 #[derive(Clone, Copy)]
 pub struct View {
     pub zoom: f32,
@@ -57,8 +55,6 @@ pub fn canvas_rect(region: Rect, width: u16, height: u16, view: View) -> Rect {
     )
 }
 
-/// The artwork as one region's context holds it: an image composited over the
-/// checkerboard, and the pixels a gesture is about to paint on top of it.
 #[derive(Default)]
 pub struct Pane {
     texture: Option<egui::TextureHandle>,
@@ -99,8 +95,6 @@ impl Pane {
         self.dark_mode = dark_mode;
     }
 
-    /// Patches the pixels a gesture would paint into the texture, and puts
-    /// back the ones it no longer covers.
     pub fn set_preview(&mut self, pixels: &[(u16, u16)], color: PixelColor) {
         if self.preview == pixels && (pixels.is_empty() || self.preview_color == Some(color)) {
             return;
@@ -156,8 +150,6 @@ impl Pane {
 }
 
 impl PixelArtApp {
-    /// The whole main region: the artwork, the gesture being drawn on it, and
-    /// every way of moving around it.
     pub(crate) fn canvas_ui(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size().max(Vec2::splat(1.0));
         let (region, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
@@ -175,8 +167,6 @@ impl PixelArtApp {
         };
 
         let input_enabled = !self.resize_open && !self.clear_open;
-        // The host cannot gate a plugin's own surface, so a block being read
-        // is kept out of every gesture that would change it.
         let editable = input_enabled && self.editable();
         if input_enabled {
             self.handle_view_input(&response, region);
@@ -271,8 +261,6 @@ impl PixelArtApp {
         held && response.hovered()
     }
 
-    /// Panning and zooming, which this editor does itself because the host
-    /// hands it the whole viewport.
     fn handle_view_input(&mut self, response: &egui::Response, region: Rect) {
         if self.panning(response) {
             self.view.pan += response.ctx.input(|input| input.pointer.delta());
@@ -377,8 +365,6 @@ impl PixelArtApp {
         }
     }
 
-    /// The pixels shown on top of the artwork: the gesture being drawn, the
-    /// one just committed, or where the brush would land.
     fn pending_pixels(
         &self,
         hovered_pixel: Option<(u16, u16)>,

@@ -1066,9 +1066,6 @@ pub trait DynamicArtifactRegeneration {
     fn poll(&mut self) -> Option<Result<(), String>>;
 }
 
-/// What a native source block type can tell the app about the artifacts it
-/// produces. The descriptor payload is opaque to everything but these
-/// functions.
 #[derive(Clone, Copy)]
 pub(super) struct DynamicArtifactSupport {
     /// The block the artifact was generated from.
@@ -1080,20 +1077,12 @@ pub(super) struct DynamicArtifactSupport {
     pub regenerate: RegenerateDynamicArtifact,
 }
 
-/// Whichever of them a source block type has: functions the app calls
-/// directly, or the plugin that owns the block type.
 enum ArtifactProvider {
     Native(DynamicArtifactSupport),
     Plugin(Arc<PluginManifest>),
 }
 
-/// What one artifact block's source can say about it: where it came from, what
-/// its settings produce, and how to rebuild it. A native editor answers on the
-/// spot; a plugin's answers arrive from its runtime, so a session is kept for
-/// as long as the artifact is on screen.
 pub(super) trait ArtifactSession {
-    /// Keeps the session going for this frame and answers what is known about
-    /// `data`, the settings the artifact currently carries.
     fn poll(
         &mut self,
         ctx: &egui::Context,
@@ -1101,8 +1090,6 @@ pub(super) trait ArtifactSession {
         client: &Arc<BlockClient>,
         data: &[u8],
     ) -> ArtifactStatus;
-    /// Draws the settings dialog's contents, leaving the edited settings in
-    /// `draft`.
     fn settings_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1110,10 +1097,7 @@ pub(super) trait ArtifactSession {
         client: &Arc<BlockClient>,
         draft: &mut Vec<u8>,
     );
-    /// What `draft` would produce, when the source describes it rather than
-    /// drawing it itself.
     fn summary(&self, draft: &[u8]) -> Option<String>;
-    /// Throws away whatever the settings dialog had edited.
     fn cancel_settings(&mut self);
     fn regenerate(&mut self, client: &Arc<BlockClient>, data: &[u8]);
     fn take_outcome(&mut self) -> Option<Result<(), String>>;
@@ -1121,12 +1105,8 @@ pub(super) trait ArtifactSession {
 }
 
 pub(super) enum ArtifactStatus {
-    /// The source has not answered yet.
     Starting,
-    Described {
-        source: Uuid,
-        summary: String,
-    },
+    Described { source: Uuid, summary: String },
     Failed(String),
 }
 
@@ -1525,7 +1505,6 @@ impl EditorRegistry {
             .is_some_and(|registration| registration.can_replace_child)
     }
 
-    /// A session that describes and rebuilds one artifact `source_type` made.
     pub(super) fn artifact_session(
         &self,
         source_type: Uuid,

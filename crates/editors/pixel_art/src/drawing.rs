@@ -81,7 +81,6 @@ pub struct CommittedPreview {
     pub frames_remaining: u8,
 }
 
-/// Everything about the brush that turns a gesture into pixels.
 #[derive(Clone, Copy, Debug)]
 pub struct Brush {
     pub size: u16,

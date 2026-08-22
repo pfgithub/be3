@@ -37,8 +37,6 @@ pub trait App: Default + 'static {
     fn create_block(&mut self) -> Result<uuid::Uuid, String> {
         Err("this editor does not create blocks".into())
     }
-    /// An instance opened on a dynamic artifact one of this editor's blocks
-    /// generated, rather than on a block of its own.
     fn connect_artifact(
         &mut self,
         _host: EditorHost,
@@ -46,17 +44,11 @@ pub trait App: Default + 'static {
         _artifact: Artifact,
     ) {
     }
-    /// What the artifact's settings were generated from and what they
-    /// currently produce.
     fn describe_artifact(&mut self, _data: &[u8]) -> Result<ArtifactDescription, String> {
         Err("this editor does not generate artifacts".into())
     }
-    /// Draws the artifact's settings inside the host's dialog. Edits go
-    /// straight into `data`, which the host stores once the user applies it.
     fn artifact_settings_ui(&mut self, _ui: &mut egui::Ui, _data: &mut Vec<u8>) {}
-    /// Starts rebuilding the artifact from `data`.
     fn regenerate_artifact(&mut self, _data: &[u8]) {}
-    /// `None` while the rebuild is still waiting on the blocks it needs.
     fn poll_artifact(&mut self) -> Option<Result<(), String>> {
         None
     }

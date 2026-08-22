@@ -111,8 +111,6 @@ pub(crate) struct EditorBlock {
     pub(crate) block_type: Uuid,
 }
 
-/// What an instance was opened for: a block it edits, a block it is filling
-/// in, or a dynamic artifact one of its blocks generated.
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceRole {
     Editor(EditorBlock),
@@ -129,7 +127,6 @@ impl InstanceRole {
     }
 }
 
-/// An instance kept open to describe, edit and rebuild one dynamic artifact.
 pub(crate) struct ArtifactSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
@@ -137,12 +134,9 @@ pub(crate) struct ArtifactSlot<'a> {
     pub(crate) instance: EditorInstanceId,
     pub(crate) block: EditorBlock,
     pub(crate) data: &'a [u8],
-    /// Hands the settings over again even when they have not changed, so a
-    /// dismissed dialog's edits are thrown away.
     pub(crate) resync: bool,
 }
 
-/// What the plugin has said about the settings the host last handed it.
 #[cfg_attr(
     not(any(target_arch = "wasm32", target_os = "windows")),
     allow(dead_code)

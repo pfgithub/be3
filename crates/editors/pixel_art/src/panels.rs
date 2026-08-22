@@ -314,8 +314,6 @@ impl PixelArtApp {
         }
     }
 
-    /// The resize and clear confirmations, drawn inside the main region
-    /// because that is the surface this editor is given.
     pub(crate) fn dialogs_ui(&mut self, ui: &mut egui::Ui, width: u16, height: u16) {
         if self.resize_open {
             let mut apply = false;

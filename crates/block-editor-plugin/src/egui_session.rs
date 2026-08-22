@@ -25,8 +25,6 @@ pub(crate) struct EguiSession {
     artifact: Option<ArtifactState>,
 }
 
-/// The settings the host holds for an artifact, the copy its settings region
-/// edits, and what has yet to be reported back.
 struct ArtifactState {
     data: Vec<u8>,
     draft: Vec<u8>,
@@ -458,7 +456,7 @@ impl EguiSession {
         let mut draft = artifact
             .as_mut()
             .filter(|_| region == EditorRegion::ArtifactSettings)
-            .map(|artifact| std::mem::take(&mut artifact.draft));
+            .map(|artifact| artifact.draft.clone());
         let output = context.run_ui(input, |ui| {
             egui::CentralPanel::default().frame(frame).show_inside(ui, {
                 |ui| match (&mut draft, creating) {

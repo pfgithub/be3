@@ -20,16 +20,12 @@ pub struct BlockDrag {
     pub dropped: bool,
 }
 
-/// A dynamic artifact one of this editor's blocks generated, as the instance
-/// serving it sees it.
 #[derive(Clone, Copy)]
 pub struct Artifact {
     pub block_id: Uuid,
     pub block_type: Uuid,
 }
 
-/// What an editor makes of an artifact's settings: the block it was generated
-/// from, and a short description of what those settings produce.
 pub struct ArtifactDescription {
     pub source: Uuid,
     pub summary: String,
