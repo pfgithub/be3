@@ -2,6 +2,7 @@ BE3 project
 
 Guides (read if they are relevant):
 - guides/adding_a_block.md
+- guides/adding_a_game.md
 - guides/adding_an_editor.md
 - guides/adding_a_plugin_editor.md
 
