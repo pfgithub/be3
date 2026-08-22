@@ -1,7 +1,7 @@
 use block_client::{blocks, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
-    BlockTypeDescriptor, EditorInstanceId, EditorRegion, InteractionMode, PluginManifest,
-    ResizeMode,
+    BlockTypeDescriptor, CreationMode, EditorInstanceId, EditorRegion, InteractionMode,
+    PluginManifest, ResizeMode,
 };
 use eframe::egui;
 use std::sync::{
@@ -13,9 +13,11 @@ use uuid::Uuid;
 pub(crate) mod discovery;
 
 use super::{
-    BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
-    DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, PendingCreation,
+    BlockEditor, BlockRenderContext, CreationStep, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
+    PendingCreation,
 };
+use crate::plugin_host::{CreationSlot, CreationState};
 
 /// The registered block types as a plugin sees them, built once for every
 /// runtime that has to name and illustrate blocks it only holds a reference
@@ -46,6 +48,7 @@ pub(super) struct PluginCreation {
     plugin: Arc<PluginManifest>,
     instance: EditorInstanceId,
     context: Option<egui::Context>,
+    state: CreationState,
     committed: bool,
 }
 
@@ -55,22 +58,12 @@ impl PluginCreation {
             plugin,
             instance: next_instance(),
             context: None,
+            state: CreationState::Starting,
             committed: false,
         }
     }
-}
 
-impl Drop for PluginCreation {
-    fn drop(&mut self) {
-        if let Some(context) = self.context.take() {
-            crate::plugin_host::close(&context, &self.plugin.identity.id, self.instance);
-        }
-    }
-}
-
-impl PendingCreation for PluginCreation {
-    fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> bool {
-        self.context = Some(ui.ctx().clone());
+    fn dialog_ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
         let height = crate::plugin_host::region_size(
             &self.plugin.identity.id,
             self.instance,
@@ -89,10 +82,51 @@ impl PendingCreation for PluginCreation {
                 size: egui::vec2(ui.available_width(), height),
             },
         );
-        crate::plugin_host::creation_ready(&self.plugin.identity.id, self.instance)
+    }
+}
+
+impl Drop for PluginCreation {
+    fn drop(&mut self) {
+        if let Some(context) = self.context.take() {
+            crate::plugin_host::close(&context, &self.plugin.identity.id, self.instance);
+        }
+    }
+}
+
+impl PendingCreation for PluginCreation {
+    fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> CreationStep {
+        self.context = Some(ui.ctx().clone());
+        if self.plugin.creation == CreationMode::Dialog {
+            self.dialog_ui(ui, editors);
+            let ready = crate::plugin_host::creation_ready(&self.plugin.identity.id, self.instance);
+            if ready {
+                self.state = CreationState::Ready;
+            }
+            return CreationStep::Options(ready);
+        }
+        self.state = crate::plugin_host::creation(
+            ui.ctx(),
+            CreationSlot {
+                plugin: &self.plugin,
+                block_types: editors.registry().plugin_block_types(),
+                client: editors.client_handle(),
+                instance: self.instance,
+            },
+        );
+        CreationStep::Working
     }
 
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String> {
+        match &self.state {
+            CreationState::Starting => return Ok(None),
+            CreationState::Failed(error) => {
+                return Err(format!(
+                    "{} could not be created: {error}",
+                    self.plugin.display_name
+                ))
+            }
+            CreationState::Ready => {}
+        }
         if !self.committed {
             self.committed = true;
             crate::plugin_host::commit_creation(&self.plugin.identity.id, self.instance);

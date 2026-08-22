@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     editors::{
-        infinite_canvas, BlockCreation, BlockEditor, BlockLabel, EditorAccess, EditorRegistry,
-        PendingCreation,
+        infinite_canvas, BlockCreation, BlockEditor, BlockLabel, CreationStep, EditorAccess,
+        EditorRegistry, PendingCreation,
     },
     slide_templates::SlideTemplate,
 };
@@ -254,13 +254,25 @@ impl BlockPicker {
                 ui.set_min_width(320.0);
                 ui.heading(format!("New {title}"));
                 ui.add_space(8.0);
-                let ready = pending.creation.ui(ui, editors);
+                let step = pending.creation.ui(ui, editors);
                 ui.separator();
                 ui.horizontal(|ui| {
-                    create = ui
-                        .add_enabled(ready && !pending.creating, egui::Button::new("Create"))
-                        .on_disabled_hover_text("Fill in the options first")
-                        .clicked();
+                    match step {
+                        CreationStep::Options(ready) => {
+                            create = ui
+                                .add_enabled(
+                                    ready && !pending.creating,
+                                    egui::Button::new("Create"),
+                                )
+                                .on_disabled_hover_text("Fill in the options first")
+                                .clicked();
+                        }
+                        CreationStep::Working => {
+                            ui.spinner();
+                            ui.label(format!("Creating {title}..."));
+                            create = true;
+                        }
+                    }
                     cancel = ui.button("Cancel").clicked();
                 });
             });

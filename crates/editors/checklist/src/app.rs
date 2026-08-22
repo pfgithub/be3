@@ -28,6 +28,7 @@ impl Filter {
 #[derive(Default)]
 pub struct ChecklistApp {
     block: Option<block_client::BlockHandle<Checklist>>,
+    creation: Option<block_client::BlockClient>,
     draft: String,
     filter: Filter,
 }
@@ -81,6 +82,22 @@ impl block_editor_plugin::App for ChecklistApp {
         block_id: uuid::Uuid,
     ) {
         self.block = Some(client.get_block(block_id));
+    }
+
+    fn connect_creation(
+        &mut self,
+        _host: block_editor_plugin::EditorHost,
+        client: block_client::BlockClient,
+    ) {
+        self.creation = Some(client);
+    }
+
+    fn create_block(&mut self) -> Result<uuid::Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(Checklist::default()).id())
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {

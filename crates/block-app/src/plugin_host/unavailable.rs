@@ -2,7 +2,7 @@ use block_plugin_api::{EditorInstanceId, EditorRegion};
 use eframe::egui;
 use uuid::Uuid;
 
-use super::{EditorSlot, PreviewSlot};
+use super::{CreationSlot, CreationState, EditorSlot, PreviewSlot};
 
 pub(crate) fn install(_creation_context: &eframe::CreationContext<'_>) {}
 
@@ -23,6 +23,20 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         format!("{} is not supported on this platform.", plugin.display_name),
     );
     None
+}
+
+pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> CreationState {
+    let CreationSlot {
+        plugin,
+        block_types,
+        client,
+        instance,
+    } = slot;
+    let _ = (context, block_types, client, instance);
+    CreationState::Failed(format!(
+        "{} is not supported on this platform.",
+        plugin.display_name
+    ))
 }
 
 pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {

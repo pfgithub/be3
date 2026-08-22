@@ -14,7 +14,7 @@ use super::{
     preview_size,
     process::{Process, SurfaceEvent},
     windows::WindowsFrame,
-    EditorBlock, EditorSlot, PreviewSlot,
+    CreationSlot, CreationState, EditorBlock, EditorSlot, PreviewSlot,
 };
 
 thread_local! {
@@ -105,6 +105,43 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         };
         painter.add(present(runtime, response.rect, atlas_region));
         open_request
+    })
+}
+
+pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> CreationState {
+    let CreationSlot {
+        plugin,
+        block_types,
+        client,
+        instance,
+    } = slot;
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        if !host.presenter_available {
+            return CreationState::Failed("Windows plugins require the D3D12 renderer.".to_owned());
+        }
+        let Some(surface) = host.surface_for(&plugin.identity.id, context) else {
+            return CreationState::Failed(
+                "Too many plugin runtimes are already presenting.".to_owned(),
+            );
+        };
+        let pass = context.cumulative_pass_nr();
+        let runtime = host
+            .runtimes
+            .entry(plugin.identity.id.clone())
+            .or_insert_with(|| Runtime::new(surface));
+        if runtime.process.is_none() {
+            runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
+        }
+        begin_pass(runtime, pass);
+        context.request_repaint();
+        match runtime
+            .instances
+            .report_creation(instance, context, &client, block_types)
+        {
+            true => CreationState::Ready,
+            false => CreationState::Starting,
+        }
     })
 }
 

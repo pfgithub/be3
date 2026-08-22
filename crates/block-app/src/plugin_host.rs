@@ -24,18 +24,18 @@ mod windows;
 
 #[cfg(target_os = "windows")]
 pub(crate) use native::{
-    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size, kill,
-    preview, region_size, running, take_created,
+    aspect_ratio, close, commit_creation, creation, creation_ready, editor_ui, install,
+    intrinsic_size, kill, preview, region_size, running, take_created,
 };
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
 pub(crate) use unavailable::{
-    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size, kill,
-    preview, region_size, running, take_created,
+    aspect_ratio, close, commit_creation, creation, creation_ready, editor_ui, install,
+    intrinsic_size, kill, preview, region_size, running, take_created,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::{
-    aspect_ratio, close, commit_creation, creation_ready, editor_ui, install, intrinsic_size, kill,
-    preview, region_size, running, take_created,
+    aspect_ratio, close, commit_creation, creation, creation_ready, editor_ui, install,
+    intrinsic_size, kill, preview, region_size, running, take_created,
 };
 
 pub(crate) struct RuntimeStatus {
@@ -77,6 +77,19 @@ pub(crate) fn preview_size(size: egui::Vec2, scale_factor: f32) -> egui::Vec2 {
     )
     .clamp(egui::Vec2::splat(STEP), egui::Vec2::splat(MAXIMUM))
         / scale
+}
+
+pub(crate) struct CreationSlot<'a> {
+    pub(crate) plugin: &'a PluginManifest,
+    pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
+    pub(crate) client: Arc<BlockClient>,
+    pub(crate) instance: EditorInstanceId,
+}
+
+pub(crate) enum CreationState {
+    Starting,
+    Ready,
+    Failed(String),
 }
 
 pub(crate) struct EditorSlot<'a> {

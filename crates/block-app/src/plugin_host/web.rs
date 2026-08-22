@@ -15,7 +15,7 @@ use super::{
     presenter::{
         PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
     },
-    preview_size, EditorBlock, EditorSlot, PreviewSlot,
+    preview_size, CreationSlot, CreationState, EditorBlock, EditorSlot, PreviewSlot,
 };
 use adapter::WebProtocolAdapter;
 
@@ -305,6 +305,40 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         };
         painter.add(present(runtime, response.rect, atlas_region, pass));
         open_request
+    })
+}
+
+pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> CreationState {
+    let CreationSlot {
+        plugin,
+        block_types,
+        client,
+        instance,
+    } = slot;
+    open(plugin, context);
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.render_available {
+            return CreationState::Failed("wgpu is not available in this build.".to_owned());
+        }
+        let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
+            return CreationState::Failed(
+                "Too many plugin runtimes are already presenting.".to_owned(),
+            );
+        };
+        runtime.context = Some(context.clone());
+        begin_pass(runtime, context, context.cumulative_pass_nr());
+        if let Some(error) = runtime.error.clone() {
+            return CreationState::Failed(error);
+        }
+        context.request_repaint();
+        match runtime
+            .instances
+            .report_creation(instance, context, &client, block_types)
+        {
+            true => CreationState::Ready,
+            false => CreationState::Starting,
+        }
     })
 }
 

@@ -105,13 +105,6 @@ puts the type in the erased table the app opens blocks through:
 my_block::MyBlock;
 ```
 
-Add `: Default` after the type when a block of it can be made from its default
-value, which is what a plugin editor's new-block action uses:
-
-```rust
-my_block::MyBlock: Default;
-```
-
 The block is now available as `block_client::blocks::my_block::MyBlock`.
 
 ## 5. Add model tests

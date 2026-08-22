@@ -1132,8 +1132,13 @@ pub(super) trait CreationOptions: Default {
 /// A creation dialog waiting on the user: the options being filled in, and
 /// how to turn them into an editor.
 pub(super) trait PendingCreation {
-    fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> bool;
+    fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> CreationStep;
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String>;
+}
+
+pub(super) enum CreationStep {
+    Options(bool),
+    Working,
 }
 
 struct EditorCreation<E: ConfigurableEditor> {
@@ -1141,8 +1146,8 @@ struct EditorCreation<E: ConfigurableEditor> {
 }
 
 impl<E: ConfigurableEditor> PendingCreation for EditorCreation<E> {
-    fn ui(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) -> bool {
-        self.options.ui(ui)
+    fn ui(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) -> CreationStep {
+        CreationStep::Options(self.options.ui(ui))
     }
 
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String> {
@@ -1336,15 +1341,8 @@ impl EditorRegistry {
             display_name,
             icon,
             create: match manifest.creation {
-                block_plugin_api::CreationMode::Immediate => {
-                    let manifest = Arc::clone(&manifest);
-                    Some(CreateBlock::Immediate(Box::new(move |client| {
-                        let block = blocks::create_default(client, block_type)
-                            .expect("a plugin block type the menu makes must have a default");
-                        Box::new(plugin::PluginEditor::new(Arc::clone(&manifest), block))
-                    })))
-                }
-                block_plugin_api::CreationMode::Dialog => {
+                block_plugin_api::CreationMode::Immediate
+                | block_plugin_api::CreationMode::Dialog => {
                     let manifest = Arc::clone(&manifest);
                     Some(CreateBlock::Configured(Box::new(move || {
                         Box::new(plugin::PluginCreation::new(Arc::clone(&manifest)))

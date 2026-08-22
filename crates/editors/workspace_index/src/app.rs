@@ -75,6 +75,7 @@ struct Folder {
 #[derive(Default)]
 pub struct WorkspaceIndexApp {
     folder: Option<Folder>,
+    creation: Option<BlockClient>,
     view: FolderView,
     sort: FolderSort,
     descending: bool,
@@ -262,6 +263,18 @@ impl block_editor_plugin::App for WorkspaceIndexApp {
             block,
             references,
         });
+    }
+
+    fn connect_creation(&mut self, _host: EditorHost, client: BlockClient) {
+        self.creation = Some(client);
+    }
+
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(WorkspaceIndex::default()).id())
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {

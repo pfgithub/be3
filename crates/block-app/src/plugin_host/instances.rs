@@ -38,6 +38,30 @@ struct Instance {
     picks: Vec<PendingPick>,
 }
 
+impl Instance {
+    fn new(context: &egui::Context, client: &Arc<BlockClient>, block: Option<EditorBlock>) -> Self {
+        let tunnel = client.open_tunnel({
+            let context = context.clone();
+            move || context.request_repaint()
+        });
+        Self {
+            context: context.clone(),
+            client: Arc::clone(client),
+            tunnel,
+            block,
+            creation_ready: false,
+            created: None,
+            screens: HashMap::new(),
+            opened: false,
+            opens: Vec::new(),
+            drag_accepted: false,
+            intrinsic: None,
+            aspect_ratio: None,
+            picks: Vec::new(),
+        }
+    }
+}
+
 struct PendingPick {
     request_id: u64,
     picker: FilePicker,
@@ -80,27 +104,10 @@ impl Instances {
         if self.block_types.is_none() {
             self.block_types = Some(Arc::clone(block_types));
         }
-        let entry = self.entries.entry(instance).or_insert_with(|| {
-            let tunnel = client.open_tunnel({
-                let context = context.clone();
-                move || context.request_repaint()
-            });
-            Instance {
-                context: context.clone(),
-                client: Arc::clone(client),
-                tunnel,
-                block,
-                creation_ready: false,
-                created: None,
-                screens: HashMap::new(),
-                opened: false,
-                opens: Vec::new(),
-                drag_accepted: false,
-                intrinsic: None,
-                aspect_ratio: None,
-                picks: Vec::new(),
-            }
-        });
+        let entry = self
+            .entries
+            .entry(instance)
+            .or_insert_with(|| Instance::new(context, client, block));
         let next_screen = &mut self.next_screen;
         let screen = entry.screens.entry(region).or_insert_with(|| {
             *next_screen += 1;
@@ -120,6 +127,22 @@ impl Instances {
         screen.request.metrics = viewport_metrics(size, scale_factor);
         screen.last_seen = pass;
         screen.request.screen
+    }
+
+    pub(super) fn report_creation(
+        &mut self,
+        instance: EditorInstanceId,
+        context: &egui::Context,
+        client: &Arc<BlockClient>,
+        block_types: &Arc<Vec<BlockTypeDescriptor>>,
+    ) -> bool {
+        if self.block_types.is_none() {
+            self.block_types = Some(Arc::clone(block_types));
+        }
+        self.entries
+            .entry(instance)
+            .or_insert_with(|| Instance::new(context, client, None))
+            .opened
     }
 
     pub(super) fn next_screens(&mut self, pass: u64) -> NextScreens {
@@ -147,7 +170,7 @@ impl Instances {
                 })
                 .map(|screen| screen.request.clone())
                 .collect();
-            if regions.is_empty() {
+            if regions.is_empty() && entry.block.is_some() {
                 continue;
             }
             regions.sort_by_key(|request| request.screen.0);

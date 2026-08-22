@@ -7,7 +7,7 @@ use crate::{BlockClient, BlockHandleAccess};
 mod tests;
 
 macro_rules! block_types {
-    ($($module:ident::$block:ident $(: $default:path)?;)*) => {
+    ($($module:ident::$block:ident;)*) => {
         $(pub mod $module;)*
 
         pub const TYPE_IDS: &[Uuid] = &[$(<$module::$block as Block>::TYPE_ID,)*];
@@ -24,51 +24,38 @@ macro_rules! block_types {
             )*
             None
         }
-
-        pub fn create_default(
-            client: &BlockClient,
-            block_type: Uuid,
-        ) -> Option<Box<dyn BlockHandleAccess>> {
-            $($(
-                if block_type == <$module::$block as Block>::TYPE_ID {
-                    let value = <$module::$block as $default>::default();
-                    return Some(Box::new(client.create_block(value)));
-                }
-            )?)*
-            None
-        }
     };
 }
 
 block_types! {
     audio::Audio;
-    calendar::Calendar: Default;
-    checklist::Checklist: Default;
+    calendar::Calendar;
+    checklist::Checklist;
     compiled_logic::CompiledLogic;
-    counter::Counter: Default;
+    counter::Counter;
     database::Database;
-    database_schema::DatabaseSchema: Default;
+    database_schema::DatabaseSchema;
     database_view::DatabaseView;
-    deterministic_game::DeterministicGame: Default;
-    gui_builder::GuiBuilder: Default;
-    hotbar::Hotbar: Default;
+    deterministic_game::DeterministicGame;
+    gui_builder::GuiBuilder;
+    hotbar::Hotbar;
     image::Image;
-    infinite_canvas::InfiniteCanvas: Default;
-    logic_game::LogicGame: Default;
-    logic_grid::LogicGrid: Default;
-    map::Map: Default;
+    infinite_canvas::InfiniteCanvas;
+    logic_game::LogicGame;
+    logic_grid::LogicGrid;
+    map::Map;
     pdf::Pdf;
-    pixel_art::PixelArt: Default;
-    pixel_ray_tracer::PixelRayTracer: Default;
-    presentation::Presentation: Default;
-    scene_3d::Scene3D: Default;
-    settings::Settings: Default;
-    text::TextDocument: Default;
-    ui_settings::UiSettings: Default;
+    pixel_art::PixelArt;
+    pixel_ray_tracer::PixelRayTracer;
+    presentation::Presentation;
+    scene_3d::Scene3D;
+    settings::Settings;
+    text::TextDocument;
+    ui_settings::UiSettings;
     version_control_data::VersionControlData;
     version_control_object::VersionControlObject;
     version_control_worktree::VersionControlWorktree;
-    video::Video: Default;
-    web_browser_tab::WebBrowserTab: Default;
-    workspace_index::WorkspaceIndex: Default;
+    video::Video;
+    web_browser_tab::WebBrowserTab;
+    workspace_index::WorkspaceIndex;
 }

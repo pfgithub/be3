@@ -3,6 +3,7 @@ use block_editor_plugin::egui;
 
 pub struct CounterApp {
     block: Option<block_client::BlockHandle<Counter>>,
+    creation: Option<block_client::BlockClient>,
     step: i64,
     applied: u64,
 }
@@ -11,6 +12,7 @@ impl Default for CounterApp {
     fn default() -> Self {
         Self {
             block: None,
+            creation: None,
             step: 1,
             applied: 0,
         }
@@ -45,6 +47,22 @@ impl block_editor_plugin::App for CounterApp {
         block_id: uuid::Uuid,
     ) {
         self.block = Some(client.get_block(block_id));
+    }
+
+    fn connect_creation(
+        &mut self,
+        _host: block_editor_plugin::EditorHost,
+        client: block_client::BlockClient,
+    ) {
+        self.creation = Some(client);
+    }
+
+    fn create_block(&mut self) -> Result<uuid::Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(Counter::default()).id())
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
