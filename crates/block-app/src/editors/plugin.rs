@@ -52,7 +52,6 @@ pub(super) struct PluginCreation {
     context: Option<egui::Context>,
     state: CreationState,
     committed: bool,
-    created: Option<Box<dyn BlockHandleAccess>>,
 }
 
 impl PluginCreation {
@@ -63,7 +62,6 @@ impl PluginCreation {
             context: None,
             state: CreationState::Starting,
             committed: false,
-            created: None,
         }
     }
 
@@ -121,48 +119,39 @@ impl PendingCreation for PluginCreation {
     }
 
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String> {
-        if self.created.is_none() {
-            match &self.state {
-                CreationState::Starting => return Ok(None),
-                CreationState::Failed(error) => {
-                    return Err(format!(
-                        "{} could not be created: {error}",
-                        self.plugin.display_name
-                    ))
-                }
-                CreationState::Ready => {}
+        match &self.state {
+            CreationState::Starting => return Ok(None),
+            CreationState::Failed(error) => {
+                return Err(format!(
+                    "{} could not be created: {error}",
+                    self.plugin.display_name
+                ))
             }
-            if !self.committed {
-                self.committed = true;
-                crate::plugin_host::commit_creation(&self.plugin.identity.id, self.instance);
+            CreationState::Ready => {}
+        }
+        if !self.committed {
+            self.committed = true;
+            crate::plugin_host::commit_creation(&self.plugin.identity.id, self.instance);
+        }
+        match crate::plugin_host::take_created(&self.plugin.identity.id, self.instance) {
+            None => Ok(None),
+            Some(Ok(block_id)) => {
+                let block_type = Uuid::from_bytes(self.plugin.block_type);
+                let block = blocks::open(client, block_id, block_type)
+                    .ok_or_else(|| format!("{block_type} is not a block type this app knows"))?;
+                Ok(Some(Box::new(PluginEditor::new(
+                    Arc::clone(&self.plugin),
+                    block,
+                ))))
             }
-            match crate::plugin_host::take_created(&self.plugin.identity.id, self.instance) {
-                None => return Ok(None),
-                Some(Ok(block_id)) => {
-                    let block_type = Uuid::from_bytes(self.plugin.block_type);
-                    self.created =
-                        Some(blocks::open(client, block_id, block_type).ok_or_else(|| {
-                            format!("{block_type} is not a block type this app knows")
-                        })?);
-                }
-                Some(Err(error)) => {
-                    self.committed = false;
-                    return Err(format!(
-                        "{} could not be created: {error}",
-                        self.plugin.display_name
-                    ));
-                }
+            Some(Err(error)) => {
+                self.committed = false;
+                Err(format!(
+                    "{} could not be created: {error}",
+                    self.plugin.display_name
+                ))
             }
         }
-        let block = self.created.take().expect("the block has been opened");
-        if !block.resolved() {
-            self.created = Some(block);
-            return Ok(None);
-        }
-        Ok(Some(Box::new(PluginEditor::new(
-            Arc::clone(&self.plugin),
-            block,
-        ))))
     }
 }
 

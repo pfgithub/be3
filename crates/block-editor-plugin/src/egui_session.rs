@@ -174,10 +174,6 @@ impl EguiSession {
         self.host.set_editable(editable);
     }
 
-    pub(crate) fn has_client(&self) -> bool {
-        self.carrier.is_some()
-    }
-
     pub(crate) fn set_drag(&mut self, drag: Option<(EditorRegion, BlockDrag)>) {
         self.drag = drag;
     }

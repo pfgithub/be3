@@ -83,8 +83,6 @@ fn run_endpoint<A: crate::App>(
         time::Instant,
     };
 
-    const CLIENT_FLUSH: std::time::Duration = std::time::Duration::from_millis(16);
-
     let mut stream = connect(endpoint)?;
     eprintln!("connected to the Linux host");
     let mut session = ClientSession::new(id, name, version);
@@ -112,8 +110,7 @@ fn run_endpoint<A: crate::App>(
     let mut repaint_at: Option<Instant> = None;
     loop {
         let mut batch = Vec::new();
-        let flush_at = screens.has_clients().then(|| Instant::now() + CLIENT_FLUSH);
-        match [repaint_at, flush_at].into_iter().flatten().min() {
+        match repaint_at {
             Some(deadline) => wait_until(socket, deadline)?,
             None => batch.push(carrier.receive()?.0),
         }
@@ -246,8 +243,6 @@ fn run_endpoint<A: crate::App>(
         },
     };
 
-    const CLIENT_FLUSH: std::time::Duration = std::time::Duration::from_millis(16);
-
     let mut stream = connect(endpoint)?;
     eprintln!("connected to the Windows host");
     let mut session = ClientSession::new(id, name, version);
@@ -283,8 +278,7 @@ fn run_endpoint<A: crate::App>(
     let mut repaint_at: Option<Instant> = None;
     loop {
         let mut batch = Vec::new();
-        let flush_at = screens.has_clients().then(|| Instant::now() + CLIENT_FLUSH);
-        match [repaint_at, flush_at].into_iter().flatten().min() {
+        match repaint_at {
             Some(deadline) => wait_until(pipe, deadline)?,
             None => batch.push(carrier.receive()?.0),
         }

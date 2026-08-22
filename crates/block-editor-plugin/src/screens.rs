@@ -186,10 +186,6 @@ impl Screens {
         }
     }
 
-    pub(crate) fn has_clients(&self) -> bool {
-        self.sessions.values().any(EguiSession::has_client)
-    }
-
     pub(crate) fn outbound(&mut self) -> Vec<Message> {
         let mut messages = Vec::new();
         for session in self.sessions.values_mut() {

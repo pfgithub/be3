@@ -1570,7 +1570,6 @@ pub trait BlockHandleAccess {
     fn block_type(&self) -> Uuid;
     fn name(&self) -> Option<String>;
     fn block_name(&self) -> Option<properties::BlockName>;
-    fn resolved(&self) -> bool;
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
     /// Adds `block_id` as a child, or `None` if the block isn't loaded yet or
@@ -1610,10 +1609,6 @@ impl<B: Block> BlockHandleAccess for BlockHandle<B> {
 
     fn name(&self) -> Option<String> {
         BlockHandle::name(self)
-    }
-
-    fn resolved(&self) -> bool {
-        self.read().is_some()
     }
 
     fn relationships(&self) -> Option<BlockRelationships> {
