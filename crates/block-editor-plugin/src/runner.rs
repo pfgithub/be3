@@ -18,9 +18,9 @@ pub(crate) fn run<A: crate::App>(id: &str, name: &str, version: &str) {
         eprintln!("usage: counter --transport-test | --endpoint ENDPOINT");
         std::process::exit(2);
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     let result = run_endpoint::<A>(&arguments[2], id, name, version);
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     let result = run_endpoint(&arguments[2], id, name, version);
     if let Err(error) = result {
         eprintln!("plugin transport failed: {error}");
@@ -66,7 +66,149 @@ fn transport(
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+#[cfg(target_os = "linux")]
+fn run_endpoint<A: crate::App>(
+    endpoint: &str,
+    id: &str,
+    name: &str,
+    version: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::{linux_surface::Surface, native::ClientSession};
+    use block_plugin_api::{
+        decode_frame, desktop_attachments::UnixAttachmentCarrier, encode_frame, Message,
+    };
+    use std::{
+        io::{Read, Write},
+        os::fd::AsRawFd,
+        time::Instant,
+    };
+
+    let mut stream = connect(endpoint)?;
+    eprintln!("connected to the Linux host");
+    let mut session = ClientSession::new(id, name, version);
+    stream.write_all(&encode_frame(&session.hello())?)?;
+    stream.flush()?;
+    let mut header = [0; 4];
+    stream.read_exact(&mut header)?;
+    let length = u32::from_be_bytes(header) as usize;
+    let mut frame = Vec::with_capacity(length + 4);
+    frame.extend_from_slice(&header);
+    frame.resize(length + 4, 0);
+    stream.read_exact(&mut frame[4..])?;
+    for response in session.receive(decode_frame(&frame)?) {
+        stream.write_all(&encode_frame(&response)?)?;
+    }
+    stream.flush()?;
+    eprintln!("protocol handshake completed");
+    let socket = stream.as_raw_fd();
+    let mut carrier = UnixAttachmentCarrier::new(stream);
+    let started = Instant::now();
+    let mut screens = crate::screens::Screens::new::<A>();
+    let mut surface: Option<Surface> = None;
+    let mut generation = 0;
+    let mut request_id = 0;
+    let mut repaint_at: Option<Instant> = None;
+    loop {
+        let mut batch = Vec::new();
+        match repaint_at {
+            Some(deadline) => wait_until(socket, deadline)?,
+            None => batch.push(carrier.receive()?.0),
+        }
+        while pending(socket)? {
+            batch.push(carrier.receive()?.0);
+        }
+        let received = !batch.is_empty();
+        for message in batch {
+            if let Message::Screens(set) = &message {
+                request_id = set.request_id;
+            }
+            screens.receive(&message);
+            for response in session.receive(message) {
+                carrier.send(&response, &[])?;
+            }
+            if matches!(session.state(), crate::native::State::Closed) {
+                return Ok(());
+            }
+        }
+        let layout = screens.layout().clone();
+        let replaced = !layout.is_empty()
+            && !surface
+                .as_ref()
+                .is_some_and(|surface| surface.layout().same_placements(&layout));
+        if replaced {
+            generation += 1;
+            screens.set_generation(generation);
+            let mut layout = layout;
+            layout.generation = generation;
+            eprintln!(
+                "creating a dma-buf surface {}x{} for {} screens",
+                layout.width,
+                layout.height,
+                layout.screens.len()
+            );
+            surface = Some(match surface.take() {
+                Some(previous) => previous.resize(request_id, layout.clone(), generation)?,
+                None => Surface::new(request_id, layout.clone(), generation)?,
+            });
+            carrier.send(&Message::Layout(layout), &[])?;
+        }
+        if let Some(surface) = &mut surface {
+            if replaced {
+                let (descriptor, planes) = surface.descriptor();
+                carrier.send(&descriptor, &planes)?;
+                eprintln!("transferred dma-buf surface generation {generation}");
+            }
+            let due = repaint_at.is_some_and(|deadline| deadline <= Instant::now());
+            if received || replaced || due {
+                let (messages, repaint) =
+                    surface.render(&mut screens, started.elapsed().as_secs_f64())?;
+                for message in messages {
+                    carrier.send(&message, &[])?;
+                }
+                repaint_at = repaint.map(|delay| Instant::now() + delay);
+            }
+        }
+        for message in screens.outbound() {
+            carrier.send(&message, &[])?;
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn wait_until(socket: std::os::fd::RawFd, deadline: std::time::Instant) -> std::io::Result<()> {
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    poll(socket, remaining.as_millis().min(i32::MAX as u128) as i32)?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn pending(socket: std::os::fd::RawFd) -> std::io::Result<bool> {
+    poll(socket, 0)
+}
+
+#[cfg(target_os = "linux")]
+fn poll(socket: std::os::fd::RawFd, timeout: i32) -> std::io::Result<bool> {
+    let mut descriptor = libc::pollfd {
+        fd: socket,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ready = unsafe { libc::poll(&raw mut descriptor, 1, timeout) };
+    if ready < 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::Interrupted {
+            return Ok(false);
+        }
+        return Err(error);
+    }
+    Ok(descriptor.revents & libc::POLLIN != 0)
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "windows"),
+    not(target_os = "linux")
+))]
 fn run_endpoint(
     endpoint: &str,
     id: &str,

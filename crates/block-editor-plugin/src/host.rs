@@ -100,42 +100,42 @@ impl EditorHost {
         self.creation_changed.set(true);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn take_opens(&self) -> Vec<(Uuid, Uuid)> {
         std::mem::take(&mut self.opens.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn set_block_types(&self, catalog: Rc<BlockCatalog>) {
         *self.block_types.borrow_mut() = catalog;
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn set_editable(&self, editable: bool) {
         self.editable.set(editable);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn set_drag(&self, drag: Option<BlockDrag>) {
         self.drag.set(drag);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn take_drag_accepted(&self) -> Option<bool> {
         self.drag_accepted.take()
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn take_picks(&self) -> Vec<(u64, FileFilter)> {
         std::mem::take(&mut self.picks.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn set_pick(&self, request: u64, pick: FilePick) {
         self.picked.borrow_mut().insert(request, pick);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn take_creation_ready(&self) -> Option<bool> {
         self.creation_changed
             .take()

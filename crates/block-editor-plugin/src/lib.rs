@@ -1,15 +1,17 @@
 pub use eframe::egui;
 pub use egui_material_icons;
 
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod egui_session;
 mod host;
+#[cfg(target_os = "linux")]
+mod linux_surface;
 pub mod native;
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod panes;
 #[cfg(not(target_arch = "wasm32"))]
 mod runner;
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod screens;
 #[cfg(target_arch = "wasm32")]
 mod web;

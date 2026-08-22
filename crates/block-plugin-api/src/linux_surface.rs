@@ -5,7 +5,7 @@ use crate::{
 use std::fmt;
 
 const DESCRIPTOR_VERSION: u16 = 1;
-const HEADER_LENGTH: usize = 19;
+const HEADER_LENGTH: usize = 35;
 const PLANE_LENGTH: usize = 8;
 const MAX_PLANES: usize = 4;
 
@@ -27,6 +27,7 @@ pub struct LinuxSurfaceDescriptor {
     pub drm_format: u32,
     pub modifier: u64,
     pub synchronization_value: u32,
+    pub device: [u8; 16],
     pub planes: Vec<LinuxSurfacePlane>,
 }
 
@@ -35,6 +36,7 @@ pub enum LinuxSurfaceError {
     WrongMechanism,
     InvalidDimensions,
     UnsupportedBackend,
+    DifferentDevice,
     UnsupportedFormat,
     UnsupportedColorSpace,
     UnsupportedAlphaMode,
@@ -62,6 +64,7 @@ impl LinuxSurfaceDescriptor {
         bytes.extend_from_slice(&self.drm_format.to_be_bytes());
         bytes.extend_from_slice(&self.modifier.to_be_bytes());
         bytes.extend_from_slice(&self.synchronization_value.to_be_bytes());
+        bytes.extend_from_slice(&self.device);
         bytes.push(self.planes.len() as u8);
         for plane in &self.planes {
             bytes.extend_from_slice(&plane.offset.to_be_bytes());
@@ -77,7 +80,7 @@ impl LinuxSurfaceDescriptor {
         {
             return Err(LinuxSurfaceError::MalformedDescriptor);
         }
-        let plane_count = surface.opaque[18] as usize;
+        let plane_count = surface.opaque[HEADER_LENGTH - 1] as usize;
         if plane_count == 0
             || plane_count > MAX_PLANES
             || surface.opaque.len() != HEADER_LENGTH + plane_count * PLANE_LENGTH
@@ -100,6 +103,7 @@ impl LinuxSurfaceDescriptor {
             drm_format: u32::from_be_bytes(surface.opaque[2..6].try_into().unwrap()),
             modifier: u64::from_be_bytes(surface.opaque[6..14].try_into().unwrap()),
             synchronization_value: u32::from_be_bytes(surface.opaque[14..18].try_into().unwrap()),
+            device: surface.opaque[18..34].try_into().unwrap(),
             planes,
         };
         if descriptor.drm_format == 0 {

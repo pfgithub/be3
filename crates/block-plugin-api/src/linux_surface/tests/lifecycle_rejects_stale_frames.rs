@@ -6,6 +6,7 @@ fn lifecycle_rejects_stale_frames() {
         drm_format: 875_713_112,
         modifier: 0,
         synchronization_value: 4,
+        device: [7; 16],
         planes: vec![LinuxSurfacePlane {
             offset: 0,
             stride: 256,
