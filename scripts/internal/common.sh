@@ -71,12 +71,12 @@ write_index() {
 load_games() {
     games=()
     local manifest
-    for manifest in "$repository"/crates/games/*/Cargo.toml; do
+    for manifest in "$repository"/crates/tabletop_games/rules/*/Cargo.toml; do
         [[ -f "$manifest" ]] || continue
         games+=("$(basename "$(dirname "$manifest")")")
     done
     if [[ ${#games[@]} -eq 0 ]]; then
-        echo 'No games were found under crates/games' >&2
+        echo 'No games were found under crates/tabletop_games/rules' >&2
         exit 1
     fi
 }

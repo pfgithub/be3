@@ -1,4 +1,4 @@
-use deterministic_games::GameAction;
+use game_host::GameAction;
 use uuid::Uuid;
 
 use super::{join, show, start};

@@ -3,25 +3,39 @@
 A deterministic game is a crate of its own that compiles to a single
 WebAssembly module. The app never links a game: it finds the modules staged
 beside it, runs them through the `wasmi` interpreter in
-`crates/deterministic_games`, and asks each one what a player currently sees.
+`crates/tabletop_games/host`, and asks each one what a player currently sees.
 That is the same on desktop, Android and the browser, so a game is written
 and built once.
 
+Everything about games lives under `crates/tabletop_games`, split by which
+side of the WebAssembly boundary it runs on:
+
+- `api` (`game-api`) is the contract, and is compiled into every game
+  module. It holds the types the two sides exchange, the `GameHelper` a game
+  is written against, the `game!` macro that declares a module's exports,
+  and the build script helper each game calls. It has to build for
+  wasm32-unknown-unknown, so it depends on nothing that needs a host.
+- `host` (`game-host`) is the other side: it embeds `wasmi`, loads a module,
+  and calls it. Only the app depends on it. It re-exports the `game-api`
+  types it passes across, so a caller needs the one crate.
+- `rules/<game>` is one game each - the only place a game's actual rules
+  live.
+
 ## 1. Write the crate
 
-- `crates/games/foo/Cargo.toml` — copy `tic_tac_toe`'s. The package name is
-  the module's file name and the game's id, so it is written with
-  underscores. It needs `crate-type = ["cdylib", "rlib"]`, `game-api` as a
-  dependency and a build dependency, and `deterministic_games` as a dev
+- `crates/tabletop_games/rules/foo/Cargo.toml` — copy `tic_tac_toe`'s. The
+  package name is the module's file name and the game's id, so it is written
+  with underscores. It needs `crate-type = ["cdylib", "rlib"]`, `game-api`
+  as a dependency and a build dependency, and `game-host` as a dev
   dependency so the tests can run the module.
-- `crates/games/foo/build.rs` — `fn main() { game_api::build::wasm(); }`.
-  This compiles the crate to wasm32-unknown-unknown and points `GAME_WASM`
-  at the module for the tests.
-- `crates/games/foo/src/lib.rs` — the game, ending in
+- `crates/tabletop_games/rules/foo/build.rs` —
+  `fn main() { game_api::build::wasm(); }`. This compiles the crate to
+  wasm32-unknown-unknown and points `GAME_WASM` at the module for the tests.
+- `crates/tabletop_games/rules/foo/src/lib.rs` — the game, ending in
   `game_api::game!("Foo", foo);`. The first argument is the display name the
   app shows and stores on the blocks made from it; the second is the game
   function.
-- Root `Cargo.toml` — add `crates/games/foo` to the members.
+- Root `Cargo.toml` — add `crates/tabletop_games/rules/foo` to the members.
 
 Anything a game depends on has to build for wasm32-unknown-unknown with no
 host to call into: no clock, no filesystem, no randomness. Whatever a game
@@ -81,9 +95,9 @@ reaches the test as a trap rather than a message.
 
 ## 4. Nothing else
 
-`./scripts/build` finds every crate under `crates/games` for each target,
-stages the modules in `games/` beside the app with an index the browser and
-Android read in place of listing a directory, and the app compiles what it
-finds at startup. The block stores the id of the module it plays and the name
+`./scripts/build` finds every crate under `crates/tabletop_games/rules` for
+each target, stages the modules in `games/` beside the app with an index the
+browser and Android read in place of listing a directory, and the app
+compiles what it finds at startup. The block stores the id of the module it plays and the name
 that module gave itself, so a client without the module still names the
 block, and a game that is not installed is reported in its place.

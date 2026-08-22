@@ -44,7 +44,7 @@ block-client = { path = "../block-client" }
 block-plugin-api = { path = "../block-plugin-api" }
 block-ui = { path = "../block-ui" }
 bytemuck = { version = "1.24.0", features = ["derive"] }
-deterministic_games = { path = "../deterministic_games" }
+game-host = { path = "../tabletop_games/host" }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "persistence", "wgpu"] }
 egui_dock = "0.19.1"
 egui_material_icons = "0.6.0"

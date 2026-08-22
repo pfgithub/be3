@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use deterministic_games::{Game, GameAction, GameScreen};
+use game_host::{Game, GameAction, GameScreen};
 use uuid::Uuid;
 
 use super::column_label;

@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use deterministic_games::{Game, GameAction, GameScreen};
+use game_host::{Game, GameAction, GameScreen};
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;

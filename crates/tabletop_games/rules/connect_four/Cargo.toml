@@ -8,15 +8,15 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-game-api = { path = "../../game-api" }
+game-api = { path = "../../api" }
 uuid = { version = "1", default-features = false }
 
 [build-dependencies]
-game-api = { path = "../../game-api" }
+game-api = { path = "../../api" }
 
 [dev-dependencies]
 bincode = "1"
-deterministic_games = { path = "../../deterministic_games" }
+game-host = { path = "../../host" }
 uuid = { version = "1", features = ["v4"] }
 
 [lints]

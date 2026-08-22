@@ -1,6 +1,6 @@
 use std::{cell::RefCell, sync::Arc};
 
-use deterministic_games::Game;
+use game_host::Game;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

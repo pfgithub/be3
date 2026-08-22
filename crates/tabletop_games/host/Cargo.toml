@@ -1,12 +1,12 @@
 [package]
-name = "deterministic_games"
+name = "game-host"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 
 [dependencies]
 bincode = "1"
-game-api = { path = "../game-api" }
+game-api = { path = "../api" }
 uuid = { version = "1", features = ["serde", "v4"] }
 wasmi = { version = "1.1", default-features = false, features = ["std"] }
 

@@ -12,7 +12,7 @@ eips = { version = "0.2.4", features = ["serde"] }
 flate2 = "1"
 futures-channel = "0.3"
 futures-util = "0.3"
-game-api = { path = "../game-api" }
+game-api = { path = "../tabletop_games/api" }
 logicgame = { path = "../logicgame" }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }

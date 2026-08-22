@@ -859,12 +859,12 @@ dependencies = [
  "block-server",
  "block-ui",
  "bytemuck",
- "deterministic_games",
  "eframe",
  "egui_dock",
  "egui_material_icons",
  "flate2",
  "freetype",
+ "game-host",
  "harfbuzz_rs",
  "image",
  "jni 0.22.4",
@@ -1561,8 +1561,8 @@ name = "connect_four"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "deterministic_games",
  "game-api",
+ "game-host",
  "uuid",
 ]
 
@@ -1886,8 +1886,8 @@ name = "crazy_8s"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "deterministic_games",
  "game-api",
+ "game-host",
  "rand 0.9.4",
  "rand_chacha 0.9.0",
  "uuid",
@@ -2088,16 +2088,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "deterministic_games"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "game-api",
- "uuid",
- "wasmi",
 ]
 
 [[package]]
@@ -3127,6 +3117,16 @@ dependencies = [
  "bincode",
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "game-host"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "game-api",
+ "uuid",
+ "wasmi",
 ]
 
 [[package]]
@@ -8627,8 +8627,8 @@ name = "tic_tac_toe"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "deterministic_games",
  "game-api",
+ "game-host",
  "uuid",
 ]
 

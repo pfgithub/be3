@@ -2,9 +2,9 @@ use block_client::{
     blocks::deterministic_game::{DeterministicGame, DeterministicGameOperation},
     BlockClient, BlockHandle,
 };
-use deterministic_games::{GameAction, GameScreen};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_GRID_3X3, MaterialIcon};
+use game_host::{GameAction, GameScreen};
 use uuid::Uuid;
 
 use super::{
