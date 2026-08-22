@@ -98,10 +98,18 @@ For undo and redo, implement `BlockHistory<MyBlock>` and set it as `type History
 
 ## 4. Export the module
 
-Add the module to `blocks/mod.rs`:
+Add the block type to the list in `blocks.rs`, which declares the module and
+puts the type in the erased table the app opens blocks through:
 
 ```rust
-pub mod my_block;
+my_block::MyBlock;
+```
+
+Add `: Default` after the type when a block of it can be made from its default
+value, which is what a plugin editor's new-block action uses:
+
+```rust
+my_block::MyBlock: Default;
 ```
 
 The block is now available as `block_client::blocks::my_block::MyBlock`.

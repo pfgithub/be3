@@ -1,7 +1,7 @@
 1. Add the block (if the block type is new)
 
 - crates/block-client/src/blocks/foo.rs — state struct, operation enum, impl Block with a fresh TYPE_ID UUID, #[cfg(test)] mod tests;.
-- crates/block-client/src/blocks/mod.rs — add pub mod foo; (alphabetical).
+- crates/block-client/src/blocks.rs — add foo::Foo; to the block_types! list (alphabetical), with : Default when the new-block menu can make one from its default.
 - crates/block-client/src/blocks/foo/tests.rs + one file per test under tests/ (serialization round trip, operation edge cases).
 - A block holds what it is, not what an editor makes of it. The image block keeps the file's bytes and a metadata field saying what decoding them found — or why it failed — which the editor fills in through an operation the first time it draws the image. Nothing but the plugin then needs a decoder, and no other client has to decode the block to know its shape.
 
