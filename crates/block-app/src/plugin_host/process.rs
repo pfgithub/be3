@@ -287,7 +287,7 @@ fn drive_windows(
 
 #[cfg(target_os = "linux")]
 fn drive_unix(
-    stream: std::os::unix::net::UnixStream,
+    mut stream: std::os::unix::net::UnixStream,
     child: &mut Child,
     repaint: &eframe::egui::Context,
     shutdown: &Receiver<()>,
@@ -311,7 +311,6 @@ fn drive_unix(
         ],
     );
     session.start(0);
-    let mut stream = stream;
     session.receive(read_message(&mut stream)?, elapsed(started));
     flush(&mut stream, &mut session)?;
     if !matches!(session.state(), SessionState::Running) {
