@@ -58,6 +58,7 @@ fn region_screen(
 mod artifact_messages_round_trip;
 mod block_types_round_trip;
 mod creation_messages_round_trip;
+mod cursor_round_trips;
 mod drag_messages_round_trip;
 mod file_pick_messages_round_trip;
 mod frame_round_trips;

@@ -58,6 +58,11 @@ regeneration request carries the settings to rebuild from and is answered
 exactly once, after the instance has written the artifact through its own
 client, with success or with why it failed.
 
+An editor instance may ask for the cursor shown over one of its regions,
+which only the host can put on the window. The request names what the cursor
+means rather than any one toolkit's spelling of it, is sent only when the
+cursor changes, and is honoured only while the pointer is over that region.
+
 An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a
 request for a block the host cannot open is discarded.

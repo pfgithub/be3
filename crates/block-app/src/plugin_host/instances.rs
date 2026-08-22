@@ -1,8 +1,8 @@
 use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
-    ArtifactDescription, BlockTypeDescriptor, CreationOutcome, EditorInstanceId, EditorMessage,
-    EditorRegion, FilePick, Message, RegenerationOutcome, RegionSize, ScreenId, ScreenRequest,
-    ScreenSet, TunnelMessage,
+    ArtifactDescription, BlockTypeDescriptor, CreationOutcome, CursorIcon, EditorInstanceId,
+    EditorMessage, EditorRegion, FilePick, Message, RegenerationOutcome, RegionSize, ScreenId,
+    ScreenRequest, ScreenSet, TunnelMessage,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -86,6 +86,7 @@ struct Screen {
     last_seen: u64,
     used: Option<egui::Vec2>,
     dragging: bool,
+    cursor: CursorIcon,
 }
 
 pub(super) struct NextScreens {
@@ -135,6 +136,7 @@ impl Instances {
                 last_seen: pass,
                 used: None,
                 dragging: false,
+                cursor: CursorIcon::Default,
             }
         });
         screen.request.metrics = viewport_metrics(size, scale_factor);
@@ -401,6 +403,33 @@ impl Instances {
         self.entries.get(&instance)?.screens.get(&region)?.used
     }
 
+    /// The cursor the instance asked for over one of its regions.
+    pub(super) fn cursor(
+        &self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+    ) -> Option<egui::CursorIcon> {
+        let screen = self.entries.get(&instance)?.screens.get(&region)?;
+        Some(match screen.cursor {
+            CursorIcon::Default => egui::CursorIcon::Default,
+            CursorIcon::None => egui::CursorIcon::None,
+            CursorIcon::Pointer => egui::CursorIcon::PointingHand,
+            CursorIcon::Text => egui::CursorIcon::Text,
+            CursorIcon::Crosshair => egui::CursorIcon::Crosshair,
+            CursorIcon::Grab => egui::CursorIcon::Grab,
+            CursorIcon::Grabbing => egui::CursorIcon::Grabbing,
+            CursorIcon::Move => egui::CursorIcon::Move,
+            CursorIcon::NotAllowed => egui::CursorIcon::NotAllowed,
+            CursorIcon::Wait => egui::CursorIcon::Wait,
+            CursorIcon::Progress => egui::CursorIcon::Progress,
+            CursorIcon::Help => egui::CursorIcon::Help,
+            CursorIcon::ResizeHorizontal => egui::CursorIcon::ResizeHorizontal,
+            CursorIcon::ResizeVertical => egui::CursorIcon::ResizeVertical,
+            CursorIcon::ResizeNeSw => egui::CursorIcon::ResizeNeSw,
+            CursorIcon::ResizeNwSe => egui::CursorIcon::ResizeNwSe,
+        })
+    }
+
     pub(super) fn screen_set(&mut self, screens: Vec<ScreenRequest>) -> Message {
         self.request_id += 1;
         Message::Screens(ScreenSet {
@@ -502,6 +531,19 @@ impl Instances {
                         CreationOutcome::Created(block_id) => Ok(Uuid::from_bytes(block_id)),
                         CreationOutcome::Failed(error) => Err(error),
                     });
+                }
+            }
+            EditorMessage::Cursor {
+                instance,
+                region,
+                cursor,
+            } => {
+                if let Some(screen) = self
+                    .entries
+                    .get_mut(&instance)
+                    .and_then(|entry| entry.screens.get_mut(&region))
+                {
+                    screen.cursor = cursor;
                 }
             }
             EditorMessage::ArtifactDescribed {

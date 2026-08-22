@@ -27,7 +27,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 15;
+pub const PROTOCOL_VERSION: u16 = 16;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -419,6 +419,13 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         outcome: RegenerationOutcome,
     },
+    /// The cursor the instance wants shown over one of its regions, which
+    /// only the host can put on the window.
+    Cursor {
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        cursor: CursorIcon,
+    },
     AspectRatio {
         instance: EditorInstanceId,
         ratio: f32,
@@ -447,6 +454,29 @@ pub struct FileFilter {
     pub default_file_name: String,
     pub extensions: Vec<String>,
     pub mime_types: Vec<String>,
+}
+
+/// The cursors an editor may ask for, named for what they mean rather than
+/// for any one toolkit's spelling of them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CursorIcon {
+    #[default]
+    Default,
+    None,
+    Pointer,
+    Text,
+    Crosshair,
+    Grab,
+    Grabbing,
+    Move,
+    NotAllowed,
+    Wait,
+    Progress,
+    Help,
+    ResizeHorizontal,
+    ResizeVertical,
+    ResizeNeSw,
+    ResizeNwSe,
 }
 
 /// What an editor makes of an artifact's settings: the block it was generated

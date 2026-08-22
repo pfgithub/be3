@@ -295,6 +295,10 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         runtime.send(messages);
         if hovering && runtime.instances.drag_accepted(instance) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
+        } else if response.hovered() {
+            if let Some(cursor) = runtime.instances.cursor(instance, region) {
+                ui.ctx().set_cursor_icon(cursor);
+            }
         }
         let open_request = runtime.instances.take_open(instance);
         let Some(atlas_region) = Region::of(

@@ -1,7 +1,8 @@
 use block_client::TunnelCarrier;
 use block_plugin_api::{
-    ArtifactDescription, CreationOutcome, EditorInstanceId, EditorMessage, EditorRegion, FilePick,
-    InputEvent, Message, PointerButton, RegionSize, ScreenPlacement, TunnelMessage, WheelUnit,
+    ArtifactDescription, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage,
+    EditorRegion, FilePick, InputEvent, Message, PointerButton, RegionSize, ScreenPlacement,
+    TunnelMessage, WheelUnit,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -58,6 +59,8 @@ struct RegionState {
     placement: Option<ScreenPlacement>,
     used: Option<egui::Vec2>,
     reported: Option<egui::Vec2>,
+    cursor: CursorIcon,
+    reported_cursor: Option<CursorIcon>,
 }
 
 trait AppUi {
@@ -269,6 +272,13 @@ impl EguiSession {
             messages.push(Message::RegionSizes(sizes));
         }
         let instance = self.instance;
+        for (region, cursor) in self.cursors() {
+            messages.push(Message::Editor(EditorMessage::Cursor {
+                instance,
+                region,
+                cursor,
+            }));
+        }
         if let Some(accepted) = self.host.take_drag_accepted() {
             messages.push(Message::Editor(EditorMessage::DragAccepted {
                 instance,
@@ -363,6 +373,18 @@ impl EguiSession {
         messages
     }
 
+    fn cursors(&mut self) -> Vec<(EditorRegion, CursorIcon)> {
+        let mut cursors = Vec::new();
+        for (region, state) in &mut self.regions {
+            if state.reported_cursor == Some(state.cursor) {
+                continue;
+            }
+            state.reported_cursor = Some(state.cursor);
+            cursors.push((*region, state.cursor));
+        }
+        cursors
+    }
+
     fn region_sizes(&mut self) -> Vec<RegionSize> {
         let mut sizes = Vec::new();
         for state in self.regions.values_mut() {
@@ -455,6 +477,10 @@ impl EguiSession {
             self.drag = None;
         }
         self.used(region, context.globally_used_rect());
+        let cursor = cursor_icon(output.platform_output.cursor_icon);
+        if let Some(state) = self.regions.get_mut(&region) {
+            state.cursor = cursor;
+        }
         output
     }
 
@@ -543,6 +569,37 @@ impl EguiSession {
             }
             InputEvent::Focus(focused) => state.input.focused = *focused,
         }
+    }
+}
+
+fn cursor_icon(cursor: egui::CursorIcon) -> CursorIcon {
+    match cursor {
+        egui::CursorIcon::None => CursorIcon::None,
+        egui::CursorIcon::PointingHand => CursorIcon::Pointer,
+        egui::CursorIcon::Text | egui::CursorIcon::VerticalText => CursorIcon::Text,
+        egui::CursorIcon::Crosshair | egui::CursorIcon::Cell => CursorIcon::Crosshair,
+        egui::CursorIcon::Grab => CursorIcon::Grab,
+        egui::CursorIcon::Grabbing => CursorIcon::Grabbing,
+        egui::CursorIcon::Move | egui::CursorIcon::AllScroll => CursorIcon::Move,
+        egui::CursorIcon::NotAllowed | egui::CursorIcon::NoDrop => CursorIcon::NotAllowed,
+        egui::CursorIcon::Wait => CursorIcon::Wait,
+        egui::CursorIcon::Progress => CursorIcon::Progress,
+        egui::CursorIcon::Help => CursorIcon::Help,
+        egui::CursorIcon::ResizeHorizontal
+        | egui::CursorIcon::ResizeColumn
+        | egui::CursorIcon::ResizeEast
+        | egui::CursorIcon::ResizeWest => CursorIcon::ResizeHorizontal,
+        egui::CursorIcon::ResizeVertical
+        | egui::CursorIcon::ResizeRow
+        | egui::CursorIcon::ResizeNorth
+        | egui::CursorIcon::ResizeSouth => CursorIcon::ResizeVertical,
+        egui::CursorIcon::ResizeNeSw
+        | egui::CursorIcon::ResizeNorthEast
+        | egui::CursorIcon::ResizeSouthWest => CursorIcon::ResizeNeSw,
+        egui::CursorIcon::ResizeNwSe
+        | egui::CursorIcon::ResizeNorthWest
+        | egui::CursorIcon::ResizeSouthEast => CursorIcon::ResizeNwSe,
+        _ => CursorIcon::Default,
     }
 }
 
