@@ -9,15 +9,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 game-api = { path = "../../api" }
-rand = { version = "0.9", default-features = false, features = ["alloc"] }
-rand_chacha = { version = "0.9", default-features = false }
-uuid = { version = "1", default-features = false }
 
 [build-dependencies]
 game-api = { path = "../../api" }
 
 [dev-dependencies]
-bincode = "1"
 game-host = { path = "../../host" }
 uuid = { version = "1", features = ["v4"] }
 

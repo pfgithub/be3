@@ -8,7 +8,7 @@ fn duplicate_join_from_the_same_actor_is_ignored() {
     let p1 = Uuid::new_v4();
 
     let mut with_duplicate = vec![join(&[], p0)];
-    with_duplicate.push(with_duplicate[0].clone()); // same actor, same encoded action again
+    with_duplicate.push(with_duplicate[0].clone());
     with_duplicate.push(join(&with_duplicate, p1));
 
     let mut clean = vec![with_duplicate[0].clone()];

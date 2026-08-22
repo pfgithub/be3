@@ -1,18 +1,12 @@
 use game_host::GameAction;
 use uuid::Uuid;
 
-use super::{join, show, start};
+use super::{show, started};
 
 #[test]
 fn playing_greedily_from_all_sides_eventually_ends_the_game() {
     let players: Vec<Uuid> = (0..5).map(|_| Uuid::new_v4()).collect();
-    let mut actions: Vec<GameAction> = Vec::new();
-    for player in players.iter().copied() {
-        let joined = join(&actions, player);
-        actions.push(joined);
-    }
-    let started = start(&actions, players[0]);
-    actions.push(started);
+    let mut actions = started(&players);
 
     for _ in 0..2000 {
         let screens: Vec<_> = players

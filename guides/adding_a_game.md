@@ -35,6 +35,10 @@ side of the WebAssembly boundary it runs on:
   `game_api::game!("Foo", foo);`. The first argument is the display name the
   app shows and stores on the blocks made from it; the second is the game
   function.
+- `crates/tabletop_games/rules/foo/rulebook.md` — the rules in English,
+  written the way a rulebook explains a game: who plays, what the pieces or
+  cards are, how a turn goes, how it ends. Write this one first, because the
+  code is meant to read like it.
 - Root `Cargo.toml` — add `crates/tabletop_games/rules/foo` to the members.
 
 Anything a game depends on has to build for wasm32-unknown-unknown with no
@@ -70,6 +74,33 @@ there, inline. A move is identified by its position among the `action` calls
 reached for its actor, never by its label, so nothing a client sends can name
 a move it was not offered. When the log runs out, `action` returns the screen
 for the viewing player, which `?` propagates out.
+
+Some of what a rulebook says in one sentence is a paragraph of Rust, so
+`GameHelper` says those the short way too:
+
+- `helper.gather(2)?` fills a table before play begins - anyone may join,
+  and once two have, any of them may start - and answers with the players in
+  the order they joined.
+- `helper.turn(whose, yours, theirs, |choose| ...)` waits on the one player
+  whose turn it is, who is offered the moves `choose` names; everyone else
+  is only told they are waiting.
+- `helper.game_over(|player| ...)` ends the game: every viewer is told how
+  it ended and nobody is offered anything.
+
+`game_api::cards` and `game_api::table` are the same idea for card games:
+a deck of the usual 52, and a `Table` that deals it, holds each player's
+hand, the draw pile and the discard pile, draws (reshuffling the discard
+pile back under the face-up card when the draw pile runs out), counts
+passes and passes the turn to the left. Its shuffle is seeded from the ids
+of the players it deals to, so it needs no randomness of its own.
+
+These all live in `game-api` rather than in a game, so put anything new of
+the same sort there too: whenever a rulebook sentence is plain and the Rust
+for it is not, the sentence belongs in the shared crate and the game keeps
+only its own rules. `crazy_8s` is written that way - one `lib.rs` that
+follows its `rulebook.md` section by section - so what is left in it is
+what makes Crazy 8s that game: eights are wild, a played eight calls a
+suit, and drawing gets you one card you may play.
 
 The game keeps no state between calls: the log is replayed from the top every
 time, in a fresh instance, and the interpreter cuts a module off that never

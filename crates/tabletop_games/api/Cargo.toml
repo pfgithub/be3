@@ -6,8 +6,13 @@ license.workspace = true
 
 [dependencies]
 bincode = "1"
+rand = { version = "0.9", default-features = false, features = ["alloc"] }
+rand_chacha = { version = "0.9", default-features = false }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", default-features = false, features = ["serde"] }
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
 
 [lints]
 workspace = true

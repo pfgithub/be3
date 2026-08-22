@@ -1885,11 +1885,8 @@ dependencies = [
 name = "crazy_8s"
 version = "0.1.0"
 dependencies = [
- "bincode",
  "game-api",
  "game-host",
- "rand 0.9.4",
- "rand_chacha 0.9.0",
  "uuid",
 ]
 
@@ -3115,6 +3112,8 @@ name = "game-api"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "rand 0.9.4",
+ "rand_chacha 0.9.0",
  "serde",
  "uuid",
 ]

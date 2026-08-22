@@ -1,23 +1,21 @@
 use std::sync::OnceLock;
 
+use game_api::cards::Card;
+use game_api::table::Table;
 use game_host::{Game, GameAction, GameScreen};
-use rand::seq::SliceRandom;
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 use uuid::Uuid;
 
-use super::{deck_count_for, draw_from_pile, full_deck, Card, Rank, Suit, HAND_SIZE};
+use super::{can_be_played, decks_for, HAND_SIZE};
 
-mod deck_count_scales_with_player_count;
-mod draw_from_pile_prefers_the_draw_pile_when_it_has_cards;
-mod draw_from_pile_reshuffles_the_discard_pile_when_empty;
+mod decks_scale_with_the_number_of_players;
+mod drawing_a_card_you_can_play_offers_it_before_your_turn_ends;
+mod drawing_a_card_you_cannot_play_ends_your_turn;
 mod duplicate_join_from_the_same_actor_is_ignored;
+mod eights_match_anything_and_other_cards_match_the_suit_or_the_rank;
 mod first_player_can_act_after_the_game_starts;
 mod playing_greedily_from_all_sides_eventually_ends_the_game;
 mod spectator_after_the_game_starts_has_no_actions;
 
-/// The compiled module this crate's build script produced, which is the
-/// same artifact the app loads, run here through the same interpreter.
 fn show(actions: &[GameAction], player: Uuid) -> GameScreen {
     static GAME: OnceLock<Game> = OnceLock::new();
     GAME.get_or_init(|| {
@@ -48,20 +46,24 @@ fn start(actions: &[GameAction], actor: Uuid) -> GameAction {
     option(actions, actor, "Start the game")
 }
 
-/// Replays the same shuffle-and-deal the game itself performs once the
-/// table is started, so tests can reason about real dealt hands without
-/// hardcoding cards.
-fn deal(players: &[Uuid]) -> (Vec<Vec<Card>>, Vec<Card>, Card) {
-    let seed = players.iter().fold(0u128, |acc, id| acc ^ id.as_u128()) as u64;
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let mut deck: Vec<Card> = (0..deck_count_for(players.len()))
-        .flat_map(|_| full_deck())
-        .collect();
-    deck.shuffle(&mut rng);
-    let hands: Vec<Vec<Card>> = players
-        .iter()
-        .map(|_| deck.split_off(deck.len() - HAND_SIZE))
-        .collect();
-    let top = deck.pop().unwrap();
-    (hands, deck, top)
+fn started(players: &[Uuid]) -> Vec<GameAction> {
+    let mut actions = Vec::new();
+    for player in players {
+        let joined = join(&actions, *player);
+        actions.push(joined);
+    }
+    let started = start(&actions, players[0]);
+    actions.push(started);
+    actions
+}
+
+fn dealt(players: &[Uuid]) -> Table {
+    Table::deal(players, HAND_SIZE, decks_for(players.len()))
+}
+
+fn drawn_by_the_first_player(players: &[Uuid]) -> (Card, Card) {
+    let mut table = dealt(players);
+    let face_up = table.face_up();
+    let drawn = table.draw().expect("a fresh deal leaves cards to draw");
+    (drawn, face_up)
 }

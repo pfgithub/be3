@@ -1,10 +1,13 @@
 use std::cell::Cell;
+use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod build;
+pub mod cards;
 pub mod guest;
+pub mod table;
 
 /// One entry in a deterministic game's append-only action log. `actor` is
 /// always the operation's server-verified author, never something a client
@@ -106,4 +109,68 @@ impl<'a> GameHelper<'a> {
             actions,
         })
     }
+
+    pub fn turn(
+        &self,
+        whose: Uuid,
+        yours: &str,
+        theirs: &str,
+        mut choices: impl FnMut(&mut dyn FnMut(&str) -> bool),
+    ) -> Result<(), GameScreen> {
+        self.action(
+            |player| {
+                if player == whose {
+                    yours.to_owned()
+                } else {
+                    theirs.to_owned()
+                }
+            },
+            |player, choose| {
+                if player == whose {
+                    choices(choose);
+                }
+            },
+        )
+    }
+
+    pub fn gather(&self, minimum: usize) -> Result<Vec<Uuid>, GameScreen> {
+        let mut players: Vec<Uuid> = Vec::new();
+        loop {
+            let joined = players.clone();
+            let mut started = false;
+            self.action(
+                move |player| {
+                    if !joined.contains(&player) {
+                        "Join the game".to_owned()
+                    } else if joined.len() < minimum {
+                        "Waiting for another player to join...".to_owned()
+                    } else {
+                        format!("{} players joined - start when ready", joined.len())
+                    }
+                },
+                |player, choose| {
+                    if !players.contains(&player) {
+                        if choose("Join the game") {
+                            players.push(player);
+                        }
+                    } else if players.len() >= minimum && choose("Start the game") {
+                        started = true;
+                    }
+                },
+            )?;
+            if started {
+                return Ok(players);
+            }
+        }
+    }
+
+    pub fn game_over(&self, describe: impl Fn(Uuid) -> String) -> Result<Infallible, GameScreen> {
+        Err(GameScreen {
+            description: describe(self.player),
+            actions: Vec::new(),
+        })
+    }
 }
+
+#[cfg(test)]
+mod tests;

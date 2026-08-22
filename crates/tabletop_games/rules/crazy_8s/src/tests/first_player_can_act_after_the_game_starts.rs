@@ -1,9 +1,9 @@
+use game_api::cards::Card;
 use uuid::Uuid;
 
-use super::{deal, join, show, start};
-use crate::Card;
+use super::{can_be_played, dealt, show, started};
 
-fn played_card_label(option_label: &str) -> Option<&str> {
+fn played_card(option_label: &str) -> Option<&str> {
     option_label
         .strip_prefix("Play ")
         .map(|rest| rest.split(" and call ").next().unwrap())
@@ -13,42 +13,38 @@ fn played_card_label(option_label: &str) -> Option<&str> {
 fn first_player_can_act_after_the_game_starts() {
     let p0 = Uuid::new_v4();
     let p1 = Uuid::new_v4();
-    let players = [p0, p1];
-    let (hands, deck, top) = deal(&players);
-    let hand0 = &hands[0];
-    let mut actions = vec![join(&[], p0)];
-    actions.push(join(&actions, p1));
-    actions.push(start(&actions, p0));
+    let table = dealt(&[p0, p1]);
+    let actions = started(&[p0, p1]);
 
     let waiting = show(&actions, p1);
     assert_eq!(waiting.description, "Waiting for your turn...");
     assert!(waiting.actions.is_empty());
 
     let screen = show(&actions, p0);
-    assert!(screen.description.contains(top.label().as_str()));
-    assert!(!deck.is_empty());
-
+    assert!(screen.description.contains(&table.face_up().to_string()));
+    assert!(table.can_draw());
     assert!(screen
         .actions
         .iter()
         .any(|option| option.label == "Draw a card"));
 
-    let mut offered_cards: Vec<&str> = Vec::new();
+    let mut offered: Vec<String> = Vec::new();
     for option in &screen.actions {
-        if let Some(card_label) = played_card_label(&option.label) {
-            if !offered_cards.contains(&card_label) {
-                offered_cards.push(card_label);
+        if let Some(card) = played_card(&option.label) {
+            if !offered.iter().any(|seen| seen == card) {
+                offered.push(card.to_owned());
             }
         }
     }
 
-    let expected_cards: Vec<Card> = hand0
+    let playable: Vec<Card> = table
+        .hand()
         .iter()
         .copied()
-        .filter(|card| card.is_legal(top.suit, top.rank))
+        .filter(|card| can_be_played(*card, table.face_up(), table.face_up().suit))
         .collect();
-    assert_eq!(offered_cards.len(), expected_cards.len());
-    for card in &expected_cards {
-        assert!(offered_cards.contains(&card.label().as_str()));
+    assert_eq!(offered.len(), playable.len());
+    for card in playable {
+        assert!(offered.contains(&card.to_string()));
     }
 }
