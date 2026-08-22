@@ -44,6 +44,7 @@ impl Screens {
                 block_id,
                 account_id,
                 workspace_id,
+                editable,
                 ..
             }) => {
                 let session = self
@@ -51,6 +52,7 @@ impl Screens {
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance));
                 session.set_block_types(Rc::clone(&self.block_types));
+                session.set_editable(*editable);
                 session.connect(
                     Uuid::from_bytes(*block_id),
                     Uuid::from_bytes(*account_id),
@@ -75,6 +77,11 @@ impl Screens {
             Message::Editor(EditorMessage::CommitCreation { instance }) => {
                 if let Some(session) = self.sessions.get_mut(instance) {
                     session.commit_creation();
+                }
+            }
+            Message::Editor(EditorMessage::EditabilityChanged { instance, editable }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.set_editable(*editable);
                 }
             }
             Message::Editor(EditorMessage::Close { instance }) => {

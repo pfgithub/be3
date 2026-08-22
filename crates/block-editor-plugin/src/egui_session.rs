@@ -97,6 +97,10 @@ impl EguiSession {
         self.host.set_block_types(catalog);
     }
 
+    pub(crate) fn set_editable(&self, editable: bool) {
+        self.host.set_editable(editable);
+    }
+
     pub(crate) fn set_drag(&mut self, drag: Option<(EditorRegion, BlockDrag)>) {
         self.drag = drag;
     }
@@ -113,6 +117,7 @@ impl EguiSession {
             return;
         };
         self.creating = true;
+        self.host.set_editable(true);
         self.app.connect_creation(self.host.clone(), client);
     }
 

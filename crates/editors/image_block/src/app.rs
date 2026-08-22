@@ -235,9 +235,10 @@ impl ImageApp {
         let recorded = image.metadata().clone();
         let result = crate::decode::decode(image.data());
         drop(image);
+        let editable = editing.host.editable();
         match result {
             Ok(found) => {
-                if recorded != found.metadata {
+                if editable && recorded != found.metadata {
                     editing.block.operate(ImageOperation::SetMetadata {
                         metadata: found.metadata,
                     });
@@ -254,9 +255,11 @@ impl ImageApp {
                 Ok(texture)
             }
             Err(error) => {
-                editing.block.operate(ImageOperation::SetMetadata {
-                    metadata: ImageMetadata::Failed(error.clone()),
-                });
+                if editable {
+                    editing.block.operate(ImageOperation::SetMetadata {
+                        metadata: ImageMetadata::Failed(error.clone()),
+                    });
+                }
                 decoded.error = Some(error);
                 Err(decoded.error.clone())
             }

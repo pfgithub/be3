@@ -37,6 +37,7 @@ pub struct EditorHost {
     picks: Rc<RefCell<Vec<(u64, FileFilter)>>>,
     picked: Rc<RefCell<HashMap<u64, FilePick>>>,
     next_pick: Rc<Cell<u64>>,
+    editable: Rc<Cell<bool>>,
     creation_ready: Rc<Cell<bool>>,
     creation_changed: Rc<Cell<bool>>,
 }
@@ -51,6 +52,12 @@ impl EditorHost {
     /// blocks this editor only holds a reference to.
     pub fn block_types(&self) -> Rc<BlockCatalog> {
         Rc::clone(&self.block_types.borrow())
+    }
+
+    /// Whether the block this instance was opened on may be edited. An
+    /// instance filling in a new block always may.
+    pub fn editable(&self) -> bool {
+        self.editable.get()
     }
 
     /// The block being dragged over the region currently drawing, if any.
@@ -90,6 +97,11 @@ impl EditorHost {
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
     pub(crate) fn set_block_types(&self, catalog: Rc<BlockCatalog>) {
         *self.block_types.borrow_mut() = catalog;
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+    pub(crate) fn set_editable(&self, editable: bool) {
+        self.editable.set(editable);
     }
 
     #[cfg(any(target_arch = "wasm32", target_os = "windows"))]

@@ -17,6 +17,7 @@ What connect's EditorHost offers, for anything the plugin cannot do itself:
 
 - open_block(id, block_type) — opens another block in a tab of its own.
 - block_types() — the host's registered block types, for naming and illustrating a block this editor only holds a reference to. Pass it to block_ui::BlockLabel (re-exported as block_editor_plugin::block_ui) so labels match the rest of the app, including how an automatic name is italicized.
+- editable() — whether the block this instance was opened on may be edited, so an editor does not write back what it worked out (an image's decoded size) on behalf of a reader.
 - drag() — the block the app is dragging over the region being drawn, in that region's own coordinates, and whether it has been let go. Draw the drop feedback yourself and answer accept_drag(bool), which decides the cursor the host shows.
 - pick_file(filter) — the host's own file picker, the only one that works on desktop, Android and the browser alike. block_editor_plugin::FilePicker wraps it the way the app's own picker works: open(&host, filter), is_open(), and poll(&host) until it answers.
 - set_creation_ready(bool) — whether a creation dialog has been filled in, which is what lets the user accept it (see below).
