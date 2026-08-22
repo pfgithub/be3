@@ -19,6 +19,7 @@ members = [
     "crates/editors/counter",
     "crates/editors/hotbar",
     "crates/editors/image_block",
+    "crates/editors/pdf",
     "crates/editors/workspace_index",
     "crates/block-editor-plugin",
     "crates/block-plugin-api",

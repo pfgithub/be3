@@ -12,7 +12,6 @@ pub(crate) mod infinite_canvas;
 mod logic_game;
 mod logic_grid;
 mod map;
-mod pdf;
 mod pixel_art;
 mod pixel_ray_tracer;
 pub(crate) mod plugin;
@@ -1247,7 +1246,6 @@ impl EditorRegistry {
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
-        registry.register_configurable::<pdf::PdfEditor>();
         registry.register_creatable::<pixel_art::PixelArtEditor>();
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<presentation::PresentationEditor>();

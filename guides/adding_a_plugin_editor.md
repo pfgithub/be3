@@ -52,6 +52,8 @@ block_type is the uuid of a block type block-client declares — a plugin cannot
 
 creation is Immediate for a block a user can make from the new-block menu (the host makes it from the block type's default, so the type needs : Default in blocks.rs), Dialog for one the editor has to ask about first, or None for one only another block ever produces. The optional fields default to the plainest answer: children says which of the host's structural edits the block type accepts, important puts it in the main section of the add-block picker, interaction says whether an embedded instance is live or only previewed until it is focused, capabilities carries rotation, aspect ratio and pan-and-zoom, and resize says how an embedded instance may be resized.
 
+capabilities.pan_and_zoom means the editor pans and zooms itself: the host gives it the whole tab viewport and every input event landing in it, rather than transforming the region on the editor's behalf, which would only stretch the surface the plugin renders into. Such an editor keeps its own zoom and offset, redraws its content at the resolution it is being shown at, and offers whatever "fit" control it wants (the PDF editor puts one in its toolbar). Input arrives as ordinary egui events, so a wheel turned with the zoom modifier held and a pinch gesture both read back as ctx.input(|input| input.zoom_delta()).
+
 A manifest is untrusted input, so a bad one is skipped and reported in the Plugins debug window rather than crashing the app.
 
 The host discovers plugins in plugins/<plugin id>/ beside its executable and in a per-user plugins directory, from plugins/index.json on the web, and from the same layout mirrored into assets on Android. Registration is not gated by platform: a plugin host exists for wasm and Windows, and platforms without one (plugin_host/unavailable.rs) still create and open the block, drawing an error in place of the plugin's surface.
@@ -60,10 +62,16 @@ The host discovers plugins in plugins/<plugin id>/ beside its executable and in 
 
 If the editor needs something the host has and the plugin does not, add it to crates/block-plugin-api (a Message or EditorMessage variant, plus validate coverage and a round-trip test), accept it in the plugin's ClientSession state machine, route it in crates/block-app/src/plugin_host (instances.rs, and the web adapter's receive_all for anything the plugin sends back), and surface it on EditorHost or App. Bump PROTOCOL_VERSION and describe the new rule in crates/block-plugin-api/PROTOCOL.md. Anything the host and a plugin both draw — labels, shared painting helpers — belongs in crates/block-ui, which both depend on.
 
-5. Build scripts
+5. Work that does not finish in one frame
 
-Nothing to edit: build-block-web.sh, run-block-app.sh and build-block-android.sh all scan crates/editors/*/manifest.json, and ./scripts/build-plugin.sh --plugin foo --target ... stages plugins/<plugin id>/ off the package name.
+A plugin runtime draws when the host sends it something or when the frame it last drew asked to be drawn again, so a repaint requested from a worker thread does not wake it on its own. An editor doing work off the frame — the PDF editor renders its pages on a thread of its own — polls instead: while a job is outstanding it calls ui.ctx().request_repaint_after(...) with an interval matched to the work, and stops asking once the result is in, so an idle editor costs nothing.
 
-6. Verification
+A dependency that only exists on some targets belongs behind a [target.'cfg(...)'.dependencies] table with a stand-in module for the rest, the way the PDF editor keeps PDFium out of its wasm build. A native library the plugin loads at runtime is looked for beside the plugin's own executable and, since a plugin lives in plugins/<plugin id>/, in the directories above it where the app's copy sits.
+
+6. Build scripts
+
+Nothing to edit: build-block-web.sh, run-block-app.sh and build-block-android.sh all scan crates/editors/*/manifest.json, and ./scripts/build-plugin.sh --plugin foo --target ... stages plugins/<plugin id>/ off the package name. Repeat --runtime-dependency PATH for a shared library the plugin needs beside it.
+
+7. Verification
 
 Run ./scripts/verify.sh, then ./scripts/build-block-web.sh, since the real plugin host only compiles for wasm/Windows and verify.sh builds the placeholder host instead. Windows can't be compiled from this VM, so manifest/entry-point mistakes there only surface in CI.

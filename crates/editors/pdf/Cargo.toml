@@ -1,0 +1,23 @@
+[package]
+name = "pdf"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "pdf-host"
+path = "src/main.rs"
+
+[dependencies]
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
+uuid = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+
+[lints]
+workspace = true

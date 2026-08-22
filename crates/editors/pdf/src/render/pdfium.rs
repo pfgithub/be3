@@ -1,36 +1,26 @@
-use std::sync::{
-    mpsc::{self, Receiver},
-    OnceLock,
-};
+use std::sync::{mpsc, OnceLock};
 use std::thread;
 
-use eframe::egui::{self, Pos2, Rect};
+use block_editor_plugin::egui::{self, Pos2, Rect};
 use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfRenderConfig, Pdfium};
 
-use super::{RenderJobResult, RenderTarget, RenderedTile, DETAIL_MAX_DIM, MIN_SCALE};
+use super::{RenderJob, RenderJobResult, RenderTarget, RenderedTile, DETAIL_MAX_DIM, MIN_SCALE};
 
 const BASE_MAX_DIM: f32 = 1600.0;
 const MAX_PAGE_DIM: f32 = 100_000.0;
 
-pub(super) fn spawn_render_job(
-    context: &egui::Context,
-    data: Vec<u8>,
-    page: usize,
-    target: RenderTarget,
-) -> Receiver<RenderJobResult> {
+pub(crate) fn spawn_render_job(data: Vec<u8>, page: usize, target: RenderTarget) -> RenderJob {
     let (sender, receiver) = mpsc::channel();
-    let repaint = context.clone();
     thread::Builder::new()
         .name("pdf-render".into())
         .spawn(move || {
             let _ = sender.send(render_tile(&data, page, target));
-            repaint.request_repaint();
         })
         .expect("failed to start pdf render job");
     receiver
 }
 
-fn render_tile(data: &[u8], page: usize, target: RenderTarget) -> Result<RenderedTile, String> {
+fn render_tile(data: &[u8], page: usize, target: RenderTarget) -> RenderJobResult {
     let pdfium = pdfium_instance().map_err(str::to_owned)?;
     let document = pdfium
         .load_pdf_from_byte_slice(data, None)
@@ -63,9 +53,6 @@ fn render_tile(data: &[u8], page: usize, target: RenderTarget) -> Result<Rendere
     };
     let scale = requested_scale.clamp(MIN_SCALE, MAX_PAGE_DIM / page_size_pts.max_elem());
 
-    // Pdfium draws the whole page into the destination bitmap at the size given
-    // here, so this is the page's size in pixels, not the tile's; the origin
-    // then shifts the page so only the wanted slice lands on the bitmap.
     let page_width = ((page_size_pts.x * scale).round() as i32).max(1);
     let page_height = ((page_size_pts.y * scale).round() as i32).max(1);
     let origin_px = egui::vec2(
@@ -105,14 +92,22 @@ fn pdfium_instance() -> Result<&'static Pdfium, &'static str> {
 }
 
 fn load_pdfium() -> Result<Pdfium, String> {
-    let bindings = bind_next_to_executable()
+    let bindings = bind_around_executable()
         .map_or_else(Pdfium::bind_to_system_library, Ok)
         .map_err(|error| format!("Could not load the PDFium library: {error}"))?;
     Ok(Pdfium::new(bindings))
 }
 
-fn bind_next_to_executable() -> Option<Box<dyn pdfium_render::prelude::PdfiumLibraryBindings>> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(dir)).ok()
+fn bind_around_executable() -> Option<Box<dyn pdfium_render::prelude::PdfiumLibraryBindings>> {
+    let executable = std::env::current_exe().ok()?;
+    let mut directory = executable.parent();
+    for _ in 0..3 {
+        let current = directory?;
+        let name = Pdfium::pdfium_platform_library_name_at_path(current);
+        if let Ok(bindings) = Pdfium::bind_to_library(name) {
+            return Some(bindings);
+        }
+        directory = current.parent();
+    }
+    None
 }

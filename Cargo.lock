@@ -872,7 +872,6 @@ dependencies = [
  "libghostty-vt",
  "logicgame",
  "ndk-context",
- "pdfium-render",
  "portable-pty",
  "rfd",
  "rodio",
@@ -6087,6 +6086,16 @@ checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest 0.10.7",
  "hmac",
+]
+
+[[package]]
+name = "pdf"
+version = "0.1.0"
+dependencies = [
+ "block-client",
+ "block-editor-plugin",
+ "pdfium-render",
+ "uuid",
 ]
 
 [[package]]

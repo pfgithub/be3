@@ -96,6 +96,8 @@ repeat `--runtime-dependency PATH` for each non-system shared library or DLL. Wi
 lookup. macOS signs the plugin and then the complete bundle when both
 `--sign-identity` and `--app-executable` are supplied.
 
+The PDF editor renders through PDFium, a shared library the app is distributed with; `./scripts/fetch-pdfium.sh` puts a copy beside the app's executable, where the plugin finds it from `plugins/be3.pdf/`. Stage it with `--runtime-dependency` to place it in the plugin's own directory instead.
+
 Script failures distinguish a missing Rust target artifact, nonexistent runtime
 dependency, unsupported desktop target, and unavailable macOS signing tool.
 After launch, Plugin Demo separately reports the resolved-path launch failure,
