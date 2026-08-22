@@ -42,8 +42,7 @@ use block_client::references;
 
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    embedded_editor_ui, name_galley, paint_name,
-    plugin::image::{create_image_block, image_filter, imported_image},
+    create_image_block, embedded_editor_ui, image_filter, imported_image, name_galley, paint_name,
     BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
     DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
     EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,

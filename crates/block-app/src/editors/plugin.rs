@@ -6,15 +6,11 @@ use block_plugin_api::{
 use eframe::egui;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc, OnceLock,
+    Arc,
 };
 use uuid::Uuid;
 
-pub(super) mod checklist;
-pub(super) mod counter;
-pub(super) mod hotbar;
-pub(super) mod image;
-pub(super) mod workspace_index;
+pub(crate) mod discovery;
 
 use super::{
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
@@ -38,18 +34,6 @@ pub(super) fn block_type_descriptors(
                 .unwrap_or_default(),
         })
         .collect()
-}
-
-pub(super) fn cached_manifest(
-    cache: &'static OnceLock<Arc<PluginManifest>>,
-    document: &str,
-) -> Arc<PluginManifest> {
-    Arc::clone(cache.get_or_init(|| {
-        Arc::new(
-            block_plugin_api::manifest_from_json(document)
-                .unwrap_or_else(|error| panic!("invalid built-in plugin manifest: {error}")),
-        )
-    }))
 }
 
 static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);

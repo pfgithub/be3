@@ -9,7 +9,7 @@ use wasm_bindgen::prelude::*;
 const plugins = new Map();
 
 export async function web_plugin_start(url, canvasId) {
-    const module = await import(url);
+    const module = await import(new URL(url, document.baseURI).href);
     await module.default();
     await module.start(canvasId);
     plugins.set(canvasId, module);

@@ -46,6 +46,7 @@ if [[ "${OS:-}" == "Windows_NT" ]]; then
     zipalign+='.exe'
     apksigner+='.bat'
 fi
+assets="$repository/android/app/src/main/assets"
 keystore="$repository/target/android-debug.keystore"
 apk="$repository/target/debug/apk/block-app.apk"
 aligned_apk="$repository/target/debug/apk/block-app-aligned.apk"
@@ -82,6 +83,39 @@ export AR_aarch64_linux_android="$toolchain/llvm-ar"
 cargo build -p block-app --lib --target aarch64-linux-android
 cargo build -p counter --lib --target aarch64-linux-android
 cargo build -p checklist --lib --target aarch64-linux-android
+
+manifest_field() {
+    sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -1
+}
+
+# There is no plugin runtime on Android, but the app still discovers plugins
+# so their blocks can be created, listed and opened. Mirror the same
+# plugins/<plugin id>/manifest.json layout into the app's assets.
+rm -rf "$assets/plugins"
+mkdir -p "$assets/plugins"
+plugin_ids=()
+for manifest in "$repository"/crates/editors/*/manifest.json; do
+    [[ -f "$manifest" ]] || continue
+    plugin_id="$(manifest_field "$manifest" id)"
+    if [[ -z "$plugin_id" ]]; then
+        echo "$manifest has no plugin id" >&2
+        exit 1
+    fi
+    mkdir -p "$assets/plugins/$plugin_id"
+    cp "$manifest" "$assets/plugins/$plugin_id/manifest.json"
+    plugin_ids+=("$plugin_id")
+done
+{
+    echo '['
+    for index in "${!plugin_ids[@]}"; do
+        separator=','
+        if [[ $index -eq $((${#plugin_ids[@]} - 1)) ]]; then
+            separator=''
+        fi
+        echo "  \"${plugin_ids[$index]}\"$separator"
+    done
+    echo ']'
+} > "$assets/plugins/index.json"
 
 mkdir -p "$native_libraries" "$(dirname "$apk")"
 cp "$repository/target/aarch64-linux-android/debug/libblock_app_lib.so" "$native_libraries/"

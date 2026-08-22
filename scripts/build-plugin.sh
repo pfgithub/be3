@@ -61,6 +61,16 @@ if ! command -v cargo >/dev/null; then
 fi
 
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+manifest="$repository/crates/editors/$plugin/manifest.json"
+if [[ ! -f "$manifest" ]]; then
+    echo "No manifest at $manifest" >&2
+    exit 1
+fi
+plugin_id="$(sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -1)"
+if [[ -z "$plugin_id" ]]; then
+    echo "$manifest has no plugin id" >&2
+    exit 1
+fi
 if [[ -z "$output_directory" ]]; then
     output_directory="$repository/target/plugins/$plugin/$target/$profile"
 fi
@@ -82,17 +92,16 @@ if [[ ! -f "$source_executable" ]]; then
     exit 1
 fi
 
+# A plugin ships as a directory beside the app's executable, holding its
+# manifest and the artifacts its entry points name.
 case "$target" in
     *-apple-darwin)
-        destination_directory="$output_directory/Block.app/Contents/MacOS"
-        app_directory="$destination_directory"
+        app_directory="$output_directory/Block.app/Contents/MacOS"
         ;;
     *-windows-*)
-        destination_directory="$output_directory/$plugin"
         app_directory="$output_directory"
         ;;
     *-linux-*)
-        destination_directory="$output_directory/libexec/be3"
         app_directory="$output_directory/bin"
         ;;
     *)
@@ -100,9 +109,11 @@ case "$target" in
         exit 1
         ;;
 esac
+destination_directory="$app_directory/plugins/$plugin_id"
 
 mkdir -p "$destination_directory"
-cp "$source_executable" "$destination_directory/$plugin$extension"
+cp "$manifest" "$destination_directory/manifest.json"
+cp "$source_executable" "$destination_directory/$plugin-host$extension"
 if [[ -n "$app_executable" ]]; then
     if [[ ! -f "$app_executable" ]]; then
         echo "Application executable does not exist: $app_executable" >&2
@@ -124,7 +135,7 @@ if [[ "$target" == *-apple-darwin && -n "$sign_identity" ]]; then
         echo 'codesign was not found; macOS signing requires Xcode command-line tools' >&2
         exit 1
     fi
-    codesign --force --options runtime --sign "$sign_identity" "$destination_directory/$plugin"
+    codesign --force --options runtime --sign "$sign_identity" "$destination_directory/$plugin-host"
     if [[ -n "$app_executable" ]]; then
         codesign --force --options runtime --sign "$sign_identity" "$output_directory/Block.app"
     fi

@@ -19,7 +19,7 @@
     "Preview"
   ],
   "entry_points": {
-    "web": "/image_block.js",
+    "web": "image_block.js",
     "windows": "image_block-host.exe"
   },
   "surfaces": [

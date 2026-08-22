@@ -13,7 +13,7 @@
     "RightSidebar"
   ],
   "entry_points": {
-    "web": "/counter.js",
+    "web": "counter.js",
     "windows": "counter-host.exe"
   },
   "surfaces": [

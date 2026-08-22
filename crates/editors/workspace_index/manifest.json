@@ -19,7 +19,7 @@
     "Toolbar"
   ],
   "entry_points": {
-    "web": "/workspace_index.js",
+    "web": "workspace_index.js",
     "windows": "workspace_index-host.exe"
   },
   "surfaces": [

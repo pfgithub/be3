@@ -127,6 +127,8 @@ pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
         .ok_or_else(|| wasm_bindgen::JsValue::from_str(&format!("no element id {canvas_id}")))?
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
 
+    editors::plugin::discovery::load().await;
+
     eframe::WebRunner::new()
         .start(
             canvas,
@@ -146,6 +148,7 @@ pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    editors::plugin::discovery::load(&app);
     let storage_root = app.internal_data_path();
     let mut options = native_options();
     options.android_app = Some(app);

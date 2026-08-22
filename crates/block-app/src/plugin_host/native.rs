@@ -433,7 +433,6 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
 }
 
 fn plugin_path(plugin: &PluginManifest) -> PathBuf {
-    let mut path = std::env::current_exe().unwrap_or_default();
-    path.set_file_name(plugin.entry_points.windows.as_deref().unwrap_or_default());
-    path
+    let entry = plugin.entry_points.windows.as_deref().unwrap_or_default();
+    crate::editors::plugin::discovery::entry_point(&plugin.identity.id, entry).unwrap_or_default()
 }

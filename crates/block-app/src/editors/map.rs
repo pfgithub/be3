@@ -40,8 +40,7 @@ use self::tiles::{TileId, TileWorker, SOURCE_MAX_ZOOM};
 
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    plugin::image::create_image_block,
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
+    create_image_block, BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
 };
 use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};

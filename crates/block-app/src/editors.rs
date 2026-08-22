@@ -15,7 +15,7 @@ mod map;
 mod pdf;
 mod pixel_art;
 mod pixel_ray_tracer;
-mod plugin;
+pub(crate) mod plugin;
 mod presentation;
 mod scene_3d;
 pub(crate) mod settings;
@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use block::{Block, BlockAccess, BlockParent, BlockReference};
 use block_client::{
-    blocks::{self, workspace_index::BlockEntry},
+    blocks::{self, image::Image, workspace_index::BlockEntry},
     BlockClient, BlockHandle, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
 };
 use block_plugin_api::PluginManifest;
@@ -43,6 +43,7 @@ use egui_material_icons::{icons::ICON_LOCK, MaterialIcon};
 use uuid::Uuid;
 
 use self::unsupported::UnsupportedEditor;
+use crate::platform::{FileFilter, PickedFile};
 
 const COMPACT_DIRECT_EDITOR_WIDTH: f32 = 760.0;
 const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
@@ -1151,6 +1152,30 @@ impl<E: ConfigurableEditor> PendingCreation for EditorCreation<E> {
     }
 }
 
+pub(super) fn image_filter() -> FileFilter {
+    FileFilter::new("Images", "Image", Image::FILE_EXTENSIONS, Image::MIME_TYPES)
+}
+
+pub(super) fn imported_image(file: PickedFile) -> Image {
+    let PickedFile { name, data } = file;
+    Image::new(name, data)
+}
+
+pub(super) fn create_image_block(
+    editors: &mut EditorAccess<'_>,
+    image: Image,
+    parent: Uuid,
+) -> Uuid {
+    let block = editors.client().create_block(image);
+    let id = block.id();
+    block.set_parent(BlockParent::Uuid(parent));
+    let editor = editors
+        .registry()
+        .open(editors.client(), id, Image::TYPE_ID);
+    editors.insert(editor);
+    id
+}
+
 /// Starting to create a block either produces the editor outright or the
 /// dialog that has to be filled in first.
 pub(super) enum BlockCreation {
@@ -1219,10 +1244,6 @@ impl EditorRegistry {
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
-        registry.register_plugin(plugin::checklist::manifest());
-        registry.register_plugin(plugin::counter::manifest());
-        registry.register_plugin(plugin::hotbar::manifest());
-        registry.register_plugin(plugin::image::manifest());
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
@@ -1238,7 +1259,9 @@ impl EditorRegistry {
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<video::VideoEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
-        registry.register_plugin(plugin::workspace_index::manifest());
+        for manifest in plugin::discovery::manifests() {
+            registry.register_plugin(manifest);
+        }
         registry.plugin_block_types =
             Arc::new(plugin::block_type_descriptors(registry.block_types()));
         registry
@@ -1305,9 +1328,7 @@ impl EditorRegistry {
     }
 
     /// Registers a block editor that runs as a plugin, out of process or in a
-    /// worker, from the manifest it ships with. The block type it names is
-    /// reached through `block-client`'s erased table, so the host never needs
-    /// the block's Rust type.
+    /// worker, from the manifest it ships with.
     fn register_plugin(&mut self, manifest: Arc<PluginManifest>) {
         let block_type = Uuid::from_bytes(manifest.block_type);
         let display_name: &'static str = Box::leak(manifest.display_name.clone().into_boxed_str());

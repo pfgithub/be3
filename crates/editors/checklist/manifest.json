@@ -13,7 +13,7 @@
     "RightSidebar"
   ],
   "entry_points": {
-    "web": "/checklist.js",
+    "web": "checklist.js",
     "windows": "checklist-host.exe"
   },
   "surfaces": [

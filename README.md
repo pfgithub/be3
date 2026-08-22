@@ -86,11 +86,13 @@ application executable with it:
 ```
 
 The plugin packages live in `crates/editors`; run the script once per plugin.
-The default output is `target/plugins/<plugin>/<target>/<profile>`. Linux
-stages `bin` and `libexec/be3`, Windows uses a private directory named after
-the plugin beside the app, and macOS creates `Block.app/Contents/MacOS`. Use `--output DIRECTORY`
-to select another package root and repeat `--runtime-dependency PATH` for each
-non-system shared library or DLL. Windows launches without inherited `PATH`
+The default output is `target/plugins/<plugin>/<target>/<profile>`. A plugin
+ships as `plugins/<plugin id>/` beside the app's executable, holding its
+`manifest.json` and the artifacts its entry points name: Linux stages `bin`,
+Windows the package root itself, and macOS `Block.app/Contents/MacOS`. The app
+discovers whatever it finds there, plus a per-user plugins directory beside its
+application data. Use `--output DIRECTORY` to select another package root and
+repeat `--runtime-dependency PATH` for each non-system shared library or DLL. Windows launches without inherited `PATH`
 lookup. macOS signs the plugin and then the complete bundle when both
 `--sign-identity` and `--app-executable` are supplied.
 

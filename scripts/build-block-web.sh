@@ -2,8 +2,6 @@
 
 set -euo pipefail
 
-# The editor plugin packages the web build serves alongside the app.
-plugins=(checklist counter hotbar image_block workspace_index)
 wasi_sysroot=''
 release=false
 while [[ $# -gt 0 ]]; do
@@ -35,6 +33,23 @@ assert_command clang 'Install LLVM and put its bin directory on PATH.'
 assert_command llvm-ar 'Install LLVM and put its bin directory on PATH.'
 
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The editor plugins the web build serves alongside the app: every package
+# under crates/editors that ships a manifest.
+manifest_field() {
+    sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -1
+}
+
+plugins=()
+for manifest in "$repository"/crates/editors/*/manifest.json; do
+    [[ -f "$manifest" ]] || continue
+    plugins+=("$(basename "$(dirname "$manifest")")")
+done
+if [[ ${#plugins[@]} -eq 0 ]]; then
+    echo 'No plugin manifests were found under crates/editors' >&2
+    exit 1
+fi
+
 tools_directory="$repository/target/tools"
 output_directory="$repository/target/web"
 wasi_sdk_version='33'
@@ -98,8 +113,18 @@ linker_search_path="$wasi_sysroot/lib/wasm32-wasip1/noeh"
 setjmp_library="$wasi_sysroot/lib/wasm32-wasip1/libsetjmp.a"
 export RUSTFLAGS="-C link-arg=-L$linker_search_path -C link-arg=$setjmp_library"
 
-mkdir -p "$output_directory"
+plugins_directory="$output_directory/plugins"
+rm -rf "$plugins_directory"
+mkdir -p "$plugins_directory"
+plugin_ids=()
 for plugin in "${plugins[@]}"; do
+    manifest="$repository/crates/editors/$plugin/manifest.json"
+    plugin_id="$(manifest_field "$manifest" id)"
+    if [[ -z "$plugin_id" ]]; then
+        echo "$manifest has no plugin id" >&2
+        exit 1
+    fi
+
     echo "Building $plugin for wasm32-wasip1..."
     cargo build -p "$plugin" --target wasm32-wasip1 "${profile_arguments[@]}"
     plugin_wasm="$repository/target/wasm32-wasip1/$profile_directory/$plugin.wasm"
@@ -109,8 +134,26 @@ for plugin in "${plugins[@]}"; do
     fi
 
     echo "Generating JavaScript bindings for $plugin..."
-    "$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$plugin_wasm"
+    plugin_directory="$plugins_directory/$plugin_id"
+    mkdir -p "$plugin_directory"
+    "$wasm_bindgen" --target web --no-typescript --out-dir "$plugin_directory" "$plugin_wasm"
+    cp "$manifest" "$plugin_directory/manifest.json"
+    plugin_ids+=("$plugin_id")
 done
+
+# The browser cannot list a directory, so the app is served an index of the
+# plugin directories to read the manifests out of.
+{
+    echo '['
+    for index in "${!plugin_ids[@]}"; do
+        separator=','
+        if [[ $index -eq $((${#plugin_ids[@]} - 1)) ]]; then
+            separator=''
+        fi
+        echo "  \"${plugin_ids[$index]}\"$separator"
+    done
+    echo ']'
+} > "$plugins_directory/index.json"
 
 echo 'Building block-app for wasm32-wasip1...'
 cargo build -p block-app --lib --target wasm32-wasip1 "${profile_arguments[@]}"

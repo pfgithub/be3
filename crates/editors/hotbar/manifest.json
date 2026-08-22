@@ -10,7 +10,7 @@
     "Main"
   ],
   "entry_points": {
-    "web": "/hotbar.js",
+    "web": "hotbar.js",
     "windows": "hotbar-host.exe"
   },
   "surfaces": [

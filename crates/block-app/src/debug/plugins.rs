@@ -21,6 +21,23 @@ pub(crate) fn show(ctx: &egui::Context) {
         .default_size([420.0, 320.0])
         .resizable(true)
         .show(ctx, |ui| {
+            let discovered = crate::editors::plugin::discovery::plugins();
+            ui.strong("Discovered");
+            if discovered.manifests().is_empty() {
+                ui.weak("    no plugins were found");
+            }
+            for manifest in discovered.manifests() {
+                ui.small(format!(
+                    "    {} {} — {}",
+                    manifest.identity.id,
+                    manifest.identity.version,
+                    uuid::Uuid::from_bytes(manifest.block_type)
+                ));
+            }
+            for error in discovered.errors() {
+                ui.colored_label(egui::Color32::RED, format!("    {error}"));
+            }
+            ui.separator();
             let running = crate::plugin_host::running();
             if running.is_empty() {
                 ui.weak("No editor plugins are running.");
