@@ -53,12 +53,16 @@ pub(super) fn block_type_descriptors(
         .collect()
 }
 
-/// Builds a package's manifest once and hands out shared references to it.
 pub(super) fn cached_manifest(
     cache: &'static OnceLock<Arc<PluginManifest>>,
-    build: impl FnOnce() -> PluginManifest,
+    document: &str,
 ) -> Arc<PluginManifest> {
-    Arc::clone(cache.get_or_init(|| Arc::new(build())))
+    Arc::clone(cache.get_or_init(|| {
+        Arc::new(
+            block_plugin_api::manifest_from_json(document)
+                .unwrap_or_else(|error| panic!("invalid built-in plugin manifest: {error}")),
+        )
+    }))
 }
 
 static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);

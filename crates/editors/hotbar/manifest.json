@@ -1,0 +1,20 @@
+{
+  "id": "be3.hotbar",
+  "name": "Hotbar",
+  "version": "0.1.0",
+  "block_type": "6c6f6769-632d-686f-7462-617201010101",
+  "display_name": "Hotbar",
+  "icon": "\ue1bd",
+  "creation": "None",
+  "regions": [
+    "Main"
+  ],
+  "entry_points": {
+    "web": "/hotbar.js",
+    "windows": "hotbar-host.exe"
+  },
+  "surfaces": [
+    "WebExternalImage",
+    "WindowsDxgi"
+  ]
+}

@@ -63,8 +63,15 @@ pub mod __private {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn hello(id: &str, name: &str, version: &str) -> Result<Vec<u8>, wasm_bindgen::JsValue> {
-        crate::web::hello(id, name, version)
+    pub fn hello(manifest: &str) -> Result<Vec<u8>, wasm_bindgen::JsValue> {
+        let identity = identity(manifest);
+        crate::web::hello(&identity.id, &identity.name, &identity.version)
+    }
+
+    pub fn identity(manifest: &str) -> block_plugin_api::PluginIdentity {
+        block_plugin_api::ManifestDocument::parse(manifest)
+            .unwrap_or_else(|error| panic!("this plugin's manifest is invalid: {error}"))
+            .identity()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -88,14 +95,17 @@ pub mod __private {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn run<A: crate::App>(id: &str, name: &str, version: &str) {
-        crate::runner::run::<A>(id, name, version);
+    pub fn run<A: crate::App>(manifest: &str) {
+        let identity = identity(manifest);
+        crate::runner::run::<A>(&identity.id, &identity.name, &identity.version);
     }
 }
 
 #[macro_export]
 macro_rules! plugin {
-    ($app:ty, $id:expr, $name:expr) => {
+    ($app:ty, $manifest:expr) => {
+        const PLUGIN_MANIFEST: &str = include_str!($manifest);
+
         #[cfg(target_arch = "wasm32")]
         use block_editor_plugin::__private::{js_sys, wasm_bindgen, wasm_bindgen_futures};
 
@@ -110,7 +120,7 @@ macro_rules! plugin {
         #[cfg(target_arch = "wasm32")]
         #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
         pub fn hello() -> Result<Vec<u8>, block_editor_plugin::__private::wasm_bindgen::JsValue> {
-            block_editor_plugin::__private::hello($id, $name, env!("CARGO_PKG_VERSION"))
+            block_editor_plugin::__private::hello(PLUGIN_MANIFEST)
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -150,7 +160,7 @@ macro_rules! plugin {
 
         #[cfg(not(target_arch = "wasm32"))]
         pub fn run() {
-            block_editor_plugin::__private::run::<$app>($id, $name, env!("CARGO_PKG_VERSION"));
+            block_editor_plugin::__private::run::<$app>(PLUGIN_MANIFEST);
         }
     };
 }

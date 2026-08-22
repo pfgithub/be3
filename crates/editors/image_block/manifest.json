@@ -1,0 +1,29 @@
+{
+  "id": "be3.image",
+  "name": "Image",
+  "version": "0.1.0",
+  "block_type": "696d6167-652d-626c-6f63-6b2d74797001",
+  "display_name": "Image",
+  "icon": "\ue3f4",
+  "creation": "Dialog",
+  "interaction": "Preview",
+  "capabilities": {
+    "rotation": false,
+    "preserve_aspect_ratio": true,
+    "pan_and_zoom": false
+  },
+  "resize": "None",
+  "regions": [
+    "Main",
+    "RightSidebar",
+    "Preview"
+  ],
+  "entry_points": {
+    "web": "/image_block.js",
+    "windows": "image_block-host.exe"
+  },
+  "surfaces": [
+    "WebExternalImage",
+    "WindowsDxgi"
+  ]
+}

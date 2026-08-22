@@ -7,6 +7,7 @@ mod attachment;
 pub mod desktop_attachments;
 mod linux_surface;
 mod macos_surface;
+mod manifest;
 mod session;
 mod windows_surface;
 pub use attachment::{
@@ -20,6 +21,7 @@ pub use linux_surface::{
 pub use macos_surface::{
     MacOsSurfaceDescriptor, MacOsSurfaceError, MacOsSurfaceLifecycle, MacOsSurfaceState,
 };
+pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
@@ -213,20 +215,43 @@ impl EditorRegion {
     ];
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntryPoints {
+    #[serde(default)]
     pub web: Option<String>,
+    #[serde(default)]
     pub windows: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ManifestError {
+    Malformed(String),
     Empty(&'static str),
     TooLong(&'static str),
     InvalidIdentity,
+    InvalidBlockType,
     InvalidRegions,
     MissingEntryPoint,
     MissingSurface,
+}
+
+impl fmt::Display for ManifestError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Malformed(error) => write!(formatter, "the manifest could not be read: {error}"),
+            Self::Empty(field) => write!(formatter, "{field} is empty"),
+            Self::TooLong(field) => write!(formatter, "{field} is too long"),
+            Self::InvalidIdentity => formatter.write_str("the plugin id is not a plain identifier"),
+            Self::InvalidBlockType => formatter.write_str("the block type is not a uuid"),
+            Self::InvalidRegions => {
+                formatter.write_str("the regions must include the main one exactly once")
+            }
+            Self::MissingEntryPoint => formatter.write_str("no entry point is given"),
+            Self::MissingSurface => {
+                formatter.write_str("an entry point has no surface mechanism to present with")
+            }
+        }
+    }
 }
 
 impl PluginManifest {

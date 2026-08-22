@@ -1,9 +1,5 @@
-use block::Block;
 use block_client::{blocks::workspace_index::WorkspaceIndex, BlockClient, BlockHandle};
-use block_plugin_api::{
-    ChildOperations, CreationMode, EditorCapabilities, EditorRegion, EntryPoints, InteractionMode,
-    PluginIdentity, PluginManifest, ResizeMode, SurfaceMechanism,
-};
+use block_plugin_api::PluginManifest;
 use egui_material_icons::{icons::ICON_FOLDER, MaterialIcon};
 use std::sync::{Arc, OnceLock};
 
@@ -22,34 +18,9 @@ impl PluginPackage for WorkspaceIndexPlugin {
 
     fn manifest() -> Arc<PluginManifest> {
         static MANIFEST: OnceLock<Arc<PluginManifest>> = OnceLock::new();
-        super::cached_manifest(&MANIFEST, || PluginManifest {
-            identity: PluginIdentity {
-                id: "be3.workspace-index".into(),
-                name: "Folder".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-            },
-            block_type: WorkspaceIndex::TYPE_ID.into_bytes(),
-            display_name: "Folder".into(),
-            icon: "folder".into(),
-            creation: CreationMode::Immediate,
-            children: ChildOperations {
-                add: true,
-                delete: true,
-                replace: true,
-            },
-            important: true,
-            interaction: InteractionMode::Preview,
-            capabilities: EditorCapabilities::default(),
-            resize: ResizeMode::None,
-            regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
-            entry_points: EntryPoints {
-                web: Some("/workspace_index.js".into()),
-                windows: Some("workspace_index-host.exe".into()),
-            },
-            surfaces: vec![
-                SurfaceMechanism::WebExternalImage,
-                SurfaceMechanism::WindowsDxgi,
-            ],
-        })
+        super::cached_manifest(
+            &MANIFEST,
+            include_str!("../../../../editors/workspace_index/manifest.json"),
+        )
     }
 }

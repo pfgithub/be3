@@ -992,6 +992,8 @@ dependencies = [
  "bincode",
  "libc",
  "serde",
+ "serde_json",
+ "uuid",
  "windows-sys 0.59.0",
 ]
 
