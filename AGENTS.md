@@ -17,6 +17,7 @@ UI style:
 Code style:
 - Prefer a.rs over a/mod.rs.
 - Do not add any comments to the code. Do not add doc-comments either. You may remove existing comments & doc comments.
+- Do not edit README.md
 
 Tests:
 - Keep test files seperate from code files.
