@@ -852,6 +852,7 @@ name = "block-app"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "ash",
  "block 0.1.0",
  "block-client",
  "block-plugin-api",

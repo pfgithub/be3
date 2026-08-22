@@ -14,10 +14,12 @@
   ],
   "entry_points": {
     "web": "checklist.js",
-    "windows": "checklist-host.exe"
+    "windows": "checklist-host.exe",
+    "linux": "checklist-host"
   },
   "surfaces": [
     "WebExternalImage",
-    "WindowsDxgi"
+    "WindowsDxgi",
+    "LinuxDmaBuf"
   ]
 }

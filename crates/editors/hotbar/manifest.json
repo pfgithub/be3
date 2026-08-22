@@ -11,10 +11,12 @@
   ],
   "entry_points": {
     "web": "hotbar.js",
-    "windows": "hotbar-host.exe"
+    "windows": "hotbar-host.exe",
+    "linux": "hotbar-host"
   },
   "surfaces": [
     "WebExternalImage",
-    "WindowsDxgi"
+    "WindowsDxgi",
+    "LinuxDmaBuf"
   ]
 }

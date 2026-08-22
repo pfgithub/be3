@@ -47,8 +47,8 @@ manifest.json is the plugin's single source of truth: the plugin reads its own i
   "icon": "\ue3f4",
   "creation": "Immediate",
   "regions": ["Main", "Toolbar"],
-  "entry_points": { "web": "foo.js", "windows": "foo-host.exe" },
-  "surfaces": ["WebExternalImage", "WindowsDxgi"]
+  "entry_points": { "web": "foo.js", "windows": "foo-host.exe", "linux": "foo-host" },
+  "surfaces": ["WebExternalImage", "WindowsDxgi", "LinuxDmaBuf"]
 }
 ```
 
@@ -62,7 +62,7 @@ capabilities.pan_and_zoom means the editor pans and zooms itself: the host gives
 
 A manifest is untrusted input, so a bad one is skipped and reported in the Plugins debug window rather than crashing the app.
 
-The host discovers plugins in plugins/<plugin id>/ beside its executable and in a per-user plugins directory, from plugins/index.json on the web, and from the same layout mirrored into assets on Android. Registration is not gated by platform: a plugin host exists for wasm and Windows, and platforms without one (plugin_host/unavailable.rs) still open the block, drawing an error in place of the plugin's surface. Creating one there fails with that error instead, since only the plugin makes its blocks.
+The host discovers plugins in plugins/<plugin id>/ beside its executable and in a per-user plugins directory, from plugins/index.json on the web, and from the same layout mirrored into assets on Android. Registration is not gated by platform: a plugin host exists for wasm, Windows and Linux, and platforms without one (plugin_host/unavailable.rs) still open the block, drawing an error in place of the plugin's surface. Creating one there fails with that error instead, since only the plugin makes its blocks.
 
 4. Extending the protocol
 
@@ -80,4 +80,6 @@ Nothing to edit: ./scripts/build scans crates/editors/*/manifest.json for every 
 
 7. Verification
 
-Run ./scripts/verify, then ./scripts/build --target web, since the real plugin host only compiles for wasm/Windows and verify builds the placeholder host instead. Windows can't be compiled from this VM, so manifest/entry-point mistakes there only surface in CI.
+Run ./scripts/verify, which builds the Linux host and plugin runtime, then ./scripts/build --target web for the wasm side of the same plugin. Windows can't be compiled from this VM, so mistakes in its half only surface in CI.
+
+Each desktop host shares the pixels the plugin drew rather than copying them: Windows hands over a D3D12 texture and a fence, and Linux exports the plugin's Vulkan image as a dma-buf the host imports into a texture of its own (plugin_host/linux.rs and the plugin's linux_surface.rs). Both sides therefore have to be on the same GPU, which the surface descriptor carries the identity of, and the Linux image is linear and unmodified so that either driver lays its rows out the same way. wgpu enables no extension for sharing a fence, so the Linux plugin waits for its own submission to retire before it publishes a frame, and the value it publishes only tells the host which frame it is.

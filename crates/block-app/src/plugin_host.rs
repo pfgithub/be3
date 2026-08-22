@@ -5,30 +5,32 @@ use block_plugin_api::{BlockTypeDescriptor, EditorInstanceId, EditorRegion, Plug
 use eframe::egui;
 use uuid::Uuid;
 
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod input;
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod instances;
-#[cfg(target_os = "windows")]
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 mod native;
-#[cfg(any(target_arch = "wasm32", target_os = "windows"))]
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod presenter;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 mod process;
-#[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
 mod unavailable;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) use native::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
     editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
     take_artifact_outcome, take_created,
 };
-#[cfg(not(any(target_arch = "wasm32", target_os = "windows")))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
 pub(crate) use unavailable::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
     editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
@@ -66,7 +68,7 @@ pub(crate) struct PreviewSlot<'a> {
 }
 
 #[cfg_attr(
-    not(any(target_arch = "wasm32", target_os = "windows")),
+    not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")),
     allow(dead_code)
 )]
 pub(crate) fn preview_size(size: egui::Vec2, scale_factor: f32) -> egui::Vec2 {
@@ -138,7 +140,7 @@ pub(crate) struct ArtifactSlot<'a> {
 }
 
 #[cfg_attr(
-    not(any(target_arch = "wasm32", target_os = "windows")),
+    not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")),
     allow(dead_code)
 )]
 pub(crate) enum ArtifactState {

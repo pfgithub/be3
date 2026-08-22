@@ -21,10 +21,12 @@
   ],
   "entry_points": {
     "web": "pdf.js",
-    "windows": "pdf-host.exe"
+    "windows": "pdf-host.exe",
+    "linux": "pdf-host"
   },
   "surfaces": [
     "WebExternalImage",
-    "WindowsDxgi"
+    "WindowsDxgi",
+    "LinuxDmaBuf"
   ]
 }

@@ -289,6 +289,8 @@ where
     }
 }
 
+#[cfg(target_os = "linux")]
+pub(super) use super::linux::LinuxSurfacePresenter as WebSurfacePresenter;
 #[cfg(target_arch = "wasm32")]
 pub(super) use super::web::renderer::WebSurfacePresenter;
 #[cfg(target_os = "windows")]

@@ -7,6 +7,12 @@ use block_plugin_api::{
 use eframe::egui;
 use uuid::Uuid;
 
+#[cfg(target_os = "linux")]
+use super::linux::{install as install_presenter, LinuxFrame as PlatformFrame, RENDERER_REQUIRED};
+#[cfg(target_os = "windows")]
+use super::windows::{
+    install as install_presenter, WindowsFrame as PlatformFrame, RENDERER_REQUIRED,
+};
 use super::{
     instances::{Instances, NextScreens},
     presenter::{
@@ -14,7 +20,6 @@ use super::{
     },
     preview_size,
     process::{Process, SurfaceEvent},
-    windows::WindowsFrame,
     ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, EditorSlot,
     InstanceRole, PreviewSlot,
 };
@@ -25,7 +30,7 @@ thread_local! {
 
 pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     HOST.with(|host| {
-        host.borrow_mut().presenter_available = super::windows::install(creation_context);
+        host.borrow_mut().presenter_available = install_presenter(creation_context);
     });
 }
 
@@ -42,10 +47,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if !host.presenter_available {
-            ui.colored_label(
-                egui::Color32::RED,
-                "Windows plugins require the D3D12 renderer.",
-            );
+            ui.colored_label(egui::Color32::RED, RENDERER_REQUIRED);
             return None;
         }
         let Some(surface) = host.surface_for(&plugin.identity.id, ui.ctx()) else {
@@ -68,7 +70,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             PresenterState::Failed(error) | PresenterState::Unsupported(error) => {
                 ui.colored_label(
                     egui::Color32::RED,
-                    format!("Windows plugin presentation failed: {error}"),
+                    format!("plugin presentation failed: {error}"),
                 );
             }
             PresenterState::Waiting | PresenterState::Presenting | PresenterState::Released => {}
@@ -124,7 +126,7 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if !host.presenter_available {
-            return CreationState::Failed("Windows plugins require the D3D12 renderer.".to_owned());
+            return CreationState::Failed(RENDERER_REQUIRED.to_owned());
         }
         let Some(surface) = host.surface_for(&plugin.identity.id, context) else {
             return CreationState::Failed(
@@ -164,7 +166,7 @@ pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> Artif
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if !host.presenter_available {
-            return ArtifactState::Failed("Windows plugins require the D3D12 renderer.".to_owned());
+            return ArtifactState::Failed(RENDERER_REQUIRED.to_owned());
         }
         let Some(surface) = host.surface_for(&plugin.identity.id, context) else {
             return ArtifactState::Failed(
@@ -304,7 +306,7 @@ fn present(runtime: &mut Runtime, rect: egui::Rect, region: Region) -> egui::epa
     let frame = runtime
         .pending_frame
         .take()
-        .unwrap_or(WindowsFrame::Events(Vec::new()));
+        .unwrap_or(PlatformFrame::Events(Vec::new()));
     eframe::egui_wgpu::Callback::new_paint_callback(
         rect,
         PresenterCallback {
@@ -462,7 +464,7 @@ impl Host {
         ctx.debug_painter()
             .add(eframe::egui_wgpu::Callback::new_paint_callback(
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
-                PresenterCallback::<WindowsFrame> {
+                PresenterCallback::<PlatformFrame> {
                     command: PresenterCommand::Release,
                     status: runtime.status.clone(),
                     region: Region {
@@ -479,7 +481,7 @@ struct Runtime {
     surface: u32,
     status: PresenterStatus,
     process: Option<Process>,
-    pending_frame: Option<WindowsFrame>,
+    pending_frame: Option<PlatformFrame>,
     instances: Instances,
     layout: ScreenLayout,
     pending_layouts: Vec<ScreenLayout>,
@@ -548,7 +550,7 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
             .retain(|layout| layout.generation > runtime.layout.generation);
     }
     if !frames.is_empty() {
-        runtime.pending_frame = Some(WindowsFrame::Events(frames));
+        runtime.pending_frame = Some(PlatformFrame::Events(frames));
     }
     let messages = process.client_messages();
     let editor_messages = process.editor_messages();
@@ -563,6 +565,9 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
 }
 
 fn plugin_path(plugin: &PluginManifest) -> PathBuf {
+    #[cfg(target_os = "windows")]
     let entry = plugin.entry_points.windows.as_deref().unwrap_or_default();
+    #[cfg(target_os = "linux")]
+    let entry = plugin.entry_points.linux.as_deref().unwrap_or_default();
     crate::editors::plugin::discovery::entry_point(&plugin.identity.id, entry).unwrap_or_default()
 }

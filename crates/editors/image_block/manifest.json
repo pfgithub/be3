@@ -20,10 +20,12 @@
   ],
   "entry_points": {
     "web": "image_block.js",
-    "windows": "image_block-host.exe"
+    "windows": "image_block-host.exe",
+    "linux": "image_block-host"
   },
   "surfaces": [
     "WebExternalImage",
-    "WindowsDxgi"
+    "WindowsDxgi",
+    "LinuxDmaBuf"
   ]
 }

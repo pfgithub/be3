@@ -13,6 +13,8 @@ use windows::Win32::{
     Graphics::Direct3D12::{ID3D12Fence, ID3D12Resource},
 };
 
+pub(super) const RENDERER_REQUIRED: &str = "Windows plugins require the D3D12 renderer.";
+
 pub(super) enum WindowsFrame {
     Events(Vec<SurfaceEvent>),
 }

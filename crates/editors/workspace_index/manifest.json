@@ -20,10 +20,12 @@
   ],
   "entry_points": {
     "web": "workspace_index.js",
-    "windows": "workspace_index-host.exe"
+    "windows": "workspace_index-host.exe",
+    "linux": "workspace_index-host"
   },
   "surfaces": [
     "WebExternalImage",
-    "WindowsDxgi"
+    "WindowsDxgi",
+    "LinuxDmaBuf"
   ]
 }

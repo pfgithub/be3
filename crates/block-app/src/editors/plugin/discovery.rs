@@ -118,7 +118,7 @@ pub(crate) fn manifests() -> Vec<Arc<PluginManifest>> {
 }
 
 #[cfg_attr(
-    not(any(target_arch = "wasm32", target_os = "windows")),
+    not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")),
     allow(dead_code)
 )]
 pub(crate) fn entry_point(plugin_id: &str, entry: &str) -> Option<Location> {

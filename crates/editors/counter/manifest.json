@@ -14,10 +14,12 @@
   ],
   "entry_points": {
     "web": "counter.js",
-    "windows": "counter-host.exe"
+    "windows": "counter-host.exe",
+    "linux": "counter-host"
   },
   "surfaces": [
     "WebExternalImage",
-    "WindowsDxgi"
+    "WindowsDxgi",
+    "LinuxDmaBuf"
   ]
 }

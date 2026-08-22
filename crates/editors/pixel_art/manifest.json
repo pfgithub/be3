@@ -23,10 +23,12 @@
   ],
   "entry_points": {
     "web": "pixel_art.js",
-    "windows": "pixel_art-host.exe"
+    "windows": "pixel_art-host.exe",
+    "linux": "pixel_art-host"
   },
   "surfaces": [
     "WebExternalImage",
-    "WindowsDxgi"
+    "WindowsDxgi",
+    "LinuxDmaBuf"
   ]
 }

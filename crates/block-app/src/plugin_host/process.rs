@@ -11,51 +11,37 @@ use std::{
 use std::io::{BufRead, Read, Write};
 
 #[cfg(target_os = "windows")]
-use std::os::windows::io::OwnedHandle;
+pub(super) type Attachment = std::os::windows::io::OwnedHandle;
+#[cfg(target_os = "linux")]
+pub(super) type Attachment = std::os::fd::OwnedFd;
 
-#[cfg(target_os = "windows")]
 pub(super) enum SurfaceEvent {
-    Surface(block_plugin_api::SurfaceDescriptor, Vec<OwnedHandle>),
+    Surface(block_plugin_api::SurfaceDescriptor, Vec<Attachment>),
     Frame(block_plugin_api::FrameReady),
 }
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-
-#[cfg(target_os = "windows")]
 const BUSY_POLL: Duration = Duration::from_millis(1);
-#[cfg(target_os = "windows")]
 const IDLE_POLL: Duration = Duration::from_millis(32);
 
 pub(super) struct Process {
     shutdown: Sender<()>,
-    #[cfg(target_os = "windows")]
     messages: Sender<Message>,
-    #[cfg(target_os = "windows")]
     surfaces: Receiver<SurfaceEvent>,
-    #[cfg(target_os = "windows")]
     layouts: Receiver<block_plugin_api::ScreenLayout>,
-    #[cfg(target_os = "windows")]
     clients: Receiver<block_plugin_api::TunnelMessage>,
-    #[cfg(target_os = "windows")]
     editors: Receiver<block_plugin_api::EditorMessage>,
-    #[cfg(target_os = "windows")]
     sizes: Receiver<Vec<block_plugin_api::RegionSize>>,
 }
 
 impl Process {
     pub(super) fn launch(executable: PathBuf, repaint: eframe::egui::Context) -> Self {
         let (shutdown, shutdown_receiver) = mpsc::channel();
-        #[cfg(target_os = "windows")]
         let (messages, message_receiver) = mpsc::channel();
-        #[cfg(target_os = "windows")]
         let (surface_sender, surfaces) = mpsc::channel();
-        #[cfg(target_os = "windows")]
         let (layout_sender, layouts) = mpsc::channel();
-        #[cfg(target_os = "windows")]
         let (client_sender, clients) = mpsc::channel();
-        #[cfg(target_os = "windows")]
         let (editor_sender, editors) = mpsc::channel();
-        #[cfg(target_os = "windows")]
         let (size_sender, sizes) = mpsc::channel();
         thread::spawn(move || {
             let result = platform::Endpoint::create().and_then(|endpoint| {
@@ -97,7 +83,20 @@ impl Process {
                         &editor_sender,
                         &size_sender,
                     );
-                    #[cfg(not(target_os = "windows"))]
+                    #[cfg(target_os = "linux")]
+                    return drive_unix(
+                        stream,
+                        &mut child,
+                        &repaint,
+                        &shutdown_receiver,
+                        &message_receiver,
+                        &surface_sender,
+                        &layout_sender,
+                        &client_sender,
+                        &editor_sender,
+                        &size_sender,
+                    );
+                    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
                     drive(stream, &mut child, &shutdown_receiver)
                 });
                 terminate(&mut child);
@@ -109,17 +108,11 @@ impl Process {
         });
         Self {
             shutdown,
-            #[cfg(target_os = "windows")]
             messages,
-            #[cfg(target_os = "windows")]
             surfaces,
-            #[cfg(target_os = "windows")]
             layouts,
-            #[cfg(target_os = "windows")]
             clients,
-            #[cfg(target_os = "windows")]
             editors,
-            #[cfg(target_os = "windows")]
             sizes,
         }
     }
@@ -128,14 +121,12 @@ impl Process {
         self.shutdown.send(()).ok();
     }
 
-    #[cfg(target_os = "windows")]
     pub(super) fn send(&self, messages: Vec<Message>) {
         for message in messages {
             self.messages.send(message).ok();
         }
     }
 
-    #[cfg(target_os = "windows")]
     pub(super) fn latest_surface(&self) -> Vec<SurfaceEvent> {
         let mut latest = Vec::new();
         for event in self.surfaces.try_iter() {
@@ -155,22 +146,18 @@ impl Process {
         latest
     }
 
-    #[cfg(target_os = "windows")]
     pub(super) fn layouts(&self) -> Vec<block_plugin_api::ScreenLayout> {
         self.layouts.try_iter().collect()
     }
 
-    #[cfg(target_os = "windows")]
     pub(super) fn client_messages(&self) -> Vec<block_plugin_api::TunnelMessage> {
         self.clients.try_iter().collect()
     }
 
-    #[cfg(target_os = "windows")]
     pub(super) fn editor_messages(&self) -> Vec<block_plugin_api::EditorMessage> {
         self.editors.try_iter().collect()
     }
 
-    #[cfg(target_os = "windows")]
     pub(super) fn region_sizes(&self) -> Vec<block_plugin_api::RegionSize> {
         self.sizes.try_iter().flatten().collect()
     }
@@ -298,7 +285,141 @@ fn drive_windows(
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(target_os = "linux")]
+fn drive_unix(
+    stream: std::os::unix::net::UnixStream,
+    child: &mut Child,
+    repaint: &eframe::egui::Context,
+    shutdown: &Receiver<()>,
+    messages: &Receiver<Message>,
+    surfaces: &Sender<SurfaceEvent>,
+    layouts: &Sender<block_plugin_api::ScreenLayout>,
+    clients: &Sender<block_plugin_api::TunnelMessage>,
+    editors: &Sender<block_plugin_api::EditorMessage>,
+    sizes: &Sender<Vec<block_plugin_api::RegionSize>>,
+) -> io::Result<()> {
+    use block_plugin_api::desktop_attachments::UnixAttachmentCarrier;
+    use std::os::fd::AsRawFd;
+
+    let started = Instant::now();
+    let mut session = HostSession::new(
+        "BE3",
+        vec![
+            Capability::Lifecycle,
+            Capability::Input,
+            Capability::Surface(block_plugin_api::SurfaceMechanism::LinuxDmaBuf),
+        ],
+    );
+    session.start(0);
+    let mut stream = stream;
+    session.receive(read_message(&mut stream)?, elapsed(started));
+    flush(&mut stream, &mut session)?;
+    if !matches!(session.state(), SessionState::Running) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plugin handshake was rejected",
+        ));
+    }
+    let socket = stream.as_raw_fd();
+    let mut carrier = UnixAttachmentCarrier::new(stream);
+    let mut wait = BUSY_POLL;
+    loop {
+        if shutdown.try_recv().is_ok() {
+            carrier
+                .send(&Message::Shutdown, &[])
+                .map_err(carrier_error)?;
+            return wait_for_shutdown(child);
+        }
+        let mut outbound = Vec::new();
+        match messages.recv_timeout(wait) {
+            Ok(message) => outbound.push(message),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => thread::sleep(wait),
+        }
+        outbound.extend(messages.try_iter());
+        let sent = !outbound.is_empty();
+        coalesce_screens(&mut outbound);
+        for message in outbound {
+            if !matches!(
+                message,
+                Message::Input(_)
+                    | Message::Editor(block_plugin_api::EditorMessage::DragOver { .. })
+            ) {
+                eprintln!("plugin host sending {} to the plugin", name(&message));
+            }
+            carrier.send(&message, &[]).map_err(carrier_error)?;
+        }
+        let mut received = false;
+        while pending(socket)? {
+            received = true;
+            let (message, attachments) = carrier.receive().map_err(carrier_error)?;
+            match message {
+                Message::Surface(surface) => {
+                    eprintln!(
+                        "plugin host received dma-buf surface generation {} size={}x{} attachments={}",
+                        surface.generation,
+                        surface.width,
+                        surface.height,
+                        attachments.len()
+                    );
+                    surfaces
+                        .send(SurfaceEvent::Surface(surface, attachments))
+                        .ok();
+                }
+                Message::FrameReady(frame) => {
+                    surfaces.send(SurfaceEvent::Frame(frame)).ok();
+                }
+                Message::Layout(layout) => {
+                    layouts.send(layout).ok();
+                }
+                Message::ShutdownAcknowledged => return Ok(()),
+                Message::Client(message) => {
+                    clients.send(message).ok();
+                }
+                Message::Editor(message) => {
+                    editors.send(message).ok();
+                }
+                Message::RegionSizes(message) => {
+                    sizes.send(message).ok();
+                }
+                _ => {}
+            }
+        }
+        if received {
+            repaint.request_repaint();
+        }
+        if let Some(exit) = child.try_wait()? {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                format!("plugin exited unexpectedly: {exit}"),
+            ));
+        }
+        wait = if sent || received {
+            BUSY_POLL
+        } else {
+            (wait * 2).min(IDLE_POLL)
+        };
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn pending(socket: std::os::fd::RawFd) -> io::Result<bool> {
+    let mut descriptor = libc::pollfd {
+        fd: socket,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ready = unsafe { libc::poll(&raw mut descriptor, 1, 0) };
+    if ready < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::Interrupted {
+            return Ok(false);
+        }
+        return Err(error);
+    }
+    Ok(descriptor.revents & libc::POLLIN != 0)
+}
+
 fn coalesce_screens(messages: &mut Vec<Message>) {
     let Some(last) = messages
         .iter()
@@ -333,7 +454,6 @@ fn pending(pipe: windows_sys::Win32::Foundation::HANDLE) -> io::Result<bool> {
     Ok(available > 0)
 }
 
-#[cfg(target_os = "windows")]
 fn name(message: &Message) -> &'static str {
     match message {
         Message::Screens(_) => "Screens",
@@ -347,12 +467,10 @@ fn name(message: &Message) -> &'static str {
     }
 }
 
-#[cfg(target_os = "windows")]
 fn carrier_error(error: block_plugin_api::desktop_attachments::CarrierError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
 
-#[cfg(target_os = "windows")]
 fn wait_for_shutdown(child: &mut Child) -> io::Result<()> {
     let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
     while Instant::now() < deadline {
@@ -373,7 +491,7 @@ impl Drop for Process {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn drive<S: Read + Write>(
     mut stream: S,
     child: &mut Child,
