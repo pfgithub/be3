@@ -6,6 +6,8 @@
   "display_name": "Pixel Art",
   "icon": "",
   "creation": "Immediate",
+  "interaction": "Preview",
+  "resize": "None",
   "capabilities": {
     "rotation": false,
     "preserve_aspect_ratio": true,

@@ -12,8 +12,8 @@ use crate::{
 };
 
 pub const ZOOM_STEP: f32 = 1.25;
-const MIN_ZOOM: f32 = 0.1;
-const MAX_ZOOM: f32 = 64.0;
+const MIN_ZOOM: f32 = 0.25;
+const MAX_ZOOM: f32 = 32.0;
 
 /// Where the artwork sits in the region the editor is given: a multiple of the
 /// scale that fits it, and an offset from the centre.
