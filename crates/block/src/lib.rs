@@ -452,9 +452,7 @@ pub enum ErrorCode {
     InvalidSeq,
     NotWatching,
     ParentCycle,
-    ParentMissingReference,
     PermissionDenied,
-    ReferencedBlockNotFound,
     StorageError,
     UnsupportedMessage,
 }

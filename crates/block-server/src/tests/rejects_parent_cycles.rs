@@ -1,10 +1,9 @@
-use super::support;
 use super::support::{create, set_parent, TestServer};
 use block::{BlockParent, ErrorCode, ServerMessage};
 use uuid::Uuid;
 
 #[tokio::test]
-async fn rejects_missing_parent_references_and_parent_cycles() {
+async fn rejects_parent_cycles() {
     let server = TestServer::start().await;
     let mut socket = server.connect().await;
     let first = Uuid::new_v4();
@@ -16,18 +15,6 @@ async fn rejects_missing_parent_references_and_parent_cycles() {
     ));
     assert!(matches!(
         create(&mut socket, second, vec![first]).await,
-        ServerMessage::Ok { .. }
-    ));
-    assert!(matches!(
-        set_parent(&mut socket, second, BlockParent::Uuid(first)).await,
-        ServerMessage::Error {
-            code: ErrorCode::ParentMissingReference,
-            ..
-        }
-    ));
-
-    assert!(matches!(
-        support::update(&mut socket, first, vec![second], vec![]).await,
         ServerMessage::Ok { .. }
     ));
     assert!(matches!(

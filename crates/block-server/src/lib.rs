@@ -604,10 +604,10 @@ async fn handle_command(
             // A new block belongs to its author, but it may only point at blocks
             // the author is at least allowed to know about.
             let access = store.access(identity).await;
-            if references
-                .iter()
-                .any(|reference| *reference != id && !access.get(*reference).can_know_exists())
-            {
+            let existing = store.existing_blocks(workspace_id, &references).await;
+            if references.iter().any(|reference| {
+                existing.contains(reference) && !access.get(*reference).can_know_exists()
+            }) {
                 return (
                     permission_denied(request_id, CommandKind::CreateBlock, id),
                     None,
@@ -655,11 +655,11 @@ async fn handle_command(
             references,
         } => {
             let access = store.access(identity).await;
+            let existing = store.existing_blocks(workspace_id, &references.after).await;
             if !access.get(id).can_edit()
-                || references
-                    .after
-                    .iter()
-                    .any(|reference| !access.get(*reference).can_know_exists())
+                || references.after.iter().any(|reference| {
+                    existing.contains(reference) && !access.get(*reference).can_know_exists()
+                })
             {
                 return (
                     permission_denied(request_id, CommandKind::UpdateBlock, id),
@@ -744,13 +744,16 @@ async fn handle_command(
                 );
             }
             let access = store.access(identity).await;
+            let referenced: Vec<_> = updates
+                .iter()
+                .flat_map(|update| update.references.after.iter().copied())
+                .collect();
+            let existing = store.existing_blocks(workspace_id, &referenced).await;
             let denied = updates.iter().find(|update| {
                 !access.get(update.id).can_edit()
-                    || update
-                        .references
-                        .after
-                        .iter()
-                        .any(|reference| !access.get(*reference).can_know_exists())
+                    || update.references.after.iter().any(|reference| {
+                        existing.contains(reference) && !access.get(*reference).can_know_exists()
+                    })
             });
             if let Some(denied) = denied {
                 return (
@@ -931,7 +934,13 @@ async fn handle_command(
             let access = store.access(identity).await;
             let parent_allowed = match parent {
                 BlockParent::Orphaned | BlockParent::Root => true,
-                BlockParent::Uuid(parent) => access.get(parent).can_edit(),
+                BlockParent::Uuid(parent) => {
+                    !store
+                        .existing_blocks(workspace_id, &[parent])
+                        .await
+                        .contains(&parent)
+                        || access.get(parent).can_edit()
+                }
             };
             if !access.get(id).can_edit() || !parent_allowed {
                 return (
@@ -1866,13 +1875,13 @@ impl BlockStore {
         if workspace.blocks.contains_key(&id) {
             return Err(StoreError::BlockAlreadyExists);
         }
-        if references
-            .iter()
-            .any(|reference| *reference != id && !workspace.blocks.contains_key(reference))
-        {
-            return Err(StoreError::ReferencedBlockNotFound);
-        }
         let mut updated = workspace.clone();
+        let backrefs = updated
+            .blocks
+            .iter()
+            .filter(|(_, block)| block.references.contains(&id))
+            .map(|(&referrer, _)| referrer)
+            .collect();
         updated.blocks.insert(
             id,
             DependencyBlock {
@@ -1882,15 +1891,17 @@ impl BlockStore {
                 dynamic_artifact,
                 parent: BlockParent::Orphaned,
                 references,
-                backrefs: Vec::new(),
+                backrefs,
                 grants: HashMap::new(),
             },
         );
         let references = updated.blocks[&id].references.clone();
         for reference in references {
-            let backrefs = &mut updated.blocks.get_mut(&reference).unwrap().backrefs;
-            if !backrefs.contains(&id) {
-                backrefs.push(id);
+            let Some(block) = updated.blocks.get_mut(&reference) else {
+                continue;
+            };
+            if !block.backrefs.contains(&id) {
+                block.backrefs.push(id);
             }
         }
         let mut database = self.database.lock().await;
@@ -2104,6 +2115,17 @@ impl BlockStore {
         Ok(value)
     }
 
+    async fn existing_blocks(&self, workspace_id: Uuid, ids: &[Uuid]) -> HashSet<Uuid> {
+        let dependencies = self.dependencies.lock().await;
+        let Some(workspace) = dependencies.get(&workspace_id) else {
+            return HashSet::new();
+        };
+        ids.iter()
+            .copied()
+            .filter(|id| workspace.blocks.contains_key(id))
+            .collect()
+    }
+
     async fn references(
         &self,
         identity: Identity,
@@ -2172,7 +2194,10 @@ impl BlockStore {
                     references: block
                         .references
                         .iter()
-                        .filter(|reference| access.get(**reference).can_know_exists())
+                        .filter(|reference| {
+                            dependencies.blocks.contains_key(*reference)
+                                && access.get(**reference).can_know_exists()
+                        })
                         .count(),
                     dynamic_artifact: block.dynamic_artifact,
                     access: listed,
@@ -2350,13 +2375,6 @@ struct DependencyState {
 
 impl DependencyState {
     fn apply_references(&mut self, id: Uuid, delta: &ReferenceDelta) -> Result<(), StoreError> {
-        if delta
-            .after
-            .iter()
-            .any(|reference| !self.blocks.contains_key(reference))
-        {
-            return Err(StoreError::ReferencedBlockNotFound);
-        }
         if !self.blocks.contains_key(&id) {
             return Err(StoreError::BlockNotFound);
         }
@@ -2374,26 +2392,19 @@ impl DependencyState {
         let previous: HashSet<_> = previous.into_iter().collect();
         let current: HashSet<_> = references.iter().copied().collect();
         for removed in previous.difference(&current) {
-            self.blocks
-                .get_mut(removed)
-                .unwrap()
-                .backrefs
-                .retain(|backref| *backref != id);
+            if let Some(block) = self.blocks.get_mut(removed) {
+                block.backrefs.retain(|backref| *backref != id);
+            }
         }
         for added in current.difference(&previous) {
-            let backrefs = &mut self.blocks.get_mut(added).unwrap().backrefs;
-            if !backrefs.contains(&id) {
-                backrefs.push(id);
+            let Some(block) = self.blocks.get_mut(added) else {
+                continue;
+            };
+            if !block.backrefs.contains(&id) {
+                block.backrefs.push(id);
             }
         }
         self.blocks.get_mut(&id).unwrap().references = references;
-
-        let still_referenced: HashSet<_> = self.blocks[&id].references.iter().copied().collect();
-        for (&child_id, child) in &mut self.blocks {
-            if child.parent == BlockParent::Uuid(id) && !still_referenced.contains(&child_id) {
-                child.parent = BlockParent::Orphaned;
-            }
-        }
         Ok(())
     }
 
@@ -2405,13 +2416,6 @@ impl DependencyState {
             self.blocks.get_mut(&id).unwrap().parent = parent;
             return Ok(());
         };
-        let parent_block = self
-            .blocks
-            .get(&parent_id)
-            .ok_or(StoreError::ReferencedBlockNotFound)?;
-        if !parent_block.references.contains(&id) {
-            return Err(StoreError::ParentMissingReference);
-        }
         let mut ancestor = Some(parent_id);
         while let Some(current) = ancestor {
             if current == id {
@@ -2793,9 +2797,7 @@ fn initialize_database(connection: &mut Connection) -> Result<(), StoreError> {
             PRIMARY KEY (workspace_id, block_id, position),
             UNIQUE (workspace_id, block_id, reference_id),
             FOREIGN KEY (workspace_id, block_id)
-                REFERENCES blocks(workspace_id, id) ON DELETE CASCADE,
-            FOREIGN KEY (workspace_id, reference_id)
-                REFERENCES blocks(workspace_id, id)
+                REFERENCES blocks(workspace_id, id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS operations (
@@ -3150,12 +3152,9 @@ fn load_dependencies(
             })
             .collect();
         for (id, reference) in references {
-            state
-                .blocks
-                .get_mut(&reference)
-                .ok_or_else(|| StoreError::InvalidStorage("referenced block is missing".into()))?
-                .backrefs
-                .push(id);
+            if let Some(block) = state.blocks.get_mut(&reference) {
+                block.backrefs.push(id);
+            }
         }
     }
     Ok(states)
@@ -3304,8 +3303,6 @@ enum StoreError {
     InvalidMessage(String),
     InvalidSeq { expected: u64, actual: u64 },
     ParentCycle,
-    ParentMissingReference,
-    ReferencedBlockNotFound,
     CorruptOperationLog,
     InvalidStorage(String),
     Sqlite(rusqlite::Error),
@@ -3337,8 +3334,6 @@ impl StoreError {
             Self::InvalidMessage(_) => ErrorCode::InvalidMessage,
             Self::InvalidSeq { .. } => ErrorCode::InvalidSeq,
             Self::ParentCycle => ErrorCode::ParentCycle,
-            Self::ParentMissingReference => ErrorCode::ParentMissingReference,
-            Self::ReferencedBlockNotFound => ErrorCode::ReferencedBlockNotFound,
             Self::CorruptOperationLog
             | Self::InvalidStorage(_)
             | Self::Sqlite(_)
@@ -3367,10 +3362,6 @@ impl fmt::Display for StoreError {
                 write!(formatter, "invalid seq {actual}; expected {expected}")
             }
             Self::ParentCycle => write!(formatter, "parent assignment would create a cycle"),
-            Self::ParentMissingReference => {
-                write!(formatter, "parent does not reference the child block")
-            }
-            Self::ReferencedBlockNotFound => write!(formatter, "referenced block does not exist"),
             Self::CorruptOperationLog => write!(formatter, "operation log is not contiguous"),
             Self::InvalidStorage(message) => write!(formatter, "invalid storage data: {message}"),
             Self::Sqlite(error) => write!(formatter, "SQLite storage error: {error}"),

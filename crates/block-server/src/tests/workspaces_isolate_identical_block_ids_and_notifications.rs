@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::support::{create, create_workspace, references, request, TestServer};
-use block::{BlockReferenceList, ClientMessage, ErrorCode, ReferenceDelta, ServerMessage};
+use block::{BlockReferenceList, ClientMessage, ReferenceDelta, ServerMessage};
 use futures_util::StreamExt;
 use uuid::Uuid;
 
@@ -29,14 +29,22 @@ async fn workspaces_isolate_identical_block_ids_and_notifications() {
 
     let second_only = Uuid::new_v4();
     create(&mut second_socket, second_only, vec![]).await;
-    let response = create(&mut first_socket, Uuid::new_v4(), vec![second_only]).await;
+    let referrer = Uuid::new_v4();
     assert!(matches!(
-        response,
-        ServerMessage::Error {
-            code: ErrorCode::ReferencedBlockNotFound,
-            ..
-        }
+        create(&mut first_socket, referrer, vec![second_only]).await,
+        ServerMessage::Ok { .. }
     ));
+    assert!(
+        references(&mut first_socket, BlockReferenceList::References(referrer))
+            .await
+            .is_empty()
+    );
+    assert!(references(
+        &mut second_socket,
+        BlockReferenceList::Backrefs(second_only)
+    )
+    .await
+    .is_empty());
 
     let _ = request(
         &mut first_socket,
