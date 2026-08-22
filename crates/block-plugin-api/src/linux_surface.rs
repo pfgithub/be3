@@ -36,7 +36,6 @@ pub enum LinuxSurfaceError {
     WrongMechanism,
     InvalidDimensions,
     UnsupportedBackend,
-    DifferentDevice,
     UnsupportedFormat,
     UnsupportedColorSpace,
     UnsupportedAlphaMode,

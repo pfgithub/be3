@@ -3,7 +3,9 @@ use super::{
     process::SurfaceEvent,
 };
 use ash::vk;
-use block_plugin_api::{LinuxSurfaceDescriptor, LinuxSurfaceLifecycle, SurfaceDescriptor};
+use block_plugin_api::{
+    LinuxSurfaceDescriptor, LinuxSurfaceLifecycle, LinuxSurfacePlane, SurfaceDescriptor,
+};
 use eframe::egui_wgpu::wgpu;
 use std::{
     collections::HashMap,
@@ -147,7 +149,7 @@ impl LinuxSurfacePresenter {
         {
             return Err("the plugin surface is not a linear BGRA image".into());
         }
-        let texture = self.texture(device, surface, &descriptor, plane.stride, &planes[0])?;
+        let texture = self.texture(device, surface, &descriptor, plane, &planes[0])?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Linux plugin surface bind group"),
@@ -179,7 +181,7 @@ impl LinuxSurfacePresenter {
         device: &wgpu::Device,
         surface: &SurfaceDescriptor,
         descriptor: &LinuxSurfaceDescriptor,
-        stride: u32,
+        placement: &LinuxSurfacePlane,
         plane: &OwnedFd,
     ) -> Result<wgpu::Texture, String> {
         let size = wgpu::Extent3d {
@@ -226,7 +228,7 @@ impl LinuxSurfacePresenter {
             .push_next(&mut external);
         let image = unsafe { raw_device.create_image(&image_info, None) }
             .map_err(|error| format!("the plugin surface could not be imported: {error}"))?;
-        let bound = layout_matches(raw_device, image, stride)
+        let bound = layout_matches(raw_device, image, placement)
             .and_then(|()| bind(raw_device, raw_instance, physical_device, image, plane));
         let memory = match bound {
             Ok(memory) => memory,
@@ -281,16 +283,22 @@ fn device_id(raw_instance: &ash::Instance, physical_device: vk::PhysicalDevice) 
 /// The plugin's rows only land where this device expects them if both drivers
 /// lay a linear image of the same size out the same way, which is what an
 /// image shared without a format modifier rests on.
-fn layout_matches(raw_device: &ash::Device, image: vk::Image, stride: u32) -> Result<(), String> {
+fn layout_matches(
+    raw_device: &ash::Device,
+    image: vk::Image,
+    placement: &LinuxSurfacePlane,
+) -> Result<(), String> {
     let subresource = vk::ImageSubresource::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
         .mip_level(0)
         .array_layer(0);
     let layout = unsafe { raw_device.get_image_subresource_layout(image, subresource) };
-    if layout.row_pitch as u32 != stride {
+    if layout.row_pitch != u64::from(placement.stride)
+        || layout.offset != u64::from(placement.offset)
+    {
         return Err(format!(
-            "the plugin surface has {stride} bytes to a row where this device expects {}",
-            layout.row_pitch
+            "the plugin surface starts at {} with {} bytes to a row, where this device expects {} and {}",
+            placement.offset, placement.stride, layout.offset, layout.row_pitch
         ));
     }
     Ok(())
