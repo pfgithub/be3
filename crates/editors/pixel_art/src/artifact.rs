@@ -3,12 +3,10 @@ use block_client::{
     blocks::{image::Image, pixel_art::PixelArt},
     BlockClient, BlockHandle, DynamicArtifactDescriptor,
 };
-use eframe::egui;
+use block_editor_plugin::{egui, ArtifactDescription};
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use super::super::{DynamicArtifactRegeneration, DynamicArtifactSupport};
 
 const MAX_EXPORT_SCALE: u32 = 16;
 
@@ -43,14 +41,7 @@ impl ImageArtifact {
     }
 }
 
-pub(in crate::editors) const SUPPORT: DynamicArtifactSupport = DynamicArtifactSupport {
-    source: |data| ImageArtifact::decode(data).map(|artifact| artifact.source),
-    summary,
-    settings_ui,
-    regenerate,
-};
-
-pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
+pub fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
     DynamicArtifactDescriptor {
         source_type: PixelArt::TYPE_ID,
         data: ImageArtifact {
@@ -62,7 +53,7 @@ pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
 }
 
 /// The image a freshly exported artifact starts with.
-pub(super) fn generate_initial(art: &PixelArt, source_name: &str) -> Result<Image, String> {
+pub fn generate_initial(art: &PixelArt, source_name: &str) -> Result<Image, String> {
     generate(art, source_name, &ImageSettings::default())
 }
 
@@ -106,11 +97,16 @@ fn magnified(art: &PixelArt, scale: u32) -> Vec<u8> {
     magnified
 }
 
-fn summary(data: &[u8]) -> String {
-    let Ok(artifact) = ImageArtifact::decode(data) else {
-        return "PNG export".to_owned();
-    };
-    let scale = artifact.settings.scale.clamp(1, MAX_EXPORT_SCALE);
+pub fn describe(data: &[u8]) -> Result<ArtifactDescription, String> {
+    let artifact = ImageArtifact::decode(data)?;
+    Ok(ArtifactDescription {
+        source: artifact.source,
+        summary: summary(&artifact.settings),
+    })
+}
+
+fn summary(settings: &ImageSettings) -> String {
+    let scale = settings.scale.clamp(1, MAX_EXPORT_SCALE);
     if scale == 1 {
         "PNG export at the original size".to_owned()
     } else {
@@ -118,10 +114,10 @@ fn summary(data: &[u8]) -> String {
     }
 }
 
-fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) -> bool {
+pub fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) {
     let Ok(mut artifact) = ImageArtifact::decode(data) else {
         ui.label("These settings cannot be read.");
-        return false;
+        return;
     };
     let changed = ui
         .horizontal(|ui| {
@@ -134,39 +130,42 @@ fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) -> bool {
             .changed()
         })
         .inner;
+    ui.add_space(12.0);
+    ui.weak(summary(&artifact.settings));
     if changed {
         *data = artifact.encode();
     }
-    changed
 }
 
-fn regenerate(
-    client: &BlockClient,
-    target_id: Uuid,
-    target_type: Uuid,
-    data: &[u8],
-) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
-    if target_type != Image::TYPE_ID {
-        return Err(format!(
-            "pixel art export expected an Image target, found {target_type}"
-        ));
-    }
-    let artifact = ImageArtifact::decode(data)?;
-    Ok(Box::new(PixelArtRegeneration {
-        source: client.get_block::<PixelArt>(artifact.source),
-        target: client.get_block::<Image>(target_id),
-        settings: artifact.settings,
-    }))
-}
-
-struct PixelArtRegeneration {
+/// Rebuilding one exported image, which waits for both blocks to load before
+/// it can write anything.
+pub struct Regeneration {
     source: BlockHandle<PixelArt>,
     target: BlockHandle<Image>,
     settings: ImageSettings,
 }
 
-impl DynamicArtifactRegeneration for PixelArtRegeneration {
-    fn poll(&mut self) -> Option<Result<(), String>> {
+impl Regeneration {
+    pub fn start(
+        client: &BlockClient,
+        target_id: Uuid,
+        target_type: Uuid,
+        data: &[u8],
+    ) -> Result<Self, String> {
+        if target_type != Image::TYPE_ID {
+            return Err(format!(
+                "pixel art export expected an Image target, found {target_type}"
+            ));
+        }
+        let artifact = ImageArtifact::decode(data)?;
+        Ok(Self {
+            source: client.get_block::<PixelArt>(artifact.source),
+            target: client.get_block::<Image>(target_id),
+            settings: artifact.settings,
+        })
+    }
+
+    pub fn poll(&mut self) -> Option<Result<(), String>> {
         let source = self.source.read()?;
         self.target.read()?;
         let name = self.source.name().unwrap_or_else(|| "Pixel Art".to_owned());

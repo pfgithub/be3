@@ -1,0 +1,30 @@
+{
+  "id": "be3.pixel_art",
+  "name": "Pixel Art",
+  "version": "0.1.0",
+  "block_type": "70697865-6c2d-6172-742d-626c6f636b01",
+  "display_name": "Pixel Art",
+  "icon": "",
+  "creation": "Immediate",
+  "capabilities": {
+    "rotation": false,
+    "preserve_aspect_ratio": true,
+    "pan_and_zoom": true
+  },
+  "regions": [
+    "Main",
+    "Toolbar",
+    "LeftSidebar",
+    "RightSidebar",
+    "Preview",
+    "ArtifactSettings"
+  ],
+  "entry_points": {
+    "web": "pixel_art.js",
+    "windows": "pixel_art-host.exe"
+  },
+  "surfaces": [
+    "WebExternalImage",
+    "WindowsDxgi"
+  ]
+}

@@ -6251,6 +6251,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad78bf43dcf80e8f950c92b84f938a0fc7590b7f6866fbcbeca781609c115590"
 
 [[package]]
+name = "pixel_art"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "image",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
