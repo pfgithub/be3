@@ -42,6 +42,10 @@ impl BlockHandleAccess for UnsupportedEditor {
         })
     }
 
+    fn resolved(&self) -> bool {
+        true
+    }
+
     fn relationships(&self) -> Option<BlockRelationships> {
         None
     }
