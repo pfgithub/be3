@@ -32,9 +32,10 @@ use std::sync::Arc;
 
 use block::{Block, BlockAccess, BlockParent, BlockReference};
 use block_client::{
-    blocks::workspace_index::BlockEntry, BlockClient, BlockHandle, BlockHandleAccess,
-    BlockHistoryHandle, BlockRelationships,
+    blocks::{self, workspace_index::BlockEntry},
+    BlockClient, BlockHandle, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
 };
+use block_plugin_api::PluginManifest;
 pub(super) use block_ui::{name_galley, paint_name, BlockLabel};
 use block_ui::{BlockTypeEntry, BlockTypes};
 use eframe::egui;
@@ -1056,8 +1057,9 @@ impl Default for DirectEditorTabViewport {
     }
 }
 
-type CreateEditor = fn(&BlockClient) -> Box<dyn BlockEditor>;
-type OpenEditor = fn(&BlockClient, Uuid) -> Box<dyn BlockEditor>;
+type CreateEditor = Box<dyn Fn(&BlockClient) -> Box<dyn BlockEditor>>;
+type OpenEditor = Box<dyn Fn(&BlockClient, Uuid) -> Box<dyn BlockEditor>>;
+type CreateOptions = Box<dyn Fn() -> Box<dyn PendingCreation>>;
 type RegenerateDynamicArtifact =
     fn(&BlockClient, Uuid, Uuid, &[u8]) -> Result<Box<dyn DynamicArtifactRegeneration>, String>;
 
@@ -1160,7 +1162,7 @@ enum CreateBlock {
     /// Nothing to ask about: the block is created on the spot.
     Immediate(CreateEditor),
     /// Options are collected before the block exists.
-    Configured(fn() -> Box<dyn PendingCreation>),
+    Configured(CreateOptions),
 }
 
 struct EditorRegistration {
@@ -1183,7 +1185,9 @@ impl EditorRegistration {
             display_name: E::DISPLAY_NAME,
             icon: E::ICON,
             create: None,
-            open: |client, id| Box::new(E::open(client, client.get_block::<E::Block>(id))),
+            open: Box::new(|client, id| {
+                Box::new(E::open(client, client.get_block::<E::Block>(id)))
+            }),
             can_add_child: E::CAN_ADD_CHILD,
             can_delete_child: E::CAN_DELETE_CHILD,
             can_replace_child: E::CAN_REPLACE_CHILD,
@@ -1215,10 +1219,10 @@ impl EditorRegistry {
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register::<compiled_logic::CompiledLogicEditor>();
-        registry.register_plugin::<plugin::checklist::ChecklistPlugin>();
-        registry.register_plugin::<plugin::counter::CounterPlugin>();
-        registry.register_plugin::<plugin::hotbar::HotbarPlugin>();
-        registry.register_plugin::<plugin::image::ImagePlugin>();
+        registry.register_plugin(plugin::checklist::manifest());
+        registry.register_plugin(plugin::counter::manifest());
+        registry.register_plugin(plugin::hotbar::manifest());
+        registry.register_plugin(plugin::image::manifest());
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
@@ -1234,7 +1238,7 @@ impl EditorRegistry {
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<video::VideoEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
-        registry.register_plugin::<plugin::workspace_index::WorkspaceIndexPlugin>();
+        registry.register_plugin(plugin::workspace_index::manifest());
         registry.plugin_block_types =
             Arc::new(plugin::block_type_descriptors(registry.block_types()));
         registry
@@ -1272,17 +1276,19 @@ impl EditorRegistry {
 
     fn register_creatable<E: CreatableEditor>(&mut self) {
         let mut registration = EditorRegistration::of::<E>();
-        registration.create = Some(CreateBlock::Immediate(|client| Box::new(E::create(client))));
+        registration.create = Some(CreateBlock::Immediate(Box::new(|client| {
+            Box::new(E::create(client))
+        })));
         self.insert(registration);
     }
 
     fn register_configurable<E: ConfigurableEditor>(&mut self) {
         let mut registration = EditorRegistration::of::<E>();
-        registration.create = Some(CreateBlock::Configured(|| {
+        registration.create = Some(CreateBlock::Configured(Box::new(|| {
             Box::new(EditorCreation::<E> {
                 options: E::Options::default(),
             })
-        }));
+        })));
         self.insert(registration);
     }
 
@@ -1299,37 +1305,41 @@ impl EditorRegistry {
     }
 
     /// Registers a block editor that runs as a plugin, out of process or in a
-    /// worker, from the package's own manifest.
-    fn register_plugin<P: plugin::PluginPackage>(&mut self) {
-        let manifest = P::manifest();
-        if let Err(error) = manifest.validate() {
-            panic!(
-                "invalid built-in {} plugin manifest: {error:?}",
-                manifest.identity.name
-            );
-        }
+    /// worker, from the manifest it ships with. The block type it names is
+    /// reached through `block-client`'s erased table, so the host never needs
+    /// the block's Rust type.
+    fn register_plugin(&mut self, manifest: Arc<PluginManifest>) {
+        let block_type = Uuid::from_bytes(manifest.block_type);
         let display_name: &'static str = Box::leak(manifest.display_name.clone().into_boxed_str());
+        let icon = MaterialIcon::new(Box::leak(manifest.icon.clone().into_boxed_str()));
         self.insert(EditorRegistration {
-            block_type: <P::Block as Block>::TYPE_ID,
+            block_type,
             display_name,
-            icon: P::ICON,
+            icon,
             create: match manifest.creation {
                 block_plugin_api::CreationMode::Immediate => {
-                    Some(CreateBlock::Immediate(|client| {
-                        let block = P::new_block(client)
-                            .expect("a plugin that creates its block outright must make one");
-                        Box::new(plugin::PluginEditor::<P>::new(block))
-                    }))
+                    let manifest = Arc::clone(&manifest);
+                    Some(CreateBlock::Immediate(Box::new(move |client| {
+                        let block = blocks::create_default(client, block_type)
+                            .expect("a plugin block type the menu makes must have a default");
+                        Box::new(plugin::PluginEditor::new(Arc::clone(&manifest), block))
+                    })))
                 }
-                block_plugin_api::CreationMode::Dialog => Some(CreateBlock::Configured(|| {
-                    Box::new(plugin::PluginCreation::<P>::new())
-                })),
+                block_plugin_api::CreationMode::Dialog => {
+                    let manifest = Arc::clone(&manifest);
+                    Some(CreateBlock::Configured(Box::new(move || {
+                        Box::new(plugin::PluginCreation::new(Arc::clone(&manifest)))
+                    })))
+                }
                 block_plugin_api::CreationMode::None => None,
             },
-            open: |client, id| {
-                Box::new(plugin::PluginEditor::<P>::new(
-                    client.get_block::<P::Block>(id),
-                ))
+            open: {
+                let manifest = Arc::clone(&manifest);
+                Box::new(move |client, id| {
+                    let block = blocks::open(client, id, block_type)
+                        .expect("a registered plugin block type is in the erased table");
+                    Box::new(plugin::PluginEditor::new(Arc::clone(&manifest), block))
+                })
             },
             can_add_child: manifest.children.add,
             can_delete_child: manifest.children.delete,

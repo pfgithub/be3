@@ -1,15 +1,14 @@
-use block::Block;
-use block_client::{BlockClient, BlockHandle};
+use block_client::{blocks, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
     BlockTypeDescriptor, EditorInstanceId, EditorRegion, InteractionMode, PluginManifest,
     ResizeMode,
 };
 use eframe::egui;
-use egui_material_icons::MaterialIcon;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, OnceLock,
 };
+use uuid::Uuid;
 
 pub(super) mod checklist;
 pub(super) mod counter;
@@ -21,18 +20,6 @@ use super::{
     BlockEditor, BlockRenderContext, DirectEditorCapabilities, DirectEditorInteraction,
     DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction, PendingCreation,
 };
-
-/// A first-party editor package: the block type it edits, its manifest, and
-/// the app-side presentation the host keeps ownership of.
-pub(super) trait PluginPackage: 'static {
-    type Block: Block;
-
-    const ICON: MaterialIcon;
-
-    fn manifest() -> Arc<PluginManifest>;
-
-    fn new_block(client: &BlockClient) -> Option<BlockHandle<Self::Block>>;
-}
 
 /// The registered block types as a plugin sees them, built once for every
 /// runtime that has to name and illustrate blocks it only holds a reference
@@ -71,27 +58,25 @@ fn next_instance() -> EditorInstanceId {
     EditorInstanceId(NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed))
 }
 
-pub(super) struct PluginCreation<P: PluginPackage> {
+pub(super) struct PluginCreation {
     plugin: Arc<PluginManifest>,
     instance: EditorInstanceId,
     context: Option<egui::Context>,
     committed: bool,
-    package: std::marker::PhantomData<P>,
 }
 
-impl<P: PluginPackage> PluginCreation<P> {
-    pub(super) fn new() -> Self {
+impl PluginCreation {
+    pub(super) fn new(plugin: Arc<PluginManifest>) -> Self {
         Self {
-            plugin: P::manifest(),
+            plugin,
             instance: next_instance(),
             context: None,
             committed: false,
-            package: std::marker::PhantomData,
         }
     }
 }
 
-impl<P: PluginPackage> Drop for PluginCreation<P> {
+impl Drop for PluginCreation {
     fn drop(&mut self) {
         if let Some(context) = self.context.take() {
             crate::plugin_host::close(&context, &self.plugin.identity.id, self.instance);
@@ -99,7 +84,7 @@ impl<P: PluginPackage> Drop for PluginCreation<P> {
     }
 }
 
-impl<P: PluginPackage> PendingCreation for PluginCreation<P> {
+impl PendingCreation for PluginCreation {
     fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> bool {
         self.context = Some(ui.ctx().clone());
         let height = crate::plugin_host::region_size(
@@ -130,9 +115,15 @@ impl<P: PluginPackage> PendingCreation for PluginCreation<P> {
         }
         match crate::plugin_host::take_created(&self.plugin.identity.id, self.instance) {
             None => Ok(None),
-            Some(Ok(block_id)) => Ok(Some(Box::new(PluginEditor::<P>::new(
-                client.get_block::<P::Block>(block_id),
-            )))),
+            Some(Ok(block_id)) => {
+                let block_type = Uuid::from_bytes(self.plugin.block_type);
+                let block = blocks::open(client, block_id, block_type)
+                    .ok_or_else(|| format!("{block_type} is not a block type this app knows"))?;
+                Ok(Some(Box::new(PluginEditor::new(
+                    Arc::clone(&self.plugin),
+                    block,
+                ))))
+            }
             Some(Err(error)) => {
                 self.committed = false;
                 Err(format!(
@@ -146,17 +137,17 @@ impl<P: PluginPackage> PendingCreation for PluginCreation<P> {
 
 const CREATION_DIALOG_HEIGHT: f32 = 96.0;
 
-pub(super) struct PluginEditor<P: PluginPackage> {
+pub(super) struct PluginEditor {
     plugin: Arc<PluginManifest>,
-    block: BlockHandle<P::Block>,
+    block: Box<dyn BlockHandleAccess>,
     instance: EditorInstanceId,
     context: Option<egui::Context>,
 }
 
-impl<P: PluginPackage> PluginEditor<P> {
-    pub(super) fn new(block: BlockHandle<P::Block>) -> Self {
+impl PluginEditor {
+    pub(super) fn new(plugin: Arc<PluginManifest>, block: Box<dyn BlockHandleAccess>) -> Self {
         Self {
-            plugin: P::manifest(),
+            plugin,
             block,
             instance: next_instance(),
             context: None,
@@ -186,7 +177,7 @@ impl<P: PluginPackage> PluginEditor<P> {
                 client: editors.client_handle(),
                 block: Some(crate::plugin_host::EditorBlock {
                     id: self.block.id(),
-                    block_type: <P::Block as Block>::TYPE_ID,
+                    block_type: self.block.block_type(),
                 }),
                 instance: self.instance,
                 region,
@@ -203,15 +194,15 @@ impl<P: PluginPackage> PluginEditor<P> {
     }
 }
 
-impl<P: PluginPackage> Drop for PluginEditor<P> {
+impl Drop for PluginEditor {
     fn drop(&mut self) {
         self.close();
     }
 }
 
-impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+impl BlockEditor for PluginEditor {
+    fn block(&self) -> &dyn BlockHandleAccess {
+        self.block.as_ref()
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
@@ -226,7 +217,7 @@ impl<P: PluginPackage> BlockEditor for PluginEditor<P> {
                 block_types: editors.registry().plugin_block_types(),
                 client: editors.client_handle(),
                 block_id: self.block.id(),
-                block_type: <P::Block as Block>::TYPE_ID,
+                block_type: self.block.block_type(),
                 instance: self.instance,
                 corners: context.corners,
                 opacity: context.opacity,
