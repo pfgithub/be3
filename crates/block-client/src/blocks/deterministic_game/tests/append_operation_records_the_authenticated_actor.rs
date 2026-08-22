@@ -1,12 +1,12 @@
 use block::Block;
-use deterministic_games::GameAction;
+use game_api::GameAction;
 use uuid::Uuid;
 
-use super::{DeterministicGame, DeterministicGameKind, DeterministicGameOperation};
+use super::{DeterministicGame, DeterministicGameOperation};
 
 #[test]
 fn append_operation_records_the_authenticated_actor() {
-    let mut game = DeterministicGame::new(DeterministicGameKind::TicTacToe);
+    let mut game = DeterministicGame::new("tic_tac_toe".to_owned(), "Tic-Tac-Toe".to_owned());
     let actor = Uuid::new_v4();
 
     DeterministicGame::apply_authored_operation(

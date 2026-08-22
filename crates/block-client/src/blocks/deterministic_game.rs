@@ -1,37 +1,21 @@
 use block::{Block, NoHistory};
-use deterministic_games::GameAction;
+use game_api::GameAction;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Which game a `DeterministicGame` block plays. Fixed at creation and never
-/// changed afterward - there is no operation to reassign it, so the block
-/// always has a valid game to look up in `deterministic_games`.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeterministicGameKind {
-    #[default]
-    TicTacToe,
-    Crazy8s,
-    ConnectFour,
-}
-
-impl DeterministicGameKind {
-    pub fn display_name(self) -> &'static str {
-        match self {
-            DeterministicGameKind::TicTacToe => "Tic-Tac-Toe",
-            DeterministicGameKind::Crazy8s => "Crazy 8s",
-            DeterministicGameKind::ConnectFour => "Connect Four",
-        }
-    }
-}
-
 /// A deterministic game session: which game it is, and the append-only log
 /// of actions taken in it so far. The block itself has no notion of turns,
-/// legality, or win conditions - that lives entirely in the `deterministic_games`
-/// game implementation, which recomputes the current state from this log.
+/// legality, or win conditions - that lives entirely in the game's
+/// WebAssembly module, which recomputes the current state from this log.
+///
+/// `game` is the module the session is played with and `display_name` is
+/// what that module called itself when the session was created. Both are
+/// fixed at creation - there is no operation to reassign them - so a client
+/// that does not have the module can still name the block.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DeterministicGame {
-    game: DeterministicGameKind,
+    game: String,
+    display_name: String,
     actions: Vec<GameAction>,
 }
 
@@ -42,15 +26,20 @@ pub enum DeterministicGameOperation {
 }
 
 impl DeterministicGame {
-    pub fn new(game: DeterministicGameKind) -> Self {
+    pub fn new(game: String, display_name: String) -> Self {
         Self {
             game,
+            display_name,
             actions: Vec::new(),
         }
     }
 
-    pub fn game(&self) -> DeterministicGameKind {
-        self.game
+    pub fn game(&self) -> &str {
+        &self.game
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.display_name
     }
 
     pub fn actions(&self) -> &[GameAction] {
@@ -78,7 +67,10 @@ impl Block for DeterministicGame {
     }
 
     fn implicit_name(&self) -> Option<String> {
-        Some(self.game.display_name().to_owned())
+        if self.display_name.is_empty() {
+            return None;
+        }
+        Some(self.display_name.clone())
     }
 }
 

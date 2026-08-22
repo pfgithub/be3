@@ -54,6 +54,8 @@ if [[ "$profile" == 'release' ]]; then
     cargo_arguments+=(--release)
 fi
 
+build_games "$output_directory/games" "$profile"
+
 if [[ -z "$wasi_sysroot" ]]; then
     wasi_sysroot="$tools_directory/wasi-sysroot"
     if [[ ! -d "$wasi_sysroot/include" ]]; then

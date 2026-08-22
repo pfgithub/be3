@@ -6,7 +6,7 @@ mod compiled_logic;
 mod database;
 mod database_schema;
 mod database_view;
-mod deterministic_game;
+pub(crate) mod deterministic_game;
 mod gui_builder;
 pub(crate) mod infinite_canvas;
 mod logic_game;

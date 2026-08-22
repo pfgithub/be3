@@ -1,108 +1,124 @@
-use std::cell::Cell;
-
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use wasmi::{Config, Engine, Instance, Linker, Memory, Module, Store, TypedFunc};
 
-pub mod connect_four;
-pub mod crazy_8s;
-pub mod tic_tac_toe;
+pub use game_api::{GameAction, GameActionOption, GameRequest, GameScreen};
 
-/// One entry in a deterministic game's append-only action log. `actor` is
-/// always the operation's server-verified author, never something a client
-/// can claim for itself through `action`.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub struct GameAction {
-    pub actor: Uuid,
-    pub action: Vec<u8>,
+/// How much a single `show` call may execute before the interpreter stops
+/// it. A game replays its whole log on every call, so this is generous - it
+/// exists so a module that never returns cannot take the app's frame with
+/// it, not to budget honest games.
+const FUEL: u64 = 100_000_000;
+
+/// One game, as the WebAssembly module that plays it. The module is the
+/// whole game: the app knows nothing about turns, legality or win
+/// conditions, and asks the module what a player sees by replaying the
+/// action log into it. Every call runs in an instance of its own, so a game
+/// keeps no state between calls beyond the log it is given.
+pub struct Game {
+    engine: Engine,
+    module: Module,
+    name: String,
 }
 
-/// What a game currently looks like to one viewer: a description of the
-/// state, and the actions they may take from here (empty if it is not their
-/// turn, or the game has ended).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GameScreen {
-    pub description: String,
-    pub actions: Vec<GameActionOption>,
-}
+impl Game {
+    pub fn load(module: &[u8]) -> Result<Self, String> {
+        let mut config = Config::default();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config);
+        let module = Module::new(&engine, module)
+            .map_err(|error| format!("this is not a game module: {error}"))?;
+        let mut game = Self {
+            engine,
+            module,
+            name: String::new(),
+        };
+        game.name = game.ask_name()?;
+        Ok(game)
+    }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GameActionOption {
-    pub label: String,
-    pub effect: Vec<u8>,
-}
+    /// What the module calls itself, which is the only name the app has for
+    /// a game it discovered rather than shipped.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 
-/// A deterministic game's entire logic: given the full action log so far and
-/// which player is looking, what they should see. The log is the only state:
-/// implementations recompute everything from it on every call, typically by
-/// driving a `GameHelper` (see the `tic_tac_toe` module for an example).
-pub trait Game {
-    fn show(&self, actions: &[GameAction], player: Uuid) -> GameScreen;
-}
-
-/// Drives a game written as a single straight-line function over its action
-/// log. The function calls `action` wherever it is waiting on a player,
-/// passing a closure that offers each of that player's legal moves in turn
-/// by calling `choose(label)` for it: `choose` returns `true` and the caller
-/// mutates its own local game state right there, inline, if that move is the
-/// one the log records next for that actor; otherwise it returns `false` and
-/// nothing happens. A move is identified purely by its position among the
-/// `choose` calls reached for its actor - never by its label or any encoded
-/// value - so the log entry that records it, and the `effect` bytes handed
-/// back to a client offered it, are just that position as a single number.
-/// Once the log runs out, `action` returns the screen for the viewing player
-/// instead, which the game function propagates out with `?` - so the whole
-/// game is just its own control flow re-run from the top on every call to
-/// `Game::show`.
-pub struct GameHelper<'a> {
-    actions: &'a [GameAction],
-    cursor: Cell<usize>,
-    player: Uuid,
-}
-
-impl<'a> GameHelper<'a> {
-    pub fn new(actions: &'a [GameAction], player: Uuid) -> Self {
-        Self {
-            actions,
-            cursor: Cell::new(0),
+    pub fn show(&self, actions: &[GameAction], player: Uuid) -> Result<GameScreen, String> {
+        let request = bincode::serialize(&GameRequest {
+            actions: actions.to_vec(),
             player,
-        }
+        })
+        .map_err(|error| format!("the action log could not be encoded: {error}"))?;
+        let length = u32::try_from(request.len())
+            .map_err(|_| "the action log is too long for a game module".to_owned())?;
+
+        let (mut store, instance, memory) = self.instantiate()?;
+        let allocate: TypedFunc<u32, u32> = export(&store, &instance, "allocate")?;
+        let show: TypedFunc<(u32, u32), u64> = export(&store, &instance, "show")?;
+
+        let pointer = allocate
+            .call(&mut store, length)
+            .map_err(|error| format!("this game could not take the action log: {error}"))?;
+        memory
+            .write(&mut store, pointer as usize, &request)
+            .map_err(|error| format!("this game could not take the action log: {error}"))?;
+        let answer = show
+            .call(&mut store, (pointer, length))
+            .map_err(|error| format!("this game stopped: {error}"))?;
+
+        let screen = read(&store, &memory, answer)?;
+        bincode::deserialize(&screen)
+            .map_err(|error| format!("this game answered with nothing readable: {error}"))
     }
 
-    pub fn action(
-        &self,
-        describe: impl Fn(Uuid) -> String,
-        mut body: impl FnMut(Uuid, &mut dyn FnMut(&str) -> bool),
-    ) -> Result<(), GameScreen> {
-        while let Some(entry) = self.actions.get(self.cursor.get()) {
-            self.cursor.set(self.cursor.get() + 1);
-            let Ok(target) = bincode::deserialize::<u32>(&entry.action) else {
-                continue;
-            };
-            let mut seen = 0u32;
-            let mut matched = false;
-            body(entry.actor, &mut |_label: &str| {
-                let is_target = !matched && seen == target;
-                seen += 1;
-                matched |= is_target;
-                is_target
-            });
-            if matched {
-                return Ok(());
-            }
-        }
-        let mut index = 0u32;
-        let mut actions = Vec::new();
-        body(self.player, &mut |label: &str| {
-            actions.push(GameActionOption {
-                label: label.to_owned(),
-                effect: bincode::serialize(&index).expect("index encoding is infallible"),
-            });
-            index += 1;
-            false
-        });
-        Err(GameScreen {
-            description: describe(self.player),
-            actions,
-        })
+    fn ask_name(&self) -> Result<String, String> {
+        let (mut store, instance, memory) = self.instantiate()?;
+        let name: TypedFunc<(), u64> = export(&store, &instance, "name")?;
+        let answer = name
+            .call(&mut store, ())
+            .map_err(|error| format!("this game would not name itself: {error}"))?;
+        String::from_utf8(read(&store, &memory, answer)?)
+            .map_err(|_| "this game's name is not text".to_owned())
+    }
+
+    fn instantiate(&self) -> Result<(Store<()>, Instance, Memory), String> {
+        let mut store = Store::new(&self.engine, ());
+        store
+            .set_fuel(FUEL)
+            .map_err(|error| format!("this game could not be given fuel: {error}"))?;
+        let instance = Linker::<()>::new(&self.engine)
+            .instantiate_and_start(&mut store, &self.module)
+            .map_err(|error| format!("this game would not start: {error}"))?;
+        let memory = instance
+            .get_memory(&store, "memory")
+            .ok_or_else(|| "this game module exports no memory".to_owned())?;
+        Ok((store, instance, memory))
     }
 }
+
+fn export<Parameters: wasmi::WasmParams, Results: wasmi::WasmResults>(
+    store: &Store<()>,
+    instance: &Instance,
+    name: &str,
+) -> Result<TypedFunc<Parameters, Results>, String> {
+    instance
+        .get_typed_func(store, name)
+        .map_err(|error| format!("this game module has no usable {name}: {error}"))
+}
+
+/// Reads back what a module handed over: a pointer and a length packed into
+/// the one integer a call can answer with.
+fn read(store: &Store<()>, memory: &Memory, answer: u64) -> Result<Vec<u8>, String> {
+    let pointer = (answer >> 32) as usize;
+    let length = (answer & u64::from(u32::MAX)) as usize;
+    let end = pointer
+        .checked_add(length)
+        .ok_or_else(|| "this game answered outside its own memory".to_owned())?;
+    memory
+        .data(store)
+        .get(pointer..end)
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| "this game answered outside its own memory".to_owned())
+}
+
+#[cfg(test)]
+mod tests;

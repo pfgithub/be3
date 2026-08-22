@@ -47,19 +47,71 @@ plugin_id() {
 write_plugin_index() {
     local directory="$1"
     shift
-    local ids=("$@")
+    write_index "$directory/index.json" "$@"
+}
+
+write_index() {
+    local file="$1"
+    shift
+    local entries=("$@")
     local index separator
     {
         echo '['
-        for index in "${!ids[@]}"; do
+        for index in "${!entries[@]}"; do
             separator=','
-            if [[ $index -eq $((${#ids[@]} - 1)) ]]; then
+            if [[ $index -eq $((${#entries[@]} - 1)) ]]; then
                 separator=''
             fi
-            echo "  \"${ids[$index]}\"$separator"
+            echo "  \"${entries[$index]}\"$separator"
         done
         echo ']'
-    } > "$directory/index.json"
+    } > "$file"
+}
+
+load_games() {
+    games=()
+    local manifest
+    for manifest in "$repository"/crates/games/*/Cargo.toml; do
+        [[ -f "$manifest" ]] || continue
+        games+=("$(basename "$(dirname "$manifest")")")
+    done
+    if [[ ${#games[@]} -eq 0 ]]; then
+        echo 'No games were found under crates/games' >&2
+        exit 1
+    fi
+}
+
+# Compiles every game to its own WebAssembly module and stages them, with an
+# index the browser and Android builds read in place of listing a directory.
+# The modules are interpreted wherever the app runs, so they are built the
+# same way for every target.
+build_games() {
+    local output="$1" profile="$2"
+    local arguments=()
+    if [[ "$profile" == 'release' ]]; then
+        arguments+=(--release)
+    fi
+    if ! rustup target list --installed | grep -qx 'wasm32-unknown-unknown'; then
+        echo 'Installing the wasm32-unknown-unknown Rust target...'
+        rustup target add wasm32-unknown-unknown
+    fi
+
+    load_games
+    rm -rf "$output"
+    mkdir -p "$output"
+    local game module modules=()
+    for game in "${games[@]}"; do
+        echo "Building the $game game..."
+        (cd "$repository" && cargo build -p "$game" --lib --target wasm32-unknown-unknown "${arguments[@]}")
+        module="$repository/target/wasm32-unknown-unknown/$profile/$game.wasm"
+        if [[ ! -f "$module" ]]; then
+            echo "cargo did not produce $module" >&2
+            exit 1
+        fi
+        cp "$module" "$output/$game.wasm"
+        modules+=("$game.wasm")
+    done
+    write_index "$output/index.json" "${modules[@]}"
 }
 
 profile_directory() {

@@ -1,17 +1,12 @@
 use block::Block;
 
-use super::{DeterministicGame, DeterministicGameKind};
+use super::DeterministicGame;
 
 #[test]
 fn implicit_name_uses_game() {
-    let tic_tac_toe = DeterministicGame::new(DeterministicGameKind::TicTacToe);
-    let crazy_8s = DeterministicGame::new(DeterministicGameKind::Crazy8s);
-    let connect_four = DeterministicGame::new(DeterministicGameKind::ConnectFour);
+    let named = DeterministicGame::new("tic_tac_toe".to_owned(), "Tic-Tac-Toe".to_owned());
+    let unnamed = DeterministicGame::new("tic_tac_toe".to_owned(), String::new());
 
-    assert_eq!(tic_tac_toe.implicit_name(), Some("Tic-Tac-Toe".to_owned()));
-    assert_eq!(crazy_8s.implicit_name(), Some("Crazy 8s".to_owned()));
-    assert_eq!(
-        connect_four.implicit_name(),
-        Some("Connect Four".to_owned())
-    );
+    assert_eq!(named.implicit_name(), Some("Tic-Tac-Toe".to_owned()));
+    assert_eq!(unnamed.implicit_name(), None);
 }

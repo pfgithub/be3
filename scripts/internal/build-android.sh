@@ -101,6 +101,8 @@ for plugin in "${plugins[@]}"; do
 done
 write_plugin_index "$assets/plugins" "${plugin_ids[@]}"
 
+build_games "$assets/games" debug
+
 mkdir -p "$native_libraries" "$(dirname "$apk")"
 cp "$repository/target/aarch64-linux-android/debug/libblock_app_lib.so" "$native_libraries/"
 cp "$repository/target/aarch64-linux-android/debug/libcounter.so" "$native_libraries/"

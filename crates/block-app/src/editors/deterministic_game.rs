@@ -1,12 +1,8 @@
 use block_client::{
-    blocks::deterministic_game::{
-        DeterministicGame, DeterministicGameKind, DeterministicGameOperation,
-    },
+    blocks::deterministic_game::{DeterministicGame, DeterministicGameOperation},
     BlockClient, BlockHandle,
 };
-use deterministic_games::{
-    connect_four::ConnectFour, crazy_8s::Crazy8s, tic_tac_toe::TicTacToe, Game,
-};
+use deterministic_games::{GameAction, GameScreen};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_GRID_3X3, MaterialIcon};
 use uuid::Uuid;
@@ -16,20 +12,7 @@ use super::{
     DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
 };
 
-const GAME_KINDS: [DeterministicGameKind; 3] = [
-    DeterministicGameKind::TicTacToe,
-    DeterministicGameKind::Crazy8s,
-    DeterministicGameKind::ConnectFour,
-];
-
-/// The only place a game kind is turned into its `Game` implementation.
-fn game_for(kind: DeterministicGameKind) -> &'static dyn Game {
-    match kind {
-        DeterministicGameKind::TicTacToe => &TicTacToe,
-        DeterministicGameKind::Crazy8s => &Crazy8s,
-        DeterministicGameKind::ConnectFour => &ConnectFour,
-    }
-}
+pub(crate) mod catalog;
 
 impl EditorKind for DeterministicGameEditor {
     type Block = DeterministicGame;
@@ -44,35 +27,57 @@ impl EditorKind for DeterministicGameEditor {
 
 /// Which game a `DeterministicGame` block plays is fixed for its lifetime
 /// (there is no operation to change it), so creating one starts by choosing
-/// it.
+/// it from the games installed beside the app.
 impl ConfigurableEditor for DeterministicGameEditor {
     type Options = ChosenGame;
 
     fn create(client: &BlockClient, options: ChosenGame) -> Result<Self, String> {
-        let kind = options.kind.ok_or("Choose a game first")?;
-        let block = client.create_block(DeterministicGame::new(kind));
+        let id = options.id.ok_or("Choose a game first")?;
+        let installed = catalog::installed();
+        let entry = installed
+            .games()
+            .iter()
+            .find(|entry| entry.id() == id)
+            .ok_or("That game is no longer installed")?;
+        let block = client.create_block(DeterministicGame::new(
+            entry.id().to_owned(),
+            entry.display_name().to_owned(),
+        ));
         Ok(Self::new(client, block))
     }
 }
 
 #[derive(Default)]
 pub(crate) struct ChosenGame {
-    kind: Option<DeterministicGameKind>,
+    id: Option<String>,
 }
 
 impl CreationOptions for ChosenGame {
     fn ui(&mut self, ui: &mut egui::Ui) -> bool {
-        ui.label("Choose a game:");
-        for kind in GAME_KINDS {
-            ui.radio_value(&mut self.kind, Some(kind), kind.display_name());
+        let installed = catalog::installed();
+        if installed.games().is_empty() {
+            ui.label("No games are installed.");
+        } else {
+            ui.label("Choose a game:");
+            for entry in installed.games() {
+                let chosen = self.id.as_deref() == Some(entry.id());
+                if ui.radio(chosen, entry.display_name()).clicked() {
+                    self.id = Some(entry.id().to_owned());
+                }
+            }
         }
-        self.kind.is_some()
+        for error in installed.errors() {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        self.id.is_some()
     }
 }
 
 pub(super) struct DeterministicGameEditor {
     block: BlockHandle<DeterministicGame>,
     player: Uuid,
+    shown: Vec<GameAction>,
+    screen: Option<Result<GameScreen, String>>,
 }
 
 impl DeterministicGameEditor {
@@ -80,7 +85,24 @@ impl DeterministicGameEditor {
         Self {
             block,
             player: client.account_id(),
+            shown: Vec::new(),
+            screen: None,
         }
+    }
+
+    /// Replaying the log through the interpreter costs more than a frame
+    /// should, so it happens only when the log this editor last drew from
+    /// has actually changed.
+    fn screen(&mut self, game: &str, actions: Vec<GameAction>) -> &Result<GameScreen, String> {
+        if self.screen.is_none() || self.shown != actions {
+            let screen = match catalog::game(game) {
+                Some(module) => module.show(&actions, self.player),
+                None => Err(format!("{game} is not installed")),
+            };
+            self.shown = actions;
+            self.screen = Some(screen);
+        }
+        self.screen.as_ref().expect("the screen was just computed")
     }
 }
 
@@ -117,11 +139,22 @@ impl BlockEditor for DeterministicGameEditor {
             });
             return None;
         };
-        let kind = block.game();
+        let game = block.game().to_owned();
         let actions = block.actions().to_vec();
         drop(block);
 
-        let screen = game_for(kind).show(&actions, self.player);
+        let screen = match self.screen(&game, actions) {
+            Ok(screen) => screen.clone(),
+            Err(error) => {
+                let error = error.clone();
+                ui.vertical_centered(|ui| {
+                    ui.add_space(12.0);
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                });
+                return None;
+            }
+        };
+
         ui.vertical_centered(|ui| {
             ui.add_space(12.0);
             ui.label(screen.description);

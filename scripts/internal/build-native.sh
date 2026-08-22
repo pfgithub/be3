@@ -84,6 +84,7 @@ if $server; then
 fi
 
 plugins_directory="$artifact_directory/plugins"
+games_directory="$artifact_directory/games"
 if $client; then
     echo 'Building block-app...'
     cargo build -p block-app --bins "${cargo_arguments[@]}"
@@ -109,6 +110,8 @@ if $client; then
         fi
     done
 
+    build_games "$games_directory" "$profile"
+
     "$internal/fetch-pdfium.sh" --triple "$target_triple" --output "$artifact_directory"
 
     if [[ -n "$sign_identity" ]]; then
@@ -131,6 +134,8 @@ if [[ -n "$output" ]]; then
         done
         rm -rf "$output/plugins"
         cp -R "$plugins_directory" "$output/plugins"
+        rm -rf "$output/games"
+        cp -R "$games_directory" "$output/games"
     fi
     echo "Packaged $target_triple in $output"
 fi
