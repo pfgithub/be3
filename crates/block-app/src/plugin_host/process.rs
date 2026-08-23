@@ -101,8 +101,6 @@ impl Process {
                     return drive_windows(stream, &mut child, &event_receiver, inbound);
                     #[cfg(target_os = "linux")]
                     return drive_unix(stream, &mut child, &event_receiver, inbound);
-                    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-                    drive(stream, &mut child, &event_receiver)
                 });
                 terminate(&mut child);
                 result
@@ -477,67 +475,6 @@ fn wait_for_shutdown(child: &mut Child) -> io::Result<()> {
 impl Drop for Process {
     fn drop(&mut self) {
         self.shutdown();
-    }
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
-fn drive<S: Read + Write>(
-    mut stream: S,
-    child: &mut Child,
-    events: &Receiver<Event>,
-) -> io::Result<()> {
-    let started = Instant::now();
-    #[allow(unused_mut)]
-    let mut capabilities = vec![Capability::Lifecycle, Capability::Input];
-    #[cfg(target_os = "macos")]
-    capabilities.push(Capability::Surface(
-        block_plugin_api::SurfaceMechanism::MacOsIoSurface,
-    ));
-    #[cfg(target_os = "windows")]
-    capabilities.push(Capability::Surface(
-        block_plugin_api::SurfaceMechanism::WindowsDxgi,
-    ));
-    #[cfg(target_os = "linux")]
-    capabilities.push(Capability::Surface(
-        block_plugin_api::SurfaceMechanism::LinuxDmaBuf,
-    ));
-    let mut session = HostSession::new("BE3", capabilities);
-    session.start(0);
-    let message = read_message(&mut stream)?;
-    session.receive(message, elapsed(started));
-    flush(&mut stream, &mut session)?;
-    if !matches!(session.state(), SessionState::Running) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "plugin handshake was rejected",
-        ));
-    }
-    loop {
-        if matches!(
-            events.recv_timeout(Duration::from_millis(10)),
-            Ok(Event::Shutdown)
-        ) {
-            session.shutdown(elapsed(started));
-            flush(&mut stream, &mut session)?;
-            stream.flush()?;
-            let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
-            while Instant::now() < deadline {
-                if child.try_wait()?.is_some() {
-                    return Ok(());
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "plugin did not exit after shutdown",
-            ));
-        }
-        if let Some(exit) = child.try_wait()? {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                format!("plugin exited unexpectedly: {exit}"),
-            ));
-        }
     }
 }
 
