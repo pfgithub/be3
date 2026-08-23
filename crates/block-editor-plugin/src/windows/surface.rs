@@ -20,7 +20,9 @@ use crate::panes::Panes;
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 
-pub struct Surface {
+pub(crate) const SURFACE_KIND: &str = "DXGI";
+
+pub(crate) struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
     texture: wgpu::Texture,
@@ -35,7 +37,11 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn new(request_id: u64, layout: ScreenLayout, generation: u64) -> Result<Self, String> {
+    pub(crate) fn new(
+        request_id: u64,
+        layout: ScreenLayout,
+        generation: u64,
+    ) -> Result<Self, String> {
         let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         instance_descriptor.backends = wgpu::Backends::DX12;
         let instance = wgpu::Instance::new(instance_descriptor);
@@ -79,7 +85,7 @@ impl Surface {
         })
     }
 
-    pub fn resize(
+    pub(crate) fn resize(
         mut self,
         request_id: u64,
         layout: ScreenLayout,
@@ -94,11 +100,11 @@ impl Surface {
         Ok(self)
     }
 
-    pub fn layout(&self) -> &ScreenLayout {
+    pub(crate) fn layout(&self) -> &ScreenLayout {
         &self.layout
     }
 
-    pub fn descriptor(&self) -> (Message, [RawHandle; 2]) {
+    pub(crate) fn descriptor(&self) -> (Message, [RawHandle; 2]) {
         let luid = unsafe {
             self.device
                 .as_hal::<wgpu_hal::api::Dx12>()
@@ -127,7 +133,7 @@ impl Surface {
         )
     }
 
-    pub fn render(
+    pub(crate) fn render(
         &mut self,
         screens: &mut crate::screens::Screens,
         phase: f64,

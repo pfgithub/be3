@@ -7,10 +7,10 @@ use std::sync::Arc;
 mod egui_session;
 mod host;
 #[cfg(target_os = "linux")]
-mod linux_surface;
+mod linux;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod panes;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 mod runner;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod screens;
@@ -20,7 +20,12 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 mod web_surface;
 #[cfg(target_os = "windows")]
-mod windows_surface;
+mod windows;
+
+#[cfg(target_os = "linux")]
+use linux as platform;
+#[cfg(target_os = "windows")]
+use windows as platform;
 
 pub use block_plugin_api::EditorRegion;
 pub use block_ui;
@@ -115,7 +120,7 @@ pub mod __private {
         crate::web::shutdown();
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     pub fn run<A: crate::App>(manifest: &str) {
         let identity = identity(manifest);
         crate::runner::run::<A>(&identity.id, &identity.name, &identity.version);

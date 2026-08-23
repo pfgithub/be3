@@ -15,7 +15,9 @@ const VULKAN_FORMAT: vk::Format = vk::Format::B8G8R8A8_UNORM;
 const DRM_FORMAT_ARGB8888: u32 = 0x3432_5241;
 const DRM_FORMAT_MOD_LINEAR: u64 = 0;
 
-pub struct Surface {
+pub(crate) const SURFACE_KIND: &str = "dma-buf";
+
+pub(crate) struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
     texture: wgpu::Texture,
@@ -30,7 +32,11 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn new(request_id: u64, layout: ScreenLayout, generation: u64) -> Result<Self, String> {
+    pub(crate) fn new(
+        request_id: u64,
+        layout: ScreenLayout,
+        generation: u64,
+    ) -> Result<Self, String> {
         let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         instance_descriptor.backends = wgpu::Backends::VULKAN;
         let instance = wgpu::Instance::new(instance_descriptor);
@@ -62,7 +68,7 @@ impl Surface {
         })
     }
 
-    pub fn resize(
+    pub(crate) fn resize(
         mut self,
         request_id: u64,
         layout: ScreenLayout,
@@ -78,11 +84,11 @@ impl Surface {
         Ok(self)
     }
 
-    pub fn layout(&self) -> &ScreenLayout {
+    pub(crate) fn layout(&self) -> &ScreenLayout {
         &self.layout
     }
 
-    pub fn descriptor(&self) -> (Message, Vec<RawFd>) {
+    pub(crate) fn descriptor(&self) -> (Message, Vec<RawFd>) {
         let descriptor = LinuxSurfaceDescriptor {
             drm_format: DRM_FORMAT_ARGB8888,
             modifier: DRM_FORMAT_MOD_LINEAR,
@@ -99,7 +105,7 @@ impl Surface {
         (Message::Surface(descriptor), vec![self.memory.as_raw_fd()])
     }
 
-    pub fn render(
+    pub(crate) fn render(
         &mut self,
         screens: &mut crate::screens::Screens,
         phase: f64,
