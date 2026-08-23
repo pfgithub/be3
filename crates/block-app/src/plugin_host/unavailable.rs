@@ -15,9 +15,8 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         instance,
         region,
         size,
-        pan_and_zoom,
     } = slot;
-    let _ = (block_types, client, instance, region, size, pan_and_zoom);
+    let _ = (block_types, client, instance, region, size);
     let _ = role.block().map(|block| (block.id, block.block_type));
     ui.colored_label(
         egui::Color32::RED,

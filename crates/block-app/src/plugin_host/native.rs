@@ -43,7 +43,6 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         instance,
         region,
         size,
-        pan_and_zoom,
     } = slot;
     HOST.with(|host| {
         let mut host = host.borrow_mut();
@@ -88,7 +87,6 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             ui.ctx().pixels_per_point(),
             pass,
         );
-        runtime.instances.set_pan_and_zoom(instance, pan_and_zoom);
         let messages = runtime.instances.input(instance, region, |input| {
             input.update(ui, &response, screen)
         });

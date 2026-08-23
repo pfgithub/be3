@@ -476,7 +476,6 @@ fn editor_name(message: &block_plugin_api::EditorMessage) -> &'static str {
         EditorMessage::CreationBlock { .. } => "Editor::CreationBlock",
         EditorMessage::OpenArtifact { .. } => "Editor::OpenArtifact",
         EditorMessage::EditabilityChanged { .. } => "Editor::EditabilityChanged",
-        EditorMessage::PanAndZoomChanged { .. } => "Editor::PanAndZoomChanged",
         _ => "Editor",
     }
 }

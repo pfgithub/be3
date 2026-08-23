@@ -49,7 +49,6 @@ pub struct EditorHost {
     picked: Rc<RefCell<HashMap<u64, FilePick>>>,
     next_pick: Rc<Cell<u64>>,
     editable: Rc<Cell<bool>>,
-    pan_and_zoom_taken: Rc<Cell<bool>>,
     creation_ready: Rc<Cell<bool>>,
     creation_changed: Rc<Cell<bool>>,
 }
@@ -70,10 +69,6 @@ impl EditorHost {
     /// instance filling in a new block always may.
     pub fn editable(&self) -> bool {
         self.editable.get()
-    }
-
-    pub fn owns_pan_and_zoom(&self) -> bool {
-        !self.pan_and_zoom_taken.get()
     }
 
     /// The block being dragged over the region currently drawing, if any.
@@ -118,11 +113,6 @@ impl EditorHost {
     #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn set_editable(&self, editable: bool) {
         self.editable.set(editable);
-    }
-
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
-    pub(crate) fn set_owns_pan_and_zoom(&self, owned: bool) {
-        self.pan_and_zoom_taken.set(!owned);
     }
 
     #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]

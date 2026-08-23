@@ -82,7 +82,6 @@ impl PluginCreation {
                 instance: self.instance,
                 region: EditorRegion::Main,
                 size: egui::vec2(ui.available_width(), height),
-                pan_and_zoom: true,
             },
         );
     }
@@ -163,7 +162,6 @@ pub(super) struct PluginEditor {
     block: Box<dyn BlockHandleAccess>,
     instance: EditorInstanceId,
     context: Option<egui::Context>,
-    embedded: bool,
 }
 
 impl PluginEditor {
@@ -173,12 +171,7 @@ impl PluginEditor {
             block,
             instance: next_instance(),
             context: None,
-            embedded: false,
         }
-    }
-
-    fn owns_pan_and_zoom(&self) -> bool {
-        self.plugin.capabilities.pan_and_zoom && !self.embedded
     }
 
     fn has_region(&self, region: EditorRegion) -> bool {
@@ -209,7 +202,6 @@ impl PluginEditor {
                 instance: self.instance,
                 region,
                 size,
-                pan_and_zoom: self.owns_pan_and_zoom(),
             },
         )?;
         Some(EditorAction::OpenBlock { id, block_type })
@@ -353,66 +345,12 @@ impl BlockEditor for PluginEditor {
         _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.embedded = false;
         let size = ui.available_size();
         self.region_ui(ui, editors, EditorRegion::Main, size)
     }
 
-    fn embedded_direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        scale: f32,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        if !self.plugin.capabilities.pan_and_zoom || !viewport.pans_and_zooms() {
-            return self.direct_editor_ui(ui, editors, scale, viewport);
-        }
-        self.embedded = true;
-        let size = ui.available_size();
-        let rect = ui.available_rect_before_wrap();
-        let action = self.region_ui(ui, editors, EditorRegion::Main, size);
-        host_viewport_input(ui.ctx(), rect, viewport);
-        action
-    }
-
     fn tab_closed(&mut self) {
         self.close();
-    }
-}
-
-fn host_viewport_input(
-    context: &egui::Context,
-    rect: egui::Rect,
-    viewport: &mut DirectEditorViewport,
-) {
-    let Some(pointer) = context
-        .pointer_hover_pos()
-        .filter(|pointer| rect.contains(*pointer))
-    else {
-        return;
-    };
-    let (scroll, zoom_delta, command, panning, delta) = context.input(|input| {
-        (
-            input.smooth_scroll_delta,
-            input.zoom_delta(),
-            input.modifiers.command,
-            input.pointer.button_down(egui::PointerButton::Middle)
-                || (input.key_down(egui::Key::Space)
-                    && input.pointer.button_down(egui::PointerButton::Primary)),
-            input.pointer.delta(),
-        )
-    });
-    if panning {
-        context.set_cursor_icon(egui::CursorIcon::Grabbing);
-        viewport.pan(delta);
-    }
-    if (zoom_delta - 1.0).abs() > f32::EPSILON {
-        viewport.change_zoom(zoom_delta, Some(pointer));
-    } else if command && scroll.y != 0.0 {
-        viewport.change_zoom((scroll.y * 0.002).exp(), Some(pointer));
-    } else if scroll != egui::Vec2::ZERO {
-        viewport.pan(scroll);
     }
 }
 
@@ -519,7 +457,6 @@ impl ArtifactSession for PluginArtifact {
                 instance: self.instance,
                 region: EditorRegion::ArtifactSettings,
                 size: egui::vec2(ui.available_width(), height),
-                pan_and_zoom: true,
             },
         );
         if let Some(edited) =

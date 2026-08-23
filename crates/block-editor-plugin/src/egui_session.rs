@@ -172,10 +172,6 @@ impl EguiSession {
         self.host.set_editable(editable);
     }
 
-    pub(crate) fn set_owns_pan_and_zoom(&self, owned: bool) {
-        self.host.set_owns_pan_and_zoom(owned);
-    }
-
     pub(crate) fn set_drag(&mut self, drag: Option<(EditorRegion, BlockDrag)>) {
         self.drag = drag;
     }

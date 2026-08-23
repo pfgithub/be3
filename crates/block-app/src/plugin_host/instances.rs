@@ -42,8 +42,6 @@ struct Instance {
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
-    pan_and_zoom: bool,
-    reported_pan_and_zoom: bool,
 }
 
 #[derive(Default)]
@@ -69,8 +67,6 @@ impl Instance {
             intrinsic: None,
             aspect_ratio: None,
             picks: Vec::new(),
-            pan_and_zoom: true,
-            reported_pan_and_zoom: true,
         }
     }
 }
@@ -161,12 +157,6 @@ impl Instances {
         screen.request.metrics = viewport_metrics(size, scale_factor);
         screen.last_seen = pass;
         screen.request.screen
-    }
-
-    pub(super) fn set_pan_and_zoom(&mut self, instance: EditorInstanceId, owned: bool) {
-        if let Some(entry) = self.entries.get_mut(&instance) {
-            entry.pan_and_zoom = owned;
-        }
     }
 
     pub(super) fn report_creation(
@@ -315,13 +305,6 @@ impl Instances {
                         data: entry.artifact.data.clone(),
                     }),
                 });
-            }
-            if entry.pan_and_zoom != entry.reported_pan_and_zoom {
-                entry.reported_pan_and_zoom = entry.pan_and_zoom;
-                opened.push(Message::Editor(EditorMessage::PanAndZoomChanged {
-                    instance,
-                    owned: entry.pan_and_zoom,
-                }));
             }
             screens.extend(regions);
         }
