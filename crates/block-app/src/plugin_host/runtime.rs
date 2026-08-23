@@ -1,0 +1,629 @@
+use std::{cell::RefCell, collections::HashMap, time::Duration};
+
+use block_plugin_api::{
+    ArtifactDescription, EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest,
+    RegionSize, ScreenLayout, ScreenRequest, TunnelMessage, ViewChange,
+};
+use eframe::egui;
+use uuid::Uuid;
+
+use super::{
+    input,
+    instances::Instances,
+    presenter::{
+        PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
+        MAX_SURFACES,
+    },
+    preview_size, ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock,
+    EditorSlot, InstanceRole, PreviewSlot, RuntimeStatus, SurfaceStatus,
+};
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use super::native::Native as Platform;
+#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
+use super::unavailable::Unavailable as Platform;
+#[cfg(target_arch = "wasm32")]
+use super::web::Web as Platform;
+
+type Frame = <Platform as Backend>::Frame;
+
+const NOT_INSTALLED: &str = "The plugin host is not installed.";
+const CROWDED: &str = "Too many plugin runtimes are already presenting.";
+
+/// Everything a plugin runtime needs from the platform it runs on: how to
+/// start it, how to exchange messages with it, and how to get the image it
+/// last drew onto the screen. Everything else - input, screen layout,
+/// instances, errors - is the same on every platform and lives in this module.
+pub(super) trait Backend: Sized {
+    type Frame: Send + Sync + 'static;
+
+    fn install(creation_context: &eframe::CreationContext<'_>) -> Result<(), String>;
+
+    fn new(plugin: &PluginManifest, context: &egui::Context) -> Self;
+
+    fn start(&mut self, plugin: &PluginManifest, context: &egui::Context);
+
+    fn send(&mut self, messages: Vec<Message>);
+
+    fn poll(&mut self, context: &egui::Context) -> Update;
+
+    fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Self::Frame;
+
+    fn take_error(&mut self) -> Option<String>;
+
+    fn state(&self) -> &'static str;
+
+    fn uptime(&self) -> Option<Duration>;
+
+    fn shutdown(&mut self);
+}
+
+/// What a runtime produced since it was last polled.
+#[derive(Default)]
+pub(super) struct Update {
+    pub(super) layout: Option<ScreenLayout>,
+    pub(super) client: Vec<TunnelMessage>,
+    pub(super) editor: Vec<EditorMessage>,
+    pub(super) sizes: Vec<RegionSize>,
+}
+
+impl Update {
+    fn received(&self) -> bool {
+        self.layout.is_some()
+            || !self.client.is_empty()
+            || !self.editor.is_empty()
+            || !self.sizes.is_empty()
+    }
+}
+
+thread_local! {
+    static HOST: RefCell<Host> = RefCell::new(Host::new());
+}
+
+struct Host {
+    availability: Result<(), String>,
+    runtimes: HashMap<String, Runtime>,
+}
+
+impl Host {
+    fn new() -> Self {
+        Self {
+            availability: Err(NOT_INSTALLED.to_owned()),
+            runtimes: HashMap::new(),
+        }
+    }
+
+    fn runtime(
+        &mut self,
+        plugin: &PluginManifest,
+        context: &egui::Context,
+    ) -> Result<&mut Runtime, String> {
+        if let Err(error) = &self.availability {
+            return Err(error.clone());
+        }
+        let Some(surface) = self.surface_for(&plugin.identity.id, context) else {
+            return Err(CROWDED.to_owned());
+        };
+        let runtime = self
+            .runtimes
+            .entry(plugin.identity.id.clone())
+            .or_insert_with(|| Runtime::new(plugin, surface, context));
+        runtime.begin_pass(context.cumulative_pass_nr());
+        Ok(runtime)
+    }
+
+    fn surface_for(&mut self, plugin_id: &str, context: &egui::Context) -> Option<u32> {
+        if let Some(runtime) = self.runtimes.get(plugin_id) {
+            return Some(runtime.surface);
+        }
+        if let Some(surface) = (0..MAX_SURFACES).find(|surface| {
+            !self
+                .runtimes
+                .values()
+                .any(|runtime| runtime.surface == *surface)
+        }) {
+            return Some(surface);
+        }
+        let evicted = self
+            .runtimes
+            .iter()
+            .filter(|(_, runtime)| runtime.instances.is_empty())
+            .min_by_key(|(_, runtime)| runtime.pass)
+            .map(|(id, _)| id.clone())?;
+        self.shutdown(context, &evicted)
+    }
+
+    fn shutdown(&mut self, context: &egui::Context, plugin_id: &str) -> Option<u32> {
+        let mut runtime = self.runtimes.remove(plugin_id)?;
+        runtime.backend.shutdown();
+        context
+            .debug_painter()
+            .add(eframe::egui_wgpu::Callback::new_paint_callback(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+                PresenterCallback::<Frame> {
+                    command: PresenterCommand::Release,
+                    status: runtime.status.clone(),
+                    region: Region {
+                        surface: runtime.surface,
+                        ..Region::default()
+                    },
+                },
+            ));
+        Some(runtime.surface)
+    }
+}
+
+pub(super) struct Runtime {
+    pub(super) context: egui::Context,
+    pub(super) backend: Platform,
+    pub(super) instances: Instances,
+    pub(super) layout: ScreenLayout,
+    pub(super) pass: u64,
+    surface: u32,
+    status: PresenterStatus,
+    sent: Vec<ScreenRequest>,
+    error: Option<String>,
+}
+
+impl Runtime {
+    fn new(plugin: &PluginManifest, surface: u32, context: &egui::Context) -> Self {
+        let mut backend = Platform::new(plugin, context);
+        backend.start(plugin, context);
+        Self {
+            context: context.clone(),
+            backend,
+            instances: Instances::default(),
+            layout: ScreenLayout::default(),
+            pass: 0,
+            surface,
+            status: PresenterStatus::waiting(),
+            sent: Vec::new(),
+            error: None,
+        }
+    }
+
+    fn restart(&mut self, plugin: &PluginManifest) {
+        self.error = None;
+        self.status = PresenterStatus::waiting();
+        self.layout = ScreenLayout::default();
+        self.sent.clear();
+        self.instances.reopen();
+        self.backend.start(plugin, &self.context);
+    }
+
+    fn begin_pass(&mut self, pass: u64) {
+        self.detect_error();
+        if self.pass == pass || self.error.is_some() {
+            return;
+        }
+        let previous = self.pass;
+        self.pass = pass;
+        let next = self.instances.next_screens(previous);
+        let mut messages = next.opened;
+        if self.sent != next.screens {
+            self.sent.clone_from(&next.screens);
+            messages.push(self.instances.screen_set(next.screens));
+        }
+        messages.extend(self.instances.pending());
+        let awaited = messages.iter().any(|message| {
+            matches!(
+                message,
+                Message::Editor(EditorMessage::Open { .. } | EditorMessage::OpenArtifact { .. })
+            )
+        });
+        self.send(messages);
+        if awaited {
+            self.context.request_repaint();
+        }
+        self.pump();
+    }
+
+    fn detect_error(&mut self) {
+        if self.error.is_some() {
+            return;
+        }
+        self.error = self.backend.take_error().or(match self.status.get() {
+            PresenterState::Failed(error) | PresenterState::Unsupported(error) => Some(error),
+            PresenterState::Waiting | PresenterState::Presenting | PresenterState::Released => None,
+        });
+    }
+
+    fn pump(&mut self) {
+        if self.error.is_some() {
+            return;
+        }
+        let update = self.backend.poll(&self.context);
+        self.apply(update);
+        let responses = self.instances.client_responses();
+        if !responses.is_empty() {
+            self.send(responses);
+            self.context.request_repaint();
+        }
+    }
+
+    pub(super) fn apply(&mut self, update: Update) {
+        if !update.received() {
+            return;
+        }
+        if let Some(layout) = update.layout {
+            self.layout = layout;
+        }
+        for message in update.client {
+            self.instances.client_message(message);
+        }
+        for message in update.editor {
+            self.instances.editor_message(message);
+        }
+        self.instances.set_region_sizes(update.sizes);
+        self.context.request_repaint();
+    }
+
+    fn send(&mut self, messages: Vec<Message>) {
+        if messages.is_empty() {
+            return;
+        }
+        self.backend.send(messages);
+    }
+
+    fn present(&mut self, rect: egui::Rect, region: Region) -> egui::epaint::PaintCallback {
+        let frame = self.backend.frame(&self.layout, self.pass);
+        eframe::egui_wgpu::Callback::new_paint_callback(
+            rect,
+            PresenterCallback {
+                command: PresenterCommand::Present(frame),
+                status: self.status.clone(),
+                region,
+            },
+        )
+    }
+
+    fn state(&self) -> String {
+        match (&self.error, self.status.get()) {
+            (Some(error), _) => error.clone(),
+            (None, PresenterState::Presenting) => "presenting".to_owned(),
+            (None, PresenterState::Released) => "released".to_owned(),
+            (None, PresenterState::Failed(error) | PresenterState::Unsupported(error)) => error,
+            (None, PresenterState::Waiting) => self.backend.state().to_owned(),
+        }
+    }
+}
+
+pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
+    let availability = Platform::install(creation_context);
+    HOST.with(|host| {
+        host.borrow_mut().availability = availability;
+    });
+}
+
+pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid, Uuid)> {
+    let EditorSlot {
+        plugin,
+        block_types,
+        client,
+        role,
+        instance,
+        region,
+        size,
+        view,
+    } = slot;
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        let runtime = match host.runtime(plugin, ui.ctx()) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                ui.colored_label(egui::Color32::RED, error);
+                return None;
+            }
+        };
+        if let Some(error) = runtime.error.clone() {
+            ui.colored_label(egui::Color32::RED, error);
+            if ui.button("Restart plugin").clicked() {
+                runtime.restart(plugin);
+            }
+            return None;
+        }
+        let pass = runtime.pass;
+        let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
+        let screen = runtime.instances.report(
+            instance,
+            region,
+            ui.ctx(),
+            &client,
+            role,
+            block_types,
+            response.rect.size(),
+            ui.ctx().pixels_per_point(),
+            pass,
+        );
+        if let Some(view) = view {
+            runtime.instances.set_view(instance, view);
+        }
+        let messages = runtime.instances.input(instance, region, |input| {
+            input.update(ui, &response, screen)
+        });
+        runtime.send(messages);
+        let drag = input::block_drag(&response);
+        let hovering = drag.as_ref().is_some_and(|drag| !drag.dropped);
+        let messages = runtime.instances.drag(instance, region, drag);
+        runtime.send(messages);
+        if hovering && runtime.instances.drag_accepted(instance) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
+        } else if response.hovered() {
+            if let Some(cursor) = runtime.instances.cursor(instance, region) {
+                ui.ctx().set_cursor_icon(cursor);
+            }
+        }
+        let open_request = runtime.instances.take_open(instance);
+        let Some(atlas_region) = Region::of(
+            &runtime.layout,
+            runtime.surface,
+            screen,
+            Quad::upright(response.rect),
+        ) else {
+            return open_request;
+        };
+        painter.add(runtime.present(response.rect, atlas_region));
+        open_request
+    })
+}
+
+pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> CreationState {
+    let CreationSlot {
+        plugin,
+        block_types,
+        client,
+        instance,
+    } = slot;
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        let runtime = match host.runtime(plugin, context) {
+            Ok(runtime) => runtime,
+            Err(error) => return CreationState::Failed(error),
+        };
+        if let Some(error) = runtime.error.clone() {
+            return CreationState::Failed(error);
+        }
+        context.request_repaint();
+        match runtime
+            .instances
+            .report_creation(instance, context, &client, block_types)
+        {
+            true => CreationState::Ready,
+            false => CreationState::Starting,
+        }
+    })
+}
+
+pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> ArtifactState {
+    let ArtifactSlot {
+        plugin,
+        block_types,
+        client,
+        instance,
+        block,
+        data,
+        resync,
+    } = slot;
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        let runtime = match host.runtime(plugin, context) {
+            Ok(runtime) => runtime,
+            Err(error) => return ArtifactState::Failed(error),
+        };
+        if let Some(error) = runtime.error.clone() {
+            return ArtifactState::Failed(error);
+        }
+        let messages = runtime.instances.report_artifact(
+            instance,
+            context,
+            &client,
+            block_types,
+            block,
+            data,
+            resync,
+        );
+        runtime.send(messages);
+        match runtime.instances.artifact_description(instance) {
+            Some(ArtifactDescription::Described { source, summary }) => ArtifactState::Described {
+                source: Uuid::from_bytes(source),
+                summary,
+            },
+            Some(ArtifactDescription::Unreadable(error)) => ArtifactState::Failed(error),
+            None => {
+                context.request_repaint();
+                ArtifactState::Starting
+            }
+        }
+    })
+}
+
+pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
+    let PreviewSlot {
+        plugin,
+        block_types,
+        client,
+        block_id,
+        block_type,
+        instance,
+        corners,
+        opacity,
+    } = slot;
+    let context = painter.ctx().clone();
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        let Ok(runtime) = host.runtime(plugin, &context) else {
+            return false;
+        };
+        if runtime.error.is_some() {
+            return false;
+        }
+        let rect = egui::Rect::from_points(&corners);
+        let scale_factor = context.pixels_per_point();
+        let pass = runtime.pass;
+        let screen = runtime.instances.report(
+            instance,
+            EditorRegion::Preview,
+            &context,
+            &client,
+            InstanceRole::Editor(EditorBlock {
+                id: block_id,
+                block_type,
+            }),
+            block_types,
+            preview_size(rect.size(), scale_factor),
+            scale_factor,
+            pass,
+        );
+        let Some(atlas_region) = Region::of(
+            &runtime.layout,
+            runtime.surface,
+            screen,
+            Quad {
+                rect,
+                corners,
+                opacity,
+            },
+        ) else {
+            return false;
+        };
+        painter.add(runtime.present(rect, atlas_region));
+        true
+    })
+}
+
+pub(crate) fn poll(_context: &egui::Context) {
+    HOST.with(|host| {
+        for runtime in host.borrow_mut().runtimes.values_mut() {
+            runtime.detect_error();
+            runtime.pump();
+        }
+    });
+}
+
+pub(crate) fn kill(context: &egui::Context, plugin_id: &str) {
+    HOST.with(|host| {
+        host.borrow_mut().shutdown(context, plugin_id);
+    });
+}
+
+pub(crate) fn close(_context: &egui::Context, plugin_id: &str, instance: EditorInstanceId) {
+    with(plugin_id, |runtime| {
+        let messages = runtime
+            .instances
+            .remove(instance)
+            .then(|| vec![Message::Editor(EditorMessage::Close { instance })]);
+        if let Some(messages) = messages {
+            runtime.send(messages);
+        }
+    });
+}
+
+pub(crate) fn artifact_draft(plugin_id: &str, instance: EditorInstanceId) -> Option<Vec<u8>> {
+    with(plugin_id, |runtime| {
+        runtime.instances.artifact_draft(instance)
+    })
+    .flatten()
+}
+
+pub(crate) fn regenerate_artifact(plugin_id: &str, instance: EditorInstanceId, data: &[u8]) {
+    with(plugin_id, |runtime| {
+        let messages = runtime.instances.regenerate_artifact(instance, data);
+        runtime.send(messages);
+    });
+}
+
+pub(crate) fn take_artifact_outcome(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+) -> Option<Result<(), String>> {
+    with(plugin_id, |runtime| {
+        runtime.instances.take_artifact_outcome(instance)
+    })
+    .flatten()
+}
+
+pub(crate) fn region_size(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    region: EditorRegion,
+) -> Option<egui::Vec2> {
+    with(plugin_id, |runtime| {
+        runtime.instances.region_size(instance, region)
+    })
+    .flatten()
+}
+
+pub(crate) fn creation_ready(plugin_id: &str, instance: EditorInstanceId) -> bool {
+    with(plugin_id, |runtime| {
+        runtime.instances.creation_ready(instance)
+    })
+    .unwrap_or_default()
+}
+
+pub(crate) fn commit_creation(plugin_id: &str, instance: EditorInstanceId) {
+    with(plugin_id, |runtime| {
+        let messages = runtime.instances.commit_creation(instance);
+        runtime.send(messages);
+    });
+}
+
+pub(crate) fn take_created(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+) -> Option<Result<Uuid, String>> {
+    with(plugin_id, |runtime| {
+        runtime.instances.take_created(instance)
+    })
+    .flatten()
+}
+
+pub(crate) fn take_view_changes(plugin_id: &str, instance: EditorInstanceId) -> Vec<ViewChange> {
+    with(plugin_id, |runtime| {
+        runtime.instances.take_view_changes(instance)
+    })
+    .unwrap_or_default()
+}
+
+pub(crate) fn aspect_ratio(plugin_id: &str, instance: EditorInstanceId) -> Option<f32> {
+    with(plugin_id, |runtime| {
+        runtime.instances.aspect_ratio(instance)
+    })
+    .flatten()
+}
+
+pub(crate) fn intrinsic_size(plugin_id: &str, instance: EditorInstanceId) -> Option<egui::Vec2> {
+    with(plugin_id, |runtime| {
+        runtime.instances.intrinsic_size(instance)
+    })
+    .flatten()
+}
+
+pub(crate) fn running() -> Vec<RuntimeStatus> {
+    HOST.with(|host| {
+        let host = host.borrow();
+        let mut running: Vec<_> = host
+            .runtimes
+            .iter()
+            .map(|(plugin_id, runtime)| RuntimeStatus {
+                plugin_id: plugin_id.clone(),
+                state: runtime.state(),
+                surface: SurfaceStatus {
+                    index: runtime.surface,
+                    generation: runtime.layout.generation,
+                    width: runtime.layout.width,
+                    height: runtime.layout.height,
+                    placements: runtime.layout.screens.len(),
+                },
+                pass: runtime.pass,
+                uptime: runtime.backend.uptime(),
+                instances: runtime.instances.statuses(&runtime.layout, runtime.pass),
+            })
+            .collect();
+        running.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+        running
+    })
+}
+
+pub(super) fn with<R>(plugin_id: &str, act: impl FnOnce(&mut Runtime) -> R) -> Option<R> {
+    HOST.with(|host| Some(act(host.borrow_mut().runtimes.get_mut(plugin_id)?)))
+}

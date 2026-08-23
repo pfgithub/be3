@@ -1,90 +1,45 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::time::Duration;
 
-use block_plugin_api::{
-    ArtifactDescription, EditorInstanceId, EditorRegion, Message, PluginManifest,
-};
+use block_plugin_api::{Message, PluginManifest, ScreenLayout};
 use eframe::egui;
-use uuid::Uuid;
 use wasm_bindgen::JsCast;
 
 mod adapter;
 pub(super) mod renderer;
 
-use super::{
-    core::{select_surface, RuntimeCore, SurfaceSelection},
-    presenter::{PresenterCallback, PresenterCommand, PresenterState, Quad, Region},
-    preview_size, ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock,
-    EditorSlot, InstanceRole, PreviewSlot,
-};
+use super::runtime::{self, Backend, Update};
 use adapter::WebProtocolAdapter;
 
-thread_local! {
-    static STATE: RefCell<State> = RefCell::new(State::default());
-}
+const RENDERER_REQUIRED: &str = "wgpu is not available in this build.";
+const REPAINT_SLACK_MILLISECONDS: f64 = 2.0;
 
-#[derive(Default)]
-struct State {
-    render_available: bool,
-    runtimes: HashMap<String, Runtime>,
-}
-
-impl State {
-    fn surface_for(&mut self, plugin_id: &str, context: &egui::Context) -> Option<u32> {
-        match select_surface(
-            plugin_id,
-            self.runtimes
-                .iter()
-                .map(|(id, runtime)| (id, &runtime.core)),
-        )? {
-            SurfaceSelection::Selected(surface) => Some(surface),
-            SurfaceSelection::Evict(id) => self.shutdown(context, &id),
-        }
-    }
-
-    fn shutdown(&mut self, context: &egui::Context, plugin_id: &str) -> Option<u32> {
-        let mut runtime = self.runtimes.remove(plugin_id)?;
-        if let Some(mut adapter) = runtime.adapter.take() {
-            adapter.shutdown();
-        }
-        if !runtime.starting {
-            remove_canvas(&runtime.canvas_id);
-        }
-        context
-            .debug_painter()
-            .add(eframe::egui_wgpu::Callback::new_paint_callback(
-                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
-                PresenterCallback::<renderer::WebFrame> {
-                    command: PresenterCommand::Release,
-                    status: runtime.status.clone(),
-                    region: Region {
-                        surface: runtime.surface,
-                        ..Region::default()
-                    },
-                },
-            ));
-        Some(runtime.surface)
-    }
-}
-
-struct Runtime {
-    core: RuntimeCore,
+pub(super) struct Web {
     plugin_id: String,
     canvas_id: String,
     url: String,
-    open: bool,
-    starting: bool,
     adapter: Option<WebProtocolAdapter>,
+    start: u64,
+    starting: bool,
+    started: f64,
     error: Option<String>,
-    context: Option<egui::Context>,
+    pending: Vec<Message>,
     dirty: bool,
     rendered_pass: u64,
     repaint_at: Option<f64>,
 }
 
-impl Runtime {
-    fn new(plugin: &PluginManifest, surface: u32) -> Self {
+impl Backend for Web {
+    type Frame = renderer::WebFrame;
+
+    fn install(creation_context: &eframe::CreationContext<'_>) -> Result<(), String> {
+        match renderer::install(creation_context) {
+            true => Ok(()),
+            false => Err(RENDERER_REQUIRED.to_owned()),
+        }
+    }
+
+    fn new(plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self {
-            core: RuntimeCore::new(surface),
             plugin_id: plugin.identity.id.clone(),
             canvas_id: format!("plugin-canvas-{}", plugin.identity.id),
             url: plugin
@@ -95,638 +50,192 @@ impl Runtime {
                     crate::editors::plugin::discovery::entry_point(&plugin.identity.id, entry)
                 })
                 .unwrap_or_default(),
-            open: false,
-            starting: false,
             adapter: None,
+            start: 0,
+            starting: false,
+            started: now(),
             error: None,
-            context: None,
+            pending: Vec::new(),
             dirty: false,
             rendered_pass: u64::MAX,
             repaint_at: None,
         }
     }
 
+    fn start(&mut self, _plugin: &PluginManifest, context: &egui::Context) {
+        if let Some(mut adapter) = self.adapter.take() {
+            adapter.shutdown();
+        }
+        self.start += 1;
+        self.starting = true;
+        self.started = now();
+        self.error = None;
+        self.pending.clear();
+        create_canvas(&self.canvas_id);
+        let start = self.start;
+        let plugin_id = self.plugin_id.clone();
+        let canvas_id = self.canvas_id.clone();
+        let url = self.url.clone();
+        let context = context.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let mut result = Some(WebProtocolAdapter::start(url, canvas_id.clone()).await);
+            runtime::with(&plugin_id, |runtime| {
+                runtime.backend.attach(start, &mut result);
+            });
+            if let Some(result) = result {
+                if let Ok(mut adapter) = result {
+                    adapter.shutdown();
+                }
+                remove_canvas(&canvas_id);
+            }
+            context.request_repaint();
+        });
+    }
+
     fn send(&mut self, messages: Vec<Message>) {
-        if messages.is_empty() {
+        if self.adapter.is_none() {
+            if self.starting {
+                self.pending.extend(messages);
+            }
             return;
         }
-        let Some(adapter) = &mut self.adapter else {
-            return;
-        };
         self.dirty = true;
-        if let Err(error) = adapter.send(messages) {
+        if let Err(error) = self.adapter.as_mut().unwrap().send(messages) {
             self.error = Some(error);
         }
     }
 
-    fn take_output(&mut self) -> bool {
+    fn poll(&mut self, _context: &egui::Context) -> Update {
         let Some(adapter) = &mut self.adapter else {
-            return false;
+            return Update::default();
         };
-        let client_messages = adapter.take_client_messages();
-        let editor_messages = adapter.take_editor_messages();
-        let region_sizes = adapter.take_region_sizes();
-        let layout = adapter.take_layout();
-        let received = !client_messages.is_empty()
-            || !editor_messages.is_empty()
-            || !region_sizes.is_empty()
-            || layout.is_some();
-        if let Some(layout) = layout {
-            self.layout = layout;
-        }
-        for message in client_messages {
-            self.instances.client_message(message);
-        }
-        for message in editor_messages {
-            self.instances.editor_message(message);
-        }
-        self.instances.set_region_sizes(region_sizes);
-        received
-    }
-}
-
-impl std::ops::Deref for Runtime {
-    type Target = RuntimeCore;
-
-    fn deref(&self) -> &Self::Target {
-        &self.core
-    }
-}
-
-impl std::ops::DerefMut for Runtime {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.core
-    }
-}
-
-pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
-    let render_available = renderer::install(creation_context);
-    STATE.with(|state| {
-        state.borrow_mut().render_available = render_available;
-    });
-}
-
-fn open(plugin: &PluginManifest, context: &egui::Context) {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if !state.render_available {
-            return;
-        }
-        let Some(surface) = state.surface_for(&plugin.identity.id, context) else {
-            return;
-        };
-        let plugin_id = plugin.identity.id.clone();
-        let runtime = state
-            .runtimes
-            .entry(plugin_id.clone())
-            .or_insert_with(|| Runtime::new(plugin, surface));
-        runtime.open = true;
-        if runtime.starting || runtime.adapter.is_some() {
-            return;
-        }
-        runtime.starting = true;
-        let canvas_id = runtime.canvas_id.clone();
-        let url = runtime.url.clone();
-        create_canvas(&canvas_id);
-        wasm_bindgen_futures::spawn_local(async move {
-            let result = WebProtocolAdapter::start(url, canvas_id.clone()).await;
-            STATE.with(|state| {
-                let mut state = state.borrow_mut();
-                let Some(runtime) = state.runtimes.get_mut(&plugin_id) else {
-                    if let Ok(mut adapter) = result {
-                        adapter.shutdown();
-                    }
-                    remove_canvas(&canvas_id);
-                    return;
-                };
-                runtime.starting = false;
-                match result {
-                    Ok(adapter) if runtime.open => runtime.adapter = Some(adapter),
-                    Ok(mut adapter) => {
-                        adapter.shutdown();
-                        remove_canvas(&canvas_id);
-                    }
-                    Err(error) => {
-                        runtime.error = Some(error);
-                        remove_canvas(&canvas_id);
-                    }
-                }
-                if let Some(context) = &runtime.context {
-                    context.request_repaint();
-                }
-            });
-        });
-    });
-}
-
-pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid, Uuid)> {
-    let EditorSlot {
-        plugin,
-        block_types,
-        client,
-        role,
-        instance,
-        region,
-        size,
-        view,
-    } = slot;
-    open(plugin, ui.ctx());
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if !state.render_available {
-            ui.colored_label(
-                egui::Color32::RED,
-                "wgpu is not available in this build.".to_owned(),
-            );
-            return None;
-        }
-        let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
-            ui.colored_label(
-                egui::Color32::RED,
-                "Too many plugin runtimes are already presenting.",
-            );
-            return None;
-        };
-        runtime.context = Some(ui.ctx().clone());
-        begin_pass(runtime, ui.ctx(), ui.ctx().cumulative_pass_nr());
-        let presenter_error = match runtime.status.get() {
-            PresenterState::Unsupported(error) | PresenterState::Failed(error) => Some(error),
-            _ => None,
-        };
-        let error = runtime.error.clone().or(presenter_error);
-        if let Some(error) = &error {
-            ui.colored_label(egui::Color32::RED, error);
-            if ui.button("Retry").clicked() {
-                runtime.error = None;
-                runtime.open = false;
-            }
-            return None;
-        }
-        let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
-        let pass = runtime.pass;
-        let screen = runtime.instances.report(
-            instance,
-            region,
-            ui.ctx(),
-            &client,
-            role,
-            block_types,
-            response.rect.size(),
-            ui.ctx().pixels_per_point(),
-            pass,
-        );
-        if let Some(view) = view {
-            runtime.instances.set_view(instance, view);
-        }
-        let messages = runtime.instances.input(instance, region, |input| {
-            input.update(ui, &response, screen)
-        });
-        runtime.send(messages);
-        let drag = super::input::block_drag(&response);
-        let hovering = drag.as_ref().is_some_and(|drag| !drag.dropped);
-        let messages = runtime.instances.drag(instance, region, drag);
-        runtime.send(messages);
-        if hovering && runtime.instances.drag_accepted(instance) {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
-        } else if response.hovered() {
-            if let Some(cursor) = runtime.instances.cursor(instance, region) {
-                ui.ctx().set_cursor_icon(cursor);
-            }
-        }
-        let open_request = runtime.instances.take_open(instance);
-        let Some(atlas_region) = Region::of(
-            &runtime.layout,
-            runtime.surface,
-            screen,
-            Quad::upright(response.rect),
-        ) else {
-            return open_request;
-        };
-        painter.add(present(runtime, response.rect, atlas_region, pass));
-        open_request
-    })
-}
-
-pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> CreationState {
-    let CreationSlot {
-        plugin,
-        block_types,
-        client,
-        instance,
-    } = slot;
-    open(plugin, context);
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if !state.render_available {
-            return CreationState::Failed("wgpu is not available in this build.".to_owned());
-        }
-        let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
-            return CreationState::Failed(
-                "Too many plugin runtimes are already presenting.".to_owned(),
-            );
-        };
-        runtime.context = Some(context.clone());
-        begin_pass(runtime, context, context.cumulative_pass_nr());
-        if let Some(error) = runtime.error.clone() {
-            return CreationState::Failed(error);
-        }
-        context.request_repaint();
-        match runtime
-            .instances
-            .report_creation(instance, context, &client, block_types)
-        {
-            true => CreationState::Ready,
-            false => CreationState::Starting,
-        }
-    })
-}
-
-pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> ArtifactState {
-    let ArtifactSlot {
-        plugin,
-        block_types,
-        client,
-        instance,
-        block,
-        data,
-        resync,
-    } = slot;
-    open(plugin, context);
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if !state.render_available {
-            return ArtifactState::Failed("wgpu is not available in this build.".to_owned());
-        }
-        let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
-            return ArtifactState::Failed(
-                "Too many plugin runtimes are already presenting.".to_owned(),
-            );
-        };
-        runtime.context = Some(context.clone());
-        begin_pass(runtime, context, context.cumulative_pass_nr());
-        if let Some(error) = runtime.error.clone() {
-            return ArtifactState::Failed(error);
-        }
-        let messages = runtime.instances.report_artifact(
-            instance,
-            context,
-            &client,
-            block_types,
-            block,
-            data,
-            resync,
-        );
-        runtime.send(messages);
-        match runtime.instances.artifact_description(instance) {
-            Some(ArtifactDescription::Described { source, summary }) => ArtifactState::Described {
-                source: Uuid::from_bytes(source),
-                summary,
-            },
-            Some(ArtifactDescription::Unreadable(error)) => ArtifactState::Failed(error),
-            None => {
-                context.request_repaint();
-                ArtifactState::Starting
-            }
-        }
-    })
-}
-
-pub(crate) fn artifact_draft(plugin_id: &str, instance: EditorInstanceId) -> Option<Vec<u8>> {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .runtimes
-            .get(plugin_id)?
-            .instances
-            .artifact_draft(instance)
-    })
-}
-
-pub(crate) fn regenerate_artifact(plugin_id: &str, instance: EditorInstanceId, data: &[u8]) {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
-            return;
-        };
-        let messages = runtime.instances.regenerate_artifact(instance, data);
-        runtime.send(messages);
-    });
-}
-
-pub(crate) fn take_artifact_outcome(
-    plugin_id: &str,
-    instance: EditorInstanceId,
-) -> Option<Result<(), String>> {
-    STATE.with(|state| {
-        state
-            .borrow_mut()
-            .runtimes
-            .get_mut(plugin_id)?
-            .instances
-            .take_artifact_outcome(instance)
-    })
-}
-
-pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
-    let PreviewSlot {
-        plugin,
-        block_types,
-        client,
-        block_id,
-        block_type,
-        instance,
-        corners,
-        opacity,
-    } = slot;
-    open(plugin, painter.ctx());
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if !state.render_available {
-            return false;
-        }
-        let Some(runtime) = state.runtimes.get_mut(&plugin.identity.id) else {
-            return false;
-        };
-        let context = painter.ctx().clone();
-        runtime.context = Some(context.clone());
-        begin_pass(runtime, &context, context.cumulative_pass_nr());
-        if runtime.error.is_some() {
-            return false;
-        }
-        let rect = egui::Rect::from_points(&corners);
-        let scale_factor = context.pixels_per_point();
-        let pass = runtime.pass;
-        let screen = runtime.instances.report(
-            instance,
-            EditorRegion::Preview,
-            &context,
-            &client,
-            InstanceRole::Editor(EditorBlock {
-                id: block_id,
-                block_type,
-            }),
-            block_types,
-            preview_size(rect.size(), scale_factor),
-            scale_factor,
-            pass,
-        );
-        let Some(atlas_region) = Region::of(
-            &runtime.layout,
-            runtime.surface,
-            screen,
-            Quad {
-                rect,
-                corners,
-                opacity,
-            },
-        ) else {
-            return false;
-        };
-        painter.add(present(runtime, rect, atlas_region, pass));
-        true
-    })
-}
-
-fn present(
-    runtime: &Runtime,
-    rect: egui::Rect,
-    region: Region,
-    pass: u64,
-) -> egui::epaint::PaintCallback {
-    eframe::egui_wgpu::Callback::new_paint_callback(
-        rect,
-        PresenterCallback {
-            command: PresenterCommand::Present(renderer::WebFrame {
-                size: [runtime.layout.width, runtime.layout.height],
-                canvas_id: runtime.canvas_id.clone(),
-                plugin_id: runtime.plugin_id.clone(),
-                pass,
-            }),
-            status: runtime.status.clone(),
-            region,
-        },
-    )
-}
-
-pub(crate) fn region_size(
-    plugin_id: &str,
-    instance: EditorInstanceId,
-    region: EditorRegion,
-) -> Option<egui::Vec2> {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .runtimes
-            .get(plugin_id)?
-            .region_size(instance, region)
-    })
-}
-
-pub(crate) fn creation_ready(plugin_id: &str, instance: EditorInstanceId) -> bool {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .runtimes
-            .get(plugin_id)
-            .is_some_and(|runtime| runtime.creation_ready(instance))
-    })
-}
-
-pub(crate) fn commit_creation(plugin_id: &str, instance: EditorInstanceId) {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
-            return;
-        };
-        let messages = runtime.instances.commit_creation(instance);
-        runtime.send(messages);
-    });
-}
-
-pub(crate) fn take_view_changes(
-    plugin_id: &str,
-    instance: EditorInstanceId,
-) -> Vec<block_plugin_api::ViewChange> {
-    STATE.with(|state| {
-        state
-            .borrow_mut()
-            .runtimes
-            .get_mut(plugin_id)
-            .map(|runtime| runtime.instances.take_view_changes(instance))
-            .unwrap_or_default()
-    })
-}
-
-pub(crate) fn take_created(
-    plugin_id: &str,
-    instance: EditorInstanceId,
-) -> Option<Result<Uuid, String>> {
-    STATE.with(|state| {
-        state
-            .borrow_mut()
-            .runtimes
-            .get_mut(plugin_id)?
-            .instances
-            .take_created(instance)
-    })
-}
-
-pub(crate) fn aspect_ratio(plugin_id: &str, instance: EditorInstanceId) -> Option<f32> {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .runtimes
-            .get(plugin_id)?
-            .aspect_ratio(instance)
-    })
-}
-
-pub(crate) fn intrinsic_size(plugin_id: &str, instance: EditorInstanceId) -> Option<egui::Vec2> {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .runtimes
-            .get(plugin_id)?
-            .intrinsic_size(instance)
-    })
-}
-
-pub(crate) fn close(_ctx: &egui::Context, plugin_id: &str, instance: EditorInstanceId) {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
-            return;
-        };
-        if let Some(messages) = runtime.close(instance) {
-            runtime.send(messages);
-        }
-    });
-}
-
-pub(crate) fn running() -> Vec<super::RuntimeStatus> {
-    STATE.with(|state| {
-        let state = state.borrow();
-        let mut running: Vec<_> = state
-            .runtimes
-            .iter()
-            .map(|(plugin_id, runtime)| super::RuntimeStatus {
-                plugin_id: plugin_id.clone(),
-                surface: runtime.surface_status(),
-                pass: runtime.pass,
-                uptime: None,
-                state: match (&runtime.error, runtime.adapter.is_some()) {
-                    (Some(error), _) => error.clone(),
-                    (None, true) => "running".to_owned(),
-                    (None, false) => "starting".to_owned(),
-                },
-                instances: runtime.statuses(),
-            })
-            .collect();
-        running.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
-        running
-    })
-}
-
-pub(crate) fn kill(ctx: &egui::Context, plugin_id: &str) {
-    STATE.with(|state| {
-        state.borrow_mut().shutdown(ctx, plugin_id);
-    });
-}
-
-fn begin_pass(runtime: &mut Runtime, context: &egui::Context, pass: u64) {
-    let Some((messages, awaited)) = runtime.core.begin_pass(pass) else {
-        return;
-    };
-    if runtime.adapter.is_none() {
-        return;
-    }
-    runtime.send(messages);
-    if awaited {
-        context.request_repaint();
-    }
-    pump_client(runtime, context);
-}
-
-pub(crate) fn poll(context: &egui::Context) {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        for runtime in state.runtimes.values_mut() {
-            pump_client(runtime, context);
-        }
-    });
-}
-
-fn pump_client(runtime: &mut Runtime, context: &egui::Context) {
-    if runtime.adapter.is_none() {
-        return;
-    }
-    let responses = runtime.instances.client_responses();
-    let awaited = !responses.is_empty();
-    runtime.send(responses);
-    if let Some(adapter) = &mut runtime.adapter {
         if let Err(error) = adapter.poll() {
-            runtime.error = Some(error);
+            self.error = Some(error);
+            return Update::default();
+        }
+        self.take_output()
+    }
+
+    fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Self::Frame {
+        renderer::WebFrame {
+            size: [layout.width, layout.height],
+            canvas_id: self.canvas_id.clone(),
+            plugin_id: self.plugin_id.clone(),
+            pass,
         }
     }
-    let received = runtime.take_output();
-    if awaited || received {
-        context.request_repaint();
+
+    fn take_error(&mut self) -> Option<String> {
+        self.error.take()
+    }
+
+    fn state(&self) -> &'static str {
+        match (self.adapter.is_some(), self.starting) {
+            (true, _) => "running",
+            (false, true) => "starting",
+            (false, false) => "stopped",
+        }
+    }
+
+    fn uptime(&self) -> Option<Duration> {
+        (self.adapter.is_some() || self.starting)
+            .then(|| Duration::from_secs_f64((now() - self.started).max(0.0) / 1000.0))
+    }
+
+    fn shutdown(&mut self) {
+        if let Some(mut adapter) = self.adapter.take() {
+            adapter.shutdown();
+        }
+        if !self.starting {
+            remove_canvas(&self.canvas_id);
+        }
     }
 }
 
-pub(super) fn render(plugin_id: &str, pass: u64) -> bool {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
-            return false;
-        };
-        if runtime.rendered_pass == pass || runtime.adapter.is_none() {
-            return false;
+impl Web {
+    /// Takes the adapter a pending start produced, unless the runtime was
+    /// restarted while it was loading. What is left in `result` belongs to
+    /// nobody and is shut down by the caller.
+    fn attach(&mut self, start: u64, result: &mut Option<Result<WebProtocolAdapter, String>>) {
+        if start != self.start || !self.starting {
+            return;
         }
-        runtime.rendered_pass = pass;
-        let due = match runtime.repaint_at {
+        self.starting = false;
+        match result.take() {
+            Some(Ok(adapter)) => {
+                self.adapter = Some(adapter);
+                let pending = std::mem::take(&mut self.pending);
+                self.send(pending);
+            }
+            Some(Err(error)) => {
+                self.error = Some(error);
+                remove_canvas(&self.canvas_id);
+            }
+            None => {}
+        }
+    }
+
+    fn take_output(&mut self) -> Update {
+        let Some(adapter) = &mut self.adapter else {
+            return Update::default();
+        };
+        Update {
+            layout: adapter.take_layout(),
+            client: adapter.take_client_messages(),
+            editor: adapter.take_editor_messages(),
+            sizes: adapter.take_region_sizes(),
+        }
+    }
+
+    /// Runs the plugin's own frame, once per host pass, when something it was
+    /// told about changed or when it asked to be woken up again.
+    fn draw(&mut self, pass: u64, context: &egui::Context) -> (bool, Update) {
+        if self.rendered_pass == pass || self.adapter.is_none() {
+            return (false, Update::default());
+        }
+        self.rendered_pass = pass;
+        let due = match self.repaint_at {
             Some(deadline) if deadline <= now() + REPAINT_SLACK_MILLISECONDS => true,
             Some(deadline) => {
-                if let Some(context) = &runtime.context {
-                    context.request_repaint_after(std::time::Duration::from_secs_f64(
-                        (deadline - now()) / 1000.0,
-                    ));
-                }
+                context.request_repaint_after(Duration::from_secs_f64(
+                    (deadline - now()).max(0.0) / 1000.0,
+                ));
                 false
             }
             None => false,
         };
-        if !runtime.dirty && !due {
-            return false;
+        if !self.dirty && !due {
+            return (false, Update::default());
         }
-        runtime.dirty = false;
-        runtime.repaint_at = None;
-        let repaint = match runtime.adapter.as_mut().unwrap().render() {
-            Ok(repaint) => repaint,
-            Err(error) => {
-                runtime.error = Some(error);
-                if let Some(context) = &runtime.context {
-                    context.request_repaint();
-                }
-                return false;
+        self.dirty = false;
+        self.repaint_at = None;
+        match self.adapter.as_mut().unwrap().render() {
+            Ok(Some(delay)) => {
+                self.repaint_at = Some(now() + delay.as_secs_f64() * 1000.0);
+                context.request_repaint_after(delay);
             }
-        };
-        let received = runtime.take_output();
-        let Some(context) = runtime.context.clone() else {
-            return true;
-        };
-        if received {
-            context.request_repaint();
+            Ok(None) => {}
+            Err(error) => {
+                self.error = Some(error);
+                context.request_repaint();
+                return (false, Update::default());
+            }
         }
-        if let Some(delay) = repaint {
-            runtime.repaint_at = Some(now() + delay.as_secs_f64() * 1000.0);
-            context.request_repaint_after(delay);
-        }
-        true
-    })
+        (true, self.take_output())
+    }
 }
 
-const REPAINT_SLACK_MILLISECONDS: f64 = 2.0;
+/// Called while the presenter prepares its copy of the plugin's canvas, to
+/// give the plugin the chance to draw the frame that is about to be copied.
+pub(super) fn render(plugin_id: &str, pass: u64) -> bool {
+    runtime::with(plugin_id, |runtime| {
+        let context = runtime.context.clone();
+        let (painted, update) = runtime.backend.draw(pass, &context);
+        runtime.apply(update);
+        painted
+    })
+    .unwrap_or_default()
+}
 
 fn now() -> f64 {
     web_sys::window()

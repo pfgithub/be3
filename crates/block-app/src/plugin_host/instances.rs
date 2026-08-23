@@ -261,6 +261,16 @@ impl Instances {
         self.entries.get_mut(&instance)?.artifact.outcome.take()
     }
 
+    /// Forgets what a runtime was told, so that a restarted one is sent the
+    /// block types and open instances it knows nothing about again.
+    pub(super) fn reopen(&mut self) {
+        self.sent_block_types = false;
+        for entry in self.entries.values_mut() {
+            entry.opened = false;
+            entry.reported_view = None;
+        }
+    }
+
     pub(super) fn next_screens(&mut self, pass: u64) -> NextScreens {
         let client = self
             .connection

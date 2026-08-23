@@ -64,7 +64,7 @@ capabilities.pan_and_zoom means the editor's content has a view of its own rathe
 
 A manifest is untrusted input, so a bad one is skipped and reported in the Plugins debug window rather than crashing the app.
 
-The host discovers plugins in plugins/<plugin id>/ beside its executable and in a per-user plugins directory, from plugins/index.json on the web, and from the same layout mirrored into assets on Android. Registration is not gated by platform: a plugin host exists for wasm, Windows and Linux, and platforms without one (plugin_host/unavailable.rs) still open the block, drawing an error in place of the plugin's surface. Creating one there fails with that error instead, since only the plugin makes its blocks.
+The host discovers plugins in plugins/<plugin id>/ beside its executable and in a per-user plugins directory, from plugins/index.json on the web, and from the same layout mirrored into assets on Android. Registration is not gated by platform: a plugin host exists for wasm, Windows and Linux, and platforms without one (plugin_host/unavailable.rs) still open the block, drawing an error in place of the plugin's surface. Creating one there fails with that error instead, since only the plugin makes its blocks. Every platform runs the same host: plugin_host/runtime.rs owns the runtimes, the instances they show, input, errors and restarting, and a platform only implements its Backend - starting a runtime, exchanging messages with it, and handing over the frame it drew.
 
 4. Extending the protocol
 

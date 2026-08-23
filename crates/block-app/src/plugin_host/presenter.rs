@@ -1,3 +1,8 @@
+#![cfg_attr(
+    not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")),
+    allow(dead_code)
+)]
+
 use std::sync::{Arc, Mutex};
 
 use eframe::{
@@ -238,7 +243,7 @@ pub(super) struct PresenterCallback<Frame> {
 impl<Frame> egui_wgpu::CallbackTrait for PresenterCallback<Frame>
 where
     Frame: Send + Sync + 'static,
-    WebSurfacePresenter: SurfacePresenter<Frame = Frame>,
+    Presenter: SurfacePresenter<Frame = Frame>,
 {
     fn prepare(
         &self,
@@ -248,7 +253,7 @@ where
         _egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let Some(presenter) = resources.get_mut::<WebSurfacePresenter>() else {
+        let Some(presenter) = resources.get_mut::<Presenter>() else {
             self.status.set(PresenterState::Unsupported(
                 "The active renderer has no plugin surface presenter.".to_owned(),
             ));
@@ -282,7 +287,7 @@ where
         resources: &egui_wgpu::CallbackResources,
     ) {
         if matches!(self.command, PresenterCommand::Present(_)) {
-            if let Some(presenter) = resources.get::<WebSurfacePresenter>() {
+            if let Some(presenter) = resources.get::<Presenter>() {
                 presenter.paint(render_pass, self.region.surface, self.region.slot);
             }
         }
@@ -290,8 +295,10 @@ where
 }
 
 #[cfg(target_os = "linux")]
-pub(super) use super::linux::LinuxSurfacePresenter as WebSurfacePresenter;
+pub(super) use super::linux::LinuxSurfacePresenter as Presenter;
+#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
+pub(super) use super::unavailable::UnavailablePresenter as Presenter;
 #[cfg(target_arch = "wasm32")]
-pub(super) use super::web::renderer::WebSurfacePresenter;
+pub(super) use super::web::renderer::WebSurfacePresenter as Presenter;
 #[cfg(target_os = "windows")]
-pub(super) use super::windows::WindowsSurfacePresenter as WebSurfacePresenter;
+pub(super) use super::windows::WindowsSurfacePresenter as Presenter;
