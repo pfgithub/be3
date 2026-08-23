@@ -111,6 +111,13 @@ impl DirectEditorResize {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectEditorViewportInput {
+    Background,
+    Viewport,
+    Editor,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum DirectEditorViewportCommand {
     Pan(egui::Vec2),
@@ -140,6 +147,10 @@ impl DirectEditorViewport {
 
     pub fn zoom(&self) -> f32 {
         self.zoom
+    }
+
+    pub fn push(&mut self, command: DirectEditorViewportCommand) {
+        self.commands.push(command);
     }
 
     pub fn pan(&mut self, delta: egui::Vec2) {
@@ -295,19 +306,27 @@ pub fn embedded_editor_ui(
     scale: f32,
     viewport: &mut DirectEditorViewport,
 ) -> Option<EditorAction> {
-    ui.new_child(
-        egui::UiBuilder::new()
-            .id_salt(id_salt)
-            .max_rect(rect)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    )
-    .scope(|ui| {
-        ui.set_clip_rect(clip_rect.intersect(ui.clip_rect()));
-        ui.set_max_size(rect.size());
-        ui.set_min_size(rect.size());
-        editors.embedded_direct_editor_ui(block_id, ui, scale, viewport)
-    })
-    .inner
+    let input = editors.direct_editor_viewport_input(block_id);
+    let previous = viewport.replace_content_rect(Some(rect));
+    let action = ui
+        .new_child(
+            egui::UiBuilder::new()
+                .id_salt(id_salt)
+                .max_rect(rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        )
+        .scope(|ui| {
+            ui.set_clip_rect(clip_rect.intersect(ui.clip_rect()));
+            ui.set_max_size(rect.size());
+            ui.set_min_size(rect.size());
+            editors.embedded_direct_editor_ui(block_id, ui, scale, viewport)
+        })
+        .inner;
+    viewport.replace_content_rect(previous);
+    if input == DirectEditorViewportInput::Viewport {
+        viewport_gesture_input(ui.ctx(), rect.intersect(clip_rect), None, viewport);
+    }
+    action
 }
 
 impl<'a> EditorAccess<'a> {
@@ -450,10 +469,11 @@ impl<'a> EditorAccess<'a> {
             .map(|editor| editor.direct_editor_resize())
     }
 
-    pub fn direct_editor_handles_viewport_input(&self, id: Uuid) -> bool {
+    pub fn direct_editor_viewport_input(&self, id: Uuid) -> DirectEditorViewportInput {
         self.editors
             .get(&id)
-            .is_some_and(|editor| editor.direct_editor_handles_viewport_input(self))
+            .map(|editor| editor.direct_editor_viewport_input(self))
+            .unwrap_or(DirectEditorViewportInput::Background)
     }
 
     pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
@@ -651,8 +671,11 @@ pub trait BlockEditor {
     fn direct_editor_max_zoom(&self) -> f32 {
         DIRECT_EDITOR_MAX_ZOOM
     }
-    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
-        false
+    fn direct_editor_viewport_input(
+        &self,
+        _editors: &EditorAccess<'_>,
+    ) -> DirectEditorViewportInput {
+        DirectEditorViewportInput::Background
     }
     fn direct_editor_intrinsic_size(
         &mut self,
@@ -850,8 +873,10 @@ pub fn direct_editor_tab_ui(
         // A read-only editor answers no input, so the tab drives the viewport
         // for it. Editors read the content rect back, so panning and zooming
         // still reach the ones that normally steer it themselves.
-        let handles_viewport_input =
-            !read_only && editor.direct_editor_handles_viewport_input(editors);
+        let mut viewport_input = editor.direct_editor_viewport_input(editors);
+        if read_only && viewport_input == DirectEditorViewportInput::Editor {
+            viewport_input = DirectEditorViewportInput::Background;
+        }
         let editor_rect = if fills_viewport {
             viewport_rect
         } else {
@@ -876,17 +901,16 @@ pub fn direct_editor_tab_ui(
             action = next_action;
         }
 
-        if !handles_viewport_input
-            && handle_direct_editor_background_input(
+        match viewport_input {
+            DirectEditorViewportInput::Editor => {}
+            DirectEditorViewportInput::Background => viewport_gesture_input(
                 ui.ctx(),
                 viewport_rect,
                 (!read_only).then_some(content_rect),
-                &mut viewport_state,
-                max_zoom,
-            )
-        {
-            if let Some(auto_fit) = &mut viewport_state.auto_fit {
-                auto_fit.enabled = false;
+                &mut viewport,
+            ),
+            DirectEditorViewportInput::Viewport => {
+                viewport_gesture_input(ui.ctx(), viewport_rect, None, &mut viewport)
             }
         }
 
@@ -968,21 +992,18 @@ pub fn direct_editor_tab_ui(
     action
 }
 
-/// Pans and zooms the tab viewport. `content_rect` is the area the editor
-/// steers itself, which is left out; a read-only editor steers nothing and
-/// passes `None`.
-fn handle_direct_editor_background_input(
+/// Turns the gestures a host answers for an editor into viewport commands.
+/// `steered` is the area the editor steers itself, which is left out.
+fn viewport_gesture_input(
     context: &egui::Context,
     viewport_rect: egui::Rect,
-    content_rect: Option<egui::Rect>,
-    viewport: &mut DirectEditorTabViewport,
-    max_zoom: f32,
-) -> bool {
+    steered: Option<egui::Rect>,
+    viewport: &mut DirectEditorViewport,
+) {
     let Some(pointer) = context.pointer_hover_pos().filter(|pointer| {
-        viewport_rect.contains(*pointer)
-            && !content_rect.is_some_and(|content| content.contains(*pointer))
+        viewport_rect.contains(*pointer) && !steered.is_some_and(|rect| rect.contains(*pointer))
     }) else {
-        return false;
+        return;
     };
     let (scroll, zoom_delta, command, panning, delta) = context.input(|input| {
         (
@@ -996,27 +1017,16 @@ fn handle_direct_editor_background_input(
         )
     });
     if panning {
-        viewport.pan += delta;
+        context.set_cursor_icon(egui::CursorIcon::Grabbing);
+        viewport.pan(delta);
     }
-    let zoom_factor = if (zoom_delta - 1.0).abs() > f32::EPSILON {
-        Some(zoom_delta)
+    if (zoom_delta - 1.0).abs() > f32::EPSILON {
+        viewport.change_zoom(zoom_delta, Some(pointer));
     } else if command && scroll.y != 0.0 {
-        Some((scroll.y * 0.002).exp())
-    } else {
-        None
-    };
-    if let Some(zoom_factor) = zoom_factor {
-        let old_zoom = viewport.zoom;
-        let new_zoom = (old_zoom * zoom_factor).clamp(DIRECT_EDITOR_MIN_ZOOM, max_zoom);
-        if new_zoom != old_zoom {
-            viewport.pan = (pointer - viewport_rect.center())
-                - ((pointer - viewport_rect.center()) - viewport.pan) * (new_zoom / old_zoom);
-            viewport.zoom = new_zoom;
-        }
+        viewport.change_zoom((scroll.y * 0.002).exp(), Some(pointer));
     } else if scroll != egui::Vec2::ZERO {
-        viewport.pan += scroll;
+        viewport.pan(scroll);
     }
-    panning || zoom_factor.is_some() || scroll != egui::Vec2::ZERO
 }
 
 fn fit_direct_editor_viewport(

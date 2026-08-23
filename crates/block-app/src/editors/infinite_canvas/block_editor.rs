@@ -101,8 +101,11 @@ impl BlockEditor for InfiniteCanvasEditor {
         true
     }
 
-    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
-        true
+    fn direct_editor_viewport_input(
+        &self,
+        _editors: &EditorAccess<'_>,
+    ) -> DirectEditorViewportInput {
+        DirectEditorViewportInput::Editor
     }
 
     fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
@@ -160,9 +163,11 @@ impl BlockEditor for InfiniteCanvasEditor {
                     self.focused_editor = None;
                 }
             });
-            if self.focused_editor.is_some() {
+            if let Some(entity_id) = self.focused_editor {
                 if let Some(id) = self.resolve_block_id(editors, block_id) {
-                    action = editors.direct_editor_top_bar(id, ui, viewport);
+                    let mut nested = DirectEditorViewport::new(viewport.zoom());
+                    action = editors.direct_editor_top_bar(id, ui, &mut nested);
+                    self.forward_viewport(entity_id, nested, viewport);
                 }
             }
         } else {
@@ -298,22 +303,33 @@ impl BlockEditor for InfiniteCanvasEditor {
         self.viewport_center = self.screen_to_world(canvas_clip_rect.center(), canvas_rect);
         if std::mem::take(&mut self.fit_selection_requested) {
             if let Some(bounds) = self.selected_bounds(&entities) {
-                let selection = screen_rect(self, bounds, canvas_rect);
-                let available = (canvas_clip_rect.size() - Vec2::splat(40.0)).max(Vec2::splat(1.0));
-                let factor = (available.x / selection.width().max(1.0))
-                    .min(available.y / selection.height().max(1.0));
-                viewport.change_zoom(factor, Some(selection.center()));
-                viewport.pan(canvas_clip_rect.center() - selection.center());
+                fit_into_view(
+                    viewport,
+                    canvas_clip_rect,
+                    screen_rect(self, bounds, canvas_rect),
+                );
+            }
+        }
+        if let Some(id) = self.fit_entity_requested.take() {
+            if let Some(bounds) = entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .and_then(|entity| direct_editor_layout(entity).map(|layout| layout.content))
+            {
+                fit_into_view(
+                    viewport,
+                    canvas_clip_rect,
+                    screen_rect(self, bounds, canvas_rect),
+                );
             }
         }
         if std::mem::take(&mut self.fit_preview_region_requested) {
             if let Some(region) = self.block.read().and_then(|canvas| canvas.preview_region()) {
-                let preview = screen_rect(self, preview_region_bounds(region), canvas_rect);
-                let available = (canvas_clip_rect.size() - Vec2::splat(40.0)).max(Vec2::splat(1.0));
-                let factor = (available.x / preview.width().max(1.0))
-                    .min(available.y / preview.height().max(1.0));
-                viewport.change_zoom(factor, Some(preview.center()));
-                viewport.pan(canvas_clip_rect.center() - preview.center());
+                fit_into_view(
+                    viewport,
+                    canvas_clip_rect,
+                    screen_rect(self, preview_region_bounds(region), canvas_rect),
+                );
                 viewport.resume_auto_fit();
             }
         }
@@ -399,6 +415,7 @@ impl BlockEditor for InfiniteCanvasEditor {
             {
                 self.focused_editor = Some(entity.id);
             }
+            let mut nested = DirectEditorViewport::new(viewport.zoom());
             let embedded = embedded_editor_ui(
                 ui,
                 editors,
@@ -407,8 +424,9 @@ impl BlockEditor for InfiniteCanvasEditor {
                 screen,
                 visible_screen,
                 scale * self.render_scale,
-                viewport,
+                &mut nested,
             );
+            self.forward_viewport(entity.id, nested, viewport);
             action = action.or(embedded);
         }
 
@@ -447,4 +465,28 @@ impl BlockEditor for InfiniteCanvasEditor {
         }
         action.or(keyboard_action)
     }
+}
+
+impl InfiniteCanvasEditor {
+    fn forward_viewport(
+        &mut self,
+        entity: Uuid,
+        mut nested: DirectEditorViewport,
+        viewport: &mut DirectEditorViewport,
+    ) {
+        for command in nested.drain() {
+            match command {
+                DirectEditorViewportCommand::Fit => self.fit_entity_requested = Some(entity),
+                command => viewport.push(command),
+            }
+        }
+    }
+}
+
+fn fit_into_view(viewport: &mut DirectEditorViewport, clip: Rect, target: Rect) {
+    let available = (clip.size() - Vec2::splat(40.0)).max(Vec2::splat(1.0));
+    let factor =
+        (available.x / target.width().max(1.0)).min(available.y / target.height().max(1.0));
+    viewport.change_zoom(factor, Some(target.center()));
+    viewport.pan(clip.center() - target.center());
 }

@@ -1,7 +1,7 @@
 use block_client::{blocks, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
     BlockTypeDescriptor, CreationMode, EditorInstanceId, EditorRegion, InteractionMode,
-    PluginManifest, ResizeMode,
+    PluginManifest, ResizeMode, ViewChange,
 };
 use eframe::egui;
 use std::sync::{
@@ -15,7 +15,7 @@ pub(crate) mod discovery;
 use super::{
     ArtifactSession, ArtifactStatus, BlockEditor, BlockRenderContext, CreationStep,
     DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorRegistry, PendingCreation,
+    DirectEditorViewportInput, EditorAccess, EditorAction, EditorRegistry, PendingCreation,
 };
 use crate::plugin_host::{
     ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, InstanceRole,
@@ -82,6 +82,7 @@ impl PluginCreation {
                 instance: self.instance,
                 region: EditorRegion::Main,
                 size: egui::vec2(ui.available_width(), height),
+                view: None,
             },
         );
     }
@@ -184,6 +185,7 @@ impl PluginEditor {
         editors: &mut EditorAccess<'_>,
         region: EditorRegion,
         size: egui::Vec2,
+        view: Option<egui::Rect>,
     ) -> Option<EditorAction> {
         if !self.has_region(region) {
             return None;
@@ -202,9 +204,26 @@ impl PluginEditor {
                 instance: self.instance,
                 region,
                 size,
+                view,
             },
         )?;
         Some(EditorAction::OpenBlock { id, block_type })
+    }
+
+    fn take_view_changes(&mut self, rect: egui::Rect, viewport: &mut DirectEditorViewport) {
+        if !self.plugin.capabilities.pan_and_zoom {
+            return;
+        }
+        for change in crate::plugin_host::take_view_changes(&self.plugin.identity.id, self.instance)
+        {
+            match change {
+                ViewChange::Pan { x, y } => viewport.pan(egui::vec2(x, y)),
+                ViewChange::Zoom { factor, anchor } => {
+                    viewport.change_zoom(factor, anchor.map(|(x, y)| rect.min + egui::vec2(x, y)))
+                }
+                ViewChange::Fit => viewport.fit(),
+            }
+        }
     }
 
     fn close(&mut self) {
@@ -265,8 +284,15 @@ impl BlockEditor for PluginEditor {
         self.plugin.capabilities.pan_and_zoom
     }
 
-    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
-        self.plugin.capabilities.pan_and_zoom
+    fn direct_editor_viewport_input(
+        &self,
+        _editors: &EditorAccess<'_>,
+    ) -> DirectEditorViewportInput {
+        if self.plugin.capabilities.pan_and_zoom {
+            DirectEditorViewportInput::Viewport
+        } else {
+            DirectEditorViewportInput::Background
+        }
     }
 
     fn direct_editor_interaction(&self) -> DirectEditorInteraction {
@@ -309,7 +335,7 @@ impl BlockEditor for PluginEditor {
         )
         .map_or_else(|| toolbar_height(ui), |size| size.y.max(1.0));
         let size = egui::vec2(ui.available_width(), height);
-        self.region_ui(ui, editors, EditorRegion::Toolbar, size)
+        self.region_ui(ui, editors, EditorRegion::Toolbar, size, None)
     }
 
     fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
@@ -322,7 +348,7 @@ impl BlockEditor for PluginEditor {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::LeftSidebar, size)
+        self.region_ui(ui, editors, EditorRegion::LeftSidebar, size, None)
     }
 
     fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
@@ -335,7 +361,7 @@ impl BlockEditor for PluginEditor {
         editors: &mut EditorAccess<'_>,
     ) -> Option<EditorAction> {
         let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::RightSidebar, size)
+        self.region_ui(ui, editors, EditorRegion::RightSidebar, size, None)
     }
 
     fn direct_editor_ui(
@@ -343,10 +369,18 @@ impl BlockEditor for PluginEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
         _scale: f32,
-        _viewport: &mut DirectEditorViewport,
+        viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::Main, size)
+        let rect = ui.available_rect_before_wrap();
+        let view = self.plugin.capabilities.pan_and_zoom.then(|| {
+            viewport
+                .content_rect()
+                .unwrap_or(rect)
+                .translate(-rect.min.to_vec2())
+        });
+        let action = self.region_ui(ui, editors, EditorRegion::Main, rect.size(), view);
+        self.take_view_changes(rect, viewport);
+        action
     }
 
     fn tab_closed(&mut self) {
@@ -457,6 +491,7 @@ impl ArtifactSession for PluginArtifact {
                 instance: self.instance,
                 region: EditorRegion::ArtifactSettings,
                 size: egui::vec2(ui.available_width(), height),
+                view: None,
             },
         );
         if let Some(edited) =

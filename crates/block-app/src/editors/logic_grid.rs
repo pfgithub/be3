@@ -44,7 +44,8 @@ use self::renderer::{
 };
 use super::{
     settings::RootSetting, BlockEditor, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorViewport, DynamicArtifactSupport, EditorAccess, EditorAction, EditorKind,
+    DirectEditorViewport, DirectEditorViewportInput, DynamicArtifactSupport, EditorAccess,
+    EditorAction, EditorKind,
 };
 
 use geometry::*;
@@ -864,8 +865,11 @@ impl BlockEditor for LogicGridEditor {
 
     /// The editor keeps its own camera, so the tab's pan and zoom are left out
     /// of the way.
-    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
-        true
+    fn direct_editor_viewport_input(
+        &self,
+        _editors: &EditorAccess<'_>,
+    ) -> DirectEditorViewportInput {
+        DirectEditorViewportInput::Editor
     }
 
     fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {

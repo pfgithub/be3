@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::{
     artifact,
-    canvas::{Pane, View},
+    canvas::Pane,
     color::format_hex_color,
     drawing::{ActiveDrawing, Brush, BrushShape, CommittedPreview, PixelTool},
 };
@@ -60,7 +60,7 @@ pub struct PixelArtApp {
     pub(crate) show_grid: bool,
     pub(crate) active_drawing: Option<ActiveDrawing>,
     pub(crate) committed_preview: Option<CommittedPreview>,
-    pub(crate) view: View,
+    pub(crate) zoom: f32,
     panes: HashMap<PaneKey, Pane>,
     pub(crate) resize_open: bool,
     pub(crate) resize_width: u16,
@@ -90,7 +90,7 @@ impl Default for PixelArtApp {
             show_grid: true,
             active_drawing: None,
             committed_preview: None,
-            view: View::default(),
+            zoom: 1.0,
             panes: HashMap::new(),
             resize_open: false,
             resize_width: 32,
@@ -248,6 +248,26 @@ impl PixelArtApp {
         self.editing
             .as_ref()
             .is_none_or(|editing| editing.host.editable())
+    }
+
+    pub(crate) fn view(&self, region: egui::Rect) -> egui::Rect {
+        self.editing
+            .as_ref()
+            .and_then(|editing| editing.host.view())
+            .map(|view| view.translate(region.min.to_vec2()))
+            .unwrap_or(region)
+    }
+
+    pub(crate) fn change_zoom(&self, factor: f32) {
+        if let Some(editing) = &self.editing {
+            editing.host.zoom_view(factor, None);
+        }
+    }
+
+    pub(crate) fn fit_view(&self) {
+        if let Some(editing) = &self.editing {
+            editing.host.fit_view();
+        }
     }
 
     pub(crate) fn refresh_pane(

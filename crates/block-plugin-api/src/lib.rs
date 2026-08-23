@@ -27,7 +27,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 17;
+pub const PROTOCOL_VERSION: u16 = 18;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -328,6 +328,17 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         editable: bool,
     },
+    ViewChanged {
+        instance: EditorInstanceId,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    },
+    ChangeView {
+        instance: EditorInstanceId,
+        change: ViewChange,
+    },
     Close {
         instance: EditorInstanceId,
     },
@@ -566,6 +577,19 @@ pub enum SurfaceMechanism {
     MacOsIoSurface,
     WindowsDxgi,
     LinuxDmaBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ViewChange {
+    Pan {
+        x: f32,
+        y: f32,
+    },
+    Zoom {
+        factor: f32,
+        anchor: Option<(f32, f32)>,
+    },
+    Fit,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

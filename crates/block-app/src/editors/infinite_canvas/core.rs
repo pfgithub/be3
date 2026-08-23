@@ -30,6 +30,7 @@ impl InfiniteCanvasEditor {
             pointer_world: None,
             fit_selection_requested: false,
             fit_preview_region_requested: false,
+            fit_entity_requested: None,
             pending_presence_reveal: None,
             grouped_inspector_edit_active: false,
             last_foreground: CanvasEntityStyle::default().foreground,

@@ -5,7 +5,7 @@ use std::{
 };
 
 pub use block_plugin_api::FileFilter;
-use block_plugin_api::FilePick;
+use block_plugin_api::{FilePick, ViewChange};
 use block_ui::BlockCatalog;
 use eframe::egui;
 use uuid::Uuid;
@@ -49,6 +49,8 @@ pub struct EditorHost {
     picked: Rc<RefCell<HashMap<u64, FilePick>>>,
     next_pick: Rc<Cell<u64>>,
     editable: Rc<Cell<bool>>,
+    view: Rc<Cell<Option<egui::Rect>>>,
+    view_changes: Rc<RefCell<Vec<ViewChange>>>,
     creation_ready: Rc<Cell<bool>>,
     creation_changed: Rc<Cell<bool>>,
 }
@@ -69,6 +71,28 @@ impl EditorHost {
     /// instance filling in a new block always may.
     pub fn editable(&self) -> bool {
         self.editable.get()
+    }
+
+    pub fn view(&self) -> Option<egui::Rect> {
+        self.view.get()
+    }
+
+    pub fn pan_view(&self, delta: egui::Vec2) {
+        self.view_changes.borrow_mut().push(ViewChange::Pan {
+            x: delta.x,
+            y: delta.y,
+        });
+    }
+
+    pub fn zoom_view(&self, factor: f32, anchor: Option<egui::Pos2>) {
+        self.view_changes.borrow_mut().push(ViewChange::Zoom {
+            factor,
+            anchor: anchor.map(|anchor| (anchor.x, anchor.y)),
+        });
+    }
+
+    pub fn fit_view(&self) {
+        self.view_changes.borrow_mut().push(ViewChange::Fit);
     }
 
     /// The block being dragged over the region currently drawing, if any.
@@ -113,6 +137,16 @@ impl EditorHost {
     #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
     pub(crate) fn set_editable(&self, editable: bool) {
         self.editable.set(editable);
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn set_view(&self, view: egui::Rect) {
+        self.view.set(Some(view));
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn take_view_changes(&self) -> Vec<ViewChange> {
+        std::mem::take(&mut self.view_changes.borrow_mut())
     }
 
     #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]

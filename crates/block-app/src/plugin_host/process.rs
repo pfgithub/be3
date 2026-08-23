@@ -221,7 +221,11 @@ fn drive_windows(
             if !matches!(
                 message,
                 Message::Input(_)
-                    | Message::Editor(block_plugin_api::EditorMessage::DragOver { .. })
+                    | Message::Editor(
+                        block_plugin_api::EditorMessage::DragOver { .. }
+                            | block_plugin_api::EditorMessage::ViewChanged { .. }
+                            | block_plugin_api::EditorMessage::ChangeView { .. },
+                    )
             ) {
                 eprintln!("plugin host sending {} to the plugin", name(&message));
             }
@@ -342,7 +346,11 @@ fn drive_unix(
             if !matches!(
                 message,
                 Message::Input(_)
-                    | Message::Editor(block_plugin_api::EditorMessage::DragOver { .. })
+                    | Message::Editor(
+                        block_plugin_api::EditorMessage::DragOver { .. }
+                            | block_plugin_api::EditorMessage::ViewChanged { .. }
+                            | block_plugin_api::EditorMessage::ChangeView { .. },
+                    )
             ) {
                 eprintln!("plugin host sending {} to the plugin", name(&message));
             }
@@ -476,6 +484,8 @@ fn editor_name(message: &block_plugin_api::EditorMessage) -> &'static str {
         EditorMessage::CreationBlock { .. } => "Editor::CreationBlock",
         EditorMessage::OpenArtifact { .. } => "Editor::OpenArtifact",
         EditorMessage::EditabilityChanged { .. } => "Editor::EditabilityChanged",
+        EditorMessage::ViewChanged { .. } => "Editor::ViewChanged",
+        EditorMessage::ChangeView { .. } => "Editor::ChangeView",
         _ => "Editor",
     }
 }

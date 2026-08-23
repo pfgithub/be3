@@ -2,7 +2,7 @@ use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
     ArtifactDescription, BlockTypeDescriptor, CreationOutcome, CursorIcon, EditorInstanceId,
     EditorMessage, EditorRegion, FilePick, Message, RegenerationOutcome, RegionSize, ScreenId,
-    ScreenRequest, ScreenSet, TunnelMessage,
+    ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -42,6 +42,9 @@ struct Instance {
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
+    view: Option<egui::Rect>,
+    reported_view: Option<egui::Rect>,
+    view_changes: Vec<ViewChange>,
 }
 
 #[derive(Default)]
@@ -67,6 +70,9 @@ impl Instance {
             intrinsic: None,
             aspect_ratio: None,
             picks: Vec::new(),
+            view: None,
+            reported_view: None,
+            view_changes: Vec::new(),
         }
     }
 }
@@ -157,6 +163,19 @@ impl Instances {
         screen.request.metrics = viewport_metrics(size, scale_factor);
         screen.last_seen = pass;
         screen.request.screen
+    }
+
+    pub(super) fn set_view(&mut self, instance: EditorInstanceId, view: egui::Rect) {
+        if let Some(entry) = self.entries.get_mut(&instance) {
+            entry.view = Some(view);
+        }
+    }
+
+    pub(super) fn take_view_changes(&mut self, instance: EditorInstanceId) -> Vec<ViewChange> {
+        self.entries
+            .get_mut(&instance)
+            .map(|entry| std::mem::take(&mut entry.view_changes))
+            .unwrap_or_default()
     }
 
     pub(super) fn report_creation(
@@ -305,6 +324,18 @@ impl Instances {
                         data: entry.artifact.data.clone(),
                     }),
                 });
+            }
+            if entry.view != entry.reported_view {
+                entry.reported_view = entry.view;
+                if let Some(view) = entry.view {
+                    opened.push(Message::Editor(EditorMessage::ViewChanged {
+                        instance,
+                        x: view.min.x,
+                        y: view.min.y,
+                        width: view.width(),
+                        height: view.height(),
+                    }));
+                }
             }
             screens.extend(regions);
         }
@@ -589,6 +620,11 @@ impl Instances {
                         RegenerationOutcome::Done => Ok(()),
                         RegenerationOutcome::Failed(error) => Err(error),
                     });
+                }
+            }
+            EditorMessage::ChangeView { instance, change } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.view_changes.push(change);
                 }
             }
             EditorMessage::AspectRatio { instance, ratio } => {

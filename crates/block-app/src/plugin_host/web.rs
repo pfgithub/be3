@@ -239,6 +239,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         instance,
         region,
         size,
+        view,
     } = slot;
     open(plugin, ui.ctx());
     STATE.with(|state| {
@@ -285,6 +286,9 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             ui.ctx().pixels_per_point(),
             pass,
         );
+        if let Some(view) = view {
+            runtime.instances.set_view(instance, view);
+        }
         let messages = runtime.instances.input(instance, region, |input| {
             input.update(ui, &response, screen)
         });
@@ -549,6 +553,20 @@ pub(crate) fn commit_creation(plugin_id: &str, instance: EditorInstanceId) {
         let messages = runtime.instances.commit_creation(instance);
         runtime.send(messages);
     });
+}
+
+pub(crate) fn take_view_changes(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+) -> Vec<block_plugin_api::ViewChange> {
+    STATE.with(|state| {
+        state
+            .borrow_mut()
+            .runtimes
+            .get_mut(plugin_id)
+            .map(|runtime| runtime.instances.take_view_changes(instance))
+            .unwrap_or_default()
+    })
 }
 
 pub(crate) fn take_created(

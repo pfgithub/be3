@@ -17,7 +17,7 @@ use block_editor_plugin::{
 
 use crate::{
     app::PixelArtApp,
-    canvas::{View, ZOOM_STEP},
+    canvas::ZOOM_STEP,
     color::{color_swatch, parse_hex_color},
     drawing::{BrushShape, PixelTool, MAX_BRUSH_SIZE},
 };
@@ -49,28 +49,28 @@ impl PixelArtApp {
                 .on_hover_text("Zoom out (-)")
                 .clicked()
             {
-                self.view.change_zoom(1.0 / ZOOM_STEP, None);
+                self.change_zoom(1.0 / ZOOM_STEP);
             }
             if ui
-                .button(format!("{:.0}%", self.view.zoom * 100.0))
+                .button(format!("{:.0}%", self.zoom * 100.0))
                 .on_hover_text("Reset zoom to 100%")
                 .clicked()
             {
-                self.view.change_zoom(1.0 / self.view.zoom, None);
+                self.change_zoom(1.0 / self.zoom);
             }
             if ui
                 .small_button(ICON_ZOOM_IN)
                 .on_hover_text("Zoom in (+)")
                 .clicked()
             {
-                self.view.change_zoom(ZOOM_STEP, None);
+                self.change_zoom(ZOOM_STEP);
             }
             if ui
                 .small_button(ICON_FIT_SCREEN)
                 .on_hover_text("Fit canvas to viewport (0)")
                 .clicked()
             {
-                self.view = View::default();
+                self.fit_view();
             }
             ui.checkbox(&mut self.show_grid, "Grid");
 
@@ -358,7 +358,7 @@ impl PixelArtApp {
                     anchor: self.resize_anchor,
                 });
                 self.active_drawing = None;
-                self.view = View::default();
+                self.fit_view();
                 self.resize_open = false;
             } else if response.should_close() {
                 self.resize_open = false;

@@ -44,9 +44,9 @@ use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     create_image_block, embedded_editor_ui, image_filter, imported_image, name_galley, paint_name,
     BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
-    EMBEDDED_EDITOR_TITLE_HEIGHT,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, DirectEditorViewportCommand,
+    DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
+    EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 impl EditorKind for InfiniteCanvasEditor {
@@ -336,6 +336,7 @@ pub(super) struct InfiniteCanvasEditor {
     pointer_world: Option<CanvasPoint>,
     fit_selection_requested: bool,
     fit_preview_region_requested: bool,
+    fit_entity_requested: Option<Uuid>,
     pending_presence_reveal: Option<ClientId>,
     grouped_inspector_edit_active: bool,
     last_foreground: CanvasColor,

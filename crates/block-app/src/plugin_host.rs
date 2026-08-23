@@ -28,19 +28,19 @@ mod windows;
 pub(crate) use native::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
     editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,
-    running, take_artifact_outcome, take_created,
+    running, take_artifact_outcome, take_created, take_view_changes,
 };
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
 pub(crate) use unavailable::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
     editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,
-    running, take_artifact_outcome, take_created,
+    running, take_artifact_outcome, take_created, take_view_changes,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
     editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,
-    running, take_artifact_outcome, take_created,
+    running, take_artifact_outcome, take_created, take_view_changes,
 };
 
 pub(crate) struct RuntimeStatus {
@@ -105,6 +105,7 @@ pub(crate) struct EditorSlot<'a> {
     pub(crate) instance: EditorInstanceId,
     pub(crate) region: EditorRegion,
     pub(crate) size: egui::Vec2,
+    pub(crate) view: Option<egui::Rect>,
 }
 
 #[derive(Clone, Copy)]

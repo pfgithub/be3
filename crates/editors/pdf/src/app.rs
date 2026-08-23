@@ -15,29 +15,12 @@ use crate::pane::Pane;
 
 const DEFAULT_PAGE_SIZE: egui::Vec2 = egui::vec2(612.0, 792.0);
 const LOADING_FILL: egui::Color32 = egui::Color32::from_gray(35);
-const MIN_ZOOM: f32 = 0.25;
-const MAX_ZOOM: f32 = 32.0;
 const RENDER_POLL: Duration = Duration::from_millis(30);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum PaneKey {
     Main,
     Preview,
-}
-
-#[derive(Clone, Copy)]
-struct View {
-    zoom: f32,
-    pan: egui::Vec2,
-}
-
-impl Default for View {
-    fn default() -> Self {
-        Self {
-            zoom: 1.0,
-            pan: egui::Vec2::ZERO,
-        }
-    }
 }
 
 enum Drawn {
@@ -67,7 +50,6 @@ pub struct PdfApp {
     page: usize,
     page_count: Option<usize>,
     page_size_pts: Option<egui::Vec2>,
-    view: View,
     panes: HashMap<PaneKey, Pane>,
 }
 
@@ -136,7 +118,7 @@ impl block_editor_plugin::App for PdfApp {
         let available = ui.available_size().max(egui::Vec2::splat(1.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
         self.handle_input(&response, rect);
-        let view = self.view;
+        let view = self.view(rect);
         match self.draw(ui, PaneKey::Main, rect, view) {
             Drawn::Page => {}
             waiting => {
@@ -157,10 +139,7 @@ impl block_editor_plugin::App for PdfApp {
     fn preview_ui(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         ui.allocate_rect(rect, egui::Sense::hover());
-        if !matches!(
-            self.draw(ui, PaneKey::Preview, rect, View::default()),
-            Drawn::Page
-        ) {
+        if !matches!(self.draw(ui, PaneKey::Preview, rect, rect), Drawn::Page) {
             ui.painter().rect_filled(rect, 0.0, LOADING_FILL);
         }
     }
@@ -190,7 +169,9 @@ impl block_editor_plugin::App for PdfApp {
             }
             ui.separator();
             if ui.button("Fit view").clicked() {
-                self.view = View::default();
+                if let Some(editing) = &self.editing {
+                    editing.host.fit_view();
+                }
             }
         });
     }
@@ -246,7 +227,21 @@ impl PdfApp {
         self.page_size_pts.unwrap_or(DEFAULT_PAGE_SIZE)
     }
 
-    fn draw(&mut self, ui: &mut egui::Ui, key: PaneKey, region: egui::Rect, view: View) -> Drawn {
+    fn view(&self, region: egui::Rect) -> egui::Rect {
+        self.editing
+            .as_ref()
+            .and_then(|editing| editing.host.view())
+            .map(|view| view.translate(region.min.to_vec2()))
+            .unwrap_or(region)
+    }
+
+    fn draw(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: PaneKey,
+        region: egui::Rect,
+        view: egui::Rect,
+    ) -> Drawn {
         let Some(revision) = self
             .editing
             .as_ref()
@@ -263,7 +258,7 @@ impl PdfApp {
             self.page_size_pts = Some(facts.page_size_pts);
         }
         let page_size = self.page_size();
-        let page_rect = page_rect(region, page_size, view);
+        let page_rect = page_rect(view, page_size);
         let editing = self.editing.as_ref();
         pane.ensure(
             revision,
@@ -293,9 +288,12 @@ impl PdfApp {
         drawn
     }
 
-    fn handle_input(&mut self, response: &egui::Response, region: egui::Rect) {
+    fn handle_input(&self, response: &egui::Response, region: egui::Rect) {
+        let Some(editing) = &self.editing else {
+            return;
+        };
         if response.dragged() {
-            self.view.pan += response.drag_delta();
+            editing.host.pan_view(response.drag_delta());
         }
         if !response.hovered() {
             return;
@@ -303,6 +301,7 @@ impl PdfApp {
         let Some(pointer) = response.ctx.pointer_hover_pos() else {
             return;
         };
+        let anchor = pointer - region.min.to_vec2();
         let (scroll, zoom_delta, command) = response.ctx.input(|input| {
             (
                 input.smooth_scroll_delta,
@@ -311,31 +310,22 @@ impl PdfApp {
             )
         });
         if (zoom_delta - 1.0).abs() > f32::EPSILON {
-            self.zoom(zoom_delta, pointer, region);
+            editing.host.zoom_view(zoom_delta, Some(anchor));
         } else if command && scroll.y != 0.0 {
-            self.zoom((scroll.y * 0.002).exp(), pointer, region);
+            editing
+                .host
+                .zoom_view((scroll.y * 0.002).exp(), Some(anchor));
         } else if scroll != egui::Vec2::ZERO {
-            self.view.pan += scroll;
+            editing.host.pan_view(scroll);
         }
-    }
-
-    fn zoom(&mut self, factor: f32, anchor: egui::Pos2, region: egui::Rect) {
-        let old = self.view.zoom;
-        let new = (old * factor).clamp(MIN_ZOOM, MAX_ZOOM);
-        if new == old {
-            return;
-        }
-        let offset = anchor - region.center();
-        self.view.pan = offset - (offset - self.view.pan) * (new / old);
-        self.view.zoom = new;
     }
 }
 
-fn page_rect(region: egui::Rect, page_size: egui::Vec2, view: View) -> egui::Rect {
-    let scale = (region.width() / page_size.x)
-        .min(region.height() / page_size.y)
+fn page_rect(view: egui::Rect, page_size: egui::Vec2) -> egui::Rect {
+    let scale = (view.width() / page_size.x)
+        .min(view.height() / page_size.y)
         .max(f32::EPSILON);
-    egui::Rect::from_center_size(region.center() + view.pan, page_size * scale * view.zoom)
+    egui::Rect::from_center_size(view.center(), page_size * scale)
 }
 
 fn filter() -> FileFilter {

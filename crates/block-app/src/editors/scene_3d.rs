@@ -10,8 +10,8 @@ use self::{
     renderer::{Scene3DCallback, SceneFrame},
 };
 use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport,
+    DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind,
 };
 
 const HINT_TEXT: &str = "Click to look around \u{2022} WASD to move \u{2022} Esc to release";
@@ -112,8 +112,11 @@ impl BlockEditor for Scene3DEditor {
 
     /// The editor steers its own first-person camera, so the tab's own pan
     /// and zoom controls are left out of the way.
-    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
-        true
+    fn direct_editor_viewport_input(
+        &self,
+        _editors: &EditorAccess<'_>,
+    ) -> DirectEditorViewportInput {
+        DirectEditorViewportInput::Editor
     }
 
     fn direct_editor_ui(

@@ -146,6 +146,20 @@ impl Screens {
                     session.set_editable(*editable);
                 }
             }
+            Message::Editor(EditorMessage::ViewChanged {
+                instance,
+                x,
+                y,
+                width,
+                height,
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.set_view(egui::Rect::from_min_size(
+                        egui::pos2(*x, *y),
+                        egui::vec2(*width, *height),
+                    ));
+                }
+            }
             Message::Editor(EditorMessage::Close { instance }) => {
                 self.sessions.remove(instance);
                 self.requests

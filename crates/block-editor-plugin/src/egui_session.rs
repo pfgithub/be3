@@ -172,6 +172,10 @@ impl EguiSession {
         self.host.set_editable(editable);
     }
 
+    pub(crate) fn set_view(&self, view: egui::Rect) {
+        self.host.set_view(view);
+    }
+
     pub(crate) fn set_drag(&mut self, drag: Option<(EditorRegion, BlockDrag)>) {
         self.drag = drag;
     }
@@ -321,6 +325,12 @@ impl EguiSession {
                 instance,
                 request_id,
                 filter,
+            }));
+        }
+        for change in self.host.take_view_changes() {
+            messages.push(Message::Editor(EditorMessage::ChangeView {
+                instance,
+                change,
             }));
         }
         for (block_id, block_type) in self.host.take_opens() {

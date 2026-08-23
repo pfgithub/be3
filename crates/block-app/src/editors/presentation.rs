@@ -24,7 +24,7 @@ use crate::{block_picker::BlockPicker, slide_templates::SlideTemplate};
 use super::{
     fit_rect, paint_block_fallback, rect_corners, BlockEditor, BlockRenderContext, CreatableEditor,
     DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    EditorAccess, EditorAction, EditorKind,
+    DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind,
 };
 use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
@@ -627,14 +627,17 @@ impl BlockEditor for PresentationEditor {
         true
     }
 
-    fn direct_editor_handles_viewport_input(&self, editors: &EditorAccess<'_>) -> bool {
+    fn direct_editor_viewport_input(
+        &self,
+        editors: &EditorAccess<'_>,
+    ) -> DirectEditorViewportInput {
         let Some(slides) = self.slides() else {
-            return false;
+            return DirectEditorViewportInput::Background;
         };
-        self.selected_slide(&slides).is_some_and(|slide| {
-            self.peek_block_id(slide.block_id)
-                .is_some_and(|id| editors.direct_editor_handles_viewport_input(id))
-        })
+        self.selected_slide(&slides)
+            .and_then(|slide| self.peek_block_id(slide.block_id))
+            .map(|id| editors.direct_editor_viewport_input(id))
+            .unwrap_or(DirectEditorViewportInput::Background)
     }
 
     fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {

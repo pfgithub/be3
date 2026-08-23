@@ -15,8 +15,9 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         instance,
         region,
         size,
+        view,
     } = slot;
-    let _ = (block_types, client, instance, region, size);
+    let _ = (block_types, client, instance, region, size, view);
     let _ = role.block().map(|block| (block.id, block.block_type));
     ui.colored_label(
         egui::Color32::RED,
@@ -107,6 +108,13 @@ pub(crate) fn take_created(
     _instance: EditorInstanceId,
 ) -> Option<Result<Uuid, String>> {
     None
+}
+
+pub(crate) fn take_view_changes(
+    _plugin_id: &str,
+    _instance: EditorInstanceId,
+) -> Vec<block_plugin_api::ViewChange> {
+    Vec::new()
 }
 
 pub(crate) fn aspect_ratio(_plugin_id: &str, _instance: EditorInstanceId) -> Option<f32> {

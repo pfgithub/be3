@@ -12,46 +12,14 @@ use crate::{
 };
 
 pub const ZOOM_STEP: f32 = 1.25;
-const MIN_ZOOM: f32 = 0.25;
-const MAX_ZOOM: f32 = 32.0;
 
-#[derive(Clone, Copy)]
-pub struct View {
-    pub zoom: f32,
-    pub pan: Vec2,
-}
-
-impl Default for View {
-    fn default() -> Self {
-        Self {
-            zoom: 1.0,
-            pan: Vec2::ZERO,
-        }
-    }
-}
-
-impl View {
-    pub fn change_zoom(&mut self, factor: f32, anchor: Option<(Pos2, Rect)>) {
-        let previous = self.zoom;
-        let zoom = (previous * factor).clamp(MIN_ZOOM, MAX_ZOOM);
-        if zoom == previous {
-            return;
-        }
-        if let Some((pointer, region)) = anchor {
-            let offset = pointer - region.center();
-            self.pan = offset - (offset - self.pan) * (zoom / previous);
-        }
-        self.zoom = zoom;
-    }
-}
-
-pub fn canvas_rect(region: Rect, width: u16, height: u16, view: View) -> Rect {
-    let scale = (region.width() / f32::from(width))
-        .min(region.height() / f32::from(height))
+pub fn canvas_rect(view: Rect, width: u16, height: u16) -> Rect {
+    let scale = (view.width() / f32::from(width))
+        .min(view.height() / f32::from(height))
         .max(f32::EPSILON);
     Rect::from_center_size(
-        region.center() + view.pan,
-        Vec2::new(f32::from(width), f32::from(height)) * scale * view.zoom,
+        view.center(),
+        Vec2::new(f32::from(width), f32::from(height)) * scale,
     )
 }
 
@@ -169,11 +137,12 @@ impl PixelArtApp {
         let input_enabled = !self.resize_open && !self.clear_open;
         let editable = input_enabled && self.editable();
         if input_enabled {
-            self.handle_view_input(&response, region);
             self.handle_shortcuts(ui, &response);
         }
 
-        let canvas = canvas_rect(region, width, height, self.view);
+        let view = self.view(region);
+        let canvas = canvas_rect(view, width, height);
+        self.zoom = canvas.width() / f32::from(width);
         let pointer = response
             .ctx
             .pointer_hover_pos()
@@ -190,6 +159,10 @@ impl PixelArtApp {
         };
 
         let panning = input_enabled && self.panning(&response);
+        if panning {
+            self.active_drawing = None;
+            self.committed_preview = None;
+        }
         if response.hovered() && input_enabled {
             let cursor = if panning {
                 egui::CursorIcon::Grabbing
@@ -259,29 +232,6 @@ impl PixelArtApp {
                     && input.pointer.button_down(PointerButton::Primary))
         });
         held && response.hovered()
-    }
-
-    fn handle_view_input(&mut self, response: &egui::Response, region: Rect) {
-        if self.panning(response) {
-            self.view.pan += response.ctx.input(|input| input.pointer.delta());
-            self.active_drawing = None;
-            self.committed_preview = None;
-        }
-        if !response.hovered() {
-            return;
-        }
-        let Some(pointer) = response.ctx.pointer_hover_pos() else {
-            return;
-        };
-        let (scroll, zoom_delta) = response
-            .ctx
-            .input(|input| (input.smooth_scroll_delta.y, input.zoom_delta()));
-        if (zoom_delta - 1.0).abs() > f32::EPSILON {
-            self.view.change_zoom(zoom_delta, Some((pointer, region)));
-        } else if scroll != 0.0 {
-            self.view
-                .change_zoom((scroll * 0.002).exp(), Some((pointer, region)));
-        }
     }
 
     fn handle_tool_input(
@@ -512,8 +462,8 @@ impl PixelArtApp {
             self.mirror_vertical = !self.mirror_vertical;
         }
         match zoom {
-            Some(Some(factor)) => self.view.change_zoom(factor, None),
-            Some(None) => self.view = View::default(),
+            Some(Some(factor)) => self.change_zoom(factor),
+            Some(None) => self.fit_view(),
             None => {}
         }
     }

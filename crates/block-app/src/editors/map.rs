@@ -41,7 +41,8 @@ use self::tiles::{TileId, TileWorker, SOURCE_MAX_ZOOM};
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
     create_image_block, BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
+    DirectEditorViewport, DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind,
+    SidebarDragPayload,
 };
 use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
@@ -816,8 +817,11 @@ impl BlockEditor for MapEditor {
         MAX_VIEWPORT_ZOOM
     }
 
-    fn direct_editor_handles_viewport_input(&self, _editors: &EditorAccess<'_>) -> bool {
-        true
+    fn direct_editor_viewport_input(
+        &self,
+        _editors: &EditorAccess<'_>,
+    ) -> DirectEditorViewportInput {
+        DirectEditorViewportInput::Editor
     }
 
     fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
