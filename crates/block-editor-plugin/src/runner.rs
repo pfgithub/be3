@@ -37,13 +37,14 @@ fn run_endpoint<A: crate::App>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut connection = platform::connect(endpoint)?;
     eprintln!("connected to the host");
-    let mut session = handshake(&mut connection, id, name, version)?;
+    let (mut session, accepted) = handshake(&mut connection, id, name, version)?;
     eprintln!("protocol handshake completed");
     let (reader, mut sender) = connection.split()?;
     let (events, incoming) = channel();
     spawn_reader(reader, events.clone())?;
     let started = Instant::now();
     let mut screens = Screens::new::<A>(waker(events));
+    screens.receive(&accepted);
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
     let mut request_id = 0;
@@ -112,7 +113,7 @@ fn handshake(
     id: &str,
     name: &str,
     version: &str,
-) -> Result<ClientSession, Box<dyn std::error::Error>> {
+) -> Result<(ClientSession, Message), Box<dyn std::error::Error>> {
     use std::io::{Read, Write};
     let mut session = ClientSession::new(id, name, version);
     let writer = connection.writer();
@@ -126,13 +127,14 @@ fn handshake(
     frame.extend_from_slice(&header);
     frame.resize(length + 4, 0);
     reader.read_exact(&mut frame[4..])?;
-    let responses = session.receive(decode_frame(&frame)?);
+    let accepted = decode_frame(&frame)?;
+    let responses = session.receive(accepted.clone());
     let writer = connection.writer();
     for response in responses {
         writer.write_all(&encode_frame(&response)?)?;
     }
     writer.flush()?;
-    Ok(session)
+    Ok((session, accepted))
 }
 
 fn spawn_reader(

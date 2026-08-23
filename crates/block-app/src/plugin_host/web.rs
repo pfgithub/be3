@@ -77,8 +77,10 @@ impl Backend for Web {
         let canvas_id = self.canvas_id.clone();
         let url = self.url.clone();
         let context = context.clone();
+        let dark_theme = context.style().visuals.dark_mode;
         wasm_bindgen_futures::spawn_local(async move {
-            let mut result = Some(WebProtocolAdapter::start(url, canvas_id.clone()).await);
+            let mut result =
+                Some(WebProtocolAdapter::start(url, canvas_id.clone(), dark_theme).await);
             runtime::with(&plugin_id, |runtime| {
                 runtime.backend.attach(start, &mut result);
             });

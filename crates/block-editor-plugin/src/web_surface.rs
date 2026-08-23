@@ -62,7 +62,7 @@ impl Surface {
             queue,
             surface,
             configuration,
-            panes: Panes::new(format, browser_theme()),
+            panes: Panes::new(format),
             configured: false,
         })
     }
@@ -116,18 +116,6 @@ impl Surface {
         frame.present();
         Ok(painted.repaint)
     }
-}
-
-fn browser_theme() -> Option<eframe::egui::Theme> {
-    let dark = web_sys::window()?
-        .match_media("(prefers-color-scheme: dark)")
-        .ok()??
-        .matches();
-    Some(if dark {
-        eframe::egui::Theme::Dark
-    } else {
-        eframe::egui::Theme::Light
-    })
 }
 
 fn preferred_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {

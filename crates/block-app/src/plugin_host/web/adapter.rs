@@ -67,7 +67,11 @@ pub(super) struct WebProtocolAdapter {
 }
 
 impl WebProtocolAdapter {
-    pub(super) async fn start(url: String, canvas_id: String) -> Result<Self, String> {
+    pub(super) async fn start(
+        url: String,
+        canvas_id: String,
+        dark_theme: bool,
+    ) -> Result<Self, String> {
         let hello = web_plugin_start(&url, &canvas_id)
             .await
             .map_err(js_error)?
@@ -79,6 +83,7 @@ impl WebProtocolAdapter {
                 Capability::Lifecycle,
                 Capability::Surface(SurfaceMechanism::WebExternalImage),
             ],
+            dark_theme,
         );
         session.start(now());
         session.receive(decode(&hello)?, now());

@@ -25,6 +25,7 @@ pub(crate) struct Screens {
     layout: ScreenLayout,
     block_types: Rc<BlockCatalog>,
     client: Option<Client>,
+    theme: egui::Theme,
 }
 
 impl Screens {
@@ -37,6 +38,7 @@ impl Screens {
             layout: ScreenLayout::default(),
             block_types: Rc::new(BlockCatalog::default()),
             client: None,
+            theme: egui::Theme::Dark,
         }
     }
 
@@ -63,6 +65,10 @@ impl Screens {
         client
     }
 
+    pub(crate) fn theme(&self) -> egui::Theme {
+        self.theme
+    }
+
     pub(crate) fn waker(&self) -> Waker {
         self.waker.clone()
     }
@@ -78,6 +84,12 @@ impl Screens {
 
     pub(crate) fn receive(&mut self, message: &Message) {
         match message {
+            Message::HelloAccepted(accepted) => {
+                self.theme = match accepted.dark_theme {
+                    true => egui::Theme::Dark,
+                    false => egui::Theme::Light,
+                };
+            }
             Message::Editor(EditorMessage::Open {
                 instance,
                 block_id,

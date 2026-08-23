@@ -2,7 +2,7 @@ use super::*;
 use crate::{encode_frame, Hello, Modifiers, PluginIdentity, PointerButton, WheelUnit};
 
 fn session() -> HostSession {
-    HostSession::new("BE3", vec![Capability::Input, Capability::Lifecycle])
+    HostSession::new("BE3", vec![Capability::Input, Capability::Lifecycle], true)
 }
 
 fn hello() -> Message {

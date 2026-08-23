@@ -156,13 +156,18 @@ fn drive(
     inbound: Inbound,
 ) -> io::Result<()> {
     let started = Instant::now();
-    let mut session = handshake(&mut connection, started)?;
+    let dark_theme = inbound.repaint.style().visuals.dark_mode;
+    let mut session = handshake(&mut connection, started, dark_theme)?;
     let (reader, writer) = connection.split(child)?;
     thread::spawn(move || read_from_plugin(reader, sender));
     pump(writer, child, events, inbound, &mut session, started)
 }
 
-fn handshake(connection: &mut platform::Connection, started: Instant) -> io::Result<HostSession> {
+fn handshake(
+    connection: &mut platform::Connection,
+    started: Instant,
+    dark_theme: bool,
+) -> io::Result<HostSession> {
     let mut session = HostSession::new(
         "BE3",
         vec![
@@ -170,6 +175,7 @@ fn handshake(connection: &mut platform::Connection, started: Instant) -> io::Res
             Capability::Input,
             Capability::Surface(platform::SURFACE_MECHANISM),
         ],
+        dark_theme,
     );
     session.start(elapsed(started));
     let hello = read_message(connection.reader())?;

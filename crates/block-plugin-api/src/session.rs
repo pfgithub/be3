@@ -34,6 +34,7 @@ pub enum QueueError {
 pub struct HostSession {
     state: SessionState,
     host_name: String,
+    dark_theme: bool,
     capabilities: Vec<Capability>,
     queue: VecDeque<Message>,
     requests: HashMap<u64, u64>,
@@ -41,10 +42,15 @@ pub struct HostSession {
 }
 
 impl HostSession {
-    pub fn new(host_name: impl Into<String>, capabilities: Vec<Capability>) -> Self {
+    pub fn new(
+        host_name: impl Into<String>,
+        capabilities: Vec<Capability>,
+        dark_theme: bool,
+    ) -> Self {
         Self {
             state: SessionState::Idle,
             host_name: host_name.into(),
+            dark_theme,
             capabilities,
             queue: VecDeque::new(),
             requests: HashMap::new(),
@@ -99,6 +105,7 @@ impl HostSession {
                     version: PROTOCOL_VERSION,
                     host_name: self.host_name.clone(),
                     capabilities: self.capabilities.clone(),
+                    dark_theme: self.dark_theme,
                 }));
                 self.state = SessionState::Running;
                 self.lifecycle_deadline = None;

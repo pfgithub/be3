@@ -8,6 +8,10 @@ published string, collection, or opaque-descriptor limits. Implementations
 must also bound pending messages to `MAX_QUEUED_MESSAGES` and requests to
 `REQUEST_TIMEOUT_MILLISECONDS`.
 
+The accepted handshake carries the theme the host is drawn in, which is what
+a plugin's own interface follows, so an editor looks the same as the app it is
+embedded in wherever it runs.
+
 The initial handshake advertises an inclusive supported-version range. Peers
 may communicate only after selecting one version in the intersection. A peer
 rejects an absent intersection with `UnsupportedVersion` and closes the

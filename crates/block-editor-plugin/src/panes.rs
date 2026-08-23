@@ -24,7 +24,7 @@ impl Pane {
     fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
-        theme: Option<egui::Theme>,
+        theme: egui::Theme,
         instance: EditorInstanceId,
         waker: Waker,
         painting: Arc<AtomicBool>,
@@ -36,9 +36,7 @@ impl Pane {
             }
         });
         egui_material_icons::initialize(&context);
-        if let Some(theme) = theme {
-            context.set_theme(theme);
-        }
+        context.set_theme(theme);
         Self {
             instance,
             context,
@@ -54,7 +52,6 @@ impl Pane {
 
 pub(crate) struct Panes {
     format: wgpu::TextureFormat,
-    theme: Option<egui::Theme>,
     panes: HashMap<ScreenId, Pane>,
     painting: Arc<AtomicBool>,
 }
@@ -65,10 +62,9 @@ pub(crate) struct Painted {
 }
 
 impl Panes {
-    pub(crate) fn new(format: wgpu::TextureFormat, theme: Option<egui::Theme>) -> Self {
+    pub(crate) fn new(format: wgpu::TextureFormat) -> Self {
         Self {
             format,
-            theme,
             panes: HashMap::new(),
             painting: Arc::new(AtomicBool::new(false)),
         }
@@ -89,13 +85,13 @@ impl Panes {
         let mut repaint = Duration::MAX;
         let placements = layout.screens.clone();
         let waker = screens.waker();
+        let theme = screens.theme();
         self.painting.store(true, Ordering::Relaxed);
         for placement in &placements {
             let Some(session) = screens.session(placement.instance) else {
                 continue;
             };
             let format = self.format;
-            let theme = self.theme;
             let waker = waker.clone();
             let painting = Arc::clone(&self.painting);
             let pane = self.panes.entry(placement.screen).or_insert_with(|| {

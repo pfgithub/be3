@@ -8,6 +8,7 @@ fn accept(session: &mut ClientSession) {
         version: PROTOCOL_VERSION,
         host_name: "test host".into(),
         capabilities: vec![Capability::Lifecycle, Capability::Input],
+        dark_theme: true,
     }));
 }
 

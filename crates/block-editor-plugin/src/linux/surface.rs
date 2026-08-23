@@ -57,7 +57,7 @@ impl Surface {
             device,
             queue,
             texture,
-            panes: Panes::new(TARGET_FORMAT, None),
+            panes: Panes::new(TARGET_FORMAT),
             plane,
             memory,
             device_id,
