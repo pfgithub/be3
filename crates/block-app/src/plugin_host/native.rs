@@ -63,7 +63,18 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             .runtimes
             .entry(plugin.identity.id.clone())
             .or_insert_with(|| Runtime::new(surface));
-        if runtime.process.is_none() {
+        detect_exit(runtime);
+        if let Some(error) = &runtime.exit {
+            ui.colored_label(
+                egui::Color32::RED,
+                format!("plugin process exited: {error}"),
+            );
+            if ui.button("Restart plugin").clicked() {
+                runtime.exit = None;
+                runtime.process = Some(Process::launch(plugin_path(plugin), ui.ctx().clone()));
+            }
+            return None;
+        } else if runtime.process.is_none() {
             runtime.process = Some(Process::launch(plugin_path(plugin), ui.ctx().clone()));
         }
         begin_pass(runtime, pass);
@@ -142,7 +153,10 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
             .runtimes
             .entry(plugin.identity.id.clone())
             .or_insert_with(|| Runtime::new(surface));
-        if runtime.process.is_none() {
+        detect_exit(runtime);
+        if let Some(error) = &runtime.exit {
+            return CreationState::Failed(format!("plugin process exited: {error}"));
+        } else if runtime.process.is_none() {
             runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
         }
         begin_pass(runtime, pass);
@@ -182,7 +196,10 @@ pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> Artif
             .runtimes
             .entry(plugin.identity.id.clone())
             .or_insert_with(|| Runtime::new(surface));
-        if runtime.process.is_none() {
+        detect_exit(runtime);
+        if let Some(error) = &runtime.exit {
+            return ArtifactState::Failed(format!("plugin process exited: {error}"));
+        } else if runtime.process.is_none() {
             runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
         }
         begin_pass(runtime, pass);
@@ -269,7 +286,10 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
             .runtimes
             .entry(plugin.identity.id.clone())
             .or_insert_with(|| Runtime::new(surface));
-        if runtime.process.is_none() {
+        detect_exit(runtime);
+        if runtime.exit.is_some() {
+            return false;
+        } else if runtime.process.is_none() {
             runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
         }
         begin_pass(runtime, pass);
@@ -422,11 +442,14 @@ pub(crate) fn running() -> Vec<super::RuntimeStatus> {
             .map(|(plugin_id, runtime)| super::RuntimeStatus {
                 plugin_id: plugin_id.clone(),
                 surface: runtime.surface,
-                state: match runtime.status.get() {
-                    PresenterState::Waiting => "waiting".to_owned(),
-                    PresenterState::Presenting => "presenting".to_owned(),
-                    PresenterState::Released => "released".to_owned(),
-                    PresenterState::Failed(error) | PresenterState::Unsupported(error) => error,
+                state: match &runtime.exit {
+                    Some(error) => format!("exited: {error}"),
+                    None => match runtime.status.get() {
+                        PresenterState::Waiting => "waiting".to_owned(),
+                        PresenterState::Presenting => "presenting".to_owned(),
+                        PresenterState::Released => "released".to_owned(),
+                        PresenterState::Failed(error) | PresenterState::Unsupported(error) => error,
+                    },
                 },
                 instances: runtime.instances.statuses(),
             })
@@ -440,6 +463,7 @@ pub(crate) fn poll(_context: &egui::Context) {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         for runtime in host.runtimes.values_mut() {
+            detect_exit(runtime);
             pump_client(runtime);
         }
     });
@@ -519,6 +543,7 @@ struct Runtime {
     surface: u32,
     status: PresenterStatus,
     process: Option<Process>,
+    exit: Option<String>,
     pending_frame: Option<PlatformFrame>,
     instances: Instances,
     layout: ScreenLayout,
@@ -533,6 +558,7 @@ impl Runtime {
             surface,
             status: PresenterStatus::waiting(),
             process: None,
+            exit: None,
             pending_frame: None,
             instances: Instances::default(),
             layout: ScreenLayout::default(),
@@ -550,6 +576,14 @@ impl Runtime {
             process.send(messages);
         }
     }
+}
+
+fn detect_exit(runtime: &mut Runtime) {
+    let Some(error) = runtime.process.as_ref().and_then(Process::take_exit) else {
+        return;
+    };
+    runtime.process = None;
+    runtime.exit = Some(error);
 }
 
 fn begin_pass(runtime: &mut Runtime, pass: u64) {

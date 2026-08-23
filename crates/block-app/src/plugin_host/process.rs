@@ -26,6 +26,7 @@ const IDLE_POLL: Duration = Duration::from_millis(32);
 
 pub(super) struct Process {
     shutdown: Sender<()>,
+    exit: Receiver<String>,
     messages: Sender<Message>,
     surfaces: Receiver<SurfaceEvent>,
     layouts: Receiver<block_plugin_api::ScreenLayout>,
@@ -37,6 +38,7 @@ pub(super) struct Process {
 impl Process {
     pub(super) fn launch(executable: PathBuf, repaint: eframe::egui::Context) -> Self {
         let (shutdown, shutdown_receiver) = mpsc::channel();
+        let (exit_sender, exit) = mpsc::channel();
         let (messages, message_receiver) = mpsc::channel();
         let (surface_sender, surfaces) = mpsc::channel();
         let (layout_sender, layouts) = mpsc::channel();
@@ -102,12 +104,18 @@ impl Process {
                 terminate(&mut child);
                 result
             });
-            if let Err(error) = result {
-                eprintln!("plugin host process failed: {error}");
-            }
+            let reason = match result {
+                Ok(()) => "plugin exited".to_owned(),
+                Err(error) => {
+                    eprintln!("plugin host process failed: {error}");
+                    error.to_string()
+                }
+            };
+            exit_sender.send(reason).ok();
         });
         Self {
             shutdown,
+            exit,
             messages,
             surfaces,
             layouts,
@@ -119,6 +127,10 @@ impl Process {
 
     pub(super) fn shutdown(&mut self) {
         self.shutdown.send(()).ok();
+    }
+
+    pub(super) fn take_exit(&self) -> Option<String> {
+        self.exit.try_recv().ok()
     }
 
     pub(super) fn send(&self, messages: Vec<Message>) {
