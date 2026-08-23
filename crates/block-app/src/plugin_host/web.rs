@@ -611,13 +611,15 @@ pub(crate) fn running() -> Vec<super::RuntimeStatus> {
             .iter()
             .map(|(plugin_id, runtime)| super::RuntimeStatus {
                 plugin_id: plugin_id.clone(),
-                surface: runtime.surface,
+                surface: runtime.surface_status(),
+                pass: runtime.pass,
+                uptime: None,
                 state: match (&runtime.error, runtime.adapter.is_some()) {
                     (Some(error), _) => error.clone(),
                     (None, true) => "running".to_owned(),
                     (None, false) => "starting".to_owned(),
                 },
-                instances: runtime.instances.statuses(),
+                instances: runtime.statuses(),
             })
             .collect();
         running.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));

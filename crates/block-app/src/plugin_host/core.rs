@@ -46,6 +46,20 @@ impl RuntimeCore {
         Some((messages, awaited))
     }
 
+    pub(super) fn statuses(&self) -> Vec<super::InstanceStatus> {
+        self.instances.statuses(&self.layout, self.pass)
+    }
+
+    pub(super) fn surface_status(&self) -> super::SurfaceStatus {
+        super::SurfaceStatus {
+            index: self.surface,
+            generation: self.layout.generation,
+            width: self.layout.width,
+            height: self.layout.height,
+            placements: self.layout.screens.len(),
+        }
+    }
+
     pub(super) fn region_size(
         &self,
         instance: EditorInstanceId,

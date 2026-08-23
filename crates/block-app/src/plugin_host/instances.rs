@@ -2,7 +2,7 @@ use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
     ArtifactDescription, BlockTypeDescriptor, CreationOutcome, CursorIcon, EditorInstanceId,
     EditorMessage, EditorRegion, FilePick, Message, RegenerationOutcome, RegionSize, ScreenId,
-    ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
+    ScreenLayout, ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -401,17 +401,65 @@ impl Instances {
             .is_some_and(|entry| entry.drag_accepted)
     }
 
-    pub(super) fn statuses(&self) -> Vec<super::InstanceStatus> {
+    pub(super) fn statuses(&self, layout: &ScreenLayout, pass: u64) -> Vec<super::InstanceStatus> {
         let mut statuses: Vec<_> = self
             .entries
             .iter()
             .map(|(instance, entry)| {
-                let mut regions: Vec<_> = entry.screens.keys().copied().collect();
-                regions.sort_by_key(|region| format!("{region:?}"));
+                let mut screens: Vec<_> = entry
+                    .screens
+                    .values()
+                    .map(|screen| {
+                        let metrics = &screen.request.metrics;
+                        let placement = layout
+                            .screens
+                            .iter()
+                            .find(|placement| placement.screen == screen.request.screen)
+                            .map(|placement| {
+                                [placement.x, placement.y, placement.width, placement.height]
+                            });
+                        super::ScreenStatus {
+                            screen: screen.request.screen,
+                            region: screen.request.region,
+                            logical: egui::vec2(metrics.logical_width, metrics.logical_height),
+                            pixels: [metrics.pixel_width, metrics.pixel_height],
+                            scale_factor: metrics.scale_factor,
+                            used: screen.used,
+                            placement,
+                            drawn: screen.last_seen >= pass,
+                        }
+                    })
+                    .collect();
+                screens.sort_by_key(|screen| screen.screen.0);
                 super::InstanceStatus {
                     instance: *instance,
                     block: entry.role.block().map(|block| block.id),
-                    regions,
+                    role: match entry.role {
+                        InstanceRole::Editor(_) => "editor",
+                        InstanceRole::Creation => "creation",
+                        InstanceRole::Artifact(_) => "artifact",
+                    },
+                    opened: entry.opened,
+                    aspect_ratio: entry.aspect_ratio,
+                    intrinsic: entry.intrinsic,
+                    view: entry.view,
+                    artifact: matches!(entry.role, InstanceRole::Artifact(_)).then(|| {
+                        super::ArtifactStatus {
+                            data: entry.artifact.data.len(),
+                            draft: entry.artifact.draft.as_ref().map(Vec::len),
+                            description: entry.artifact.description.as_ref().map(|description| {
+                                match description {
+                                    ArtifactDescription::Described { summary, .. } => {
+                                        summary.clone()
+                                    }
+                                    ArtifactDescription::Unreadable(error) => {
+                                        format!("unreadable: {error}")
+                                    }
+                                }
+                            }),
+                        }
+                    }),
+                    screens,
                 }
             })
             .collect();

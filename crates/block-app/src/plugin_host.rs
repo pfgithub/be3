@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use block_client::BlockClient;
-use block_plugin_api::{BlockTypeDescriptor, EditorInstanceId, EditorRegion, PluginManifest};
+use block_plugin_api::{
+    BlockTypeDescriptor, EditorInstanceId, EditorRegion, PluginManifest, ScreenId,
+};
 use eframe::egui;
 use uuid::Uuid;
 
@@ -47,15 +49,48 @@ pub(crate) use web::{
 
 pub(crate) struct RuntimeStatus {
     pub(crate) plugin_id: String,
-    pub(crate) surface: u32,
     pub(crate) state: String,
+    pub(crate) surface: SurfaceStatus,
+    pub(crate) pass: u64,
+    pub(crate) uptime: Option<std::time::Duration>,
     pub(crate) instances: Vec<InstanceStatus>,
+}
+
+pub(crate) struct SurfaceStatus {
+    pub(crate) index: u32,
+    pub(crate) generation: u64,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) placements: usize,
 }
 
 pub(crate) struct InstanceStatus {
     pub(crate) instance: EditorInstanceId,
     pub(crate) block: Option<Uuid>,
-    pub(crate) regions: Vec<EditorRegion>,
+    pub(crate) role: &'static str,
+    pub(crate) opened: bool,
+    pub(crate) aspect_ratio: Option<f32>,
+    pub(crate) intrinsic: Option<egui::Vec2>,
+    pub(crate) view: Option<egui::Rect>,
+    pub(crate) artifact: Option<ArtifactStatus>,
+    pub(crate) screens: Vec<ScreenStatus>,
+}
+
+pub(crate) struct ArtifactStatus {
+    pub(crate) data: usize,
+    pub(crate) draft: Option<usize>,
+    pub(crate) description: Option<String>,
+}
+
+pub(crate) struct ScreenStatus {
+    pub(crate) screen: ScreenId,
+    pub(crate) region: EditorRegion,
+    pub(crate) logical: egui::Vec2,
+    pub(crate) pixels: [u32; 2],
+    pub(crate) scale_factor: f32,
+    pub(crate) used: Option<egui::Vec2>,
+    pub(crate) placement: Option<[u32; 4]>,
+    pub(crate) drawn: bool,
 }
 
 pub(crate) struct PreviewSlot<'a> {

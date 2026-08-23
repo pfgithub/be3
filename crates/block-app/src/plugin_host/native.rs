@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, time::Instant};
 
 use block_plugin_api::{
     ArtifactDescription, EditorInstanceId, EditorRegion, Message, PluginManifest, ScreenLayout,
@@ -67,12 +67,11 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
                 format!("plugin process exited: {error}"),
             );
             if ui.button("Restart plugin").clicked() {
-                runtime.exit = None;
-                runtime.process = Some(Process::launch(plugin_path(plugin), ui.ctx().clone()));
+                runtime.launch(plugin, ui.ctx());
             }
             return None;
         } else if runtime.process.is_none() {
-            runtime.process = Some(Process::launch(plugin_path(plugin), ui.ctx().clone()));
+            runtime.launch(plugin, ui.ctx());
         }
         begin_pass(runtime, pass);
         match runtime.status.get() {
@@ -154,7 +153,7 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
         if let Some(error) = &runtime.exit {
             return CreationState::Failed(format!("plugin process exited: {error}"));
         } else if runtime.process.is_none() {
-            runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
+            runtime.launch(plugin, context);
         }
         begin_pass(runtime, pass);
         context.request_repaint();
@@ -197,7 +196,7 @@ pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> Artif
         if let Some(error) = &runtime.exit {
             return ArtifactState::Failed(format!("plugin process exited: {error}"));
         } else if runtime.process.is_none() {
-            runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
+            runtime.launch(plugin, context);
         }
         begin_pass(runtime, pass);
         let messages = runtime.instances.report_artifact(
@@ -287,7 +286,7 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
         if runtime.exit.is_some() {
             return false;
         } else if runtime.process.is_none() {
-            runtime.process = Some(Process::launch(plugin_path(plugin), context.clone()));
+            runtime.launch(plugin, &context);
         }
         begin_pass(runtime, pass);
         let rect = egui::Rect::from_points(&corners);
@@ -434,7 +433,9 @@ pub(crate) fn running() -> Vec<super::RuntimeStatus> {
             .iter()
             .map(|(plugin_id, runtime)| super::RuntimeStatus {
                 plugin_id: plugin_id.clone(),
-                surface: runtime.surface,
+                surface: runtime.surface_status(),
+                pass: runtime.pass,
+                uptime: runtime.process.is_some().then(|| runtime.started.elapsed()),
                 state: match &runtime.exit {
                     Some(error) => format!("exited: {error}"),
                     None => match runtime.status.get() {
@@ -444,7 +445,7 @@ pub(crate) fn running() -> Vec<super::RuntimeStatus> {
                         PresenterState::Failed(error) | PresenterState::Unsupported(error) => error,
                     },
                 },
-                instances: runtime.instances.statuses(),
+                instances: runtime.statuses(),
             })
             .collect();
         running.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
@@ -523,6 +524,7 @@ impl Host {
 struct Runtime {
     core: RuntimeCore,
     process: Option<Process>,
+    started: Instant,
     exit: Option<String>,
     pending_frame: Option<PlatformFrame>,
     pending_layouts: Vec<ScreenLayout>,
@@ -533,10 +535,17 @@ impl Runtime {
         Self {
             core: RuntimeCore::new(surface),
             process: None,
+            started: Instant::now(),
             exit: None,
             pending_frame: None,
             pending_layouts: Vec::new(),
         }
+    }
+
+    fn launch(&mut self, plugin: &PluginManifest, context: &egui::Context) {
+        self.exit = None;
+        self.started = Instant::now();
+        self.process = Some(Process::launch(plugin_path(plugin), context.clone()));
     }
 
     fn send(&self, messages: Vec<Message>) {
