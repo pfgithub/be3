@@ -6,7 +6,6 @@ mod attachment;
 #[cfg(any(unix, windows))]
 pub mod desktop_attachments;
 mod linux_surface;
-mod macos_surface;
 mod manifest;
 mod session;
 mod windows_surface;
@@ -18,16 +17,13 @@ pub use linux_surface::{
     LinuxGraphicsBackend, LinuxSurfaceDescriptor, LinuxSurfaceError, LinuxSurfaceLifecycle,
     LinuxSurfacePlane, LinuxSurfaceState,
 };
-pub use macos_surface::{
-    MacOsSurfaceDescriptor, MacOsSurfaceError, MacOsSurfaceLifecycle, MacOsSurfaceState,
-};
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 18;
+pub const PROTOCOL_VERSION: u16 = 19;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -574,7 +570,6 @@ pub enum Capability {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SurfaceMechanism {
     WebExternalImage,
-    MacOsIoSurface,
     WindowsDxgi,
     LinuxDmaBuf,
 }

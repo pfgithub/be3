@@ -1,28 +1,10 @@
 pub(crate) fn run<A: crate::App>(id: &str, name: &str, version: &str) {
-    let _ = std::marker::PhantomData::<A>;
     let arguments: Vec<_> = std::env::args().collect();
-    if arguments.len() == 2 && arguments[1] == "--transport-test" {
-        if let Err(error) = transport(
-            std::io::stdin().lock(),
-            std::io::stdout().lock(),
-            id,
-            name,
-            version,
-        ) {
-            eprintln!("plugin transport failed: {error}");
-            std::process::exit(1);
-        }
-        return;
-    }
     if arguments.len() != 3 || arguments[1] != "--endpoint" {
-        eprintln!("usage: counter --transport-test | --endpoint ENDPOINT");
+        eprintln!("usage: {name} --endpoint ENDPOINT");
         std::process::exit(2);
     }
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    let result = run_endpoint::<A>(&arguments[2], id, name, version);
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    let result = run_endpoint(&arguments[2], id, name, version);
-    if let Err(error) = result {
+    if let Err(error) = run_endpoint::<A>(&arguments[2], id, name, version) {
         eprintln!("plugin transport failed: {error}");
         std::process::exit(1);
     }
@@ -165,44 +147,6 @@ fn handshake(
     Ok(session)
 }
 
-fn transport(
-    mut input: impl std::io::Read,
-    mut output: impl std::io::Write,
-    id: &str,
-    name: &str,
-    version: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::session::{ClientSession, State};
-    use block_plugin_api::{decode_frame, encode_frame};
-    let mut session = ClientSession::new(id, name, version);
-    output.write_all(&encode_frame(&session.hello())?)?;
-    output.flush()?;
-
-    loop {
-        let mut header = [0; 4];
-        match input.read_exact(&mut header) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
-            Err(error) => return Err(error.into()),
-        }
-        let length = u32::from_be_bytes(header) as usize;
-        let mut frame = Vec::with_capacity(length + 4);
-        frame.extend_from_slice(&header);
-        frame.resize(length + 4, 0);
-        input.read_exact(&mut frame[4..])?;
-        let message = decode_frame(&frame)?;
-        for response in session.receive(message) {
-            output.write_all(&encode_frame(&response)?)?;
-        }
-        output.flush()?;
-        match session.state() {
-            State::Closed => return Ok(()),
-            State::Failed => return Err("protocol violation".into()),
-            State::AwaitingHello | State::Running => {}
-        }
-    }
-}
-
 #[cfg(target_os = "linux")]
 fn run_endpoint<A: crate::App>(
     endpoint: &str,
@@ -285,21 +229,6 @@ fn run_endpoint<A: crate::App>(
             carrier.send(&message, &[])?;
         }
     }
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "windows"),
-    not(target_os = "linux")
-))]
-fn run_endpoint(
-    endpoint: &str,
-    id: &str,
-    name: &str,
-    version: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let stream = connect(endpoint)?;
-    transport(stream.try_clone()?, stream, id, name, version)
 }
 
 #[cfg(target_os = "windows")]
@@ -402,12 +331,12 @@ fn run_endpoint<A: crate::App>(
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), unix))]
+#[cfg(target_os = "linux")]
 fn connect(endpoint: &str) -> std::io::Result<std::os::unix::net::UnixStream> {
     std::os::unix::net::UnixStream::connect(endpoint)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), windows))]
+#[cfg(target_os = "windows")]
 fn connect(endpoint: &str) -> std::io::Result<(std::fs::File, std::fs::File)> {
     use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
     let reader = open(&format!("{endpoint}-to-plugin"), FILE_GENERIC_READ)?;
@@ -415,7 +344,7 @@ fn connect(endpoint: &str) -> std::io::Result<(std::fs::File, std::fs::File)> {
     Ok((reader, writer))
 }
 
-#[cfg(all(not(target_arch = "wasm32"), windows))]
+#[cfg(target_os = "windows")]
 fn open(name: &str, access: u32) -> std::io::Result<std::fs::File> {
     use std::{
         ffi::OsStr,

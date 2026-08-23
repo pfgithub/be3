@@ -45,10 +45,6 @@ impl ClientSession {
     pub fn hello(&self) -> Message {
         #[allow(unused_mut)]
         let mut capabilities = vec![Capability::Lifecycle, Capability::Input];
-        #[cfg(target_os = "macos")]
-        capabilities.push(Capability::Surface(
-            block_plugin_api::SurfaceMechanism::MacOsIoSurface,
-        ));
         #[cfg(target_os = "windows")]
         capabilities.push(Capability::Surface(
             block_plugin_api::SurfaceMechanism::WindowsDxgi,

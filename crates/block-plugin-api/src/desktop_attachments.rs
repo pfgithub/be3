@@ -156,11 +156,7 @@ mod unix {
         message.msg_iovlen = 1;
         message.msg_control = control.as_mut_ptr().cast();
         message.msg_controllen = control.len() as _;
-        #[cfg(target_vendor = "apple")]
-        let flags = 0;
-        #[cfg(not(target_vendor = "apple"))]
-        let flags = libc::MSG_CMSG_CLOEXEC;
-        let received = unsafe { libc::recvmsg(fd, &raw mut message, flags) };
+        let received = unsafe { libc::recvmsg(fd, &raw mut message, libc::MSG_CMSG_CLOEXEC) };
         if received < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -209,13 +205,11 @@ mod unix {
             let descriptors = unsafe {
                 std::slice::from_raw_parts(libc::CMSG_DATA(control_header).cast::<RawFd>(), count)
             };
-            result.extend(descriptors.iter().map(|fd| {
-                #[cfg(target_vendor = "apple")]
-                unsafe {
-                    libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
-                }
-                unsafe { OwnedFd::from_raw_fd(*fd) }
-            }));
+            result.extend(
+                descriptors
+                    .iter()
+                    .map(|fd| unsafe { OwnedFd::from_raw_fd(*fd) }),
+            );
             control_header = unsafe { libc::CMSG_NXTHDR(&message, control_header) };
         }
         Ok(result)
