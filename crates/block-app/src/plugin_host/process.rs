@@ -1,11 +1,12 @@
 use block_plugin_api::{
-    desktop_attachments::CarrierError, encode_frame, Capability, HostSession, Message, SessionState,
+    desktop_attachments::CarrierError, encode_frame, Capability, HostSession, Message,
+    SessionFailure, SessionState,
 };
 use std::{
     io::{self, BufRead, Read, Write},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
     thread,
     time::{Duration, Instant},
 };
@@ -21,11 +22,28 @@ pub(super) enum SurfaceEvent {
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub(super) enum Event {
+/// How often the session is asked to check its deadlines while it is waiting
+/// for something. Nothing is polled while it waits for nothing.
+const TICK: Duration = Duration::from_millis(250);
+
+/// Everything the plugin sent, in the order it sent it. Surfaces are told
+/// apart from the rest because only the backend can do anything with them.
+pub(super) enum Received {
+    Message(Message),
+    Surface(SurfaceEvent),
+}
+
+enum Event {
     Send(Message),
+    Received(Message, Vec<Attachment>),
     Shutdown,
-    Acknowledged,
     Ended(String),
+}
+
+enum Waited {
+    Event(Event),
+    Idle,
+    Stopped,
 }
 
 /// Reading a message the plugin sent, with whatever native resources came
@@ -40,47 +58,29 @@ pub(super) trait Writing {
     fn write(&mut self, message: &Message) -> Result<(), CarrierError>;
 }
 
-pub(super) struct Inbound {
-    events: Sender<Event>,
-    surfaces: Sender<SurfaceEvent>,
-    layouts: Sender<block_plugin_api::ScreenLayout>,
-    clients: Sender<block_plugin_api::TunnelMessage>,
-    editors: Sender<block_plugin_api::EditorMessage>,
-    sizes: Sender<Vec<block_plugin_api::RegionSize>>,
+struct Inbound {
+    received: Sender<Received>,
     repaint: eframe::egui::Context,
 }
 
 pub(super) struct Process {
     events: Sender<Event>,
     exit: Receiver<String>,
-    surfaces: Receiver<SurfaceEvent>,
-    layouts: Receiver<block_plugin_api::ScreenLayout>,
-    clients: Receiver<block_plugin_api::TunnelMessage>,
-    editors: Receiver<block_plugin_api::EditorMessage>,
-    sizes: Receiver<Vec<block_plugin_api::RegionSize>>,
+    received: Receiver<Received>,
 }
 
 impl Process {
     pub(super) fn launch(executable: PathBuf, repaint: eframe::egui::Context) -> Self {
         let (events, event_receiver) = mpsc::channel();
         let (exit_sender, exit) = mpsc::channel();
-        let (surface_sender, surfaces) = mpsc::channel();
-        let (layout_sender, layouts) = mpsc::channel();
-        let (client_sender, clients) = mpsc::channel();
-        let (editor_sender, editors) = mpsc::channel();
-        let (size_sender, sizes) = mpsc::channel();
+        let (received_sender, received) = mpsc::channel();
         let event_sender = events.clone();
         thread::spawn(move || {
             let inbound = Inbound {
-                events: event_sender,
-                surfaces: surface_sender,
-                layouts: layout_sender,
-                clients: client_sender,
-                editors: editor_sender,
-                sizes: size_sender,
+                received: received_sender,
                 repaint,
             };
-            let reason = match run(executable, &event_receiver, inbound) {
+            let reason = match run(executable, event_sender, &event_receiver, inbound) {
                 Ok(()) => "plugin exited".to_owned(),
                 Err(error) => {
                     eprintln!("plugin host process failed: {error}");
@@ -92,11 +92,7 @@ impl Process {
         Self {
             events,
             exit,
-            surfaces,
-            layouts,
-            clients,
-            editors,
-            sizes,
+            received,
         }
     }
 
@@ -114,39 +110,8 @@ impl Process {
         }
     }
 
-    pub(super) fn latest_surface(&self) -> Vec<SurfaceEvent> {
-        let mut latest = Vec::new();
-        for event in self.surfaces.try_iter() {
-            match &event {
-                SurfaceEvent::Surface(_, _) => {
-                    latest.clear();
-                    latest.push(event);
-                }
-                SurfaceEvent::Frame(_) => {
-                    if matches!(latest.last(), Some(SurfaceEvent::Frame(_))) {
-                        latest.pop();
-                    }
-                    latest.push(event);
-                }
-            }
-        }
-        latest
-    }
-
-    pub(super) fn layouts(&self) -> Vec<block_plugin_api::ScreenLayout> {
-        self.layouts.try_iter().collect()
-    }
-
-    pub(super) fn client_messages(&self) -> Vec<block_plugin_api::TunnelMessage> {
-        self.clients.try_iter().collect()
-    }
-
-    pub(super) fn editor_messages(&self) -> Vec<block_plugin_api::EditorMessage> {
-        self.editors.try_iter().collect()
-    }
-
-    pub(super) fn region_sizes(&self) -> Vec<block_plugin_api::RegionSize> {
-        self.sizes.try_iter().flatten().collect()
+    pub(super) fn receive(&self) -> Vec<Received> {
+        self.received.try_iter().collect()
     }
 }
 
@@ -159,7 +124,12 @@ impl Drop for Process {
 /// Starts the plugin, speaks the handshake, and then reads and writes the
 /// connection until either side ends it. The plugin is killed on the way out
 /// however this returns.
-fn run(executable: PathBuf, events: &Receiver<Event>, inbound: Inbound) -> io::Result<()> {
+fn run(
+    executable: PathBuf,
+    sender: Sender<Event>,
+    events: &Receiver<Event>,
+    inbound: Inbound,
+) -> io::Result<()> {
     let endpoint = platform::Endpoint::create()?;
     let argument = endpoint.argument();
     let mut command = Command::new(&executable);
@@ -184,7 +154,7 @@ fn run(executable: PathBuf, events: &Receiver<Event>, inbound: Inbound) -> io::R
     }
     let result = endpoint
         .accept(&child)
-        .and_then(|connection| drive(connection, &mut child, events, inbound));
+        .and_then(|connection| drive(connection, &mut child, sender, events, inbound));
     terminate(&mut child);
     result
 }
@@ -192,17 +162,18 @@ fn run(executable: PathBuf, events: &Receiver<Event>, inbound: Inbound) -> io::R
 fn drive(
     mut connection: platform::Connection,
     child: &mut Child,
+    sender: Sender<Event>,
     events: &Receiver<Event>,
     inbound: Inbound,
 ) -> io::Result<()> {
-    handshake(&mut connection)?;
+    let started = Instant::now();
+    let mut session = handshake(&mut connection, started)?;
     let (reader, writer) = connection.split(child)?;
-    thread::spawn(move || read_from_plugin(reader, inbound));
-    write_to_plugin(writer, child, events)
+    thread::spawn(move || read_from_plugin(reader, sender));
+    pump(writer, child, events, inbound, &mut session, started)
 }
 
-fn handshake(connection: &mut platform::Connection) -> io::Result<()> {
-    let started = Instant::now();
+fn handshake(connection: &mut platform::Connection, started: Instant) -> io::Result<HostSession> {
     let mut session = HostSession::new(
         "BE3",
         vec![
@@ -211,12 +182,16 @@ fn handshake(connection: &mut platform::Connection) -> io::Result<()> {
             Capability::Surface(platform::SURFACE_MECHANISM),
         ],
     );
-    session.start(0);
+    session.start(elapsed(started));
     let hello = read_message(connection.reader())?;
     session.receive(hello, elapsed(started));
-    flush(connection.writer(), &mut session)?;
+    let writer = connection.writer();
+    while let Some(message) = session.next_outbound() {
+        writer.write_all(&encode(&message)?)?;
+    }
+    writer.flush()?;
     match session.state() {
-        SessionState::Running => Ok(()),
+        SessionState::Running => Ok(session),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "plugin handshake was rejected",
@@ -224,127 +199,146 @@ fn handshake(connection: &mut platform::Connection) -> io::Result<()> {
     }
 }
 
-fn read_from_plugin(mut carrier: impl Reading, inbound: Inbound) {
+/// Reads the connection for as long as the plugin holds it open. Everything
+/// it says is handed to the one thread that owns the session, so the order it
+/// arrived in is the order it is acted on.
+fn read_from_plugin(mut carrier: impl Reading, events: Sender<Event>) {
     loop {
-        let (message, attachments) = match carrier.read() {
-            Ok(received) => received,
+        match carrier.read() {
+            Ok((message, attachments)) => {
+                if events.send(Event::Received(message, attachments)).is_err() {
+                    return;
+                }
+            }
             Err(error) => {
-                inbound.events.send(Event::Ended(error.to_string())).ok();
+                events.send(Event::Ended(error.to_string())).ok();
                 return;
             }
-        };
-        match message {
-            Message::Surface(surface) => {
-                eprintln!(
-                    "plugin host received surface generation {} size={}x{} attachments={}",
-                    surface.generation,
-                    surface.width,
-                    surface.height,
-                    attachments.len()
-                );
-                inbound
-                    .surfaces
-                    .send(SurfaceEvent::Surface(surface, attachments))
-                    .ok();
-            }
-            Message::FrameReady(frame) => {
-                inbound.surfaces.send(SurfaceEvent::Frame(frame)).ok();
-            }
-            Message::Layout(layout) => {
-                eprintln!(
-                    "plugin host received layout generation {} with {} screens",
-                    layout.generation,
-                    layout.screens.len()
-                );
-                inbound.layouts.send(layout).ok();
-            }
-            Message::ShutdownAcknowledged => {
-                inbound.events.send(Event::Acknowledged).ok();
-                return;
-            }
-            Message::Client(message) => {
-                inbound.clients.send(message).ok();
-            }
-            Message::Editor(message) => {
-                inbound.editors.send(message).ok();
-            }
-            Message::RegionSizes(message) => {
-                inbound.sizes.send(message).ok();
-            }
-            _ => {}
         }
-        inbound.repaint.request_repaint();
     }
 }
 
-fn write_to_plugin(
+/// The one place a plugin connection is spoken to: the host's messages, the
+/// plugin's answers and the session's own deadlines all pass through here.
+fn pump(
     mut carrier: impl Writing,
     child: &mut Child,
     events: &Receiver<Event>,
+    inbound: Inbound,
+    session: &mut HostSession,
+    started: Instant,
 ) -> io::Result<()> {
+    let mut disconnection = None;
     loop {
-        let Ok(first) = events.recv() else {
-            return Ok(());
+        let first = match wait(events, session) {
+            Waited::Event(event) => Some(event),
+            Waited::Idle => None,
+            Waited::Stopped => return Ok(()),
         };
-        let mut outbound = Vec::new();
-        let mut ending = None;
-        for event in std::iter::once(first).chain(events.try_iter()) {
+        let mut delivered = false;
+        for event in first.into_iter().chain(events.try_iter()) {
             match event {
-                Event::Send(message) => outbound.push(message),
-                event => {
-                    ending = Some(event);
-                    break;
+                Event::Send(message) => session
+                    .send(message, elapsed(started))
+                    .map_err(|error| queue_error(&error))?,
+                Event::Received(message, attachments) => {
+                    delivered |= deliver(message, attachments, &inbound, session, elapsed(started));
+                }
+                Event::Shutdown => session.shutdown(elapsed(started)),
+                Event::Ended(error) => {
+                    disconnection = Some(error);
+                    session.disconnected();
                 }
             }
         }
-        coalesce_screens(&mut outbound);
-        for message in outbound {
-            if !matches!(
-                message,
-                Message::Input(_)
-                    | Message::Editor(
-                        block_plugin_api::EditorMessage::DragOver { .. }
-                            | block_plugin_api::EditorMessage::ViewChanged { .. }
-                            | block_plugin_api::EditorMessage::ChangeView { .. },
-                    )
-            ) {
+        if delivered {
+            inbound.repaint.request_repaint();
+        }
+        while let Some(message) = session.next_outbound() {
+            if !quiet(&message) {
                 eprintln!("plugin host sending {} to the plugin", name(&message));
             }
             carrier.write(&message).map_err(carrier_error)?;
         }
-        match ending {
-            Some(Event::Shutdown) => {
-                carrier.write(&Message::Shutdown).map_err(carrier_error)?;
-                return wait_for_shutdown(child);
-            }
-            Some(Event::Acknowledged) => return Ok(()),
-            Some(Event::Ended(error)) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::ConnectionAborted,
-                    match child.try_wait()? {
-                        Some(exit) => format!("plugin exited unexpectedly: {exit}"),
-                        None => error,
-                    },
-                ))
+        session.tick(elapsed(started));
+        match session.state() {
+            SessionState::Closed => return wait_for_shutdown(child),
+            SessionState::Failed(failure) => {
+                return Err(failed(failure.clone(), child, disconnection.take()))
             }
             _ => {}
         }
     }
 }
 
-fn coalesce_screens(messages: &mut Vec<Message>) {
-    let Some(last) = messages
-        .iter()
-        .rposition(|message| matches!(message, Message::Screens(_)))
-    else {
-        return;
+/// Waits for the next event, only bounding the wait while the session has a
+/// deadline of its own to watch.
+fn wait(events: &Receiver<Event>, session: &HostSession) -> Waited {
+    let watching = session.pending_request_count() > 0
+        || !matches!(session.state(), SessionState::Running | SessionState::Idle);
+    if !watching {
+        return match events.recv() {
+            Ok(event) => Waited::Event(event),
+            Err(_) => Waited::Stopped,
+        };
+    }
+    match events.recv_timeout(TICK) {
+        Ok(event) => Waited::Event(event),
+        Err(RecvTimeoutError::Timeout) => Waited::Idle,
+        Err(RecvTimeoutError::Disconnected) => Waited::Stopped,
+    }
+}
+
+/// Routes one message the plugin sent: the session keeps its own, and
+/// everything else reaches the host in the order it arrived.
+fn deliver(
+    message: Message,
+    attachments: Vec<Attachment>,
+    inbound: &Inbound,
+    session: &mut HostSession,
+    now: u64,
+) -> bool {
+    if message.is_session() {
+        session.receive(message, now);
+        return false;
+    }
+    let received = match message {
+        Message::Surface(surface) => {
+            eprintln!(
+                "plugin host received surface generation {} size={}x{} attachments={}",
+                surface.generation,
+                surface.width,
+                surface.height,
+                attachments.len()
+            );
+            Received::Surface(SurfaceEvent::Surface(surface, attachments))
+        }
+        Message::FrameReady(frame) => Received::Surface(SurfaceEvent::Frame(frame)),
+        message => Received::Message(message),
     };
-    let mut index = 0;
-    messages.retain(|message| {
-        let keep = index == last || !matches!(message, Message::Screens(_));
-        index += 1;
-        keep
-    });
+    inbound.received.send(received).is_ok()
+}
+
+fn failed(failure: SessionFailure, child: &mut Child, disconnection: Option<String>) -> io::Error {
+    let exit = child.try_wait().ok().flatten();
+    let reason = match (exit, disconnection) {
+        (Some(exit), _) => format!("plugin exited unexpectedly: {exit}"),
+        (None, Some(error)) => error,
+        (None, None) => format!("plugin session failed: {failure:?}"),
+    };
+    io::Error::new(io::ErrorKind::ConnectionAborted, reason)
+}
+
+fn quiet(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::Input(_)
+            | Message::Editor(
+                block_plugin_api::EditorMessage::DragOver { .. }
+                    | block_plugin_api::EditorMessage::ViewChanged { .. }
+                    | block_plugin_api::EditorMessage::ChangeView { .. },
+            )
+    )
 }
 
 fn name(message: &Message) -> &'static str {
@@ -380,6 +374,22 @@ fn carrier_error(error: CarrierError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
 
+fn queue_error(error: &block_plugin_api::QueueError) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("the plugin message queue failed: {error:?}"),
+    )
+}
+
+fn encode(message: &Message) -> io::Result<Vec<u8>> {
+    encode_frame(message).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "host message could not be encoded",
+        )
+    })
+}
+
 fn wait_for_shutdown(child: &mut Child) -> io::Result<()> {
     let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
     while Instant::now() < deadline {
@@ -404,19 +414,6 @@ fn read_message(stream: &mut impl Read) -> io::Result<Message> {
     stream.read_exact(&mut frame[4..])?;
     block_plugin_api::decode_frame(&frame)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "plugin sent a malformed frame"))
-}
-
-fn flush(stream: &mut impl Write, session: &mut HostSession) -> io::Result<()> {
-    while let Some(message) = session.next_outbound() {
-        let frame = encode_frame(&message).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "host message could not be encoded",
-            )
-        })?;
-        stream.write_all(&frame)?;
-    }
-    stream.flush()
 }
 
 fn elapsed(started: Instant) -> u64 {

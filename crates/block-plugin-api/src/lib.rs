@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 19;
+pub const PROTOCOL_VERSION: u16 = 20;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -523,10 +523,8 @@ pub enum Message {
     Layout(ScreenLayout),
     RegionSizes(Vec<RegionSize>),
     Input(InputBatch),
-    SurfaceCapabilities(SurfaceCapabilities),
     Surface(SurfaceDescriptor),
     FrameReady(FrameReady),
-    FramePresented { generation: u64 },
     Acknowledged { request_id: u64 },
     Ping { nonce: u64 },
     Pong { nonce: u64 },
@@ -536,6 +534,26 @@ pub enum Message {
     Editor(EditorMessage),
     Client(TunnelMessage),
     BlockTypes(Vec<BlockTypeDescriptor>),
+}
+
+impl Message {
+    /// Whether this message belongs to the session state machine rather than
+    /// to whatever the host is showing. A session owns exactly these and
+    /// fails on anything else, so everything else goes straight to the host.
+    pub fn is_session(&self) -> bool {
+        matches!(
+            self,
+            Self::Hello(_)
+                | Self::HelloAccepted(_)
+                | Self::HelloRejected(_)
+                | Self::Acknowledged { .. }
+                | Self::Ping { .. }
+                | Self::Pong { .. }
+                | Self::Error(_)
+                | Self::Shutdown
+                | Self::ShutdownAcknowledged
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -662,12 +680,6 @@ pub struct Modifiers {
     pub control: bool,
     pub shift: bool,
     pub command: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SurfaceCapabilities {
-    pub request_id: u64,
-    pub mechanisms: Vec<SurfaceMechanism>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -808,7 +820,6 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
         Message::Screens(value) => collection(value.screens.len()),
         Message::Layout(value) => collection(value.screens.len()),
         Message::RegionSizes(value) => collection(value.len()),
-        Message::SurfaceCapabilities(value) => collection(value.mechanisms.len()),
         Message::Surface(value) => {
             if value.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
                 return Err(DecodeError::LimitExceeded("surface descriptor"));

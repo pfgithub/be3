@@ -129,11 +129,28 @@ impl HostSession {
         self.tick(now_milliseconds);
     }
 
+    /// Queues a message for the plugin, as the request it is if it carries
+    /// one. Both hosts send everything this way, so a message that has to be
+    /// answered is tracked the same wherever it was sent from.
+    pub fn send(&mut self, message: Message, now_milliseconds: u64) -> Result<(), QueueError> {
+        match &message {
+            Message::Screens(set) => {
+                let request_id = set.request_id;
+                self.enqueue_request(request_id, message, now_milliseconds)
+            }
+            _ => self.enqueue(message),
+        }
+    }
+
     pub fn enqueue(&mut self, message: Message) -> Result<(), QueueError> {
         if self.state != SessionState::Running {
             return Err(QueueError::NotRunning);
         }
+        let superseded = superseded_request(&self.queue, &message);
         if coalesce(&mut self.queue, &message) {
+            if let Some(request_id) = superseded {
+                self.requests.remove(&request_id);
+            }
             return Ok(());
         }
         if self.queue.len() == MAX_QUEUED_MESSAGES {
@@ -218,6 +235,16 @@ fn decode_failure(error: DecodeError) -> SessionFailure {
         DecodeError::MalformedPayload
         | DecodeError::TruncatedFrame { .. }
         | DecodeError::LimitExceeded(_) => SessionFailure::MalformedMessage,
+    }
+}
+
+/// The request the message at the back of the queue is waiting on, when the
+/// incoming message is about to replace it. Nothing answers a request whose
+/// message never went out, so the queue stops waiting for it.
+fn superseded_request(queue: &VecDeque<Message>, incoming: &Message) -> Option<u64> {
+    match (queue.back(), incoming) {
+        (Some(Message::Screens(current)), Message::Screens(_)) => Some(current.request_id),
+        _ => None,
     }
 }
 

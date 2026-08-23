@@ -5,7 +5,7 @@ use eframe::{egui, egui_wgpu::wgpu};
 
 use super::{
     presenter::{Regions, SurfacePresenter},
-    runtime::{Backend, Update},
+    runtime::Backend,
 };
 
 const UNSUPPORTED: &str = "Plugins are not supported on this platform.";
@@ -27,8 +27,8 @@ impl Backend for Unavailable {
 
     fn send(&mut self, _messages: Vec<Message>) {}
 
-    fn poll(&mut self, _context: &egui::Context) -> Update {
-        Update::default()
+    fn receive(&mut self) -> Vec<Message> {
+        Vec::new()
     }
 
     fn frame(&mut self, _layout: &ScreenLayout, _pass: u64) -> Self::Frame {}

@@ -7,7 +7,7 @@ use wasm_bindgen::JsCast;
 mod adapter;
 pub(super) mod renderer;
 
-use super::runtime::{self, Backend, Update};
+use super::runtime::{self, Backend};
 use adapter::WebProtocolAdapter;
 
 const RENDERER_REQUIRED: &str = "wgpu is not available in this build.";
@@ -105,13 +105,13 @@ impl Backend for Web {
         }
     }
 
-    fn poll(&mut self, _context: &egui::Context) -> Update {
+    fn receive(&mut self) -> Vec<Message> {
         let Some(adapter) = &mut self.adapter else {
-            return Update::default();
+            return Vec::new();
         };
         if let Err(error) = adapter.poll() {
             self.error = Some(error);
-            return Update::default();
+            return Vec::new();
         }
         self.take_output()
     }
@@ -175,23 +175,18 @@ impl Web {
         }
     }
 
-    fn take_output(&mut self) -> Update {
-        let Some(adapter) = &mut self.adapter else {
-            return Update::default();
-        };
-        Update {
-            layout: adapter.take_layout(),
-            client: adapter.take_client_messages(),
-            editor: adapter.take_editor_messages(),
-            sizes: adapter.take_region_sizes(),
+    fn take_output(&mut self) -> Vec<Message> {
+        match &mut self.adapter {
+            Some(adapter) => adapter.take_received(),
+            None => Vec::new(),
         }
     }
 
     /// Runs the plugin's own frame, once per host pass, when something it was
     /// told about changed or when it asked to be woken up again.
-    fn draw(&mut self, pass: u64, context: &egui::Context) -> (bool, Update) {
+    fn draw(&mut self, pass: u64, context: &egui::Context) -> (bool, Vec<Message>) {
         if self.rendered_pass == pass || self.adapter.is_none() {
-            return (false, Update::default());
+            return (false, Vec::new());
         }
         self.rendered_pass = pass;
         let due = match self.repaint_at {
@@ -205,7 +200,7 @@ impl Web {
             None => false,
         };
         if !self.dirty && !due {
-            return (false, Update::default());
+            return (false, Vec::new());
         }
         self.dirty = false;
         self.repaint_at = None;
@@ -218,7 +213,7 @@ impl Web {
             Err(error) => {
                 self.error = Some(error);
                 context.request_repaint();
-                return (false, Update::default());
+                return (false, Vec::new());
             }
         }
         (true, self.take_output())

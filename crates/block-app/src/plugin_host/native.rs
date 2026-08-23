@@ -5,8 +5,8 @@ use eframe::egui;
 
 use super::{
     platform::{self, Frame as PlatformFrame, RENDERER_REQUIRED},
-    process::{Process, SurfaceEvent},
-    runtime::{Backend, Update},
+    process::{Process, Received, SurfaceEvent},
+    runtime::Backend,
 };
 
 pub(super) struct Native {
@@ -48,30 +48,33 @@ impl Backend for Native {
         }
     }
 
-    fn poll(&mut self, _context: &egui::Context) -> Update {
-        let (client, editor, sizes, frames, layouts) = {
-            let Some(process) = &self.process else {
-                return Update::default();
-            };
-            (
-                process.client_messages(),
-                process.editor_messages(),
-                process.region_sizes(),
-                process.latest_surface(),
-                process.layouts(),
-            )
+    fn receive(&mut self) -> Vec<Message> {
+        let Some(process) = &self.process else {
+            return Vec::new();
         };
-        self.pending_layouts.extend(layouts);
-        let layout = self.take_layout(&frames);
+        let mut messages = Vec::new();
+        let mut frames: Vec<SurfaceEvent> = Vec::new();
+        for received in process.receive() {
+            match received {
+                Received::Message(Message::Layout(layout)) => self.pending_layouts.push(layout),
+                Received::Message(message) => messages.push(message),
+                Received::Surface(event) => {
+                    if let SurfaceEvent::Surface(descriptor, _) = &event {
+                        if let Some(layout) = self.take_layout(descriptor.generation) {
+                            messages.push(Message::Layout(layout));
+                        }
+                        frames.clear();
+                    } else if matches!(frames.last(), Some(SurfaceEvent::Frame(_))) {
+                        frames.pop();
+                    }
+                    frames.push(event);
+                }
+            }
+        }
         if !frames.is_empty() {
             self.pending_frame = Some(PlatformFrame::Events(frames));
         }
-        Update {
-            layout,
-            client,
-            editor,
-            sizes,
-        }
+        messages
     }
 
     fn frame(&mut self, _layout: &ScreenLayout, _pass: u64) -> Self::Frame {
@@ -108,24 +111,18 @@ impl Native {
     /// The layout a newly arrived surface was drawn with. Layouts arrive
     /// ahead of the surfaces that use them, so the pending ones are held
     /// until the surface naming their generation shows up.
-    fn take_layout(&mut self, frames: &[SurfaceEvent]) -> Option<ScreenLayout> {
-        let mut taken = None;
-        for event in frames {
-            let SurfaceEvent::Surface(descriptor, _) = event else {
-                continue;
-            };
-            let Some(index) = self
-                .pending_layouts
-                .iter()
-                .position(|layout| layout.generation == descriptor.generation)
-            else {
-                continue;
-            };
-            let layout = self.pending_layouts.remove(index);
-            self.pending_layouts
-                .retain(|pending| pending.generation > layout.generation);
-            taken = Some(layout);
-        }
-        taken
+    fn take_layout(&mut self, generation: u64) -> Option<ScreenLayout> {
+        let index = self
+            .pending_layouts
+            .iter()
+            .position(|layout| layout.generation == generation)?;
+        let layout = self.pending_layouts.remove(index);
+        self.pending_layouts
+            .retain(|pending| pending.generation > generation);
+        eprintln!(
+            "plugin host took layout generation {generation} with {} screens",
+            layout.screens.len()
+        );
+        Some(layout)
     }
 }

@@ -26,6 +26,13 @@ fn running_session() -> HostSession {
     session
 }
 
+fn screens(request_id: u64) -> Message {
+    Message::Screens(crate::ScreenSet {
+        request_id,
+        screens: Vec::new(),
+    })
+}
+
 fn input(event: InputEvent) -> Message {
     Message::Input(InputBatch {
         screen: crate::ScreenId(7),
@@ -33,6 +40,7 @@ fn input(event: InputEvent) -> Message {
     })
 }
 
+mod a_superseded_request_is_forgotten;
 mod coalesced_zoom_gestures_multiply;
 mod disconnect_fails_the_session;
 mod malformed_payload_fails_the_session;

@@ -1,6 +1,5 @@
 use block_plugin_api::{
-    encode_frame, Capability, EditorMessage, HostSession, Message, QueueError, RegionSize,
-    ScreenLayout, SessionState, SurfaceMechanism, TunnelMessage,
+    encode_frame, Capability, HostSession, Message, QueueError, SessionState, SurfaceMechanism,
 };
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
@@ -63,10 +62,7 @@ extern "C" {
 pub(super) struct WebProtocolAdapter {
     canvas_id: String,
     session: HostSession,
-    client_messages: Vec<TunnelMessage>,
-    editor_messages: Vec<EditorMessage>,
-    layout: Option<ScreenLayout>,
-    region_sizes: Vec<RegionSize>,
+    received: Vec<Message>,
     repaint: Option<Duration>,
 }
 
@@ -89,10 +85,7 @@ impl WebProtocolAdapter {
         let mut adapter = Self {
             canvas_id,
             session,
-            client_messages: Vec::new(),
-            editor_messages: Vec::new(),
-            layout: None,
-            region_sizes: Vec::new(),
+            received: Vec::new(),
             repaint: None,
         };
         adapter.flush()?;
@@ -105,13 +98,7 @@ impl WebProtocolAdapter {
 
     pub(super) fn send(&mut self, messages: Vec<Message>) -> Result<(), String> {
         for message in messages {
-            match &message {
-                Message::Screens(set) => {
-                    self.session.enqueue_request(set.request_id, message, now())
-                }
-                _ => self.session.enqueue(message),
-            }
-            .map_err(queue_error)?;
+            self.session.send(message, now()).map_err(queue_error)?;
         }
         self.flush()?;
         self.session.tick(now());
@@ -121,16 +108,8 @@ impl WebProtocolAdapter {
         }
     }
 
-    pub(super) fn take_client_messages(&mut self) -> Vec<TunnelMessage> {
-        std::mem::take(&mut self.client_messages)
-    }
-
-    pub(super) fn take_editor_messages(&mut self) -> Vec<EditorMessage> {
-        std::mem::take(&mut self.editor_messages)
-    }
-
-    pub(super) fn take_region_sizes(&mut self) -> Vec<RegionSize> {
-        std::mem::take(&mut self.region_sizes)
+    pub(super) fn take_received(&mut self) -> Vec<Message> {
+        std::mem::take(&mut self.received)
     }
 
     pub(super) fn poll(&mut self) -> Result<(), String> {
@@ -143,10 +122,6 @@ impl WebProtocolAdapter {
         let responses = web_plugin_render(&self.canvas_id).map_err(js_error)?;
         self.receive_all(&responses)?;
         Ok(self.repaint.take())
-    }
-
-    pub(super) fn take_layout(&mut self) -> Option<ScreenLayout> {
-        self.layout.take()
     }
 
     pub(super) fn shutdown(&mut self) {
@@ -170,29 +145,22 @@ impl WebProtocolAdapter {
         }
     }
 
+    /// Routes everything the plugin answered with: the session keeps its own,
+    /// the frame it drew says when to draw again, and the rest reaches the
+    /// host in the order it arrived.
     fn receive_all(&mut self, responses: &js_sys::Array) -> Result<(), String> {
         for response in responses.iter() {
             let response = js_sys::Uint8Array::new(&response).to_vec();
-            match decode(&response)? {
-                Message::Client(message) => self.client_messages.push(message),
-                Message::Layout(layout) => self.layout = Some(layout),
-                Message::RegionSizes(sizes) => self.region_sizes.extend(sizes),
+            let message = decode(&response)?;
+            if message.is_session() {
+                self.session.receive(message, now());
+                continue;
+            }
+            match message {
                 Message::FrameReady(frame) => {
                     self.repaint = frame.repaint_after_micros.map(Duration::from_micros);
                 }
-                Message::Editor(EditorMessage::Acknowledged { .. }) => {}
-                Message::Editor(
-                    message @ (EditorMessage::OpenBlock { .. }
-                    | EditorMessage::DragAccepted { .. }
-                    | EditorMessage::IntrinsicSize { .. }
-                    | EditorMessage::AspectRatio { .. }
-                    | EditorMessage::PickFile { .. }
-                    | EditorMessage::CreationReady { .. }
-                    | EditorMessage::CreationBlock { .. }),
-                ) => {
-                    self.editor_messages.push(message);
-                }
-                message => self.session.receive(message, now()),
+                message => self.received.push(message),
             }
         }
         Ok(())

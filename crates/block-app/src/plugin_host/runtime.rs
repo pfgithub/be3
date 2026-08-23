@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use block_plugin_api::{
     ArtifactDescription, EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest,
-    RegionSize, ScreenLayout, ScreenRequest, TunnelMessage, ViewChange,
+    ScreenLayout, ScreenRequest, ViewChange,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -45,7 +45,10 @@ pub(super) trait Backend: Sized {
 
     fn send(&mut self, messages: Vec<Message>);
 
-    fn poll(&mut self, context: &egui::Context) -> Update;
+    /// Everything the plugin has said since this was last called, in the
+    /// order it said it. A runtime is woken when there is something to take,
+    /// so this only ever drains what has already arrived.
+    fn receive(&mut self) -> Vec<Message>;
 
     fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Self::Frame;
 
@@ -56,24 +59,6 @@ pub(super) trait Backend: Sized {
     fn uptime(&self) -> Option<Duration>;
 
     fn shutdown(&mut self);
-}
-
-/// What a runtime produced since it was last polled.
-#[derive(Default)]
-pub(super) struct Update {
-    pub(super) layout: Option<ScreenLayout>,
-    pub(super) client: Vec<TunnelMessage>,
-    pub(super) editor: Vec<EditorMessage>,
-    pub(super) sizes: Vec<RegionSize>,
-}
-
-impl Update {
-    fn received(&self) -> bool {
-        self.layout.is_some()
-            || !self.client.is_empty()
-            || !self.editor.is_empty()
-            || !self.sizes.is_empty()
-    }
 }
 
 thread_local! {
@@ -232,8 +217,8 @@ impl Runtime {
         if self.error.is_some() {
             return;
         }
-        let update = self.backend.poll(&self.context);
-        self.apply(update);
+        let received = self.backend.receive();
+        self.apply(received);
         let responses = self.instances.client_responses();
         if !responses.is_empty() {
             self.send(responses);
@@ -241,20 +226,20 @@ impl Runtime {
         }
     }
 
-    pub(super) fn apply(&mut self, update: Update) {
-        if !update.received() {
+    /// Acts on what the plugin said, in the order it said it.
+    pub(super) fn apply(&mut self, messages: Vec<Message>) {
+        if messages.is_empty() {
             return;
         }
-        if let Some(layout) = update.layout {
-            self.layout = layout;
+        for message in messages {
+            match message {
+                Message::Layout(layout) => self.layout = layout,
+                Message::Client(message) => self.instances.client_message(message),
+                Message::Editor(message) => self.instances.editor_message(message),
+                Message::RegionSizes(sizes) => self.instances.set_region_sizes(sizes),
+                _ => {}
+            }
         }
-        for message in update.client {
-            self.instances.client_message(message);
-        }
-        for message in update.editor {
-            self.instances.editor_message(message);
-        }
-        self.instances.set_region_sizes(update.sizes);
         self.context.request_repaint();
     }
 

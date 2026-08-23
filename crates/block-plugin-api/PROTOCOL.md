@@ -22,9 +22,19 @@ are never silently ignored.
 Messages with request identifiers are answered with the same identifier by a
 response, `Acknowledged`, or `Error`. Lifecycle messages and input events are
 ordered as sent. Backpressure may coalesce or discard only the event classes
-defined by the session layer; it may not reorder retained messages. A timeout,
-malformed frame, invalid ordering, or unsupported capability is reported with
-a structured error before disconnect when the transport remains usable.
+defined by the session layer; it may not reorder retained messages. A request
+whose message is coalesced away is no longer waited on, since nothing will
+answer a message that never went out. A timeout, malformed frame, invalid
+ordering, or unsupported capability is reported with a structured error
+before disconnect when the transport remains usable.
+
+A message belongs either to the session - the handshake, acknowledgements,
+errors, ping and shutdown - or to what the host is showing. The session owns
+exactly the first kind and rejects anything else, so a receiver routes on that
+distinction rather than on a list of the messages it happens to expect. What
+is left is delivered to the host in the order it arrived, whatever class each
+message belongs to: a block a plugin wrote and the editor message that
+depends on it cannot swap places on the way.
 
 Input events carry pointer, wheel, key, text, focus and zoom-gesture input in
 the region's own logical coordinates. A pinch or trackpad zoom is its own
