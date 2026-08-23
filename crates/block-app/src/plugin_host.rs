@@ -24,6 +24,11 @@ mod web;
 #[cfg(target_os = "windows")]
 mod windows;
 
+#[cfg(target_os = "linux")]
+use linux as platform;
+#[cfg(target_os = "windows")]
+use windows as platform;
+
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
     editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,

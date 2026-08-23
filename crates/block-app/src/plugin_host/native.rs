@@ -3,13 +3,8 @@ use std::{path::PathBuf, time::Instant};
 use block_plugin_api::{Message, PluginManifest, ScreenLayout};
 use eframe::egui;
 
-#[cfg(target_os = "linux")]
-use super::linux::{install as install_presenter, LinuxFrame as PlatformFrame, RENDERER_REQUIRED};
-#[cfg(target_os = "windows")]
-use super::windows::{
-    install as install_presenter, WindowsFrame as PlatformFrame, RENDERER_REQUIRED,
-};
 use super::{
+    platform::{self, Frame as PlatformFrame, RENDERER_REQUIRED},
     process::{Process, SurfaceEvent},
     runtime::{Backend, Update},
 };
@@ -26,7 +21,7 @@ impl Backend for Native {
     type Frame = PlatformFrame;
 
     fn install(creation_context: &eframe::CreationContext<'_>) -> Result<(), String> {
-        match install_presenter(creation_context) {
+        match platform::install(creation_context) {
             true => Ok(()),
             false => Err(RENDERER_REQUIRED.to_owned()),
         }
@@ -38,7 +33,7 @@ impl Backend for Native {
             started: Instant::now(),
             pending_frame: None,
             pending_layouts: Vec::new(),
-            path: plugin_path(plugin),
+            path: platform::entry_point(plugin),
         }
     }
 
@@ -133,12 +128,4 @@ impl Native {
         }
         taken
     }
-}
-
-fn plugin_path(plugin: &PluginManifest) -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let entry = plugin.entry_points.windows.as_deref().unwrap_or_default();
-    #[cfg(target_os = "linux")]
-    let entry = plugin.entry_points.linux.as_deref().unwrap_or_default();
-    crate::editors::plugin::discovery::entry_point(&plugin.identity.id, entry).unwrap_or_default()
 }

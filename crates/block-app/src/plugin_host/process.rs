@@ -1,6 +1,8 @@
-use block_plugin_api::{encode_frame, Capability, HostSession, Message, SessionState};
+use block_plugin_api::{
+    desktop_attachments::CarrierError, encode_frame, Capability, HostSession, Message, SessionState,
+};
 use std::{
-    io,
+    io::{self, BufRead, Read, Write},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
@@ -8,12 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use std::io::{BufRead, Read, Write};
+use super::platform;
 
-#[cfg(target_os = "windows")]
-pub(super) type Attachment = std::os::windows::io::OwnedHandle;
-#[cfg(target_os = "linux")]
-pub(super) type Attachment = std::os::fd::OwnedFd;
+pub(super) type Attachment = platform::Attachment;
 
 pub(super) enum SurfaceEvent {
     Surface(block_plugin_api::SurfaceDescriptor, Vec<Attachment>),
@@ -29,7 +28,18 @@ pub(super) enum Event {
     Ended(String),
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+/// Reading a message the plugin sent, with whatever native resources came
+/// with it. Implemented by each platform's carrier.
+pub(super) trait Reading {
+    fn read(&mut self) -> Result<(Message, Vec<Attachment>), CarrierError>;
+}
+
+/// Writing a message to the plugin. The host never sends native resources of
+/// its own, so a carrier only has to carry the message.
+pub(super) trait Writing {
+    fn write(&mut self, message: &Message) -> Result<(), CarrierError>;
+}
+
 pub(super) struct Inbound {
     events: Sender<Event>,
     surfaces: Sender<SurfaceEvent>,
@@ -61,7 +71,6 @@ impl Process {
         let (size_sender, sizes) = mpsc::channel();
         let event_sender = events.clone();
         thread::spawn(move || {
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
             let inbound = Inbound {
                 events: event_sender,
                 surfaces: surface_sender,
@@ -71,41 +80,7 @@ impl Process {
                 sizes: size_sender,
                 repaint,
             };
-            let result = platform::Endpoint::create().and_then(|endpoint| {
-                let argument = endpoint.argument();
-                let mut command = Command::new(&executable);
-                command
-                    .args(["--endpoint", &argument])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped());
-                #[cfg(target_os = "windows")]
-                if let Some(directory) = executable.parent() {
-                    command.current_dir(directory).env_remove("PATH");
-                }
-                let mut child = command.spawn().map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        format!("failed to launch {}: {error}", executable.display()),
-                    )
-                })?;
-                if let Some(stderr) = child.stderr.take() {
-                    thread::spawn(move || {
-                        for line in io::BufReader::new(stderr).lines().map_while(Result::ok) {
-                            eprintln!("plugin process: {line}");
-                        }
-                    });
-                }
-                let result = endpoint.accept(&child).and_then(|stream| {
-                    #[cfg(target_os = "windows")]
-                    return drive_windows(stream, &mut child, &event_receiver, inbound);
-                    #[cfg(target_os = "linux")]
-                    return drive_unix(stream, &mut child, &event_receiver, inbound);
-                });
-                terminate(&mut child);
-                result
-            });
-            let reason = match result {
+            let reason = match run(executable, &event_receiver, inbound) {
                 Ok(()) => "plugin exited".to_owned(),
                 Err(error) => {
                     eprintln!("plugin host process failed: {error}");
@@ -175,62 +150,80 @@ impl Process {
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-trait Reading {
-    fn read(
-        &mut self,
-    ) -> Result<(Message, Vec<Attachment>), block_plugin_api::desktop_attachments::CarrierError>;
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-trait Writing {
-    fn write(
-        &mut self,
-        message: &Message,
-    ) -> Result<(), block_plugin_api::desktop_attachments::CarrierError>;
-}
-
-#[cfg(target_os = "linux")]
-impl Reading for block_plugin_api::desktop_attachments::UnixAttachmentCarrier {
-    fn read(
-        &mut self,
-    ) -> Result<(Message, Vec<Attachment>), block_plugin_api::desktop_attachments::CarrierError>
-    {
-        self.receive()
+impl Drop for Process {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
-#[cfg(target_os = "linux")]
-impl Writing for block_plugin_api::desktop_attachments::UnixAttachmentCarrier {
-    fn write(
-        &mut self,
-        message: &Message,
-    ) -> Result<(), block_plugin_api::desktop_attachments::CarrierError> {
-        self.send(message, &[])
+/// Starts the plugin, speaks the handshake, and then reads and writes the
+/// connection until either side ends it. The plugin is killed on the way out
+/// however this returns.
+fn run(executable: PathBuf, events: &Receiver<Event>, inbound: Inbound) -> io::Result<()> {
+    let endpoint = platform::Endpoint::create()?;
+    let argument = endpoint.argument();
+    let mut command = Command::new(&executable);
+    command
+        .args(["--endpoint", &argument])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    platform::prepare(&mut command, &executable);
+    let mut child = command.spawn().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to launch {}: {error}", executable.display()),
+        )
+    })?;
+    if let Some(stderr) = child.stderr.take() {
+        thread::spawn(move || {
+            for line in io::BufReader::new(stderr).lines().map_while(Result::ok) {
+                eprintln!("plugin process: {line}");
+            }
+        });
+    }
+    let result = endpoint
+        .accept(&child)
+        .and_then(|connection| drive(connection, &mut child, events, inbound));
+    terminate(&mut child);
+    result
+}
+
+fn drive(
+    mut connection: platform::Connection,
+    child: &mut Child,
+    events: &Receiver<Event>,
+    inbound: Inbound,
+) -> io::Result<()> {
+    handshake(&mut connection)?;
+    let (reader, writer) = connection.split(child)?;
+    thread::spawn(move || read_from_plugin(reader, inbound));
+    write_to_plugin(writer, child, events)
+}
+
+fn handshake(connection: &mut platform::Connection) -> io::Result<()> {
+    let started = Instant::now();
+    let mut session = HostSession::new(
+        "BE3",
+        vec![
+            Capability::Lifecycle,
+            Capability::Input,
+            Capability::Surface(platform::SURFACE_MECHANISM),
+        ],
+    );
+    session.start(0);
+    let hello = read_message(connection.reader())?;
+    session.receive(hello, elapsed(started));
+    flush(connection.writer(), &mut session)?;
+    match session.state() {
+        SessionState::Running => Ok(()),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plugin handshake was rejected",
+        )),
     }
 }
 
-#[cfg(target_os = "windows")]
-impl Reading for block_plugin_api::desktop_attachments::WindowsAttachmentCarrier {
-    fn read(
-        &mut self,
-    ) -> Result<(Message, Vec<Attachment>), block_plugin_api::desktop_attachments::CarrierError>
-    {
-        self.receive()
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Writing for block_plugin_api::desktop_attachments::WindowsAttachmentCarrier {
-    fn write(
-        &mut self,
-        message: &Message,
-    ) -> Result<(), block_plugin_api::desktop_attachments::CarrierError> {
-        self.send(message, &[])
-    }
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn read_from_plugin(mut carrier: impl Reading, inbound: Inbound) {
     loop {
         let (message, attachments) = match carrier.read() {
@@ -284,7 +277,6 @@ fn read_from_plugin(mut carrier: impl Reading, inbound: Inbound) {
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn write_to_plugin(
     mut carrier: impl Writing,
     child: &mut Child,
@@ -340,76 +332,6 @@ fn write_to_plugin(
     }
 }
 
-#[cfg(target_os = "windows")]
-fn drive_windows(
-    streams: (std::fs::File, std::fs::File),
-    child: &mut Child,
-    events: &Receiver<Event>,
-    inbound: Inbound,
-) -> io::Result<()> {
-    use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
-    use std::os::windows::io::AsRawHandle;
-
-    let (mut reader, mut writer) = streams;
-    let started = Instant::now();
-    let mut session = HostSession::new(
-        "BE3",
-        vec![
-            Capability::Lifecycle,
-            Capability::Input,
-            Capability::Surface(block_plugin_api::SurfaceMechanism::WindowsDxgi),
-        ],
-    );
-    session.start(0);
-    session.receive(read_message(&mut reader)?, elapsed(started));
-    flush(&mut writer, &mut session)?;
-    if !matches!(session.state(), SessionState::Running) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "plugin handshake was rejected",
-        ));
-    }
-    let peer: windows_sys::Win32::Foundation::HANDLE = child.as_raw_handle().cast();
-    thread::spawn(move || {
-        read_from_plugin(WindowsAttachmentCarrier::receiving(reader), inbound);
-    });
-    write_to_plugin(WindowsAttachmentCarrier::new(writer, peer), child, events)
-}
-
-#[cfg(target_os = "linux")]
-fn drive_unix(
-    mut stream: std::os::unix::net::UnixStream,
-    child: &mut Child,
-    events: &Receiver<Event>,
-    inbound: Inbound,
-) -> io::Result<()> {
-    use block_plugin_api::desktop_attachments::UnixAttachmentCarrier;
-
-    let started = Instant::now();
-    let mut session = HostSession::new(
-        "BE3",
-        vec![
-            Capability::Lifecycle,
-            Capability::Input,
-            Capability::Surface(block_plugin_api::SurfaceMechanism::LinuxDmaBuf),
-        ],
-    );
-    session.start(0);
-    session.receive(read_message(&mut stream)?, elapsed(started));
-    flush(&mut stream, &mut session)?;
-    if !matches!(session.state(), SessionState::Running) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "plugin handshake was rejected",
-        ));
-    }
-    let reader = stream.try_clone()?;
-    thread::spawn(move || {
-        read_from_plugin(UnixAttachmentCarrier::new(reader), inbound);
-    });
-    write_to_plugin(UnixAttachmentCarrier::new(stream), child, events)
-}
-
 fn coalesce_screens(messages: &mut Vec<Message>) {
     let Some(last) = messages
         .iter()
@@ -454,7 +376,7 @@ fn editor_name(message: &block_plugin_api::EditorMessage) -> &'static str {
     }
 }
 
-fn carrier_error(error: block_plugin_api::desktop_attachments::CarrierError) -> io::Error {
+fn carrier_error(error: CarrierError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
 
@@ -470,12 +392,6 @@ fn wait_for_shutdown(child: &mut Child) -> io::Result<()> {
         io::ErrorKind::TimedOut,
         "plugin did not exit after shutdown",
     ))
-}
-
-impl Drop for Process {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
 }
 
 fn read_message(stream: &mut impl Read) -> io::Result<Message> {
@@ -512,210 +428,4 @@ fn terminate(child: &mut Child) {
         child.kill().ok();
     }
     child.wait().ok();
-}
-
-#[cfg(unix)]
-mod platform {
-    use std::{
-        fs, io,
-        os::unix::net::{UnixListener, UnixStream},
-        path::PathBuf,
-        process::Child,
-    };
-
-    pub(super) struct Endpoint {
-        listener: UnixListener,
-        path: PathBuf,
-    }
-
-    impl Endpoint {
-        pub(super) fn create() -> io::Result<Self> {
-            let path = std::env::temp_dir().join(format!(
-                "be3-plugin-{}-{}.sock",
-                std::process::id(),
-                unique()
-            ));
-            let listener = UnixListener::bind(&path)?;
-            Ok(Self { listener, path })
-        }
-
-        pub(super) fn argument(&self) -> String {
-            self.path.to_string_lossy().into_owned()
-        }
-
-        pub(super) fn accept(&self, child: &Child) -> io::Result<UnixStream> {
-            let (stream, _) = self.listener.accept()?;
-            verify_peer(&stream, child)?;
-            Ok(stream)
-        }
-    }
-
-    impl Drop for Endpoint {
-        fn drop(&mut self) {
-            fs::remove_file(&self.path).ok();
-        }
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    fn verify_peer(stream: &UnixStream, child: &Child) -> io::Result<()> {
-        use std::os::fd::AsRawFd;
-        let mut credentials = libc::ucred {
-            pid: 0,
-            uid: 0,
-            gid: 0,
-        };
-        let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-        let result = unsafe {
-            libc::getsockopt(
-                stream.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_PEERCRED,
-                (&raw mut credentials).cast(),
-                &raw mut length,
-            )
-        };
-        if result == 0 && credentials.pid as u32 == child.id() {
-            Ok(())
-        } else if result != 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "unexpected plugin peer",
-            ))
-        }
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    fn verify_peer(_stream: &UnixStream, _child: &Child) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn unique() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    }
-}
-
-#[cfg(windows)]
-mod platform {
-    use std::{
-        ffi::OsStr,
-        fs::File,
-        io,
-        os::windows::{ffi::OsStrExt, io::FromRawHandle},
-        process::Child,
-    };
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE},
-        Storage::FileSystem::{
-            FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND, PIPE_ACCESS_OUTBOUND,
-        },
-        System::Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
-            PIPE_TYPE_BYTE, PIPE_WAIT,
-        },
-    };
-    pub(super) struct Endpoint {
-        inbound: HANDLE,
-        outbound: HANDLE,
-        name: String,
-    }
-    impl Endpoint {
-        pub(super) fn create() -> io::Result<Self> {
-            let name = format!(r"\\.\pipe\be3-plugin-{}-{}", std::process::id(), unique());
-            let mut endpoint = Self {
-                inbound: INVALID_HANDLE_VALUE,
-                outbound: INVALID_HANDLE_VALUE,
-                name,
-            };
-            endpoint.inbound = pipe(&super::to_host(&endpoint.name), PIPE_ACCESS_INBOUND)?;
-            endpoint.outbound = pipe(&super::to_plugin(&endpoint.name), PIPE_ACCESS_OUTBOUND)?;
-            Ok(endpoint)
-        }
-        pub(super) fn argument(&self) -> String {
-            self.name.clone()
-        }
-        pub(super) fn accept(mut self, child: &Child) -> io::Result<(File, File)> {
-            connect(self.inbound, child)?;
-            connect(self.outbound, child)?;
-            let inbound = std::mem::replace(&mut self.inbound, INVALID_HANDLE_VALUE);
-            let outbound = std::mem::replace(&mut self.outbound, INVALID_HANDLE_VALUE);
-            Ok(unsafe {
-                (
-                    File::from_raw_handle(inbound.cast()),
-                    File::from_raw_handle(outbound.cast()),
-                )
-            })
-        }
-    }
-    impl Drop for Endpoint {
-        fn drop(&mut self) {
-            for handle in [self.inbound, self.outbound] {
-                if handle != INVALID_HANDLE_VALUE {
-                    unsafe { CloseHandle(handle) };
-                }
-            }
-        }
-    }
-    fn pipe(name: &str, access: u32) -> io::Result<HANDLE> {
-        let wide = wide(name);
-        let handle = unsafe {
-            CreateNamedPipeW(
-                wide.as_ptr(),
-                access | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                1,
-                1_048_580,
-                1_048_580,
-                5_000,
-                std::ptr::null(),
-            )
-        };
-        if handle == INVALID_HANDLE_VALUE {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(handle)
-        }
-    }
-    fn connect(handle: HANDLE, child: &Child) -> io::Result<()> {
-        let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) };
-        if connected == 0
-            && io::Error::last_os_error().raw_os_error() != Some(ERROR_PIPE_CONNECTED as i32)
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let mut process_id = 0;
-        if unsafe { GetNamedPipeClientProcessId(handle, &raw mut process_id) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if process_id != child.id() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "unexpected plugin peer",
-            ));
-        }
-        Ok(())
-    }
-    fn wide(value: &str) -> Vec<u16> {
-        OsStr::new(value).encode_wide().chain(Some(0)).collect()
-    }
-    fn unique() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    }
-}
-
-#[cfg(windows)]
-fn to_host(endpoint: &str) -> String {
-    format!("{endpoint}-to-host")
-}
-
-#[cfg(windows)]
-fn to_plugin(endpoint: &str) -> String {
-    format!("{endpoint}-to-plugin")
 }

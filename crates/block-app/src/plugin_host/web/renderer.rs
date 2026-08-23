@@ -53,7 +53,7 @@ pub(crate) struct WebSurfacePresenter {
 
 impl WebSurfacePresenter {
     fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("blit.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("../blit.wgsl"));
 
         let blit_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
