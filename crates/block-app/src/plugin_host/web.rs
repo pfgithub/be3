@@ -647,11 +647,32 @@ fn begin_pass(runtime: &mut Runtime, context: &egui::Context, pass: u64) {
     let awaited = messages.iter().any(|message| {
         matches!(
             message,
-            Message::Client(_)
-                | Message::Editor(EditorMessage::Open { .. } | EditorMessage::OpenArtifact { .. })
+            Message::Editor(EditorMessage::Open { .. } | EditorMessage::OpenArtifact { .. })
         )
     });
     runtime.send(messages);
+    if awaited {
+        context.request_repaint();
+    }
+    pump_client(runtime, context);
+}
+
+pub(crate) fn poll(context: &egui::Context) {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        for runtime in state.runtimes.values_mut() {
+            pump_client(runtime, context);
+        }
+    });
+}
+
+fn pump_client(runtime: &mut Runtime, context: &egui::Context) {
+    if runtime.adapter.is_none() {
+        return;
+    }
+    let responses = runtime.instances.client_responses();
+    let awaited = !responses.is_empty();
+    runtime.send(responses);
     if let Some(adapter) = &mut runtime.adapter {
         if let Err(error) = adapter.poll() {
             runtime.error = Some(error);

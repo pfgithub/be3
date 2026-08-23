@@ -100,6 +100,8 @@ pub(crate) fn creation_ready(_plugin_id: &str, _instance: EditorInstanceId) -> b
 
 pub(crate) fn commit_creation(_plugin_id: &str, _instance: EditorInstanceId) {}
 
+pub(crate) fn poll(_context: &egui::Context) {}
+
 pub(crate) fn take_created(
     _plugin_id: &str,
     _instance: EditorInstanceId,

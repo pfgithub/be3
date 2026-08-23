@@ -27,20 +27,20 @@ mod windows;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) use native::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
-    editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
-    take_artifact_outcome, take_created,
+    editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,
+    running, take_artifact_outcome, take_created,
 };
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
 pub(crate) use unavailable::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
-    editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
-    take_artifact_outcome, take_created,
+    editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,
+    running, take_artifact_outcome, take_created,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::{
     artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
-    editor_ui, install, intrinsic_size, kill, preview, regenerate_artifact, region_size, running,
-    take_artifact_outcome, take_created,
+    editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,
+    running, take_artifact_outcome, take_created,
 };
 
 pub(crate) struct RuntimeStatus {

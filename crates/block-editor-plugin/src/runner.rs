@@ -28,6 +28,26 @@ pub(crate) fn run<A: crate::App>(id: &str, name: &str, version: &str) {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const FLUSH_WINDOW: std::time::Duration = std::time::Duration::from_millis(250);
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const FLUSH_POLL: std::time::Duration = std::time::Duration::from_millis(8);
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn wait_deadline(
+    repaint_at: Option<std::time::Instant>,
+    flush_until: Option<std::time::Instant>,
+) -> Option<std::time::Instant> {
+    let now = std::time::Instant::now();
+    let flush_at = flush_until
+        .filter(|until| *until > now)
+        .map(|_| now + FLUSH_POLL);
+    match (repaint_at, flush_at) {
+        (Some(repaint), Some(flush)) => Some(repaint.min(flush)),
+        (repaint, flush) => repaint.or(flush),
+    }
+}
+
 fn transport(
     mut input: impl std::io::Read,
     mut output: impl std::io::Write,
@@ -108,9 +128,10 @@ fn run_endpoint<A: crate::App>(
     let mut generation = 0;
     let mut request_id = 0;
     let mut repaint_at: Option<Instant> = None;
+    let mut flush_until: Option<Instant> = None;
     loop {
         let mut batch = Vec::new();
-        match repaint_at {
+        match wait_deadline(repaint_at, flush_until) {
             Some(deadline) => wait_until(socket, deadline)?,
             None => batch.push(carrier.receive()?.0),
         }
@@ -152,13 +173,13 @@ fn run_endpoint<A: crate::App>(
             });
             carrier.send(&Message::Layout(layout), &[])?;
         }
+        let due = repaint_at.is_some_and(|deadline| deadline <= Instant::now());
         if let Some(surface) = &mut surface {
             if replaced {
                 let (descriptor, planes) = surface.descriptor();
                 carrier.send(&descriptor, &planes)?;
                 eprintln!("transferred dma-buf surface generation {generation}");
             }
-            let due = repaint_at.is_some_and(|deadline| deadline <= Instant::now());
             if received || replaced || due {
                 let (messages, repaint) =
                     surface.render(&mut screens, started.elapsed().as_secs_f64())?;
@@ -168,8 +189,13 @@ fn run_endpoint<A: crate::App>(
                 repaint_at = repaint.map(|delay| Instant::now() + delay);
             }
         }
-        for message in screens.outbound() {
+        let outbound = screens.outbound();
+        let flushed = !outbound.is_empty();
+        for message in outbound {
             carrier.send(&message, &[])?;
+        }
+        if received || replaced || due || flushed {
+            flush_until = Some(Instant::now() + FLUSH_WINDOW);
         }
     }
 }
@@ -276,9 +302,10 @@ fn run_endpoint<A: crate::App>(
     let mut generation = 0;
     let mut request_id = 0;
     let mut repaint_at: Option<Instant> = None;
+    let mut flush_until: Option<Instant> = None;
     loop {
         let mut batch = Vec::new();
-        match repaint_at {
+        match wait_deadline(repaint_at, flush_until) {
             Some(deadline) => wait_until(pipe, deadline)?,
             None => batch.push(carrier.receive()?.0),
         }
@@ -321,13 +348,13 @@ fn run_endpoint<A: crate::App>(
             });
             carrier.send(&Message::Layout(layout), &[])?;
         }
+        let due = repaint_at.is_some_and(|deadline| deadline <= Instant::now());
         if let Some(surface) = &mut surface {
             if replaced {
                 let (descriptor, handles) = surface.descriptor();
                 carrier.send(&descriptor, &handles)?;
                 eprintln!("transferred DXGI surface generation {generation}");
             }
-            let due = repaint_at.is_some_and(|deadline| deadline <= Instant::now());
             if received || replaced || due {
                 let (messages, repaint) =
                     surface.render(&mut screens, started.elapsed().as_secs_f64())?;
@@ -337,8 +364,13 @@ fn run_endpoint<A: crate::App>(
                 repaint_at = repaint.map(|delay| Instant::now() + delay);
             }
         }
-        for message in screens.outbound() {
+        let outbound = screens.outbound();
+        let flushed = !outbound.is_empty();
+        for message in outbound {
             carrier.send(&message, &[])?;
+        }
+        if received || replaced || due || flushed {
+            flush_until = Some(Instant::now() + FLUSH_WINDOW);
         }
     }
 }

@@ -100,7 +100,11 @@ impl Instances {
     }
 
     fn connect(&mut self, context: &egui::Context, client: &Arc<BlockClient>) {
-        if self.connection.is_some() {
+        if self
+            .connection
+            .as_ref()
+            .is_some_and(|connection| Arc::ptr_eq(&connection.client, client))
+        {
             return;
         }
         let tunnel = client.open_tunnel({
@@ -469,13 +473,18 @@ impl Instances {
 
     /// Takes whatever the server has sent back for the runtime's client, so
     /// it can be handed to the plugin runtime.
-    pub(super) fn pending(&mut self) -> Vec<Message> {
+    pub(super) fn client_responses(&mut self) -> Vec<Message> {
         let mut messages = Vec::new();
         if let Some(connection) = &mut self.connection {
             while let Some(payload) = connection.tunnel.try_recv() {
                 messages.push(Message::Client(TunnelMessage::Response { payload }));
             }
         }
+        messages
+    }
+
+    pub(super) fn pending(&mut self) -> Vec<Message> {
+        let mut messages = Vec::new();
         let mut instances: Vec<_> = self.entries.keys().copied().collect();
         instances.sort_by_key(|instance| instance.0);
         for instance in instances {
@@ -616,10 +625,33 @@ impl Instances {
             return;
         };
         let Some(connection) = &self.connection else {
+            log(&format!(
+                "dropped a plugin client frame: the runtime has no connection: {}",
+                summary(&payload)
+            ));
             return;
         };
+        log(&format!(
+            "forwarding a plugin client frame: {}",
+            summary(&payload)
+        ));
         connection.tunnel.send(payload);
     }
+}
+
+fn summary(payload: &str) -> String {
+    const LONGEST: usize = 160;
+    match payload.char_indices().nth(LONGEST) {
+        Some((end, _)) => format!("{}...", &payload[..end]),
+        None => payload.to_owned(),
+    }
+}
+
+fn log(message: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&format!("plugin host {message}").into());
+    #[cfg(not(target_arch = "wasm32"))]
+    eprintln!("plugin host {message}");
 }
 
 fn host_filter(filter: block_plugin_api::FileFilter) -> FileFilter {

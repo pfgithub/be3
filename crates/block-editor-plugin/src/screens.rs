@@ -168,9 +168,14 @@ impl Screens {
                 }
             }
             Message::Client(TunnelMessage::Response { payload }) => {
-                if let Some(client) = &self.client {
-                    client.carrier.send(payload.clone());
-                }
+                let Some(client) = &self.client else {
+                    log(&format!(
+                        "dropped a server frame: the runtime has no client: {}",
+                        summary(payload)
+                    ));
+                    return;
+                };
+                client.carrier.send(payload.clone());
             }
             Message::BlockTypes(descriptors) => {
                 self.block_types = Rc::new(catalog(descriptors));
@@ -221,6 +226,7 @@ impl Screens {
         let mut messages = Vec::new();
         if let Some(client) = &mut self.client {
             while let Some(payload) = client.carrier.try_recv() {
+                log(&format!("sending a client frame: {}", summary(&payload)));
                 messages.push(Message::Client(TunnelMessage::Request { payload }));
             }
         }
@@ -255,6 +261,18 @@ impl Screens {
             session.place(placements.get(instance).map_or(&[], Vec::as_slice));
         }
     }
+}
+
+fn summary(payload: &str) -> String {
+    const LONGEST: usize = 160;
+    match payload.char_indices().nth(LONGEST) {
+        Some((end, _)) => format!("{}...", &payload[..end]),
+        None => payload.to_owned(),
+    }
+}
+
+fn log(message: &str) {
+    eprintln!("{message}");
 }
 
 fn catalog(descriptors: &[BlockTypeDescriptor]) -> BlockCatalog {

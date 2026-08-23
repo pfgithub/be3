@@ -459,10 +459,24 @@ fn name(message: &Message) -> &'static str {
         Message::Layout(_) => "Layout",
         Message::RegionSizes(_) => "RegionSizes",
         Message::Input(_) => "Input",
-        Message::Editor(_) => "Editor",
+        Message::Editor(message) => editor_name(message),
         Message::Client(_) => "Client",
         Message::Shutdown => "Shutdown",
         _ => "a message",
+    }
+}
+
+fn editor_name(message: &block_plugin_api::EditorMessage) -> &'static str {
+    use block_plugin_api::EditorMessage;
+    match message {
+        EditorMessage::Open { .. } => "Editor::Open",
+        EditorMessage::Close { .. } => "Editor::Close",
+        EditorMessage::OpenCreation { .. } => "Editor::OpenCreation",
+        EditorMessage::CommitCreation { .. } => "Editor::CommitCreation",
+        EditorMessage::CreationBlock { .. } => "Editor::CreationBlock",
+        EditorMessage::OpenArtifact { .. } => "Editor::OpenArtifact",
+        EditorMessage::EditabilityChanged { .. } => "Editor::EditabilityChanged",
+        _ => "Editor",
     }
 }
 

@@ -419,6 +419,27 @@ pub(crate) fn running() -> Vec<super::RuntimeStatus> {
     })
 }
 
+pub(crate) fn poll(_context: &egui::Context) {
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        for runtime in host.runtimes.values_mut() {
+            pump_client(runtime);
+        }
+    });
+}
+
+fn pump_client(runtime: &mut Runtime) {
+    let Some(process) = &runtime.process else {
+        return;
+    };
+    let requests = process.client_messages();
+    for message in requests {
+        runtime.instances.client_message(message);
+    }
+    let responses = runtime.instances.client_responses();
+    runtime.send(responses);
+}
+
 pub(crate) fn kill(ctx: &egui::Context, plugin_id: &str) {
     HOST.with(|host| {
         host.borrow_mut().shutdown(ctx, plugin_id);
@@ -552,16 +573,13 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
     if !frames.is_empty() {
         runtime.pending_frame = Some(PlatformFrame::Events(frames));
     }
-    let messages = process.client_messages();
     let editor_messages = process.editor_messages();
     let sizes = process.region_sizes();
-    for message in messages {
-        runtime.instances.client_message(message);
-    }
     for message in editor_messages {
         runtime.instances.editor_message(message);
     }
     runtime.instances.set_region_sizes(sizes);
+    pump_client(runtime);
 }
 
 fn plugin_path(plugin: &PluginManifest) -> PathBuf {
