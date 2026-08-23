@@ -254,6 +254,10 @@ impl Screens {
         self.sessions.get_mut(&instance)
     }
 
+    pub(crate) fn is_open(&self, instance: EditorInstanceId) -> bool {
+        self.sessions.contains_key(&instance)
+    }
+
     fn screen(&self, screen: ScreenId) -> Option<(EditorInstanceId, EditorRegion)> {
         self.layout
             .placement(screen)

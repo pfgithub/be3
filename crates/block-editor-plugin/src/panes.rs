@@ -1,4 +1,4 @@
-use block_plugin_api::{ScreenId, ScreenLayout};
+use block_plugin_api::{EditorInstanceId, ScreenId, ScreenLayout};
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::{collections::HashMap, time::Duration};
 
@@ -7,19 +7,26 @@ use crate::screens::Screens;
 const MINIMUM_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
 struct Pane {
+    instance: EditorInstanceId,
     context: egui::Context,
     renderer: egui_wgpu::Renderer,
     freed: Vec<egui::TextureId>,
 }
 
 impl Pane {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, theme: Option<egui::Theme>) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        theme: Option<egui::Theme>,
+        instance: EditorInstanceId,
+    ) -> Self {
         let context = egui::Context::default();
         egui_material_icons::initialize(&context);
         if let Some(theme) = theme {
             context.set_theme(theme);
         }
         Self {
+            instance,
             context,
             renderer: egui_wgpu::Renderer::new(
                 device,
@@ -74,7 +81,7 @@ impl Panes {
             let pane = self
                 .panes
                 .entry(placement.screen)
-                .or_insert_with(|| Pane::new(device, format, theme));
+                .or_insert_with(|| Pane::new(device, format, theme, placement.instance));
             for id in std::mem::take(&mut pane.freed) {
                 pane.renderer.free_texture(&id);
             }
@@ -124,11 +131,7 @@ impl Panes {
             }
             pane.freed = output.textures_delta.free;
         }
-        self.panes.retain(|screen, _| {
-            placements
-                .iter()
-                .any(|placement| placement.screen == *screen)
-        });
+        self.panes.retain(|_, pane| screens.is_open(pane.instance));
         Painted {
             commands,
             repaint: (repaint < Duration::MAX).then(|| repaint.max(MINIMUM_FRAME_INTERVAL)),
