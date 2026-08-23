@@ -135,8 +135,10 @@ impl block_editor_plugin::App for PdfApp {
     fn ui(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size().max(egui::Vec2::splat(1.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
-        self.handle_input(&response, rect);
-        let view = self.view;
+        if self.owns_pan_and_zoom() {
+            self.handle_input(&response, rect);
+        }
+        let view = self.view();
         match self.draw(ui, PaneKey::Main, rect, view) {
             Drawn::Page => {}
             waiting => {
@@ -188,9 +190,11 @@ impl block_editor_plugin::App for PdfApp {
             {
                 self.page += 1;
             }
-            ui.separator();
-            if ui.button("Fit view").clicked() {
-                self.view = View::default();
+            if self.owns_pan_and_zoom() {
+                ui.separator();
+                if ui.button("Fit view").clicked() {
+                    self.view = View::default();
+                }
             }
         });
     }
@@ -244,6 +248,20 @@ impl block_editor_plugin::App for PdfApp {
 impl PdfApp {
     fn page_size(&self) -> egui::Vec2 {
         self.page_size_pts.unwrap_or(DEFAULT_PAGE_SIZE)
+    }
+
+    fn owns_pan_and_zoom(&self) -> bool {
+        self.editing
+            .as_ref()
+            .is_none_or(|editing| editing.host.owns_pan_and_zoom())
+    }
+
+    fn view(&self) -> View {
+        if self.owns_pan_and_zoom() {
+            self.view
+        } else {
+            View::default()
+        }
     }
 
     fn draw(&mut self, ui: &mut egui::Ui, key: PaneKey, region: egui::Rect, view: View) -> Drawn {

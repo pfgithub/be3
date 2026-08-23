@@ -250,6 +250,20 @@ impl PixelArtApp {
             .is_none_or(|editing| editing.host.editable())
     }
 
+    pub(crate) fn owns_pan_and_zoom(&self) -> bool {
+        self.editing
+            .as_ref()
+            .is_none_or(|editing| editing.host.owns_pan_and_zoom())
+    }
+
+    pub(crate) fn view(&self) -> View {
+        if self.owns_pan_and_zoom() {
+            self.view
+        } else {
+            View::default()
+        }
+    }
+
     pub(crate) fn refresh_pane(
         &mut self,
         context: &egui::Context,

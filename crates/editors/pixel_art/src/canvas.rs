@@ -168,12 +168,15 @@ impl PixelArtApp {
 
         let input_enabled = !self.resize_open && !self.clear_open;
         let editable = input_enabled && self.editable();
+        let steers_view = self.owns_pan_and_zoom();
         if input_enabled {
-            self.handle_view_input(&response, region);
+            if steers_view {
+                self.handle_view_input(&response, region);
+            }
             self.handle_shortcuts(ui, &response);
         }
 
-        let canvas = canvas_rect(region, width, height, self.view);
+        let canvas = canvas_rect(region, width, height, self.view());
         let pointer = response
             .ctx
             .pointer_hover_pos()
@@ -189,11 +192,12 @@ impl PixelArtApp {
             None
         };
 
-        let panning = input_enabled && self.panning(&response);
+        let panning = input_enabled && steers_view && self.panning(&response);
         if response.hovered() && input_enabled {
+            let grabbing = response.ctx.input(|input| input.key_down(egui::Key::Space));
             let cursor = if panning {
                 egui::CursorIcon::Grabbing
-            } else if response.ctx.input(|input| input.key_down(egui::Key::Space)) {
+            } else if grabbing && steers_view {
                 egui::CursorIcon::Grab
             } else {
                 egui::CursorIcon::Crosshair
@@ -510,6 +514,9 @@ impl PixelArtApp {
         }
         if vertical {
             self.mirror_vertical = !self.mirror_vertical;
+        }
+        if !self.owns_pan_and_zoom() {
+            return;
         }
         match zoom {
             Some(Some(factor)) => self.view.change_zoom(factor, None),
