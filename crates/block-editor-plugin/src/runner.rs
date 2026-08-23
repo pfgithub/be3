@@ -29,26 +29,6 @@ pub(crate) fn run<A: crate::App>(id: &str, name: &str, version: &str) {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-const FLUSH_WINDOW: std::time::Duration = std::time::Duration::from_millis(250);
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-const FLUSH_POLL: std::time::Duration = std::time::Duration::from_millis(8);
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-fn wait_deadline(
-    repaint_at: Option<std::time::Instant>,
-    flush_until: Option<std::time::Instant>,
-) -> Option<std::time::Instant> {
-    let now = std::time::Instant::now();
-    let flush_at = flush_until
-        .filter(|until| *until > now)
-        .map(|_| now + FLUSH_POLL);
-    match (repaint_at, flush_at) {
-        (Some(repaint), Some(flush)) => Some(repaint.min(flush)),
-        (repaint, flush) => repaint.or(flush),
-    }
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn remaining(deadline: std::time::Instant) -> std::time::Duration {
     deadline.saturating_duration_since(std::time::Instant::now())
 }
@@ -248,9 +228,8 @@ fn run_endpoint<A: crate::App>(
     let mut generation = 0;
     let mut request_id = 0;
     let mut repaint_at: Option<Instant> = None;
-    let mut flush_until: Option<Instant> = None;
     loop {
-        let (batch, woken) = receive_batch(&events, wait_deadline(repaint_at, flush_until))?;
+        let (batch, woken) = receive_batch(&events, repaint_at)?;
         let received = !batch.is_empty();
         for message in batch {
             if let Message::Screens(set) = &message {
@@ -302,13 +281,8 @@ fn run_endpoint<A: crate::App>(
                 repaint_at = repaint.map(|delay| Instant::now() + delay);
             }
         }
-        let outbound = screens.outbound();
-        let flushed = !outbound.is_empty();
-        for message in outbound {
+        for message in screens.outbound() {
             carrier.send(&message, &[])?;
-        }
-        if received || replaced || due || flushed || woken {
-            flush_until = Some(Instant::now() + FLUSH_WINDOW);
         }
     }
 }
@@ -368,9 +342,8 @@ fn run_endpoint<A: crate::App>(
     let mut generation = 0;
     let mut request_id = 0;
     let mut repaint_at: Option<Instant> = None;
-    let mut flush_until: Option<Instant> = None;
     loop {
-        let (batch, woken) = receive_batch(&events, wait_deadline(repaint_at, flush_until))?;
+        let (batch, woken) = receive_batch(&events, repaint_at)?;
         let received = !batch.is_empty();
         for message in batch {
             if let Message::Screens(set) = &message {
@@ -423,13 +396,8 @@ fn run_endpoint<A: crate::App>(
                 repaint_at = repaint.map(|delay| Instant::now() + delay);
             }
         }
-        let outbound = screens.outbound();
-        let flushed = !outbound.is_empty();
-        for message in outbound {
+        for message in screens.outbound() {
             carrier.send(&message, &[])?;
-        }
-        if received || replaced || due || flushed || woken {
-            flush_until = Some(Instant::now() + FLUSH_WINDOW);
         }
     }
 }

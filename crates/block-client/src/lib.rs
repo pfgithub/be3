@@ -786,7 +786,12 @@ impl BlockClient {
     /// Runs a client whose frames are carried by another client's connection
     /// instead of one of its own. It behaves exactly like a connected client:
     /// the server gives it its own watches, presence and sequencing.
-    pub fn tunneled(account_id: Uuid, workspace_id: Uuid, endpoint: TunnelEndpoint) -> Self {
+    pub fn tunneled(
+        account_id: Uuid,
+        workspace_id: Uuid,
+        endpoint: TunnelEndpoint,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
         let (commands, command_rx) = mpsc::unbounded();
         let commands = CommandSender(commands);
         let id = Uuid::new_v4();
@@ -811,6 +816,7 @@ impl BlockClient {
         transport::spawn_worker(tunneled_worker_main(
             command_rx,
             endpoint,
+            Arc::new(wake),
             shutdown.clone(),
             Arc::clone(&access),
             Arc::clone(&debug),
@@ -1886,6 +1892,7 @@ async fn worker_main(
 async fn tunneled_worker_main(
     mut commands: mpsc::UnboundedReceiver<WorkerCommand>,
     endpoint: TunnelEndpoint,
+    wake: TunnelWake,
     shutdown: Shutdown,
     access: Arc<RwLock<()>>,
     debug: Arc<RwLock<NetworkDebugSnapshot>>,
@@ -1903,7 +1910,7 @@ async fn tunneled_worker_main(
         presence,
     );
     let socket = Link::Tunnel(TunnelSocket::new(endpoint.outgoing, endpoint.incoming));
-    run_link(socket, &shutdown, &mut state, &mut commands).await;
+    run_link(socket, &shutdown, &mut state, &mut commands, &*wake).await;
 }
 
 /// The websocket endpoint for a server URL. The blocks websocket shares the
@@ -1933,7 +1940,7 @@ async fn run_connected(
         Ok(socket) => socket,
         Err(error) => return stop_or_fatal(shutdown, error),
     };
-    run_link(Link::Socket(socket), shutdown, state, commands).await;
+    run_link(Link::Socket(socket), shutdown, state, commands, &|| {}).await;
 }
 
 async fn run_link(
@@ -1941,6 +1948,7 @@ async fn run_link(
     shutdown: &Shutdown,
     state: &mut WorkerState,
     commands: &mut mpsc::UnboundedReceiver<WorkerCommand>,
+    wake: &(dyn Fn() + Send + Sync),
 ) {
     state.connected = true;
     state.queue_initial_requests();
@@ -1959,6 +1967,7 @@ async fn run_link(
             state.message_sent(text);
         }
         state.refresh_debug();
+        wake();
 
         futures_util::select! {
             command = commands.next() => {

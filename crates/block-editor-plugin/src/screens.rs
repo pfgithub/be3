@@ -47,7 +47,13 @@ impl Screens {
             }
         }
         let (endpoint, carrier) = block_client::tunnel_channel();
-        let client = Arc::new(BlockClient::tunneled(account_id, workspace_id, endpoint));
+        let waker = self.waker.clone();
+        let client = Arc::new(BlockClient::tunneled(
+            account_id,
+            workspace_id,
+            endpoint,
+            move || waker.wake(),
+        ));
         self.client = Some(Client {
             client: Arc::clone(&client),
             carrier,
