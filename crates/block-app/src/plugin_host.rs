@@ -6,6 +6,8 @@ use eframe::egui;
 use uuid::Uuid;
 
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+mod core;
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod input;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod instances;

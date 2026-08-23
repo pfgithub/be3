@@ -1,8 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, path::PathBuf};
 
 use block_plugin_api::{
-    ArtifactDescription, EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest,
-    ScreenLayout,
+    ArtifactDescription, EditorInstanceId, EditorRegion, Message, PluginManifest, ScreenLayout,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -14,10 +13,8 @@ use super::windows::{
     install as install_presenter, WindowsFrame as PlatformFrame, RENDERER_REQUIRED,
 };
 use super::{
-    instances::{Instances, NextScreens},
-    presenter::{
-        PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
-    },
+    core::{select_surface, RuntimeCore, SurfaceSelection},
+    presenter::{PresenterCallback, PresenterCommand, PresenterState, Quad, Region},
     preview_size,
     process::{Process, SurfaceEvent},
     ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, EditorSlot,
@@ -350,7 +347,6 @@ pub(crate) fn region_size(
         host.borrow()
             .runtimes
             .get(plugin_id)?
-            .instances
             .region_size(instance, region)
     })
 }
@@ -360,7 +356,7 @@ pub(crate) fn creation_ready(plugin_id: &str, instance: EditorInstanceId) -> boo
         host.borrow()
             .runtimes
             .get(plugin_id)
-            .is_some_and(|runtime| runtime.instances.creation_ready(instance))
+            .is_some_and(|runtime| runtime.creation_ready(instance))
     })
 }
 
@@ -405,7 +401,6 @@ pub(crate) fn aspect_ratio(plugin_id: &str, instance: EditorInstanceId) -> Optio
         host.borrow()
             .runtimes
             .get(plugin_id)?
-            .instances
             .aspect_ratio(instance)
     })
 }
@@ -415,7 +410,6 @@ pub(crate) fn intrinsic_size(plugin_id: &str, instance: EditorInstanceId) -> Opt
         host.borrow()
             .runtimes
             .get(plugin_id)?
-            .instances
             .intrinsic_size(instance)
     })
 }
@@ -426,10 +420,9 @@ pub(crate) fn close(_ctx: &egui::Context, plugin_id: &str, instance: EditorInsta
         let Some(runtime) = host.runtimes.get_mut(plugin_id) else {
             return;
         };
-        if !runtime.instances.remove(instance) {
-            return;
+        if let Some(messages) = runtime.close(instance) {
+            runtime.send(messages);
         }
-        runtime.send(vec![Message::Editor(EditorMessage::Close { instance })]);
     });
 }
 
@@ -494,28 +487,16 @@ struct Host {
 }
 
 impl Host {
-    /// The presenter slot the plugin already holds, the lowest free one, or
-    /// the one taken back from the runtime that has been idle longest.
     fn surface_for(&mut self, plugin_id: &str, ctx: &egui::Context) -> Option<u32> {
-        if let Some(runtime) = self.runtimes.get(plugin_id) {
-            return Some(runtime.surface);
+        match select_surface(
+            plugin_id,
+            self.runtimes
+                .iter()
+                .map(|(id, runtime)| (id, &runtime.core)),
+        )? {
+            SurfaceSelection::Selected(surface) => Some(surface),
+            SurfaceSelection::Evict(id) => self.shutdown(ctx, &id),
         }
-        let free = (0..super::presenter::MAX_SURFACES).find(|surface| {
-            !self
-                .runtimes
-                .values()
-                .any(|runtime| runtime.surface == *surface)
-        });
-        if let Some(surface) = free {
-            return Some(surface);
-        }
-        let idle = self
-            .runtimes
-            .iter()
-            .filter(|(_, runtime)| runtime.instances.is_empty())
-            .min_by_key(|(_, runtime)| runtime.pass)
-            .map(|(id, _)| id.clone())?;
-        self.shutdown(ctx, &idle)
     }
 
     fn shutdown(&mut self, ctx: &egui::Context, plugin_id: &str) -> Option<u32> {
@@ -540,31 +521,21 @@ impl Host {
 }
 
 struct Runtime {
-    surface: u32,
-    status: PresenterStatus,
+    core: RuntimeCore,
     process: Option<Process>,
     exit: Option<String>,
     pending_frame: Option<PlatformFrame>,
-    instances: Instances,
-    layout: ScreenLayout,
     pending_layouts: Vec<ScreenLayout>,
-    sent: Vec<block_plugin_api::ScreenRequest>,
-    pass: u64,
 }
 
 impl Runtime {
     fn new(surface: u32) -> Self {
         Self {
-            surface,
-            status: PresenterStatus::waiting(),
+            core: RuntimeCore::new(surface),
             process: None,
             exit: None,
             pending_frame: None,
-            instances: Instances::default(),
-            layout: ScreenLayout::default(),
             pending_layouts: Vec::new(),
-            sent: Vec::new(),
-            pass: 0,
         }
     }
 
@@ -578,6 +549,20 @@ impl Runtime {
     }
 }
 
+impl std::ops::Deref for Runtime {
+    type Target = RuntimeCore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
+}
+
+impl std::ops::DerefMut for Runtime {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.core
+    }
+}
+
 fn detect_exit(runtime: &mut Runtime) {
     let Some(error) = runtime.process.as_ref().and_then(Process::take_exit) else {
         return;
@@ -587,24 +572,22 @@ fn detect_exit(runtime: &mut Runtime) {
 }
 
 fn begin_pass(runtime: &mut Runtime, pass: u64) {
-    if runtime.pass == pass {
-        return;
-    }
-    let previous = runtime.pass;
-    runtime.pass = pass;
-    let NextScreens { opened, screens } = runtime.instances.next_screens(previous);
-    let mut messages = opened;
-    if runtime.sent != screens {
-        runtime.sent.clone_from(&screens);
-        messages.push(runtime.instances.screen_set(screens));
-    }
-    messages.extend(runtime.instances.pending());
-    runtime.send(messages);
-    let Some(process) = &runtime.process else {
+    let Some((messages, _)) = runtime.core.begin_pass(pass) else {
         return;
     };
-    runtime.pending_layouts.extend(process.layouts());
-    let frames = process.latest_surface();
+    runtime.send(messages);
+    let (layouts, frames, editor_messages, sizes) = {
+        let Some(process) = &runtime.process else {
+            return;
+        };
+        (
+            process.layouts(),
+            process.latest_surface(),
+            process.editor_messages(),
+            process.region_sizes(),
+        )
+    };
+    runtime.pending_layouts.extend(layouts);
     for event in &frames {
         let SurfaceEvent::Surface(descriptor, _) = event else {
             continue;
@@ -616,16 +599,15 @@ fn begin_pass(runtime: &mut Runtime, pass: u64) {
         else {
             continue;
         };
-        runtime.layout = runtime.pending_layouts.remove(index);
+        runtime.core.layout = runtime.pending_layouts.remove(index);
+        let generation = runtime.core.layout.generation;
         runtime
             .pending_layouts
-            .retain(|layout| layout.generation > runtime.layout.generation);
+            .retain(|layout| layout.generation > generation);
     }
     if !frames.is_empty() {
         runtime.pending_frame = Some(PlatformFrame::Events(frames));
     }
-    let editor_messages = process.editor_messages();
-    let sizes = process.region_sizes();
     for message in editor_messages {
         runtime.instances.editor_message(message);
     }

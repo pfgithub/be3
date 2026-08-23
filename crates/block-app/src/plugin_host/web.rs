@@ -1,8 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use block_plugin_api::{
-    ArtifactDescription, EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest,
-    ScreenLayout,
+    ArtifactDescription, EditorInstanceId, EditorRegion, Message, PluginManifest,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -12,10 +11,8 @@ mod adapter;
 pub(super) mod renderer;
 
 use super::{
-    instances::{Instances, NextScreens},
-    presenter::{
-        PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
-    },
+    core::{select_surface, RuntimeCore, SurfaceSelection},
+    presenter::{PresenterCallback, PresenterCommand, PresenterState, Quad, Region},
     preview_size, ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock,
     EditorSlot, InstanceRole, PreviewSlot,
 };
@@ -32,28 +29,16 @@ struct State {
 }
 
 impl State {
-    /// The presenter slot the plugin already holds, the lowest free one, or
-    /// the one taken back from the runtime that has been idle longest.
     fn surface_for(&mut self, plugin_id: &str, context: &egui::Context) -> Option<u32> {
-        if let Some(runtime) = self.runtimes.get(plugin_id) {
-            return Some(runtime.surface);
+        match select_surface(
+            plugin_id,
+            self.runtimes
+                .iter()
+                .map(|(id, runtime)| (id, &runtime.core)),
+        )? {
+            SurfaceSelection::Selected(surface) => Some(surface),
+            SurfaceSelection::Evict(id) => self.shutdown(context, &id),
         }
-        let free = (0..super::presenter::MAX_SURFACES).find(|surface| {
-            !self
-                .runtimes
-                .values()
-                .any(|runtime| runtime.surface == *surface)
-        });
-        if let Some(surface) = free {
-            return Some(surface);
-        }
-        let idle = self
-            .runtimes
-            .iter()
-            .filter(|(_, runtime)| runtime.instances.is_empty())
-            .min_by_key(|(_, runtime)| runtime.pass)
-            .map(|(id, _)| id.clone())?;
-        self.shutdown(context, &idle)
     }
 
     fn shutdown(&mut self, context: &egui::Context, plugin_id: &str) -> Option<u32> {
@@ -82,7 +67,7 @@ impl State {
 }
 
 struct Runtime {
-    surface: u32,
+    core: RuntimeCore,
     plugin_id: String,
     canvas_id: String,
     url: String,
@@ -90,11 +75,6 @@ struct Runtime {
     starting: bool,
     adapter: Option<WebProtocolAdapter>,
     error: Option<String>,
-    status: PresenterStatus,
-    instances: Instances,
-    layout: ScreenLayout,
-    sent: Vec<block_plugin_api::ScreenRequest>,
-    pass: u64,
     context: Option<egui::Context>,
     dirty: bool,
     rendered_pass: u64,
@@ -104,7 +84,7 @@ struct Runtime {
 impl Runtime {
     fn new(plugin: &PluginManifest, surface: u32) -> Self {
         Self {
-            surface,
+            core: RuntimeCore::new(surface),
             plugin_id: plugin.identity.id.clone(),
             canvas_id: format!("plugin-canvas-{}", plugin.identity.id),
             url: plugin
@@ -119,11 +99,6 @@ impl Runtime {
             starting: false,
             adapter: None,
             error: None,
-            status: PresenterStatus::waiting(),
-            instances: Instances::default(),
-            layout: ScreenLayout::default(),
-            sent: Vec::new(),
-            pass: 0,
             context: None,
             dirty: false,
             rendered_pass: u64::MAX,
@@ -167,6 +142,20 @@ impl Runtime {
         }
         self.instances.set_region_sizes(region_sizes);
         received
+    }
+}
+
+impl std::ops::Deref for Runtime {
+    type Target = RuntimeCore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
+}
+
+impl std::ops::DerefMut for Runtime {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.core
     }
 }
 
@@ -529,7 +518,6 @@ pub(crate) fn region_size(
             .borrow()
             .runtimes
             .get(plugin_id)?
-            .instances
             .region_size(instance, region)
     })
 }
@@ -540,7 +528,7 @@ pub(crate) fn creation_ready(plugin_id: &str, instance: EditorInstanceId) -> boo
             .borrow()
             .runtimes
             .get(plugin_id)
-            .is_some_and(|runtime| runtime.instances.creation_ready(instance))
+            .is_some_and(|runtime| runtime.creation_ready(instance))
     })
 }
 
@@ -589,7 +577,6 @@ pub(crate) fn aspect_ratio(plugin_id: &str, instance: EditorInstanceId) -> Optio
             .borrow()
             .runtimes
             .get(plugin_id)?
-            .instances
             .aspect_ratio(instance)
     })
 }
@@ -600,7 +587,6 @@ pub(crate) fn intrinsic_size(plugin_id: &str, instance: EditorInstanceId) -> Opt
             .borrow()
             .runtimes
             .get(plugin_id)?
-            .instances
             .intrinsic_size(instance)
     })
 }
@@ -611,10 +597,9 @@ pub(crate) fn close(_ctx: &egui::Context, plugin_id: &str, instance: EditorInsta
         let Some(runtime) = state.runtimes.get_mut(plugin_id) else {
             return;
         };
-        if !runtime.instances.remove(instance) {
-            return;
+        if let Some(messages) = runtime.close(instance) {
+            runtime.send(messages);
         }
-        runtime.send(vec![Message::Editor(EditorMessage::Close { instance })]);
     });
 }
 
@@ -647,27 +632,12 @@ pub(crate) fn kill(ctx: &egui::Context, plugin_id: &str) {
 }
 
 fn begin_pass(runtime: &mut Runtime, context: &egui::Context, pass: u64) {
-    if runtime.pass == pass {
+    let Some((messages, awaited)) = runtime.core.begin_pass(pass) else {
         return;
-    }
-    let previous = runtime.pass;
-    runtime.pass = pass;
+    };
     if runtime.adapter.is_none() {
         return;
     }
-    let NextScreens { opened, screens } = runtime.instances.next_screens(previous);
-    let mut messages = opened;
-    if runtime.sent != screens {
-        runtime.sent.clone_from(&screens);
-        messages.push(runtime.instances.screen_set(screens));
-    }
-    messages.extend(runtime.instances.pending());
-    let awaited = messages.iter().any(|message| {
-        matches!(
-            message,
-            Message::Editor(EditorMessage::Open { .. } | EditorMessage::OpenArtifact { .. })
-        )
-    });
     runtime.send(messages);
     if awaited {
         context.request_repaint();

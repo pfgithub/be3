@@ -8,13 +8,13 @@ mod egui_session;
 mod host;
 #[cfg(target_os = "linux")]
 mod linux_surface;
-pub mod native;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod panes;
 #[cfg(not(target_arch = "wasm32"))]
 mod runner;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod screens;
+pub mod session;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_arch = "wasm32")]

@@ -48,6 +48,31 @@ fn wait_deadline(
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn handshake(
+    stream: &mut (impl std::io::Read + std::io::Write),
+    id: &str,
+    name: &str,
+    version: &str,
+) -> Result<crate::session::ClientSession, Box<dyn std::error::Error>> {
+    use block_plugin_api::{decode_frame, encode_frame};
+    let mut session = crate::session::ClientSession::new(id, name, version);
+    stream.write_all(&encode_frame(&session.hello())?)?;
+    stream.flush()?;
+    let mut header = [0; 4];
+    stream.read_exact(&mut header)?;
+    let length = u32::from_be_bytes(header) as usize;
+    let mut frame = Vec::with_capacity(length + 4);
+    frame.extend_from_slice(&header);
+    frame.resize(length + 4, 0);
+    stream.read_exact(&mut frame[4..])?;
+    for response in session.receive(decode_frame(&frame)?) {
+        stream.write_all(&encode_frame(&response)?)?;
+    }
+    stream.flush()?;
+    Ok(session)
+}
+
 fn transport(
     mut input: impl std::io::Read,
     mut output: impl std::io::Write,
@@ -55,7 +80,7 @@ fn transport(
     name: &str,
     version: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::native::{ClientSession, State};
+    use crate::session::{ClientSession, State};
     use block_plugin_api::{decode_frame, encode_frame};
     let mut session = ClientSession::new(id, name, version);
     output.write_all(&encode_frame(&session.hello())?)?;
@@ -93,32 +118,13 @@ fn run_endpoint<A: crate::App>(
     name: &str,
     version: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::{linux_surface::Surface, native::ClientSession};
-    use block_plugin_api::{
-        decode_frame, desktop_attachments::UnixAttachmentCarrier, encode_frame, Message,
-    };
-    use std::{
-        io::{Read, Write},
-        os::fd::AsRawFd,
-        time::Instant,
-    };
+    use crate::linux_surface::Surface;
+    use block_plugin_api::{desktop_attachments::UnixAttachmentCarrier, Message};
+    use std::{os::fd::AsRawFd, time::Instant};
 
     let mut stream = connect(endpoint)?;
     eprintln!("connected to the Linux host");
-    let mut session = ClientSession::new(id, name, version);
-    stream.write_all(&encode_frame(&session.hello())?)?;
-    stream.flush()?;
-    let mut header = [0; 4];
-    stream.read_exact(&mut header)?;
-    let length = u32::from_be_bytes(header) as usize;
-    let mut frame = Vec::with_capacity(length + 4);
-    frame.extend_from_slice(&header);
-    frame.resize(length + 4, 0);
-    stream.read_exact(&mut frame[4..])?;
-    for response in session.receive(decode_frame(&frame)?) {
-        stream.write_all(&encode_frame(&response)?)?;
-    }
-    stream.flush()?;
+    let mut session = handshake(&mut stream, id, name, version)?;
     eprintln!("protocol handshake completed");
     let socket = stream.as_raw_fd();
     let mut carrier = UnixAttachmentCarrier::new(stream);
@@ -147,7 +153,7 @@ fn run_endpoint<A: crate::App>(
             for response in session.receive(message) {
                 carrier.send(&response, &[])?;
             }
-            if matches!(session.state(), crate::native::State::Closed) {
+            if matches!(session.state(), crate::session::State::Closed) {
                 return Ok(());
             }
         }
@@ -252,15 +258,9 @@ fn run_endpoint<A: crate::App>(
     name: &str,
     version: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::{native::ClientSession, windows_surface::Surface};
-    use block_plugin_api::{
-        decode_frame, desktop_attachments::WindowsAttachmentCarrier, encode_frame, Message,
-    };
-    use std::{
-        io::{Read, Write},
-        os::windows::io::AsRawHandle,
-        time::Instant,
-    };
+    use crate::windows_surface::Surface;
+    use block_plugin_api::{desktop_attachments::WindowsAttachmentCarrier, Message};
+    use std::{os::windows::io::AsRawHandle, time::Instant};
     use windows_sys::Win32::{
         Foundation::CloseHandle,
         System::{
@@ -271,19 +271,7 @@ fn run_endpoint<A: crate::App>(
 
     let mut stream = connect(endpoint)?;
     eprintln!("connected to the Windows host");
-    let mut session = ClientSession::new(id, name, version);
-    stream.write_all(&encode_frame(&session.hello())?)?;
-    stream.flush()?;
-    let mut header = [0; 4];
-    stream.read_exact(&mut header)?;
-    let length = u32::from_be_bytes(header) as usize;
-    let mut frame = Vec::with_capacity(length + 4);
-    frame.extend_from_slice(&header);
-    frame.resize(length + 4, 0);
-    stream.read_exact(&mut frame[4..])?;
-    for response in session.receive(decode_frame(&frame)?) {
-        stream.write_all(&encode_frame(&response)?)?;
-    }
+    let mut session = handshake(&mut stream, id, name, version)?;
     eprintln!("protocol handshake completed");
     let mut host_pid = 0;
     if unsafe { GetNamedPipeServerProcessId(stream.as_raw_handle().cast(), &mut host_pid) } == 0 {
@@ -321,7 +309,7 @@ fn run_endpoint<A: crate::App>(
             for response in session.receive(message) {
                 carrier.send(&response, &[])?;
             }
-            if matches!(session.state(), crate::native::State::Closed) {
+            if matches!(session.state(), crate::session::State::Closed) {
                 unsafe { CloseHandle(host) };
                 return Ok(());
             }

@@ -6,7 +6,7 @@ use crate::{screens::Screens, web_surface::Surface};
 
 thread_local! {
     static RUNTIME: RefCell<Option<Runtime>> = const { RefCell::new(None) };
-    static SESSION: RefCell<crate::native::ClientSession> = RefCell::default();
+    static SESSION: RefCell<crate::session::ClientSession> = RefCell::default();
 }
 
 struct Runtime {
@@ -25,7 +25,7 @@ pub(crate) async fn start<A: crate::App>(canvas_id: String) -> Result<(), JsValu
         .ok_or_else(|| JsValue::from_str(&format!("no element id {canvas_id}")))?
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
     let surface = Surface::new(canvas).await.map_err(protocol_error)?;
-    SESSION.with(|current| *current.borrow_mut() = crate::native::ClientSession::default());
+    SESSION.with(|current| *current.borrow_mut() = crate::session::ClientSession::default());
     RUNTIME.with(|current| {
         *current.borrow_mut() = Some(Runtime {
             screens: Screens::new::<A>(),
@@ -39,7 +39,7 @@ pub(crate) async fn start<A: crate::App>(canvas_id: String) -> Result<(), JsValu
 
 pub(crate) fn hello(id: &str, name: &str, version: &str) -> Result<Vec<u8>, JsValue> {
     SESSION.with(|session| {
-        let client = crate::native::ClientSession::new(id, name, version);
+        let client = crate::session::ClientSession::new(id, name, version);
         let frame = encode_frame(&client.hello()).map_err(protocol_error)?;
         *session.borrow_mut() = client;
         Ok(frame)
