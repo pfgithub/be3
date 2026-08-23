@@ -117,7 +117,7 @@ impl block_editor_plugin::App for PdfApp {
     fn ui(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size().max(egui::Vec2::splat(1.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
-        self.handle_input(&response, rect);
+        self.handle_input(&response);
         let view = self.view(rect);
         match self.draw(ui, PaneKey::Main, rect, view) {
             Drawn::Page => {}
@@ -288,35 +288,12 @@ impl PdfApp {
         drawn
     }
 
-    fn handle_input(&self, response: &egui::Response, region: egui::Rect) {
+    fn handle_input(&self, response: &egui::Response) {
         let Some(editing) = &self.editing else {
             return;
         };
         if response.dragged() {
             editing.host.pan_view(response.drag_delta());
-        }
-        if !response.hovered() {
-            return;
-        }
-        let Some(pointer) = response.ctx.pointer_hover_pos() else {
-            return;
-        };
-        let anchor = pointer - region.min.to_vec2();
-        let (scroll, zoom_delta, command) = response.ctx.input(|input| {
-            (
-                input.smooth_scroll_delta,
-                input.zoom_delta(),
-                input.modifiers.command,
-            )
-        });
-        if (zoom_delta - 1.0).abs() > f32::EPSILON {
-            editing.host.zoom_view(zoom_delta, Some(anchor));
-        } else if command && scroll.y != 0.0 {
-            editing
-                .host
-                .zoom_view((scroll.y * 0.002).exp(), Some(anchor));
-        } else if scroll != egui::Vec2::ZERO {
-            editing.host.pan_view(scroll);
         }
     }
 }

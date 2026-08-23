@@ -671,8 +671,6 @@ pub trait BlockEditor {
     fn direct_editor_max_zoom(&self) -> f32 {
         DIRECT_EDITOR_MAX_ZOOM
     }
-    /// Lower limit for the tab viewport zoom, for editors whose content is far
-    /// smaller than the viewport it is fitted into.
     fn direct_editor_min_zoom(&self) -> f32 {
         DIRECT_EDITOR_MIN_ZOOM
     }
