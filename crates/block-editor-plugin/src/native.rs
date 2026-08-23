@@ -113,10 +113,10 @@ impl ClientSession {
             }
             (
                 State::Running,
-                Message::Editor(block_plugin_api::EditorMessage::EditabilityChanged {
-                    instance,
-                    ..
-                }),
+                Message::Editor(
+                    block_plugin_api::EditorMessage::EditabilityChanged { instance, .. }
+                    | block_plugin_api::EditorMessage::PanAndZoomChanged { instance, .. },
+                ),
             ) if self.instances.contains(&instance) => Ok(Vec::new()),
             (
                 State::Running,

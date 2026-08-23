@@ -90,6 +90,13 @@ the editor fills the region and lets the host place, rotate and fade it. An
 instance may also report the shape of its block, which the host holds its
 preview to; it is a request in the same sense as the embedded size below.
 
+An editor that pans and zooms itself owns its view only while the host gives
+it a viewport of its own. Wherever the host embeds such an instance in a
+surface that already pans and zooms, it tells the instance that its pan and
+zoom have been taken over, and the instance leaves its own view alone and
+hides whatever controls steer it. The host tells the instance again whenever
+that changes, and an instance never told otherwise owns its view.
+
 An editor instance may report the size it would like to be given wherever the
 host embeds it. It is a request, not a constraint: the host may embed the
 instance at any size, and falls back to its own default until an instance

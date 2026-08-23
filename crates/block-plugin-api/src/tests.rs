@@ -65,6 +65,7 @@ mod frame_round_trips;
 mod manifest_validation;
 mod multiplexed_messages_round_trip;
 mod open_block_request_round_trips;
+mod pan_and_zoom_changed_round_trips;
 mod region_sizes_round_trip;
 mod rejects_artifact_settings_over_limit;
 mod rejects_collection_over_limit;

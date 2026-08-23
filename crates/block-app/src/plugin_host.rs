@@ -105,6 +105,7 @@ pub(crate) struct EditorSlot<'a> {
     pub(crate) instance: EditorInstanceId,
     pub(crate) region: EditorRegion,
     pub(crate) size: egui::Vec2,
+    pub(crate) pan_and_zoom: bool,
 }
 
 #[derive(Clone, Copy)]

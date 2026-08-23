@@ -146,6 +146,11 @@ impl Screens {
                     session.set_editable(*editable);
                 }
             }
+            Message::Editor(EditorMessage::PanAndZoomChanged { instance, owned }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.set_owns_pan_and_zoom(*owned);
+                }
+            }
             Message::Editor(EditorMessage::Close { instance }) => {
                 self.sessions.remove(instance);
                 self.requests
