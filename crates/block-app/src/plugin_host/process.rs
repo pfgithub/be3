@@ -21,13 +21,28 @@ pub(super) enum SurfaceEvent {
 }
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-const BUSY_POLL: Duration = Duration::from_millis(1);
-const IDLE_POLL: Duration = Duration::from_millis(32);
+
+pub(super) enum Event {
+    Send(Message),
+    Shutdown,
+    Acknowledged,
+    Ended(String),
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(super) struct Inbound {
+    events: Sender<Event>,
+    surfaces: Sender<SurfaceEvent>,
+    layouts: Sender<block_plugin_api::ScreenLayout>,
+    clients: Sender<block_plugin_api::TunnelMessage>,
+    editors: Sender<block_plugin_api::EditorMessage>,
+    sizes: Sender<Vec<block_plugin_api::RegionSize>>,
+    repaint: eframe::egui::Context,
+}
 
 pub(super) struct Process {
-    shutdown: Sender<()>,
+    events: Sender<Event>,
     exit: Receiver<String>,
-    messages: Sender<Message>,
     surfaces: Receiver<SurfaceEvent>,
     layouts: Receiver<block_plugin_api::ScreenLayout>,
     clients: Receiver<block_plugin_api::TunnelMessage>,
@@ -37,15 +52,25 @@ pub(super) struct Process {
 
 impl Process {
     pub(super) fn launch(executable: PathBuf, repaint: eframe::egui::Context) -> Self {
-        let (shutdown, shutdown_receiver) = mpsc::channel();
+        let (events, event_receiver) = mpsc::channel();
         let (exit_sender, exit) = mpsc::channel();
-        let (messages, message_receiver) = mpsc::channel();
         let (surface_sender, surfaces) = mpsc::channel();
         let (layout_sender, layouts) = mpsc::channel();
         let (client_sender, clients) = mpsc::channel();
         let (editor_sender, editors) = mpsc::channel();
         let (size_sender, sizes) = mpsc::channel();
+        let event_sender = events.clone();
         thread::spawn(move || {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            let inbound = Inbound {
+                events: event_sender,
+                surfaces: surface_sender,
+                layouts: layout_sender,
+                clients: client_sender,
+                editors: editor_sender,
+                sizes: size_sender,
+                repaint,
+            };
             let result = platform::Endpoint::create().and_then(|endpoint| {
                 let argument = endpoint.argument();
                 let mut command = Command::new(&executable);
@@ -73,33 +98,11 @@ impl Process {
                 }
                 let result = endpoint.accept(&child).and_then(|stream| {
                     #[cfg(target_os = "windows")]
-                    return drive_windows(
-                        stream,
-                        &mut child,
-                        &repaint,
-                        &shutdown_receiver,
-                        &message_receiver,
-                        &surface_sender,
-                        &layout_sender,
-                        &client_sender,
-                        &editor_sender,
-                        &size_sender,
-                    );
+                    return drive_windows(stream, &mut child, &event_receiver, inbound);
                     #[cfg(target_os = "linux")]
-                    return drive_unix(
-                        stream,
-                        &mut child,
-                        &repaint,
-                        &shutdown_receiver,
-                        &message_receiver,
-                        &surface_sender,
-                        &layout_sender,
-                        &client_sender,
-                        &editor_sender,
-                        &size_sender,
-                    );
+                    return drive_unix(stream, &mut child, &event_receiver, inbound);
                     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-                    drive(stream, &mut child, &shutdown_receiver)
+                    drive(stream, &mut child, &event_receiver)
                 });
                 terminate(&mut child);
                 result
@@ -114,9 +117,8 @@ impl Process {
             exit_sender.send(reason).ok();
         });
         Self {
-            shutdown,
+            events,
             exit,
-            messages,
             surfaces,
             layouts,
             clients,
@@ -126,7 +128,7 @@ impl Process {
     }
 
     pub(super) fn shutdown(&mut self) {
-        self.shutdown.send(()).ok();
+        self.events.send(Event::Shutdown).ok();
     }
 
     pub(super) fn take_exit(&self) -> Option<String> {
@@ -135,7 +137,7 @@ impl Process {
 
     pub(super) fn send(&self, messages: Vec<Message>) {
         for message in messages {
-            self.messages.send(message).ok();
+            self.events.send(Event::Send(message)).ok();
         }
     }
 
@@ -175,59 +177,136 @@ impl Process {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn drive_windows(
-    mut stream: std::fs::File,
-    child: &mut Child,
-    repaint: &eframe::egui::Context,
-    shutdown: &Receiver<()>,
-    messages: &Receiver<Message>,
-    surfaces: &Sender<SurfaceEvent>,
-    layouts: &Sender<block_plugin_api::ScreenLayout>,
-    clients: &Sender<block_plugin_api::TunnelMessage>,
-    editors: &Sender<block_plugin_api::EditorMessage>,
-    sizes: &Sender<Vec<block_plugin_api::RegionSize>>,
-) -> io::Result<()> {
-    use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
-    use std::os::windows::io::AsRawHandle;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+trait Reading {
+    fn read(
+        &mut self,
+    ) -> Result<(Message, Vec<Attachment>), block_plugin_api::desktop_attachments::CarrierError>;
+}
 
-    let started = Instant::now();
-    let mut session = HostSession::new(
-        "BE3",
-        vec![
-            Capability::Lifecycle,
-            Capability::Input,
-            Capability::Surface(block_plugin_api::SurfaceMechanism::WindowsDxgi),
-        ],
-    );
-    session.start(0);
-    session.receive(read_message(&mut stream)?, elapsed(started));
-    flush(&mut stream, &mut session)?;
-    if !matches!(session.state(), SessionState::Running) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "plugin handshake was rejected",
-        ));
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+trait Writing {
+    fn write(
+        &mut self,
+        message: &Message,
+    ) -> Result<(), block_plugin_api::desktop_attachments::CarrierError>;
+}
+
+#[cfg(target_os = "linux")]
+impl Reading for block_plugin_api::desktop_attachments::UnixAttachmentCarrier {
+    fn read(
+        &mut self,
+    ) -> Result<(Message, Vec<Attachment>), block_plugin_api::desktop_attachments::CarrierError>
+    {
+        self.receive()
     }
-    let peer: windows_sys::Win32::Foundation::HANDLE = child.as_raw_handle().cast();
-    let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
-    let mut carrier = WindowsAttachmentCarrier::new(stream, peer);
-    let mut wait = BUSY_POLL;
+}
+
+#[cfg(target_os = "linux")]
+impl Writing for block_plugin_api::desktop_attachments::UnixAttachmentCarrier {
+    fn write(
+        &mut self,
+        message: &Message,
+    ) -> Result<(), block_plugin_api::desktop_attachments::CarrierError> {
+        self.send(message, &[])
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Reading for block_plugin_api::desktop_attachments::WindowsAttachmentCarrier {
+    fn read(
+        &mut self,
+    ) -> Result<(Message, Vec<Attachment>), block_plugin_api::desktop_attachments::CarrierError>
+    {
+        self.receive()
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Writing for block_plugin_api::desktop_attachments::WindowsAttachmentCarrier {
+    fn write(
+        &mut self,
+        message: &Message,
+    ) -> Result<(), block_plugin_api::desktop_attachments::CarrierError> {
+        self.send(message, &[])
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn read_from_plugin(mut carrier: impl Reading, inbound: Inbound) {
     loop {
-        if shutdown.try_recv().is_ok() {
-            carrier
-                .send(&Message::Shutdown, &[])
-                .map_err(carrier_error)?;
-            return wait_for_shutdown(child);
+        let (message, attachments) = match carrier.read() {
+            Ok(received) => received,
+            Err(error) => {
+                inbound.events.send(Event::Ended(error.to_string())).ok();
+                return;
+            }
+        };
+        match message {
+            Message::Surface(surface) => {
+                eprintln!(
+                    "plugin host received surface generation {} size={}x{} attachments={}",
+                    surface.generation,
+                    surface.width,
+                    surface.height,
+                    attachments.len()
+                );
+                inbound
+                    .surfaces
+                    .send(SurfaceEvent::Surface(surface, attachments))
+                    .ok();
+            }
+            Message::FrameReady(frame) => {
+                inbound.surfaces.send(SurfaceEvent::Frame(frame)).ok();
+            }
+            Message::Layout(layout) => {
+                eprintln!(
+                    "plugin host received layout generation {} with {} screens",
+                    layout.generation,
+                    layout.screens.len()
+                );
+                inbound.layouts.send(layout).ok();
+            }
+            Message::ShutdownAcknowledged => {
+                inbound.events.send(Event::Acknowledged).ok();
+                return;
+            }
+            Message::Client(message) => {
+                inbound.clients.send(message).ok();
+            }
+            Message::Editor(message) => {
+                inbound.editors.send(message).ok();
+            }
+            Message::RegionSizes(message) => {
+                inbound.sizes.send(message).ok();
+            }
+            _ => {}
         }
+        inbound.repaint.request_repaint();
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn write_to_plugin(
+    mut carrier: impl Writing,
+    child: &mut Child,
+    events: &Receiver<Event>,
+) -> io::Result<()> {
+    loop {
+        let Ok(first) = events.recv() else {
+            return Ok(());
+        };
         let mut outbound = Vec::new();
-        match messages.recv_timeout(wait) {
-            Ok(message) => outbound.push(message),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => thread::sleep(wait),
+        let mut ending = None;
+        for event in std::iter::once(first).chain(events.try_iter()) {
+            match event {
+                Event::Send(message) => outbound.push(message),
+                event => {
+                    ending = Some(event);
+                    break;
+                }
+            }
         }
-        outbound.extend(messages.try_iter());
-        let sent = !outbound.is_empty();
         coalesce_screens(&mut outbound);
         for message in outbound {
             if !matches!(
@@ -241,81 +320,72 @@ fn drive_windows(
             ) {
                 eprintln!("plugin host sending {} to the plugin", name(&message));
             }
-            carrier.send(&message, &[]).map_err(carrier_error)?;
+            carrier.write(&message).map_err(carrier_error)?;
         }
-        let mut received = false;
-        while pending(pipe)? {
-            received = true;
-            let (message, attachments) = carrier.receive().map_err(carrier_error)?;
-            match message {
-                Message::Surface(surface) => {
-                    eprintln!(
-                        "plugin host received DXGI surface generation {} size={}x{} attachments={}",
-                        surface.generation,
-                        surface.width,
-                        surface.height,
-                        attachments.len()
-                    );
-                    surfaces
-                        .send(SurfaceEvent::Surface(surface, attachments))
-                        .ok();
-                }
-                Message::FrameReady(frame) => {
-                    surfaces.send(SurfaceEvent::Frame(frame)).ok();
-                }
-                Message::Layout(layout) => {
-                    eprintln!(
-                        "plugin host received layout generation {} with {} screens",
-                        layout.generation,
-                        layout.screens.len()
-                    );
-                    layouts.send(layout).ok();
-                }
-                Message::ShutdownAcknowledged => return Ok(()),
-                Message::Client(message) => {
-                    clients.send(message).ok();
-                }
-                Message::Editor(message) => {
-                    editors.send(message).ok();
-                }
-                Message::RegionSizes(message) => {
-                    sizes.send(message).ok();
-                }
-                _ => {}
+        match ending {
+            Some(Event::Shutdown) => {
+                carrier.write(&Message::Shutdown).map_err(carrier_error)?;
+                return wait_for_shutdown(child);
             }
+            Some(Event::Acknowledged) => return Ok(()),
+            Some(Event::Ended(error)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    match child.try_wait()? {
+                        Some(exit) => format!("plugin exited unexpectedly: {exit}"),
+                        None => error,
+                    },
+                ))
+            }
+            _ => {}
         }
-        if received {
-            repaint.request_repaint();
-        }
-        if let Some(exit) = child.try_wait()? {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                format!("plugin exited unexpectedly: {exit}"),
-            ));
-        }
-        wait = if sent || received {
-            BUSY_POLL
-        } else {
-            (wait * 2).min(IDLE_POLL)
-        };
     }
+}
+
+#[cfg(target_os = "windows")]
+fn drive_windows(
+    streams: (std::fs::File, std::fs::File),
+    child: &mut Child,
+    events: &Receiver<Event>,
+    inbound: Inbound,
+) -> io::Result<()> {
+    use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
+    use std::os::windows::io::AsRawHandle;
+
+    let (mut reader, mut writer) = streams;
+    let started = Instant::now();
+    let mut session = HostSession::new(
+        "BE3",
+        vec![
+            Capability::Lifecycle,
+            Capability::Input,
+            Capability::Surface(block_plugin_api::SurfaceMechanism::WindowsDxgi),
+        ],
+    );
+    session.start(0);
+    session.receive(read_message(&mut reader)?, elapsed(started));
+    flush(&mut writer, &mut session)?;
+    if !matches!(session.state(), SessionState::Running) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plugin handshake was rejected",
+        ));
+    }
+    let peer: windows_sys::Win32::Foundation::HANDLE = child.as_raw_handle().cast();
+    thread::spawn(move || {
+        read_from_plugin(WindowsAttachmentCarrier::receiving(reader), inbound);
+    });
+    write_to_plugin(WindowsAttachmentCarrier::new(writer, peer), child, events)
 }
 
 #[cfg(target_os = "linux")]
 fn drive_unix(
     mut stream: std::os::unix::net::UnixStream,
     child: &mut Child,
-    repaint: &eframe::egui::Context,
-    shutdown: &Receiver<()>,
-    messages: &Receiver<Message>,
-    surfaces: &Sender<SurfaceEvent>,
-    layouts: &Sender<block_plugin_api::ScreenLayout>,
-    clients: &Sender<block_plugin_api::TunnelMessage>,
-    editors: &Sender<block_plugin_api::EditorMessage>,
-    sizes: &Sender<Vec<block_plugin_api::RegionSize>>,
+    events: &Receiver<Event>,
+    inbound: Inbound,
 ) -> io::Result<()> {
     use block_plugin_api::desktop_attachments::UnixAttachmentCarrier;
-    use std::os::fd::AsRawFd;
 
     let started = Instant::now();
     let mut session = HostSession::new(
@@ -335,108 +405,11 @@ fn drive_unix(
             "plugin handshake was rejected",
         ));
     }
-    let socket = stream.as_raw_fd();
-    let mut carrier = UnixAttachmentCarrier::new(stream);
-    let mut wait = BUSY_POLL;
-    loop {
-        if shutdown.try_recv().is_ok() {
-            carrier
-                .send(&Message::Shutdown, &[])
-                .map_err(carrier_error)?;
-            return wait_for_shutdown(child);
-        }
-        let mut outbound = Vec::new();
-        match messages.recv_timeout(wait) {
-            Ok(message) => outbound.push(message),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => thread::sleep(wait),
-        }
-        outbound.extend(messages.try_iter());
-        let sent = !outbound.is_empty();
-        coalesce_screens(&mut outbound);
-        for message in outbound {
-            if !matches!(
-                message,
-                Message::Input(_)
-                    | Message::Editor(
-                        block_plugin_api::EditorMessage::DragOver { .. }
-                            | block_plugin_api::EditorMessage::ViewChanged { .. }
-                            | block_plugin_api::EditorMessage::ChangeView { .. },
-                    )
-            ) {
-                eprintln!("plugin host sending {} to the plugin", name(&message));
-            }
-            carrier.send(&message, &[]).map_err(carrier_error)?;
-        }
-        let mut received = false;
-        while pending(socket)? {
-            received = true;
-            let (message, attachments) = carrier.receive().map_err(carrier_error)?;
-            match message {
-                Message::Surface(surface) => {
-                    eprintln!(
-                        "plugin host received dma-buf surface generation {} size={}x{} attachments={}",
-                        surface.generation,
-                        surface.width,
-                        surface.height,
-                        attachments.len()
-                    );
-                    surfaces
-                        .send(SurfaceEvent::Surface(surface, attachments))
-                        .ok();
-                }
-                Message::FrameReady(frame) => {
-                    surfaces.send(SurfaceEvent::Frame(frame)).ok();
-                }
-                Message::Layout(layout) => {
-                    layouts.send(layout).ok();
-                }
-                Message::ShutdownAcknowledged => return Ok(()),
-                Message::Client(message) => {
-                    clients.send(message).ok();
-                }
-                Message::Editor(message) => {
-                    editors.send(message).ok();
-                }
-                Message::RegionSizes(message) => {
-                    sizes.send(message).ok();
-                }
-                _ => {}
-            }
-        }
-        if received {
-            repaint.request_repaint();
-        }
-        if let Some(exit) = child.try_wait()? {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                format!("plugin exited unexpectedly: {exit}"),
-            ));
-        }
-        wait = if sent || received {
-            BUSY_POLL
-        } else {
-            (wait * 2).min(IDLE_POLL)
-        };
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn pending(socket: std::os::fd::RawFd) -> io::Result<bool> {
-    let mut descriptor = libc::pollfd {
-        fd: socket,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    let ready = unsafe { libc::poll(&raw mut descriptor, 1, 0) };
-    if ready < 0 {
-        let error = io::Error::last_os_error();
-        if error.kind() == io::ErrorKind::Interrupted {
-            return Ok(false);
-        }
-        return Err(error);
-    }
-    Ok(descriptor.revents & libc::POLLIN != 0)
+    let reader = stream.try_clone()?;
+    thread::spawn(move || {
+        read_from_plugin(UnixAttachmentCarrier::new(reader), inbound);
+    });
+    write_to_plugin(UnixAttachmentCarrier::new(stream), child, events)
 }
 
 fn coalesce_screens(messages: &mut Vec<Message>) {
@@ -452,25 +425,6 @@ fn coalesce_screens(messages: &mut Vec<Message>) {
         index += 1;
         keep
     });
-}
-
-#[cfg(target_os = "windows")]
-fn pending(pipe: windows_sys::Win32::Foundation::HANDLE) -> io::Result<bool> {
-    let mut available = 0;
-    let peeked = unsafe {
-        windows_sys::Win32::System::Pipes::PeekNamedPipe(
-            pipe,
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null_mut(),
-            &raw mut available,
-            std::ptr::null_mut(),
-        )
-    };
-    if peeked == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(available > 0)
 }
 
 fn name(message: &Message) -> &'static str {
@@ -530,7 +484,7 @@ impl Drop for Process {
 fn drive<S: Read + Write>(
     mut stream: S,
     child: &mut Child,
-    shutdown: &Receiver<()>,
+    events: &Receiver<Event>,
 ) -> io::Result<()> {
     let started = Instant::now();
     #[allow(unused_mut)]
@@ -559,7 +513,10 @@ fn drive<S: Read + Write>(
         ));
     }
     loop {
-        if shutdown.try_recv().is_ok() {
+        if matches!(
+            events.recv_timeout(Duration::from_millis(10)),
+            Ok(Event::Shutdown)
+        ) {
             session.shutdown(elapsed(started));
             flush(&mut stream, &mut session)?;
             stream.flush()?;
@@ -581,7 +538,6 @@ fn drive<S: Read + Write>(
                 format!("plugin exited unexpectedly: {exit}"),
             ));
         }
-        thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -717,68 +673,94 @@ mod platform {
     };
     use windows_sys::Win32::{
         Foundation::{CloseHandle, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE},
-        Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX},
+        Storage::FileSystem::{
+            FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND, PIPE_ACCESS_OUTBOUND,
+        },
         System::Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
             PIPE_TYPE_BYTE, PIPE_WAIT,
         },
     };
     pub(super) struct Endpoint {
-        handle: HANDLE,
+        inbound: HANDLE,
+        outbound: HANDLE,
         name: String,
     }
     impl Endpoint {
         pub(super) fn create() -> io::Result<Self> {
             let name = format!(r"\\.\pipe\be3-plugin-{}-{}", std::process::id(), unique());
-            let wide = wide(&name);
-            let handle = unsafe {
-                CreateNamedPipeW(
-                    wide.as_ptr(),
-                    PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                    1,
-                    1_048_580,
-                    1_048_580,
-                    5_000,
-                    std::ptr::null(),
-                )
+            let mut endpoint = Self {
+                inbound: INVALID_HANDLE_VALUE,
+                outbound: INVALID_HANDLE_VALUE,
+                name,
             };
-            if handle == INVALID_HANDLE_VALUE {
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(Self { handle, name })
-            }
+            endpoint.inbound = pipe(&super::to_host(&endpoint.name), PIPE_ACCESS_INBOUND)?;
+            endpoint.outbound = pipe(&super::to_plugin(&endpoint.name), PIPE_ACCESS_OUTBOUND)?;
+            Ok(endpoint)
         }
         pub(super) fn argument(&self) -> String {
             self.name.clone()
         }
-        pub(super) fn accept(mut self, child: &Child) -> io::Result<File> {
-            let connected = unsafe { ConnectNamedPipe(self.handle, std::ptr::null_mut()) };
-            if connected == 0
-                && io::Error::last_os_error().raw_os_error() != Some(ERROR_PIPE_CONNECTED as i32)
-            {
-                return Err(io::Error::last_os_error());
-            }
-            let mut process_id = 0;
-            if unsafe { GetNamedPipeClientProcessId(self.handle, &raw mut process_id) } == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            if process_id != child.id() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "unexpected plugin peer",
-                ));
-            }
-            let handle = std::mem::replace(&mut self.handle, INVALID_HANDLE_VALUE);
-            Ok(unsafe { File::from_raw_handle(handle.cast()) })
+        pub(super) fn accept(mut self, child: &Child) -> io::Result<(File, File)> {
+            connect(self.inbound, child)?;
+            connect(self.outbound, child)?;
+            let inbound = std::mem::replace(&mut self.inbound, INVALID_HANDLE_VALUE);
+            let outbound = std::mem::replace(&mut self.outbound, INVALID_HANDLE_VALUE);
+            Ok(unsafe {
+                (
+                    File::from_raw_handle(inbound.cast()),
+                    File::from_raw_handle(outbound.cast()),
+                )
+            })
         }
     }
     impl Drop for Endpoint {
         fn drop(&mut self) {
-            if self.handle != INVALID_HANDLE_VALUE {
-                unsafe { CloseHandle(self.handle) };
+            for handle in [self.inbound, self.outbound] {
+                if handle != INVALID_HANDLE_VALUE {
+                    unsafe { CloseHandle(handle) };
+                }
             }
         }
+    }
+    fn pipe(name: &str, access: u32) -> io::Result<HANDLE> {
+        let wide = wide(name);
+        let handle = unsafe {
+            CreateNamedPipeW(
+                wide.as_ptr(),
+                access | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                1,
+                1_048_580,
+                1_048_580,
+                5_000,
+                std::ptr::null(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(handle)
+        }
+    }
+    fn connect(handle: HANDLE, child: &Child) -> io::Result<()> {
+        let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) };
+        if connected == 0
+            && io::Error::last_os_error().raw_os_error() != Some(ERROR_PIPE_CONNECTED as i32)
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let mut process_id = 0;
+        if unsafe { GetNamedPipeClientProcessId(handle, &raw mut process_id) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if process_id != child.id() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "unexpected plugin peer",
+            ));
+        }
+        Ok(())
     }
     fn wide(value: &str) -> Vec<u16> {
         OsStr::new(value).encode_wide().chain(Some(0)).collect()
@@ -789,4 +771,14 @@ mod platform {
             .unwrap_or_default()
             .as_nanos()
     }
+}
+
+#[cfg(windows)]
+fn to_host(endpoint: &str) -> String {
+    format!("{endpoint}-to-host")
+}
+
+#[cfg(windows)]
+fn to_plugin(endpoint: &str) -> String {
+    format!("{endpoint}-to-plugin")
 }

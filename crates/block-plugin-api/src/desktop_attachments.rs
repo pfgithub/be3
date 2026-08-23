@@ -252,6 +252,13 @@ mod windows {
             }
         }
 
+        pub fn receiving(stream: File) -> Self {
+            Self {
+                stream,
+                peer_process: std::ptr::null_mut(),
+            }
+        }
+
         pub fn send(
             &mut self,
             message: &Message,

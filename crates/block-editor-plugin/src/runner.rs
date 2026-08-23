@@ -70,6 +70,23 @@ fn waker(events: std::sync::mpsc::Sender<Event>) -> crate::Waker {
     })
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn read_from_host(
+    mut read: impl FnMut() -> Result<block_plugin_api::Message, String>,
+    events: std::sync::mpsc::Sender<Event>,
+) {
+    loop {
+        let event = match read() {
+            Ok(message) => Event::Received(message),
+            Err(error) => Event::Failed(error),
+        };
+        let failed = matches!(event, Event::Failed(_));
+        if events.send(event).is_err() || failed {
+            return;
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn spawn_reader(
     stream: std::os::unix::net::UnixStream,
@@ -80,21 +97,43 @@ fn spawn_reader(
         .name("plugin-reader".into())
         .spawn(move || {
             let mut carrier = UnixAttachmentCarrier::new(stream);
-            loop {
-                let event = match carrier.receive() {
-                    Ok((message, _)) => Event::Received(message),
-                    Err(error) => Event::Failed(error.to_string()),
-                };
-                let failed = matches!(event, Event::Failed(_));
-                if events.send(event).is_err() || failed {
-                    return;
-                }
-            }
+            read_from_host(
+                move || {
+                    carrier
+                        .receive()
+                        .map(|(message, _)| message)
+                        .map_err(|error| error.to_string())
+                },
+                events,
+            );
         })?;
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "windows")]
+fn spawn_reader(
+    stream: std::fs::File,
+    events: std::sync::mpsc::Sender<Event>,
+) -> std::io::Result<()> {
+    use block_plugin_api::desktop_attachments::WindowsAttachmentCarrier;
+    std::thread::Builder::new()
+        .name("plugin-reader".into())
+        .spawn(move || {
+            let mut carrier = WindowsAttachmentCarrier::receiving(stream);
+            read_from_host(
+                move || {
+                    carrier
+                        .receive()
+                        .map(|(message, _)| message)
+                        .map_err(|error| error.to_string())
+                },
+                events,
+            );
+        })?;
+    Ok(())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn receive_batch(
     events: &std::sync::mpsc::Receiver<Event>,
     deadline: Option<std::time::Instant>,
@@ -122,26 +161,27 @@ fn receive_batch(
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn handshake(
-    stream: &mut (impl std::io::Read + std::io::Write),
+    reader: &mut impl std::io::Read,
+    writer: &mut impl std::io::Write,
     id: &str,
     name: &str,
     version: &str,
 ) -> Result<crate::session::ClientSession, Box<dyn std::error::Error>> {
     use block_plugin_api::{decode_frame, encode_frame};
     let mut session = crate::session::ClientSession::new(id, name, version);
-    stream.write_all(&encode_frame(&session.hello())?)?;
-    stream.flush()?;
+    writer.write_all(&encode_frame(&session.hello())?)?;
+    writer.flush()?;
     let mut header = [0; 4];
-    stream.read_exact(&mut header)?;
+    reader.read_exact(&mut header)?;
     let length = u32::from_be_bytes(header) as usize;
     let mut frame = Vec::with_capacity(length + 4);
     frame.extend_from_slice(&header);
     frame.resize(length + 4, 0);
-    stream.read_exact(&mut frame[4..])?;
+    reader.read_exact(&mut frame[4..])?;
     for response in session.receive(decode_frame(&frame)?) {
-        stream.write_all(&encode_frame(&response)?)?;
+        writer.write_all(&encode_frame(&response)?)?;
     }
-    stream.flush()?;
+    writer.flush()?;
     Ok(session)
 }
 
@@ -194,13 +234,14 @@ fn run_endpoint<A: crate::App>(
     use block_plugin_api::{desktop_attachments::UnixAttachmentCarrier, Message};
     use std::time::Instant;
 
-    let mut stream = connect(endpoint)?;
+    let mut writer = connect(endpoint)?;
+    let mut reader = writer.try_clone()?;
     eprintln!("connected to the Linux host");
-    let mut session = handshake(&mut stream, id, name, version)?;
+    let mut session = handshake(&mut reader, &mut writer, id, name, version)?;
     eprintln!("protocol handshake completed");
     let (sender, events) = std::sync::mpsc::channel();
-    spawn_reader(stream.try_clone()?, sender.clone())?;
-    let mut carrier = UnixAttachmentCarrier::new(stream);
+    spawn_reader(reader, sender.clone())?;
+    let mut carrier = UnixAttachmentCarrier::new(writer);
     let started = Instant::now();
     let mut screens = crate::screens::Screens::new::<A>(waker(sender));
     let mut surface: Option<Surface> = None;
@@ -305,12 +346,12 @@ fn run_endpoint<A: crate::App>(
         },
     };
 
-    let mut stream = connect(endpoint)?;
+    let (mut reader, mut writer) = connect(endpoint)?;
     eprintln!("connected to the Windows host");
-    let mut session = handshake(&mut stream, id, name, version)?;
+    let mut session = handshake(&mut reader, &mut writer, id, name, version)?;
     eprintln!("protocol handshake completed");
     let mut host_pid = 0;
-    if unsafe { GetNamedPipeServerProcessId(stream.as_raw_handle().cast(), &mut host_pid) } == 0 {
+    if unsafe { GetNamedPipeServerProcessId(writer.as_raw_handle().cast(), &mut host_pid) } == 0 {
         return Err(std::io::Error::last_os_error().into());
     }
     let host = unsafe { OpenProcess(PROCESS_DUP_HANDLE, 0, host_pid) };
@@ -318,10 +359,10 @@ fn run_endpoint<A: crate::App>(
         return Err(std::io::Error::last_os_error().into());
     }
     eprintln!("opened the host process for DXGI handle transfer");
-    let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
-    let mut carrier = WindowsAttachmentCarrier::new(stream, host);
-    let started = Instant::now();
     let (sender, events) = std::sync::mpsc::channel();
+    spawn_reader(reader, sender.clone())?;
+    let mut carrier = WindowsAttachmentCarrier::new(writer, host);
+    let started = Instant::now();
     let mut screens = crate::screens::Screens::new::<A>(waker(sender));
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
@@ -329,11 +370,7 @@ fn run_endpoint<A: crate::App>(
     let mut repaint_at: Option<Instant> = None;
     let mut flush_until: Option<Instant> = None;
     loop {
-        let woken = wait_for_input(pipe, &events, wait_deadline(repaint_at, flush_until))?;
-        let mut batch = Vec::new();
-        while pending(pipe)? {
-            batch.push(carrier.receive()?.0);
-        }
+        let (batch, woken) = receive_batch(&events, wait_deadline(repaint_at, flush_until))?;
         let received = !batch.is_empty();
         for message in batch {
             if let Message::Screens(set) = &message {
@@ -397,75 +434,34 @@ fn run_endpoint<A: crate::App>(
     }
 }
 
-#[cfg(target_os = "windows")]
-fn wait_for_input(
-    pipe: windows_sys::Win32::Foundation::HANDLE,
-    events: &std::sync::mpsc::Receiver<Event>,
-    deadline: Option<std::time::Instant>,
-) -> std::io::Result<bool> {
-    use std::sync::mpsc::RecvTimeoutError;
-    const SHORTEST_POLL: std::time::Duration = std::time::Duration::from_millis(1);
-    const LONGEST_POLL: std::time::Duration = std::time::Duration::from_millis(16);
-    let mut woken = false;
-    loop {
-        while events.try_recv().is_ok() {
-            woken = true;
-        }
-        if woken || pending(pipe)? {
-            return Ok(woken);
-        }
-        let wait = match deadline {
-            Some(deadline) if remaining(deadline).is_zero() => return Ok(false),
-            Some(deadline) => remaining(deadline).clamp(SHORTEST_POLL, LONGEST_POLL),
-            None => LONGEST_POLL,
-        };
-        match events.recv_timeout(wait) {
-            Ok(_) => woken = true,
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Ok(woken),
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn pending(pipe: windows_sys::Win32::Foundation::HANDLE) -> std::io::Result<bool> {
-    let mut available = 0;
-    let peeked = unsafe {
-        windows_sys::Win32::System::Pipes::PeekNamedPipe(
-            pipe,
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null_mut(),
-            &raw mut available,
-            std::ptr::null_mut(),
-        )
-    };
-    if peeked == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(available > 0)
-}
-
 #[cfg(all(not(target_arch = "wasm32"), unix))]
 fn connect(endpoint: &str) -> std::io::Result<std::os::unix::net::UnixStream> {
     std::os::unix::net::UnixStream::connect(endpoint)
 }
 
 #[cfg(all(not(target_arch = "wasm32"), windows))]
-fn connect(endpoint: &str) -> std::io::Result<std::fs::File> {
+fn connect(endpoint: &str) -> std::io::Result<(std::fs::File, std::fs::File)> {
+    use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+    let reader = open(&format!("{endpoint}-to-plugin"), FILE_GENERIC_READ)?;
+    let writer = open(&format!("{endpoint}-to-host"), FILE_GENERIC_WRITE)?;
+    Ok((reader, writer))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), windows))]
+fn open(name: &str, access: u32) -> std::io::Result<std::fs::File> {
     use std::{
         ffi::OsStr,
         os::windows::{ffi::OsStrExt, io::FromRawHandle},
     };
     use windows_sys::Win32::{
         Foundation::INVALID_HANDLE_VALUE,
-        Storage::FileSystem::{CreateFileW, FILE_GENERIC_READ, FILE_GENERIC_WRITE, OPEN_EXISTING},
+        Storage::FileSystem::{CreateFileW, OPEN_EXISTING},
     };
-    let wide: Vec<u16> = OsStr::new(endpoint).encode_wide().chain(Some(0)).collect();
+    let wide: Vec<u16> = OsStr::new(name).encode_wide().chain(Some(0)).collect();
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
-            FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+            access,
             0,
             std::ptr::null(),
             OPEN_EXISTING,
