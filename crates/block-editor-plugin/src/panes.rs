@@ -1,8 +1,15 @@
 use block_plugin_api::{EditorInstanceId, ScreenId, ScreenLayout};
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use crate::screens::Screens;
+use crate::{screens::Screens, Waker};
 
 const MINIMUM_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
@@ -19,8 +26,15 @@ impl Pane {
         format: wgpu::TextureFormat,
         theme: Option<egui::Theme>,
         instance: EditorInstanceId,
+        waker: Waker,
+        painting: Arc<AtomicBool>,
     ) -> Self {
         let context = egui::Context::default();
+        context.set_request_repaint_callback(move |_| {
+            if !painting.load(Ordering::Relaxed) {
+                waker.wake();
+            }
+        });
         egui_material_icons::initialize(&context);
         if let Some(theme) = theme {
             context.set_theme(theme);
@@ -42,6 +56,7 @@ pub(crate) struct Panes {
     format: wgpu::TextureFormat,
     theme: Option<egui::Theme>,
     panes: HashMap<ScreenId, Pane>,
+    painting: Arc<AtomicBool>,
 }
 
 pub(crate) struct Painted {
@@ -55,6 +70,7 @@ impl Panes {
             format,
             theme,
             panes: HashMap::new(),
+            painting: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -72,16 +88,19 @@ impl Panes {
         let mut cleared = false;
         let mut repaint = Duration::MAX;
         let placements = layout.screens.clone();
+        let waker = screens.waker();
+        self.painting.store(true, Ordering::Relaxed);
         for placement in &placements {
             let Some(session) = screens.session(placement.instance) else {
                 continue;
             };
             let format = self.format;
             let theme = self.theme;
-            let pane = self
-                .panes
-                .entry(placement.screen)
-                .or_insert_with(|| Pane::new(device, format, theme, placement.instance));
+            let waker = waker.clone();
+            let painting = Arc::clone(&self.painting);
+            let pane = self.panes.entry(placement.screen).or_insert_with(|| {
+                Pane::new(device, format, theme, placement.instance, waker, painting)
+            });
             for id in std::mem::take(&mut pane.freed) {
                 pane.renderer.free_texture(&id);
             }
@@ -131,6 +150,7 @@ impl Panes {
             }
             pane.freed = output.textures_delta.free;
         }
+        self.painting.store(false, Ordering::Relaxed);
         self.panes.retain(|_, pane| screens.is_open(pane.instance));
         Painted {
             commands,

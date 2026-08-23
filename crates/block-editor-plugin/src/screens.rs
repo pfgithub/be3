@@ -63,6 +63,10 @@ impl Screens {
         client
     }
 
+    pub(crate) fn waker(&self) -> Waker {
+        self.waker.clone()
+    }
+
     pub(crate) fn layout(&self) -> &ScreenLayout {
         &self.layout
     }
