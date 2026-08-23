@@ -1,6 +1,9 @@
 use std::sync::mpsc::TryRecvError;
 
-use block_editor_plugin::egui::{self, Color32, Pos2, Rect, Vec2};
+use block_editor_plugin::{
+    egui::{self, Color32, Pos2, Rect, Vec2},
+    Waker,
+};
 
 use crate::render::{
     spawn_render_job, RenderJob, RenderRequest, RenderTarget, RenderedTile, DETAIL_MAX_DIM,
@@ -115,6 +118,7 @@ impl Pane {
         page_rect: Rect,
         visible_rect: Rect,
         pixels_per_point: f32,
+        waker: Waker,
         data: impl FnOnce() -> Option<Vec<u8>>,
     ) {
         if self
@@ -150,7 +154,7 @@ impl Pane {
             page,
             target,
         };
-        self.job = Some((request, spawn_render_job(data, page, target)));
+        self.job = Some((request, spawn_render_job(data, page, target, waker)));
     }
 
     fn detail_target(
@@ -221,10 +225,6 @@ impl Pane {
 
     pub(crate) fn has_page(&self) -> bool {
         self.base.is_some() || self.detail.is_some()
-    }
-
-    pub(crate) fn is_rendering(&self) -> bool {
-        self.job.is_some()
     }
 
     pub(crate) fn error(&self) -> Option<&str> {

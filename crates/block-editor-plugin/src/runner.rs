@@ -49,6 +49,78 @@ fn wait_deadline(
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
+fn remaining(deadline: std::time::Instant) -> std::time::Duration {
+    deadline.saturating_duration_since(std::time::Instant::now())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+enum Event {
+    Received(block_plugin_api::Message),
+    Woken,
+    Failed(String),
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn waker(events: std::sync::mpsc::Sender<Event>) -> crate::Waker {
+    let events = std::sync::Mutex::new(events);
+    crate::Waker::new(move || {
+        if let Ok(events) = events.lock() {
+            let _ = events.send(Event::Woken);
+        }
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_reader(
+    stream: std::os::unix::net::UnixStream,
+    events: std::sync::mpsc::Sender<Event>,
+) -> std::io::Result<()> {
+    use block_plugin_api::desktop_attachments::UnixAttachmentCarrier;
+    std::thread::Builder::new()
+        .name("plugin-reader".into())
+        .spawn(move || {
+            let mut carrier = UnixAttachmentCarrier::new(stream);
+            loop {
+                let event = match carrier.receive() {
+                    Ok((message, _)) => Event::Received(message),
+                    Err(error) => Event::Failed(error.to_string()),
+                };
+                let failed = matches!(event, Event::Failed(_));
+                if events.send(event).is_err() || failed {
+                    return;
+                }
+            }
+        })?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn receive_batch(
+    events: &std::sync::mpsc::Receiver<Event>,
+    deadline: Option<std::time::Instant>,
+) -> Result<(Vec<block_plugin_api::Message>, bool), Box<dyn std::error::Error>> {
+    use std::sync::mpsc::RecvTimeoutError;
+    let first = match deadline {
+        Some(deadline) => match events.recv_timeout(remaining(deadline)) {
+            Ok(event) => Some(event),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => return Err("the host reader stopped".into()),
+        },
+        None => Some(events.recv()?),
+    };
+    let mut messages = Vec::new();
+    let mut woken = false;
+    for event in first.into_iter().chain(events.try_iter()) {
+        match event {
+            Event::Received(message) => messages.push(message),
+            Event::Woken => woken = true,
+            Event::Failed(error) => return Err(error.into()),
+        }
+    }
+    Ok((messages, woken))
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn handshake(
     stream: &mut (impl std::io::Read + std::io::Write),
     id: &str,
@@ -120,30 +192,24 @@ fn run_endpoint<A: crate::App>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::linux_surface::Surface;
     use block_plugin_api::{desktop_attachments::UnixAttachmentCarrier, Message};
-    use std::{os::fd::AsRawFd, time::Instant};
+    use std::time::Instant;
 
     let mut stream = connect(endpoint)?;
     eprintln!("connected to the Linux host");
     let mut session = handshake(&mut stream, id, name, version)?;
     eprintln!("protocol handshake completed");
-    let socket = stream.as_raw_fd();
+    let (sender, events) = std::sync::mpsc::channel();
+    spawn_reader(stream.try_clone()?, sender.clone())?;
     let mut carrier = UnixAttachmentCarrier::new(stream);
     let started = Instant::now();
-    let mut screens = crate::screens::Screens::new::<A>();
+    let mut screens = crate::screens::Screens::new::<A>(waker(sender));
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
     let mut request_id = 0;
     let mut repaint_at: Option<Instant> = None;
     let mut flush_until: Option<Instant> = None;
     loop {
-        let mut batch = Vec::new();
-        match wait_deadline(repaint_at, flush_until) {
-            Some(deadline) => wait_until(socket, deadline)?,
-            None => batch.push(carrier.receive()?.0),
-        }
-        while pending(socket)? {
-            batch.push(carrier.receive()?.0);
-        }
+        let (batch, woken) = receive_batch(&events, wait_deadline(repaint_at, flush_until))?;
         let received = !batch.is_empty();
         for message in batch {
             if let Message::Screens(set) = &message {
@@ -186,7 +252,7 @@ fn run_endpoint<A: crate::App>(
                 carrier.send(&descriptor, &planes)?;
                 eprintln!("transferred dma-buf surface generation {generation}");
             }
-            if received || replaced || due {
+            if received || replaced || due || woken {
                 let (messages, repaint) =
                     surface.render(&mut screens, started.elapsed().as_secs_f64())?;
                 for message in messages {
@@ -200,40 +266,10 @@ fn run_endpoint<A: crate::App>(
         for message in outbound {
             carrier.send(&message, &[])?;
         }
-        if received || replaced || due || flushed {
+        if received || replaced || due || flushed || woken {
             flush_until = Some(Instant::now() + FLUSH_WINDOW);
         }
     }
-}
-
-#[cfg(target_os = "linux")]
-fn wait_until(socket: std::os::fd::RawFd, deadline: std::time::Instant) -> std::io::Result<()> {
-    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-    poll(socket, remaining.as_millis().min(i32::MAX as u128) as i32)?;
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn pending(socket: std::os::fd::RawFd) -> std::io::Result<bool> {
-    poll(socket, 0)
-}
-
-#[cfg(target_os = "linux")]
-fn poll(socket: std::os::fd::RawFd, timeout: i32) -> std::io::Result<bool> {
-    let mut descriptor = libc::pollfd {
-        fd: socket,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    let ready = unsafe { libc::poll(&raw mut descriptor, 1, timeout) };
-    if ready < 0 {
-        let error = std::io::Error::last_os_error();
-        if error.kind() == std::io::ErrorKind::Interrupted {
-            return Ok(false);
-        }
-        return Err(error);
-    }
-    Ok(descriptor.revents & libc::POLLIN != 0)
 }
 
 #[cfg(all(
@@ -285,18 +321,16 @@ fn run_endpoint<A: crate::App>(
     let pipe: windows_sys::Win32::Foundation::HANDLE = stream.as_raw_handle().cast();
     let mut carrier = WindowsAttachmentCarrier::new(stream, host);
     let started = Instant::now();
-    let mut screens = crate::screens::Screens::new::<A>();
+    let (sender, events) = std::sync::mpsc::channel();
+    let mut screens = crate::screens::Screens::new::<A>(waker(sender));
     let mut surface: Option<Surface> = None;
     let mut generation = 0;
     let mut request_id = 0;
     let mut repaint_at: Option<Instant> = None;
     let mut flush_until: Option<Instant> = None;
     loop {
+        let woken = wait_for_input(pipe, &events, wait_deadline(repaint_at, flush_until))?;
         let mut batch = Vec::new();
-        match wait_deadline(repaint_at, flush_until) {
-            Some(deadline) => wait_until(pipe, deadline)?,
-            None => batch.push(carrier.receive()?.0),
-        }
         while pending(pipe)? {
             batch.push(carrier.receive()?.0);
         }
@@ -343,7 +377,7 @@ fn run_endpoint<A: crate::App>(
                 carrier.send(&descriptor, &handles)?;
                 eprintln!("transferred DXGI surface generation {generation}");
             }
-            if received || replaced || due {
+            if received || replaced || due || woken {
                 let (messages, repaint) =
                     surface.render(&mut screens, started.elapsed().as_secs_f64())?;
                 for message in messages {
@@ -357,32 +391,40 @@ fn run_endpoint<A: crate::App>(
         for message in outbound {
             carrier.send(&message, &[])?;
         }
-        if received || replaced || due || flushed {
+        if received || replaced || due || flushed || woken {
             flush_until = Some(Instant::now() + FLUSH_WINDOW);
         }
     }
 }
 
 #[cfg(target_os = "windows")]
-fn wait_until(
+fn wait_for_input(
     pipe: windows_sys::Win32::Foundation::HANDLE,
-    deadline: std::time::Instant,
-) -> std::io::Result<()> {
+    events: &std::sync::mpsc::Receiver<Event>,
+    deadline: Option<std::time::Instant>,
+) -> std::io::Result<bool> {
+    use std::sync::mpsc::RecvTimeoutError;
     const SHORTEST_POLL: std::time::Duration = std::time::Duration::from_millis(1);
     const LONGEST_POLL: std::time::Duration = std::time::Duration::from_millis(16);
-    while !pending(pipe)? {
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            break;
+    let mut woken = false;
+    loop {
+        while events.try_recv().is_ok() {
+            woken = true;
         }
-        let remaining = deadline - now;
-        std::thread::sleep(
-            (remaining / 4)
-                .clamp(SHORTEST_POLL, LONGEST_POLL)
-                .min(remaining),
-        );
+        if woken || pending(pipe)? {
+            return Ok(woken);
+        }
+        let wait = match deadline {
+            Some(deadline) if remaining(deadline).is_zero() => return Ok(false),
+            Some(deadline) => remaining(deadline).clamp(SHORTEST_POLL, LONGEST_POLL),
+            None => LONGEST_POLL,
+        };
+        match events.recv_timeout(wait) {
+            Ok(_) => woken = true,
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return Ok(woken),
+        }
     }
-    Ok(())
 }
 
 #[cfg(target_os = "windows")]

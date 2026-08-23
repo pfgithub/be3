@@ -9,7 +9,7 @@ use eframe::egui;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 use uuid::Uuid;
 
-use crate::{host::BlockDrag, EditorHost};
+use crate::{host::BlockDrag, EditorHost, Waker};
 
 pub(crate) struct EguiSession {
     app: Box<dyn AppUi>,
@@ -149,12 +149,12 @@ impl<A: crate::App> AppUi for A {
 }
 
 impl EguiSession {
-    pub(crate) fn new<A: crate::App>(instance: EditorInstanceId) -> Self {
+    pub(crate) fn new<A: crate::App>(instance: EditorInstanceId, waker: Waker) -> Self {
         Self {
             app: Box::new(A::default()),
             instance,
             regions: HashMap::new(),
-            host: EditorHost::default(),
+            host: EditorHost::new(waker),
             drag: None,
             intrinsic: None,
             aspect_ratio: None,

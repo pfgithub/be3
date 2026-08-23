@@ -1,7 +1,10 @@
 use std::sync::{mpsc, OnceLock};
 use std::thread;
 
-use block_editor_plugin::egui::{self, Pos2, Rect};
+use block_editor_plugin::{
+    egui::{self, Pos2, Rect},
+    Waker,
+};
 use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfRenderConfig, Pdfium};
 
 use super::{RenderJob, RenderJobResult, RenderTarget, RenderedTile, DETAIL_MAX_DIM, MIN_SCALE};
@@ -9,12 +12,18 @@ use super::{RenderJob, RenderJobResult, RenderTarget, RenderedTile, DETAIL_MAX_D
 const BASE_MAX_DIM: f32 = 1600.0;
 const MAX_PAGE_DIM: f32 = 100_000.0;
 
-pub(crate) fn spawn_render_job(data: Vec<u8>, page: usize, target: RenderTarget) -> RenderJob {
+pub(crate) fn spawn_render_job(
+    data: Vec<u8>,
+    page: usize,
+    target: RenderTarget,
+    waker: Waker,
+) -> RenderJob {
     let (sender, receiver) = mpsc::channel();
     thread::Builder::new()
         .name("pdf-render".into())
         .spawn(move || {
             let _ = sender.send(render_tile(&data, page, target));
+            waker.wake();
         })
         .expect("failed to start pdf render job");
     receiver

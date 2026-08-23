@@ -28,7 +28,7 @@ pub(crate) async fn start<A: crate::App>(canvas_id: String) -> Result<(), JsValu
     SESSION.with(|current| *current.borrow_mut() = crate::session::ClientSession::default());
     RUNTIME.with(|current| {
         *current.borrow_mut() = Some(Runtime {
-            screens: Screens::new::<A>(),
+            screens: Screens::new::<A>(crate::Waker::default()),
             surface,
             layout: ScreenLayout::default(),
             started: now(),

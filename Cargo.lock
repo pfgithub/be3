@@ -966,7 +966,6 @@ dependencies = [
  "egui_material_icons",
  "futures-util",
  "js-sys",
- "libc",
  "pollster 0.4.0",
  "serde",
  "uuid",

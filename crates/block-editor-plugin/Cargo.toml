@@ -26,7 +26,6 @@ eframe = { version = "0.34.3", default-features = false, features = ["android-na
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ash = "0.38"
-libc = "0.2"
 pollster = "0.4"
 wgpu-hal = { version = "29", features = ["vulkan"] }
 

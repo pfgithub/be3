@@ -2,6 +2,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
+    sync::Arc,
 };
 
 pub use block_plugin_api::FileFilter;
@@ -36,11 +37,28 @@ pub struct PickedFile {
     pub data: Vec<u8>,
 }
 
+#[derive(Clone, Default)]
+pub struct Waker(Option<Arc<dyn Fn() + Send + Sync>>);
+
+impl Waker {
+    pub fn wake(&self) {
+        if let Some(wake) = &self.0 {
+            wake();
+        }
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    pub(crate) fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
+        Self(Some(Arc::new(wake)))
+    }
+}
+
 /// An editor instance's way of asking the host for something the plugin
 /// cannot do itself. Cloning it shares the same queue, so a copy kept on a
 /// widget still reaches the instance it came from.
 #[derive(Clone, Default)]
 pub struct EditorHost {
+    waker: Waker,
     opens: Rc<RefCell<Vec<(Uuid, Uuid)>>>,
     block_types: Rc<RefCell<Rc<BlockCatalog>>>,
     drag: Rc<Cell<Option<BlockDrag>>>,
@@ -56,6 +74,18 @@ pub struct EditorHost {
 }
 
 impl EditorHost {
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn new(waker: Waker) -> Self {
+        Self {
+            waker,
+            ..Self::default()
+        }
+    }
+
+    pub fn waker(&self) -> Waker {
+        self.waker.clone()
+    }
+
     /// Asks the host to open `block_id` in a tab of its own.
     pub fn open_block(&self, block_id: Uuid, block_type: Uuid) {
         self.opens.borrow_mut().push((block_id, block_type));

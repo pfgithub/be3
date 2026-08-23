@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use block_client::{
     blocks::pdf::{Pdf, PdfOperation},
@@ -15,7 +15,6 @@ use crate::pane::Pane;
 
 const DEFAULT_PAGE_SIZE: egui::Vec2 = egui::vec2(612.0, 792.0);
 const LOADING_FILL: egui::Color32 = egui::Color32::from_gray(35);
-const RENDER_POLL: Duration = Duration::from_millis(30);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum PaneKey {
@@ -267,14 +266,14 @@ impl PdfApp {
             page_rect,
             page_rect.intersect(ui.clip_rect()),
             ui.ctx().pixels_per_point(),
+            editing
+                .map(|editing| editing.host.waker())
+                .unwrap_or_default(),
             || {
                 let pdf = editing?.block.read()?;
                 Some(pdf.data().to_vec())
             },
         );
-        if pane.is_rendering() {
-            ui.ctx().request_repaint_after(RENDER_POLL);
-        }
         let drawn = if pane.has_page() {
             pane.paint(&ui.painter_at(region), page_rect, page_size);
             Drawn::Page

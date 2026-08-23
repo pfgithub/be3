@@ -8,7 +8,7 @@ use eframe::egui;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 use uuid::Uuid;
 
-use crate::{egui_session::EguiSession, host::BlockDrag};
+use crate::{egui_session::EguiSession, host::BlockDrag, Waker};
 
 struct Client {
     client: Arc<BlockClient>,
@@ -19,7 +19,8 @@ struct Client {
 
 pub(crate) struct Screens {
     sessions: HashMap<EditorInstanceId, EguiSession>,
-    open: fn(EditorInstanceId) -> EguiSession,
+    open: fn(EditorInstanceId, Waker) -> EguiSession,
+    waker: Waker,
     requests: Vec<ScreenRequest>,
     layout: ScreenLayout,
     block_types: Rc<BlockCatalog>,
@@ -27,10 +28,11 @@ pub(crate) struct Screens {
 }
 
 impl Screens {
-    pub(crate) fn new<A: crate::App>() -> Self {
+    pub(crate) fn new<A: crate::App>(waker: Waker) -> Self {
         Self {
             sessions: HashMap::new(),
             open: EguiSession::new::<A>,
+            waker,
             requests: Vec::new(),
             layout: ScreenLayout::default(),
             block_types: Rc::new(BlockCatalog::default()),
@@ -81,7 +83,7 @@ impl Screens {
                 let session = self
                     .sessions
                     .entry(*instance)
-                    .or_insert_with(|| (self.open)(*instance));
+                    .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.set_editable(*editable);
                 session.connect(client, Uuid::from_bytes(*block_id));
@@ -98,7 +100,7 @@ impl Screens {
                 let session = self
                     .sessions
                     .entry(*instance)
-                    .or_insert_with(|| (self.open)(*instance));
+                    .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.connect_creation(client);
             }
@@ -117,7 +119,7 @@ impl Screens {
                 let session = self
                     .sessions
                     .entry(*instance)
-                    .or_insert_with(|| (self.open)(*instance));
+                    .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.connect_artifact(
                     client,
