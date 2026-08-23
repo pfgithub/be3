@@ -671,6 +671,11 @@ pub trait BlockEditor {
     fn direct_editor_max_zoom(&self) -> f32 {
         DIRECT_EDITOR_MAX_ZOOM
     }
+    /// Lower limit for the tab viewport zoom, for editors whose content is far
+    /// smaller than the viewport it is fitted into.
+    fn direct_editor_min_zoom(&self) -> f32 {
+        DIRECT_EDITOR_MIN_ZOOM
+    }
     fn direct_editor_viewport_input(
         &self,
         _editors: &EditorAccess<'_>,
@@ -758,6 +763,7 @@ pub fn direct_editor_tab_ui(
     let mut action = None;
     let capabilities = editor.direct_editor_capabilities();
     let max_zoom = editor.direct_editor_max_zoom();
+    let min_zoom = editor.direct_editor_min_zoom();
     let viewport_id = egui::Id::new(("direct-editor-tab-viewport", id));
     let mut viewport_state = ui
         .ctx()
@@ -924,7 +930,7 @@ pub fn direct_editor_tab_ui(
                 }
                 DirectEditorViewportCommand::Zoom { factor, anchor } => {
                     let old_zoom = viewport_state.zoom;
-                    let new_zoom = (old_zoom * factor).clamp(DIRECT_EDITOR_MIN_ZOOM, max_zoom);
+                    let new_zoom = (old_zoom * factor).clamp(min_zoom, max_zoom);
                     if new_zoom != old_zoom {
                         let anchor = anchor.unwrap_or_else(|| viewport_rect.center());
                         viewport_state.pan = (anchor - viewport_rect.center())
@@ -937,7 +943,12 @@ pub fn direct_editor_tab_ui(
                     }
                 }
                 DirectEditorViewportCommand::Fit => {
-                    fit_direct_editor_viewport(&mut viewport_state, viewport_size, content_size);
+                    fit_direct_editor_viewport(
+                        &mut viewport_state,
+                        viewport_size,
+                        content_size,
+                        min_zoom,
+                    );
                     if let Some(auto_fit) = &mut viewport_state.auto_fit {
                         auto_fit.enabled = false;
                     }
@@ -958,6 +969,7 @@ pub fn direct_editor_tab_ui(
                             &mut viewport_state,
                             viewport_size,
                             content_size,
+                            min_zoom,
                         );
                     }
                 }
@@ -968,6 +980,7 @@ pub fn direct_editor_tab_ui(
                             &mut viewport_state,
                             viewport_size,
                             content_size,
+                            min_zoom,
                         );
                     }
                 }
@@ -1033,11 +1046,12 @@ fn fit_direct_editor_viewport(
     viewport: &mut DirectEditorTabViewport,
     viewport_size: egui::Vec2,
     content_size: egui::Vec2,
+    min_zoom: f32,
 ) {
     viewport.zoom = (viewport_size.x / content_size.x)
         .min(viewport_size.y / content_size.y)
         .min(1.0)
-        .clamp(DIRECT_EDITOR_MIN_ZOOM, DIRECT_EDITOR_MAX_ZOOM);
+        .clamp(min_zoom, DIRECT_EDITOR_MAX_ZOOM);
     viewport.pan = egui::Vec2::ZERO;
 }
 

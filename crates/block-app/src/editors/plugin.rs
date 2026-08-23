@@ -157,6 +157,7 @@ impl PendingCreation for PluginCreation {
 }
 
 const CREATION_DIALOG_HEIGHT: f32 = 96.0;
+const PLUGIN_MIN_ZOOM: f32 = 1.0 / 64.0;
 
 pub(super) struct PluginEditor {
     plugin: Arc<PluginManifest>,
@@ -284,6 +285,10 @@ impl BlockEditor for PluginEditor {
         self.plugin.capabilities.pan_and_zoom
     }
 
+    fn direct_editor_min_zoom(&self) -> f32 {
+        PLUGIN_MIN_ZOOM
+    }
+
     fn direct_editor_viewport_input(
         &self,
         _editors: &EditorAccess<'_>,
@@ -372,6 +377,9 @@ impl BlockEditor for PluginEditor {
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         let rect = ui.available_rect_before_wrap();
+        if self.plugin.capabilities.pan_and_zoom {
+            viewport.auto_fit(self.block.id());
+        }
         let view = self.plugin.capabilities.pan_and_zoom.then(|| {
             viewport
                 .content_rect()

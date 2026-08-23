@@ -477,6 +477,8 @@ impl InfiniteCanvasEditor {
         for command in nested.drain() {
             match command {
                 DirectEditorViewportCommand::Fit => self.fit_entity_requested = Some(entity),
+                DirectEditorViewportCommand::AutoFit(_)
+                | DirectEditorViewportCommand::ResumeAutoFit => {}
                 command => viewport.push(command),
             }
         }
