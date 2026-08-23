@@ -14,13 +14,8 @@ use crate::{
     BlockClient,
 };
 
-/// The result of a request started with [`spawn_request`], polled from a view
-/// each frame so drawing never waits on the network.
 pub type RequestResult<T> = Receiver<T>;
 
-/// Runs `future` wherever this build runs client work — a scratch runtime on
-/// its own thread natively, a task on the event loop in the browser — and
-/// delivers its result to the returned channel.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn spawn_request<T>(future: impl Future<Output = T> + Send + 'static) -> RequestResult<T>
 where

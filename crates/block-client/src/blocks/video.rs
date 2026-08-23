@@ -11,18 +11,18 @@ use crate::block_ref::BlockRef;
 
 const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
 
-/// How long a clip is when it is first added, in seconds.
+                                                          
 pub const DEFAULT_CLIP_SECONDS: f64 = 5.0;
 
-/// The longest a single clip may run, in frames. About nine hours at thirty
-/// frames a second, which keeps timeline arithmetic far away from overflowing.
+                                                                            
+                                                                               
 pub const MAX_CLIP_LENGTH: u64 = 1_000_000;
 
-/// The largest numerator or denominator a frame rate may be given.
+                                                                   
 const MAX_FRAME_RATE_PART: u32 = 1_000_000;
 
-/// How many frames pass each second, as an exact ratio so that broadcast rates
-/// such as 30000/1001 stay exact.
+                                                                               
+                                  
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct VideoFrameRate {
     pub numerator: u32,
@@ -43,12 +43,12 @@ impl VideoFrameRate {
         f64::from(self.numerator) / f64::from(self.denominator)
     }
 
-    /// How long `frames` frames last, in seconds.
+                                                  
     pub fn seconds(self, frames: u64) -> f64 {
         frames as f64 / self.frames_per_second()
     }
 
-    /// How many whole frames fit into `seconds`.
+                                                 
     pub fn frames(self, seconds: f64) -> u64 {
         if !seconds.is_finite() || seconds <= 0.0 {
             return 0;
@@ -70,8 +70,8 @@ impl Default for VideoFrameRate {
     }
 }
 
-/// Where a clip hangs: the clip it is attached to, and how many frames after
-/// that clip's start it begins.
+                                                                             
+                                
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct VideoAttachment {
     pub clip_id: Uuid,
@@ -84,8 +84,8 @@ impl VideoAttachment {
     }
 }
 
-/// An effect applied to a clip. No effect kinds exist yet; the list is
-/// reserved so that clips already carry the stack effects will land in.
+                                                                       
+                                                                        
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct VideoEffect {
     pub id: Uuid,
@@ -93,17 +93,17 @@ pub struct VideoEffect {
     pub enabled: bool,
 }
 
-/// A stretch of the timeline showing one block.
+                                                
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct VideoClip {
     pub id: Uuid,
-    /// The block the clip shows.
+                                 
     pub block_id: BlockRef,
-    /// How many frames the clip runs for. At least one.
+                                                        
     pub length: u64,
-    /// `None` puts the clip on the base track, where clips run back to back in
-    /// list order. Otherwise the clip hangs off another clip, which is what
-    /// makes deleting a base clip ripple while leaving attachments alone.
+                                                                               
+                                                                            
+                                                                          
     pub attachment: Option<VideoAttachment>,
     pub effects: Vec<VideoEffect>,
 }
@@ -124,7 +124,7 @@ impl VideoClip {
         self
     }
 
-    /// The clip this one hangs off, if it is not on the base track.
+                                                                    
     pub fn parent(&self) -> Option<Uuid> {
         self.attachment.map(|attachment| attachment.clip_id)
     }
@@ -139,13 +139,13 @@ impl VideoClip {
     }
 }
 
-/// A clip resolved to the place on the timeline its attachments put it.
+                                                                        
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct VideoClipTiming {
     pub id: Uuid,
     pub start: u64,
     pub length: u64,
-    /// How many attachments deep the clip sits. Base track clips are zero.
+                                                                           
     pub depth: usize,
 }
 
@@ -159,8 +159,8 @@ impl VideoClipTiming {
     }
 }
 
-/// A video built out of clips, each showing another block. One base track runs
-/// its clips back to back; every other clip hangs off a clip at a frame offset.
+                                                                               
+                                                                                
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Video {
     frame_rate: VideoFrameRate,
@@ -170,21 +170,21 @@ pub struct Video {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum VideoOperation {
-    /// Adds a clip at `index` among the clips sharing its attachment.
+                                                                      
     InsertClip {
         clip: VideoClip,
         index: usize,
     },
-    /// Removes clips together with everything attached to them.
+                                                                
     RemoveClips {
         ids: Vec<Uuid>,
     },
-    /// Replaces clips by id. An attachment that does not exist, or that would
-    /// put a clip inside its own attachments, is left as it was.
+                                                                              
+                                                                 
     UpdateClips {
         clips: Vec<VideoClip>,
     },
-    /// Reorders a clip among the clips sharing its attachment.
+                                                               
     MoveClip {
         clip_id: Uuid,
         index: usize,
@@ -211,7 +211,7 @@ impl Video {
         self.clips.iter().find(|clip| clip.id == id)
     }
 
-    /// The clips attached to `parent`, in order. `None` gives the base track.
+                                                                              
     pub fn children(&self, parent: Option<Uuid>) -> Vec<&VideoClip> {
         self.clips
             .iter()
@@ -219,7 +219,7 @@ impl Video {
             .collect()
     }
 
-    /// Where a clip sits among the clips sharing its attachment.
+                                                                 
     pub fn sibling_index(&self, clip_id: Uuid) -> Option<usize> {
         let clip = self.clip(clip_id)?;
         self.children(clip.parent())
@@ -227,9 +227,9 @@ impl Video {
             .position(|sibling| sibling.id == clip_id)
     }
 
-    /// Every clip resolved to its start frame, each clip before the clips
-    /// attached to it. Painting in this order stacks attachments over the clip
-    /// they hang off.
+                                                                          
+                                                                               
+                      
     pub fn timeline(&self) -> Vec<VideoClipTiming> {
         let mut timings = Vec::with_capacity(self.clips.len());
         let mut visited = HashSet::new();
@@ -249,8 +249,8 @@ impl Video {
         visited: &mut HashSet<Uuid>,
         timings: &mut Vec<VideoClipTiming>,
     ) {
-        // Operations never build a cycle, but a stored block that somehow
-        // holds one must not be walked forever.
+                                                                          
+                                                
         if !visited.insert(clip.id) {
             return;
         }
@@ -266,7 +266,7 @@ impl Video {
         }
     }
 
-    /// How many frames the whole video runs for.
+                                                 
     pub fn duration(&self) -> u64 {
         self.timeline()
             .iter()
@@ -281,7 +281,7 @@ impl Video {
             .find(|timing| timing.id == clip_id)
     }
 
-    /// The clips showing at `frame`, bottom first.
+                                                   
     pub fn visible_at(&self, frame: u64) -> Vec<Uuid> {
         self.timeline()
             .iter()
@@ -290,13 +290,13 @@ impl Video {
             .collect()
     }
 
-    /// The clips that removing `ids` takes with it - the clips themselves and
-    /// everything attached to them - each clip before its attachments.
+                                                                              
+                                                                       
     fn removal_order(&self, ids: &[Uuid]) -> Vec<Uuid> {
         let mut removed: HashSet<Uuid> = ids.iter().copied().collect();
         let mut order = Vec::new();
-        // The timeline lists a clip before its attachments, so a clip's parent
-        // has already been decided by the time the clip is looked at.
+                                                                               
+                                                                      
         for timing in self.timeline() {
             let attached_to_removed = self
                 .clip(timing.id)
@@ -310,8 +310,8 @@ impl Video {
         order
     }
 
-    /// Where in `clips` a clip attached to `parent` belongs when it is the
-    /// `index`th of its siblings.
+                                                                           
+                                  
     fn sibling_position(&self, parent: Option<Uuid>, index: usize) -> usize {
         self.clips
             .iter()
@@ -322,8 +322,8 @@ impl Video {
             .unwrap_or(self.clips.len())
     }
 
-    /// Whether attaching `clip_id` to `parent` would put the clip inside its
-    /// own attachments.
+                                                                             
+                        
     fn creates_cycle(&self, clip_id: Uuid, parent: Uuid) -> bool {
         let mut visited = HashSet::new();
         let mut current = Some(parent);
@@ -336,8 +336,8 @@ impl Video {
         false
     }
 
-    /// The attachment a clip may actually be given: one that exists and that
-    /// keeps the clip out of its own attachments.
+                                                                             
+                                                  
     fn accepted_attachment(
         &self,
         clip_id: Uuid,
@@ -362,8 +362,8 @@ impl Block for Video {
                     return;
                 }
                 let mut inserted = clip.clone().normalized();
-                // A clip cannot hang off something that is not there, so it
-                // lands on the base track instead.
+                                                                            
+                                                   
                 inserted.attachment = video.accepted_attachment(inserted.id, inserted.attachment);
                 let position = video.sibling_position(inserted.parent(), *index);
                 video.clips.insert(position, inserted);
@@ -379,10 +379,10 @@ impl Block for Video {
                         continue;
                     };
                     let attachment = match update.attachment {
-                        // Detaching onto the base track is always allowed.
+                                                                           
                         None => None,
-                        // An attachment that is not there, or that would put
-                        // the clip inside itself, leaves the clip where it is.
+                                                                             
+                                                                               
                         attachment => video
                             .accepted_attachment(update.id, attachment)
                             .or(existing),
@@ -471,8 +471,8 @@ enum VideoHistoryChange {
         clip: VideoClip,
         index: usize,
     },
-    /// The removed clips with the sibling index each one had, listed so that
-    /// inserting them back in order restores their attachments.
+                                                                             
+                                                                
     Remove {
         clips: Vec<(VideoClip, usize)>,
     },
@@ -582,7 +582,7 @@ impl BlockHistory<Video> for VideoHistory {
     }
 }
 
-/// What one operation changed, ready to be reversed.
+                                                     
 fn change_for(
     current: &Video,
     next: &Video,
@@ -706,8 +706,8 @@ fn operations_for(
     }
 }
 
-/// Keeps the fields a concurrent editor changed while restoring the fields
-/// this history action owns.
+                                                                           
+                             
 fn rebase_clip(current: &VideoClip, expected: &VideoClip, desired: &VideoClip) -> VideoClip {
     let mut result = current.clone();
     if result.block_id == expected.block_id {

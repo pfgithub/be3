@@ -9,8 +9,8 @@ fn logic_grid_history_restores_wires_split_by_a_removal() {
     let laid = block.read().unwrap().grid().wires().to_vec();
     assert_eq!(laid, vec![wire((0, 0), (8, 0))]);
 
-    // Cutting the middle out splits one segment into two, so undoing it has to
-    // put back a wire that no single operation ever added.
+                                                                               
+                                                           
     block.operate(LogicGridOperation::RemoveWire {
         wire: wire((3, 0), (4, 0)),
     });

@@ -3,10 +3,6 @@ use futures_util::StreamExt;
 
 use super::SocketMessage;
 
-/// A connection that reaches the server through another client rather than
-/// over the network. The worker's protocol logic is unchanged: it still sends
-/// and receives the same JSON frames, they are just carried by whoever holds
-/// the other end of the channel.
 pub(crate) struct TunnelSocket {
     outgoing: mpsc::UnboundedSender<String>,
     incoming: mpsc::UnboundedReceiver<String>,

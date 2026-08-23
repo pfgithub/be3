@@ -14,8 +14,8 @@ use crate::{parse_block_urls, properties::MAX_NAME_BYTES};
 
 const TEXT_BURST_DELAY: Duration = Duration::from_millis(750);
 
-/// The language a text document is highlighted with. Stored on the document so
-/// that every editor of a block agrees on how it is displayed.
+                                                                               
+                                                               
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TextLanguage {

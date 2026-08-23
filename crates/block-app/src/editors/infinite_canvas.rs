@@ -128,8 +128,6 @@ enum CanvasCommand {
     Paste,
 }
 
-// Copy and paste need a synchronous system clipboard, which Android and the
-// browser do not have.
 #[cfg_attr(any(target_os = "android", target_arch = "wasm32"), allow(dead_code))]
 const CANVAS_CLIPBOARD_PREFIX: &str = "be3-infinite-canvas:";
 
@@ -300,8 +298,6 @@ enum Gesture {
     },
 }
 
-/// Tracks an in-progress multi-touch gesture so that a quick, still
-/// two-finger tap can be told apart from a pinch/pan and treated as undo.
 #[derive(Clone, Copy, Debug)]
 struct TwoFingerTouch {
     start_time: f64,
@@ -331,8 +327,7 @@ pub(super) struct InfiniteCanvasEditor {
     clipboard_image_paste: ClipboardImagePaste,
     focused_editor: Option<Uuid>,
     viewport_center: CanvasPoint,
-    /// The pointer's world-space position while it's hovering the canvas,
-    /// broadcast as [`CanvasCursor`] presence so other clients can see it.
+
     pointer_world: Option<CanvasPoint>,
     fit_selection_requested: bool,
     fit_preview_region_requested: bool,

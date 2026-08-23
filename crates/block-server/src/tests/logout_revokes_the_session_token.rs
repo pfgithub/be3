@@ -23,8 +23,6 @@ async fn logout_revokes_the_session_token() {
     .await;
     assert!(matches!(response, ManagementServerMessage::Ok { .. }));
 
-    // The token no longer authenticates anything: a block connection is
-    // refused and management commands report an invalid session.
     assert!(server
         .try_connect_to(&account.token, workspace.id)
         .await
@@ -45,8 +43,6 @@ async fn logout_revokes_the_session_token() {
         }
     ));
 
-    // Logging out an already-invalid token is not an error: the caller's
-    // goal, that the token no longer works, is already true.
     let response = management_request(
         &management,
         ManagementClientMessage::Logout {

@@ -1,7 +1,5 @@
 use super::{identifier_end, SynHlColorScope as Scope};
 
-/// Bytes to skip at the start of a node so that expanding a selection over an
-/// item does not first swallow its visibility modifier.
 pub(super) fn chain_start_offset(kind: &str, source: &[u8]) -> usize {
     if !kind.ends_with("_item") {
         return 0;
@@ -144,10 +142,7 @@ fn attribute_introducer(bytes: &[u8], start: usize) -> Option<usize> {
     }
 }
 
-/// A string literal opener: the `b`/`c`/`r` prefix letters, any raw string
-/// hashes and the opening quote.
 struct StringLiteral {
-    /// Bytes between the start of the literal and the opening quote.
     prefix: usize,
     hashes: usize,
     raw: bool,
@@ -220,9 +215,6 @@ fn string_literal(
     index
 }
 
-/// Colours a `\`-escape: the backslash is punctuation, and the escaped value is
-/// either the string colour (when it stands for the quoted character itself) or
-/// a literal colour (when it stands for something else).
 fn escape(bytes: &[u8], scopes: &mut [Scope], start: usize) -> usize {
     scopes[start] = Scope::Punctuation;
     let mut index = start + 1;
@@ -396,7 +388,6 @@ fn punctuation_scope(byte: u8) -> Scope {
     }
 }
 
-/// The colour given to the name introduced by a declaration keyword.
 fn declared_scope(token: &str) -> Option<Scope> {
     match token {
         "let" => Some(Scope::Variable),
@@ -413,8 +404,6 @@ fn is_primitive(token: &str) -> bool {
         })
 }
 
-/// `SCREAMING_SNAKE_CASE`. Single letters are excluded so that generic type
-/// parameters such as `T` keep the type colour.
 fn is_constant_name(token: &str) -> bool {
     token.len() > 1
         && token.bytes().any(|byte| byte.is_ascii_uppercase())

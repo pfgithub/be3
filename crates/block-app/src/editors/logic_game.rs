@@ -32,14 +32,11 @@ const DIRECT_EDITOR_CHROME_HEIGHT: f32 = 120.0;
 
 pub(super) struct LogicGameEditor {
     block: BlockHandle<LogicGame>,
-    /// Every solution grid the game lists, so each one can be named and its
-    /// progress read back without opening it.
+
     solutions: HashMap<Uuid, BlockHandle<LogicGrid>>,
-    /// The level whose solutions are shown, if any.
+
     expanded: Option<ChallengeId>,
-    /// The palette the game's grids are built from. The game does not own it:
-    /// it is the hotbar registered under the workspace's root `Settings`
-    /// block, offered here so it can be opened without finding a grid first.
+
     hotbar: Option<RootSetting<Hotbar>>,
     quiz: BinaryAdditionQuiz,
     reference_cache: ReferenceResolutionCache,
@@ -98,9 +95,6 @@ impl LogicGameEditor {
         }
     }
 
-    /// Keeps a handle on every listed solution and carries each level's
-    /// progress over from the grids that passed it, and looks for the shared
-    /// hotbar so it can be offered once the block tree has one.
     fn sync(&mut self, editors: &mut EditorAccess<'_>) {
         self.reference_cache.poll();
         for (solution, (challenge, index)) in self.pending_solutions.poll() {
@@ -266,8 +260,6 @@ impl BlockEditor for LogicGameEditor {
             ui.indent(("level", *challenge as usize), |ui| {
                 ui.weak(generate_challenge(*challenge).goal);
                 if *challenge == ChallengeId::BinaryAddition {
-                    // The quiz level has nothing to wire up, so it is answered
-                    // here rather than in a grid.
                     self.quiz.ui(ui, &self.block);
                     return;
                 }

@@ -45,28 +45,19 @@ mod http;
 
 use self::http::{PrefixedStream, Status};
 
-/// Block connections identify themselves in the websocket URL's query string.
-/// Browsers cannot set request headers on a websocket handshake, so the query
-/// string is the only place a web client can put this.
 const TOKEN_PARAMETER: &str = "token";
 const WORKSPACE_PARAMETER: &str = "workspace";
-/// Management commands are POSTed here as JSON; the websocket carries block
-/// traffic only.
+
 const MANAGEMENT_PATH: &str = "/api/management";
 const DATABASE_FILE: &str = "server.sqlite3";
-/// The shortest password `register_account` accepts.
+
 const MIN_PASSWORD_BYTES: usize = 8;
-/// How many random bytes back a session token before it is hex-encoded.
+
 const TOKEN_BYTES: usize = 32;
 const MAX_WEBSOCKET_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
-/// Controls that only make sense to change for a standalone, publicly hosted
-/// server. The embedded server block-app starts for itself uses the default.
 #[derive(Clone, Copy)]
 pub struct ServerConfig {
-    /// Whether `ManagementClientMessage::Register` is answered at all. An
-    /// operator running a public instance can turn this off and provision
-    /// accounts by hand instead, so a stranger cannot self-register.
     pub allow_registration: bool,
 }
 
@@ -127,10 +118,6 @@ pub async fn serve_until_shutdown(
     Ok(())
 }
 
-/// Creates an account directly against the database at `data_dir`, bypassing
-/// the management protocol entirely (and whatever `ServerConfig` a running
-/// instance was started with). This is how an operator provisions accounts
-/// by hand on a server that has registration turned off.
 pub async fn add_account(
     data_dir: impl Into<PathBuf>,
     email: String,
@@ -165,8 +152,6 @@ async fn handle_connection(
     let identity = match connection_identity(&request.head, &store).await {
         Some(identity) => identity,
         None => {
-            // The upgrade is refused outright rather than accepted and then
-            // dropped, so the client sees why it was turned away.
             reject_handshake(&mut stream).await?;
             return Err(ServerError::InvalidHandshake);
         }
@@ -182,8 +167,6 @@ async fn handle_connection(
     handle_block_connection(socket, store, watch_hub, identity).await
 }
 
-/// Resolves the account a block connection's token proves and the workspace
-/// it claims, confirming the account is a member of that workspace.
 async fn connection_identity(head: &http::RequestHead, store: &BlockStore) -> Option<Identity> {
     let token = head.query_parameter(TOKEN_PARAMETER)?;
     let workspace_id = head
@@ -295,10 +278,6 @@ async fn handle_block_connection(
     Ok(())
 }
 
-/// Every client a single connection is serving. The connection always has one
-/// of its own, addressed by an absent envelope id; the rest are opened by name
-/// the first time a frame arrives for them and live until they are closed or
-/// the connection ends.
 struct Clients {
     sender: mpsc::UnboundedSender<ServerEnvelope>,
     connection: ClientId,
@@ -380,8 +359,6 @@ fn invalid_message(error: serde_json::Error) -> ServerMessage {
     }
 }
 
-/// Answers one management command over HTTP. The connection carries a single
-/// request and is closed afterwards.
 async fn handle_management_request(
     mut stream: TcpStream,
     request: http::BufferedRequest,
@@ -396,8 +373,6 @@ async fn handle_management_request(
             ),
         )
     } else if request.head.method == "OPTIONS" {
-        // A browser asks permission before sending a management command, and
-        // will not send the command at all unless the preflight is answered.
         http::write_preflight_response(&mut stream).await?;
         return Ok(());
     } else if request.head.method != "POST" {
@@ -547,9 +522,6 @@ async fn handle_management_message(store: &BlockStore, body: &[u8]) -> Managemen
     }
 }
 
-/// Everything a block connection is allowed to act as: who is connected, the
-/// workspace they opened, and the role that decides whether per-block
-/// permissions apply to them at all.
 #[derive(Clone, Copy)]
 struct Identity {
     account_id: Uuid,
@@ -603,8 +575,6 @@ async fn handle_command(
             references,
             watch,
         } => {
-            // A new block belongs to its author, but it may only point at blocks
-            // the author is at least allowed to know about.
             let access = store.access(identity).await;
             let existing = store.existing_blocks(workspace_id, &references).await;
             if references.iter().any(|reference| {
@@ -1111,8 +1081,6 @@ async fn handle_command(
 
 use block::ClientId;
 
-/// Where a watcher's notifications go: the connection's outbound queue, plus
-/// the client of that connection they are addressed to.
 #[derive(Clone)]
 struct OutboundMessages {
     client: Option<Uuid>,
@@ -1125,8 +1093,6 @@ impl OutboundMessages {
     }
 }
 
-/// Identifies a watcher's view of the workspace. Two accounts watching the same
-/// list can see different blocks, so their subscriptions are tracked apart.
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 struct WatchIdentity {
     account_id: Uuid,
@@ -1164,9 +1130,7 @@ struct WatchHub {
 struct BlockWatch {
     identity: WatchIdentity,
     outbound: OutboundMessages,
-    /// This client's own presence values for the block, keyed by presence id.
-    /// Cleared automatically (and reported to every other watcher) when the
-    /// client unwatches the block or disconnects.
+
     presence: HashMap<Uuid, Vec<u8>>,
 }
 
@@ -1188,9 +1152,6 @@ impl WatchHub {
         self.next_client_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Starts `client_id` watching `id`, replaying every presence value
-    /// already recorded for it (from other clients) on `outbound` before the
-    /// watch is registered, so the new watcher is caught up immediately.
     async fn watch(
         &self,
         identity: Identity,
@@ -1220,8 +1181,6 @@ impl WatchHub {
         );
     }
 
-    /// Stops `client_id` watching `id` and clears whatever presence it had
-    /// recorded there, notifying every other watcher of the block.
     async fn unwatch(&self, store: &BlockStore, workspace_id: Uuid, id: Uuid, client_id: ClientId) {
         let (presence, deliveries) = {
             let mut watchers = self.watchers.lock().await;
@@ -1273,9 +1232,6 @@ impl WatchHub {
         }
     }
 
-    /// Records a presence value from a client that is currently watching
-    /// `id`, broadcasting it to every other watcher. Returns `false` without
-    /// effect if the client is not watching the block.
     async fn post_presence(
         &self,
         store: &BlockStore,
@@ -1310,9 +1266,6 @@ impl WatchHub {
         true
     }
 
-    /// Clears a presence value from a client that is currently watching
-    /// `id`, notifying every other watcher. Returns `false` without effect
-    /// if the client is not watching the block.
     async fn clear_presence(
         &self,
         store: &BlockStore,
@@ -1511,7 +1464,6 @@ impl WatchHub {
     }
 }
 
-/// Per-block write locks, keyed by workspace and block id.
 type BlockLocks = HashMap<(Uuid, Uuid), Arc<Mutex<()>>>;
 
 struct BlockStore {
@@ -1564,7 +1516,6 @@ impl BlockStore {
         require_membership(&database, account_id, workspace_id)
     }
 
-    /// The permissions `identity` currently has across the whole workspace.
     async fn access(&self, identity: Identity) -> WorkspaceAccess {
         if identity.role == WorkspaceRole::Administrator {
             return WorkspaceAccess::Unrestricted;
@@ -1663,8 +1614,6 @@ impl BlockStore {
         Ok((account, token))
     }
 
-    /// Resolves a session token to the account it authenticates, as proven by
-    /// possession of the token rather than anything the client asserts.
     async fn resolve_token(&self, token: &str) -> Result<Uuid, ManagementStoreError> {
         let token_hash = hash_token(token);
         let database = self.database.lock().await;
@@ -1679,9 +1628,6 @@ impl BlockStore {
         parse_management_uuid(&account_id)
     }
 
-    /// Revokes a session token. Revoking a token that is already invalid is
-    /// not an error: the caller's goal, that the token no longer works, is
-    /// already true.
     async fn logout(&self, token: &str) -> Result<(), ManagementStoreError> {
         let token_hash = hash_token(token);
         let database = self.database.lock().await;
@@ -2191,8 +2137,7 @@ impl BlockStore {
         let Some(dependencies) = dependencies.get(&identity.workspace_id) else {
             return Vec::new();
         };
-        // Listing the neighbours of a block the account cannot see would leak
-        // its shape, so the whole listing collapses to nothing.
+
         let subject = match list {
             BlockReferenceList::Roots | BlockReferenceList::Orphans => None,
             BlockReferenceList::Parents(id)
@@ -2261,8 +2206,6 @@ impl BlockStore {
             .collect()
     }
 
-    /// Every workspace member alongside the access they have to `id`, so a
-    /// client managing sharing can show the full picture in one round trip.
     async fn block_access_entries(
         &self,
         workspace_id: Uuid,
@@ -2346,8 +2289,7 @@ impl BlockStore {
             )
             .optional()?
             .ok_or(StoreError::AccountNotFound)?;
-        // Administrators already reach every block, so recording a grant for one
-        // would be a permission the workspace role silently overrides.
+
         if decode_workspace_role(&is_member)
             .map_err(|error| StoreError::InvalidStorage(format!("{error:?}")))?
             == WorkspaceRole::Administrator
@@ -2392,9 +2334,7 @@ impl BlockStore {
     }
 }
 
-/// A resolved view of what one account may do in a workspace.
 enum WorkspaceAccess {
-    /// Administrators bypass per-block permissions entirely.
     Unrestricted,
     Blocks(HashMap<Uuid, BlockAccess>),
 }
@@ -2494,12 +2434,6 @@ impl DependencyState {
             .map_or_else(Vec::new, |block| block.backrefs.clone())
     }
 
-    /// Resolves what `account_id` may do with every block in the workspace.
-    ///
-    /// Access starts from the blocks the account authored or was granted
-    /// directly, then spreads along three rules: view and edit flow down into
-    /// owned children, a viewable block reveals the existence of the blocks it
-    /// references, and knowing a block exists reveals its ancestors.
     fn access(&self, account_id: Uuid) -> HashMap<Uuid, BlockAccess> {
         let direct: HashMap<Uuid, BlockAccess> = self
             .blocks
@@ -2517,8 +2451,6 @@ impl DependencyState {
             .map(|&id| (id, self.inherited_access(&direct, id)))
             .collect();
 
-        // A block you can open reveals that the blocks it points at exist, but
-        // only for plain references: owned children already inherited above.
         let referenced: Vec<Uuid> = self
             .blocks
             .iter()
@@ -2536,8 +2468,6 @@ impl DependencyState {
             *entry = (*entry).max(BlockAccess::KnowExists);
         }
 
-        // Anything known to exist makes its whole ancestor chain known too,
-        // otherwise it could never be located in a listing.
         let known: Vec<Uuid> = access
             .iter()
             .filter(|(_, level)| level.can_know_exists())
@@ -2559,8 +2489,6 @@ impl DependencyState {
         access
     }
 
-    /// The strongest view or edit permission reaching `id` from itself or any
-    /// block that owns it, combined with any weaker direct grant on `id`.
     fn inherited_access(&self, direct: &HashMap<Uuid, BlockAccess>, id: Uuid) -> BlockAccess {
         let mut access = direct.get(&id).copied().unwrap_or(BlockAccess::None);
         let mut seen = HashSet::from([id]);
@@ -2589,16 +2517,14 @@ impl DependencyState {
 struct DependencyBlock {
     block_type: Uuid,
     author: Uuid,
-    /// Every property key and value recorded against the block. Properties
-    /// are opaque to the server; only the client interprets them.
+
     properties: BTreeMap<Uuid, Vec<u8>>,
-    /// Whether the block is generated from another one. The server never reads
-    /// what a block holds, so its author reports this alongside the name.
+
     dynamic_artifact: bool,
     parent: BlockParent,
     references: Vec<Uuid>,
     backrefs: Vec<Uuid>,
-    /// Permissions recorded directly against this block, by account.
+
     grants: HashMap<Uuid, BlockAccess>,
 }
 
@@ -2628,8 +2554,6 @@ fn normalize_email(email: &str) -> Result<String, ManagementStoreError> {
     Ok(email)
 }
 
-/// How long an account's display name may be. Unrelated to block properties;
-/// just a reasonable length cap for a person's name.
 const MAX_DISPLAY_NAME_BYTES: usize = 128;
 
 fn normalize_display_name(name: &str) -> Result<String, ManagementStoreError> {
@@ -2640,9 +2564,6 @@ fn normalize_display_name(name: &str) -> Result<String, ManagementStoreError> {
     Ok(name.to_owned())
 }
 
-/// Hashes a password for storage. Argon2's own salt and work-factor defaults
-/// are used, encoded into the returned PHC string alongside the hash so
-/// `verify_password` needs nothing else to check it later.
 fn hash_password(password: &str) -> Result<String, ManagementStoreError> {
     if password.len() < MIN_PASSWORD_BYTES {
         return Err(ManagementStoreError::InvalidPassword);
@@ -2654,9 +2575,6 @@ fn hash_password(password: &str) -> Result<String, ManagementStoreError> {
         .map_err(|error| ManagementStoreError::InvalidStorage(error.to_string()))
 }
 
-/// Checks a password against a hash produced by `hash_password`. Any error
-/// parsing the stored hash is treated as a mismatch rather than propagated,
-/// since a garbled `password_hash` should never be able to authenticate.
 fn verify_password(password: &str, hash: &str) -> bool {
     let Ok(parsed) = PasswordHash::new(hash) else {
         return false;
@@ -2666,17 +2584,12 @@ fn verify_password(password: &str, hash: &str) -> bool {
         .is_ok()
 }
 
-/// A fresh, high-entropy session token. Tokens are bearer credentials, so
-/// their strength comes entirely from this randomness rather than from a
-/// deliberately slow hash like passwords use.
 fn generate_token() -> String {
     let mut bytes = [0u8; TOKEN_BYTES];
     OsRng.fill_bytes(&mut bytes);
     to_hex(&bytes)
 }
 
-/// The value actually stored for a session token: only its hash, so a
-/// database leak does not hand out working credentials.
 fn hash_token(token: &str) -> String {
     to_hex(&Sha256::digest(token.as_bytes()))
 }
@@ -2799,7 +2712,7 @@ fn initialize_database(connection: &mut Connection) -> Result<(), StoreError> {
     connection.pragma_update(None, "journal_mode", "WAL")?;
     for (table, expected) in EXPECTED_TABLES {
         let columns = table_columns(connection, table)?;
-        // Tables that are not there yet are created below.
+
         if !columns.is_empty()
             && !columns
                 .iter()
@@ -2917,10 +2830,6 @@ fn initialize_database(connection: &mut Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// The columns every table is expected to have, in the order they are declared
-/// above. A database that disagrees was written by a different version of the
-/// schema, and nothing here migrates it, so the server refuses to open it
-/// rather than deciding on its own what to throw away.
 const EXPECTED_TABLES: &[(&str, &[&str])] = &[
     (
         "blocks",
@@ -2976,9 +2885,7 @@ const EXPECTED_TABLES: &[(&str, &[&str])] = &[
     ),
 ];
 
-/// The columns `table` has, or nothing at all when it does not exist yet.
 fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StoreError> {
-    // A table name cannot be bound as a parameter, and these names are ours.
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns = statement
         .query_map([], |row| row.get::<_, String>(1))?

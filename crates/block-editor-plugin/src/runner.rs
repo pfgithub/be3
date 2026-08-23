@@ -23,8 +23,6 @@ pub(crate) fn run<A: crate::App>(id: &str, name: &str, version: &str) {
     }
 }
 
-/// Everything that reaches the plugin's loop: what the host sent, and the
-/// plugin's own work asking to be drawn again.
 enum Event {
     Received(Message),
     Woken,
@@ -109,8 +107,6 @@ fn run_endpoint<A: crate::App>(
     }
 }
 
-/// The host's hello and the plugin's answer to it, spoken on the connection
-/// itself before either side starts reading it on a thread of its own.
 fn handshake(
     connection: &mut Connection,
     id: &str,
@@ -158,8 +154,6 @@ fn spawn_reader(
     Ok(())
 }
 
-/// Lets work the plugin started off the frame - a background thread, its own
-/// block client - ask the loop to draw again.
 fn waker(events: Sender<Event>) -> crate::Waker {
     let events = std::sync::Mutex::new(events);
     crate::Waker::new(move || {
@@ -169,8 +163,6 @@ fn waker(events: Sender<Event>) -> crate::Waker {
     })
 }
 
-/// Waits for the next thing to happen, then takes everything else already
-/// waiting with it, so a burst of input costs one frame rather than one each.
 fn receive_batch(
     events: &Receiver<Event>,
     deadline: Option<Instant>,

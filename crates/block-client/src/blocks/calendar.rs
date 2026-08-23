@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
 
-/// A scheduled event with a start and end time, in whole seconds since the
-/// Unix epoch (UTC).
+                                                                           
+                     
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CalendarEvent {
     pub id: Uuid,
@@ -27,7 +27,7 @@ impl CalendarEvent {
     }
 }
 
-/// A calendar of events, viewable by day, week, or month.
+                                                          
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct Calendar {
     events: Vec<CalendarEvent>,
@@ -106,7 +106,7 @@ impl Block for Calendar {
     }
 }
 
-/// Ensures an event never ends before it starts.
+                                                 
 fn normalized_event(mut event: CalendarEvent) -> CalendarEvent {
     if event.end < event.start {
         event.end = event.start;
@@ -231,8 +231,8 @@ impl BlockHistory<Calendar> for CalendarHistory {
     }
 }
 
-/// Keeps fields a concurrent editor changed while restoring the fields this
-/// history action owns.
+                                                                            
+                        
 fn rebase_event(
     current: CalendarEvent,
     expected: CalendarEvent,

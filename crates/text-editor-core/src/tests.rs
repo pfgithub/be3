@@ -51,8 +51,6 @@ mod toggle_collapse_at_moves_the_cursor_out_of_a_newly_hidden_section;
 mod up_arrow_skips_past_a_collapsed_section;
 mod zig_syn_hl;
 
-/// Renders the document with `<scope>` markers wherever the colour scope
-/// changes, skipping whitespace so that trailing-scope inheritance is ignored.
 fn rendered_highlight(tester: &mut EditorTester, offset: usize) -> String {
     let highlight = tester.editor.highlight();
     let document = tester.editor.document().read().unwrap();

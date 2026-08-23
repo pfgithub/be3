@@ -3,17 +3,8 @@ use wasmi::{Config, Engine, Instance, Linker, Memory, Module, Store, TypedFunc};
 
 pub use game_api::{GameAction, GameActionOption, GameRequest, GameScreen};
 
-/// How much a single `show` call may execute before the interpreter stops
-/// it. A game replays its whole log on every call, so this is generous - it
-/// exists so a module that never returns cannot take the app's frame with
-/// it, not to budget honest games.
 const FUEL: u64 = 100_000_000;
 
-/// One game, as the WebAssembly module that plays it. The module is the
-/// whole game: the app knows nothing about turns, legality or win
-/// conditions, and asks the module what a player sees by replaying the
-/// action log into it. Every call runs in an instance of its own, so a game
-/// keeps no state between calls beyond the log it is given.
 pub struct Game {
     engine: Engine,
     module: Module,
@@ -36,8 +27,6 @@ impl Game {
         Ok(game)
     }
 
-    /// What the module calls itself, which is the only name the app has for
-    /// a game it discovered rather than shipped.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -105,8 +94,6 @@ fn export<Parameters: wasmi::WasmParams, Results: wasmi::WasmResults>(
         .map_err(|error| format!("this game module has no usable {name}: {error}"))
 }
 
-/// Reads back what a module handed over: a pointer and a length packed into
-/// the one integer a call can answer with.
 fn read(store: &Store<()>, memory: &Memory, answer: u64) -> Result<Vec<u8>, String> {
     let pointer = (answer >> 32) as usize;
     let length = (answer & u64::from(u32::MAX)) as usize;

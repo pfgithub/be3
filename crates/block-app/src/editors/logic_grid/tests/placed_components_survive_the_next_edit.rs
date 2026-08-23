@@ -2,9 +2,6 @@ use super::*;
 use logicgame::grid::ComponentPort;
 use uuid::Uuid;
 
-/// Placing writes to the block, not just to the working copy: a component that
-/// only reached the mirror would disappear the next time the mirror is
-/// refreshed, which happens after every edit.
 #[test]
 fn placed_components_survive_the_next_edit() {
     let mut editor = LogicGridEditor::default();
@@ -31,7 +28,6 @@ fn placed_components_survive_the_next_edit() {
         Some(kind)
     );
 
-    // Any further edit refreshes the working copy from the block.
     editor.edit(LogicGridOperation::AddWire {
         wire: wire((0, 0), (2, 0), 1),
     });

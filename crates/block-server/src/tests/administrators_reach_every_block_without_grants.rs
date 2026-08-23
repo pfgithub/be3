@@ -32,7 +32,6 @@ async fn administrators_reach_every_block_without_grants() {
     )
     .await;
 
-    // A block only the editor has ever touched.
     let mut editor_socket = server.connect_to(&editor.token, workspace.id).await;
     let block = Uuid::new_v4();
     create(&mut editor_socket, block, vec![]).await;
@@ -54,8 +53,6 @@ async fn administrators_reach_every_block_without_grants() {
     assert_eq!(access_for(&entries, owner.id), BlockAccess::Edit);
     assert_eq!(access_for(&entries, second_admin.id), BlockAccess::Edit);
 
-    // Recording a grant for an administrator would be overridden by the role,
-    // so the server refuses rather than storing something meaningless.
     assert!(matches!(
         set_access(&mut admin_socket, block, owner.id, BlockAccess::View).await,
         ServerMessage::Error {

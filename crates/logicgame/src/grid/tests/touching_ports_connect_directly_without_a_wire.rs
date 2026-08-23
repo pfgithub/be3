@@ -3,8 +3,7 @@ use super::*;
 #[test]
 fn touching_ports_connect_directly_without_a_wire() {
     let mut grid = LogicGrid::new();
-    // Two NOT gates stacked so the lower gate's bottom input touches the upper
-    // gate's top output along the shared edge at y == 2.
+
     let lower = grid.add_component(
         Point::new(0, 0),
         Rotation::Up,
@@ -16,7 +15,6 @@ fn touching_ports_connect_directly_without_a_wire() {
         ComponentKind::Not { scale: Scale::ONE },
     );
 
-    // Touching, not overlapping.
     assert!(grid.validate().is_empty());
 
     let graph = grid.generate_graph();

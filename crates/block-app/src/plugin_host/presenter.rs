@@ -60,8 +60,6 @@ pub(super) trait SurfacePresenter {
     fn release(&mut self, surface: u32);
 }
 
-/// How many plugin runtimes can present at once, and how many screens each of
-/// them can address in the shared region buffer.
 pub(super) const MAX_SURFACES: u32 = 8;
 pub(super) const MAX_REGIONS: u32 = 64;
 const MAX_SLOTS: u32 = MAX_SURFACES * MAX_REGIONS;

@@ -10,13 +10,13 @@ use uuid::Uuid;
 use crate::block_ref::BlockRef;
 
 const EDIT_BURST_DELAY: Duration = Duration::from_millis(750);
-/// Latitude beyond which the Web Mercator projection used by the map tiles is
-/// undefined.
+                                                                              
+              
 pub const MAX_LATITUDE: f64 = 85.051_128_78;
-/// Smallest span a preview region may cover, in degrees.
+                                                         
 pub const MIN_REGION_SPAN: f64 = 0.000_01;
 
-/// A geographic position in degrees.
+                                     
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct MapCoordinate {
     pub longitude: f64,
@@ -32,8 +32,8 @@ impl MapCoordinate {
     }
 }
 
-/// The geographic rectangle a map shows when it is previewed, presented, or
-/// first opened.
+                                                                            
+                 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MapRegion {
     pub west: f64,
@@ -52,7 +52,7 @@ impl MapRegion {
         }
     }
 
-    /// The whole world, which is what a map without a region shows.
+                                                                    
     pub const WORLD: Self = Self::new(-180.0, -MAX_LATITUDE, 180.0, MAX_LATITUDE);
 
     pub fn center(self) -> MapCoordinate {
@@ -63,7 +63,7 @@ impl MapRegion {
     }
 }
 
-/// The color of a point of interest marker.
+                                            
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MapColor {
@@ -76,7 +76,7 @@ pub enum MapColor {
     },
 }
 
-/// A block placed on the map at a geographic position.
+                                                       
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MapPoint {
     pub id: Uuid,
@@ -96,8 +96,8 @@ impl MapPoint {
     }
 }
 
-/// A world map rendered from OpenStreetMap vector tiles, with blocks pinned to
-/// geographic positions.
+                                                                               
+                         
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct Map {
     points: Vec<MapPoint>,
@@ -150,7 +150,7 @@ impl Map {
         self.preview_region
     }
 
-    /// The region the map shows when it is previewed or first opened.
+                                                                      
     pub fn displayed_region(&self) -> MapRegion {
         self.preview_region.unwrap_or(MapRegion::WORLD)
     }
@@ -256,8 +256,8 @@ fn normalized_region(region: MapRegion) -> MapRegion {
     MapRegion::new(west, south, east, north)
 }
 
-/// Orders one axis of a region and widens it to the minimum span without
-/// leaving the projection limits.
+                                                                         
+                                  
 fn ordered_span(low: f64, high: f64, limit_low: f64, limit_high: f64) -> (f64, f64) {
     let (mut low, mut high) = (low.min(high), low.max(high));
     if high - low >= MIN_REGION_SPAN {
@@ -457,8 +457,8 @@ impl BlockHistory<Map> for MapHistory {
     }
 }
 
-/// Keeps fields a concurrent editor changed while restoring the fields this
-/// history action owns.
+                                                                            
+                        
 fn rebase_point(current: MapPoint, expected: MapPoint, desired: MapPoint) -> MapPoint {
     let mut result = current;
     if result.position == expected.position {

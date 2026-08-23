@@ -17,7 +17,7 @@ fn struct_name_override_replaces_the_title() {
     assert!(renamed.contains("pub struct SettingsPanel {"), "{renamed}");
     assert!(renamed.contains("impl SettingsPanel {"), "{renamed}");
 
-    // A blank override falls back to the title.
+                                                
     let blank = builder.generate_code(Some("  "));
     assert_eq!(blank, titled);
 }

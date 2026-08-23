@@ -3,21 +3,8 @@ use super::*;
 #[test]
 fn collapsible_sections_detects_markdown_headings() {
     let lines = [
-        "# Title",  // 0
-        "intro",    // 1
-        "",         // 2
-        "## A",     // 3
-        "line a1",  // 4
-        "line a2",  // 5
-        "",         // 6
-        "### Sub",  // 7
-        "sub line", // 8
-        "",         // 9
-        "## B",     // 10
-        "line b",   // 11
-        "",         // 12
-        "# Second", // 13
-        "last",     // 14
+        "# Title", "intro", "", "## A", "line a1", "line a2", "", "### Sub", "sub line", "",
+        "## B", "line b", "", "# Second", "last",
     ];
     let content = lines.join("\n");
     let offset = |index: usize| -> usize { lines[..index].iter().map(|line| line.len() + 1).sum() };

@@ -261,8 +261,6 @@ impl Instances {
         self.entries.get_mut(&instance)?.artifact.outcome.take()
     }
 
-    /// Forgets what a runtime was told, so that a restarted one is sent the
-    /// block types and open instances it knows nothing about again.
     pub(super) fn reopen(&mut self) {
         self.sent_block_types = false;
         for entry in self.entries.values_mut() {
@@ -366,8 +364,6 @@ impl Instances {
         }
     }
 
-    /// Tells an instance about a block being dragged over one of its
-    /// regions, and about a drag that has moved off it again.
     pub(super) fn drag(
         &mut self,
         instance: EditorInstanceId,
@@ -560,8 +556,6 @@ impl Instances {
             .unwrap_or_default()
     }
 
-    /// Takes whatever the server has sent back for the runtime's client, so
-    /// it can be handed to the plugin runtime.
     pub(super) fn client_responses(&mut self) -> Vec<Message> {
         let mut messages = Vec::new();
         if let Some(connection) = &mut self.connection {
@@ -602,8 +596,6 @@ impl Instances {
         messages
     }
 
-    /// Records an instance's request to have another block opened, to be
-    /// picked up by the editor the next time it draws.
     pub(super) fn editor_message(&mut self, message: EditorMessage) {
         match message {
             EditorMessage::OpenBlock {
@@ -712,8 +704,6 @@ impl Instances {
         }
     }
 
-    /// Forwards a plugin's client message to the server over the host's own
-    /// connection, where it is served as a client in its own right.
     pub(super) fn client_message(&mut self, message: TunnelMessage) {
         let TunnelMessage::Request { payload } = message else {
             return;

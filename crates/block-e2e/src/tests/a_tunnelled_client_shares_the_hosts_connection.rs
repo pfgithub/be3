@@ -47,7 +47,6 @@ async fn a_tunnelled_client_shares_the_hosts_connection() {
     fs::remove_dir_all(data_dir).await.unwrap();
 }
 
-/// Stands in for the plugin host, which does this from its frame loop.
 async fn carry(mut tunnel: block_client::Tunnel, mut carrier: block_client::TunnelCarrier) {
     loop {
         tokio::select! {

@@ -21,9 +21,6 @@ use crate::plugin_host::{
     ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, InstanceRole,
 };
 
-/// The registered block types as a plugin sees them, built once for every
-/// runtime that has to name and illustrate blocks it only holds a reference
-/// to.
 pub(super) fn block_type_descriptors(
     types: impl IntoIterator<Item = (uuid::Uuid, block_ui::BlockTypeEntry)>,
 ) -> Vec<BlockTypeDescriptor> {

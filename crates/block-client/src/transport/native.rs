@@ -16,13 +16,9 @@ use crate::fatal;
 
 type Stream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// How long a management request may take. The web build has no equivalent:
-/// `fetch` runs until the browser gives up on it.
 const MANAGEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_WEBSOCKET_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
-/// Runs the block client worker on its own thread, since native builds have no
-/// event loop to borrow.
 pub(crate) fn spawn_worker<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
@@ -91,8 +87,6 @@ impl Socket {
     }
 }
 
-/// POSTs a JSON body and returns the response status and body. `ureq` blocks,
-/// so the request runs off the runtime's worker threads.
 pub(crate) async fn post_json(url: String, body: Vec<u8>) -> Result<(u16, String), String> {
     tokio::task::spawn_blocking(move || {
         let agent = ureq::AgentBuilder::new()

@@ -41,9 +41,6 @@ impl Connection {
         &mut self.writer
     }
 
-    /// Splits the connection, opening the host process the surface handles
-    /// are duplicated into. A plugin may only do that because the host is the
-    /// server end of the pipe it is already connected to.
     pub(crate) fn split(self) -> io::Result<(Reader, Sender)> {
         let mut host_pid = 0;
         if unsafe {

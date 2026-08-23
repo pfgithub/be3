@@ -145,9 +145,6 @@ impl WebProtocolAdapter {
         }
     }
 
-    /// Routes everything the plugin answered with: the session keeps its own,
-    /// the frame it drew says when to draw again, and the rest reaches the
-    /// host in the order it arrived.
     fn receive_all(&mut self, responses: &js_sys::Array) -> Result<(), String> {
         for response in responses.iter() {
             let response = js_sys::Uint8Array::new(&response).to_vec();

@@ -94,9 +94,6 @@ impl TextEditor {
             .unwrap_or(0..0)
     }
 
-    /// Selects a single byte for editing: the whole byte cell in overwrite
-    /// mode (so the next digit typed replaces it), or a collapsed cursor
-    /// before it in insert mode (so the next digit is inserted there).
     fn select_hex_byte(&mut self, index: usize) {
         let len = self.hex_document_len();
         let index = index.min(len);

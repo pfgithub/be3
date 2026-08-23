@@ -47,6 +47,6 @@ fn set_dynamic_artifact_updates_the_descriptor() {
     assert_eq!(block.dynamic_artifact(), Some(updated.clone()));
     assert_eq!(client.dynamic_artifact(block.id()), Some(updated));
     assert!(block.revision() > revision);
-    // The value is untouched by a settings change.
+
     assert_eq!(block.read().unwrap().0, 1);
 }

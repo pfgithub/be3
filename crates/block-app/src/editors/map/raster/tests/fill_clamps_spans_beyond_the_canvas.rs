@@ -1,7 +1,5 @@
 use super::{square, Canvas, CANVAS, WATER};
 
-/// Tiles carry buffer geometry outside the tile extent, so fill spans can lie
-/// entirely beyond the canvas edge; they must be clamped, not panic.
 #[test]
 fn fill_clamps_spans_beyond_the_canvas() {
     let mut canvas = Canvas::new();

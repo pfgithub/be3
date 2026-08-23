@@ -12,7 +12,7 @@ fn video_attached_clips_start_at_their_offset() {
         Some(&(attached, 2, 1))
     );
 
-    // An attachment of an attachment offsets from the clip it hangs off.
+                                                                         
     let nested = VideoClip::new(BlockRef::Direct(Uuid::new_v4()), 4).attached_to(attached, 3);
     let nested_id = nested.id;
     Video::apply_operation(
@@ -27,7 +27,7 @@ fn video_attached_clips_start_at_their_offset() {
         Some(&(nested_id, 5, 2))
     );
 
-    // Moving the clip it all hangs off carries the whole subtree along.
+                                                                        
     let mut moved = video.clip(first).unwrap().clone();
     moved.length = 20;
     Video::apply_operation(

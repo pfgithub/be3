@@ -30,10 +30,6 @@ type Frame = <Platform as Backend>::Frame;
 const NOT_INSTALLED: &str = "The plugin host is not installed.";
 const CROWDED: &str = "Too many plugin runtimes are already presenting.";
 
-/// Everything a plugin runtime needs from the platform it runs on: how to
-/// start it, how to exchange messages with it, and how to get the image it
-/// last drew onto the screen. Everything else - input, screen layout,
-/// instances, errors - is the same on every platform and lives in this module.
 pub(super) trait Backend: Sized {
     type Frame: Send + Sync + 'static;
 
@@ -45,9 +41,6 @@ pub(super) trait Backend: Sized {
 
     fn send(&mut self, messages: Vec<Message>);
 
-    /// Everything the plugin has said since this was last called, in the
-    /// order it said it. A runtime is woken when there is something to take,
-    /// so this only ever drains what has already arrived.
     fn receive(&mut self) -> Vec<Message>;
 
     fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Self::Frame;
@@ -226,7 +219,6 @@ impl Runtime {
         }
     }
 
-    /// Acts on what the plugin said, in the order it said it.
     pub(super) fn apply(&mut self, messages: Vec<Message>) {
         if messages.is_empty() {
             return;

@@ -48,8 +48,6 @@ impl Backend for Unavailable {
     fn shutdown(&mut self) {}
 }
 
-/// The presenter the shared runtime would hand its frames to, on a platform
-/// that has none. It cannot exist, so nothing is ever presented.
 pub(super) enum UnavailablePresenter {}
 
 impl SurfacePresenter for UnavailablePresenter {

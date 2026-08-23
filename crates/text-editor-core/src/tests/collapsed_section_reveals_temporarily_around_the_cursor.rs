@@ -9,7 +9,6 @@ fn collapsed_section_reveals_temporarily_around_the_cursor() {
     tester.execute(EditorCommand::Collapse);
     assert!(tester.editor.collapsible_sections()[0].collapsed);
 
-    // Find landing a match inside the hidden content reveals it...
     tester.execute(EditorCommand::Find {
         text: "a2",
         case_sensitive: false,
@@ -17,7 +16,6 @@ fn collapsed_section_reveals_temporarily_around_the_cursor() {
     });
     assert!(!tester.editor.collapsible_sections()[0].collapsed);
 
-    // ...and it collapses again once the cursor moves away.
     tester.set_cursor(tester.pos(0));
     assert!(tester.editor.collapsible_sections()[0].collapsed);
 }

@@ -2,7 +2,6 @@ use super::{decode, feature, tile_with_layer, zigzag, GeometryKind};
 
 #[test]
 fn decode_splits_polygons_and_multipoints_into_paths() {
-    // A polygon ring closed with ClosePath followed by nothing else.
     let polygon_geometry = [
         (1 << 3) | 1,
         zigzag(0),
@@ -14,7 +13,7 @@ fn decode_splits_polygons_and_multipoints_into_paths() {
         zigzag(10),
         7,
     ];
-    // Two separate points encoded as a single MoveTo command.
+
     let point_geometry = [(2 << 3) | 1, zigzag(5), zigzag(5), zigzag(3), zigzag(-2)];
     let mut layer = super::length_delimited(1, b"shapes");
     layer.extend(feature(3, &[], &polygon_geometry));

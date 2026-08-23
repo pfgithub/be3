@@ -31,7 +31,7 @@ async fn management_client_round_trips_workspace_key_grants() {
         .await
         .unwrap();
 
-    // Nobody has been granted the key yet.
+                                           
     assert_eq!(
         client
             .get_workspace_key(&owner.token, workspace.id)
@@ -40,7 +40,7 @@ async fn management_client_round_trips_workspace_key_grants() {
         None
     );
 
-    // The creator bootstraps their own access.
+                                               
     let workspace_key = WorkspaceKey::generate();
     let owner_wrapped = workspace_key.seal_for(&owner_keypair.public_key());
     client
@@ -59,7 +59,7 @@ async fn management_client_round_trips_workspace_key_grants() {
         workspace_key.to_bytes()
     );
 
-    // Invite and accept a second member -- they have no key yet.
+                                                                 
     let recipient_keypair = AccountKeypair::generate();
     let invitation = client
         .invite(
@@ -91,7 +91,7 @@ async fn management_client_round_trips_workspace_key_grants() {
         None
     );
 
-    // The owner notices the pending grant and fulfils it.
+                                                          
     let grants = client.list_pending_key_grants(&owner.token).await.unwrap();
     assert_eq!(grants.len(), 1);
     let grant = &grants[0];
@@ -114,7 +114,7 @@ async fn management_client_round_trips_workspace_key_grants() {
         .unwrap()
         .is_empty());
 
-    // The recipient can now recover the exact same workspace key.
+                                                                  
     let fetched = client
         .get_workspace_key(&recipient.token, workspace.id)
         .await

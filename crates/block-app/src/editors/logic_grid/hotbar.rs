@@ -105,10 +105,6 @@ impl LogicGridEditor {
         }
     }
 
-    /// Finds the shared hotbar and rebuilds the palette from it, filling in what
-    /// each pinned component places now that its compiled block has loaded. An
-    /// empty block keeps the default tree, so a fresh hotbar needs no eager
-    /// write.
     pub(super) fn sync_hotbar(&mut self, client: Option<&BlockClient>, client_id: Uuid) {
         if let Some(client) = client {
             let pending = self.hotbar_needs_write;
@@ -184,8 +180,6 @@ impl LogicGridEditor {
         })
     }
 
-    /// Pins a compiled component to the hotbar. A component already pinned is
-    /// updated in place rather than pinned twice.
     pub(super) fn pin_component(&mut self, name: String, compiled: Uuid) {
         let kind = self.compiled_kind(compiled, &name);
         let slot = HotbarSlot::Component {
@@ -201,8 +195,6 @@ impl LogicGridEditor {
         self.persist_hotbar();
     }
 
-    /// Unpins a custom hotbar slot, persisting the change and fixing up the
-    /// selected custom path when needed.
     pub(super) fn remove_hotbar_slot(&mut self, path: &[usize]) {
         if !matches!(
             get_hotbar_slot(&self.hotbar, path),
@@ -253,10 +245,6 @@ impl LogicGridEditor {
         self.persist_hotbar();
     }
 
-    /// Writes the palette back to the shared hotbar block. An editor that has
-    /// not found one yet - because the root listing is still on its way, or
-    /// because it is running without a client - notes the change instead, and
-    /// the next sync writes it to the hotbar it finds or creates.
     pub(super) fn persist_hotbar(&mut self) {
         let Some(block) = self.hotbar_block.as_ref().and_then(RootSetting::block) else {
             self.hotbar_needs_write = true;
@@ -559,7 +547,6 @@ impl LogicGridEditor {
     }
 
     pub(super) fn show_tool_settings(&mut self, ui: &mut egui::Ui) {
-        // Scale controls. They have no effect on custom components for now.
         if matches!(self.tool.kind, ToolKind::MergerSplitter) {
             ui.small("Input scale");
             scale_buttons(ui, &mut self.tool.scale);
@@ -570,8 +557,6 @@ impl LogicGridEditor {
             scale_buttons(ui, &mut self.tool.scale);
         }
 
-        // A label for freely placed inputs/outputs. Inside a challenge the label
-        // is fixed by the assigned port, so the field is not offered.
         if matches!(self.tool.kind, ToolKind::Input | ToolKind::Output) && self.challenge.is_none()
         {
             ui.separator();
@@ -656,7 +641,6 @@ pub(super) fn hotbar_slot_to_block(slot: &HotbarSlot) -> BlockHotbarSlot {
     }
 }
 
-/// Every compiled block pinned anywhere in a stored palette.
 fn pinned_components(slots: &[BlockHotbarSlot]) -> Vec<Uuid> {
     let mut pinned = Vec::new();
     for slot in slots {
@@ -669,8 +653,6 @@ fn pinned_components(slots: &[BlockHotbarSlot]) -> Vec<Uuid> {
     pinned
 }
 
-/// Compares palettes by what they hold rather than by identity, so a rebuild
-/// that changed nothing leaves the open folder and the selected tool alone.
 fn hotbar_slots_equal(left: &[HotbarSlot], right: &[HotbarSlot]) -> bool {
     left.len() == right.len()
         && left
@@ -951,8 +933,6 @@ pub(super) fn step_scale(scale: &mut Scale, direction: ScaleDirection) {
     *scale = Scale::new(SCALES[next]).expect("hotbar scale is valid");
 }
 
-/// A square hotbar slot: a framed button with a glyph preview painted in its top
-/// portion and a label across the bottom. Returns the click response.
 pub(super) fn hotbar_button(
     ui: &mut egui::Ui,
     selected: bool,
@@ -1275,8 +1255,6 @@ impl LogicGridEditor {
         })
     }
 
-    /// A pinned component stays disabled until its compiled block loads, and
-    /// a challenge tool until the level still has a port left for it.
     pub(super) fn hotbar_slot_disabled(&self, slot: &HotbarSlot) -> bool {
         match slot {
             HotbarSlot::Builtin(kind) => self.challenge_tool_exhausted(*kind),

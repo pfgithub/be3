@@ -1,7 +1,5 @@
 use super::*;
 
-/// Indices into a frame's wire value table, grouped by what they describe:
-/// wires, component connections, components and storage components.
 type WireValueIndices = (
     BTreeMap<Wire, u32>,
     BTreeMap<(ComponentId, ConnectionSlot), u32>,
@@ -11,10 +9,6 @@ type WireValueIndices = (
 );
 
 impl LogicGridEditor {
-    /// Draws text labels over the grid: the label on each input/output, the
-    /// centre name of every subcomponent, and each subcomponent port's label
-    /// next to its port. Text is an egui overlay because the wgpu grid renderer
-    /// only draws triangles.
     pub(super) fn draw_component_labels(&self, painter: &egui::Painter, rect: egui::Rect) {
         let zoom = self.camera.zoom;
         for component in self.grid.components() {
@@ -60,8 +54,7 @@ impl LogicGridEditor {
                         let top = component.position.y as f32;
                         let right = left + size.width as f32;
                         let bottom = top + size.height as f32;
-                        // Sit the text just inside the edge, anchored so it grows
-                        // toward the component's interior.
+
                         let inset = 0.15;
                         let (point, anchor) = match slot.side {
                             ComponentSide::Top => ([mid, top + inset], egui::Align2::CENTER_TOP),
@@ -583,12 +576,7 @@ impl LogicGridEditor {
                     .extend(DrawTriangle::connection_highlight(component, *connection));
             }
         }
-        // Draw a wire stub on every port the circuit graph reports as wired to
-        // an actual wire net, so the wire reads as entering the component no
-        // matter where along the wire the contact was made. The stub carries the
-        // connected net's value index so it shows the same on/off value as the
-        // wire. Ports joined directly to a touching neighbour belong to an empty
-        // (wireless) net and draw nothing, so abutting components have no stub.
+
         let mut connection_stubs = Vec::new();
         for (index, node) in snapshot.graph.nodes.iter().enumerate() {
             let GraphNode::Connection {

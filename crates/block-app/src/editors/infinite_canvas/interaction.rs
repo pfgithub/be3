@@ -22,9 +22,6 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    /// The chosen image arrives some frames after the menu item was clicked
-    /// on Android and the web, so it lands where the menu was opened rather
-    /// than wherever the pointer has since moved.
     pub(super) fn import_picked_image(
         &mut self,
         context: &egui::Context,
@@ -152,11 +149,8 @@ impl InfiniteCanvasEditor {
         self.add_imported_image(editors, image, center);
     }
 
-    /// A two-finger tap must land and lift within this long to count as a
-    /// tap rather than a held pinch/pan gesture.
     const TWO_FINGER_TAP_MAX_DURATION: f64 = 0.3;
-    /// A two-finger tap must not drift further than this (in screen points)
-    /// or it's treated as a pan instead.
+
     const TWO_FINGER_TAP_MAX_DRIFT: f32 = 24.0;
 
     pub(super) fn handle_zoom_and_pan(
@@ -170,12 +164,8 @@ impl InfiniteCanvasEditor {
         }
         if response.hovered() {
             if let Some(touch) = touch {
-                // A second finger landing should immediately take over from
-                // whatever the first finger was doing (selecting, dragging, …).
                 self.gesture = None;
-                // egui's `touch.start_pos` is the emulated mouse pointer's
-                // position from before the gesture began, not where the
-                // fingers landed, so track our own starting center instead.
+
                 let start_center = self
                     .two_finger_touch
                     .map_or(touch.center_pos, |state| state.start_center);
@@ -228,9 +218,6 @@ impl InfiniteCanvasEditor {
         false
     }
 
-    /// Called once a two-finger touch has fully lifted. Undoes the last
-    /// change if the gesture was a quick, still tap rather than a
-    /// pinch/pan.
     fn finish_two_finger_touch(&mut self, response: &egui::Response) {
         let Some(touch) = self.two_finger_touch.take() else {
             return;

@@ -108,9 +108,6 @@ impl Backend for Native {
 }
 
 impl Native {
-    /// The layout a newly arrived surface was drawn with. Layouts arrive
-    /// ahead of the surfaces that use them, so the pending ones are held
-    /// until the surface naming their generation shows up.
     fn take_layout(&mut self, generation: u64) -> Option<ScreenLayout> {
         let index = self
             .pending_layouts

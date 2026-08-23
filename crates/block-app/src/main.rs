@@ -56,10 +56,10 @@ use uuid::Uuid;
 const APP_ID: &str = "Block";
 const COMPACT_FILES_WIDTH: f32 = 700.0;
 const NO_EDIT_ACCESS: &str = "You do not have permission to change this block";
-/// How a block generated from another one is marked wherever it is listed.
+
 const ICON_DYNAMIC_ARTIFACT: MaterialIcon = ICON_AUTO_AWESOME;
 const ONBOARDING_WIDTH: f32 = 460.0;
-/// The commit this build came from, stamped in by the build script.
+
 pub(crate) const COMMIT: &str = env!("BLOCK_APP_COMMIT");
 #[cfg(not(target_arch = "wasm32"))]
 fn native_options() -> eframe::NativeOptions {
@@ -108,9 +108,6 @@ pub fn run() -> eframe::Result {
     run_native(native_options(), None)
 }
 
-/// Starts the app on the canvas with the given element id. The page calls this
-/// once the module is ready; it returns as soon as eframe owns the canvas, and
-/// the app then runs from the browser's animation callbacks.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
@@ -161,17 +158,12 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         }
     };
 
-    // android-activity may start a later Activity instance on a new android_main thread in the
-    // same process. Eframe stores its event loop in thread-local state while winit permits only
-    // one event loop per process, so that later instance cannot reuse the original loop. End this
-    // native-only process once the loop exits so Android starts the next Activity in a clean one.
     std::process::exit(exit_code);
 }
 
 struct BlockApp {
     app_state: AppStateStore,
-    /// This installation's identity, used to pick out per-client settings
-    /// entries. Generated once and persisted by `app_state`.
+
     client_id: Uuid,
     local_server_url: String,
     accounts: Vec<Account>,
@@ -189,8 +181,7 @@ struct BlockApp {
         Option<platform::RequestResult<Result<WorkspaceResult, WorkspaceRequestError>>>,
     workspace_name: String,
     workspace_error: Option<String>,
-    /// Set while an account's session token has been rejected by the server
-    /// and the user is being asked to reauthenticate.
+
     reauth: Option<ReauthState>,
     invite_open: bool,
     invite_email: String,
@@ -208,39 +199,30 @@ struct BlockApp {
     parents: HashMap<Uuid, ReferenceList>,
     references: HashMap<Uuid, ReferenceList>,
     backrefs: HashMap<Uuid, ReferenceList>,
-    /// Backrefs fetched on demand for the "Set parent" menu, keyed by the
-    /// block whose parent is being changed. Unlike `backrefs`, this covers
-    /// any block a context menu was opened on, not just open tabs.
+
     parent_candidates: HashMap<Uuid, ReferenceList>,
     block_types: HashMap<Uuid, Uuid>,
     registry: EditorRegistry,
     editors: HashMap<Uuid, Box<dyn BlockEditor>>,
-    /// The access a tab is being shown at, when it is not the most its account
-    /// has. Lets someone with edit access see what a viewer would see.
+
     editor_access: HashMap<Uuid, BlockAccess>,
-    /// Tabs currently showing their block's raw serialized data instead of
-    /// its editor.
+
     debug_tabs: HashSet<Uuid>,
     dynamic_artifact_sessions: HashMap<Uuid, Box<dyn ArtifactSession>>,
     dynamic_artifact_errors: HashMap<Uuid, String>,
-    /// Settings being edited in an artifact bar, until they are applied.
+
     dynamic_artifact_settings: HashMap<Uuid, Vec<u8>>,
-    /// The block whose artifact settings modal is open, if any.
+
     dynamic_artifact_settings_open: Option<Uuid>,
-    /// The block whose unlink confirmation is open, if any.
+
     dynamic_artifact_unlink: Option<Uuid>,
     dock_state: DockState<DockTab>,
     files_compact: bool,
     active_tab: Option<Uuid>,
-    /// Blocks currently announced as [`UserActive`] presence, i.e. whose tab
-    /// was on screen as of the last frame. Kept in sync by
-    /// [`BlockApp::update_active_presence`].
+
     active_presence: HashSet<Uuid>,
     sidebar_reveal: Option<Uuid>,
-    /// The immediate container a block was last opened through via an
-    /// explicit sidebar tree click, keyed by the block id. Not persisted;
-    /// used only to reveal the exact row a click came from instead of always
-    /// falling back to the block's canonical ancestor chain.
+
     opened_via: HashMap<Uuid, Uuid>,
     pending_transfers: Vec<PendingTransfer>,
     pending_copies: Vec<PendingCopy>,
@@ -407,7 +389,6 @@ struct AccountForm {
 impl Default for AccountForm {
     fn default() -> Self {
         Self {
-            // A build with no embedded server can only reach a remote one.
             remote: !platform::HAS_EMBEDDED_SERVER,
             remote_url: String::new(),
             register: false,
@@ -438,9 +419,6 @@ enum WorkspaceResult {
     Invited,
 }
 
-/// A failed workspace/management request, keeping track of whether it failed
-/// because the account's session token is no longer valid, which is handled
-/// by prompting to reauthenticate rather than shown as a plain error.
 struct WorkspaceRequestError {
     message: String,
     invalid_token: bool,
@@ -462,10 +440,6 @@ impl From<ManagementClientError> for WorkspaceRequestError {
     }
 }
 
-/// State for reauthenticating an account whose session token the server has
-/// rejected. The account's existing token is left in storage untouched until
-/// a fresh one is obtained, so a cancelled or failed reauthentication does
-/// not lose access beyond the failure that prompted it.
 struct ReauthState {
     account: Account,
     password: String,
@@ -495,9 +469,6 @@ enum TransferStage {
     AddDestination,
 }
 
-/// Duplicates the block being viewed via a reference and swaps the specific
-/// occurrence being viewed (in `container`) to point at the copy, without
-/// touching the original block or its other referrers.
 #[derive(Clone)]
 struct PendingCopy {
     source: Uuid,
@@ -524,8 +495,6 @@ enum BlockPickerTarget {
 }
 
 impl BlockApp {
-    /// Opens the app state beside the app and starts the block server that
-    /// backs local accounts.
     #[cfg(not(target_arch = "wasm32"))]
     fn new(storage_root: Option<PathBuf>) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let data_dir = storage_root
@@ -541,16 +510,12 @@ impl BlockApp {
         Ok(app)
     }
 
-    /// Opens the app state in browser storage. There is no local server to
-    /// start, so every account is a remote one.
     #[cfg(target_arch = "wasm32")]
     fn new() -> Result<Self, Box<dyn Error + Send + Sync>> {
         let app_state = AppStateStore::open()?;
         Self::with_state(app_state, String::new())
     }
 
-    /// Restores the last session from `app_state`. `local_server_url` is where
-    /// local accounts are served, and is empty where there are none.
     fn with_state(
         app_state: AppStateStore,
         url: String,
@@ -797,9 +762,6 @@ impl BlockApp {
     }
 
     fn log_out_account(&mut self, account: &Account) {
-        // Best-effort: revokes the token server-side so a lost or stolen
-        // device cannot keep using it. The local sign-out below happens
-        // either way, since that's the part the user actually asked for.
         let url = match &account.server {
             ServerLocation::Local => self.local_server_url.clone(),
             ServerLocation::Remote(url) => url.clone(),
@@ -842,8 +804,7 @@ impl BlockApp {
             });
             ui.add_space(12.0);
             ui.label("Server");
-            // Without an embedded server there is nothing for a local account to
-            // talk to, so the choice is not offered and the URL is required.
+
             if platform::HAS_EMBEDDED_SERVER {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.account_form.remote, false, "Local");
@@ -1522,7 +1483,7 @@ impl BlockApp {
                         ui.monospace(env!("CARGO_PKG_VERSION"));
                         ui.end_row();
                         ui.label("Commit");
-                        // Selectable so the hash can be copied into a bug report.
+
                         ui.add(
                             egui::Label::new(egui::RichText::new(COMMIT).monospace())
                                 .selectable(true),
@@ -1687,7 +1648,7 @@ impl BlockApp {
                         parent: BlockParent::Orphaned,
                         references: 0,
                         dynamic_artifact: false,
-                        // The account just made or linked the block, so it is theirs.
+
                         access: BlockAccess::Edit,
                     },
                     parent,
@@ -1704,10 +1665,7 @@ impl BlockApp {
         let target = self.block_picker_target.unwrap_or(BlockPickerTarget::Root);
         let parent = match target {
             BlockPickerTarget::Root => BlockParent::Root,
-            // The server rejects a parent that does not reference the child,
-            // and the parent only takes the reference once its editor has
-            // loaded, which can be several frames later. Leave the block
-            // orphaned; the queued placement sets the parent after that.
+
             BlockPickerTarget::Block { .. } => BlockParent::Orphaned,
         };
         let active = self.active_tab.unwrap_or(Uuid::nil());
@@ -1764,8 +1722,6 @@ impl BlockApp {
         });
     }
 
-    /// Sets a block's designated parent, going through its open editor if it
-    /// has one so the change is reflected optimistically like other edits.
     fn set_block_parent(&mut self, id: Uuid, parent: BlockParent) {
         if let Some(editor) = self.editors.get(&id) {
             editor.set_parent(parent);
@@ -1873,8 +1829,6 @@ impl BlockApp {
         }
     }
 
-    /// Queues duplicating `source` and swapping the occurrence viewed through
-    /// `container` (the tab identified by `tab_id`) to point at the copy.
     fn queue_copy(&mut self, source: Uuid, container: Uuid, tab_id: Uuid) {
         if self
             .pending_copies
@@ -2050,14 +2004,10 @@ impl BlockApp {
         }
     }
 
-    /// The most a tab may do with its block, which is what its mode dropdown is
-    /// locked to.
     fn editor_access_ceiling(&self, id: Uuid) -> BlockAccess {
         editors::editor_access_ceiling(&self.client, id)
     }
 
-    /// The access a tab is being shown at: the mode it was put in, never above
-    /// what the account is allowed.
     fn editor_access(&self, id: Uuid) -> BlockAccess {
         let ceiling = self.editor_access_ceiling(id);
         self.editor_access
@@ -2228,10 +2178,6 @@ impl BlockApp {
         (action, navigation)
     }
 
-    /// Replaces an editor whose block cannot be opened, either because the
-    /// server refuses it or because the tab is showing it as an account that
-    /// only knows it exists. The block is still listed either way, so the tab
-    /// has to explain why it is empty.
     fn show_access_denied(&self, ui: &mut egui::Ui, simulated: bool) {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
@@ -2289,8 +2235,6 @@ impl BlockApp {
         navigate
     }
 
-    /// Drops the artifact dialogs a block may have open, so a block that is
-    /// closed or has stopped being an artifact leaves nothing behind.
     fn forget_dynamic_artifact_dialogs(&mut self, id: Uuid) {
         self.dynamic_artifact_settings.remove(&id);
         if self.dynamic_artifact_settings_open == Some(id) {
@@ -2301,9 +2245,6 @@ impl BlockApp {
         }
     }
 
-    /// The bar above an artifact editor: where the block came from, what the
-    /// generator is currently set to produce, and how to change, rerun or
-    /// unlink it.
     fn show_dynamic_artifact_bar(
         &mut self,
         ui: &mut egui::Ui,
@@ -2311,7 +2252,6 @@ impl BlockApp {
         block_type: Uuid,
     ) -> Option<BlockTabHistoryItem> {
         let Some(descriptor) = self.client.dynamic_artifact(id) else {
-            // A block that has just been unlinked keeps its tab open.
             self.forget_dynamic_artifact_dialogs(id);
             self.dynamic_artifact_sessions.remove(&id);
             return None;
@@ -2346,10 +2286,9 @@ impl BlockApp {
             .as_ref()
             .is_some_and(|session| session.regenerating());
         let described = matches!(status, Some(ArtifactStatus::Described { .. }));
-        // The artifact is read-only in its editor, but rebuilding it is an edit
-        // like any other, so it needs edit access to the block itself.
+
         let can_regenerate = self.client.block_access(id).can_edit();
-        // The draft is held outside the UI so the bar only reads from `self`.
+
         let mut draft = self.dynamic_artifact_settings.remove(&id);
         let mut navigate = None;
         let mut regenerate = false;
@@ -2492,8 +2431,6 @@ impl BlockApp {
         navigate
     }
 
-    /// Whether the occurrence of a block inside `container` may be replaced
-    /// with an independent copy, and why not if it can't.
     fn copy_permission(&self, container: Option<Uuid>) -> Result<(), &'static str> {
         let container_block_type =
             container.and_then(|container| self.block_types.get(&container).copied());
@@ -2509,9 +2446,6 @@ impl BlockApp {
         }
     }
 
-    /// The bar above the editor of a block that is referenced from more than
-    /// one place, warning that editing it here affects every place it
-    /// appears.
     fn show_shared_block_bar(
         &mut self,
         ui: &mut egui::Ui,
@@ -2625,7 +2559,6 @@ impl BlockApp {
         navigate.map(|(id, block_type)| BlockTabHistoryItem { id, block_type })
     }
 
-    /// A link to the block the artifact was generated from.
     fn show_dynamic_artifact_source(
         &self,
         ui: &mut egui::Ui,
@@ -2655,9 +2588,6 @@ impl BlockApp {
             })
     }
 
-    /// The settings modal. Edits go to `draft` until they are applied, and
-    /// dismissing the modal throws them away. A modal rather than a menu
-    /// because a menu closes as soon as something inside it is clicked.
     fn show_dynamic_artifact_settings(
         &self,
         ui: &mut egui::Ui,
@@ -2803,10 +2733,6 @@ impl BlockApp {
         }
     }
 
-    /// Reconciles [`UserActive`] presence with which blocks were actually on
-    /// screen this frame: clears it for blocks that left, and posts it (with
-    /// a color no one else visible on that block is already using) for
-    /// blocks that newly appeared.
     fn update_active_presence(&mut self, visible: HashSet<Uuid>) {
         for id in self.active_presence.difference(&visible) {
             self.client.set_presence::<UserActive>(*id, None);
@@ -3089,9 +3015,7 @@ struct BlockTabViewer<'a> {
     actions: Vec<(Uuid, Uuid, EditorAction)>,
     navigations: Vec<(Uuid, TabNavigation)>,
     tabs_to_close: Vec<Uuid>,
-    /// Blocks whose tab is on screen this frame, collected as tabs are drawn
-    /// so [`BlockApp::update_active_presence`] can tell who newly appeared
-    /// and who left once the dock has finished drawing.
+
     active_blocks: HashSet<Uuid>,
 }
 
@@ -3207,16 +3131,11 @@ enum BlockContextMenuAction {
     Delete,
 }
 
-/// What the account may do with the block a menu was opened on. Entries it is
-/// not allowed are shown disabled rather than left out, so the menu reads the
-/// same however much access the block was shared with.
 struct BlockMenuPermissions {
     add: bool,
     edit: bool,
     delete: bool,
-    /// Whether a reference row's occurrence may be replaced with an
-    /// independent copy, and why not if it can't. Unused for rows that
-    /// aren't references.
+
     copy: Result<(), &'static str>,
 }
 
@@ -3356,16 +3275,12 @@ fn block_context_menu(
     action
 }
 
-/// What a modal did with the frame it was drawn in: nothing yet, went ahead
-/// with what it was opened for, or was closed without doing it.
 enum ModalOutcome<T> {
     Open,
     Accepted(T),
     Dismissed,
 }
 
-/// Confirms unlinking an artifact from its source. The generated value stays
-/// where it is, so the only thing lost is the link and its settings.
 fn show_dynamic_artifact_unlink(ctx: &egui::Context) -> ModalOutcome<()> {
     let mut outcome = ModalOutcome::Open;
     let response = egui::Modal::new(egui::Id::new("dynamic-artifact-unlink")).show(ctx, |ui| {
@@ -3390,18 +3305,12 @@ fn show_dynamic_artifact_unlink(ctx: &egui::Context) -> ModalOutcome<()> {
     outcome
 }
 
-/// What a tab's mode dropdown is currently showing: the block simulated at
-/// some level of access, or its raw serialized data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TabMode {
     Access(BlockAccess),
     Debug,
 }
 
-/// The mode a tab is showing its block in. Access modes above what the
-/// account is allowed cannot be picked; the ones below it show what someone
-/// with less access would see. Debug is only offered once the block can be
-/// viewed at all. Returns the mode to show the block in from now on.
 fn show_access_mode(
     ui: &mut egui::Ui,
     active: Uuid,
@@ -3452,14 +3361,11 @@ fn show_access_mode(
     chosen
 }
 
-/// An access mode named for a menu, where every mode is spelled out.
 fn access_mode_label(access: BlockAccess) -> String {
     let icon = access_mode_icon(access).unwrap_or(ICON_EDIT.codepoint);
     format!("{icon} {}", tab_mode_wording(access))
 }
 
-/// The wording this dropdown uses for each access level. Kept separate from
-/// `BlockAccess::label`, whose wording fits the sharing dialog instead.
 fn tab_mode_wording(access: BlockAccess) -> &'static str {
     match access {
         BlockAccess::Edit => "Editing",
@@ -3479,8 +3385,6 @@ fn tab_mode_label(mode: TabMode) -> String {
     }
 }
 
-/// How a block's access is marked where it is listed. Editing is what every
-/// block allows until it is shared more narrowly, so it goes unmarked.
 fn access_mode_icon(access: BlockAccess) -> Option<&'static str> {
     match access {
         BlockAccess::Edit => None,
@@ -3489,7 +3393,6 @@ fn access_mode_icon(access: BlockAccess) -> Option<&'static str> {
     }
 }
 
-/// The concrete color an active-user indicator is painted in.
 fn presence_color_rgb(color: PresenceColor) -> egui::Color32 {
     match color {
         PresenceColor::Red => egui::Color32::from_rgb(224, 82, 82),
@@ -3509,7 +3412,6 @@ enum AccountAction {
     LogOut(Account),
 }
 
-/// Lays out onboarding content in a scrollable, horizontally centred column.
 fn onboarding_column<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])

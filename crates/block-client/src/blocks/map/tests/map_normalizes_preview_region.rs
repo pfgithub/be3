@@ -5,8 +5,8 @@ use super::{Map, MapOperation, MapRegion, MAX_LATITUDE, MIN_REGION_SPAN};
 #[test]
 fn map_normalizes_preview_region() {
     let mut map = Map::new();
-    // Corners given in the wrong order are ordered, and latitudes beyond the
-    // projection limit are clamped.
+                                                                             
+                                    
     Map::apply_operation(
         &mut map,
         &MapOperation::SetPreviewRegion {
@@ -18,7 +18,7 @@ fn map_normalizes_preview_region() {
         Some(MapRegion::new(-5.0, 40.0, 10.0, MAX_LATITUDE))
     );
 
-    // A degenerate region is widened to the minimum span.
+                                                          
     Map::apply_operation(
         &mut map,
         &MapOperation::SetPreviewRegion {

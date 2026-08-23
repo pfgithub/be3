@@ -13,8 +13,6 @@ pub use native::AppStateStore;
 #[cfg(target_arch = "wasm32")]
 pub use web::AppStateStore;
 
-/// Why a read or write of the stored app state failed. The backing store
-/// differs by platform, so the reason is already rendered to text here.
 #[derive(Clone, Debug)]
 pub struct AppStateError(String);
 
@@ -60,13 +58,10 @@ pub struct SavedAccount {
     pub id: Uuid,
     pub email: String,
     pub name: String,
-    /// The session token proving this is really the account it claims to be.
-    /// The password itself is never stored.
+
     pub token: String,
     pub last_workspace_id: Option<Uuid>,
 }
 
-// The store is backed by SQLite on native and by browser storage on the web,
-// so its tests only build where there is a file to open.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

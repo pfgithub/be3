@@ -15,8 +15,6 @@ pub(super) fn artifacts_url(run_id: u64) -> String {
     format!("https://api.github.com/repos/{OWNER}/{REPO}/actions/runs/{run_id}/artifacts")
 }
 
-/// Headers the GitHub REST API expects: a User-Agent (unauthenticated requests
-/// are rejected without one) and an explicit API version.
 pub(super) fn api_headers() -> Vec<(&'static str, String)> {
     vec![
         ("Accept", "application/vnd.github+json".to_owned()),

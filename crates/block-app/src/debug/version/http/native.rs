@@ -2,8 +2,6 @@ use std::{io::Read, sync::mpsc, thread, time::Duration};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A GET request running on a background thread, polled from the UI thread
-/// each frame since there is no async runtime borrowed from egui here.
 pub(in crate::debug::version) struct Fetch {
     receiver: mpsc::Receiver<Result<Vec<u8>, String>>,
 }

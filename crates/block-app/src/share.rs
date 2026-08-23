@@ -9,15 +9,12 @@ use uuid::Uuid;
 
 use crate::editors::BlockLabel;
 
-/// The permissions a block can be granted with, in the order they are offered.
 const GRANTABLE: [BlockAccess; 3] = [
     BlockAccess::Edit,
     BlockAccess::View,
     BlockAccess::KnowExists,
 ];
 
-/// How many matches the picker offers at once before the query has to be
-/// narrowed down.
 const MAX_SUGGESTIONS: usize = 6;
 
 #[derive(Default)]
@@ -32,16 +29,15 @@ struct ShareState {
     entries: Vec<BlockAccessEntry>,
     loaded: bool,
     error: Option<String>,
-    /// What has been typed into the people picker.
+
     query: String,
-    /// Accounts that have been picked but not granted access yet.
+
     pending: Vec<Account>,
-    /// The permission the picked accounts are about to be given.
+
     pending_access: BlockAccess,
 }
 
 impl ShareDialog {
-    /// Opens the dialog for `id` and starts loading who can currently reach it.
     pub fn open(&mut self, client: &BlockClient, id: Uuid, label: BlockLabel) {
         self.open = Some(ShareState {
             id,
@@ -178,8 +174,6 @@ impl ShareState {
         }
     }
 
-    /// Draws the picker that queues people up and hands them their permission,
-    /// pushing every confirmed grant onto `grants`.
     fn show_picker(
         &mut self,
         ui: &mut egui::Ui,
@@ -288,8 +282,6 @@ impl ShareState {
         }
     }
 
-    /// The workspace members the query matches that are not already queued up
-    /// or able to reach the block.
     fn candidates(&self, account_id: Uuid) -> Vec<Account> {
         let query = self.query.trim().to_lowercase();
         self.entries
@@ -311,8 +303,6 @@ impl ShareState {
     }
 }
 
-/// Whether the member already reaches the block, and so belongs in the list of
-/// people with access rather than the picker.
 fn has_access(entry: &BlockAccessEntry, account_id: Uuid) -> bool {
     matches!(entry.role, WorkspaceRole::Administrator)
         || entry.account.id == account_id
@@ -320,15 +310,12 @@ fn has_access(entry: &BlockAccessEntry, account_id: Uuid) -> bool {
         || entry.effective > BlockAccess::None
 }
 
-/// Draws one member's row, returning the access they were just given.
 fn show_member(
     ui: &mut egui::Ui,
     entry: &BlockAccessEntry,
     account_id: Uuid,
     block_id: Uuid,
 ) -> Option<BlockAccess> {
-    // Administrators reach every block through their workspace role, and an
-    // account cannot revoke its own access, so neither row is editable.
     let fixed = match entry.role {
         WorkspaceRole::Administrator => Some("Administrators can open every block"),
         WorkspaceRole::Editor if entry.account.id == account_id => Some("This is you"),
@@ -403,8 +390,7 @@ fn show_member(
                                     chosen = Some(access);
                                 }
                             }
-                            // Revoking is recorded as an explicit grant of no
-                            // access, so it also blocks inherited permissions.
+
                             if entry.granted != Some(BlockAccess::None) {
                                 ui.separator();
                                 if ui

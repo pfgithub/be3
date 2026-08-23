@@ -129,9 +129,6 @@ impl HostSession {
         self.tick(now_milliseconds);
     }
 
-    /// Queues a message for the plugin, as the request it is if it carries
-    /// one. Both hosts send everything this way, so a message that has to be
-    /// answered is tracked the same wherever it was sent from.
     pub fn send(&mut self, message: Message, now_milliseconds: u64) -> Result<(), QueueError> {
         match &message {
             Message::Screens(set) => {
@@ -238,9 +235,6 @@ fn decode_failure(error: DecodeError) -> SessionFailure {
     }
 }
 
-/// The request the message at the back of the queue is waiting on, when the
-/// incoming message is about to replace it. Nothing answers a request whose
-/// message never went out, so the queue stops waiting for it.
 fn superseded_request(queue: &VecDeque<Message>, incoming: &Message) -> Option<u64> {
     match (queue.back(), incoming) {
         (Some(Message::Screens(current)), Message::Screens(_)) => Some(current.request_id),

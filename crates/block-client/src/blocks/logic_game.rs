@@ -7,13 +7,13 @@ use uuid::Uuid;
 
 use crate::block_ref::BlockRef;
 
-/// One level: a built-in challenge, the grids that have been started for it,
-/// and whether any of them has passed.
+                                                                             
+                                       
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Level {
     pub challenge: ChallengeId,
-    /// Logic grid blocks holding attempts at this level, in the order they
-    /// were created.
+                                                                           
+                     
     pub solutions: Vec<BlockRef>,
     pub completed: bool,
 }
@@ -28,9 +28,9 @@ impl Level {
     }
 }
 
-/// Which of a quiz problem's blanks have been filled in. A blank is `None`, and
-/// the rows are as long as the player's editor made them; the level's own
-/// problems decide what counts as correct.
+                                                                                
+                                                                          
+                                           
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct QuizProblem {
     pub carries: Vec<Option<bool>>,
@@ -44,9 +44,9 @@ pub enum QuizRow {
     Sums,
 }
 
-/// The list of levels and the answers to the levels that are worked through on
-/// paper rather than on a grid. The palette its circuits are built from is not
-/// part of it: the editor finds the shared hotbar at the root of the block tree.
+                                                                               
+                                                                               
+                                                                                 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct LogicGame {
     levels: Vec<Level>,
@@ -110,7 +110,7 @@ impl Default for LogicGame {
 }
 
 impl LogicGame {
-    /// A new game with every built-in challenge listed and nothing solved.
+                                                                           
     pub fn new() -> Self {
         Self {
             levels: CHALLENGES.into_iter().map(Level::new).collect(),

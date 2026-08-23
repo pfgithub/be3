@@ -1,8 +1,6 @@
 use super::*;
 
 impl LogicGridEditor {
-    /// Only tests ask which level is open; the editor itself reads the state
-    /// it needs straight off `challenge`.
     #[cfg(test)]
     pub fn active_challenge_id(&self) -> Option<ChallengeId> {
         self.challenge.as_ref().map(|challenge| challenge.id)
@@ -133,7 +131,6 @@ impl LogicGridEditor {
         }
     }
 
-    /// Returns and clears the one-shot flag set when the challenge test passes.
     pub fn take_challenge_passed(&mut self) -> bool {
         match self.challenge.as_mut() {
             Some(challenge) => std::mem::take(&mut challenge.passed_event),
@@ -141,9 +138,6 @@ impl LogicGridEditor {
         }
     }
 
-    /// Recompiles the shared simulation VM for challenge testing if the grid
-    /// changed since it was built, resetting any results. Cheap when the grid
-    /// is unchanged.
     pub(super) fn ensure_challenge_test(&mut self) {
         if self.challenge.is_none() {
             return;
@@ -218,7 +212,6 @@ impl LogicGridEditor {
 
     pub(super) fn challenge_test_reset(&mut self) {
         if let Some(challenge) = self.challenge.as_mut() {
-            // Drop the stale snapshot so the next `ensure` recompiles from scratch.
             challenge.test.snapshot = None;
         }
         self.ensure_challenge_test();
@@ -229,8 +222,6 @@ impl LogicGridEditor {
         self.advance_challenge_test_tick();
     }
 
-    /// Re-runs the test from the start through `tick` (inclusive) so the wires
-    /// reflect the inputs of that row.
     pub(super) fn challenge_test_seek(&mut self, tick: usize) {
         self.challenge_test_reset();
         for _ in 0..=tick {
@@ -254,9 +245,6 @@ impl LogicGridEditor {
         }
     }
 
-    /// Executes the next challenge tick: drives the bound input ports with the
-    /// expected values, runs the circuit, and records each output port's actual
-    /// value against the expected one.
     pub(super) fn advance_challenge_test_tick(&mut self) {
         let Some(challenge) = self.challenge.as_ref() else {
             return;
@@ -416,12 +404,6 @@ pub(super) fn challenge_port_slots<T: Ord + Copy>(
         .collect()
 }
 
-/// Renders the expected/actual table: ticks as rows, ports as columns. Output
-/// cells show the actual value (red when wrong) once a tick has run, otherwise
-/// the expected value, dimmed.
-/// Renders the challenge test table. The row whose inputs are currently driven
-/// onto the wires (the last executed tick) is highlighted. Returns the tick of a
-/// row the user clicked, if any, so the caller can seek the test to it.
 pub(super) fn challenge_test_table(
     ui: &mut egui::Ui,
     data: &Challenge,
@@ -463,7 +445,6 @@ pub(super) fn challenge_test_table(
         .auto_shrink([false, false])
         .show_rows(ui, row_height, data.ticks, |ui, range| {
             for tick in range {
-                // Reserve a shape slot so the highlight paints behind the cells.
                 let background = ui.painter().add(egui::Shape::Noop);
                 let row = ui
                     .horizontal(|ui| {

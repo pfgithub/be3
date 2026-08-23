@@ -4,9 +4,6 @@ use super::support::{references, request, TestServer};
 use block::{BlockReferenceList, ClientMessage, ReferenceDelta, ServerMessage};
 use uuid::Uuid;
 
-/// The server never reads what a block holds, so a block reports for itself
-/// whether it was generated from another one. Listings hand that back so a
-/// client can mark generated blocks without opening them.
 #[tokio::test]
 async fn listings_report_whether_a_block_is_a_dynamic_artifact() {
     let server = TestServer::start().await;
@@ -34,7 +31,6 @@ async fn listings_report_whether_a_block_is_a_dynamic_artifact() {
     assert_eq!(listed.len(), 1);
     assert!(listed[0].dynamic_artifact);
 
-    // Unlinking the block from its source is an ordinary update.
     assert!(matches!(
         request(
             &mut socket,

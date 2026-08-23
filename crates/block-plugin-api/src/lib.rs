@@ -139,8 +139,6 @@ pub struct PluginManifest {
     pub surfaces: Vec<SurfaceMechanism>,
 }
 
-/// Which of the host's structural edits an editor's block type accepts, so
-/// the host can offer them around an editor it does not draw itself.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildOperations {
     pub add: bool,
@@ -163,7 +161,6 @@ pub struct EditorCapabilities {
     pub pan_and_zoom: bool,
 }
 
-/// How an embedded editor may be resized by whatever holds it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResizeMode {
     None,
@@ -173,9 +170,6 @@ pub enum ResizeMode {
     Both,
 }
 
-/// One registered block type as the host describes it to a plugin, so an
-/// editor can name and illustrate the blocks it lists. The icon is the
-/// codepoint of the host's icon font, not a name to look up.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockTypeDescriptor {
     pub block_type: [u8; 16],
@@ -187,8 +181,7 @@ pub struct BlockTypeDescriptor {
 pub enum CreationMode {
     Immediate,
     Dialog,
-    /// The block is only ever made by something else, so the host offers no
-    /// way to create one.
+
     None,
 }
 
@@ -338,15 +331,13 @@ pub enum EditorMessage {
     Close {
         instance: EditorInstanceId,
     },
-    /// An editor instance asking the host to open another block in its own
-    /// tab, the way a link inside the editor would.
+
     OpenBlock {
         instance: EditorInstanceId,
         block_id: [u8; 16],
         block_type: [u8; 16],
     },
-    /// A block the host is dragging over one of an instance's regions, in
-    /// that region's own logical coordinates, and whether it has been let go.
+
     DragOver {
         instance: EditorInstanceId,
         region: EditorRegion,
@@ -356,12 +347,11 @@ pub enum EditorMessage {
         block_type: [u8; 16],
         dropped: bool,
     },
-    /// The drag the host last reported has moved off the instance.
+
     DragLeft {
         instance: EditorInstanceId,
     },
-    /// The instance's answer to the drag it was last told about: whether it
-    /// would take the block, which the host shows through the cursor.
+
     DragAccepted {
         instance: EditorInstanceId,
         accepted: bool,
@@ -429,8 +419,7 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         ratio: f32,
     },
-    /// The size an instance would like to be given wherever the host embeds
-    /// it, in logical points.
+
     IntrinsicSize {
         instance: EditorInstanceId,
         width: f32,
@@ -501,16 +490,10 @@ pub enum FilePick {
     Failed(String),
 }
 
-/// A block-client frame tunnelled between a plugin's block client and the
-/// host's connection. A plugin runtime has one client for all of its editor
-/// instances, so these frames are not addressed to any of them. The payloads
-/// are the ordinary JSON of the block protocol, so the host forwards them
-/// without needing to understand them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TunnelMessage {
-    /// A client message on its way to the server.
     Request { payload: String },
-    /// A server message on its way back to the plugin's client.
+
     Response { payload: String },
 }
 
@@ -537,9 +520,6 @@ pub enum Message {
 }
 
 impl Message {
-    /// Whether this message belongs to the session state machine rather than
-    /// to whatever the host is showing. A session owns exactly these and
-    /// fails on anything else, so everything else goes straight to the host.
     pub fn is_session(&self) -> bool {
         matches!(
             self,

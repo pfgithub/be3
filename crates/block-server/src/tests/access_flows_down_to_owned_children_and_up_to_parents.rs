@@ -22,8 +22,6 @@ async fn access_flows_down_to_owned_children_and_up_to_parents() {
     .await;
     let mut socket = server.connect_to(&owner.token, workspace.id).await;
 
-    // grandparent -> parent -> child, all owned, plus a plain reference the
-    // parent points at without owning.
     let grandparent = Uuid::new_v4();
     let parent = Uuid::new_v4();
     let child = Uuid::new_v4();
@@ -38,19 +36,15 @@ async fn access_flows_down_to_owned_children_and_up_to_parents() {
 
     set_access(&mut socket, parent, editor.id, BlockAccess::View).await;
 
-    // Viewing the parent reaches its owned child at the same level.
     let entries = list_access(&mut socket, child).await;
     assert_eq!(access_for(&entries, editor.id), BlockAccess::View);
 
-    // The parent's plain reference is only known to exist.
     let entries = list_access(&mut socket, referenced).await;
     assert_eq!(access_for(&entries, editor.id), BlockAccess::KnowExists);
 
-    // Ancestors become findable so the shared block can be located.
     let entries = list_access(&mut socket, grandparent).await;
     assert_eq!(access_for(&entries, editor.id), BlockAccess::KnowExists);
 
-    // The grandparent is only known to exist, so the editor cannot write to it.
     let mut editor_socket = server.connect_to(&editor.token, workspace.id).await;
     assert!(matches!(
         update(&mut editor_socket, grandparent, vec![], vec![]).await,
@@ -60,7 +54,6 @@ async fn access_flows_down_to_owned_children_and_up_to_parents() {
         }
     ));
 
-    // Editing the parent carries all the way down to the owned child.
     set_access(&mut socket, parent, editor.id, BlockAccess::Edit).await;
     let entries = list_access(&mut socket, child).await;
     assert_eq!(access_for(&entries, editor.id), BlockAccess::Edit);

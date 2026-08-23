@@ -1,9 +1,5 @@
-//! CPU rasterizer that turns a decoded Shortbread vector tile into a styled
-//! RGBA tile image plus text labels to draw on top.
-
 use super::mvt::{Feature, GeometryKind, Layer, TagValue, Tile};
 
-/// Edge length of the produced tile image.
 pub(super) const TILE_PIXELS: usize = 512;
 const SUPERSAMPLE: usize = 2;
 const CANVAS: usize = TILE_PIXELS * SUPERSAMPLE;
@@ -21,14 +17,13 @@ const MAX_LABELS: usize = 80;
 #[derive(Clone, Debug)]
 pub(super) struct TileLabel {
     pub text: String,
-    /// Position in tile pixels, inside `0..TILE_PIXELS`.
+
     pub position: [f32; 2],
     pub font_size: f32,
     pub color: [u8; 3],
 }
 
 pub(super) struct TileRaster {
-    /// RGBA pixels, `TILE_PIXELS` × `TILE_PIXELS`.
     pub pixels: Vec<u8>,
     pub labels: Vec<TileLabel>,
 }
@@ -122,7 +117,6 @@ fn line_width_scale(zoom: u8) -> f32 {
     }
 }
 
-/// Rank, color, and width for a street kind; higher ranks draw on top.
 fn street_style(kind: &str) -> Option<(u8, [u8; 4], f32)> {
     match kind {
         "motorway" => Some((8, [233, 144, 161, 255], 6.0)),
@@ -310,8 +304,6 @@ impl Canvas {
         }
     }
 
-    /// Fills the union of `paths` using the even-odd rule, which also carves
-    /// out polygon holes without needing ring winding analysis.
     fn fill<P: AsRef<[[f32; 2]]>>(&mut self, paths: &[P], color: [u8; 4]) {
         let mut min = [f32::MAX; 2];
         let mut max = [f32::MIN; 2];
@@ -370,7 +362,7 @@ impl Canvas {
                 if length < 1e-3 {
                     continue;
                 }
-                // Extend both caps by the half width so joins stay covered.
+
                 let (ex, ey) = (dx / length * half, dy / length * half);
                 let (nx, ny) = (-ey, ex);
                 let quad = [

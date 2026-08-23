@@ -8139,6 +8139,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strip-rust-comments"
+version = "0.1.0"
+dependencies = [
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
 name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

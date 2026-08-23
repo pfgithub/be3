@@ -71,9 +71,7 @@ impl Element for ClickCatcherNode {
         if hovered && input.pressed_this_frame {
             self.armed = true;
         }
-        // Once armed, stay active (and keep receiving events) until release,
-        // even if the pointer leaves the rect - that's the whole point of a
-        // click catcher over a plain hover check.
+
         if input.released_this_frame {
             if hovered && self.armed {
                 if let Some(mut handler) = self.on_click.take() {

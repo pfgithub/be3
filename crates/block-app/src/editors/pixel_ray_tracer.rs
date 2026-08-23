@@ -90,8 +90,6 @@ impl Tool {
     }
 }
 
-/// A rendered single-ray debug overlay: the ray's origin, its pixels, the debug
-/// points along it, and the revision and settings it was rendered for.
 type RayOverlay = (Point, Vec<[u8; 4]>, Vec<Point>, u64, RaySettings, bool);
 
 #[derive(Clone)]

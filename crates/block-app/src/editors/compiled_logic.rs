@@ -17,15 +17,12 @@ use super::{
 
 const DIRECT_EDITOR_WIDTH: f32 = 640.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 20.0;
-/// Room for the headings, the summary rows and the section spacing.
+
 const DIRECT_EDITOR_CHROME_HEIGHT: f32 = 220.0;
 
-/// A compiled program is only ever produced by compiling a grid, so this shows
-/// what was built rather than offering a way to change it.
 pub(super) struct CompiledLogicEditor {
     block: BlockHandle<CompiledLogic>,
-    /// Handles kept only so the grid and the called components can be named
-    /// without opening an editor for each of them.
+
     source: Option<BlockHandle<LogicGrid>>,
     calls: HashMap<Uuid, BlockHandle<CompiledLogic>>,
 }
@@ -181,7 +178,6 @@ impl BlockEditor for CompiledLogicEditor {
     }
 }
 
-/// One instruction on one line, short enough to read down a listing.
 pub(super) fn format_instruction(instruction: &Instruction) -> String {
     match instruction {
         Instruction::Call {

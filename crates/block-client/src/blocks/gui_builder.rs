@@ -23,9 +23,9 @@ pub enum GuiLayout {
     Horizontal,
 }
 
-/// Every widget the builder can place. `Container` is the only kind that can
-/// hold children; the other kinds keep any children they were given so that
-/// converting a container away and back does not lose them.
+                                                                             
+                                                                            
+                                                            
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "widget", rename_all = "snake_case")]
 pub enum GuiWidgetKind {
@@ -82,7 +82,7 @@ impl GuiWidgetKind {
         matches!(self, Self::Container { .. })
     }
 
-    /// Text the editor shows for the widget in outlines and pickers.
+                                                                     
     pub fn summary(&self) -> String {
         match self {
             Self::Heading { text } | Self::Label { text } | Self::Button { text } => text.clone(),
@@ -116,8 +116,8 @@ impl GuiWidget {
     }
 }
 
-/// Where a widget sits: which container holds it, and its index among that
-/// container's children. `None` is the root list.
+                                                                           
+                                                  
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct GuiLocation {
     pub parent: Option<Uuid>,
@@ -204,7 +204,7 @@ impl GuiBuilder {
         self.canvas
     }
 
-    /// The root-level widgets, in layout order.
+                                                
     pub fn widgets(&self) -> &[GuiWidget] {
         &self.widgets
     }
@@ -217,8 +217,8 @@ impl GuiBuilder {
         locate(&self.widgets, None, id)
     }
 
-    /// The children of `parent`, or the root list for `None`. Returns `None`
-    /// when the parent is missing or cannot hold children.
+                                                                             
+                                                           
     pub fn children(&self, parent: Option<Uuid>) -> Option<&[GuiWidget]> {
         match parent {
             None => Some(&self.widgets),
@@ -232,15 +232,15 @@ impl GuiBuilder {
         }
     }
 
-    /// Rust source for an `egui` window matching the current design. The
-    /// struct is named after the design title unless `struct_name` overrides
-    /// it.
+                                                                         
+                                                                             
+           
     pub fn generate_code(&self, struct_name: Option<&str>) -> String {
         codegen::generate(self, struct_name)
     }
 
-    /// A widget can only be inserted when every id in its subtree is new and
-    /// unique, so ids stay usable as stable handles.
+                                                                             
+                                                     
     fn can_insert(&self, widget: &GuiWidget) -> bool {
         let mut ids = Vec::new();
         collect_ids(widget, &mut ids);
@@ -293,8 +293,8 @@ impl Block for GuiBuilder {
                 builder.detach(*id);
             }
             GuiBuilderOperation::Move { id, location } => {
-                // A widget cannot be moved inside itself, and the destination
-                // has to survive the detach, so both are checked up front.
+                                                                              
+                                                                           
                 let moves_into_itself = builder.widget(*id).is_some_and(|widget| {
                     location
                         .parent
@@ -426,8 +426,8 @@ pub struct GuiBuilderHistoryAction {
     recorded_at: Instant,
 }
 
-/// Each change carries the operation that reverses it and the one that
-/// replays it, which keeps undo and redo symmetric for every operation kind.
+                                                                       
+                                                                             
 struct GuiBuilderHistoryChange {
     undo: GuiBuilderOperation,
     redo: GuiBuilderOperation,
@@ -512,8 +512,8 @@ impl BlockHistory<GuiBuilder> for GuiBuilderHistory {
     }
 }
 
-/// The operation that puts `builder` back the way it was before `operation`,
-/// or `None` when the operation cannot be reversed from this state.
+                                                                             
+                                                                    
 fn reversal(builder: &GuiBuilder, operation: &GuiBuilderOperation) -> Option<GuiBuilderOperation> {
     match operation {
         GuiBuilderOperation::Insert { widget, .. } => {
@@ -540,8 +540,8 @@ fn reversal(builder: &GuiBuilder, operation: &GuiBuilderOperation) -> Option<Gui
     }
 }
 
-/// Typing and dragging produce a stream of edits to one property; those
-/// collapse into a single history entry.
+                                                                        
+                                         
 fn mergeable(previous: &GuiBuilderHistoryChange, next: &GuiBuilderHistoryChange) -> bool {
     match (&previous.redo, &next.redo) {
         (

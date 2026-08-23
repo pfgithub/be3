@@ -39,9 +39,9 @@ const MAX_TIMELINE_HEIGHT: f32 = 380.0;
 const DEFAULT_EDITOR_SIZE: Vec2 = egui::vec2(1000.0, 640.0);
 const DEFAULT_PIXELS_PER_FRAME: f32 = 4.0;
 const PANEL_GAP: f32 = 6.0;
-/// Height of the playback controls strip under the preview panel.
+
 const PLAYBACK_BAR_HEIGHT: f32 = 30.0;
-/// Height of the toolbar strip above the timeline panel.
+
 const TIMELINE_TOOLBAR_HEIGHT: f32 = 30.0;
 
 impl EditorKind for VideoEditor {
@@ -64,8 +64,6 @@ impl CreatableEditor for VideoEditor {
     }
 }
 
-/// What a timeline drag is holding onto: the clip, and how far into it the
-/// pointer grabbed, so the clip does not jump under the cursor.
 pub(super) struct ClipDrag {
     clip: Uuid,
     grab: u64,
@@ -75,16 +73,16 @@ pub(super) struct VideoEditor {
     block: BlockHandle<Video>,
     dependencies: ReferenceList,
     picker: BlockPicker,
-    /// The clip a picked block is attached to, or `None` for the base track.
+
     picker_attachment: Option<Uuid>,
     selected: Option<Uuid>,
     playhead: u64,
     playing: bool,
-    /// The wall clock reading and frame playback started from.
+
     play_origin: Option<(f64, u64)>,
-    /// Timeline zoom, in points per frame.
+
     pixels_per_frame: f32,
-    /// Set by the fit button, which needs the timeline's width to answer.
+
     fit_requested: bool,
     drag: Option<ClipDrag>,
     reference_cache: ReferenceResolutionCache,
@@ -111,8 +109,6 @@ impl VideoEditor {
         }
     }
 
-    /// The whole video, copied out so no read guard is held while operating on
-    /// the block or drawing the blocks it references.
     fn video(&self) -> Option<Video> {
         self.block.read().map(|video| video.clone())
     }
@@ -198,9 +194,6 @@ impl VideoEditor {
             .operate(VideoOperation::UpdateClips { clips: vec![clip] });
     }
 
-    /// Adds a clip showing `block_id`, attached to `attachment` at `frame` or
-    /// on the base track. `insertion_index` chooses its place among siblings;
-    /// omitting it appends the clip.
     fn insert_clip(
         &mut self,
         editors: &mut EditorAccess<'_>,
@@ -238,8 +231,6 @@ impl VideoEditor {
         );
     }
 
-    /// Splits the selected clip into two at the playhead, keeping the first
-    /// half in place and inserting the second half right after it.
     fn split_selected_clip(&mut self, video: &Video) {
         let Some(selected) = self.selected else {
             return;
@@ -292,8 +283,6 @@ impl VideoEditor {
         self.play_origin = None;
     }
 
-    /// Runs the playhead off the wall clock. Nothing has audio or video yet, so
-    /// playing only moves the playhead over the still previews.
     fn advance_playback(&mut self, context: &egui::Context, video: &Video) {
         let duration = video.duration();
         if !self.playing {
@@ -479,8 +468,7 @@ impl BlockEditor for VideoEditor {
         if visible.is_empty() {
             return false;
         }
-        // Clips are listed from the base up, so drawing them in order stacks
-        // each attachment over the clip it hangs off.
+
         for (index, clip_id) in visible.iter().enumerate() {
             let Some(clip) = video.clip(*clip_id) else {
                 continue;

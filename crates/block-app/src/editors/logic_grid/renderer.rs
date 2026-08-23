@@ -74,11 +74,6 @@ impl DrawRay {
     }
 }
 
-/// A short wire stub drawn extending outward from a port wired to a wire net,
-/// so the connection reads as a wire entering the component. It runs through the
-/// wire pipeline, so it shows the net's live on/off value and matches a regular
-/// wire's width. The stub bridges the component boundary and the centerline of a
-/// wire lying flush against that edge, which is half a cell away.
 #[derive(Clone, Copy, Debug)]
 pub struct DrawStub {
     center: [f32; 2],
@@ -728,8 +723,6 @@ impl WireVertex {
     }
 }
 
-/// Sets up the grid renderer's pipelines. The editor draws nothing when this
-/// is not called, which is what happens on a build without a wgpu backend.
 pub(in crate::editors) fn install(creation_context: &eframe::CreationContext<'_>) {
     let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
         return;
@@ -1253,9 +1246,7 @@ fn ray_vertices(rays: &[DrawRay], frame: &RenderFrame) -> Vec<WireVertex> {
             continue;
         }
         let scale = ray.scale;
-        // bit_coord varies along the band's width (perpendicular to the ray direction):
-        // Top/Bottom rays: band runs in x, bit 0 at left, bit scale at right
-        // Left/Right rays: band runs in y, bit 0 at top, bit scale at bottom
+
         let (tl_bit, tr_bit, bl_bit, br_bit) = match side {
             ComponentSide::Top | ComponentSide::Bottom => (0.0, scale, 0.0, scale),
             ComponentSide::Left | ComponentSide::Right => (0.0, 0.0, scale, scale),
@@ -1310,9 +1301,7 @@ fn stub_vertices(stubs: &[DrawStub], frame: &RenderFrame) -> Vec<WireVertex> {
             ComponentSide::Left => (cx - length, cy - half_thickness, cx, cy + half_thickness),
             ComponentSide::Right => (cx, cy - half_thickness, cx + length, cy + half_thickness),
         };
-        // bit_coord runs across the stub's width, matching a wire of the same
-        // orientation: vertical stubs (Top/Bottom) vary the bit in x, horizontal
-        // stubs (Left/Right) vary it in y.
+
         let (tl_bit, tr_bit, bl_bit, br_bit) = match stub.side {
             ComponentSide::Top | ComponentSide::Bottom => (0.0, scale, 0.0, scale),
             ComponentSide::Left | ComponentSide::Right => (0.0, 0.0, scale, scale),

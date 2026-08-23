@@ -15,7 +15,7 @@ fn hotbar_references_components_nested_in_folders() {
             name: "Memory".to_owned(),
             slots: vec![
                 component("Latch", latch),
-                // The same component pinned twice is still one reference.
+                                                                          
                 component("Adder", adder),
             ],
         },

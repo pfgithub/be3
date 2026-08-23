@@ -12,8 +12,6 @@ mod out_of_turn_action_is_ignored;
 mod spectator_sees_no_actions;
 mod winning_line_ends_the_game;
 
-/// The compiled module this crate's build script produced, which is the
-/// same artifact the app loads, run here through the same interpreter.
 fn show(actions: &[GameAction], player: Uuid) -> GameScreen {
     static GAME: OnceLock<Game> = OnceLock::new();
     GAME.get_or_init(|| {

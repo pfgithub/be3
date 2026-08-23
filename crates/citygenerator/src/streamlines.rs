@@ -203,8 +203,7 @@ impl StreamlineGenerator {
         } else {
             Eigenvector::Minor
         };
-        // This intentionally follows the source RK4 sampler, including its
-        // diagonal midpoint samples.
+
         let k1 = self.field.direction(point, eigenvector);
         let diagonal = Vec2::splat(self.params.dstep * 0.5);
         let k23 = self.field.direction(point + diagonal, eigenvector);

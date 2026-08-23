@@ -358,9 +358,6 @@ impl LogicGridEditor {
         }
     }
 
-    /// Resolves every call in `vm` against the compiled blocks this editor
-    /// holds. A block that has not arrived yet leaves the circuit unlinked
-    /// rather than half linked.
     fn link_called_components(&self, vm: &mut Vm) -> Result<(), String> {
         let mut cache = BTreeMap::<Uuid, Rc<ExecutionComponent>>::new();
         vm.load_components(|called| self.link_compiled(called, &mut cache))
@@ -562,9 +559,6 @@ pub(super) fn apply_input_values(vm: &mut Vm, values: &[u64]) {
     }
 }
 
-/// Maps each challenge port index to its slot in the VM's input/output address
-/// list. Ports placed with `from_index(port)` as their id resolve to their dense
-/// (sorted-id) position; a missing port maps to `None`.
 pub(super) fn format_instruction(instruction: &Instruction) -> String {
     match instruction {
         Instruction::Call {

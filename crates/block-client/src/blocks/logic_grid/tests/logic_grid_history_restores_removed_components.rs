@@ -13,7 +13,7 @@ fn logic_grid_history_restores_removed_components() {
 
     block.undo();
 
-    // The component comes back where it was moved to, not where it was placed.
+                                                                               
     let restored = block.read().unwrap().grid().component(id).cloned().unwrap();
     assert_eq!(restored.position, Point::new(4, 6));
 

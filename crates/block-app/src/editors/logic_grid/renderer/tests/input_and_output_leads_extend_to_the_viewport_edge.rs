@@ -48,8 +48,7 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
     assert!(input_verts
         .iter()
         .all(|v| v.fill_color == DrawTriangle::INPUT_COLOR));
-    // input rotated Up → Top lead, ray extends to viewport top
-    // viewport top in world = 0.0 - (100.0 / 2.0 / 2.0) = -25.0, clipped to vp_top
+
     let top_y_clip = input_verts
         .iter()
         .map(|v| v.position[1])
@@ -63,7 +62,7 @@ fn input_and_output_leads_extend_to_the_viewport_edge() {
     assert!(output_verts
         .iter()
         .all(|v| v.fill_color == DrawTriangle::OUTPUT_COLOR));
-    // output rotated Right → Right lead, ray extends to viewport right
+
     let right_x_clip = output_verts
         .iter()
         .map(|v| v.position[0])

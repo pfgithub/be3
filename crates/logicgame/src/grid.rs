@@ -306,11 +306,8 @@ pub enum ComponentKind {
         label: String,
     },
     Subcomponent {
-        /// The compiled logic block whose program this subcomponent calls.
         compiled: Uuid,
-        /// Display name of the subcomponent, shown in its centre. Copied from
-        /// the compiled block's name when it is placed, so renaming the block
-        /// later does not disturb grids already using it.
+
         name: String,
         size: Size,
         snap: Scale,
@@ -740,9 +737,6 @@ impl GridBounds {
     }
 }
 
-/// A grid of components and the wires between them. Serializing one writes the
-/// same snapshot `snapshot` returns: the next component ID and the revision
-/// counter are working state, not part of the circuit.
 #[derive(Clone, Debug, Default)]
 pub struct LogicGrid {
     wires: Vec<Wire>,
@@ -751,9 +745,6 @@ pub struct LogicGrid {
     revision: u64,
 }
 
-/// Two grids are the same when they hold the same circuit. The revision
-/// counter only says how often a grid has been edited, and the next component
-/// ID only affects what is placed next, so neither takes part.
 impl PartialEq for LogicGrid {
     fn eq(&self, other: &Self) -> bool {
         self.wires == other.wires && self.components == other.components
@@ -870,16 +861,10 @@ impl LogicGrid {
         self.components.get(&id)
     }
 
-    /// The ID `add_component` would hand out next. Callers that have to name a
-    /// component before adding it - because the addition travels as an
-    /// operation - allocate through this and `insert_component`.
     pub fn next_component_id(&self) -> ComponentId {
         ComponentId(self.next_component_id)
     }
 
-    /// Adds a component under the ID it already carries. Returns `false` when
-    /// that ID is taken, which is how an operation that has already been
-    /// applied is ignored when it arrives again.
     pub fn insert_component(&mut self, component: Component) -> bool {
         if self.components.contains_key(&component.id) {
             return false;
@@ -1265,7 +1250,6 @@ impl LogicGrid {
             }
         }
 
-        // Ports on touching components connect directly, forming wireless nets.
         let mut port_sets = DisjointSets::new(slot_infos.len());
         for first in 0..slot_infos.len() {
             for second in first + 1..slot_infos.len() {
@@ -1577,9 +1561,7 @@ pub struct ComponentPort {
     pub side: ComponentSide,
     pub start: i64,
     pub end: i64,
-    /// Label shown next to this port when the component is used as a
-    /// subcomponent. Carried over from the source input/output's label at
-    /// compile time; empty when unlabelled.
+
     #[serde(default)]
     pub label: String,
 }
@@ -1818,10 +1800,6 @@ fn ports_connect(
     touching && first.start < second.end && second.start < first.end
 }
 
-// A port connects to any part of a wire that runs flush against the
-// component's edge, regardless of which way the wire faces. The wire's whole
-// body is considered, so the contact may fall anywhere along the wire rather
-// than only at its endpoints.
 fn wire_component_contacts(wire: Wire, component: Rect) -> Vec<Contact> {
     let Some(wire_rect) = wire.rect() else {
         return Vec::new();

@@ -3,8 +3,7 @@ use super::*;
 #[test]
 fn touching_ports_of_the_same_direction_do_not_connect() {
     let mut grid = LogicGrid::new();
-    // An input source's bottom output touches a NOT gate's top output along the
-    // shared edge at y == 0. Both ports are outputs, so they must not connect.
+
     grid.add_component(
         Point::new(0, -1),
         Rotation::Up,

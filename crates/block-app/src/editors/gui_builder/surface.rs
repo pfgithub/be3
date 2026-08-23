@@ -9,8 +9,6 @@ use super::widget_icon;
 const SELECTION_PADDING: f32 = 1.0;
 const MIN_PLACEHOLDER_HEIGHT: f32 = 6.0;
 
-/// Values the previewed widgets edit. Preview interaction must never touch
-/// the design, so the running state lives here instead of in the block.
 #[derive(Default)]
 pub(super) struct PreviewState {
     texts: HashMap<Uuid, String>,
@@ -39,8 +37,6 @@ impl PreviewState {
 }
 
 pub(super) struct Surface<'a> {
-    /// Design mode shows selection chrome and keeps widgets inert; preview
-    /// mode runs them against [`PreviewState`].
     pub(super) design: bool,
     pub(super) state: &'a mut PreviewState,
     pub(super) selected: &'a mut Option<Uuid>,
@@ -62,8 +58,6 @@ impl Surface<'_> {
         let rect = ui
             .scope(|ui| {
                 if design {
-                    // Selection clicks must reach the widget rather than
-                    // starting a text selection inside a label.
                     ui.style_mut().interaction.selectable_labels = false;
                 }
                 self.show_leaf(ui, widget);
@@ -136,8 +130,6 @@ impl Surface<'_> {
             }
             GuiWidgetKind::Space { height } => {
                 if design {
-                    // Empty space cannot be clicked, so design mode gives it
-                    // a visible body.
                     let size = egui::vec2(
                         ui.available_width().max(1.0),
                         height.max(MIN_PLACEHOLDER_HEIGHT),
@@ -167,8 +159,6 @@ impl Surface<'_> {
             egui::Frame::new().inner_margin(2.0)
         };
         if self.design {
-            // Containers are invisible once emptied, so the designer always
-            // gets an outline and a header to grab.
             frame = frame
                 .inner_margin(4.0)
                 .corner_radius(4.0)

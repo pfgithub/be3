@@ -22,12 +22,8 @@ pub(super) enum SurfaceEvent {
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// How often the session is asked to check its deadlines while it is waiting
-/// for something. Nothing is polled while it waits for nothing.
 const TICK: Duration = Duration::from_millis(250);
 
-/// Everything the plugin sent, in the order it sent it. Surfaces are told
-/// apart from the rest because only the backend can do anything with them.
 pub(super) enum Received {
     Message(Message),
     Surface(SurfaceEvent),
@@ -46,14 +42,10 @@ enum Waited {
     Stopped,
 }
 
-/// Reading a message the plugin sent, with whatever native resources came
-/// with it. Implemented by each platform's carrier.
 pub(super) trait Reading {
     fn read(&mut self) -> Result<(Message, Vec<Attachment>), CarrierError>;
 }
 
-/// Writing a message to the plugin. The host never sends native resources of
-/// its own, so a carrier only has to carry the message.
 pub(super) trait Writing {
     fn write(&mut self, message: &Message) -> Result<(), CarrierError>;
 }
@@ -121,9 +113,6 @@ impl Drop for Process {
     }
 }
 
-/// Starts the plugin, speaks the handshake, and then reads and writes the
-/// connection until either side ends it. The plugin is killed on the way out
-/// however this returns.
 fn run(
     executable: PathBuf,
     sender: Sender<Event>,
@@ -199,9 +188,6 @@ fn handshake(connection: &mut platform::Connection, started: Instant) -> io::Res
     }
 }
 
-/// Reads the connection for as long as the plugin holds it open. Everything
-/// it says is handed to the one thread that owns the session, so the order it
-/// arrived in is the order it is acted on.
 fn read_from_plugin(mut carrier: impl Reading, events: Sender<Event>) {
     loop {
         match carrier.read() {
@@ -218,8 +204,6 @@ fn read_from_plugin(mut carrier: impl Reading, events: Sender<Event>) {
     }
 }
 
-/// The one place a plugin connection is spoken to: the host's messages, the
-/// plugin's answers and the session's own deadlines all pass through here.
 fn pump(
     mut carrier: impl Writing,
     child: &mut Child,
@@ -271,8 +255,6 @@ fn pump(
     }
 }
 
-/// Waits for the next event, only bounding the wait while the session has a
-/// deadline of its own to watch.
 fn wait(events: &Receiver<Event>, session: &HostSession) -> Waited {
     let watching = session.pending_request_count() > 0
         || !matches!(session.state(), SessionState::Running | SessionState::Idle);
@@ -289,8 +271,6 @@ fn wait(events: &Receiver<Event>, session: &HostSession) -> Waited {
     }
 }
 
-/// Routes one message the plugin sent: the session keeps its own, and
-/// everything else reaches the host in the order it arrived.
 fn deliver(
     message: Message,
     attachments: Vec<Attachment>,

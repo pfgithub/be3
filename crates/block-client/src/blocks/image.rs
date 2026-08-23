@@ -14,8 +14,8 @@ pub struct Image {
     data: Vec<u8>,
 }
 
-/// What the editor found when it decoded the image, which no other client has
-/// to decode it again to know.
+                                                                              
+                               
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub enum ImageMetadata {
     #[default]

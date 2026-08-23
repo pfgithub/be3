@@ -59,7 +59,7 @@ impl CreatableEditor for GuiBuilderEditor {
 
 pub(super) struct GuiBuilderEditor {
     block: BlockHandle<GuiBuilder>,
-    /// Design mode edits the widget tree; preview mode runs it.
+
     design: bool,
     selected: Option<Uuid>,
     preview: PreviewState,
@@ -85,15 +85,12 @@ impl GuiBuilderEditor {
         }
     }
 
-    /// Keeps the selection pointing at a widget that still exists.
     fn synchronize_selection(&mut self, builder: &GuiBuilder) {
         if self.selected.is_some_and(|id| builder.widget(id).is_none()) {
             self.selected = None;
         }
     }
 
-    /// Exports the design as a Text block that stays linked to this one, so
-    /// the code can be regenerated after the design changes.
     fn export_code(&self, client: &BlockClient) -> Option<EditorAction> {
         let generated = dynamic_artifact::generate_initial(&*self.block.read()?);
         let artifact = client
@@ -199,8 +196,7 @@ impl BlockEditor for GuiBuilderEditor {
             egui::FontId::proportional(13.0),
             strong,
         );
-        // A thumbnail only needs the shape of the design, so each top-level
-        // widget becomes one line.
+
         let mut top = title_rect.bottom() + CANVAS_PADDING;
         for widget in builder.widgets() {
             if top + PREVIEW_LINE_HEIGHT > rect.bottom() {
@@ -301,7 +297,6 @@ impl BlockEditor for GuiBuilderEditor {
                     )
                     .clicked()
                 {
-                    // Each preview run starts from the designed values.
                     self.design = false;
                     self.preview.reset();
                 }
@@ -365,8 +360,6 @@ impl BlockEditor for GuiBuilderEditor {
     }
 }
 
-/// The insertion point for a new widget: inside the selected container, or
-/// after the selected widget, falling back to the end of the design.
 fn insertion_location(builder: &GuiBuilder, selected: Option<Uuid>) -> GuiLocation {
     let fallback = GuiLocation::new(None, builder.widgets().len());
     let Some(id) = selected else {

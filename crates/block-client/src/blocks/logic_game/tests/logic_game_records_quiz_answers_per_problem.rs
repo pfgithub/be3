@@ -13,8 +13,8 @@ fn logic_game_records_quiz_answers_per_problem() {
 
     let game = block.read().unwrap();
     assert_eq!(game.quiz(1).unwrap().carries, answers);
-    // Filling in the carries leaves the sums of that problem, and every other
-    // problem, untouched.
+                                                                              
+                          
     assert!(game.quiz(1).unwrap().sums.is_empty());
     assert!(game.quiz(0).is_none());
     drop(game);

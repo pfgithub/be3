@@ -9,8 +9,6 @@ use std::{
 
 use tokio::net::TcpListener;
 
-/// Runs `future` on a scratch runtime on its own thread and delivers its result
-/// to the returned channel, so the UI never blocks on the network.
 pub(crate) fn spawn_request<T>(future: impl Future<Output = T> + Send + 'static) -> Receiver<T>
 where
     T: Send + 'static,
@@ -46,7 +44,6 @@ impl Drop for EmbeddedServer {
     }
 }
 
-/// Starts a block server inside this process and returns a handle to it.
 pub(crate) fn start_embedded_server(
     data_dir: PathBuf,
 ) -> Result<EmbeddedServer, Box<dyn Error + Send + Sync>> {

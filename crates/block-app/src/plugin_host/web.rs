@@ -153,9 +153,6 @@ impl Backend for Web {
 }
 
 impl Web {
-    /// Takes the adapter a pending start produced, unless the runtime was
-    /// restarted while it was loading. What is left in `result` belongs to
-    /// nobody and is shut down by the caller.
     fn attach(&mut self, start: u64, result: &mut Option<Result<WebProtocolAdapter, String>>) {
         if start != self.start || !self.starting {
             return;
@@ -182,8 +179,6 @@ impl Web {
         }
     }
 
-    /// Runs the plugin's own frame, once per host pass, when something it was
-    /// told about changed or when it asked to be woken up again.
     fn draw(&mut self, pass: u64, context: &egui::Context) -> (bool, Vec<Message>) {
         if self.rendered_pass == pass || self.adapter.is_none() {
             return (false, Vec::new());
@@ -220,8 +215,6 @@ impl Web {
     }
 }
 
-/// Called while the presenter prepares its copy of the plugin's canvas, to
-/// give the plugin the chance to draw the frame that is about to be copied.
 pub(super) fn render(plugin_id: &str, pass: u64) -> bool {
     runtime::with(plugin_id, |runtime| {
         let context = runtime.context.clone();

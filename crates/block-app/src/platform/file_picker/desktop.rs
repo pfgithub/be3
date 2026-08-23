@@ -5,8 +5,6 @@ use std::{
 
 use super::{FileFilter, PickResult, PickedFile};
 
-/// The desktop dialog is modal, so it has already closed by the time this
-/// returns and the answer is waiting on the first poll.
 pub(super) fn open(filter: &FileFilter) -> Receiver<PickResult> {
     let (sender, receiver) = mpsc::channel();
     let _ = sender.send(pick(filter));

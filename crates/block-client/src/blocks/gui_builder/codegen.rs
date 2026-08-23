@@ -7,7 +7,7 @@ use super::{GuiBuilder, GuiLayout, GuiWidget, GuiWidgetKind};
 const DEFAULT_STRUCT_NAME: &str = "GuiWindow";
 const INDENT: &str = "    ";
 
-/// Rust identifiers that cannot be used as struct or field names.
+                                                                  
 const RESERVED: &[&str] = &[
     "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
     "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
@@ -15,8 +15,8 @@ const RESERVED: &[&str] = &[
     "unsafe", "use", "where", "while",
 ];
 
-/// A widget that holds state needs somewhere to keep it, so it becomes a
-/// field on the generated struct.
+                                                                         
+                                  
 struct Field {
     name: String,
     declaration: String,
@@ -124,8 +124,8 @@ fn emit_widget(
     code: &mut String,
 ) {
     let pad = INDENT.repeat(depth);
-    // Stateful widgets always have a binding; the fallback keeps the output
-    // compilable if one is ever missing.
+                                                                            
+                                         
     let binding = bindings
         .get(&widget.id)
         .cloned()
@@ -218,7 +218,7 @@ fn emit_layout(
 
 fn unique_name(label: &str, fallback: &str, names: &mut HashSet<String>) -> String {
     let base = snake_case(label, fallback);
-    // The field would otherwise collide with the generated `show` method.
+                                                                          
     let base = if base == "show" {
         "show_value".to_owned()
     } else {

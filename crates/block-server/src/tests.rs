@@ -93,8 +93,6 @@ fn test_root() -> PathBuf {
     std::env::temp_dir().join(format!("block-server-test-{}", Uuid::new_v4()))
 }
 
-/// A password meeting the server's minimum length, used by every test account
-/// since none of these tests are about password strength.
 const TEST_PASSWORD: &str = "correct horse battery staple";
 
 mod support {
@@ -124,8 +122,6 @@ mod support {
 
     pub type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
-    /// An account plus the session token `register` obtained for it. Most call
-    /// sites only care about the account fields, so this derefs to `Account`.
     pub struct TestAccount {
         pub account: Account,
         pub token: String,
@@ -139,8 +135,6 @@ mod support {
         }
     }
 
-    /// The HTTP endpoint management commands are sent to, kept separate from the
-    /// websocket the block protocol runs on.
     pub struct Management {
         url: String,
     }
@@ -213,8 +207,6 @@ mod support {
             self.try_connect_to(token, workspace_id).await.unwrap()
         }
 
-        /// Opens a block connection without asserting that the server accepted
-        /// the handshake.
         pub async fn try_connect_to(
             &self,
             token: &str,
@@ -325,8 +317,6 @@ mod support {
         workspace
     }
 
-    /// Invites `account` into the workspace with `role` and accepts on its
-    /// behalf, leaving it a full member.
     pub async fn add_member(
         management: &Management,
         inviter_token: &str,

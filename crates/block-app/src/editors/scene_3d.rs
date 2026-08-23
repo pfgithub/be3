@@ -48,8 +48,6 @@ impl Scene3DEditor {
         }
     }
 
-    /// Captures the mouse on click and, while captured, steers the camera
-    /// from mouse motion and WASD until Escape releases it again.
     fn handle_input(&mut self, ctx: &egui::Context, response: &egui::Response) {
         if !self.focused {
             if response.clicked() {
@@ -110,8 +108,6 @@ impl BlockEditor for Scene3DEditor {
         true
     }
 
-    /// The editor steers its own first-person camera, so the tab's own pan
-    /// and zoom controls are left out of the way.
     fn direct_editor_viewport_input(
         &self,
         _editors: &EditorAccess<'_>,

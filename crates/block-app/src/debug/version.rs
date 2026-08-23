@@ -30,8 +30,6 @@ impl State {
     }
 }
 
-/// Opens the version-switching debug window, fetching the workflow run list
-/// if it has not been fetched yet.
 pub(crate) fn open() {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -42,7 +40,6 @@ pub(crate) fn open() {
     });
 }
 
-/// Draws the version-switching debug window, if open.
 pub(crate) fn show(ctx: &egui::Context) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();

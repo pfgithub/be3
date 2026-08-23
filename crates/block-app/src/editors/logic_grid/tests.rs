@@ -15,10 +15,6 @@ fn wire(start: (i64, i64), end: (i64, i64), scale: u8) -> Wire {
     .unwrap()
 }
 
-/// An editor opened on the NOR challenge with a correct solution: inputs `A`
-/// (port 0) and `B` (port 1) drive a shared wired-OR net feeding a NOT gate
-/// whose output reaches the `OUT` port (port 0). The grid validates cleanly and
-/// computes NOR.
 fn nor_challenge_editor() -> LogicGridEditor {
     let mut grid = Grid::new();
     grid.add_component(

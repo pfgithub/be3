@@ -9,9 +9,6 @@ use super::github;
 const ARTIFACT_NAME: &str = "block-app-android-aarch64";
 const APK_ENTRY_NAME: &str = "block-app.apk";
 
-/// A background job that downloads a workflow run's Android artifact, unzips
-/// the APK inside it, and hands it to the system installer. Polled from the
-/// UI thread each frame like `http::Fetch`.
 pub(super) struct Install {
     pub(super) run_id: u64,
     receiver: mpsc::Receiver<Result<(), String>>,

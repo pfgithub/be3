@@ -277,8 +277,6 @@ fn format_commit_time(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
 }
 
-/// Howard Hinnant's civil-calendar algorithm: days since the Unix epoch to a
-/// proleptic Gregorian year/month/day.
 fn civil_from_days(days_since_epoch: i64) -> (i32, u8, u8) {
     let days = days_since_epoch + 719_468;
     let era = if days >= 0 { days } else { days - 146_096 } / 146_097;

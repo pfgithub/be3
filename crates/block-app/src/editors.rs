@@ -61,9 +61,6 @@ pub(super) fn embedded_editor_frame_size(intrinsic: egui::Vec2, scale: f32) -> e
     )
 }
 
-/// Sets up the render resources editors need before any of them draws. eframe
-/// hands these out once, at startup, so they are claimed here rather than from
-/// inside an editor.
 pub fn install_render_resources(creation_context: &eframe::CreationContext<'_>) {
     logic_grid::renderer::install(creation_context);
     scene_3d::renderer::install(creation_context);
@@ -189,9 +186,6 @@ impl DirectEditorViewport {
     }
 }
 
-/// The most an editor may ever do with a block: what the server grants, and
-/// never more than viewing for a generated artifact, whose contents are
-/// replaced wholesale the next time it is regenerated.
 pub fn editor_access_ceiling(client: &BlockClient, id: Uuid) -> BlockAccess {
     let access = client.block_access(id);
     if client.is_dynamic_artifact(id) {
@@ -201,9 +195,6 @@ pub fn editor_access_ceiling(client: &BlockClient, id: Uuid) -> BlockAccess {
     }
 }
 
-/// Draws `contents`, non-interactive when the block may only be viewed. The
-/// fade a disabled `Ui` normally gets is turned off: a block being read should
-/// stay as legible as one being edited.
 fn editor_scope<R>(
     ui: &mut egui::Ui,
     read_only: bool,
@@ -218,14 +209,12 @@ fn editor_scope<R>(
         .inner
 }
 
-/// Replaces an editor the account may only know the existence of.
 fn no_access_notice(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
         ui.weak(format!("{} No access", ICON_LOCK.codepoint));
     });
 }
 
-/// An unrotated rectangle as the corners `BlockRenderContext` wants.
 fn rect_corners(rect: egui::Rect) -> [egui::Pos2; 4] {
     [
         rect.left_top(),
@@ -235,7 +224,6 @@ fn rect_corners(rect: egui::Rect) -> [egui::Pos2; 4] {
     ]
 }
 
-/// The largest centered rectangle of `ratio` that fits inside `available`.
 fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
     let ratio = ratio.max(0.01);
     let available_ratio = available.width() / available.height().max(1.0);
@@ -247,8 +235,6 @@ fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
     egui::Rect::from_center_size(available.center(), size)
 }
 
-/// Stands in for a block whose preview could not be drawn, naming the block
-/// and showing the icon of its type.
 fn paint_block_fallback(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -348,13 +334,10 @@ impl<'a> EditorAccess<'a> {
         }
     }
 
-    /// What the editor currently being drawn may do with its block.
     pub fn access(&self) -> BlockAccess {
         self.access
     }
 
-    /// What a block nested in the current editor may be shown as. An editor
-    /// never lets a block inside it be changed more than it is itself.
     fn access_for(&self, id: Uuid) -> BlockAccess {
         self.access.min(editor_access_ceiling(self.client, id))
     }
@@ -367,8 +350,6 @@ impl<'a> EditorAccess<'a> {
         Arc::clone(self.client)
     }
 
-    /// This installation's identity, used to pick out per-client settings
-    /// entries.
     pub fn client_id(&self) -> Uuid {
         self.client_id
     }
@@ -412,9 +393,6 @@ impl<'a> EditorAccess<'a> {
         Some(result)
     }
 
-    /// Draws a nested editor at the access it is allowed: blocks that may only
-    /// be known to exist are replaced by a notice, and blocks that may only be
-    /// viewed are drawn without any way to change them.
     fn with_editor_ui<T>(
         &mut self,
         id: Uuid,
@@ -624,21 +602,13 @@ pub trait BlockEditor {
     fn finish_frame(&mut self) {}
     fn set_tab_active(&mut self, _active: bool) {}
     fn tab_closed(&mut self) {}
-    /// Whether `UserActive` presence may be posted for this editor's block
-    /// while its tab is visible. Presence requires the block to be watched
-    /// on the server, which every real editor establishes by calling
-    /// `get_block` when it opens; the unsupported fallback never does, so it
-    /// overrides this to `false` to avoid a `NotWatching` error.
+
     fn wants_presence(&self) -> bool {
         true
     }
-    /// Posts (or clears) presence describing where this editor's cursor or
-    /// selection currently is, if it has one. Called every frame with the
-    /// same on-screen signal that drives `UserActive` presence, so a cursor
-    /// is announced for exactly as long as its block is visible.
+
     fn sync_cursor_presence(&mut self, _client: &BlockClient, _visible: bool) {}
-    /// Requests that the editor scroll its view to the given client's cursor
-    /// or selection, if it tracks one, the next time it draws.
+
     fn reveal_presence_cursor(&mut self, _client_id: block::ClientId) {}
     fn history(&self) -> Option<&dyn BlockHistoryHandle> {
         self.block().history()
@@ -666,8 +636,7 @@ pub trait BlockEditor {
     fn direct_editor_fills_viewport(&self) -> bool {
         false
     }
-    /// Upper limit for the tab viewport zoom; editors with deep content can
-    /// raise it above the shared default.
+
     fn direct_editor_max_zoom(&self) -> f32 {
         DIRECT_EDITOR_MAX_ZOOM
     }
@@ -874,9 +843,7 @@ pub fn direct_editor_tab_ui(
         );
         viewport.replace_content_rect(Some(content_rect));
         let fills_viewport = editor.direct_editor_fills_viewport();
-        // A read-only editor answers no input, so the tab drives the viewport
-        // for it. Editors read the content rect back, so panning and zooming
-        // still reach the ones that normally steer it themselves.
+
         let mut viewport_input = editor.direct_editor_viewport_input(editors);
         if read_only && viewport_input == DirectEditorViewportInput::Editor {
             viewport_input = DirectEditorViewportInput::Background;
@@ -1003,8 +970,6 @@ pub fn direct_editor_tab_ui(
     action
 }
 
-/// Turns the gestures a host answers for an editor into viewport commands.
-/// `steered` is the area the editor steers itself, which is left out.
 fn viewport_gesture_input(
     context: &egui::Context,
     viewport_rect: egui::Rect,
@@ -1090,11 +1055,10 @@ pub trait DynamicArtifactRegeneration {
 
 #[derive(Clone, Copy)]
 pub(super) struct DynamicArtifactSupport {
-    /// The block the artifact was generated from.
     pub source: fn(&[u8]) -> Result<Uuid, String>,
-    /// A short description of what the current settings produce.
+
     pub summary: fn(&[u8]) -> String,
-    /// Edits the payload in place; `true` when the settings changed.
+
     pub settings_ui: fn(&mut egui::Ui, &mut Vec<u8>) -> bool,
     pub regenerate: RegenerateDynamicArtifact,
 }
@@ -1196,57 +1160,39 @@ impl ArtifactSession for NativeArtifactSession {
     }
 }
 
-/// How an editor is registered. Only the block type, name, icon and `open`
-/// are required: every other item describes an optional capability and
-/// defaults to not having it.
 pub(super) trait EditorKind: BlockEditor + Sized + 'static {
-    /// The block type this editor edits. Its `TYPE_ID` identifies the editor.
     type Block: Block;
 
     const DISPLAY_NAME: &'static str;
     const ICON: MaterialIcon;
-    /// Set these only alongside the matching `BlockEditor` method.
+
     const CAN_ADD_CHILD: bool = false;
     const CAN_DELETE_CHILD: bool = false;
     const CAN_REPLACE_CHILD: bool = false;
-    /// Whether this editor is common enough to show in the main section of
-    /// the add-block picker, rather than below it.
+
     const DEFAULT_IMPORTANT: bool = false;
 
     fn open(client: &BlockClient, block: BlockHandle<Self::Block>) -> Self;
 
-    /// What this block type can say about the artifacts it generates.
     fn dynamic_artifact() -> Option<DynamicArtifactSupport> {
         None
     }
 }
 
-/// Editors whose block is created on the spot. Types that need something from
-/// the user first implement `ConfigurableEditor` instead.
 pub(super) trait CreatableEditor: EditorKind {
     fn create(client: &BlockClient) -> Self;
 }
 
-/// Editors whose block cannot be created until the user supplies something,
-/// such as the file behind an image. The options are collected in a dialog
-/// and handed to `create` when it is accepted.
 pub(super) trait ConfigurableEditor: EditorKind {
     type Options: CreationOptions;
 
     fn create(client: &BlockClient, options: Self::Options) -> Result<Self, String>;
 }
 
-/// The options one block type needs before it can be created. The dialog
-/// around them - its frame, its buttons and its errors - is shared, so this
-/// draws only the options themselves.
 pub(super) trait CreationOptions: Default {
-    /// Draws the options. Returns `false` while they are incomplete, which
-    /// keeps the create button disabled.
     fn ui(&mut self, ui: &mut egui::Ui) -> bool;
 }
 
-/// A creation dialog waiting on the user: the options being filled in, and
-/// how to turn them into an editor.
 pub(super) trait PendingCreation {
     fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> CreationStep;
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String>;
@@ -1296,17 +1242,14 @@ pub(super) fn create_image_block(
     id
 }
 
-/// Starting to create a block either produces the editor outright or the
-/// dialog that has to be filled in first.
 pub(super) enum BlockCreation {
     Created(Box<dyn BlockEditor>),
     Options(Box<dyn PendingCreation>),
 }
 
 enum CreateBlock {
-    /// Nothing to ask about: the block is created on the spot.
     Immediate(CreateEditor),
-    /// Options are collected before the block exists.
+
     Configured(CreateOptions),
 }
 
@@ -1385,8 +1328,6 @@ impl EditorRegistry {
         registry
     }
 
-    /// What a plugin editor needs to name and illustrate the block types it
-    /// lists, built once so it can be handed to every plugin runtime.
     fn block_types(&self) -> Vec<(Uuid, BlockTypeEntry)> {
         let mut types: Vec<_> = self
             .registrations
@@ -1409,8 +1350,6 @@ impl EditorRegistry {
         &self.plugin_block_types
     }
 
-    /// Registers an editor for a block type that is only ever produced by
-    /// another block, so it never appears in the new-block menu.
     fn register<E: EditorKind>(&mut self) {
         self.insert(EditorRegistration::of::<E>());
     }
@@ -1445,8 +1384,6 @@ impl EditorRegistry {
             .insert(registration.block_type, registration);
     }
 
-    /// Registers a block editor that runs as a plugin, out of process or in a
-    /// worker, from the manifest it ships with.
     fn register_plugin(&mut self, manifest: Arc<PluginManifest>) {
         let block_type = Uuid::from_bytes(manifest.block_type);
         let display_name: &'static str = Box::leak(manifest.display_name.clone().into_boxed_str());
@@ -1484,8 +1421,6 @@ impl EditorRegistry {
         });
     }
 
-    /// Creatable block types, with whether each belongs in the picker's main
-    /// section.
     pub fn new_block_actions(&self) -> &[(&'static str, Uuid, bool)] {
         &self.new_block_actions
     }

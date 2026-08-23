@@ -22,7 +22,7 @@ fn video_history_undoes_and_redoes_a_rippling_removal() {
     });
     assert_eq!(block.read().unwrap().clips().len(), 1);
 
-    // Undoing puts the clip and everything hanging off it back where it was.
+                                                                             
     block.undo();
     assert_eq!(block.read().unwrap().timeline(), before);
     assert_eq!(

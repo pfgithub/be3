@@ -112,8 +112,6 @@ impl Graph {
             }
         }
 
-        // Directed walks produce the unbounded exterior face as well. With the
-        // right-turn rule it has the opposite winding from bounded faces.
         let positive = polygons
             .iter()
             .filter(|polygon| polygon_signed_area(polygon) > 0.0)

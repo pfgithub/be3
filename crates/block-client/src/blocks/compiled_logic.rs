@@ -11,14 +11,14 @@ use logicgame::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Why a grid could not be turned into a component.
+                                                    
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompileError {
-    /// Nothing has been placed, so there is no outline to give the component.
+                                                                              
     Empty,
-    /// The circuit covers more cells than a component can be sized in.
+                                                                       
     TooLarge,
-    /// An input or output has no side facing out of the component.
+                                                                   
     PortWithoutLead,
     Geometry(GeometryError),
     Generation(GenerationError),
@@ -50,15 +50,15 @@ impl From<GenerationError> for CompileError {
     }
 }
 
-/// One logic grid compiled into a program, together with the shape it takes
-/// when it is placed inside another grid. Calls to other components name the
-/// compiled block that holds them, so a whole circuit can be linked by
-/// following references.
+                                                                            
+                                                                             
+                                                                       
+                         
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct CompiledLogic {
-    /// The logic grid block this was compiled from.
+                                                    
     source: Uuid,
-    /// The outline the subcomponent occupies, in grid cells.
+                                                             
     size: Size,
     ports: Vec<ComponentPort>,
     program: UnlinkedComponent,
@@ -85,9 +85,9 @@ impl CompiledLogic {
         }
     }
 
-    /// Compiles `grid` into the program a caller runs, giving the component
-    /// the outline the circuit occupies and a port for each of its inputs and
-    /// outputs.
+                                                                            
+                                                                              
+                
     pub fn compile(source: Uuid, grid: &Grid) -> Result<Self, CompileError> {
         let bounds = grid.bounds().ok_or(CompileError::Empty)?;
         let width = i64::try_from(bounds.width()).map_err(|_| CompileError::TooLarge)?;
@@ -113,14 +113,14 @@ impl CompiledLogic {
         &self.program
     }
 
-    /// The compiled blocks this program calls. Every one of them has to be
-    /// loaded before the program can run.
+                                                                           
+                                          
     pub fn calls(&self) -> &[Uuid] {
         &self.program.components
     }
 
-    /// The independent input-to-output paths through the component. A caller
-    /// only runs the ones whose outputs it is actually wired to.
+                                                                             
+                                                                 
     pub fn subgraphs(&self) -> Vec<ComponentSubgraph> {
         self.program
             .subgraphs
@@ -132,8 +132,8 @@ impl CompiledLogic {
             .collect()
     }
 
-    /// The component to place in a grid to call this program. `id` is this
-    /// block's own ID and `name` the label drawn in the middle of it.
+                                                                           
+                                                                      
     pub fn placement(&self, id: Uuid, name: &str) -> Result<ComponentKind, GeometryError> {
         let mut kind = ComponentKind::subcomponent_with_subgraphs(
             id,
@@ -168,9 +168,9 @@ impl Block for CompiledLogic {
     }
 }
 
-/// Turns the grid's inputs and outputs into ports on the component's edge.
-/// `min` is the corner the outline starts at, so port positions are measured
-/// from the component rather than from the grid's origin.
+                                                                           
+                                                                             
+                                                          
 fn boundary_ports(grid: &Grid, min: Point) -> Result<Vec<ComponentPort>, CompileError> {
     let input_indices = dense_indices(grid.components().filter_map(
         |component| match component.kind {
@@ -221,8 +221,8 @@ fn boundary_ports(grid: &Grid, min: Point) -> Result<Vec<ComponentPort>, Compile
     Ok(ports)
 }
 
-/// Numbers the IDs from zero in their sorted order, matching how the compiler
-/// numbers the program's own inputs and outputs.
+                                                                              
+                                                 
 fn dense_indices<T: Ord>(ids: impl IntoIterator<Item = T>) -> BTreeMap<T, usize> {
     let mut ids = ids.into_iter().collect::<Vec<_>>();
     ids.sort();

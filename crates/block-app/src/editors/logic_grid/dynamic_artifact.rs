@@ -9,8 +9,6 @@ use uuid::Uuid;
 
 use super::super::{DynamicArtifactRegeneration, DynamicArtifactSupport};
 
-/// The descriptor payload: which grid the component was compiled from, and how
-/// the compiled block follows it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct ComponentArtifact {
     source: Uuid,
@@ -19,7 +17,6 @@ struct ComponentArtifact {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct ComponentSettings {
-    /// Whether recompiling also renames the component after its grid.
     rename_with_source: bool,
 }
 
@@ -60,7 +57,6 @@ pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
     }
 }
 
-/// The program a freshly compiled component starts with.
 pub(super) fn generate_initial(source_id: Uuid, grid: &LogicGrid) -> Result<CompiledLogic, String> {
     CompiledLogic::compile(source_id, grid.grid()).map_err(|error| error.to_string())
 }
@@ -125,7 +121,7 @@ struct CompileRegeneration {
 impl DynamicArtifactRegeneration for CompileRegeneration {
     fn poll(&mut self) -> Option<Result<(), String>> {
         let source = self.source.read()?;
-        // Both blocks have to be resolved before the target is overwritten.
+
         self.target.read()?;
         let generated = generate_initial(self.source.id(), &source);
         drop(source);

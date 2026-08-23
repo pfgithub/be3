@@ -6,19 +6,19 @@ use uuid::Uuid;
 
 use crate::block_ref::BlockRef;
 
-/// One entry in the logic editor's tool palette.
+                                                 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "slot", rename_all = "snake_case")]
 pub enum HotbarSlot {
-    /// A tool the editor provides itself, named by the editor's own tool key.
+                                                                              
     Builtin { tool: String },
-    /// A placeholder for a tool that has not been unlocked yet.
+                                                                
     Locked { name: String },
     Folder {
         name: String,
         slots: Vec<HotbarSlot>,
     },
-    /// A compiled logic block pinned for placing.
+                                                  
     Component { name: String, compiled: BlockRef },
 }
 
@@ -48,9 +48,9 @@ impl HotbarSlot {
     }
 }
 
-/// The tool palette shared by the grids of one game. It is registered under the
-/// workspace's root `Settings` block rather than living inside a grid, so
-/// pinning a component once offers it in every circuit built afterwards.
+                                                                                
+                                                                          
+                                                                         
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Hotbar {
     slots: Vec<HotbarSlot>,
@@ -59,8 +59,8 @@ pub struct Hotbar {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum HotbarOperation {
-    /// Replaces the whole tree. Slots are dragged between folders as one
-    /// gesture, so there is no smaller unit of change worth sending.
+                                                                         
+                                                                     
     SetSlots { slots: Vec<HotbarSlot> },
 }
 
@@ -84,7 +84,7 @@ impl Hotbar {
         &self.slots
     }
 
-    /// The compiled logic blocks pinned anywhere in the tree.
+                                                              
     pub fn components(&self) -> Vec<Uuid> {
         let mut components = Vec::new();
         for slot in &self.slots {

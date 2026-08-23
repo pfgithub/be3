@@ -15,8 +15,6 @@ pub(crate) use android::load;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 mod native;
 
-/// One installed game: the module file's stem, which is what a block stores
-/// to say which game it plays, and the module itself.
 pub(crate) struct Entry {
     id: String,
     game: Arc<Game>,
@@ -32,9 +30,6 @@ impl Entry {
     }
 }
 
-/// The games this app found beside itself, compiled and ready to play. A
-/// module that does not load is skipped and reported rather than taken as a
-/// game, since nothing about the games directory is under the app's control.
 #[derive(Default)]
 pub(crate) struct Installed {
     games: Vec<Entry>,

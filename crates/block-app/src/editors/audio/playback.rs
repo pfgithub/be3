@@ -1,12 +1,3 @@
-//! Plays an [`Audio`] block's bytes through the platform's audio output.
-//!
-//! Desktop and Android both go through `rodio`/cpal, which talks to ALSA,
-//! CoreAudio, WASAPI or (on Android) Oboe depending on the platform. The web
-//! build cannot: cpal's Web Audio backend only targets `wasm32-unknown-unknown`,
-//! and this project's browser build targets `wasm32-wasip1` instead (see
-//! `./scripts/build --target web`), so it talks to `<audio>` directly through
-//! `web-sys`.
-
 use std::time::Duration;
 
 use block_client::blocks::audio::Audio;
@@ -50,8 +41,6 @@ impl AudioPlayer {
         self.error.as_deref()
     }
 
-    /// Stops playback and drops the sink, so a later `toggle` reloads the
-    /// (possibly replaced) audio from scratch.
     pub(super) fn reset(&mut self) {
         self.sink = None;
         self.duration = None;
@@ -107,9 +96,6 @@ impl AudioPlayer {
 
 #[cfg(target_arch = "wasm32")]
 pub(super) struct AudioPlayer {
-    /// The `<audio>` element playing the current file, and the blob URL it
-    /// was created from. Both live for as long as the element does; the URL
-    /// is revoked when a new file replaces it or the editor drops.
     element: Option<(web_sys::HtmlAudioElement, String)>,
     error: Option<String>,
 }
@@ -147,8 +133,6 @@ impl AudioPlayer {
         self.error.as_deref()
     }
 
-    /// Stops playback and revokes the blob URL, so a later `toggle` reloads
-    /// the (possibly replaced) audio from scratch.
     pub(super) fn reset(&mut self) {
         if let Some((element, url)) = self.element.take() {
             let _ = element.pause();

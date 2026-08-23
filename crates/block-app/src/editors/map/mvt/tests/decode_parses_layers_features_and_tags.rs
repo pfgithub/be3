@@ -9,7 +9,7 @@ fn decode_parses_layers_features_and_tags() {
     layer.extend(varint(8192));
     layer.extend(length_delimited(3, b"kind"));
     layer.extend(length_delimited(4, &length_delimited(1, b"primary")));
-    // MoveTo (2, 2), LineTo (2, -1).
+
     let geometry = [
         (1 << 3) | 1,
         zigzag(2),

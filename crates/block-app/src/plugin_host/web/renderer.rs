@@ -6,9 +6,6 @@ use super::super::presenter::{Regions, SurfacePresenter};
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-/// Registers the renderer that copies each plugin's canvas into a texture
-/// every frame. Returns whether a wgpu render backend was available at all;
-/// editors show an error instead of the plugin when it is not.
 pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
     let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
         return false;
@@ -38,11 +35,6 @@ struct Target {
     needs_copy: bool,
 }
 
-/// Owns a destination texture per running plugin, which that plugin's canvas
-/// is copied into, and the pipeline that blits it into egui's own render pass.
-/// Rebuilt from the two independent wgpu devices' canvases meeting only at the
-/// browser's `GPUQueue.copyExternalImageToTexture`, not via any shared wgpu
-/// resource.
 pub(crate) struct WebSurfacePresenter {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,

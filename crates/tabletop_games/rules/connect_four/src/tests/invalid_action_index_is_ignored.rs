@@ -7,7 +7,7 @@ fn invalid_action_index_is_ignored() {
     let red = Uuid::new_v4();
     let yellow = Uuid::new_v4();
     let mut actions = vec![play(&[], red, 0)];
-    actions.push(attempt(yellow, 999)); // no option reaches index 999, ignored
+    actions.push(attempt(yellow, 999));
     actions.push(play(&actions, yellow, 1));
 
     let screen = show(&actions, red);

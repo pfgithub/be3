@@ -2,9 +2,6 @@ use uuid::Uuid;
 
 use super::{AppStateError, SavedAccount};
 
-/// Where the saved accounts and the active selection live in browser storage.
-/// `localStorage` is per-origin and survives a reload, which is the closest
-/// equivalent to the SQLite file the native build keeps beside the app.
 const ACCOUNTS_KEY: &str = "block.accounts";
 const ACTIVE_KEY: &str = "block.active-account";
 const CLIENT_ID_KEY: &str = "block.client-id";
@@ -13,8 +10,6 @@ pub struct AppStateStore {
     storage: web_sys::Storage,
 }
 
-/// The active account, stored separately from the account list so that
-/// selecting an account does not rewrite it.
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ActiveAccount {
     server: String,
@@ -37,8 +32,7 @@ impl AppStateStore {
 
     pub fn accounts(&self) -> Result<Vec<SavedAccount>, AppStateError> {
         let mut accounts: Vec<SavedAccount> = self.read(ACCOUNTS_KEY)?.unwrap_or_default();
-        // The SQLite store orders accounts by display name, and the onboarding
-        // list is expected to match.
+
         accounts.sort_by(|left, right| {
             left.name
                 .to_lowercase()
@@ -116,8 +110,6 @@ impl AppStateStore {
         self.write(ACCOUNTS_KEY, &accounts)
     }
 
-    /// This device's identity, used to pick out per-client settings entries.
-    /// Generated once and reused for as long as browser storage keeps it.
     pub fn client_id(&self) -> Result<Uuid, AppStateError> {
         if let Some(id) = self.read(CLIENT_ID_KEY)? {
             return Ok(id);

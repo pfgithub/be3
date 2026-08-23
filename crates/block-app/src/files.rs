@@ -1,7 +1,3 @@
-//! The Files pane: the tree of blocks in the workspace, the recently deleted
-//! list beneath it, and the status line the workspace and account menus hang
-//! off.
-
 use std::collections::HashSet;
 
 use block::{Block, BlockAccess, BlockParent, BlockReference, BlockReferenceList};
@@ -136,15 +132,10 @@ impl BlockApp {
         crate::editors::BlockLabel::for_reference(&self.registry, reference).widget_text(ui.style())
     }
 
-    /// Whether the account may change a block. Blocks the sidebar has listed
-    /// but never opened count as editable until the server says otherwise.
     pub(crate) fn can_edit_block(&self, id: Uuid) -> bool {
         self.client.block_access(id).can_edit()
     }
 
-    /// Whether a block may be taken out of where it is listed. Blocks holding
-    /// their children have to accept the removal and be editable; the root and
-    /// the orphan list are the workspace's own and hold nothing back.
     fn can_delete_from(&self, source: SidebarDragSource) -> bool {
         match source {
             SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
@@ -157,9 +148,6 @@ impl BlockApp {
         }
     }
 
-    /// Whether a block may be moved out of `source`. Moving one that is listed
-    /// where it lives reparents the block itself; moving a reference to it only
-    /// touches the block that holds the reference.
     pub(crate) fn can_move_out_of(
         &self,
         source: SidebarDragSource,
@@ -198,16 +186,14 @@ impl BlockApp {
         let can_edit = access.can_edit();
         let can_open = access.can_view();
         let can_add_child = self.registry.can_add_child(reference.block_type);
-        // Taking a child in means changing the block that takes it.
+
         let can_add_here = can_add_child && can_edit;
         let can_delete_child = source != SidebarDragSource::Orphaned
             && self.can_move_out_of(source, reference.id, is_reference);
         let copy_permission = self.copy_permission(containing_id);
         let can_expand = !is_reference && reference.references > 0;
         let was_expanded = self.expanded.contains_key(&reference.id);
-        // Matched by position, not just id: the same block can appear both at
-        // its canonical row and at unrelated reference rows elsewhere, and
-        // only the one actually on the route should highlight.
+
         let on_active_path = active.is_some_and(|active| {
             active_path_index.is_some_and(|index| active.path.get(index) == Some(&reference.id))
         });
@@ -275,9 +261,6 @@ impl BlockApp {
             let label = egui::Button::selectable(is_active, self.reference_label(ui, &reference))
                 .truncate()
                 .sense(egui::Sense::click_and_drag());
-            // Generated blocks are marked as such, and editable blocks are the
-            // common case so only the rest carry the icon for as far as the
-            // account may go with them.
             let markers: Vec<_> = [
                 reference
                     .dynamic_artifact
@@ -318,9 +301,6 @@ impl BlockApp {
             } else {
                 response
             };
-            // A block that may only be known to exist cannot be opened, but its
-            // row still has to answer right clicks and drags: a reference to one
-            // could otherwise never be taken out of the block holding it.
             let response = if can_open {
                 response
             } else {

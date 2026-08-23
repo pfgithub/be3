@@ -26,7 +26,7 @@ fn rasterize_styles_water_over_land() {
             raster.pixels[index + 2],
         ]
     };
-    // The top-left quarter of the tile is water; the rest stays land.
+
     assert_eq!(pixel(100, 100), [WATER[0], WATER[1], WATER[2]]);
     assert_eq!(pixel(400, 400), [LAND[0], LAND[1], LAND[2]]);
     assert!(raster.labels.is_empty());

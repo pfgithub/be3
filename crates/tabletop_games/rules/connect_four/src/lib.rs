@@ -59,10 +59,6 @@ fn winning_symbol(board: &[Option<Symbol>; CELL_COUNT]) -> Option<Symbol> {
     None
 }
 
-/// The whole game as one straight-line function over the action log, in the
-/// same style as `tic_tac_toe`: each legal drop is offered by calling
-/// `action(label)`, and when it is the one the log records next for that
-/// actor the board and column-height updates happen right there, inline.
 fn connect_four(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
     let mut board: [Option<Symbol>; CELL_COUNT] = [None; CELL_COUNT];
     let mut column_heights: [usize; COLUMNS] = [0; COLUMNS];

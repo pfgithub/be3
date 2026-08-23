@@ -1,9 +1,5 @@
 use super::*;
 
-// The sample program from the TS file's `if (import.meta.main)` smoke test.
-// It deliberately mismatches a `(` with a `]` (`if (` ... `] else {`) to
-// exercise error recovery, so this only asserts tokenization completes
-// without panicking and yields a non-trivial, non-empty structure.
 const SAMPLE_SOURCE: &str = "abc [
     def [jkl]
     if (

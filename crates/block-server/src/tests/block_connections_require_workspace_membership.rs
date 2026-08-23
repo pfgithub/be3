@@ -5,8 +5,7 @@ use futures_util::StreamExt;
 #[tokio::test]
 async fn block_connections_require_workspace_membership() {
     let server = TestServer::start().await;
-    // Someone who is not a member is refused before the websocket handshake
-    // completes.
+
     assert!(server
         .try_connect_to("not-a-real-token", server.workspace_id)
         .await
@@ -25,8 +24,6 @@ async fn block_connections_require_workspace_membership() {
     )
     .await;
 
-    // Editors are members, so the handshake succeeds even though they cannot
-    // reach any of the workspace's blocks yet.
     let mut socket = server.connect_to(&editor.token, workspace.id).await;
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(250), socket.next())

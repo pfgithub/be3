@@ -13,10 +13,8 @@ pub struct Account {
 #[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceRole {
-    /// Has full access to every block in the workspace, regardless of the
-    /// per-block permissions recorded for it.
     Administrator,
-    /// Only reaches the blocks it authored or was explicitly granted access to.
+
     Editor,
 }
 
@@ -29,18 +27,15 @@ impl WorkspaceRole {
     }
 }
 
-/// How much of a block an account may reach. The variants are ordered from
-/// least to most access so effective permissions can be combined with `max`.
 #[derive(Clone, Copy, Debug, Deserialize, Ord, PartialOrd, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockAccess {
-    /// The block is inaccessible and is filtered out of listings.
     None,
-    /// The block appears in listings but cannot be opened.
+
     KnowExists,
-    /// The block can be read but not changed.
+
     View,
-    /// The block can be read and changed.
+
     Edit,
 }
 
@@ -67,15 +62,13 @@ impl BlockAccess {
     }
 }
 
-/// One workspace member's access to a single block, as reported to a client
-/// that is managing sharing for that block.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct BlockAccessEntry {
     pub account: Account,
     pub role: WorkspaceRole,
-    /// The permission recorded directly against this block, if any.
+
     pub granted: Option<BlockAccess>,
-    /// The permission the account actually has, after inheritance.
+
     pub effective: BlockAccess,
 }
 
@@ -222,19 +215,11 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
 
     fn apply_operation(block: &mut Self, operation: &Self::Operation);
 
-    /// Like `apply_operation`, but for block types whose state needs to know
-    /// who is responsible for each operation. `author` is the operation's
-    /// server-verified account id (`OperationRecord::author`), never a value
-    /// that the operation's own bytes could claim for themselves. Defaults to
-    /// ignoring it.
     fn apply_authored_operation(block: &mut Self, operation: &Self::Operation, author: Uuid) {
         let _ = author;
         Self::apply_operation(block, operation);
     }
 
-    /// A name this block type can derive from its own content, or `None` if
-    /// it has nothing more useful to say than its type. The result becomes
-    /// the block's `name` property unless a client has manually renamed it.
     fn implicit_name(&self) -> Option<String> {
         None
     }
@@ -249,20 +234,14 @@ pub trait Block: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
         self.references()
     }
 
-    /// Operations that add `block_id` as a child, or `None` if this block
-    /// type does not support child blocks.
     fn add_child(&self, _block_id: Uuid) -> Option<Vec<Self::Operation>> {
         None
     }
 
-    /// Operations that remove `block_id` as a child, or `None` if this block
-    /// type does not support child blocks.
     fn delete_child(&self, _block_id: Uuid) -> Option<Vec<Self::Operation>> {
         None
     }
 
-    /// Operations that replace child `old` with `new`, or `None` if this
-    /// block type does not support child blocks.
     fn replace_child(&self, _old: Uuid, _new: Uuid) -> Option<Vec<Self::Operation>> {
         None
     }
@@ -366,7 +345,7 @@ pub struct BlockOperation {
 pub struct BlockUpdate {
     pub id: Uuid,
     pub properties: BTreeMap<Uuid, Vec<u8>>,
-    /// Whether the block is generated from another one after this update.
+
     pub dynamic_artifact: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
@@ -399,28 +378,18 @@ pub struct BlockReference {
     #[serde(rename = "type")]
     pub block_type: Uuid,
     pub author: Uuid,
-    /// Every property key and value recorded against the block. Properties
-    /// are opaque to the server; only the client interprets them (e.g. the
-    /// well-known "name" property).
+
     pub properties: BTreeMap<Uuid, Vec<u8>>,
     pub parent: BlockParent,
     pub references: usize,
-    /// Whether the block is generated from another one, so a client can mark
-    /// it where it is listed without opening it.
+
     pub dynamic_artifact: bool,
-    /// What the listing account may do with the block, so a client can tell
-    /// which of the things it offers would be refused without opening it.
+
     pub access: BlockAccess,
 }
 
-/// A generic guard against abusively large property values. The server does
-/// not interpret properties, so this is the only limit it enforces.
 pub const MAX_PROPERTY_VALUE_BYTES: usize = 4096;
 
-/// Identifies one live connection, not an account: the same account may have
-/// several clients connected at once (e.g. multiple tabs or devices) editing
-/// the same block. Assigned by the server when a connection is accepted and
-/// not stable across reconnects.
 pub type ClientId = u64;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -457,11 +426,6 @@ pub enum ErrorCode {
     UnsupportedMessage,
 }
 
-/// One websocket frame from a client. A single connection carries any number of
-/// separate clients: `client` names which of them a frame belongs to, and is
-/// absent for the connection's own client. Each one gets its own watches,
-/// presence and sequencing on the server, exactly as if it had dialled in on a
-/// connection of its own.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ClientEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -470,8 +434,6 @@ pub struct ClientEnvelope {
     pub message: ClientMessage,
 }
 
-/// One websocket frame from the server, addressed to the client of the
-/// connection named by `client`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ServerEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -530,9 +492,7 @@ pub enum ClientMessage {
         request_id: Uuid,
         id: Uuid,
     },
-    /// Sets or removes a presence value for a block the client is currently
-    /// watching. The server keeps the latest value per `(client, presence_id)`
-    /// and broadcasts changes to every other client watching the block.
+
     SetPresence {
         request_id: Uuid,
         id: Uuid,
@@ -569,8 +529,7 @@ pub enum ClientMessage {
         account_id: Uuid,
         access: BlockAccess,
     },
-    /// Ends one of the connection's clients, releasing its watches and
-    /// presence. The connection itself stays open for its other clients.
+
     CloseClient {
         request_id: Uuid,
     },
@@ -621,8 +580,7 @@ pub enum ServerMessage {
         operations: Vec<OperationRecord>,
         parent: BlockParent,
         properties: BTreeMap<Uuid, Vec<u8>>,
-        /// What the reading account may do with the block, so the client knows
-        /// whether to let it be changed without asking the server first.
+
         access: BlockAccess,
     },
     BatchOk {
@@ -661,11 +619,7 @@ pub enum ServerMessage {
     BatchUpdated {
         operations: Vec<BlockOperation>,
     },
-    /// A presence value changed for a block being watched. `client_id`
-    /// identifies which watcher it belongs to, never the recipient's own
-    /// connection: the server never echoes a client's presence back to
-    /// itself. `data` is `None` when the value was cleared, either
-    /// explicitly or because that client stopped watching the block.
+
     Presence {
         id: Uuid,
         client_id: ClientId,

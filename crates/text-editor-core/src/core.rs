@@ -13,10 +13,6 @@ use uuid::Uuid;
 
 use crate::{Highlighter, Language, SyntaxHighlight};
 
-/// A position anchored to the ids of the items immediately around it, so it
-/// keeps pointing at the same place in the document across concurrent edits.
-/// Serializable so it can be round-tripped through [`TextCursor`] presence to
-/// other clients, which resolve it against their own copy of the document.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Position {
     left: Option<Uuid>,
@@ -237,16 +233,13 @@ pub enum EditorCommand<'a> {
         case_sensitive: bool,
         direction: FindDirection,
     },
-    /// Replaces the match the selection currently sits on exactly (as
-    /// reported by [`Core::find_status`]) with `replacement`, then selects
-    /// the next match so repeated calls step through every occurrence.
-    /// Does nothing if the selection isn't sitting on a match.
+
     ReplaceMatch {
         text: &'a str,
         case_sensitive: bool,
         replacement: &'a [u8],
     },
-    /// Replaces every match of `text` with `replacement`.
+
     ReplaceAllMatches {
         text: &'a str,
         case_sensitive: bool,
@@ -271,18 +264,14 @@ pub enum EditorCommand<'a> {
     },
     ReplaceWholeFile(&'a [u8]),
     Markdown(MarkdownCommand),
-    /// Changes the document's language, rebuilding the syntax highlighter to
-    /// match. Does nothing if `language` is already the document's language.
+
     SetLanguage(TextLanguage),
     SetIndentation(TextIndentation),
-    /// Collapses every collapsible line touched by the current selection(s).
+
     Collapse,
-    /// Uncollapses every collapsible line touched by the current
-    /// selection(s).
+
     Uncollapse,
-    /// Toggles the collapsed state of the collapsible line at `position`,
-    /// independent of the current selection. For the gutter fold arrow,
-    /// which can target a line the cursor isn't on.
+
     ToggleCollapseAt(Position),
 }
 
@@ -292,32 +281,22 @@ pub enum FindDirection {
     Previous,
 }
 
-/// The result of matching a query against the document: how many
-/// non-overlapping matches exist, and which one (if any) the current
-/// selection sits on exactly.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FindStatus {
     pub total: usize,
     pub current: Option<usize>,
 }
 
-/// A collapsible line and the section it would fold, per
-/// [`Core::collapsible_sections`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CollapsibleSection {
-    /// Byte offset of the start of the collapsible line itself, always
-    /// visible even when `collapsed`.
     pub line_start: usize,
-    /// Byte offset of the end of the collapsible line (before its newline).
+
     pub line_end: usize,
-    /// Byte offset of the end of the section's last line (before its
-    /// newline), i.e. the end of the content hidden when `collapsed`.
+
     pub content_end: usize,
-    /// Whether this section is currently folded: marked collapsed, and not
-    /// temporarily revealed by a cursor sitting inside it.
+
     pub collapsed: bool,
-    /// Whether this section is marked collapsed but temporarily shown
-    /// because a cursor sits inside it. Mutually exclusive with `collapsed`.
+
     pub revealed: bool,
 }
 
@@ -371,14 +350,9 @@ pub struct Core {
     clipboard_cache: Option<ClipboardCache>,
     last_undo_classification: UndoClassification,
     highlighter: Option<Highlighter>,
-    /// The document language `highlighter` was built for, so that a language
-    /// change made here or by another editor rebuilds it.
+
     highlighter_language: Option<TextLanguage>,
-    /// Anchored line-start positions of the collapsed sections, ephemeral
-    /// (not part of the document/CRDT) and local to this editor instance.
-    /// If an edit removes the line-start a position anchored to, that entry
-    /// simply stops matching anything in [`Self::collapsible_sections_in`]
-    /// and has no further effect.
+
     collapse_state: Vec<Position>,
 }
 
@@ -417,16 +391,12 @@ impl Core {
             .map(|document| position.resolve(&document))
     }
 
-    /// Resolves a cursor's anchor/focus into a sorted byte range, or `None`
-    /// if either position no longer resolves.
     pub fn selection_range(&self, cursor: &CursorPosition) -> Option<Range<usize>> {
         let anchor = self.position_index(cursor.pos.anchor)?;
         let focus = self.position_index(cursor.pos.focus)?;
         Some(anchor.min(focus)..anchor.max(focus))
     }
 
-    /// Every non-overlapping byte range matching `query` in the current
-    /// document, left to right.
     pub fn find_matches(&self, query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
         self.document
             .read()
@@ -434,8 +404,6 @@ impl Core {
             .unwrap_or_default()
     }
 
-    /// How many matches `query` has in the document, and which one (if any)
-    /// the current selection sits on exactly.
     pub fn find_status(&self, query: &str, case_sensitive: bool) -> FindStatus {
         let Some(document) = self.document.read() else {
             return FindStatus::default();
@@ -453,10 +421,6 @@ impl Core {
         }
     }
 
-    /// Moves the selection to the next (or previous) match relative to the
-    /// current selection, wrapping around either end of the document. If the
-    /// selection already sits exactly on a match, that match is skipped so
-    /// repeated calls cycle through every occurrence.
     fn find(&mut self, query: &str, case_sensitive: bool, direction: FindDirection) {
         let target = {
             let Some(document) = self.document.read() else {
@@ -492,9 +456,6 @@ impl Core {
         self.select(Selection::range(target.0, target.1));
     }
 
-    /// Replaces the match the selection sits on exactly with `replacement`,
-    /// then advances the selection to the next match. Does nothing if the
-    /// selection isn't sitting on a match.
     fn replace_match(&mut self, query: &str, case_sensitive: bool, replacement: &[u8]) {
         let history_cursors = self.cursor_positions.clone();
         let Some(document) = self.document.read() else {
@@ -524,10 +485,6 @@ impl Core {
         self.find(query, case_sensitive, FindDirection::Next);
     }
 
-    /// Replaces every match of `query` with `replacement`. Matches are
-    /// located once, up front; each match's start/end tracks its own CRDT
-    /// item, so replacing earlier matches doesn't invalidate the positions of
-    /// later ones.
     fn replace_all_matches(&mut self, query: &str, case_sensitive: bool, replacement: &[u8]) {
         let history_cursors = self.cursor_positions.clone();
         let Some(document) = self.document.read() else {
@@ -641,8 +598,6 @@ impl Core {
             .operate(TextDocument::set_indentation_operation(indentation));
     }
 
-    /// Rebuilds the highlighter when the document's language differs from the
-    /// one it was built for.
     fn sync_highlighter(&mut self) {
         let language = self.language();
         if self.highlighter_language == Some(language) {
@@ -707,8 +662,6 @@ impl Core {
         )
     }
 
-    /// Every collapsible line in the document and the section it would fold,
-    /// in document order.
     pub fn collapsible_sections(&self) -> Vec<CollapsibleSection> {
         let Some(document) = self.document.read() else {
             return Vec::new();
@@ -1199,7 +1152,6 @@ impl Core {
                     && selected.starts_with(before)
                     && selected.ends_with(after)
                 {
-                    // Selection itself includes the markers (e.g. "**bold**"): unwrap in place.
                     let inner = selected[before.len()..selected.len() - after.len()].to_vec();
                     selection_lengths.push((inner.len(), 0));
                     (
@@ -1212,7 +1164,6 @@ impl Core {
                     && &bytes[range.left - before.len()..range.left] == before
                     && &bytes[range.right..range.right + after.len()] == after
                 {
-                    // Selection sits inside existing markers: remove the surrounding markers.
                     let inner = selected.to_vec();
                     selection_lengths.push((inner.len(), 0));
                     (
@@ -1244,13 +1195,6 @@ impl Core {
         self.finish_wrap_markdown_selection(replacements, selection_lengths, history_cursors);
     }
 
-    /// Toggles inline-code formatting on the current selection(s). Unlike
-    /// [`Self::wrap_markdown_selection`], the delimiter isn't fixed: markdown
-    /// requires a run of backticks one longer than the longest backtick run
-    /// already inside the selection (so the code span isn't terminated
-    /// early), with a padding space added on any edge where the content
-    /// itself starts or ends with a backtick (so the delimiter can't read as
-    /// part of the content). See [`inline_code_markers`].
     fn wrap_inline_code_selection(&mut self) {
         let history_cursors = self.cursor_positions.clone();
         let Some(document) = self.document.read() else {
@@ -1265,7 +1209,6 @@ impl Core {
                 let range = resolve_selection(&document, cursor.pos);
                 let selected = &bytes[range.left..range.right];
                 if let Some(inner) = unwrap_self_contained_inline_code(selected) {
-                    // Selection itself includes the markers: unwrap in place.
                     selection_lengths.push((inner.len(), 0));
                     (
                         Position::at(&document, range.left),
@@ -1275,7 +1218,6 @@ impl Core {
                 } else if let Some((before_len, after_len)) =
                     surrounding_inline_code_markers(bytes, range.left, range.right)
                 {
-                    // Selection sits inside existing markers: remove the surrounding markers.
                     let inner = selected.to_vec();
                     selection_lengths.push((inner.len(), 0));
                     (
@@ -1308,10 +1250,6 @@ impl Core {
         self.finish_wrap_markdown_selection(replacements, selection_lengths, history_cursors);
     }
 
-    /// Shared tail of [`Self::wrap_markdown_selection`] and
-    /// [`Self::wrap_inline_code_selection`]: applies the computed
-    /// replacements and re-selects the (un)wrapped content, preserving
-    /// selection direction.
     fn finish_wrap_markdown_selection(
         &mut self,
         replacements: Vec<(Position, usize, Vec<u8>)>,
@@ -1642,8 +1580,6 @@ impl Core {
         }
     }
 
-    /// The start of every collapsible line touched by the current
-    /// selection(s), in document order.
     fn touched_collapsible_line_starts(&self, document: &TextDocument) -> Vec<usize> {
         let bytes = document.bytes();
         let language = document.language();
@@ -2129,12 +2065,10 @@ fn resolve_selection(document: &TextDocument, selection: Selection) -> ResolvedS
     }
 }
 
-/// The number of consecutive backticks at the very start of `content`.
 fn leading_backtick_run(content: &[u8]) -> usize {
     content.iter().take_while(|&&byte| byte == b'`').count()
 }
 
-/// The number of consecutive backticks at the very end of `content`.
 fn trailing_backtick_run(content: &[u8]) -> usize {
     content
         .iter()
@@ -2143,7 +2077,6 @@ fn trailing_backtick_run(content: &[u8]) -> usize {
         .count()
 }
 
-/// The longest run of consecutive backticks anywhere in `content`.
 fn longest_backtick_run(content: &[u8]) -> usize {
     let mut longest = 0;
     let mut current = 0;
@@ -2158,13 +2091,6 @@ fn longest_backtick_run(content: &[u8]) -> usize {
     longest
 }
 
-/// The backtick delimiter (and, where needed, a single space of padding) to
-/// wrap `content` in as markdown inline code, per CommonMark's code-span
-/// escaping rules: the delimiter is one backtick longer than the longest run
-/// of backticks already inside `content`, so it can never be confused for
-/// part of the content. If `content` itself starts (or ends) with a
-/// backtick, a padding space is added at that edge so the delimiter doesn't
-/// visually merge with it.
 fn inline_code_markers(content: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let delimiter = vec![b'`'; longest_backtick_run(content) + 1];
     let mut before = delimiter.clone();
@@ -2178,9 +2104,6 @@ fn inline_code_markers(content: &[u8]) -> (Vec<u8>, Vec<u8>) {
     (before, after)
 }
 
-/// If `selected` is itself a complete inline-code span produced by
-/// [`inline_code_markers`] — i.e. the selection includes the surrounding
-/// backtick delimiters — the unescaped content between them.
 fn unwrap_self_contained_inline_code(selected: &[u8]) -> Option<Vec<u8>> {
     let run = leading_backtick_run(selected);
     if run == 0 || trailing_backtick_run(selected) != run || selected.len() < 2 * run {
@@ -2200,10 +2123,6 @@ fn unwrap_self_contained_inline_code(selected: &[u8]) -> Option<Vec<u8>> {
     (reconstructed == selected).then_some(inner)
 }
 
-/// If the selection `bytes[left..right]` sits directly inside an inline-code
-/// span whose delimiters (as produced by [`inline_code_markers`] for that
-/// exact selected content) surround it, the lengths of the marker bytes
-/// immediately before and after the selection.
 fn surrounding_inline_code_markers(
     bytes: &[u8],
     left: usize,
@@ -2245,17 +2164,12 @@ fn line_end(bytes: &[u8], index: usize) -> usize {
     }
 }
 
-/// The heading level (1-6) of the ATX markdown heading starting at `start`,
-/// if the line begins with one (`#` through `######`, followed by a space).
 fn heading_level(bytes: &[u8], start: usize) -> Option<u8> {
     let rest = bytes.get(start..)?;
     let hashes = rest.iter().take_while(|&&byte| byte == b'#').count();
     ((1..=6).contains(&hashes) && rest.get(hashes) == Some(&b' ')).then_some(hashes as u8)
 }
 
-/// The indentation width (in columns, tabs counted as 4) of the line starting
-/// at `start`, or `None` if the line is blank (all whitespace, including
-/// empty).
 fn indent_columns(bytes: &[u8], start: usize) -> Option<usize> {
     let mut columns = 0;
     let mut index = start;
@@ -2270,10 +2184,6 @@ fn indent_columns(bytes: &[u8], start: usize) -> Option<usize> {
     }
 }
 
-/// For a markdown heading line starting at `start`, the byte offset of the
-/// end of its section: everything up to (but not including) the next heading
-/// of the same or higher level, or the document end. `None` if `start` isn't
-/// a heading, or the heading has no following content to fold.
 fn markdown_section_end(bytes: &[u8], start: usize) -> Option<usize> {
     let level = heading_level(bytes, start)?;
     let mut cursor = next_line_start(bytes, start);
@@ -2290,11 +2200,6 @@ fn markdown_section_end(bytes: &[u8], start: usize) -> Option<usize> {
     end
 }
 
-/// For a line starting at `start`, the byte offset of the end of its
-/// indent-delimited section: every following line more indented than it,
-/// including blank lines in between, up to the first line back at its
-/// indentation or less. `None` if `start` is blank, or has no more-indented
-/// following line to fold.
 fn indent_section_end(bytes: &[u8], start: usize) -> Option<usize> {
     let indent = indent_columns(bytes, start)?;
     let mut cursor = next_line_start(bytes, start);
@@ -2310,10 +2215,6 @@ fn indent_section_end(bytes: &[u8], start: usize) -> Option<usize> {
     end
 }
 
-/// The byte offset of the end of the section the collapsible line starting
-/// at `start` would fold, or `None` if that line isn't collapsible. Markdown
-/// headings fold by heading level; every other language folds by
-/// indentation.
 fn collapsible_section_end(bytes: &[u8], language: TextLanguage, start: usize) -> Option<usize> {
     match language {
         TextLanguage::Markdown => markdown_section_end(bytes, start),
@@ -2321,10 +2222,6 @@ fn collapsible_section_end(bytes: &[u8], language: TextLanguage, start: usize) -
     }
 }
 
-/// If `line_start_idx` is the start of a line hidden inside a collapsed
-/// section, the line to land on instead: the line after the section when
-/// moving down into it, or the section's own (visible) start line when
-/// moving up into it. Otherwise `line_start_idx` unchanged.
 fn skip_hidden_line(
     bytes: &[u8],
     sections: &[CollapsibleSection],
@@ -2358,17 +2255,12 @@ fn measure_indent(bytes: &[u8], start: usize, width: usize) -> (usize, usize) {
     (segments.div_ceil(width), count)
 }
 
-/// A markdown checkbox marker (`- [ ] `, `* [x] `, etc.) found at the start
-/// of a line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkdownCheckboxMarker {
-    /// Byte range of the whole marker, e.g. the `- [x]` in `- [x] `.
     pub marker: Range<usize>,
     pub checked: bool,
 }
 
-/// Finds the markdown checkbox marker on the line starting at `line_start`,
-/// if the line begins (after leading whitespace) with one.
 pub fn markdown_checkbox_marker(bytes: &[u8], line_start: usize) -> Option<MarkdownCheckboxMarker> {
     let indent = bytes[line_start..]
         .iter()
@@ -2719,9 +2611,6 @@ fn rfind_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .rposition(|window| window == needle)
 }
 
-/// Every non-overlapping byte range in `bytes` matching `query`, scanned left
-/// to right. ASCII-only case folding when `case_sensitive` is false. Returns
-/// no matches for an empty query.
 pub(crate) fn scan_matches(bytes: &[u8], query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
     if query.is_empty() {
         return Vec::new();

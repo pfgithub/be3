@@ -202,21 +202,6 @@ impl EmbedReferenceCache {
     }
 }
 
-/// UI-only state for the find/replace bar: what's typed and which panel is
-/// showing. Deliberately independent of [`EditorCommand::DuplicateCursor`]'s
-/// "select next occurrence" mechanism: find/replace always operates on a
-/// single cursor built from its own query, never on the multi-cursor state
-/// ctrl+d builds up.
-///
-/// The matching, navigation, and replacement logic itself is *not*
-/// reimplemented here. Anything that manages document state — locating
-/// matches, moving the selection to one, replacing one or all of them — is
-/// an [`EditorCommand`] or query on [`text_editor_core::Core`]
-/// ([`EditorCommand::Find`], [`EditorCommand::ReplaceMatch`],
-/// [`EditorCommand::ReplaceAllMatches`], `find_status`, `find_matches`).
-/// This module only renders the bar and dispatches those operations; it
-/// should never scan document bytes, track match ranges, or loop over
-/// matches applying edits itself.
 struct FindState {
     query: String,
     replace: String,
@@ -609,8 +594,6 @@ impl TextEditor {
             .collect()
     }
 
-    /// Whether the primary cursor sits on a currently-collapsed line, to
-    /// decide which way [`Key::OpenBracket`] should toggle.
     fn cursor_line_collapsed(&self) -> bool {
         let Some(cursor) = self.core.cursor_positions().first() else {
             return false;
@@ -625,9 +608,6 @@ impl TextEditor {
             .any(|section| section.line_start == line_start && section.collapsed)
     }
 
-    /// Opens the find bar (or the find/replace bar, if `show_replace`),
-    /// prefilling the query from the current selection the first time it's
-    /// opened.
     fn open_find(&mut self, show_replace: bool) {
         if self.find.is_none() {
             let selected = self.core.copy_utf8(CopyMode::Copy);
@@ -652,9 +632,6 @@ impl TextEditor {
         self.find = None;
     }
 
-    /// Moves the selection onto a match only if it isn't sitting on one
-    /// already, so opening the bar or editing the query doesn't jump past a
-    /// match the selection already prefilled it from.
     fn sync_find(&mut self) -> bool {
         let Some(find) = self.find.as_ref() else {
             return false;
@@ -700,8 +677,6 @@ impl TextEditor {
             > 0
     }
 
-    /// Replaces the match the selection currently sits on, if any, and
-    /// advances to the next one (see [`EditorCommand::ReplaceMatch`]).
     fn replace_current(&mut self) {
         let Some(find) = self.find.as_ref() else {
             return;
@@ -713,7 +688,6 @@ impl TextEditor {
         });
     }
 
-    /// Replaces every match (see [`EditorCommand::ReplaceAllMatches`]).
     fn replace_all(&mut self) {
         let Some(find) = self.find.as_ref() else {
             return;
@@ -725,9 +699,6 @@ impl TextEditor {
         });
     }
 
-    /// Renders the find/replace bar and dispatches interactions. Sets
-    /// `self.find_reveal` when the visible selection moved and the view
-    /// should scroll to follow it.
     fn find_bar(&mut self, ui: &mut egui::Ui) {
         if ui.input(|input| input.key_pressed(Key::Escape)) {
             self.close_find();
@@ -1079,8 +1050,6 @@ impl TextEditor {
             return false;
         }
         if touch_screen && !pressed && down {
-            // A finger dragging across the editor on a touch screen scrolls
-            // the view rather than extending the text selection.
             self.selecting = false;
             let delta = ui.input(|input| input.pointer.delta());
             if delta != Vec2::ZERO {
@@ -1419,11 +1388,6 @@ impl TextEditor {
         )
     }
 
-    /// Paints other clients' cursors and selections in this block, in the
-    /// color each one is shown with in the "Also viewing" indicator. A
-    /// remote cursor whose color hasn't arrived yet (a brief race on the
-    /// first frame it appears) is skipped rather than shown in a fallback
-    /// color, since the indicator would otherwise disagree with it.
     fn paint_remote_cursors(
         &self,
         client: &BlockClient,
@@ -1498,9 +1462,6 @@ impl TextEditor {
         }
     }
 
-    /// Screen-space rect of the given client's cursor, for scrolling it into
-    /// view when its presence indicator is clicked. Mirrors the caret
-    /// geometry painted by [`Self::paint_remote_cursors`].
     fn presence_cursor_rect(
         &self,
         client: &BlockClient,
@@ -1815,8 +1776,6 @@ impl TextEditor {
     }
 }
 
-/// The byte ranges hidden by the document's currently-collapsed sections,
-/// for [`font::TextRenderer::layout_profiled`] to skip over.
 fn hidden_ranges_from_sections(sections: &[CollapsibleSection]) -> Vec<Range<usize>> {
     sections
         .iter()
@@ -2197,9 +2156,6 @@ impl BlockEditor for TextEditor {
     }
 }
 
-/// Publishes the focused editor area as this frame's IME target. The backend
-/// only allows IME while some widget reports one, and on Android allowing IME
-/// is what raises the on-screen keyboard.
 fn report_ime_area(ui: &egui::Ui, rect: Rect, cursor: Option<Rect>) {
     let to_global = ui
         .ctx()
@@ -2305,9 +2261,6 @@ fn parse_markdown_checkboxes(bytes: &[u8]) -> Vec<MarkdownCheckbox> {
     result
 }
 
-/// The full reserved layout column for a checkbox marker (the whole
-/// `- [ ]`), used as the click/hover target so the checkbox covers that
-/// entire span rather than just the drawn box.
 fn checkbox_marker_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) -> Option<Rect> {
     let left = layout
         .positions
@@ -2328,7 +2281,6 @@ fn checkbox_marker_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) ->
     })
 }
 
-/// The drawn checkbox box: a square centered in [`checkbox_marker_rect`].
 fn checkbox_rect(layout: &DocumentLayout, checkbox: &MarkdownCheckbox) -> Option<Rect> {
     let marker = checkbox_marker_rect(layout, checkbox)?;
     let size = marker.width().min(marker.height());
@@ -2520,7 +2472,6 @@ fn gutter_width(ui: &egui::Ui, line_count: usize) -> f32 {
         + GUTTER_PADDING_RIGHT
 }
 
-/// The collapsible section, if any, whose fold arrow is painted on `line`.
 fn line_section<'a>(
     line: &LineLayout,
     sections: &'a [CollapsibleSection],
@@ -2530,8 +2481,6 @@ fn line_section<'a>(
         .find(|section| section.line_start == line.start)
 }
 
-/// The fold-arrow hit rect for `line`, in the same coordinate space as
-/// `rect` (the whole editor rect, gutter included).
 fn gutter_arrow_rect(rect: Rect, text_top: f32, line: &LineLayout) -> Rect {
     let top = text_top + line.y;
     Rect::from_min_size(
@@ -2543,7 +2492,6 @@ fn gutter_arrow_rect(rect: Rect, text_top: f32, line: &LineLayout) -> Rect {
     )
 }
 
-/// The collapsible line whose gutter fold arrow contains `pointer`, if any.
 fn gutter_arrow_at(
     rect: Rect,
     gutter_width: f32,
@@ -2608,9 +2556,6 @@ fn paint_gutter(
     }
 }
 
-/// Paints a background over the body of each collapsed section that's
-/// temporarily revealed because a cursor sits inside it, so the lines that
-/// would normally be hidden read as visually distinct from ordinary text.
 fn paint_revealed_backgrounds(
     painter: &egui::Painter,
     rect: Rect,
@@ -2642,7 +2587,6 @@ fn paint_revealed_backgrounds(
     }
 }
 
-/// Paints a `...` right after the content of each collapsed line.
 fn paint_collapsed_ellipsis(
     painter: &egui::Painter,
     origin: Pos2,

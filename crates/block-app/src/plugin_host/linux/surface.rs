@@ -280,9 +280,6 @@ fn device_id(raw_instance: &ash::Instance, physical_device: vk::PhysicalDevice) 
     identity.device_uuid
 }
 
-/// The plugin's rows only land where this device expects them if both drivers
-/// lay a linear image of the same size out the same way, which is what an
-/// image shared without a format modifier rests on.
 fn layout_matches(
     raw_device: &ash::Device,
     image: vk::Image,
@@ -336,8 +333,7 @@ fn bind(
                     .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         })
         .ok_or_else(|| "no graphics memory can hold the plugin surface".to_owned())?;
-    // The driver takes the descriptor over on a successful import, so it is a
-    // copy of the one the carrier owns that is handed to it.
+
     let plane = plane
         .try_clone()
         .map_err(|error| format!("the plugin surface could not be duplicated: {error}"))?

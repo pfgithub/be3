@@ -11,8 +11,7 @@ fn port_connects_to_the_middle_of_a_parallel_wire() {
             value: 0,
         },
     );
-    // A horizontal wire running flush along the bottom edge. Neither endpoint
-    // lands on the port; the connection is made by the wire's body.
+
     grid.add_wire(wire((8, 2), (13, 2), 1));
 
     assert!(grid.validate().is_empty());

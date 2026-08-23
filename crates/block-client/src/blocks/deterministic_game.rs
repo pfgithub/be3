@@ -3,15 +3,15 @@ use game_api::GameAction;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A deterministic game session: which game it is, and the append-only log
-/// of actions taken in it so far. The block itself has no notion of turns,
-/// legality, or win conditions - that lives entirely in the game's
-/// WebAssembly module, which recomputes the current state from this log.
-///
-/// `game` is the module the session is played with and `display_name` is
-/// what that module called itself when the session was created. Both are
-/// fixed at creation - there is no operation to reassign them - so a client
-/// that does not have the module can still name the block.
+                                                                           
+                                                                           
+                                                                   
+                                                                         
+   
+                                                                         
+                                                                         
+                                                                            
+                                                           
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DeterministicGame {
     game: String,

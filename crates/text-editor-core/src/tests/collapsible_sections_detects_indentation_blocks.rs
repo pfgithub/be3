@@ -3,12 +3,12 @@ use super::*;
 #[test]
 fn collapsible_sections_detects_indentation_blocks() {
     let lines = [
-        "outer",          // 0
-        "    inner",      // 1
-        "        nested", // 2
-        "",               // 3
-        "    inner2",     // 4
-        "trailing",       // 5
+        "outer",
+        "    inner",
+        "        nested",
+        "",
+        "    inner2",
+        "trailing",
     ];
     let content = lines.join("\n");
     let offset = |index: usize| -> usize { lines[..index].iter().map(|line| line.len() + 1).sum() };
@@ -19,8 +19,7 @@ fn collapsible_sections_detects_indentation_blocks() {
         .iter()
         .map(|section| section.line_start)
         .collect::<Vec<_>>();
-    // "nested", "inner2" and "trailing" have no more-indented following line,
-    // so they aren't collapsible.
+
     assert_eq!(starts, vec![offset(0), offset(1)]);
 
     let outer = sections[0];

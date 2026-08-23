@@ -28,7 +28,6 @@ async fn sharing_requires_edit_access_to_the_block() {
     create(&mut owner_socket, block, vec![]).await;
     set_access(&mut owner_socket, block, viewer.id, BlockAccess::View).await;
 
-    // Being able to read a block is not enough to hand it on to others.
     let mut viewer_socket = server.connect_to(&viewer.token, workspace.id).await;
     assert!(matches!(
         set_access(&mut viewer_socket, block, stranger.id, BlockAccess::View).await,
@@ -52,7 +51,6 @@ async fn sharing_requires_edit_access_to_the_block() {
         }
     ));
 
-    // Once they can edit it, they can share it on.
     set_access(&mut owner_socket, block, viewer.id, BlockAccess::Edit).await;
     assert!(matches!(
         set_access(&mut viewer_socket, block, stranger.id, BlockAccess::View).await,

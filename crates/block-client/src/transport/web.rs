@@ -7,9 +7,6 @@ use wasm_bindgen_futures::JsFuture;
 
 use super::SocketMessage;
 
-/// Runs the block client worker as a task on the browser's event loop. There is
-/// no thread to move it to, so the worker shares the main thread with the UI
-/// and only makes progress while the UI is between frames.
 pub(crate) fn spawn_worker<F>(future: F)
 where
     F: Future<Output = ()> + 'static,
@@ -17,7 +14,6 @@ where
     wasm_bindgen_futures::spawn_local(future);
 }
 
-/// Describes a `JsValue` error for a message, which is otherwise opaque.
 fn describe(error: &JsValue) -> String {
     error
         .as_string()
@@ -32,8 +28,7 @@ fn describe(error: &JsValue) -> String {
 pub(crate) struct Socket {
     socket: web_sys::WebSocket,
     events: mpsc::UnboundedReceiver<Result<SocketMessage, String>>,
-    /// The event handlers are owned here: dropping a `Closure` invalidates the
-    /// function the browser holds, so they must outlive the socket.
+
     _handlers: Vec<Closure<dyn FnMut(web_sys::Event)>>,
     _on_message: Closure<dyn FnMut(web_sys::MessageEvent)>,
 }
@@ -44,8 +39,7 @@ impl Socket {
             .map_err(|error| format!("failed to connect to {url}: {}", describe(&error)))?;
         let (events, events_rx) = mpsc::unbounded();
         let (opened, opened_rx) = oneshot::channel();
-        // The handshake finishes with whichever of `open`, `error`, or `close`
-        // fires first, and each may only report once.
+
         let opened = Rc::new(RefCell::new(Some(opened)));
 
         let on_message = {
@@ -75,8 +69,6 @@ impl Socket {
             let opened = Rc::clone(&opened);
             let url = url.to_owned();
             Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
-                // The browser does not report why a websocket failed, to keep
-                // cross-origin failures from leaking information to the page.
                 let message = format!("block server connection to {url} failed");
                 match opened.borrow_mut().take() {
                     Some(opened) => {
@@ -131,8 +123,6 @@ impl Socket {
 
 impl Drop for Socket {
     fn drop(&mut self) {
-        // Detach the handlers before their closures are dropped, so a late
-        // event cannot reach freed functions.
         self.socket.set_onmessage(None);
         self.socket.set_onopen(None);
         self.socket.set_onerror(None);
@@ -141,11 +131,6 @@ impl Drop for Socket {
     }
 }
 
-/// POSTs a JSON body and returns the response status and body.
-///
-/// `fetch` has no timeout of its own, so management requests wait as long as
-/// the browser keeps the request alive rather than the native client's
-/// `MANAGEMENT_TIMEOUT`.
 pub(crate) async fn post_json(url: String, body: Vec<u8>) -> Result<(u16, String), String> {
     let window = web_sys::window().ok_or("no browser window is available")?;
 

@@ -24,7 +24,6 @@ fn connection_stub_extends_outward_from_the_wired_port() {
         triangles: Vec::new(),
     };
 
-    // Same width as a regular wire and reaching the flush wire's centerline.
     let scale = Scale::ONE.get() as f32;
     let half_thickness = (scale * 0.36).max(0.08);
     let length = scale * 0.5;
@@ -47,7 +46,6 @@ fn connection_stub_extends_outward_from_the_wired_port() {
         let bl = world_to_clip([left, bottom], &frame);
         let br = world_to_clip([right, bottom], &frame);
 
-        // Direction is irrelevant to the stub; it always renders as a wire.
         for direction in [ConnectionDirection::Input, ConnectionDirection::Output] {
             let stub = DrawStub::for_connection(
                 &component,
@@ -64,20 +62,16 @@ fn connection_stub_extends_outward_from_the_wired_port() {
             );
             let vertices = stub_vertices(&[stub], &frame);
 
-            // Two triangles spanning the boundary and the wire centerline.
             assert_eq!(vertices.len(), 6);
             assert_eq!(
                 vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
                 vec![tl, tr, bl, bl, tr, br],
             );
 
-            // Carries the connected net's value so it shows the live on/off
-            // state, and is drawn in the wire color.
             assert!(vertices.iter().all(|v| v.value_index == 3
                 && v.scale == scale
                 && v.fill_color == DrawTriangle::WIRE_COLOR));
 
-            // bit_coord runs across the stub's width, from 0 to scale.
             let bits: Vec<f32> = vertices.iter().map(|v| v.bit_coord).collect();
             assert!(bits.contains(&0.0));
             assert!(bits.contains(&scale));

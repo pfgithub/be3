@@ -13,8 +13,8 @@ fn repeated_labels_get_unique_field_names() {
             },
         );
     }
-    // An unlabelled widget still needs a name, and a keyword-like label
-    // cannot be used verbatim.
+                                                                        
+                               
     push(
         &mut builder,
         GuiWidgetKind::Checkbox {

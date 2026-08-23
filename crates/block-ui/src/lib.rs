@@ -5,9 +5,6 @@ use block_client::{BlockHandleAccess, CachedBlock};
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
 
-/// What the app knows about the registered block types: enough to name and
-/// illustrate a block whose editor is not open. The host answers from its
-/// editor registry; a plugin editor answers from the catalog the host sent it.
 pub trait BlockTypes {
     fn display_name(&self, block_type: Uuid) -> Option<&str>;
     fn icon(&self, block_type: Uuid) -> Option<MaterialIcon>;
@@ -18,8 +15,6 @@ pub struct BlockTypeEntry {
     pub icon: Option<MaterialIcon>,
 }
 
-/// A standalone answer to [`BlockTypes`], for anything that is told about the
-/// block types rather than owning their registration.
 #[derive(Default)]
 pub struct BlockCatalog {
     types: HashMap<Uuid, BlockTypeEntry>,
@@ -45,10 +40,6 @@ impl BlockTypes for BlockCatalog {
     }
 }
 
-/// A block's icon and display name, along with whether the name was
-/// auto-derived from the block's content rather than chosen by the user.
-/// Shared by every place that shows a block's name, so an automatic name can
-/// be marked as such (e.g. italicized) consistently.
 pub struct BlockLabel {
     pub block_type: Uuid,
     pub icon: Option<MaterialIcon>,
@@ -80,8 +71,6 @@ impl BlockLabel {
         }
     }
 
-    /// For a block type and its raw property map, e.g. from a
-    /// [`BlockReference`] or [`CachedBlock`].
     pub fn for_properties(
         types: &dyn BlockTypes,
         block_type: Uuid,
@@ -94,23 +83,18 @@ impl BlockLabel {
         )
     }
 
-    /// For a listed [`BlockReference`].
     pub fn for_reference(types: &dyn BlockTypes, reference: &BlockReference) -> Self {
         Self::for_properties(types, reference.block_type, &reference.properties)
     }
 
-    /// For a [`CachedBlock`].
     pub fn for_cached(types: &dyn BlockTypes, cached: &CachedBlock) -> Self {
         Self::for_properties(types, cached.block_type, &cached.properties)
     }
 
-    /// For a block whose editor is open locally.
     pub fn for_handle(types: &dyn BlockTypes, handle: &dyn BlockHandleAccess) -> Self {
         Self::new(types, handle.block_type(), handle.block_name().as_ref())
     }
 
-    /// The name alone, italicized if it was auto-derived rather than chosen
-    /// by the user.
     pub fn rich_text(&self) -> egui::RichText {
         let text = egui::RichText::new(&self.name);
         if self.automatic {
@@ -120,8 +104,6 @@ impl BlockLabel {
         }
     }
 
-    /// Icon and name combined for a widget (button, label, ...), the name
-    /// italicized if automatic.
     pub fn widget_text(&self, style: &egui::Style) -> egui::WidgetText {
         let Some(icon) = self.icon else {
             return self.rich_text().into();
@@ -143,10 +125,6 @@ impl BlockLabel {
     }
 }
 
-/// Lays out `text` for direct painting, matching
-/// [`egui::Painter::layout_no_wrap`] but italicizing it when `automatic` -
-/// for marking an auto-derived block name in painter-based (non-widget)
-/// rendering.
 pub fn name_galley(
     painter: &egui::Painter,
     text: &str,
@@ -168,7 +146,6 @@ pub fn name_galley(
     ))
 }
 
-/// [`egui::Painter::text`], but italicizing the text when `automatic`.
 pub fn paint_name(
     painter: &egui::Painter,
     pos: egui::Pos2,

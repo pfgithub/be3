@@ -9,7 +9,6 @@ fn editing_resets_challenge_test_results() {
         editor.challenge.as_ref().unwrap().data.ticks
     );
 
-    // Any grid edit must invalidate the compiled test and clear its results.
     editor
         .grid
         .add_component(Point::new(20, 20), Rotation::Up, ComponentKind::Led);

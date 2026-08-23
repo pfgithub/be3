@@ -12,8 +12,8 @@ fn video_serialization_round_trips() {
             frame_rate: super::VideoFrameRate::new(24, 1),
         },
     );
-    // Effects are reserved, but a clip that carries one must survive a round
-    // trip once they exist.
+                                                                             
+                            
     let mut effected = video.clip(attached).unwrap().clone();
     effected.effects.push(VideoEffect {
         id: Uuid::new_v4(),

@@ -23,8 +23,6 @@ impl ScrollNode {
 }
 
 impl Element for ScrollNode {
-    // A scroll view's content is unbounded and only measured lazily for the
-    // visible range during layout, so it has no useful intrinsic size.
     fn measure(&self, _doc: &Document, _painter: &Painter) -> Vec2 {
         Vec2::ZERO
     }

@@ -24,9 +24,9 @@ async fn management_client_round_trips_device_key_transfer() {
         .await
         .unwrap();
 
-    // A second device logs in with a throwaway candidate key. The account
-    // already has an identity key, so the candidate is not adopted and this
-    // device has no usable private key of its own.
+                                                                          
+                                                                            
+                                                   
     let device_b = client
         .login(
             "linked@example.com",
@@ -43,8 +43,8 @@ async fn management_client_round_trips_device_key_transfer() {
         .await
         .unwrap();
 
-    // Device A notices the pending request and fulfils it by sealing its
-    // real account keypair to the ephemeral public key.
+                                                                         
+                                                        
     let pending = client
         .list_key_transfer_request(&device_a.token)
         .await
@@ -64,8 +64,8 @@ async fn management_client_round_trips_device_key_transfer() {
         None
     );
 
-    // Device B collects and unseals it, ending up with the exact same
-    // account identity as device A -- and the transfer is single-use.
+                                                                      
+                                                                      
     let wrapped = client
         .poll_key_transfer(&device_b.token)
         .await

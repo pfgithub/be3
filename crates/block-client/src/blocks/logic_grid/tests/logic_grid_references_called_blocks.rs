@@ -7,7 +7,7 @@ fn logic_grid_references_called_blocks() {
     let (_client, block) = client_with_grid();
     let compiled = Uuid::new_v4();
     add(&block, |id| subcomponent(id, compiled));
-    // A second instance of the same component is one reference, not two.
+                                                                         
     add(&block, |id| subcomponent(id, compiled));
     add(&block, |id| led(id, Point::new(8, 8)));
 

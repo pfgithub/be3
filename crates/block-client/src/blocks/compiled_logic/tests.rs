@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use super::{CompiledLogic, CompiledLogicOperation};
 
-/// A program that inverts its one input into its one output, calling `calls`
-/// along the way.
+                                                                             
+                  
 fn compiled(source: Uuid, calls: Vec<Uuid>) -> CompiledLogic {
     let instructions = vec![Instruction::Not {
         input: 0,

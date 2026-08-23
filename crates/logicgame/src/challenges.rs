@@ -64,8 +64,6 @@ pub struct Challenge {
     pub ticks: usize,
 }
 
-/// Builds a combinational two-input, one-output challenge over random single-bit
-/// inputs, where `op` maps the inputs to the expected output for each tick.
 fn binary_gate_challenge(
     rng: &mut impl RngCore,
     goal: &str,
@@ -104,8 +102,6 @@ fn binary_gate_challenge(
     }
 }
 
-/// Builds a combinational three-input, one-output challenge over random
-/// single-bit inputs.
 fn ternary_gate_challenge(
     rng: &mut impl RngCore,
     goal: &str,
@@ -253,8 +249,6 @@ fn memory_cell_challenge(rng: &mut impl RngCore) -> Challenge {
     }
 }
 
-/// Builds a ripple-carry adder challenge for `width`-bit operands plus a carry-in,
-/// exhaustively covering every combination of inputs.
 fn adder_challenge(width: u8, goal: &str) -> Challenge {
     let scale = Scale::new(width).expect("adder width is a valid scale");
     let span = 1u64 << width;
@@ -377,8 +371,6 @@ pub fn generate_challenge(challenge: ChallengeId) -> Challenge {
                 let r = rng.next_u64() & 1;
                 set.push(s);
                 reset.push(r);
-                // VALUE reflects the state stored from the previous tick; this tick's
-                // SET/RESET only take effect on the following tick.
                 value.push(state);
                 state = if s == 1 {
                     1
@@ -420,8 +412,6 @@ pub fn generate_challenge(challenge: ChallengeId) -> Challenge {
             for _ in 0..1000 {
                 let t = rng.next_u64() & 1;
                 toggle.push(t);
-                // VALUE reflects the state stored from the previous tick; this tick's
-                // TOGGLE only flips the state on the following tick.
                 value.push(state);
                 state ^= t;
             }

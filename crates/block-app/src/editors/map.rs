@@ -1,6 +1,5 @@
 mod geo;
-// Tiles are downloaded, decoded, and rasterised on a worker thread that the
-// browser build does not start yet, so this pipeline is unreachable there.
+
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod mvt;
 mod points;
@@ -46,16 +45,12 @@ use super::{
 };
 use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
 
-/// Size of the whole world (the intrinsic content) at 100% viewport zoom.
 const WORLD_POINTS: f32 = 1024.0;
-/// Screen size of one tile at an integer map zoom level.
+
 const TILE_POINTS: f32 = 256.0;
-/// Viewport zoom that reaches the deepest source tiles: zoom 14 tiles are
-/// 256 points each, so full detail spans 2^14 tiles * 256 points against the
-/// 1024 point world.
+
 const MAX_VIEWPORT_ZOOM: f32 = 4096.0;
-/// Previews zoom no further than the tab viewport can, which keeps tile
-/// placement inside the precision an f32 screen rect can carry.
+
 const MAX_PREVIEW_WORLD: f64 = (WORLD_POINTS * MAX_VIEWPORT_ZOOM) as f64;
 const ZOOM_STEP: f32 = 1.25;
 const BACKGROUND: Color32 = Color32::from_rgb(242, 239, 233);
@@ -108,9 +103,9 @@ pub(super) struct MapEditor {
     dependencies: ReferenceList,
     picker: BlockPicker,
     selected: Option<Uuid>,
-    /// The marker being dragged, with the offset from the pointer to its tip.
+
     dragged: Option<(Uuid, Vec2)>,
-    /// Where the next block added through the picker should land.
+
     pending_position: Option<MapCoordinate>,
     pending_file_drop: Option<MapCoordinate>,
     clipboard_image_paste: ClipboardImagePaste,
@@ -118,9 +113,9 @@ pub(super) struct MapEditor {
     fit_region_requested: bool,
     center_requested: Option<MapCoordinate>,
     grouped_edit_active: bool,
-    /// The area the direct editor last showed, used when capturing a region.
+
     visible_region: MapRegion,
-    /// The centre of that area, readable from the shared `add_child` path.
+
     view_center: Cell<MapCoordinate>,
     reference_cache: ReferenceResolutionCache,
     pending_points: ReferenceClassificationQueue<(Uuid, MapCoordinate)>,
@@ -169,7 +164,6 @@ impl MapEditor {
             .map_or(MapRegion::WORLD, |map| map.displayed_region())
     }
 
-    /// Labels of the blocks the map points at, for marker labels and lists.
     fn dependency_labels(&self, editors: &EditorAccess<'_>) -> HashMap<Uuid, super::BlockLabel> {
         self.dependencies
             .read()
@@ -298,9 +292,7 @@ impl MapEditor {
 
     fn ensure_tile(&mut self, id: TileId) {
         let state = self.tiles.entry(id).or_insert(TileState::Loading);
-        // Keep re-requesting loading tiles: the worker serves the most
-        // recent requests first, so the tiles still in view stay ahead of
-        // any backlog from earlier views.
+
         if matches!(state, TileState::Loading) {
             if let Some(worker) = &self.worker {
                 worker.request(id);
@@ -308,7 +300,6 @@ impl MapEditor {
         }
     }
 
-    /// Draws the world map into `world_rect`, clipped to `clip`.
     fn draw_map(&mut self, painter: &egui::Painter, world_rect: Rect, clip: Rect, opacity: f32) {
         let visible = clip.intersect(world_rect);
         if !visible.is_positive() {
@@ -384,7 +375,6 @@ impl MapEditor {
         }
     }
 
-    /// Draws one tile, falling back to a magnified ancestor while it loads.
     fn draw_tile(
         &self,
         painter: &egui::Painter,
@@ -419,7 +409,6 @@ impl MapEditor {
         painter.rect_filled(rect, 0.0, BACKGROUND.gamma_multiply(opacity));
     }
 
-    /// Places a block that arrived by drag, paste, or picker on the map.
     fn drop_position(&self, response: &egui::Response, view: MapView) -> MapCoordinate {
         response
             .ctx
@@ -463,8 +452,7 @@ impl MapEditor {
             .pending_file_drop
             .take()
             .unwrap_or_else(|| self.drop_position(response, view));
-        // Spread several files out so their markers do not sit on top of
-        // each other, using a step scaled to how far the map is zoomed in.
+
         let step = (self.visible_region.east - self.visible_region.west) * 0.03;
         for (index, file) in dropped.into_iter().enumerate() {
             let position = MapCoordinate::new(
@@ -666,9 +654,6 @@ impl MapEditor {
         }
     }
 
-    /// Draws the preview region into `rect`, cropping whatever falls outside
-    /// it. This is what hosts that cannot pan and zoom - canvases, thumbnails,
-    /// and slide playback - show.
     fn draw_preview_region_view(
         &mut self,
         painter: &egui::Painter,
@@ -702,7 +687,6 @@ impl MapEditor {
         );
     }
 
-    /// Zooms and pans the host viewport so the preview region fills the view.
     fn fit_preview_region(
         &self,
         viewport: &mut DirectEditorViewport,
@@ -833,8 +817,6 @@ impl BlockEditor for MapEditor {
         })
     }
 
-    /// Inside a canvas the map has no viewport of its own, so it shows the
-    /// preview region instead of a pannable world.
     fn embedded_direct_editor_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -894,8 +876,6 @@ impl BlockEditor for MapEditor {
                 .on_hover_text("Reload tiles")
                 .clicked()
             {
-                // Drop the worker too: it remembers which tiles it already
-                // served and would refuse to fetch them again.
                 self.worker = None;
                 self.tiles.clear();
                 self.last_error = None;
@@ -934,8 +914,6 @@ impl BlockEditor for MapEditor {
         let painter = painter.with_clip_rect(clip);
         painter.rect_filled(clip, 0.0, ui.visuals().extreme_bg_color);
 
-        // The host lets the content rect grow past the intrinsic square, so
-        // place the square world centered inside it.
         let content_rect = viewport.content_rect().unwrap_or(response.rect);
         let world_rect = Rect::from_center_size(
             content_rect.center(),
@@ -973,8 +951,6 @@ impl BlockEditor for MapEditor {
             1.0,
         );
 
-        // Wait for the block to load before spending the pending fit, so a map
-        // opened before its data arrives still zooms to its region.
         if self.fit_region_requested && self.block.read().is_some() {
             self.fit_region_requested = false;
             if let Some(region) = self.preview_region() {

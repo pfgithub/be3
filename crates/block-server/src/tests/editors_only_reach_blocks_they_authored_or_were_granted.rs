@@ -30,7 +30,6 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
 
     let mut editor_socket = server.connect_to(&editor.token, workspace.id).await;
 
-    // The block is invisible until it is shared.
     assert!(references(&mut editor_socket, BlockReferenceList::Roots)
         .await
         .is_empty());
@@ -42,11 +41,10 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
         }
     ));
 
-    // Viewers see the block and can read it, but cannot change it.
     set_access(&mut owner_socket, private, editor.id, BlockAccess::View).await;
     let listed = references(&mut editor_socket, BlockReferenceList::Roots).await;
     assert_eq!(listed.len(), 1);
-    // The listing says so too, so a client can tell before opening anything.
+
     assert_eq!(listed[0].access, BlockAccess::View);
     assert!(matches!(
         read(&mut editor_socket, private).await,
@@ -63,7 +61,6 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
         }
     ));
 
-    // Granting edit lets the same account write.
     set_access(&mut owner_socket, private, editor.id, BlockAccess::Edit).await;
     assert!(matches!(
         read(&mut editor_socket, private).await,
@@ -77,7 +74,6 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
         ServerMessage::Ok { .. }
     ));
 
-    // Withdrawing the grant hides the block again.
     set_access(&mut owner_socket, private, editor.id, BlockAccess::None).await;
     assert!(matches!(
         read(&mut editor_socket, private).await,
@@ -87,7 +83,6 @@ async fn editors_only_reach_blocks_they_authored_or_were_granted() {
         }
     ));
 
-    // Blocks the editor authors are always theirs to edit.
     let own = Uuid::new_v4();
     assert!(matches!(
         create(&mut editor_socket, own, vec![]).await,

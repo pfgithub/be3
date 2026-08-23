@@ -1,8 +1,3 @@
-//! Background download and rasterization of OpenStreetMap vector tiles.
-//!
-//! Tiles come from the OSMF vector tile service (Shortbread schema); see
-//! <https://operations.osmfoundation.org/policies/vector/>.
-
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14,7 +9,6 @@ use eframe::egui;
 use super::mvt;
 use super::raster;
 
-/// The OSMF vector tile service serves tiles up to this zoom level.
 pub(super) const SOURCE_MAX_ZOOM: u8 = 14;
 const TILE_URL_BASE: &str = "https://vector.openstreetmap.org/shortbread_v1";
 const USER_AGENT: &str = "be3-block-app/0.1 (map block editor)";
@@ -57,9 +51,7 @@ impl TileWorker {
                 .name("map-tile-worker".into())
                 .spawn(move || worker(request_receiver, result_sender, context));
         }
-        // Tiles are downloaded and rasterised on a worker thread, which the
-        // browser build has no equivalent for yet, so no tile ever arrives and
-        // the map draws without them.
+
         #[cfg(target_arch = "wasm32")]
         {
             let _ = (request_receiver, result_sender, context);
@@ -76,10 +68,6 @@ impl TileWorker {
     }
 }
 
-/// Pending tile requests, served most recent first so the tiles currently in
-/// view take priority over any backlog from earlier views. Each tile is
-/// served at most once; re-requesting a pending tile moves it back to the
-/// top.
 #[cfg(not(target_arch = "wasm32"))]
 struct RequestQueue {
     pending: Vec<TileId>,
@@ -134,7 +122,7 @@ fn worker(requests: Receiver<TileId>, results: Sender<TileResult>, context: egui
         let Some(id) = queue.pop() else {
             continue;
         };
-        // A panic must fail the one tile, not silently kill the worker.
+
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_tile(&agent, id)))
                 .unwrap_or_else(|_| {

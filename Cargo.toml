@@ -29,6 +29,7 @@ members = [
     "crates/block-editor-plugin",
     "crates/block-plugin-api",
     "crates/gpui-demo",
+    "crates/strip-rust-comments",
 ]
 resolver = "2"
 

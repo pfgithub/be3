@@ -15,13 +15,12 @@ fn queue_serves_latest_requests_first() {
     };
     queue.enqueue(first);
     queue.enqueue(second);
-    // Re-requesting a pending tile moves it back to the top.
+
     queue.enqueue(first);
 
     assert_eq!(queue.pop(), Some(first));
     assert_eq!(queue.pop(), Some(second));
 
-    // Served tiles are never served again.
     queue.enqueue(second);
     assert_eq!(queue.pop(), None);
     assert!(queue.is_empty());

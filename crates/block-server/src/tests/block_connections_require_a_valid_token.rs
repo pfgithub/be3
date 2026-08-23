@@ -4,8 +4,6 @@ use super::support::TestServer;
 async fn block_connections_require_a_valid_token() {
     let server = TestServer::start().await;
 
-    // A garbage token and a missing one are both refused before the
-    // websocket handshake completes; only a real session token works.
     assert!(server
         .try_connect_to("not-a-real-token", server.workspace_id)
         .await

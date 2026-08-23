@@ -23,7 +23,7 @@ fn scale_setting_magnifies_the_export() {
         .into_rgba8();
 
     assert_eq!(decoded.dimensions(), (96, 96));
-    // The painted pixel covers a 3x3 block, and its neighbours stay empty.
+
     for x in 3..6 {
         for y in 0..3 {
             assert_eq!(decoded.get_pixel(x, y).0, [12, 34, 56, 78], "{x},{y}");

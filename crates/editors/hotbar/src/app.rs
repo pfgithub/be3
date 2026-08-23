@@ -17,15 +17,12 @@ use block_editor_plugin::{
 };
 use uuid::Uuid;
 
-/// A hotbar is arranged from inside the grid editor that uses it. This shows
-/// what is pinned, and lets a component be unpinned or opened without having
-/// to find a grid first.
 #[derive(Default)]
 pub struct HotbarApp {
     host: EditorHost,
     client: Option<Arc<BlockClient>>,
     block: Option<BlockHandle<Hotbar>>,
-    /// Handles kept only so pinned components can be named.
+
     components: HashMap<Uuid, BlockHandle<CompiledLogic>>,
     reference_cache: ReferenceResolutionCache,
 }
@@ -145,7 +142,6 @@ impl block_editor_plugin::App for HotbarApp {
     }
 }
 
-/// The same tree with every pin of `compiled` taken out, at any depth.
 fn without_component(slots: &[HotbarSlot], compiled: BlockRef) -> Vec<HotbarSlot> {
     slots
         .iter()

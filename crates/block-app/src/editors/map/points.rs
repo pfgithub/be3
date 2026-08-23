@@ -1,5 +1,3 @@
-//! Drawing and hit testing of the blocks pinned to the map.
-
 use block_client::{
     block_ref::BlockRef,
     blocks::map::{MapColor, MapPoint},
@@ -23,8 +21,6 @@ pub(super) fn marker_color(color: MapColor) -> Color32 {
     }
 }
 
-/// The screen rect a marker occupies, used to keep off-screen markers from
-/// being drawn or picked.
 fn marker_rect(tip: Pos2) -> Rect {
     Rect::from_min_max(
         Pos2::new(tip.x - HEAD_RADIUS, tip.y - HEIGHT - HEAD_RADIUS),
@@ -106,7 +102,6 @@ fn draw_label(painter: &Painter, tip: Pos2, label: &str, automatic: bool, opacit
     painter.galley(anchor.min, text_galley, text_color);
 }
 
-/// The topmost marker under `position`, matching the order markers are drawn.
 pub(super) fn point_at(points: &[MapPoint], view: MapView, position: Pos2) -> Option<Uuid> {
     points
         .iter()

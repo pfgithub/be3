@@ -1,8 +1,5 @@
 use super::support::TestServer;
 
-/// A browser will not send a management command at all unless the preflight is
-/// answered, and will not hand the response back to the page without the
-/// allow-origin header, so the web build depends on both.
 #[tokio::test]
 async fn management_answers_a_cors_preflight() {
     let server = TestServer::start().await;
@@ -31,8 +28,6 @@ async fn management_answers_a_cors_preflight() {
         .header("access-control-allow-headers")
         .is_some_and(|headers| headers.contains("content-type")));
 
-    // The command's own response needs the header too; the preflight only
-    // grants permission to send it.
     let response = tokio::task::spawn_blocking(move || {
         match ureq::post(&url)
             .set("content-type", "application/json")

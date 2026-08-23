@@ -1,14 +1,8 @@
-//! Web Mercator projection between geographic coordinates and screen space.
-
 use std::f64::consts::PI;
 
 use block_client::blocks::map::{MapCoordinate, MapRegion, MAX_LATITUDE};
 use eframe::egui::{Pos2, Rect, Vec2};
 
-/// Normalized world coordinates run 0..1 over the whole Web Mercator world.
-/// A view is the placement of that square in screen space; it is kept in f64
-/// because deep zoom levels push the square far outside the screen, where f32
-/// positions quantize to several pixels.
 #[derive(Clone, Copy)]
 pub(super) struct MapView {
     origin: [f64; 2],
@@ -16,7 +10,6 @@ pub(super) struct MapView {
 }
 
 impl MapView {
-    /// A view showing the whole world inside the given square screen rect.
     pub(super) fn from_world_rect(world: Rect) -> Self {
         Self {
             origin: [f64::from(world.left()), f64::from(world.top())],
@@ -24,8 +17,6 @@ impl MapView {
         }
     }
 
-    /// The smallest view that covers `rect` entirely while centering `region`.
-    /// `max_size` bounds how far the view may zoom in.
     pub(super) fn covering(region: MapRegion, rect: Rect, max_size: f64) -> Self {
         let normalized = normalized_rect(region);
         let size = (f64::from(rect.width()) / normalized.width())
@@ -41,8 +32,6 @@ impl MapView {
         }
     }
 
-    /// The screen rect of the whole world, which is what the tile painter
-    /// draws into.
     pub(super) fn world_rect(self) -> Rect {
         Rect::from_min_size(
             Pos2::new(self.origin[0] as f32, self.origin[1] as f32),
@@ -71,7 +60,6 @@ impl MapView {
         )
     }
 
-    /// The geographic area covered by a screen rect.
     pub(super) fn region(self, rect: Rect) -> MapRegion {
         let top_left = self.coordinate(rect.left_top());
         let bottom_right = self.coordinate(rect.right_bottom());
@@ -84,7 +72,6 @@ impl MapView {
     }
 }
 
-/// The region in normalized world coordinates as `[min, max]` pairs.
 struct NormalizedRect {
     min: [f64; 2],
     max: [f64; 2],
@@ -114,8 +101,6 @@ fn normalized_rect(region: MapRegion) -> NormalizedRect {
     }
 }
 
-/// The aspect ratio the region has once projected, so hosts can shape the map
-/// without distorting it.
 pub(super) fn region_aspect_ratio(region: MapRegion) -> f32 {
     let normalized = normalized_rect(region);
     (normalized.width() / normalized.height()) as f32

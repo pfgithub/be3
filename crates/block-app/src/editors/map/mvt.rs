@@ -1,6 +1,3 @@
-//! Minimal decoder for the Mapbox Vector Tile format, covering the subset
-//! needed to render OpenStreetMap Shortbread tiles.
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum GeometryKind {
     Point,
@@ -36,10 +33,9 @@ impl TagValue {
 #[derive(Clone, Debug)]
 pub(super) struct Feature {
     pub kind: GeometryKind,
-    /// Decoded coordinate paths in tile-local units: rings for polygons,
-    /// polylines for lines, and single-point paths for points.
+
     pub paths: Vec<Vec<[f32; 2]>>,
-    /// Key and value indices into the owning layer's tables.
+
     pub tags: Vec<(u32, u32)>,
 }
 
@@ -192,7 +188,6 @@ fn decode_geometry(geometry: &[u32], kind: GeometryKind) -> Vec<Vec<[f32; 2]>> {
         let count = (command >> 3) as usize;
         match operation {
             1 => {
-                // MoveTo starts a new path per point.
                 for _ in 0..count {
                     if index + 1 >= geometry.len() {
                         return finish_geometry(paths, current);
@@ -220,7 +215,7 @@ fn decode_geometry(geometry: &[u32], kind: GeometryKind) -> Vec<Vec<[f32; 2]>> {
                     current.push([x as f32, y as f32]);
                 }
             }
-            // ClosePath: rings are closed implicitly when filled.
+
             7 => {}
             _ => return finish_geometry(paths, current),
         }

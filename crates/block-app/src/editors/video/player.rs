@@ -15,8 +15,6 @@ const DEFAULT_ASPECT_RATIO: f32 = 16.0 / 9.0;
 const PLAYER_MARGIN: f32 = 8.0;
 
 impl VideoEditor {
-    /// The frame under the playhead. No clip carries video or audio yet, so
-    /// this is the still preview of every block showing at that frame.
     pub(super) fn player_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -54,8 +52,6 @@ impl VideoEditor {
         let frame = fit_rect(rect.shrink(PLAYER_MARGIN), ratio);
         painter.rect_filled(frame, 0.0, Color32::BLACK);
 
-        // The clips come out from the base up, so drawing them in order puts
-        // each attachment over the clip it hangs off.
         for (index, clip_id) in visible.iter().enumerate() {
             let Some(clip) = video.clip(*clip_id) else {
                 continue;

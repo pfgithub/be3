@@ -14,8 +14,6 @@ use crate::editors::{BlockLabel, EditorAccess};
 use super::VideoEditor;
 
 impl VideoEditor {
-    /// The effects stack of the selected clip, with the clip's own placement
-    /// above it. No effects exist yet, so the stack is always empty.
     pub(super) fn effects_ui(
         &mut self,
         ui: &mut egui::Ui,

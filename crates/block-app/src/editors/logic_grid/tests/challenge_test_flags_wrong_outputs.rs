@@ -2,9 +2,6 @@ use super::*;
 
 #[test]
 fn challenge_test_flags_wrong_outputs() {
-    // OUT is driven directly by the wired-OR of A and B (no NOT gate), so it
-    // computes OR, which differs from NOR on every tick. All ports are placed,
-    // so the failure is a wrong output rather than a missing port.
     let mut grid = Grid::new();
     grid.add_component_with_explicit_io(
         Point::new(0, 1),
@@ -55,7 +52,6 @@ fn challenge_test_flags_wrong_outputs() {
             "OR must not satisfy the NOR challenge"
         );
 
-        // The first tick's recorded actual differs from the expected NOR value.
         let expected = challenge.data.outputs[0].values[0];
         let actual = challenge.test.actual[0][0];
         assert_ne!(actual, expected);

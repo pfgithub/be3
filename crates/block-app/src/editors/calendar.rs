@@ -81,9 +81,6 @@ enum CalendarView {
     Month,
 }
 
-/// The date and time fields the event form edits, kept separate from the
-/// event's unix-seconds representation so partially typed values do not have
-/// to round-trip through it.
 #[derive(Clone, Copy)]
 struct DateTimeFields {
     year: i32,
@@ -147,8 +144,7 @@ impl EventForm {
 pub(super) struct CalendarEditor {
     block: BlockHandle<Calendar>,
     view: CalendarView,
-    /// The focused day: the shown day in day view, a day in the shown week
-    /// in week view, or a day in the shown month in month view.
+
     anchor_day: i64,
     form: Option<EventForm>,
 }
@@ -657,9 +653,6 @@ fn date_time_row(ui: &mut egui::Ui, fields: &mut DateTimeFields) {
     });
 }
 
-/// Greedily assigns each of `events` (sorted by start) to the first lane
-/// whose previous event has already ended, so overlapping events are shown
-/// side by side instead of stacked on top of each other.
 fn assign_lanes(events: &[&CalendarEvent]) -> (Vec<usize>, usize) {
     let mut lane_ends: Vec<i64> = Vec::new();
     let mut lanes = Vec::with_capacity(events.len());
@@ -717,8 +710,6 @@ fn weekday_from_days(days_since_epoch: i64) -> u32 {
     (days_since_epoch + 4).rem_euclid(7) as u32
 }
 
-/// Howard Hinnant's civil-calendar algorithm: proleptic Gregorian
-/// year/month/day to days since the Unix epoch.
 fn days_from_civil(year: i32, month: u8, day: u8) -> i64 {
     let year = year - i32::from(month <= 2);
     let era = if year >= 0 { year } else { year - 399 } / 400;
@@ -730,7 +721,6 @@ fn days_from_civil(year: i32, month: u8, day: u8) -> i64 {
     (era * 146_097 + day_of_era - 719_468) as i64
 }
 
-/// The inverse of `days_from_civil`.
 fn civil_from_days(days_since_epoch: i64) -> (i32, u8, u8) {
     let days = days_since_epoch + 719_468;
     let era = if days >= 0 { days } else { days - 146_096 } / 146_097;

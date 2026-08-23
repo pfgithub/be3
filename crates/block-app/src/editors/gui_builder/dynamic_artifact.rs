@@ -12,8 +12,6 @@ use uuid::Uuid;
 
 use super::super::{DynamicArtifactRegeneration, DynamicArtifactSupport};
 
-/// The descriptor payload: which design the code came from, and how it is
-/// generated.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct CodeArtifact {
     source: Uuid,
@@ -22,9 +20,8 @@ struct CodeArtifact {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct CodeSettings {
-    /// Empty means the struct is named after the design title.
     struct_name: String,
-    /// Whether regenerating also renames the artifact after the design.
+
     rename_with_source: bool,
 }
 
@@ -66,7 +63,6 @@ pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
     }
 }
 
-/// The code a freshly exported artifact starts with.
 pub(super) fn generate_initial(builder: &GuiBuilder) -> TextDocument {
     generate(builder, &CodeSettings::default())
 }
@@ -146,7 +142,7 @@ struct GuiBuilderRegeneration {
 impl DynamicArtifactRegeneration for GuiBuilderRegeneration {
     fn poll(&mut self) -> Option<Result<(), String>> {
         let source = self.source.read()?;
-        // Both blocks have to be resolved before the target is overwritten.
+
         self.target.read()?;
         let generated = generate(&source, &self.settings);
         drop(source);

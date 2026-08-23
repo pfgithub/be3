@@ -10,8 +10,6 @@ use uuid::Uuid;
 
 const MAX_EXPORT_SCALE: u32 = 16;
 
-/// The descriptor payload: which drawing the image came from, and how it is
-/// exported.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct ImageArtifact {
     source: Uuid,
@@ -20,7 +18,6 @@ struct ImageArtifact {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct ImageSettings {
-    /// Nearest-neighbour magnification, so exports stay crisp when scaled.
     scale: u32,
 }
 
@@ -52,7 +49,6 @@ pub fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
     }
 }
 
-/// The image a freshly exported artifact starts with.
 pub fn generate_initial(art: &PixelArt, source_name: &str) -> Result<Image, String> {
     generate(art, source_name, &ImageSettings::default())
 }
@@ -73,7 +69,6 @@ fn generate(art: &PixelArt, source_name: &str, settings: &ImageSettings) -> Resu
     Ok(Image::new(format!("{source_name} Export"), png))
 }
 
-/// Repeats every pixel `scale` times in both directions.
 fn magnified(art: &PixelArt, scale: u32) -> Vec<u8> {
     let pixels = art.rgba_bytes();
     if scale == 1 {

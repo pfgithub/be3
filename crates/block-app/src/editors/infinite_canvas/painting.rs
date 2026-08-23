@@ -355,11 +355,6 @@ pub(super) fn with_opacity(color: Color32, opacity: f32) -> Color32 {
     )
 }
 
-/// Paints other clients' pointers and selections on this canvas, in the
-/// color each one is shown with in the "Also viewing" indicator. A remote
-/// cursor whose color hasn't arrived yet (a brief race on the first frame
-/// it appears) is skipped rather than shown in a fallback color, since the
-/// indicator would otherwise disagree with it.
 pub(super) fn paint_remote_presence(
     editor: &InfiniteCanvasEditor,
     client: &BlockClient,

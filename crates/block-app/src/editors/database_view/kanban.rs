@@ -18,8 +18,6 @@ const PREVIEW_COLUMN_GAP: f32 = 6.0;
 const PREVIEW_CARD_HEIGHT: f32 = 16.0;
 const PREVIEW_CARD_GAP: f32 = 4.0;
 
-/// Selection and drag state for the kanban board. Cards are addressed by
-/// their row's storage index, the same as spreadsheet cells.
 #[derive(Default)]
 pub(super) struct KanbanView {
     selected: Option<usize>,
@@ -211,9 +209,6 @@ impl KanbanView {
     }
 }
 
-/// Dropdown that chooses the enum field whose options become the board's
-/// columns. Only enum fields have a fixed set of options, so only they can
-/// stand in for a "status".
 pub(super) fn status_field_picker(
     ui: &mut egui::Ui,
     view: &BlockHandle<DatabaseView>,
@@ -249,8 +244,6 @@ pub(super) fn status_field_picker(
     });
 }
 
-/// Column-and-card-count thumbnail, painted at the block's on-canvas size
-/// rather than the interactive layout the direct editor uses.
 pub(super) fn paint_preview(
     context: BlockRenderContext<'_>,
     rows: &[DatabaseRow],

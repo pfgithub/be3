@@ -12,7 +12,7 @@ fn calendar_adds_updates_and_removes_events() {
             event: event.clone(),
         },
     );
-    // Re-adding an event with the same id is ignored.
+                                                      
     Calendar::apply_operation(
         &mut calendar,
         &CalendarOperation::AddEvent {
@@ -32,7 +32,7 @@ fn calendar_adds_updates_and_removes_events() {
     );
     assert_eq!(calendar.event(event.id), Some(&renamed));
 
-    // Updating an event that is no longer on the calendar is ignored.
+                                                                      
     Calendar::apply_operation(
         &mut calendar,
         &CalendarOperation::UpdateEvent {

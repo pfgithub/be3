@@ -39,7 +39,6 @@ fn zigzag(value: i32) -> u32 {
     ((value << 1) ^ (value >> 31)) as u32
 }
 
-/// Encodes a feature message wrapped as a layer `features` field.
 fn feature(kind: u32, tags: &[u32], geometry: &[u32]) -> Vec<u8> {
     let mut bytes = packed(2, tags);
     bytes.extend(field(3, 0));

@@ -7,8 +7,6 @@ use uuid::Uuid;
 
 use crate::editors::SidebarDragPayload;
 
-/// A block the app is dragging over a plugin region, in that region's own
-/// coordinates.
 pub(super) struct BlockDragEvent {
     pub(super) position: egui::Vec2,
     pub(super) block_id: Uuid,
@@ -16,7 +14,6 @@ pub(super) struct BlockDragEvent {
     pub(super) dropped: bool,
 }
 
-/// Reads a sidebar drag hovering over, or released on, a plugin region.
 pub(super) fn block_drag(response: &egui::Response) -> Option<BlockDragEvent> {
     let (payload, dropped) = match response.dnd_release_payload::<SidebarDragPayload>() {
         Some(payload) => (payload, true),

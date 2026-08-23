@@ -7,8 +7,6 @@ use eframe::egui;
 const CELL_WIDTH: f32 = 24.0;
 const CELL_HEIGHT: f32 = 24.0;
 
-/// One longhand addition to fill in: the operands as written, and the carry and
-/// sum bits the player has to work out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct BinaryAdditionProblem {
     operands: Vec<String>,
@@ -62,9 +60,6 @@ impl BinaryAdditionProblem {
     }
 }
 
-/// The quiz for the level that is worked out on paper. The answers live on the
-/// game block, so what is filled in here is what everyone reading the game
-/// sees; only which page is open and whether it has been checked are local.
 pub(super) struct BinaryAdditionQuiz {
     problems: Vec<BinaryAdditionProblem>,
     current_problem: usize,
@@ -86,7 +81,6 @@ impl Default for BinaryAdditionQuiz {
 }
 
 impl BinaryAdditionQuiz {
-    /// Room the quiz needs, so the tab can size itself before drawing.
     pub(super) fn height(&self) -> f32 {
         let rows = self.problems[self.current_problem].operands.len() + 5;
         CELL_HEIGHT * rows as f32 + 120.0
@@ -149,7 +143,6 @@ impl BinaryAdditionQuiz {
         });
     }
 
-    /// The stored answers for `problem`, padded to the rows it actually has.
     fn answers(
         &self,
         block: &BlockHandle<LogicGame>,
@@ -241,7 +234,6 @@ impl BinaryAdditionQuiz {
     }
 }
 
-/// Draws one row of blanks. Returns `true` when a blank was cycled.
 fn bit_buttons(
     ui: &mut egui::Ui,
     answers: &mut [Option<bool>],
@@ -272,7 +264,6 @@ fn bit_buttons(
     changed
 }
 
-/// Blank, then 0, then 1, then blank again.
 fn next_answer(answer: Option<bool>) -> Option<bool> {
     match answer {
         None => Some(false),
@@ -289,8 +280,6 @@ fn matches(answers: &[Option<bool>], expected: &[bool]) -> bool {
             .all(|(answer, expected)| *answer == Some(*expected))
 }
 
-/// Stored rows are whatever length they were written at, so they are trimmed or
-/// padded to the row the problem actually has.
 fn fitted(mut values: Vec<Option<bool>>, length: usize) -> Vec<Option<bool>> {
     values.resize(length, None);
     values

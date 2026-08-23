@@ -23,21 +23,18 @@ const RULER_HEIGHT: f32 = 22.0;
 const LANE_HEIGHT: f32 = 38.0;
 const LANE_GAP: f32 = 3.0;
 const TRIM_HANDLE_WIDTH: f32 = 6.0;
-/// Empty timeline kept past the end so the last clip can be dragged out.
+
 const TAIL_PADDING: f32 = 240.0;
 const MIN_TICK_SPACING: f64 = 64.0;
 const TICK_SECONDS: [f64; 12] = [
     1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0, 3600.0,
 ];
 
-/// A clip and the row it is drawn on. Base clips share row zero; every
-/// attached clip gets a row of its own, under the clip it hangs off.
 struct ClipRow {
     timing: VideoClipTiming,
     lane: usize,
 }
 
-/// `frame` as minutes, seconds and frames.
 pub(super) fn timecode(frame_rate: VideoFrameRate, frame: u64) -> String {
     let fps = (frame_rate.frames_per_second().round() as u64).max(1);
     let seconds = frame / fps;
@@ -69,8 +66,6 @@ fn lane_rect(content: Rect, lane: usize) -> Rect {
     )
 }
 
-/// The lane a `y` coordinate falls in. Lane zero is the base track; every
-/// other lane belongs to whichever clip is attached there.
 fn lane_at(content: Rect, y: f32) -> usize {
     ((y - content.top() - RULER_HEIGHT) / (LANE_HEIGHT + LANE_GAP))
         .floor()
@@ -148,8 +143,6 @@ fn would_create_cycle(video: &Video, clip_id: Uuid, parent: Uuid) -> bool {
     false
 }
 
-/// Converts an insertion boundary in the current base track into the index
-/// expected after `moving` has been removed from that track.
 fn adjusted_base_index(video: &Video, boundary: usize, moving: Option<Uuid>) -> usize {
     let moving_index = moving.and_then(|clip_id| {
         video
@@ -264,7 +257,6 @@ fn drop_target_at(
     (lane == 0).then(|| base_target(video, rows, content, pixels_per_frame, pointer.x, moving_id))
 }
 
-/// The tick spacing, in seconds, that keeps ruler labels readable.
 fn tick_seconds(frame_rate: VideoFrameRate, pixels_per_frame: f32) -> f64 {
     let pixels_per_second = frame_rate.frames_per_second() * f64::from(pixels_per_frame);
     TICK_SECONDS
@@ -346,9 +338,6 @@ impl VideoEditor {
         }
         self.draw_ruler(&painter, content, video, &visuals);
 
-        // Attachments live on their own rows, so a tether shows what each one
-        // hangs off. The tether into the selected clip's own parent is bolded
-        // so the parenting is visible at a glance.
         for row in rows {
             let Some(parent) = video.clip(row.timing.id).and_then(|clip| clip.parent()) else {
                 continue;
@@ -545,8 +534,7 @@ impl VideoEditor {
         painter.rect_filled(ruler, 0.0, visuals.extreme_bg_color);
         let frame_rate = video.frame_rate();
         let step = tick_seconds(frame_rate, self.pixels_per_frame);
-        // Ticks are placed from the time they mark rather than from a whole
-        // number of frames, which would drift at rates like 30000/1001.
+
         let pixels_per_second =
             (frame_rate.frames_per_second() * f64::from(self.pixels_per_frame)) as f32;
         let pixels_per_step = step as f32 * pixels_per_second;
@@ -650,8 +638,6 @@ impl VideoEditor {
     }
 }
 
-/// The clip moved so that it starts at `start`, or `None` when it already
-/// does. Attachments are offsets, so the clip it hangs off decides the rest.
 fn reattached(
     video: &Video,
     clip: &VideoClip,

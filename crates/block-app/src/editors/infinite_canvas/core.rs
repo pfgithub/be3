@@ -72,9 +72,6 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    /// The style newly created entities should start with: matches the
-    /// defaults except for colors, which carry over the most recently
-    /// selected foreground/fill so new objects don't reset to black.
     pub(super) fn default_entity_style(&self) -> CanvasEntityStyle {
         CanvasEntityStyle {
             foreground: self.last_foreground,
@@ -83,14 +80,10 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    /// Records a color the user just picked so future new entities default
-    /// to it.
     pub(super) fn remember_foreground(&mut self, color: CanvasColor) {
         self.last_foreground = color;
     }
 
-    /// Records a fill color the user just picked so future new entities
-    /// default to it.
     pub(super) fn remember_fill(&mut self, fill: Option<CanvasColor>) {
         self.last_fill = fill;
     }
@@ -523,8 +516,6 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    /// Neither Android nor the browser offers a clipboard this can read and
-    /// write synchronously while drawing a frame.
     #[cfg(any(target_os = "android", target_arch = "wasm32"))]
     pub(super) fn copy_selection_to_clipboard(&mut self, _entities: &[CanvasEntity]) -> bool {
         false

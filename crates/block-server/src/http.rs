@@ -1,7 +1,3 @@
-//! The minimal HTTP/1.1 subset the block server needs: enough to read a request
-//! head, tell a websocket upgrade apart from a management request, and answer a
-//! management request with JSON.
-
 #[cfg(test)]
 mod tests;
 
@@ -15,9 +11,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 
 use crate::ServerError;
 
-/// Largest request line and header block the server will buffer.
 const MAX_HEAD_BYTES: usize = 16 * 1024;
-/// Largest management request body the server will accept.
+
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 const MAX_HEADERS: usize = 64;
 
@@ -44,15 +39,6 @@ impl Status {
     }
 }
 
-/// Lets a page served from anywhere send management commands here.
-///
-/// The web build is a static bundle that can be served from a different origin
-/// than the server it talks to, so without these a browser refuses to hand the
-/// response back to the app. Management commands carry no ambient credentials —
-/// no cookies, no HTTP authentication, and the account is named in the body — so
-/// allowing any origin does not let a page act as someone who is already signed
-/// in. `content-type: application/json` is never a simple request, so browsers
-/// always ask permission with an `OPTIONS` preflight first.
 const CORS_HEADERS: &str = concat!(
     "access-control-allow-origin: *\r\n",
     "access-control-allow-methods: POST, OPTIONS\r\n",
@@ -63,9 +49,9 @@ const CORS_HEADERS: &str = concat!(
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RequestHead {
     pub method: String,
-    /// The request target, including any query string.
+
     pub path: String,
-    /// Header names are lowercased; values keep their original case.
+
     pub headers: Vec<(String, String)>,
 }
 
@@ -77,9 +63,6 @@ impl RequestHead {
             .map(|(_, value)| value.as_str())
     }
 
-    /// The value of a query-string parameter of the request target. Block
-    /// connections carry their identity here rather than in headers because
-    /// browsers cannot set headers on a websocket handshake.
     pub fn query_parameter(&self, name: &str) -> Option<&str> {
         let (_, query) = self.path.split_once('?')?;
         query.split('&').find_map(|parameter| {
@@ -88,8 +71,6 @@ impl RequestHead {
         })
     }
 
-    /// Whether this is the opening request of a websocket handshake, which the
-    /// server hands to the websocket implementation instead of answering itself.
     pub fn is_websocket_upgrade(&self) -> bool {
         self.method == "GET"
             && self
@@ -108,24 +89,20 @@ impl RequestHead {
     }
 }
 
-/// A request head plus every byte read while looking for its end.
 #[derive(Debug)]
 pub(crate) struct BufferedRequest {
     pub head: RequestHead,
-    /// Everything read from the stream, the head included, so that a websocket
-    /// handshake can be replayed to the websocket implementation.
+
     pub buffered: Vec<u8>,
     head_len: usize,
 }
 
 impl BufferedRequest {
-    /// The part of the body that arrived alongside the head.
     fn body_prefix(&self) -> &[u8] {
         &self.buffered[self.head_len..]
     }
 }
 
-/// Reads until the end of the request head, leaving the body unread.
 pub(crate) async fn read_head<S: AsyncRead + Unpin>(
     stream: &mut S,
 ) -> Result<BufferedRequest, ServerError> {
@@ -154,7 +131,6 @@ pub(crate) async fn read_head<S: AsyncRead + Unpin>(
     }
 }
 
-/// Parses a complete request head, or reports `None` while more bytes are needed.
 fn parse_head(buffer: &[u8]) -> Result<Option<(RequestHead, usize)>, ServerError> {
     let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
     let mut request = httparse::Request::new(&mut headers);
@@ -184,7 +160,6 @@ fn parse_head(buffer: &[u8]) -> Result<Option<(RequestHead, usize)>, ServerError
     Ok(Some((head, head_len)))
 }
 
-/// Reads the request body, continuing from the bytes that arrived with the head.
 pub(crate) async fn read_body<S: AsyncRead + Unpin>(
     stream: &mut S,
     request: &BufferedRequest,
@@ -230,8 +205,6 @@ pub(crate) async fn write_json_response<S: AsyncWrite + Unpin>(
     stream.flush().await
 }
 
-/// Answers a CORS preflight, which a browser sends before any management
-/// command because those carry a JSON content type.
 pub(crate) async fn write_preflight_response<S: AsyncWrite + Unpin>(
     stream: &mut S,
 ) -> io::Result<()> {
@@ -243,8 +216,6 @@ pub(crate) async fn write_preflight_response<S: AsyncWrite + Unpin>(
     stream.flush().await
 }
 
-/// A stream that replays already-read bytes before continuing with the real one,
-/// so a handshake the server has peeked at can still be parsed from the start.
 pub(crate) struct PrefixedStream<S> {
     prefix: Vec<u8>,
     offset: usize,

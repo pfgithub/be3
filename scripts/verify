@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Lints, formats and tests the workspace.
+# Strips comments, lints, formats and tests the workspace.
 #
-# Runs clippy, rustfmt and the test suite over the whole workspace. This is
-# the one command to run after making changes.
+# Runs the Rust comment stripper, clippy, rustfmt and the test suite over the
+# whole workspace. This is the one command to run after making changes.
 #
-# By default clippy applies the fixes it can and rustfmt rewrites the
-# sources. With --check nothing is written: clippy and rustfmt only report,
-# which is what CI wants. Either way the run fails if any clippy warning
-# survives.
+# By default comments are stripped, clippy applies the fixes it can and rustfmt
+# rewrites the sources. With --check nothing is written and each tool only
+# reports, which is what CI wants. Either way the run fails if comments or any
+# clippy warning survive.
 #
 # Usage:
 #   ./scripts/verify
@@ -23,6 +23,13 @@ fi
 
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository"
+
+echo 'Stripping Rust comments...'
+strip_arguments=()
+if $check; then
+    strip_arguments+=(--check)
+fi
+cargo run --quiet -p strip-rust-comments -- "${strip_arguments[@]}"
 
 # Tests and examples are linted too, so a warning cannot hide in them.
 clippy_targets=(--workspace --all-targets --all-features)

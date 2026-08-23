@@ -62,8 +62,6 @@ fn read_clipboard_image() -> ClipboardImagePasteResult {
     ClipboardImagePasteResult::Image(Image::new("Pasted Image.png", encoded))
 }
 
-/// Android has no image clipboard, and the browser only exposes one through an
-/// asynchronous API that cannot answer a synchronous paste.
 #[cfg(any(target_os = "android", target_arch = "wasm32"))]
 fn read_clipboard_image() -> ClipboardImagePasteResult {
     ClipboardImagePasteResult::NoImage
@@ -74,8 +72,7 @@ fn paste_shortcut_down() -> bool {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
 
     const VK_V: i32 = 0x56;
-    // SAFETY: GetAsyncKeyState reads process-independent keyboard state and has no pointer or
-    // lifetime requirements.
+
     unsafe { GetAsyncKeyState(VK_CONTROL as i32) < 0 && GetAsyncKeyState(VK_V) < 0 }
 }
 

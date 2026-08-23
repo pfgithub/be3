@@ -13,7 +13,6 @@ use super::{insertion_location, widget_icon};
 
 const OUTLINE_INDENT: f32 = 12.0;
 
-/// The widgets that can be dropped onto the design, in palette order.
 fn palette() -> Vec<(&'static str, GuiWidgetKind)> {
     vec![
         (
@@ -94,8 +93,6 @@ pub(super) fn left_sidebar(
             )
             .clicked()
         {
-            // The new widget lands next to the current selection, so
-            // repeated clicks stack downwards.
             let widget = GuiWidget::new(kind);
             let id = widget.id;
             operations.push(GuiBuilderOperation::Insert {
@@ -153,7 +150,6 @@ fn outline(ui: &mut egui::Ui, widgets: &[GuiWidget], depth: usize, selected: &mu
     }
 }
 
-/// Moving a widget up, down, out of or into a container, plus deletion.
 fn arrange(
     ui: &mut egui::Ui,
     builder: &GuiBuilder,
@@ -190,7 +186,6 @@ fn arrange(
             });
         }
 
-        // Indenting moves the widget into the container just above it.
         let target = location
             .index
             .checked_sub(1)

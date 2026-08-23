@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::block_ref::BlockRef;
 
-/// Which client a [`SettingEntry`] applies to. `Client` lets different
-/// devices keep different settings for the same block type; `Fallback` is
-/// used when nothing more specific has been registered.
+                                                                       
+                                                                          
+                                                        
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivationCondition {
@@ -16,17 +16,17 @@ pub enum ActivationCondition {
     Client(Uuid),
 }
 
-/// One settings block registered against a block type, active under
-/// `activation`.
+                                                                    
+                 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SettingEntry {
     pub activation: ActivationCondition,
     pub block: BlockRef,
 }
 
-/// The workspace's single root settings block. Rather than each block type
-/// getting its own block at the root, every type registers the block that
-/// holds its settings here, keyed by its own [`Block::TYPE_ID`].
+                                                                           
+                                                                          
+                                                                 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Settings {
     entries: BTreeMap<Uuid, Vec<SettingEntry>>,
@@ -35,9 +35,9 @@ pub struct Settings {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum SettingsOperation {
-    /// Registers `block` as the settings for `block_type` under
-    /// `activation`, replacing whatever was previously registered for that
-    /// same pair.
+                                                                
+                                                                           
+                  
     SetEntry {
         block_type: Uuid,
         activation: ActivationCondition,
@@ -50,15 +50,15 @@ impl Settings {
         Self::default()
     }
 
-    /// Every entry registered for `block_type`, across all activation
-    /// conditions.
+                                                                      
+                   
     pub fn entries(&self, block_type: Uuid) -> &[SettingEntry] {
         self.entries.get(&block_type).map_or(&[], Vec::as_slice)
     }
 
-    /// The block registered for `block_type` that applies to `client_id`,
-    /// preferring an entry registered for that exact client over the
-    /// fallback one.
+                                                                          
+                                                                     
+                     
     pub fn resolve(&self, block_type: Uuid, client_id: Uuid) -> Option<BlockRef> {
         let entries = self.entries(block_type);
         entries

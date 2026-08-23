@@ -25,9 +25,6 @@ impl EditorKind for DeterministicGameEditor {
     }
 }
 
-/// Which game a `DeterministicGame` block plays is fixed for its lifetime
-/// (there is no operation to change it), so creating one starts by choosing
-/// it from the games installed beside the app.
 impl ConfigurableEditor for DeterministicGameEditor {
     type Options = ChosenGame;
 
@@ -90,9 +87,6 @@ impl DeterministicGameEditor {
         }
     }
 
-    /// Replaying the log through the interpreter costs more than a frame
-    /// should, so it happens only when the log this editor last drew from
-    /// has actually changed.
     fn screen(&mut self, game: &str, actions: Vec<GameAction>) -> &Result<GameScreen, String> {
         if self.screen.is_none() || self.shown != actions {
             let screen = match catalog::game(game) {

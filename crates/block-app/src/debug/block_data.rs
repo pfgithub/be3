@@ -5,7 +5,6 @@ use uuid::Uuid;
 use crate::BlockApp;
 
 impl BlockApp {
-    /// Shows a tab's block as its raw serialized data instead of its editor.
     pub(crate) fn show_debug_data(&mut self, ui: &mut egui::Ui, active: Uuid) {
         let data = self.client.block_debug_data(active);
         egui::ScrollArea::both()
@@ -19,9 +18,6 @@ impl BlockApp {
     }
 }
 
-/// Renders a block's serialized data as a tree that can be expanded and
-/// collapsed field by field, falling back to plain text if it turns out not
-/// to be valid JSON.
 fn show_debug_tree(ui: &mut egui::Ui, data: &str) {
     let root: Value = match serde_json::from_str(data) {
         Ok(root) => root,
@@ -35,8 +31,6 @@ fn show_debug_tree(ui: &mut egui::Ui, data: &str) {
         }
     };
     match &root {
-        // The top-level object's own fields are shown directly, without an
-        // enclosing node for the object itself.
         Value::Object(fields) if !fields.is_empty() => {
             for (key, value) in fields {
                 show_node(ui, key, key, value, 0);
@@ -46,9 +40,6 @@ fn show_debug_tree(ui: &mut egui::Ui, data: &str) {
     }
 }
 
-/// Draws one field: a collapsible node for objects and arrays, or a single
-/// row for a scalar. `path` uniquely identifies the node within the tree, so
-/// egui can remember whether it is expanded across frames.
 fn show_node(ui: &mut egui::Ui, path: &str, key: &str, value: &Value, depth: usize) {
     match value {
         Value::Object(fields) if !fields.is_empty() => {

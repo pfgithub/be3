@@ -19,8 +19,6 @@ const AXIS_MARGIN_BOTTOM: f32 = 28.0;
 const AXIS_MARGIN_TOP: f32 = 8.0;
 const AXIS_MARGIN_RIGHT: f32 = 8.0;
 
-/// Selection state for the scatter chart. Points are addressed by their
-/// row's storage index, the same as spreadsheet cells and kanban cards.
 #[derive(Default)]
 pub(super) struct ScatterView {
     selected: Option<usize>,
@@ -181,8 +179,6 @@ fn number_value(row: &DatabaseRow, field_id: Uuid) -> Option<f64> {
     }
 }
 
-/// The value range spanned by an axis. A single-valued or empty range is
-/// widened by one unit on either side so the point does not sit on the edge.
 fn bounds(values: impl Iterator<Item = f64>) -> (f64, f64) {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
@@ -213,9 +209,6 @@ fn format_axis_value(value: f64) -> String {
     }
 }
 
-/// Dropdowns that choose the number fields plotted on the chart's X and Y
-/// axes. Only number fields have an inherent ordering, so only they can
-/// stand in for a coordinate.
 pub(super) fn axis_field_pickers(
     ui: &mut egui::Ui,
     view: &BlockHandle<DatabaseView>,
@@ -279,8 +272,6 @@ fn axis_field_picker(
         });
 }
 
-/// Point-cloud thumbnail, painted at the block's on-canvas size rather than
-/// the interactive layout the direct editor uses.
 pub(super) fn paint_preview(
     context: BlockRenderContext<'_>,
     rows: &[DatabaseRow],

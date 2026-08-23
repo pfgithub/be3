@@ -63,7 +63,7 @@ pub enum Instruction {
 pub struct UnlinkedComponent {
     pub inputs: Vec<MemoryAddress>,
     pub outputs: Vec<MemoryAddress>,
-    /// The compiled logic blocks this program calls, in call order.
+
     pub components: Vec<Uuid>,
     pub instructions: Vec<Instruction>,
     #[serde(default)]
@@ -88,8 +88,7 @@ pub struct Component {
     pub subgraphs: Vec<ComponentExecutionSubgraph>,
     pub memory_size: usize,
     pub storage_init: Vec<u64>,
-    /// The compiled logic block this program was linked from, when it came
-    /// from one rather than straight off a grid.
+
     pub source: Option<Uuid>,
 }
 

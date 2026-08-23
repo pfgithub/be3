@@ -19,8 +19,6 @@ pub enum Language {
 }
 
 impl Language {
-    /// The highlighter for a document's stored language, or `None` when that
-    /// language is not highlighted at all.
     pub const fn for_document(language: TextLanguage) -> Option<Self> {
         match language {
             TextLanguage::PlainText => None,

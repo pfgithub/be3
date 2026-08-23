@@ -38,8 +38,6 @@ async fn registration_can_be_disabled() {
         }
     ));
 
-    // Accounts created some other way (the CLI's `add-account`, here stood in
-    // for by registering directly against the store) can still log in.
     let store = crate::BlockStore::new(root.clone());
     store
         .register_account(

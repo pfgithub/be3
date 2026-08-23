@@ -17,7 +17,7 @@ UI style:
 
 Code style:
 - Prefer a.rs over a/mod.rs.
-- Do not add any comments to the code. Do not add doc-comments either. You may remove existing comments & doc comments.
+- `./scripts/verify` strips comments and doc-comments from Rust code.
 - Do not edit README.md
 
 Tests:

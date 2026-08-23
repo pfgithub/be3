@@ -33,12 +33,10 @@ thread_local! {
     static STATE: RefCell<TerminalDebugWindow> = RefCell::new(TerminalDebugWindow::default());
 }
 
-/// Opens the terminal debug window, spawning a fresh shell session.
 pub(crate) fn open() {
     STATE.with(|state| state.borrow_mut().open = true);
 }
 
-/// Draws the terminal debug window, if open.
 pub(crate) fn show(ctx: &egui::Context) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -78,8 +76,6 @@ pub(crate) fn show(ctx: &egui::Context) {
     });
 }
 
-/// A live terminal session: a shell running behind a pseudo-terminal, parsed
-/// by libghostty-vt and rendered directly into the egui window.
 struct Session {
     terminal: Terminal<'static, 'static>,
     render_state: RenderState<'static>,
@@ -115,8 +111,7 @@ impl Session {
             .slave
             .spawn_command(cmd)
             .map_err(|err| format!("Failed to spawn a shell: {err}"))?;
-        // The slave side is only needed to spawn the child; the child keeps its
-        // own handle to it, and the master remains usable after this is dropped.
+
         drop(pair.slave);
 
         let mut reader = pair
@@ -150,8 +145,7 @@ impl Session {
             max_scrollback: MAX_SCROLLBACK,
         })
         .map_err(|err| format!("Failed to create the terminal emulator: {err}"))?;
-        // Sequences that require a reply (cursor position reports and the
-        // like) are otherwise dropped, which hangs shells that wait on them.
+
         terminal
             .on_pty_write({
                 let writer = writer.clone();
@@ -422,9 +416,6 @@ fn to_color32(color: RgbColor) -> egui::Color32 {
     egui::Color32::from_rgb(color.r, color.g, color.b)
 }
 
-/// Maps an egui physical key to its libghostty-vt equivalent, along with the
-/// character it produces on an unmodified US keyboard layout (used by the
-/// Kitty keyboard protocol to identify keys independent of shift state).
 fn map_key(key: egui::Key) -> Option<(GhosttyKey, char)> {
     use egui::Key as EKey;
     Some(match key {

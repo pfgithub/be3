@@ -1,8 +1,5 @@
 use super::*;
 
-/// Stored blocks are never migrated. A database written by a different version
-/// of the schema is left exactly as it is: the server refuses to open it rather
-/// than dropping what it cannot read.
 #[tokio::test]
 async fn a_database_from_another_schema_is_refused() {
     let root = test_root();
@@ -30,7 +27,6 @@ async fn a_database_from_another_schema_is_refused() {
     let message = error.to_string();
     assert!(message.contains("blocks"), "unexpected error: {message}");
 
-    // The rows the server could not read are still there.
     let connection = Connection::open(&database).unwrap();
     let blocks: i64 = connection
         .query_row("SELECT count(*) FROM blocks", [], |row| row.get(0))

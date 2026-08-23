@@ -8,18 +8,18 @@ use logicgame::grid::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// One circuit: the components placed on the grid and the wires between them.
-/// The palette it is edited with is not part of it: the editor finds the shared
-/// hotbar registered under the workspace's root `Settings` block instead.
+                                                                              
+                                                                                
+                                                                          
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct LogicGrid {
     grid: Grid,
-    /// The level this grid is an attempt at. A grid built outside a game has
-    /// none, and is edited without a goal or a test to run against.
+                                                                             
+                                                                    
     #[serde(default)]
     challenge: Option<ChallengeId>,
-    /// Whether this grid has passed its level's test. The game reads it back
-    /// off its solutions rather than being told by the editor that ran them.
+                                                                             
+                                                                             
     #[serde(default)]
     completed: bool,
 }
@@ -27,9 +27,9 @@ pub struct LogicGrid {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum LogicGridOperation {
-    /// Adds a component under an ID the sender allocated with
-    /// [`LogicGrid::next_component_id`]. Repeats are ignored, so replaying the
-    /// operation - from history or from a peer - never duplicates it.
+                                                              
+                                                                               
+                                                                      
     AddComponent {
         component: Component,
     },
@@ -55,12 +55,12 @@ pub enum LogicGridOperation {
     AddWire {
         wire: Wire,
     },
-    /// Clears every wire covering `wire`'s span, splitting the segments that
-    /// only partly overlap it.
+                                                                             
+                               
     RemoveWire {
         wire: Wire,
     },
-    /// Removes one whole segment, exactly as it is stored.
+                                                           
     RemoveWireSegment {
         wire: Wire,
     },
@@ -82,9 +82,9 @@ enum LogicGridHistoryChange {
         before: Component,
         after: Component,
     },
-    /// Wire edits merge and split neighbouring segments, so what a single
-    /// operation changed is recorded as the segments that left and joined the
-    /// grid rather than as an inverse operation.
+                                                                          
+                                                                              
+                                                 
     Wires {
         removed: Vec<Wire>,
         added: Vec<Wire>,
@@ -100,8 +100,8 @@ impl LogicGrid {
         Self::default()
     }
 
-    /// Wraps a circuit that was built elsewhere, such as one being imported or
-    /// one a test set up directly.
+                                                                               
+                                   
     pub fn from_grid(grid: Grid) -> Self {
         Self {
             grid,
@@ -110,14 +110,14 @@ impl LogicGrid {
         }
     }
 
-    /// Marks the grid as an attempt at `challenge`.
+                                                    
     #[must_use]
     pub fn with_challenge(mut self, challenge: ChallengeId) -> Self {
         self.challenge = Some(challenge);
         self
     }
 
-    /// An empty grid started for `challenge`.
+                                              
     pub fn for_challenge(challenge: ChallengeId) -> Self {
         Self {
             grid: Grid::new(),
@@ -138,12 +138,12 @@ impl LogicGrid {
         self.completed
     }
 
-    /// The ID the next [`LogicGridOperation::AddComponent`] should carry.
+                                                                          
     pub fn next_component_id(&self) -> ComponentId {
         self.grid.next_component_id()
     }
 
-    /// The compiled logic blocks the placed subcomponents call.
+                                                                
     pub fn called_blocks(&self) -> Vec<Uuid> {
         let mut seen = HashSet::new();
         self.grid
@@ -280,9 +280,9 @@ impl BlockHistory<LogicGrid> for LogicGridHistory {
                     ]
                 }
                 LogicGridHistoryChange::Wires { removed, added } => {
-                    // The segments to take out are removed before the ones to
-                    // put back are added, so every removal still matches a
-                    // segment exactly as the grid stores it.
+                                                                              
+                                                                           
+                                                             
                     let (take_out, put_back) = if to_after {
                         (removed, added)
                     } else {
@@ -308,8 +308,8 @@ impl BlockHistory<LogicGrid> for LogicGridHistory {
     }
 }
 
-/// Restoring a component takes its kind and orientation as well as its ID, so
-/// adding it back rebuilds exactly what was removed.
+                                                                              
+                                                     
 fn component_operations(component: &Component, add: bool) -> Vec<LogicGridOperation> {
     if add {
         vec![LogicGridOperation::AddComponent {

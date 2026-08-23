@@ -1,9 +1,5 @@
 use super::*;
 
-// A bracket only matches a close token when both its character and the
-// indent level of the line it closes on agree with the open. When they
-// disagree the tokenizer auto-closes the inner, unclosed bracket (reporting
-// it) and keeps popping outward until it finds a frame that does match.
 #[test]
 fn tokenize_indent_based_auto_close() {
     let (result, _source) = tokenize_str("(\n    [a\n)");

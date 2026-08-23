@@ -49,9 +49,7 @@ pub(super) struct DocumentLayout {
     pub lines: Vec<LineLayout>,
     pub positions: Vec<Option<BytePosition>>,
     pub embeds: Vec<EmbedLayout>,
-    /// Total document line count, including lines hidden inside a collapsed
-    /// section (which have no entry in `lines`). Used to size the gutter so
-    /// its width doesn't change as sections fold/unfold.
+
     pub total_lines: usize,
 }
 
@@ -61,8 +59,7 @@ pub(super) struct ResolvedEmbed {
     pub id: Uuid,
     pub label: String,
     pub icon: Option<&'static str>,
-    /// Whether `label` was auto-derived from the block's content rather
-    /// than chosen by the user - shown italicized either way it's painted.
+
     pub automatic: bool,
     pub large: bool,
     pub available: bool,
@@ -86,9 +83,7 @@ pub(super) struct LineLayout {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    /// The document's own line index, counting lines hidden inside a
-    /// collapsed section — unlike this entry's position in
-    /// [`DocumentLayout::lines`], which skips them.
+
     pub document_line: usize,
     pub show_line_number: bool,
     baseline: f32,
@@ -101,26 +96,20 @@ pub(super) struct BytePosition {
     pub x: f32,
 }
 
-/// A font file FreeType/HarfBuzz have opened and parsed.
 struct LoadedFont {
     face: ft::FT_Face,
     hb_face: Shared<HbFace<'static>>,
-    /// Built lazily per pixel size on first use, since a document only ever
-    /// touches a handful of the sizes a font could be shaped at.
+
     hb_fonts: HashMap<u32, Owned<HbFont<'static>>>,
 }
 
 enum FontLoadState {
-    /// Not yet opened: the file has only been located, not read.
     Pending(FontSource),
     Loaded(LoadedFont),
-    /// Tried once and the file could not be opened as a font; never retried.
+
     Failed,
 }
 
-/// A font a document could use, opened from disk/memory on first actual use
-/// rather than at startup, since most documents only ever touch a handful of
-/// the variants (regular/bold/italic/monospace/fallback) candidates offer.
 struct FontFace {
     state: RefCell<FontLoadState>,
     library: ft::FT_Library,
@@ -130,8 +119,6 @@ struct FontFace {
 }
 
 impl FontFace {
-    /// Opens the underlying font file if this is the first use of it. Returns
-    /// whether a usable face is now loaded.
     fn ensure_loaded(&self) -> bool {
         let mut state = self.state.borrow_mut();
         if matches!(&*state, FontLoadState::Pending(_)) {
@@ -162,9 +149,6 @@ impl FontFace {
         unsafe { ft::FT_Get_Char_Index(loaded.face, character as ft::FT_ULong) != 0 }
     }
 
-    /// The FreeType face, valid for the lifetime of this `FontFace`. Only
-    /// call this for a font index chosen via [`Self::supports`], which
-    /// guarantees loading already happened.
     fn face(&self) -> ft::FT_Face {
         let state = self.state.borrow();
         let FontLoadState::Loaded(loaded) = &*state else {
@@ -173,7 +157,6 @@ impl FontFace {
         loaded.face
     }
 
-    /// See [`Self::face`]: only call this for an already-loaded font.
     fn hb_font(&self, pixel_size: u32) -> Ref<'_, Owned<HbFont<'static>>> {
         {
             let mut state = self.state.borrow_mut();
@@ -194,7 +177,6 @@ impl FontFace {
     }
 }
 
-/// Opens and validates a font file's FreeType face and HarfBuzz face.
 fn load_font_face(
     library: ft::FT_Library,
     source: &FontSource,
@@ -241,8 +223,6 @@ fn configured_hb_font(face: Shared<HbFace<'static>>, pixel_size: u32) -> Owned<H
     font
 }
 
-/// One laid out display line: its glyphs, its width, the x position of each
-/// document byte on it, its baseline and height, and how long laying it out took.
 type LaidOutLine = (
     Vec<PositionedGlyph>,
     f32,
@@ -274,9 +254,7 @@ struct GlyphKey {
     pixel_size: u32,
     bold: bool,
     italic: bool,
-    /// `pixels_per_point`, quantized to thousandths so equal scale factors
-    /// hash identically. Glyphs are rasterized at this resolution, not at
-    /// `pixel_size`, so each distinct screen scale needs its own cache entry.
+
     dpi_milli: u32,
 }
 
@@ -591,13 +569,6 @@ impl TextRenderer {
         ranges
     }
 
-    /// Lays out one display line, split at each checkbox marker it contains
-    /// (e.g. the `- [ ]` in `- [ ] task`). A checkbox's bytes are excluded
-    /// from shaping entirely rather than shaped and discarded: the text
-    /// before and after it are shaped as their own independent segments, and
-    /// the checkbox itself is a fixed-width, glyph-free gap between them
-    /// whose interior byte positions are spread at even increments across
-    /// [`CHECKBOX_WIDTH`]. See [`LaidOutLine`].
     fn layout_line(
         &self,
         document: &[u8],
@@ -669,9 +640,6 @@ impl TextRenderer {
         (glyphs, pen_x, positions, baseline, height, timings)
     }
 
-    /// Shapes one contiguous stretch of a display line (a gap between
-    /// checkbox markers, or the whole line when it has none), producing
-    /// glyphs and byte positions in local coordinates starting at `x: 0.0`.
     fn shape_segment(
         &self,
         document: &[u8],
@@ -875,10 +843,7 @@ impl TextRenderer {
             let Some(texture) = &rasterized.texture else {
                 continue;
             };
-            // Snap in physical-pixel space, not logical points: on fractional
-            // hidpi scale factors (e.g. 1.5x, 1.25x) rounding logical coordinates
-            // doesn't land on a physical pixel boundary, so glyph textures end up
-            // jittering by a physical pixel relative to their neighbors.
+
             let pixels_per_point = context.pixels_per_point();
             let position = Pos2::new(
                 ((origin.x + glyph.x + glyph.x_offset + rasterized.bearing.x) * pixels_per_point)
@@ -944,9 +909,7 @@ impl TextRenderer {
             size: Vec2::ZERO,
             bearing: Vec2::ZERO,
         };
-        // Glyphs are laid out in logical points (`key.pixel_size`), but must be
-        // rasterized at the screen's native resolution or they render blurry
-        // once egui scales them back up to physical pixels on hidpi displays.
+
         let pixels_per_point = key.dpi_milli as f32 / 1000.0;
         let raster_pixel_size = ((key.pixel_size as f32 * pixels_per_point).round() as u32).max(1);
         unsafe {
@@ -1357,8 +1320,6 @@ fn split_font_runs<'a>(
     runs
 }
 
-/// Quantizes `pixels_per_point` to thousandths for use as a glyph cache key,
-/// so equal scale factors collapse to the same cache entry.
 fn dpi_milli(pixels_per_point: f32) -> u32 {
     (pixels_per_point * 1000.0).round() as u32
 }
@@ -1378,14 +1339,10 @@ fn style_pixel_size(style: SynHlStyle) -> u32 {
     }
 }
 
-/// A font file to load into FreeType and HarfBuzz.
 enum FontSource {
-    /// A font file in one of the system font directories.
     #[cfg(not(target_arch = "wasm32"))]
     File(PathBuf),
-    /// Font bytes held in the binary. FreeType and HarfBuzz both borrow the
-    /// buffer rather than copying it, so it has to outlive every face built
-    /// from it, which is why this is `'static`.
+
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     Memory(&'static [u8]),
 }
@@ -1398,11 +1355,6 @@ fn font_sources() -> Vec<(FontSource, SynHlFontFamily, bool, bool)> {
         .collect()
 }
 
-/// The browser has no font directory to read, so the editor draws with the
-/// fonts egui already carries to render its own widgets: Ubuntu-Light for body
-/// text, Hack for code, and the two emoji faces as fallbacks for characters
-/// neither covers. None of them ship bold or italic variants, so FreeType
-/// synthesises those, exactly as it does for a system font that ships none.
 #[cfg(target_arch = "wasm32")]
 fn font_sources() -> Vec<(FontSource, SynHlFontFamily, bool, bool)> {
     const BUNDLED: &[(&str, SynHlFontFamily)] = &[
@@ -1418,8 +1370,7 @@ fn font_sources() -> Vec<(FontSource, SynHlFontFamily, bool, bool)> {
             let data = definitions.font_data.get(*name)?;
             let bytes: &'static [u8] = match &data.font {
                 std::borrow::Cow::Borrowed(bytes) => bytes,
-                // egui's bundled fonts are all `'static` already; anything else
-                // is leaked so the faces built from it stay valid.
+
                 std::borrow::Cow::Owned(bytes) => Box::leak(bytes.clone().into_boxed_slice()),
             };
             Some((FontSource::Memory(bytes), *family, false, false))
@@ -1478,8 +1429,6 @@ fn font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-/// Fallback for systems whose font files are not at any known path, such as Android builds that
-/// ship an OEM font set: take whatever the system font directories happen to contain.
 fn scanned_font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
     let mut found = Vec::new();
     for directory in SYSTEM_FONT_DIRECTORIES {
@@ -1503,7 +1452,6 @@ fn scanned_font_paths() -> Vec<(PathBuf, SynHlFontFamily, bool, bool)> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-/// Lowercased file name of a font file, or `None` when the path is not one.
 fn font_file_name(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     [".ttf", ".otf", ".ttc"]
@@ -1527,8 +1475,6 @@ fn scanned_font_style(name: &str) -> (SynHlFontFamily, bool, bool) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-/// Sort order for scanned fonts so body text lands on a general-purpose family rather than on
-/// whichever decorative or single-purpose font sorts first alphabetically.
 fn scanned_font_preference(name: &str) -> u8 {
     if name.starts_with("roboto") {
         0

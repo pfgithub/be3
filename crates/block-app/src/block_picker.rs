@@ -27,7 +27,6 @@ enum BlockPickerTab {
     LinkExisting,
 }
 
-/// A block whose creation is waiting on options the user has not filled in.
 struct PendingBlock {
     block_type: Uuid,
     creation: Box<dyn PendingCreation>,
@@ -67,12 +66,10 @@ impl Default for BlockPicker {
 }
 
 impl BlockPicker {
-    /// Opens the picker modal, starting on the Add tab.
     pub fn open(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
         self.open_on_tab(excluded, BlockPickerTab::Add);
     }
 
-    /// Opens the picker modal, starting on the slide Templates tab.
     pub fn open_on_templates(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
         self.open_on_tab(excluded, BlockPickerTab::Templates);
     }
@@ -88,12 +85,6 @@ impl BlockPicker {
         self.open = false;
     }
 
-    /// The modal itself: a tab list to switch between adding a new block and
-    /// linking an existing one, and that tab's content. Sized off the screen
-    /// so it neither overflows a thin viewport nor stays cramped on a tall
-    /// one, and stacks the tabs above the content instead of beside it once
-    /// there isn't room for both side by side. Returns the block type to
-    /// create or the block to link, if the user picked one this frame.
     fn show_modal(
         &mut self,
         context: &egui::Context,
@@ -218,7 +209,7 @@ impl BlockPicker {
             Some(BlockCreation::Created(editor)) => {
                 Some(Self::finish_creation(editors, editor, block_type, parent))
             }
-            // The block needs options first, so the dialog takes over.
+
             Some(BlockCreation::Options(creation)) => {
                 self.pending_block = Some(PendingBlock {
                     block_type,
@@ -234,8 +225,6 @@ impl BlockPicker {
         }
     }
 
-    /// The dialog for a block type that cannot be created until the user
-    /// fills something in.
     fn show_creation_options(
         &mut self,
         context: &egui::Context,
@@ -349,8 +338,6 @@ impl BlockPicker {
     }
 }
 
-/// The Add / Link existing tab selector, shared between the stacked and
-/// side-by-side layouts.
 fn show_tabs(ui: &mut egui::Ui, tab: &mut BlockPickerTab) {
     if ui
         .selectable_label(*tab == BlockPickerTab::Add, "Add")
@@ -372,9 +359,6 @@ fn show_tabs(ui: &mut egui::Ui, tab: &mut BlockPickerTab) {
     }
 }
 
-/// The Templates tab: a preview tile per slide template, in the same tile
-/// format as the Add tab's block types. A single click both chooses and
-/// creates a slide from that template.
 fn show_templates_grid(ui: &mut egui::Ui, max_height: f32) -> Option<SlideTemplate> {
     let mut selected = None;
     egui::ScrollArea::vertical()
@@ -395,9 +379,6 @@ fn show_templates_grid(ui: &mut egui::Ui, max_height: f32) -> Option<SlideTempla
     selected
 }
 
-/// The Add tab: a preview tile per creatable block type, common types shown
-/// in a main section above the rest. A single click both chooses and creates
-/// that type.
 fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry, max_height: f32) -> Option<Uuid> {
     let mut selected = None;
     egui::ScrollArea::vertical()
@@ -427,8 +408,6 @@ fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry, max_height: f32) 
     selected
 }
 
-/// A single preview tile: the block type's icon large in the preview area,
-/// with the icon and name again as a caption underneath.
 fn show_add_tile(ui: &mut egui::Ui, icon: Option<MaterialIcon>, label: &str) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(ADD_TILE_SIZE, egui::Sense::click());
     let visuals = ui.style().interact(&response);
@@ -464,8 +443,6 @@ fn show_add_tile(ui: &mut egui::Ui, icon: Option<MaterialIcon>, label: &str) -> 
     response
 }
 
-/// The Link Existing tab: search by name or UUID, then pick from the
-/// matching blocks that are not excluded.
 fn show_link_content(
     ui: &mut egui::Ui,
     search: &mut String,

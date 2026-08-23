@@ -6,7 +6,7 @@ use super::{attempt, play, show};
 fn out_of_turn_action_is_ignored() {
     let red = Uuid::new_v4();
     let yellow = Uuid::new_v4();
-    let actions = vec![play(&[], red, 0), attempt(red, 0)]; // it is Yellow's turn, so this is ignored
+    let actions = vec![play(&[], red, 0), attempt(red, 0)];
 
     let red_screen = show(&actions, red);
     assert_eq!(red_screen.description, "Waiting for Yellow...");

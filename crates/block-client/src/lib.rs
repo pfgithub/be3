@@ -37,19 +37,12 @@ mod transport;
 pub mod version_control_checkout;
 pub mod version_control_commit;
 
-/// Presence values received from the server for blocks this client is
-/// watching, keyed by block, then by which client posted it and under which
-/// presence id. Entries disappear as soon as the server reports them
-/// cleared.
 type PresenceStore = HashMap<Uuid, HashMap<(ClientId, Uuid), Vec<u8>>>;
 
 type PostedPresence = HashMap<(Uuid, Uuid), Vec<u8>>;
 
 use transport::{Link, Socket, SocketMessage, TunnelSocket};
 
-/// Sends commands to the worker. Sending never blocks, so the UI thread can
-/// queue work from inside a frame, and the same channel drives the worker
-/// whether it runs on a thread or on the browser's event loop.
 #[derive(Clone)]
 struct CommandSender(mpsc::UnboundedSender<WorkerCommand>);
 
@@ -59,11 +52,6 @@ impl CommandSender {
     }
 }
 
-/// Set when the [`BlockClient`] is dropped, so the worker can tell a connection
-/// it still needs from one nobody is waiting on any more. The worker outlives
-/// its client by however long it takes to notice the command channel closed,
-/// and whatever shut the client down usually takes the connection with it, so a
-/// socket that fails inside that window is a shutdown rather than a fault.
 #[derive(Clone, Default)]
 struct Shutdown(Arc<AtomicBool>);
 
@@ -77,13 +65,10 @@ impl Shutdown {
     }
 }
 
-/// Block connections identify themselves in the websocket URL's query string.
-/// Browsers cannot set request headers on a websocket handshake, so the query
-/// string is the only place a web client can put this.
 const TOKEN_PARAMETER: &str = "token";
 const WORKSPACE_PARAMETER: &str = "workspace";
 const API_PATH: &str = "/api";
-/// Where the server answers management commands, relative to the server URL.
+
 const MANAGEMENT_PATH: &str = "/api/management";
 const BLOCK_URL_BASE: &str = "https://blocks.pfg.pw/";
 const REPO_RELATIVE_BLOCK_URL_MARKER: &str = "repo/";
@@ -94,8 +79,6 @@ pub const BLOCK_URL_MAX_BYTES: usize =
 const MAX_HISTORY_ACTIONS: usize = 100;
 const MAX_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 
-/// Account and workspace management, which the server answers over HTTP. Block
-/// traffic uses the websocket [`BlockClient`] opens instead.
 #[derive(Clone, Debug)]
 pub struct ManagementClient {
     url: String,
@@ -126,9 +109,6 @@ impl fmt::Display for ManagementClientError {
 
 impl std::error::Error for ManagementClientError {}
 
-/// An account plus the session token that authenticates it. The token is
-/// what a caller should keep around and use for later requests -- never the
-/// password.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
     pub account: Account,
@@ -191,8 +171,6 @@ impl ManagementClient {
         Ok(Session { account, token })
     }
 
-    /// Revokes a session token, so it no longer authenticates anything. Not
-    /// an error if the token was already invalid.
     pub async fn logout(&self, token: impl Into<String>) -> Result<(), ManagementClientError> {
         let response = self
             .request(ManagementClientMessage::Logout {
@@ -360,9 +338,7 @@ struct StoredBlock<B> {
 enum StoredOperation<B, O> {
     Operate(O),
     Replace(B),
-    /// Rewrites the descriptor without touching the block value, so artifact
-    /// settings can be changed after the block has been created. `None` unlinks
-    /// the block from its source and leaves the generated value behind.
+
     SetDynamicArtifact(Option<DynamicArtifactDescriptor>),
 }
 
@@ -386,43 +362,30 @@ pub struct BlockClient {
     presence: Arc<RwLock<PresenceStore>>,
 }
 
-/// The client half of a tunnel: whatever the worker would have sent over its
-/// own websocket, and whatever arrives for it. Opaque on purpose, since only
-/// [`BlockClient::tunneled`] has any use for it.
 pub struct TunnelEndpoint {
     outgoing: mpsc::UnboundedSender<String>,
     incoming: mpsc::UnboundedReceiver<String>,
 }
 
-/// The carrying half of a tunnel, held by whoever ferries its frames to a
-/// client that does have a server connection.
 pub struct TunnelCarrier {
     outgoing: mpsc::UnboundedSender<String>,
     incoming: mpsc::UnboundedReceiver<String>,
 }
 
 impl TunnelCarrier {
-    /// Delivers a server message, as JSON, to the tunnelled client.
     pub fn send(&self, text: String) {
         let _ = self.outgoing.unbounded_send(text);
     }
 
-    /// Takes the next client message, as JSON, the tunnelled client wants
-    /// sent to the server.
     pub fn try_recv(&mut self) -> Option<String> {
         self.incoming.try_recv().ok()
     }
 
-    /// Waits for the next client message, for a carrier that is not driven by
-    /// a frame loop. Returns `None` once the tunnelled client is gone.
     pub async fn recv(&mut self) -> Option<String> {
         self.incoming.next().await
     }
 }
 
-/// Creates a tunnel. [`BlockClient::tunneled`] runs a client over the
-/// endpoint; the carrier is passed to whoever can reach a real connection,
-/// which hands its frames to [`BlockClient::open_tunnel`] on the other side.
 pub fn tunnel_channel() -> (TunnelEndpoint, TunnelCarrier) {
     let (to_server, from_client) = mpsc::unbounded();
     let (to_client, from_server) = mpsc::unbounded();
@@ -445,9 +408,6 @@ struct TunnelSink {
     wake: TunnelWake,
 }
 
-/// One of the clients a connection is carrying for somebody else. Frames go
-/// out over the connection tagged with this tunnel's id, so the server treats
-/// them as a separate client with its own watches and presence.
 pub struct Tunnel {
     client: Uuid,
     commands: CommandSender,
@@ -455,7 +415,6 @@ pub struct Tunnel {
 }
 
 impl Tunnel {
-    /// Sends a client message, as JSON, to the server on this tunnel's behalf.
     pub fn send(&self, text: String) {
         let _ = self.commands.send(WorkerCommand::TunnelMessage {
             client: self.client,
@@ -463,13 +422,10 @@ impl Tunnel {
         });
     }
 
-    /// Takes the next server message, as JSON, addressed to this tunnel.
     pub fn try_recv(&mut self) -> Option<String> {
         self.incoming.try_recv().ok()
     }
 
-    /// Waits for the next server message, for a carrier that is not driven by
-    /// a frame loop. Returns `None` once the connection is gone.
     pub async fn recv(&mut self) -> Option<String> {
         self.incoming.next().await
     }
@@ -483,8 +439,6 @@ impl Drop for Tunnel {
     }
 }
 
-/// A sharing request that is still in flight. The UI polls it each frame rather
-/// than blocking, so it never has to wait on the server to draw.
 pub struct BlockAccessRequest {
     id: Uuid,
     completed: oneshot::Receiver<Result<Vec<BlockAccessEntry>, String>>,
@@ -495,7 +449,6 @@ impl BlockAccessRequest {
         self.id
     }
 
-    /// Returns the outcome once the server has answered, and `None` until then.
     pub fn poll(&mut self) -> Option<Result<Vec<BlockAccessEntry>, String>> {
         match self.completed.try_recv() {
             Ok(result) => Some(result),
@@ -783,9 +736,6 @@ impl BlockClient {
         }
     }
 
-    /// Runs a client whose frames are carried by another client's connection
-    /// instead of one of its own. It behaves exactly like a connected client:
-    /// the server gives it its own watches, presence and sequencing.
     pub fn tunneled(
         account_id: Uuid,
         workspace_id: Uuid,
@@ -843,9 +793,6 @@ impl BlockClient {
         }
     }
 
-    /// Opens another client on this client's connection, for code that cannot
-    /// reach the server itself. Its frames are forwarded as they are; the
-    /// server sees a separate client sharing the connection's identity.
     pub fn open_tunnel(&self, wake: impl Fn() + Send + Sync + 'static) -> Tunnel {
         let client = Uuid::new_v4();
         let (responses, incoming) = mpsc::unbounded();
@@ -861,10 +808,6 @@ impl BlockClient {
         }
     }
 
-    /// Connects to the block websocket of the server at `url`, which is the same
-    /// `http://` or `https://` URL [`ManagementClient`] is given, authenticating
-    /// with the session `token` obtained from [`ManagementClient::register`] or
-    /// [`ManagementClient::login`].
     pub fn connect(&self, url: impl Into<String>, token: impl Into<String>) {
         if self.connected.set(()).is_err() {
             fatal("BlockClient::connect may only be called once");
@@ -954,9 +897,6 @@ impl BlockClient {
             .and_then(|registered| registered.erased.dynamic_artifact())
     }
 
-    /// Whether `id` was generated from another block. Callers that only need
-    /// the answer take this rather than the descriptor, which copies the
-    /// settings it carries.
     pub fn is_dynamic_artifact(&self, id: Uuid) -> bool {
         self.registered_blocks
             .read()
@@ -964,8 +904,6 @@ impl BlockClient {
             .is_some_and(|registered| registered.erased.is_dynamic_artifact())
     }
 
-    /// The block's current value, serialized as pretty-printed JSON, for the
-    /// debug view. `None` while the block has not loaded yet.
     pub fn block_debug_data(&self, id: Uuid) -> Option<String> {
         self.registered_blocks
             .read()
@@ -980,15 +918,10 @@ impl BlockClient {
             .and_then(|registered| registered.erased.current_data())
     }
 
-    /// Stores new artifact settings on a block that is already open. Blocks
-    /// this client has not registered are ignored.
     pub fn set_dynamic_artifact(&self, id: Uuid, descriptor: DynamicArtifactDescriptor) {
         self.write_dynamic_artifact(id, Some(descriptor));
     }
 
-    /// Detaches a block from the source it was generated from. The value it
-    /// currently holds stays, but nothing regenerates it any more, so it
-    /// becomes an ordinary editable block.
     pub fn clear_dynamic_artifact(&self, id: Uuid) {
         self.write_dynamic_artifact(id, None);
     }
@@ -1161,8 +1094,6 @@ impl BlockClient {
         self.send(WorkerCommand::SetBlockParent { id, parent });
     }
 
-    /// Asks the server who can reach `id`, for the sharing UI. The caller polls
-    /// the returned request rather than awaiting it.
     pub fn request_block_access(&self, id: Uuid) -> BlockAccessRequest {
         let (completed, receiver) = oneshot::channel();
         self.send(WorkerCommand::ListBlockAccess { id, completed });
@@ -1172,8 +1103,6 @@ impl BlockClient {
         }
     }
 
-    /// Grants `account_id` the given access to `id`; [`BlockAccess::None`]
-    /// withdraws whatever was granted before.
     pub fn set_block_access(&self, id: Uuid, account_id: Uuid, access: BlockAccess) {
         self.send(WorkerCommand::SetBlockAccess {
             id,
@@ -1182,9 +1111,6 @@ impl BlockClient {
         });
     }
 
-    /// What this account may do with `id`, as last reported by the server.
-    /// Blocks that have not been read yet count as editable: the server has
-    /// the final say, and a refusal lowers this to what it did allow.
     pub fn block_access(&self, id: Uuid) -> BlockAccess {
         self.block_access
             .read()
@@ -1193,9 +1119,6 @@ impl BlockClient {
             .unwrap_or(BlockAccess::Edit)
     }
 
-    /// Sets or clears a presence value of kind `P` for `id`, which must
-    /// currently be watched (e.g. via [`get_block`](Self::get_block)). The
-    /// server broadcasts the change to every other client watching the block.
     pub fn set_presence<P: PresenceKind>(&self, id: Uuid, value: Option<&P>) {
         self.send(WorkerCommand::SetPresence {
             id,
@@ -1208,9 +1131,6 @@ impl BlockClient {
         });
     }
 
-    /// Every other client's current presence value of kind `P` for `id`,
-    /// alongside the client that posted it. Never includes this client's own
-    /// value: the server never echoes presence back to its author.
     pub fn presence<P: PresenceKind>(&self, id: Uuid) -> Vec<(ClientId, P)> {
         self.presence
             .read()
@@ -1506,8 +1426,6 @@ impl<B: Block> BlockHandle<B> {
         properties::read_name(&self.block.properties.read()).map(|name| name.value)
     }
 
-    /// The block's `NAME` property in full, including whether it was
-    /// manually chosen rather than auto-derived.
     pub fn block_name(&self) -> Option<properties::BlockName> {
         properties::read_name(&self.block.properties.read())
     }
@@ -1578,25 +1496,20 @@ pub trait BlockHandleAccess {
     fn block_name(&self) -> Option<properties::BlockName>;
     fn relationships(&self) -> Option<BlockRelationships>;
     fn set_parent(&self, parent: BlockParent);
-    /// Adds `block_id` as a child, or `None` if the block isn't loaded yet or
-    /// this block type doesn't support child blocks.
+
     fn add_child(&self, _block_id: Uuid) -> Option<bool> {
         None
     }
-    /// Removes `block_id` as a child, or `None` if the block isn't loaded yet
-    /// or this block type doesn't support child blocks.
+
     fn delete_child(&self, _block_id: Uuid) -> Option<bool> {
         None
     }
-    /// Replaces child `old` with `new`, or `None` if the block isn't loaded
-    /// yet or this block type doesn't support child blocks.
+
     fn replace_child(&self, _old: Uuid, _new: Uuid) -> Option<bool> {
         None
     }
     fn history(&self) -> Option<&dyn BlockHistoryHandle>;
-    /// Creates a brand-new, independent block of the same type, seeded with
-    /// this block's current live value. The copy starts unparented with its
-    /// own operation log; `None` if this block isn't currently readable.
+
     fn duplicate(&self, client: &BlockClient) -> Option<Uuid>;
 }
 
@@ -1913,9 +1826,6 @@ async fn tunneled_worker_main(
     run_link(socket, &shutdown, &mut state, &mut commands, &*wake).await;
 }
 
-/// The websocket endpoint for a server URL. The blocks websocket shares the
-/// server's host and scheme with the management endpoint, and carries the
-/// connection's identity in its query string.
 fn websocket_url(url: &str, token: &str, workspace_id: Uuid) -> String {
     let base = match url.split_once("://") {
         Some(("http", host)) => format!("ws://{host}"),
@@ -1925,8 +1835,6 @@ fn websocket_url(url: &str, token: &str, workspace_id: Uuid) -> String {
     format!("{base}{API_PATH}?{TOKEN_PARAMETER}={token}&{WORKSPACE_PARAMETER}={workspace_id}")
 }
 
-/// Runs the connection until it ends. There is no reconnecting, so every way
-/// out of here stops the worker for good.
 async fn run_connected(
     url: String,
     token: String,
@@ -2021,9 +1929,6 @@ async fn run_link(
     }
 }
 
-/// Ends the connection. A client that is still running cannot carry on without
-/// one, so losing it is fatal; once the client is gone there is nobody left for
-/// the failure to matter to.
 fn stop_or_fatal(shutdown: &Shutdown, error: impl AsRef<str>) {
     if shutdown.requested() {
         return;
@@ -2038,15 +1943,11 @@ struct WorkerState {
     reference_lists: HashMap<BlockReferenceList, Arc<ReferenceListShared>>,
     requests: HashMap<Uuid, PendingRequest>,
     outbound: VecDeque<ClientMessage>,
-    /// Frames from the clients this one is carrying, kept apart from its own
-    /// so that neither queue can hold the other up.
+
     tunnel_outbound: VecDeque<ClientEnvelope>,
     tunnels: HashMap<Uuid, TunnelSink>,
     deferred: VecDeque<DeferredRequest>,
-    /// Parents for blocks the server has not told this client about yet. The
-    /// server refuses to parent a block it does not have, and one this client
-    /// only holds a reference to may still be on its way from whoever is
-    /// making it, so the request waits here until the block turns up.
+
     parked_parents: HashMap<Uuid, BlockParent>,
     synchronization_waiters: Vec<oneshot::Sender<()>>,
     sending_paused: bool,
@@ -2091,9 +1992,6 @@ impl WorkerState {
         }
     }
 
-    /// Records what the server let this account do with a block. Access is only
-    /// ever lowered by a refusal, so a denial for one command cannot raise what
-    /// an earlier read reported.
     fn record_access(&self, id: Uuid, access: BlockAccess) {
         self.block_access.write().insert(id, access);
     }
@@ -2727,8 +2625,6 @@ impl WorkerState {
                     return;
                 }
                 if code == ErrorCode::PermissionDenied {
-                    // Permissions can be withdrawn while a block is open, so a
-                    // refusal is an expected answer rather than a protocol fault.
                     self.deny_access(request_id, command, response_id, message);
                     return;
                 }
@@ -2874,8 +2770,6 @@ impl WorkerState {
         }
     }
 
-    /// Records that the server refused a request, dropping it so the client
-    /// keeps running with the block marked inaccessible.
     fn deny_access(
         &mut self,
         request_id: Option<Uuid>,
@@ -2888,8 +2782,6 @@ impl WorkerState {
             let _ = completed.send(Err(message));
         }
         if let Some(id) = id {
-            // A refused read means the block cannot be opened at all; every
-            // other command needs edit access, so reading may still be allowed.
             let ceiling = match command {
                 Some(CommandKind::ReadBlock) => BlockAccess::KnowExists,
                 _ => BlockAccess::View,
@@ -3398,10 +3290,9 @@ trait ErasedBlock: Send + Sync {
         parent: BlockParent,
         properties: BTreeMap<Uuid, Vec<u8>>,
     );
-    /// Replaces the whole property map, as echoed back after an operation
-    /// that rode a freshly-derived map along with it.
+
     fn apply_properties(&self, properties: BTreeMap<Uuid, Vec<u8>>);
-    /// Upserts a single property, as pushed by a standalone property set.
+
     fn set_property(&self, key: Uuid, value: Vec<u8>);
     fn set_parent(&self, parent: BlockParent);
     fn next_update(&self) -> Option<OutboundUpdate>;
@@ -3417,9 +3308,7 @@ trait ErasedBlock: Send + Sync {
 struct TypedBlock<B: Block> {
     id: Uuid,
     workspace_id: Uuid,
-    /// The connected account operating this client, used as the author of
-    /// operations this client applies optimistically, before the server has
-    /// echoed back their real, verified `OperationRecord::author`.
+
     local_account_id: Uuid,
     author: RwLock<Option<Uuid>>,
     shared: Arc<BlockShared<B>>,
@@ -3577,8 +3466,7 @@ struct PendingOperation<B, O> {
     id: Uuid,
     operation: StoredOperation<B, O>,
     properties: BTreeMap<Uuid, Vec<u8>>,
-    /// What the block's artifact descriptor amounts to once this operation has
-    /// been applied. The server keeps it as listing metadata.
+
     dynamic_artifact: bool,
     references: ReferenceDelta,
 }
@@ -3601,9 +3489,6 @@ impl<B: Block> TypedBlock<B> {
         }
     }
 
-    /// The full property map to send with the next operation: the
-    /// currently-known map, with the `name` property refreshed from
-    /// `implicit_name` unless it has been manually set.
     fn merged_properties(&self, implicit_name: Option<String>) -> BTreeMap<Uuid, Vec<u8>> {
         let mut properties = self.properties.read().clone();
         properties::apply_implicit_name(&mut properties, implicit_name);
@@ -3815,9 +3700,6 @@ impl<B: Block> TypedBlock<B> {
         (result, true)
     }
 
-    /// Rewrites the descriptor of an existing artifact, or drops it when the
-    /// block is unlinked from its source. The block value is untouched, so this
-    /// never enters the undo history.
     fn local_set_dynamic_artifact(&self, descriptor: Option<DynamicArtifactDescriptor>) {
         let mut state = self.state.write();
         let implicit_name = self

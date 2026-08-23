@@ -4,7 +4,5 @@ fn main() -> eframe::Result {
     block_app_lib::run()
 }
 
-// Android starts at `android_main` and the browser at `run_web`, both in the
-// library; neither has a binary to run.
 #[cfg(any(target_os = "android", target_arch = "wasm32"))]
 fn main() {}

@@ -10,9 +10,9 @@ pub enum DatabaseFieldType {
     Enum,
 }
 
-/// A named choice for an [`DatabaseFieldType::Enum`] field. Stored values
-/// reference options by `id`, so renaming an option does not affect rows
-/// that already hold it.
+                                                                          
+                                                                         
+                         
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DatabaseEnumOption {
     pub id: Uuid,

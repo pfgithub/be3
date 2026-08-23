@@ -7,7 +7,7 @@ use crate::cell_label;
 fn out_of_turn_action_is_ignored() {
     let x = Uuid::new_v4();
     let o = Uuid::new_v4();
-    let actions = vec![play(&[], x, 0), attempt(x, 0)]; // it is O's turn, so this is ignored
+    let actions = vec![play(&[], x, 0), attempt(x, 0)];
 
     let x_screen = show(&actions, x);
     assert_eq!(x_screen.description, "Waiting for O...");

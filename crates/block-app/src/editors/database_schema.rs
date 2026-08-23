@@ -85,8 +85,6 @@ impl BlockEditor for DatabaseSchemaEditor {
     }
 }
 
-/// Editing grid for a schema's fields, shared between `DatabaseSchemaEditor`
-/// and the database editor's sidebar.
 pub(super) fn fields_ui(ui: &mut egui::Ui, block: &BlockHandle<DatabaseSchema>) {
     let Some(schema) = block.read() else {
         ui.centered_and_justified(|ui| {

@@ -1,10 +1,5 @@
 use std::{env, path::PathBuf, process::Command};
 
-/// Compiles the game crate calling this from its own build script to
-/// wasm32-unknown-unknown, and points `GAME_WASM` at the module, so its
-/// tests run the very artifact the app ships rather than the game's Rust
-/// source linked natively. Building for wasm32 is the compile this starts
-/// itself, so it stops there rather than recursing.
 pub fn wasm() {
     if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
         return;

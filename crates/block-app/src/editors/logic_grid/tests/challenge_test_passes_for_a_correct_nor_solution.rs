@@ -16,7 +16,6 @@ fn challenge_test_passes_for_a_correct_nor_solution() {
     assert_eq!(challenge.test.next_tick, challenge.data.ticks);
     assert!(!challenge.test.mismatched, "every tick should match NOR");
 
-    // The pass is signalled exactly once.
     assert!(editor.take_challenge_passed());
     assert!(!editor.take_challenge_passed());
 }

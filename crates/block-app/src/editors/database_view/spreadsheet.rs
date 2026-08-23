@@ -20,9 +20,6 @@ const ROW_HEIGHT: f32 = 28.0;
 const STRING_COLUMN_WIDTH: f32 = 180.0;
 const NUMBER_COLUMN_WIDTH: f32 = 120.0;
 
-/// A row as displayed: its storage index (used to address operations) paired
-/// with its data. Beyond the real rows this includes trailing virtual empty
-/// rows, and the list may be reordered by the active sort.
 type DisplayRows = Vec<(usize, DatabaseRow)>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -31,8 +28,6 @@ struct CellAddress {
     field_id: Uuid,
 }
 
-/// Grid selection, in-place cell editing, and formula-bar state for the
-/// spreadsheet view of a database.
 #[derive(Default)]
 pub(super) struct SpreadsheetView {
     selected: Option<CellAddress>,
@@ -430,10 +425,6 @@ impl SpreadsheetView {
     }
 }
 
-/// The sort a header click produces: unsorted columns start ascending, an
-/// ascending column becomes descending, and a descending column clears the
-/// sort back to intrinsic row order. Clicking a different column always
-/// replaces the current sort, since a view sorts by at most one field.
 fn next_sort(current: Option<DatabaseViewSort>, field_id: Uuid) -> Option<DatabaseViewSort> {
     match current {
         Some(sort) if sort.field_id == field_id => match sort.direction {
@@ -450,8 +441,6 @@ fn next_sort(current: Option<DatabaseViewSort>, field_id: Uuid) -> Option<Databa
     }
 }
 
-/// Rows without a value for the sort field sort after those with one,
-/// regardless of direction.
 fn compare_sorted_rows(
     a: &DatabaseRow,
     b: &DatabaseRow,
@@ -488,8 +477,6 @@ fn sort_row_pairs(rows: &mut DisplayRows, sort: DatabaseViewSort, fields: &[Data
     rows.sort_by(|(_, a), (_, b)| compare_sorted_rows(a, b, sort, field));
 }
 
-/// Enum values sort by the declared order of their options; a value whose
-/// option was since deleted sorts after all present options.
 fn compare_database_values(
     a: &DatabaseValue,
     b: &DatabaseValue,
@@ -513,9 +500,6 @@ fn compare_database_values(
     }
 }
 
-/// How many virtual empty rows to show past the real data: always at least
-/// one, extended so the cursor's row plus one more empty row underneath it
-/// stay visible while the cursor sits among the virtual rows.
 fn extra_row_count(len: usize, selected: Option<CellAddress>) -> usize {
     let mut extra = 1;
     if let Some(selected) = selected {
@@ -530,9 +514,6 @@ fn display_row_total(len: usize, selected: Option<CellAddress>) -> usize {
     len + extra_row_count(len, selected)
 }
 
-/// Pairs each row with its storage index (used to address operations),
-/// applies the active sort to the real rows, then appends trailing virtual
-/// empty rows so they always stay at the bottom regardless of sort.
 fn display_rows(
     rows: &[DatabaseRow],
     selected: Option<CellAddress>,

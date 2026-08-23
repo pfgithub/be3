@@ -35,16 +35,11 @@ struct SceneUniform {
     view_projection: [[f32; 4]; 4],
 }
 
-/// What the editor asks the renderer to draw this frame: the camera and the
-/// pixel size of the offscreen target it renders into. The scene geometry
-/// itself is fixed, since the block carries no data to draw from.
 pub(super) struct SceneFrame {
     pub(super) viewport_size_px: [u32; 2],
     pub(super) view_projection: [[f32; 4]; 4],
 }
 
-/// Sets up the scene renderer. The editor draws nothing when this is not
-/// called, which is what happens on a build without a wgpu backend.
 pub(in crate::editors) fn install(creation_context: &eframe::CreationContext<'_>) {
     let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
         return;
@@ -91,9 +86,6 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
     }
 }
 
-/// The offscreen color and depth target the scene is rendered into, so it can
-/// be depth-tested on its own before being blitted into egui's own pass,
-/// which has no depth buffer of its own to draw 3D content into directly.
 struct SceneTarget {
     size: [u32; 2],
     color_view: wgpu::TextureView,
@@ -422,8 +414,6 @@ fn scene_geometry() -> Vec<SceneVertex> {
     vertices
 }
 
-/// A flat quad on the ground, spanning `-half_extent..half_extent` on both
-/// horizontal axes.
 fn push_floor(vertices: &mut Vec<SceneVertex>, half_extent: f32, color: [f32; 3]) {
     push_quad(
         vertices,
@@ -435,9 +425,6 @@ fn push_floor(vertices: &mut Vec<SceneVertex>, half_extent: f32, color: [f32; 3]
     );
 }
 
-/// An axis-aligned box standing on the ground at `min`, `size` above it. Each
-/// face is shaded a little differently so the box reads as three-dimensional
-/// even under the flat, unlit shading the scene pipeline draws with.
 fn push_box(vertices: &mut Vec<SceneVertex>, min: [f32; 3], size: [f32; 3], color: [f32; 3]) {
     let max = [min[0] + size[0], min[1] + size[1], min[2] + size[2]];
 

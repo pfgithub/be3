@@ -24,7 +24,6 @@ const DIRECT_EDITOR_WIDTH: f32 = 400.0;
 const DIRECT_EDITOR_ROW_HEIGHT: f32 = 24.0;
 const DIRECT_EDITOR_CHROME_HEIGHT: f32 = 90.0;
 
-/// A hub for a database's views: what exists, and a way to add another one.
 pub(super) struct DatabaseEditor {
     block: BlockHandle<Database>,
     views: ReferenceList,

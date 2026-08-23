@@ -38,8 +38,7 @@ impl Element for ListNode {
             if index > 0 {
                 main += self.spacing;
             }
-            // Percent items have no natural size of their own; they only
-            // get one once a concrete rect is assigned during layout.
+
             let size = match item.size {
                 ItemSize::Intrinsic => crate::layout::measure(doc, painter, item.child),
                 ItemSize::Percent(_) => Vec2::ZERO,

@@ -254,8 +254,6 @@ pub(super) fn component_placement_position(
     }
 }
 
-/// Places a custom component so the snapped local cell being held stays under
-/// the cursor as the component rotates.
 pub(super) fn subcomponent_placement_position(
     anchor: Point,
     orientation: ComponentOrientation,

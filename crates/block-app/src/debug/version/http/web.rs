@@ -3,8 +3,6 @@ use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-/// A GET request running on the browser's event loop, polled from the UI
-/// thread each frame since egui does not drive futures itself.
 pub(in crate::debug::version) struct Fetch {
     state: Rc<RefCell<Option<Result<Vec<u8>, String>>>>,
 }

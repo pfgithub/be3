@@ -24,7 +24,7 @@ fn video_history_undoes_and_redoes_trimming() {
     block.redo();
     assert_eq!(block.read().unwrap().duration(), 4);
 
-    // Undoing past the trim removes the clip the insert added.
+                                                               
     block.undo();
     block.undo();
     assert!(block.read().unwrap().clips().is_empty());

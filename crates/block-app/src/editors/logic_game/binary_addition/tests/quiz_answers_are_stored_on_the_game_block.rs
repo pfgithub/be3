@@ -9,8 +9,6 @@ fn quiz_answers_are_stored_on_the_game_block() {
     let block = client.create_block(LogicGame::new());
     let quiz = BinaryAdditionQuiz::default();
 
-    // Nothing has been filled in, so every blank comes back empty at the width
-    // the problem actually has.
     let (carries, sums) = quiz.answers(&block, 0);
     assert_eq!(carries, vec![None; 5]);
     assert_eq!(sums, vec![None; 6]);
@@ -41,6 +39,6 @@ fn quiz_answers_are_stored_on_the_game_block() {
 
     let (carries, sums) = quiz.answers(&block, 0);
     assert!(quiz.is_correct(&carries, &sums, 0));
-    // The other problems are untouched, so the quiz as a whole is unfinished.
+
     assert!(!quiz.all_correct(&block));
 }

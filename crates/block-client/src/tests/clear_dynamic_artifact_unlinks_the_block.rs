@@ -43,6 +43,6 @@ fn clear_dynamic_artifact_unlinks_the_block() {
     assert_eq!(client.dynamic_artifact(block.id()), None);
     assert!(!client.is_dynamic_artifact(block.id()));
     assert!(block.revision() > revision);
-    // Unlinking leaves the generated value behind.
+
     assert_eq!(block.read().unwrap().0, 1);
 }

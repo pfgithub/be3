@@ -29,8 +29,6 @@ fn bounds_exclude_input_and_output_components() {
         },
     );
 
-    // Only the Not gate (2x4 at the origin) contributes to the bounds; the
-    // Input and Output pins flanking it are excluded.
     let bounds = grid.bounds().unwrap();
     assert_eq!(bounds.min, Point::new(0, 0));
     assert_eq!(bounds.max, Point::new(2, 4));

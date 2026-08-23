@@ -278,10 +278,6 @@ impl ConfigSpec {
     };
 }
 
-// Mirrors the TS `mkconfig` table: entries are grouped under a name, and
-// every entry in a group shares the group's precedence (its position in
-// this list) and precedence label, so neither has to be spelled out per
-// entry.
 const CONFIG_GROUPS: &[(&str, &[ConfigSpec])] = &[
     (
         "paren",
@@ -514,11 +510,6 @@ fn new_node_list() -> NodeList {
     Rc::new(RefCell::new(Vec::new()))
 }
 
-// Mutable-during-parsing counterpart of `SyntaxNode`: container fields are
-// `Rc<RefCell<Vec<_>>>` so a stack entry's `val` can alias the `items` of the
-// tree node it was created from, matching the TS tokenizer's array-reference
-// aliasing. `freeze_list` converts this into the plain `SyntaxNode` tree once
-// tokenization is done.
 enum BuilderNode {
     Identifier(IdentifierToken),
     Whitespace(WhitespaceToken),
@@ -1149,9 +1140,7 @@ pub fn unescape_string(
                     None,
                 ));
             };
-            // Mirrors upstream: this only advances past `{`, not past the
-            // whole `}`-terminated escape, so the trailing hex digits and
-            // `}` fall through and get appended again as plain text below.
+
             idx += 1;
             let inner: String = chars[istart..iend].iter().collect();
             result.push_str(&parse_hex_codepoint(

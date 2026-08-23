@@ -1,8 +1,3 @@
-//! Procedural city generation ported from ProbableTrain/MapGenerator.
-//!
-//! The crate contains no rendering code. All output is world-space geometry and
-//! all random choices are driven by the seed passed to [`CityGenerator`].
-
 mod field;
 mod geometry;
 mod graph;

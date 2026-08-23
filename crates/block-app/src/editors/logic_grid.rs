@@ -65,11 +65,11 @@ const HOTBAR_COLUMN_GAP: f32 = 8.0;
 const SIDE_PANEL_HORIZONTAL_MARGIN: f32 = 16.0;
 const HOTBAR_WIDTH: f32 =
     HOTBAR_COLUMN_WIDTH * 2.0 + HOTBAR_COLUMN_GAP + SIDE_PANEL_HORIZONTAL_MARGIN;
-/// Label drawn on an input/output component.
+
 const LABEL_COLOR: egui::Color32 = egui::Color32::from_rgb(232, 236, 245);
-/// Name drawn in the centre of a subcomponent.
+
 const NAME_COLOR: egui::Color32 = egui::Color32::from_rgb(232, 236, 245);
-/// Port label drawn next to a subcomponent's port.
+
 const PORT_LABEL_COLOR: egui::Color32 = egui::Color32::from_rgb(176, 188, 208);
 const HOTBAR_SLOT_SIZE: f32 = 64.0;
 const GRAPH_NODE_SIZE: egui::Vec2 = egui::vec2(150.0, 48.0);
@@ -100,8 +100,7 @@ enum ToolKind {
     Input,
     Output,
     ConfigureStorage,
-    /// A user-defined component selected from the hotbar. The actual component
-    /// to place is looked up via `LogicGridEditor::active_hotbar_slot`.
+
     Custom,
 }
 
@@ -166,8 +165,6 @@ impl ToolKind {
     }
 }
 
-/// A slot in the hotbar: either one of the built-in tools or a component
-/// pinned from a compiled logic block.
 #[derive(Clone, Debug)]
 enum HotbarSlot {
     Builtin(ToolKind),
@@ -181,8 +178,7 @@ enum HotbarSlot {
     Component {
         name: String,
         compiled: Uuid,
-        /// What to place. `None` until the compiled block has loaded, which is
-        /// when the slot becomes usable.
+
         kind: Option<ComponentKind>,
     },
 }
@@ -371,28 +367,23 @@ struct ChallengeState {
     id: ChallengeId,
     data: Challenge,
     test: ChallengeTest,
-    /// One-shot flag, set the frame the test transitions to a full pass and
-    /// cleared by `take_challenge_passed`.
+
     passed_event: bool,
 }
 
-/// Runs the open challenge solution against the challenge's expected values.
 #[derive(Debug, Default)]
 struct ChallengeTest {
-    /// The grid state the shared simulation VM was compiled from; used to
-    /// detect edits.
     snapshot: Option<SimulationSnapshot>,
     error: Option<String>,
-    /// Maps each input port index to its slot in the VM's input addresses.
+
     input_slots: Vec<Option<usize>>,
-    /// Maps each output port index to its slot in the VM's output addresses.
+
     output_slots: Vec<Option<usize>>,
-    /// Number of ticks executed so far.
+
     next_tick: usize,
-    /// Actual output values, indexed `[output_port][tick]`; each inner vec has
-    /// length `next_tick`.
+
     actual: Vec<Vec<u64>>,
-    /// Whether any executed tick produced a wrong output.
+
     mismatched: bool,
 }
 
@@ -538,21 +529,14 @@ impl Selection {
 
 pub(super) struct LogicGridEditor {
     block: BlockHandle<LogicGrid>,
-    /// A working copy of the block's circuit. Reads run against this rather
-    /// than taking a lock on every lookup; it is refreshed whenever the block
-    /// changes, including from this editor's own edits.
+
     grid: Grid,
     observed_revision: Option<u64>,
-    /// The hotbar block backing the palette: the one registered under the
-    /// workspace's root `Settings` block, which every grid shares. It is
-    /// `None` until the editor has a client to look it up with.
+
     hotbar_block: Option<RootSetting<Hotbar>>,
-    /// Set when the palette changed before the hotbar block was there, so the
-    /// change is written - creating the hotbar if the tree has none - as soon
-    /// as the root listing arrives.
+
     hotbar_needs_write: bool,
-    /// Every compiled block reachable from this grid, by ID. Pinned components
-    /// and called programs are both read from here.
+
     compiled: HashMap<Uuid, BlockHandle<CompiledLogic>>,
     tool: Tool,
     placement_orientation: ComponentOrientation,
@@ -562,21 +546,19 @@ pub(super) struct LogicGridEditor {
     configured_storage: Option<ComponentId>,
     simulation: Simulation,
     challenge: Option<ChallengeState>,
-    /// Root hotbar slots. Folders can contain any other hotbar slot.
+
     hotbar: Vec<HotbarSlot>,
-    /// Path into `hotbar` of the currently open folder. Empty means root.
+
     active_hotbar_folder: Vec<usize>,
-    /// Path into `hotbar` of the selected item, when it came from the hotbar.
+
     active_hotbar_slot: Option<Vec<usize>>,
-    /// Slot currently being dragged for hotbar reordering/nesting.
+
     hotbar_drag: Option<Vec<usize>>,
     confirm_hotbar_reset: bool,
-    /// Label applied to freely placed input/output components (outside a
-    /// challenge, where labels come from the challenge port instead).
+
     io_label: String,
     compile_error: Option<String>,
-    /// Keeps the client that owns the block alive in tests, which run without
-    /// a workspace to hold it for them.
+
     #[cfg(test)]
     test_client: Option<BlockClient>,
 }
@@ -635,8 +617,6 @@ impl LogicGridEditor {
         }
     }
 
-    /// Sends an edit to the block and refreshes the working copy from it, so
-    /// the mirror never drifts from what the block actually applied.
     fn edit(&mut self, operation: LogicGridOperation) {
         self.block.operate(operation);
         self.observed_revision = None;
@@ -653,8 +633,6 @@ impl LogicGridEditor {
         self.sync(None, Uuid::nil());
     }
 
-    /// Adds a component under a freshly allocated ID, and hands the ID back so
-    /// the caller can keep working with what it just placed.
     fn place(
         &mut self,
         position: Point,
@@ -688,9 +666,6 @@ impl LogicGridEditor {
         self.edit(LogicGridOperation::SetStorageValue { id, value });
     }
 
-    /// Refreshes everything read out of the block: the circuit, the level it
-    /// belongs to, and the compiled components it can reach. The palette comes
-    /// from the shared hotbar instead, which `sync_hotbar` finds on its own.
     fn sync(&mut self, client: Option<&BlockClient>, client_id: Uuid) {
         let revision = self.block.revision();
         if self.observed_revision == Some(revision) {
@@ -722,8 +697,6 @@ impl LogicGridEditor {
         self.sync_hotbar(client, client_id);
     }
 
-    /// Keeps a handle on `compiled` and on everything it calls, so a circuit
-    /// can be linked once all of them have loaded.
     fn ensure_compiled(&mut self, client: &BlockClient, compiled: Uuid) {
         if self.compiled.contains_key(&compiled) {
             return;
@@ -747,9 +720,6 @@ impl LogicGridEditor {
             .ok()
     }
 
-    /// Compiles the grid into a component other grids can call. The compiled
-    /// block is an artifact of this one, so it is rebuilt from here rather
-    /// than edited on its own.
     fn compile(&mut self, client: &BlockClient) -> Option<EditorAction> {
         let compiled = self
             .block
@@ -768,8 +738,7 @@ impl LogicGridEditor {
                 let name = dynamic_artifact::artifact_name(&source_name);
                 child.set_name(name.clone());
                 let id = child.id();
-                // Pinning it here is what makes the component reachable: the
-                // hotbar is the only place a grid can be placed from.
+
                 self.compiled.insert(id, child);
                 self.pin_component(name, id);
                 self.compile_error = None;
@@ -863,8 +832,6 @@ impl BlockEditor for LogicGridEditor {
         true
     }
 
-    /// The editor keeps its own camera, so the tab's pan and zoom are left out
-    /// of the way.
     fn direct_editor_viewport_input(
         &self,
         _editors: &EditorAccess<'_>,
@@ -942,8 +909,7 @@ impl BlockEditor for LogicGridEditor {
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         self.sync(Some(editors.client()), editors.client_id());
-        // Passing the level is recorded on the grid, which is where the game
-        // reads each level's progress back from.
+
         if self.take_challenge_passed() {
             self.edit(LogicGridOperation::SetCompleted { completed: true });
         }
@@ -958,8 +924,6 @@ impl BlockEditor for LogicGridEditor {
     }
 }
 
-/// Tests drive the editor without a workspace, so they keep the client that
-/// owns the block alive here rather than threading it through every case.
 #[cfg(test)]
 impl LogicGridEditor {
     fn detached(grid: Grid, challenge: Option<ChallengeId>) -> Self {
@@ -974,8 +938,6 @@ impl LogicGridEditor {
         editor
     }
 
-    /// Changes the circuit the way something outside the editor would, by
-    /// rewriting the block rather than the working copy.
     fn seed<R>(&mut self, build: impl FnOnce(&mut Grid) -> R) -> R {
         let mut grid = self.grid.clone();
         let result = build(&mut grid);

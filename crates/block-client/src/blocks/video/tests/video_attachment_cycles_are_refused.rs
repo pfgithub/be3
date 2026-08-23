@@ -5,7 +5,7 @@ use block::Block;
 fn video_attachment_cycles_are_refused() {
     let (mut video, first, second, attached) = sample();
 
-    // Hanging a clip off something it already carries would lose it.
+                                                                     
     let mut cycled = video.clip(first).unwrap().clone();
     cycled.attachment = Some(VideoAttachment::new(attached, 0));
     Video::apply_operation(
@@ -16,7 +16,7 @@ fn video_attachment_cycles_are_refused() {
     );
     assert_eq!(video.clip(first).unwrap().attachment, None);
 
-    // So would hanging it off itself.
+                                      
     let mut looped = video.clip(attached).unwrap().clone();
     looped.attachment = Some(VideoAttachment::new(attached, 4));
     Video::apply_operation(
@@ -30,7 +30,7 @@ fn video_attachment_cycles_are_refused() {
         Some(VideoAttachment::new(first, 2))
     );
 
-    // Reattaching to another clip is fine, and detaching is always allowed.
+                                                                            
     let mut reattached = video.clip(attached).unwrap().clone();
     reattached.attachment = Some(VideoAttachment::new(second, 1));
     Video::apply_operation(

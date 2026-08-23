@@ -9,9 +9,6 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// A plugin's manifest as it is written by hand and shipped beside the
-/// plugin: `block_type` as a uuid string, `icon` as the codepoint of the
-/// host's icon font, and everything the host can default left out.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestDocument {
@@ -79,9 +76,6 @@ impl ManifestDocument {
     }
 }
 
-/// Reads a manifest document and turns it into the manifest the host and the
-/// plugin exchange. A manifest is untrusted input wherever it was found, so
-/// every failure is answered rather than asserted.
 pub fn manifest_from_json(source: &str) -> Result<PluginManifest, ManifestError> {
     ManifestDocument::parse(source)?.into_manifest()
 }

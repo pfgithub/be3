@@ -18,9 +18,6 @@ pub(super) fn open(filter: &FileFilter) -> Receiver<PickResult> {
     receiver
 }
 
-/// Browsers only open a file chooser for a real `<input type="file">`, so the
-/// page grows a hidden one, is clicked for the user, and takes it away again
-/// once the choice comes back.
 fn show(filter: &FileFilter, sender: Sender<PickResult>) -> Result<(), String> {
     let document = web_sys::window()
         .ok_or("no browser window is available")?
@@ -38,8 +35,6 @@ fn show(filter: &FileFilter, sender: Sender<PickResult>) -> Result<(), String> {
     body.append_child(&input)
         .map_err(|error| format!("could not open a file picker: {}", describe(&error)))?;
 
-    // Whichever of the two events fires first answers; the other then finds the
-    // slot empty and leaves the already answered picker alone.
     let slot = Rc::new(RefCell::new(Some((sender, input.clone()))));
     let chosen = slot.clone();
     let on_change = Closure::<dyn FnMut()>::new(move || {
@@ -67,8 +62,7 @@ fn show(filter: &FileFilter, sender: Sender<PickResult>) -> Result<(), String> {
             .add_event_listener_with_callback(event, listener.as_ref().unchecked_ref())
             .map_err(|error| format!("could not open a file picker: {}", describe(&error)))?;
     }
-    // The listeners outlive this call, and the input is thrown away once one of
-    // them has run, so there is nothing left to keep them alive here.
+
     on_change.forget();
     on_cancel.forget();
 
@@ -76,8 +70,6 @@ fn show(filter: &FileFilter, sender: Sender<PickResult>) -> Result<(), String> {
     Ok(())
 }
 
-/// The `accept` attribute takes MIME types and dotted extensions alike, and
-/// browsers differ in which they honour, so it is given both.
 fn accept(filter: &FileFilter) -> String {
     let mime_types = filter.mime_types.iter().cloned();
     let extensions = filter.extensions.iter().map(|end| format!(".{end}"));

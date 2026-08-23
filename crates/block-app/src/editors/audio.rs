@@ -42,7 +42,6 @@ impl EditorKind for AudioEditor {
     }
 }
 
-/// An audio block is the imported file, so creating one starts by choosing it.
 impl ConfigurableEditor for AudioEditor {
     type Options = ChosenAudio;
 

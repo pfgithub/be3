@@ -435,8 +435,6 @@ impl LogicGridEditor {
             .ctx
             .input(|input| input.pointer.button_pressed(PointerButton::Primary));
         if primary_pressed && response.hovered() {
-            // The custom component to place, resolved before the match so the
-            // arm does not borrow `self` while assigning `self.gesture`.
             let custom_kind = self.selected_custom_kind();
             self.gesture = match self.tool.kind {
                 ToolKind::Select => {

@@ -46,13 +46,6 @@ fn winning_symbol(board: &[Option<Symbol>; CELL_COUNT]) -> Option<Symbol> {
     None
 }
 
-/// The whole game as one straight-line function over the action log:
-/// `helper.action` blocks on a player until the log supplies their move, so
-/// the code below reads like a normal loop rather than a hand-written replay
-/// pass. Each legal move is offered by calling `action(label)`; when it
-/// returns `true` the move it names is the one the log records next for that
-/// actor, so the board and player-assignment updates happen right there,
-/// inline, instead of being decoded from a returned value afterward.
 fn tic_tac_toe(helper: GameHelper<'_>) -> Result<Infallible, GameScreen> {
     let mut board: [Option<Symbol>; CELL_COUNT] = [None; CELL_COUNT];
     let mut players: [Option<Uuid>; 2] = [None, None];

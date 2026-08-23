@@ -9,18 +9,9 @@ use jni::{
 
 const APK_MIME_TYPE: &str = "application/vnd.android.package-archive";
 
-/// Writes `apk_bytes` into the system's `MediaStore.Downloads` collection and
-/// asks the package installer to open it.
-///
-/// This goes through `MediaStore` rather than a `FileProvider`: this app has
-/// no bundled Java/Kotlin classes for `cargo-apk` to register a provider
-/// against, and passing another app a `file://` URI directly is rejected by
-/// `StrictMode` on modern Android. `MediaStore.Downloads` is the system's own
-/// content provider, so it needs no manifest changes here.
 pub(super) fn install(apk_bytes: &[u8], display_name: &str) -> Result<(), String> {
     let context = ndk_context::android_context();
-    // SAFETY: android-activity initializes this before `android_main` runs and
-    // it stays valid for the life of the process.
+
     let vm = unsafe { JavaVM::from_raw(context.vm().cast()) };
     let activity: jobject = context.context().cast();
 
@@ -44,9 +35,6 @@ fn install_with_env(
     apk_bytes: &[u8],
     display_name: &str,
 ) -> Result<(), JniError> {
-    // SAFETY: `activity` is the process-wide Activity reference android-activity
-    // keeps alive for the whole process. It is only read through here, never
-    // deleted, so treating it as a borrowed local reference is sound.
     let activity = unsafe { JObject::from_raw(env, activity) };
 
     let resolver = env

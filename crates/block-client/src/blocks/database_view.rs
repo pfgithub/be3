@@ -31,9 +31,9 @@ pub struct DatabaseView {
     database_id: BlockRef,
     sort: Option<DatabaseViewSort>,
     kind: DatabaseViewKind,
-    /// The enum field whose options become the kanban board's columns.
+                                                                       
     kanban_field_id: Option<Uuid>,
-    /// The number fields plotted on the scatter chart's axes.
+                                                              
     scatter_x_field_id: Option<Uuid>,
     scatter_y_field_id: Option<Uuid>,
 }
@@ -44,7 +44,7 @@ pub enum DatabaseViewOperation {
     SetDatabase {
         database_id: BlockRef,
     },
-    /// `None` clears the sort, leaving rows in their intrinsic (insertion) order.
+                                                                                  
     SetSort {
         sort: Option<DatabaseViewSort>,
     },

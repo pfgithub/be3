@@ -30,7 +30,7 @@ fn map_adds_updates_and_removes_points() {
     );
     assert_eq!(map.point(point.id), Some(moved));
 
-    // Updating a point that is no longer on the map is ignored.
+                                                                
     Map::apply_operation(
         &mut map,
         &MapOperation::UpdatePoints {

@@ -6,7 +6,6 @@ fn toggle_collapse_at_is_independent_of_the_cursor() {
     let mut tester = EditorTester::with_language(content.as_bytes(), TextLanguage::Markdown);
     let b_start = content.find("# B").unwrap();
 
-    // The cursor sits elsewhere; toggling by position still targets B.
     tester.set_cursor(tester.pos(0));
     tester.execute(EditorCommand::ToggleCollapseAt(tester.pos(b_start)));
     let sections = tester.editor.collapsible_sections();
@@ -35,7 +34,6 @@ fn toggle_collapse_at_is_independent_of_the_cursor() {
             .collapsed
     );
 
-    // Toggling a position on a non-collapsible line does nothing.
     tester.execute(EditorCommand::ToggleCollapseAt(
         tester.pos(content.find("body a").unwrap()),
     ));

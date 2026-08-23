@@ -7,7 +7,6 @@ fn collapse_and_uncollapse_affect_touched_lines() {
     let a_start = 0;
     let b_start = content.find("# B").unwrap();
 
-    // A cursor on a non-collapsible line collapses nothing.
     tester.set_cursor(tester.pos(content.find("body a").unwrap()));
     tester.execute(EditorCommand::Collapse);
     assert!(tester
@@ -16,7 +15,6 @@ fn collapse_and_uncollapse_affect_touched_lines() {
         .iter()
         .all(|section| !section.collapsed));
 
-    // A selection spanning both heading lines collapses both.
     tester.execute(EditorCommand::SetSelection {
         anchor: tester.pos(a_start),
         focus: tester.pos(b_start + "# B".len()),
@@ -38,8 +36,6 @@ fn collapse_and_uncollapse_affect_touched_lines() {
             .collapsed
     );
 
-    // Collapsing an already-collapsed line is a no-op, and Uncollapse
-    // reverses it.
     tester.execute(EditorCommand::Collapse);
     tester.set_cursor(tester.pos(a_start));
     tester.execute(EditorCommand::Uncollapse);

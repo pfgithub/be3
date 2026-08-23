@@ -7,11 +7,9 @@ fn markdown_formatting_toggles_off() {
     tester.execute(EditorCommand::Markdown(MarkdownCommand::Bold));
     tester.expect_content(b"**[hello|**");
 
-    // Applying Bold again to the same selection unwraps instead of doubling.
     tester.execute(EditorCommand::Markdown(MarkdownCommand::Bold));
     tester.expect_content(b"[hello|");
 
-    // Selecting the markers themselves also toggles off.
     tester.execute(EditorCommand::Markdown(MarkdownCommand::Italic));
     tester.expect_content(b"_[hello|_");
     tester.execute(EditorCommand::SelectAll);

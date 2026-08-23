@@ -34,7 +34,6 @@ use super::{
 };
 use block_client::references::ReferenceResolutionCache;
 
-/// The database's schema, rows, and fields, plus the view's own settings.
 struct DatabaseViewData {
     schema_id: Uuid,
     rows: Vec<DatabaseRow>,
@@ -174,7 +173,6 @@ impl DatabaseViewEditor {
         })
     }
 
-    /// Applies operations to the underlying database, not the view itself.
     fn operate_database(&self, operations: Vec<DatabaseOperation>) {
         let Some(database) = self.database.as_ref() else {
             return;
@@ -184,9 +182,6 @@ impl DatabaseViewEditor {
         }
     }
 
-    /// The row shown for editing in the shared right sidebar: the spreadsheet's
-    /// selected cell's row, the kanban board's selected card, or the scatter
-    /// chart's selected point.
     fn selected_row(&self, kind: DatabaseViewKind) -> Option<usize> {
         match kind {
             DatabaseViewKind::Spreadsheet => self.spreadsheet.selected_row(),
@@ -195,7 +190,6 @@ impl DatabaseViewEditor {
         }
     }
 
-    /// Clears the selection in whichever view kind is active.
     fn deselect(&mut self, kind: DatabaseViewKind) {
         match kind {
             DatabaseViewKind::Spreadsheet => self.spreadsheet.deselect(),
@@ -495,9 +489,6 @@ impl BlockEditor for DatabaseViewEditor {
     }
 }
 
-/// Editing surface for a single row, shared between every view kind: the
-/// spreadsheet shows it for the selected cell's row, the kanban board for
-/// the selected card.
 #[derive(Default)]
 struct RowEditor {
     row_index: Option<usize>,
@@ -505,10 +496,6 @@ struct RowEditor {
 }
 
 impl RowEditor {
-    /// Resets the edit buffers when the selected row changes, and fills in
-    /// any missing ones from the row's current values. Buffers otherwise
-    /// persist across frames so in-progress typing (e.g. a lone "-" in a
-    /// number field) is not clobbered by the freshly read value.
     fn sync(&mut self, row_index: usize, row: &DatabaseRow, fields: &[DatabaseField]) {
         if self.row_index != Some(row_index) {
             self.row_index = Some(row_index);

@@ -9,7 +9,7 @@ fn removing_a_container_removes_its_children() {
     let sibling = insert(&mut builder, None, 1, label("Sibling"));
 
     GuiBuilder::apply_operation(&mut builder, &GuiBuilderOperation::Remove { id: outer });
-    // Removing something that is already gone is a no-op.
+                                                          
     GuiBuilder::apply_operation(&mut builder, &GuiBuilderOperation::Remove { id: nested });
 
     assert!(builder.widget(outer).is_none());

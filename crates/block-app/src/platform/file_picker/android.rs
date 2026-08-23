@@ -14,9 +14,6 @@ use jni::{
 
 use super::{FileFilter, PickResult, PickedFile};
 
-/// The one picker the activity can have open, waiting for `MainActivity` to
-/// report what the user chose. Opening another replaces it, matching the
-/// activity's own single pending request.
 static PENDING: OnceLock<Mutex<Option<Sender<PickResult>>>> = OnceLock::new();
 
 fn pending() -> &'static Mutex<Option<Sender<PickResult>>> {
@@ -39,14 +36,10 @@ pub(super) fn open(filter: &FileFilter) -> Receiver<PickResult> {
 
 fn start(filter: &FileFilter) -> Result<(), String> {
     let context = ndk_context::android_context();
-    // SAFETY: android-activity initializes this before `android_main` runs and
-    // it stays valid for the life of the process.
+
     let vm = unsafe { JavaVM::from_raw(context.vm().cast()) };
     let started = vm
         .attach_current_thread_for_scope(|env| {
-            // SAFETY: `activity` is the process-wide Activity reference
-            // android-activity keeps alive for the whole process, only ever
-            // read through here.
             let activity = unsafe { JObject::from_raw(env, context.context().cast()) };
             let class = main_activity(env, &activity)?;
             let mime_types = env.new_string(filter.mime_types.join(","))?;

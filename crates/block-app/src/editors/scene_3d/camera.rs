@@ -29,9 +29,6 @@ impl Camera {
         self.pitch = (self.pitch - delta[1] * LOOK_RADIANS_PER_PIXEL).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
-    /// Moves on the ground plane. `strafe` and `forward` are each in
-    /// `-1.0..=1.0` and relative to where the camera is facing, ignoring
-    /// pitch so looking up or down does not change walking speed.
     pub(super) fn walk(&mut self, strafe: f32, forward: f32, dt: f32) {
         let length = (strafe * strafe + forward * forward).sqrt();
         if length < f32::EPSILON {
@@ -81,7 +78,6 @@ fn normalize(a: [f32; 3]) -> [f32; 3] {
     [a[0] / length, a[1] / length, a[2] / length]
 }
 
-/// A right-handed view matrix, in the column-major layout `wgpu` expects.
 fn look_at(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
     let forward = normalize(sub(center, eye));
     let side = normalize(cross(forward, up));
@@ -94,8 +90,6 @@ fn look_at(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
     ]
 }
 
-/// A right-handed perspective projection with `wgpu`'s `0..1` depth range, in
-/// the column-major layout `wgpu` expects.
 fn perspective(fov_y_radians: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
     let focal_length = 1.0 / (fov_y_radians * 0.5).tan();
     [
