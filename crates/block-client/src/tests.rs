@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
+mod a_parent_waits_for_a_block_the_server_has_not_seen_yet;
 mod a_read_guard_blocks_background_updates;
 mod a_refused_block_resolves_when_the_server_creates_it;
 mod a_refused_read_leaves_the_block_unresolved;

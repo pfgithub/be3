@@ -2034,6 +2034,11 @@ struct WorkerState {
     tunnel_outbound: VecDeque<ClientEnvelope>,
     tunnels: HashMap<Uuid, TunnelSink>,
     deferred: VecDeque<DeferredRequest>,
+    /// Parents for blocks the server has not told this client about yet. The
+    /// server refuses to parent a block it does not have, and one this client
+    /// only holds a reference to may still be on its way from whoever is
+    /// making it, so the request waits here until the block turns up.
+    parked_parents: HashMap<Uuid, BlockParent>,
     synchronization_waiters: Vec<oneshot::Sender<()>>,
     sending_paused: bool,
     steps_remaining: usize,
@@ -2064,6 +2069,7 @@ impl WorkerState {
             tunnel_outbound: VecDeque::new(),
             tunnels: HashMap::new(),
             deferred: VecDeque::new(),
+            parked_parents: HashMap::new(),
             synchronization_waiters: Vec::new(),
             sending_paused: false,
             steps_remaining: 0,
@@ -2379,10 +2385,18 @@ impl WorkerState {
     }
 
     fn has_unsaved_changes(&self) -> bool {
-        self.blocks.values().any(|block| block.has_local_changes())
+        !self.parked_parents.is_empty()
+            || self.blocks.values().any(|block| block.has_local_changes())
             || self.requests.values().any(PendingRequest::changes_data)
             || self.outbound.iter().any(client_message_changes_data)
             || self.deferred.iter().any(DeferredRequest::changes_data)
+    }
+
+    fn unpark_parent(&mut self, id: Uuid) {
+        if let Some(parent) = self.parked_parents.remove(&id) {
+            self.deferred
+                .push_back(DeferredRequest::SetBlockParent { id, parent });
+        }
     }
 
     fn queue_initial_requests(&mut self) {
@@ -2506,6 +2520,7 @@ impl WorkerState {
                     {
                         self.blocks[&id].created();
                         self.cache_registered_block(id);
+                        self.unpark_parent(id);
                         self.maybe_send_update(id);
                     }
                     (
@@ -2594,6 +2609,7 @@ impl WorkerState {
                     author,
                     properties,
                 });
+                self.unpark_parent(id);
                 self.maybe_send_update(id);
             }
             ServerMessage::BatchOk {
@@ -2666,6 +2682,7 @@ impl WorkerState {
                     properties,
                 });
                 drop(_guard);
+                self.unpark_parent(id);
                 self.maybe_send_update(id);
             }
             ServerMessage::BatchOk { .. } => fatal("invalid batch response command"),
@@ -2907,6 +2924,10 @@ impl WorkerState {
         let request_id = Uuid::new_v4();
         match request {
             DeferredRequest::SetBlockParent { id, parent } => {
+                if self.blocks.get(&id).is_some_and(|block| !block.is_ready()) {
+                    self.parked_parents.insert(id, parent);
+                    return;
+                }
                 self.requests
                     .insert(request_id, PendingRequest::SetBlockParent { id, parent });
                 self.outbound.push_back(ClientMessage::SetBlockParent {
