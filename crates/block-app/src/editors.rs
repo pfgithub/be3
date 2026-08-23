@@ -125,14 +125,16 @@ pub enum DirectEditorViewportCommand {
 
 pub struct DirectEditorViewport {
     zoom: f32,
+    pans_and_zooms: bool,
     commands: Vec<DirectEditorViewportCommand>,
     content_rect: Option<egui::Rect>,
 }
 
 impl DirectEditorViewport {
-    pub fn new(zoom: f32) -> Self {
+    pub fn new(zoom: f32, pans_and_zooms: bool) -> Self {
         Self {
             zoom,
+            pans_and_zooms,
             commands: Vec::new(),
             content_rect: None,
         }
@@ -140,6 +142,10 @@ impl DirectEditorViewport {
 
     pub fn zoom(&self) -> f32 {
         self.zoom
+    }
+
+    pub fn pans_and_zooms(&self) -> bool {
+        self.pans_and_zooms
     }
 
     pub fn pan(&mut self, delta: egui::Vec2) {
@@ -740,7 +746,8 @@ pub fn direct_editor_tab_ui(
         .ctx()
         .data_mut(|data| data.get_temp::<DirectEditorTabViewport>(viewport_id))
         .unwrap_or_default();
-    let mut viewport = DirectEditorViewport::new(viewport_state.zoom);
+    let mut viewport =
+        DirectEditorViewport::new(viewport_state.zoom, capabilities.supports_pan_and_zoom);
 
     egui::Panel::top(egui::Id::new(("direct-editor-tab-toolbar", id)))
         .show_separator_line(true)

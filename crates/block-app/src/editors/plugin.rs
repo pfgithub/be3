@@ -365,7 +365,7 @@ impl BlockEditor for PluginEditor {
         scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        if !self.plugin.capabilities.pan_and_zoom {
+        if !self.plugin.capabilities.pan_and_zoom || !viewport.pans_and_zooms() {
             return self.direct_editor_ui(ui, editors, scale, viewport);
         }
         self.embedded = true;
