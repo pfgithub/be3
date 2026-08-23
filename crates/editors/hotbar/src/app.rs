@@ -88,8 +88,7 @@ impl HotbarApp {
 }
 
 impl block_editor_plugin::App for HotbarApp {
-    fn connect(&mut self, host: EditorHost, client: BlockClient, block_id: Uuid) {
-        let client = Arc::new(client);
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
         self.block = Some(client.get_block(block_id));
         self.client = Some(client);
         self.host = host;

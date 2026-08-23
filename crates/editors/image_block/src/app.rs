@@ -32,7 +32,7 @@ struct Editing {
 
 struct Creating {
     host: EditorHost,
-    client: BlockClient,
+    client: Arc<BlockClient>,
     chosen: Option<Image>,
 }
 
@@ -46,8 +46,7 @@ pub struct ImageApp {
 }
 
 impl block_editor_plugin::App for ImageApp {
-    fn connect(&mut self, host: EditorHost, client: BlockClient, block_id: Uuid) {
-        let client = Arc::new(client);
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
         let block = client.get_block::<Image>(block_id);
         self.editing = Some(Editing {
             host,
@@ -56,7 +55,7 @@ impl block_editor_plugin::App for ImageApp {
         });
     }
 
-    fn connect_creation(&mut self, host: EditorHost, client: BlockClient) {
+    fn connect_creation(&mut self, host: EditorHost, client: Arc<BlockClient>) {
         self.creation = Some(Creating {
             host,
             client,

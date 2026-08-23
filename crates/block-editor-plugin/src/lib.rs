@@ -1,6 +1,8 @@
 pub use eframe::egui;
 pub use egui_material_icons;
 
+use std::sync::Arc;
+
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod egui_session;
 mod host;
@@ -30,11 +32,11 @@ pub trait App: Default + 'static {
     fn connect(
         &mut self,
         _host: EditorHost,
-        _client: block_client::BlockClient,
+        _client: Arc<block_client::BlockClient>,
         _block_id: uuid::Uuid,
     ) {
     }
-    fn connect_creation(&mut self, _host: EditorHost, _client: block_client::BlockClient) {}
+    fn connect_creation(&mut self, _host: EditorHost, _client: Arc<block_client::BlockClient>) {}
     fn creation_ui(&mut self, _ui: &mut egui::Ui) {}
     fn create_block(&mut self) -> Result<uuid::Uuid, String> {
         Err("this editor does not create blocks".into())
@@ -42,7 +44,7 @@ pub trait App: Default + 'static {
     fn connect_artifact(
         &mut self,
         _host: EditorHost,
-        _client: block_client::BlockClient,
+        _client: Arc<block_client::BlockClient>,
         _artifact: Artifact,
     ) {
     }

@@ -17,16 +17,20 @@ use crate::platform::{FileFilter, FilePicker};
 #[derive(Default)]
 pub(super) struct Instances {
     entries: HashMap<EditorInstanceId, Instance>,
+    connection: Option<Connection>,
     next_screen: u64,
     request_id: u64,
     block_types: Option<Arc<Vec<BlockTypeDescriptor>>>,
     sent_block_types: bool,
 }
 
-struct Instance {
-    context: egui::Context,
+struct Connection {
     client: Arc<BlockClient>,
     tunnel: Tunnel,
+}
+
+struct Instance {
+    context: egui::Context,
     role: InstanceRole,
     artifact: ArtifactState,
     creation_ready: bool,
@@ -49,15 +53,9 @@ struct ArtifactState {
 }
 
 impl Instance {
-    fn new(context: &egui::Context, client: &Arc<BlockClient>, role: InstanceRole) -> Self {
-        let tunnel = client.open_tunnel({
-            let context = context.clone();
-            move || context.request_repaint()
-        });
+    fn new(context: &egui::Context, role: InstanceRole) -> Self {
         Self {
             context: context.clone(),
-            client: Arc::clone(client),
-            tunnel,
             role,
             artifact: ArtifactState::default(),
             creation_ready: false,
@@ -101,6 +99,20 @@ impl Instances {
         self.entries.remove(&instance).is_some()
     }
 
+    fn connect(&mut self, context: &egui::Context, client: &Arc<BlockClient>) {
+        if self.connection.is_some() {
+            return;
+        }
+        let tunnel = client.open_tunnel({
+            let context = context.clone();
+            move || context.request_repaint()
+        });
+        self.connection = Some(Connection {
+            client: Arc::clone(client),
+            tunnel,
+        });
+    }
+
     pub(super) fn report(
         &mut self,
         instance: EditorInstanceId,
@@ -113,13 +125,14 @@ impl Instances {
         scale_factor: f32,
         pass: u64,
     ) -> ScreenId {
+        self.connect(context, client);
         if self.block_types.is_none() {
             self.block_types = Some(Arc::clone(block_types));
         }
         let entry = self
             .entries
             .entry(instance)
-            .or_insert_with(|| Instance::new(context, client, role));
+            .or_insert_with(|| Instance::new(context, role));
         let next_screen = &mut self.next_screen;
         let screen = entry.screens.entry(region).or_insert_with(|| {
             *next_screen += 1;
@@ -149,12 +162,13 @@ impl Instances {
         client: &Arc<BlockClient>,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
     ) -> bool {
+        self.connect(context, client);
         if self.block_types.is_none() {
             self.block_types = Some(Arc::clone(block_types));
         }
         self.entries
             .entry(instance)
-            .or_insert_with(|| Instance::new(context, client, InstanceRole::Creation))
+            .or_insert_with(|| Instance::new(context, InstanceRole::Creation))
             .opened
     }
 
@@ -168,11 +182,12 @@ impl Instances {
         data: &[u8],
         resync: bool,
     ) -> Vec<Message> {
+        self.connect(context, client);
         if self.block_types.is_none() {
             self.block_types = Some(Arc::clone(block_types));
         }
         let entry = self.entries.entry(instance).or_insert_with(|| {
-            let mut entry = Instance::new(context, client, InstanceRole::Artifact(block));
+            let mut entry = Instance::new(context, InstanceRole::Artifact(block));
             entry.artifact.data = data.to_vec();
             entry
         });
@@ -224,6 +239,10 @@ impl Instances {
     }
 
     pub(super) fn next_screens(&mut self, pass: u64) -> NextScreens {
+        let client = self
+            .connection
+            .as_ref()
+            .map(|connection| Arc::clone(&connection.client));
         let mut instances: Vec<_> = self.entries.keys().copied().collect();
         instances.sort_by_key(|instance| instance.0);
         let mut opened = Vec::new();
@@ -252,10 +271,13 @@ impl Instances {
                 continue;
             }
             regions.sort_by_key(|request| request.screen.0);
+            let Some(client) = &client else {
+                continue;
+            };
             if !entry.opened {
                 entry.opened = true;
-                let account_id = entry.client.account_id().into_bytes();
-                let workspace_id = entry.client.workspace_id().into_bytes();
+                let account_id = client.account_id().into_bytes();
+                let workspace_id = client.workspace_id().into_bytes();
                 opened.push(match entry.role {
                     InstanceRole::Editor(block) => Message::Editor(EditorMessage::Open {
                         instance,
@@ -263,7 +285,7 @@ impl Instances {
                         block_type: block.block_type.into_bytes(),
                         account_id,
                         workspace_id,
-                        editable: entry.client.block_access(block.id) == block::BlockAccess::Edit,
+                        editable: client.block_access(block.id) == block::BlockAccess::Edit,
                     }),
                     InstanceRole::Creation => Message::Editor(EditorMessage::OpenCreation {
                         instance,
@@ -445,20 +467,19 @@ impl Instances {
             .unwrap_or_default()
     }
 
-    /// Takes whatever the server has sent back for each instance's client, so
+    /// Takes whatever the server has sent back for the runtime's client, so
     /// it can be handed to the plugin runtime.
     pub(super) fn pending(&mut self) -> Vec<Message> {
         let mut messages = Vec::new();
+        if let Some(connection) = &mut self.connection {
+            while let Some(payload) = connection.tunnel.try_recv() {
+                messages.push(Message::Client(TunnelMessage::Response { payload }));
+            }
+        }
         let mut instances: Vec<_> = self.entries.keys().copied().collect();
         instances.sort_by_key(|instance| instance.0);
         for instance in instances {
             let entry = self.entries.get_mut(&instance).unwrap();
-            while let Some(payload) = entry.tunnel.try_recv() {
-                messages.push(Message::Client(TunnelMessage::Response {
-                    instance,
-                    payload,
-                }));
-            }
             let context = entry.context.clone();
             let mut picks = std::mem::take(&mut entry.picks);
             picks.retain_mut(|pending| {
@@ -591,13 +612,13 @@ impl Instances {
     /// Forwards a plugin's client message to the server over the host's own
     /// connection, where it is served as a client in its own right.
     pub(super) fn client_message(&mut self, message: TunnelMessage) {
-        let TunnelMessage::Request { instance, payload } = message else {
+        let TunnelMessage::Request { payload } = message else {
             return;
         };
-        let Some(entry) = self.entries.get(&instance) else {
+        let Some(connection) = &self.connection else {
             return;
         };
-        entry.tunnel.send(payload);
+        connection.tunnel.send(payload);
     }
 }
 

@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use block_client::blocks::counter::{Counter, CounterOperation};
 use block_editor_plugin::egui;
 
 pub struct CounterApp {
     block: Option<block_client::BlockHandle<Counter>>,
-    creation: Option<block_client::BlockClient>,
+    creation: Option<Arc<block_client::BlockClient>>,
     step: i64,
     applied: u64,
 }
@@ -43,7 +45,7 @@ impl block_editor_plugin::App for CounterApp {
     fn connect(
         &mut self,
         _host: block_editor_plugin::EditorHost,
-        client: block_client::BlockClient,
+        client: Arc<block_client::BlockClient>,
         block_id: uuid::Uuid,
     ) {
         self.block = Some(client.get_block(block_id));
@@ -52,7 +54,7 @@ impl block_editor_plugin::App for CounterApp {
     fn connect_creation(
         &mut self,
         _host: block_editor_plugin::EditorHost,
-        client: block_client::BlockClient,
+        client: Arc<block_client::BlockClient>,
     ) {
         self.creation = Some(client);
     }

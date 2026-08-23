@@ -35,7 +35,7 @@ pub struct Editing {
 }
 
 struct Exporting {
-    client: BlockClient,
+    client: Arc<BlockClient>,
     block_id: Uuid,
     block_type: Uuid,
     regeneration: Option<artifact::Regeneration>,
@@ -44,7 +44,7 @@ struct Exporting {
 
 pub struct PixelArtApp {
     pub(crate) editing: Option<Editing>,
-    creation: Option<BlockClient>,
+    creation: Option<Arc<BlockClient>>,
     exporting: Option<Exporting>,
     pub(crate) tool: PixelTool,
     pub(crate) previous_drawing_tool: PixelTool,
@@ -103,8 +103,7 @@ impl Default for PixelArtApp {
 }
 
 impl block_editor_plugin::App for PixelArtApp {
-    fn connect(&mut self, host: EditorHost, client: BlockClient, block_id: Uuid) {
-        let client = Arc::new(client);
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
         let block = client.get_block::<PixelArt>(block_id);
         self.editing = Some(Editing {
             host,
@@ -113,7 +112,7 @@ impl block_editor_plugin::App for PixelArtApp {
         });
     }
 
-    fn connect_creation(&mut self, _host: EditorHost, client: BlockClient) {
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
         self.creation = Some(client);
     }
 
@@ -184,7 +183,12 @@ impl block_editor_plugin::App for PixelArtApp {
         Some(f32::from(width) / f32::from(height))
     }
 
-    fn connect_artifact(&mut self, _host: EditorHost, client: BlockClient, artifact: Artifact) {
+    fn connect_artifact(
+        &mut self,
+        _host: EditorHost,
+        client: Arc<BlockClient>,
+        artifact: Artifact,
+    ) {
         self.exporting = Some(Exporting {
             client,
             block_id: artifact.block_id,

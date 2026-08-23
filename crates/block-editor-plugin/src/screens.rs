@@ -1,13 +1,21 @@
+use block_client::{BlockClient, TunnelCarrier};
 use block_plugin_api::{
     BlockTypeDescriptor, EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenId,
-    ScreenLayout, ScreenRequest,
+    ScreenLayout, ScreenRequest, TunnelMessage,
 };
 use block_ui::{BlockCatalog, BlockTypeEntry};
 use eframe::egui;
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 use uuid::Uuid;
 
 use crate::{egui_session::EguiSession, host::BlockDrag};
+
+struct Client {
+    client: Arc<BlockClient>,
+    carrier: TunnelCarrier,
+    account_id: Uuid,
+    workspace_id: Uuid,
+}
 
 pub(crate) struct Screens {
     sessions: HashMap<EditorInstanceId, EguiSession>,
@@ -15,6 +23,7 @@ pub(crate) struct Screens {
     requests: Vec<ScreenRequest>,
     layout: ScreenLayout,
     block_types: Rc<BlockCatalog>,
+    client: Option<Client>,
 }
 
 impl Screens {
@@ -25,7 +34,25 @@ impl Screens {
             requests: Vec::new(),
             layout: ScreenLayout::default(),
             block_types: Rc::new(BlockCatalog::default()),
+            client: None,
         }
+    }
+
+    fn client(&mut self, account_id: Uuid, workspace_id: Uuid) -> Arc<BlockClient> {
+        if let Some(existing) = &self.client {
+            if existing.account_id == account_id && existing.workspace_id == workspace_id {
+                return Arc::clone(&existing.client);
+            }
+        }
+        let (endpoint, carrier) = block_client::tunnel_channel();
+        let client = Arc::new(BlockClient::tunneled(account_id, workspace_id, endpoint));
+        self.client = Some(Client {
+            client: Arc::clone(&client),
+            carrier,
+            account_id,
+            workspace_id,
+        });
+        client
     }
 
     pub(crate) fn layout(&self) -> &ScreenLayout {
@@ -47,32 +74,33 @@ impl Screens {
                 editable,
                 ..
             }) => {
+                let client = self.client(
+                    Uuid::from_bytes(*account_id),
+                    Uuid::from_bytes(*workspace_id),
+                );
                 let session = self
                     .sessions
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance));
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.set_editable(*editable);
-                session.connect(
-                    Uuid::from_bytes(*block_id),
-                    Uuid::from_bytes(*account_id),
-                    Uuid::from_bytes(*workspace_id),
-                );
+                session.connect(client, Uuid::from_bytes(*block_id));
             }
             Message::Editor(EditorMessage::OpenCreation {
                 instance,
                 account_id,
                 workspace_id,
             }) => {
+                let client = self.client(
+                    Uuid::from_bytes(*account_id),
+                    Uuid::from_bytes(*workspace_id),
+                );
                 let session = self
                     .sessions
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance));
                 session.set_block_types(Rc::clone(&self.block_types));
-                session.connect_creation(
-                    Uuid::from_bytes(*account_id),
-                    Uuid::from_bytes(*workspace_id),
-                );
+                session.connect_creation(client);
             }
             Message::Editor(EditorMessage::OpenArtifact {
                 instance,
@@ -82,16 +110,19 @@ impl Screens {
                 workspace_id,
                 data,
             }) => {
+                let client = self.client(
+                    Uuid::from_bytes(*account_id),
+                    Uuid::from_bytes(*workspace_id),
+                );
                 let session = self
                     .sessions
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance));
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.connect_artifact(
+                    client,
                     Uuid::from_bytes(*block_id),
                     Uuid::from_bytes(*block_type),
-                    Uuid::from_bytes(*account_id),
-                    Uuid::from_bytes(*workspace_id),
                     data.clone(),
                 );
             }
@@ -136,9 +167,9 @@ impl Screens {
                     session.input(region, event);
                 }
             }
-            Message::Client(message) => {
-                if let Some(session) = self.sessions.get_mut(&instance_of_client(message)) {
-                    session.client_message(message);
+            Message::Client(TunnelMessage::Response { payload }) => {
+                if let Some(client) = &self.client {
+                    client.carrier.send(payload.clone());
                 }
             }
             Message::BlockTypes(descriptors) => {
@@ -188,6 +219,11 @@ impl Screens {
 
     pub(crate) fn outbound(&mut self) -> Vec<Message> {
         let mut messages = Vec::new();
+        if let Some(client) = &mut self.client {
+            while let Some(payload) = client.carrier.try_recv() {
+                messages.push(Message::Client(TunnelMessage::Request { payload }));
+            }
+        }
         for session in self.sessions.values_mut() {
             messages.extend(session.outbound());
         }
@@ -219,12 +255,6 @@ impl Screens {
             session.place(placements.get(instance).map_or(&[], Vec::as_slice));
         }
     }
-}
-
-fn instance_of_client(message: &block_plugin_api::TunnelMessage) -> EditorInstanceId {
-    use block_plugin_api::TunnelMessage as Tunnel;
-    let (Tunnel::Request { instance, .. } | Tunnel::Response { instance, .. }) = message;
-    *instance
 }
 
 fn catalog(descriptors: &[BlockTypeDescriptor]) -> BlockCatalog {

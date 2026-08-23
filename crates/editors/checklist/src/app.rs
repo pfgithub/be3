@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use block_client::blocks::checklist::{Checklist, ChecklistOperation};
 use block_editor_plugin::egui;
 
@@ -28,7 +30,7 @@ impl Filter {
 #[derive(Default)]
 pub struct ChecklistApp {
     block: Option<block_client::BlockHandle<Checklist>>,
-    creation: Option<block_client::BlockClient>,
+    creation: Option<Arc<block_client::BlockClient>>,
     draft: String,
     filter: Filter,
 }
@@ -78,7 +80,7 @@ impl block_editor_plugin::App for ChecklistApp {
     fn connect(
         &mut self,
         _host: block_editor_plugin::EditorHost,
-        client: block_client::BlockClient,
+        client: Arc<block_client::BlockClient>,
         block_id: uuid::Uuid,
     ) {
         self.block = Some(client.get_block(block_id));
@@ -87,7 +89,7 @@ impl block_editor_plugin::App for ChecklistApp {
     fn connect_creation(
         &mut self,
         _host: block_editor_plugin::EditorHost,
-        client: block_client::BlockClient,
+        client: Arc<block_client::BlockClient>,
     ) {
         self.creation = Some(client);
     }

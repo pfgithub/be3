@@ -75,7 +75,7 @@ struct Folder {
 #[derive(Default)]
 pub struct WorkspaceIndexApp {
     folder: Option<Folder>,
-    creation: Option<BlockClient>,
+    creation: Option<Arc<BlockClient>>,
     view: FolderView,
     sort: FolderSort,
     descending: bool,
@@ -254,18 +254,18 @@ impl WorkspaceIndexApp {
 }
 
 impl block_editor_plugin::App for WorkspaceIndexApp {
-    fn connect(&mut self, host: EditorHost, client: BlockClient, block_id: Uuid) {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
         let block = client.get_block(block_id);
         let references = client.watch_references(BlockReferenceList::References(block_id));
         self.folder = Some(Folder {
             host,
-            client: Arc::new(client),
+            client,
             block,
             references,
         });
     }
 
-    fn connect_creation(&mut self, _host: EditorHost, client: BlockClient) {
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
         self.creation = Some(client);
     }
 

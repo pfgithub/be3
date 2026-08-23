@@ -494,21 +494,17 @@ pub enum FilePick {
     Failed(String),
 }
 
-/// A block-client frame tunnelled between an editor instance's client and the
-/// host's connection. The payloads are the ordinary JSON of the block
-/// protocol, so the host forwards them without needing to understand them.
+/// A block-client frame tunnelled between a plugin's block client and the
+/// host's connection. A plugin runtime has one client for all of its editor
+/// instances, so these frames are not addressed to any of them. The payloads
+/// are the ordinary JSON of the block protocol, so the host forwards them
+/// without needing to understand them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TunnelMessage {
     /// A client message on its way to the server.
-    Request {
-        instance: EditorInstanceId,
-        payload: String,
-    },
-    /// A server message on its way back to the instance's client.
-    Response {
-        instance: EditorInstanceId,
-        payload: String,
-    },
+    Request { payload: String },
+    /// A server message on its way back to the plugin's client.
+    Response { payload: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
