@@ -15,13 +15,12 @@ Do not:
 - Do not edit README.md. If it is out of date, you may say so in your handoff message.
 
 Verification:
-- These are the allowed commands for verification:
-  - `./scripts/verify`: always run this one before committing. This will run clippy --fix, cargo fmt, as well as enforcing project-specific rules: It will remove all code comments and format folder structure and tests.
-  - `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build --target android --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
-  - `./scripts/build --target web`: run this for changes that affect features specific to web
-- Do not perform any further verification. Do not use the browser tool. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work. Do not try building for other platforms.
+- `./scripts/verify`: always run this one before committing. This will run clippy --fix, cargo fmt, as well as enforcing project-specific rules: It will remove all code comments and format folder structure and tests.
+- `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build --target android --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
+- `./scripts/build --target web`: run this for changes that affect features specific to web
+- Do not perform any GUI verification. Do not run the GUI app or use the browser tool.
 
 Do:
 - Use commit message format `type: message`
 - After running verification, commit and push changes in git.
-- You may push a change even if it still needs further verification beyond an allowed verify command.
+- You may push a change even if it still needs GUI verification or other verification that you are unable to perform.
