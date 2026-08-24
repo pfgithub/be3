@@ -1,15 +1,12 @@
 use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        mpsc, OnceLock,
-    },
+    sync::{mpsc, OnceLock},
     thread,
     time::Instant,
 };
 
 use block_editor_plugin::{
     egui::{self, Pos2, Rect},
-    Waker,
+    PerformanceReporter, Waker,
 };
 use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfRenderConfig, Pdfium};
 
@@ -25,63 +22,54 @@ pub(crate) fn spawn_render_job(
     page: usize,
     target: RenderTarget,
     waker: Waker,
+    performance: PerformanceReporter,
 ) -> RenderJob {
-    static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
-
-    let id = NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed);
     let requested_at = Instant::now();
     let channel_started = Instant::now();
     let (sender, receiver) = mpsc::channel();
-    let channel_elapsed = channel_started.elapsed();
+    performance.record_duration("Channel creation", channel_started.elapsed());
     let spawn_started = Instant::now();
+    let worker_performance = performance.clone();
     thread::Builder::new()
         .name("pdf-render".into())
         .spawn(move || {
             let thread_started = Instant::now();
-            eprintln!(
-                "pdf timing job={id} thread_start={:?} bytes={}",
-                thread_started.duration_since(requested_at),
-                data.len()
-            );
-            let result = render_tile(id, &data, page, target);
+            worker_performance
+                .record_duration("Thread start", thread_started.duration_since(requested_at));
+            let result = render_tile(&data, page, target, &worker_performance);
             let completed_at = Instant::now();
-            eprintln!(
-                "pdf timing job={id} worker_total={:?} status={}",
-                completed_at.duration_since(thread_started),
-                if result.is_ok() { "ok" } else { "error" }
-            );
+            worker_performance
+                .record_duration("Worker total", completed_at.duration_since(thread_started));
             let send_started = Instant::now();
-            let sent = sender.send(RenderJobMessage {
+            let _ = sender.send(RenderJobMessage {
                 completed_at,
                 result,
             });
-            eprintln!(
-                "pdf timing job={id} result_send={:?}",
-                send_started.elapsed()
-            );
+            worker_performance.record_duration("Result send", send_started.elapsed());
             let wake_started = Instant::now();
             waker.wake();
-            eprintln!("pdf timing job={id} wake={:?}", wake_started.elapsed());
-            let _ = sent;
+            worker_performance.record_duration("Wake", wake_started.elapsed());
         })
         .expect("failed to start pdf render job");
-    eprintln!(
-        "pdf timing job={id} channel={channel_elapsed:?} thread_spawn={:?}",
-        spawn_started.elapsed()
-    );
-    RenderJob { id, receiver }
+    performance.record_duration("Thread spawn", spawn_started.elapsed());
+    RenderJob { receiver }
 }
 
-fn render_tile(id: u64, data: &[u8], page: usize, target: RenderTarget) -> RenderJobResult {
+fn render_tile(
+    data: &[u8],
+    page: usize,
+    target: RenderTarget,
+    performance: &PerformanceReporter,
+) -> RenderJobResult {
     let phase = Instant::now();
     let pdfium = pdfium_instance().map_err(str::to_owned)?;
-    eprintln!("pdf timing job={id} pdfium_instance={:?}", phase.elapsed());
+    performance.record_duration("PDFium instance", phase.elapsed());
 
     let phase = Instant::now();
     let document = pdfium
         .load_pdf_from_byte_slice(data, None)
         .map_err(|error| error.to_string())?;
-    eprintln!("pdf timing job={id} document_load={:?}", phase.elapsed());
+    performance.record_duration("Document load", phase.elapsed());
 
     let phase = Instant::now();
     let pages = document.pages();
@@ -92,7 +80,7 @@ fn render_tile(id: u64, data: &[u8], page: usize, target: RenderTarget) -> Rende
     let index = page.min(page_count - 1);
     let pdf_page = pages.get(index as i32).map_err(|error| error.to_string())?;
     let page_size_pts = egui::vec2(pdf_page.width().value, pdf_page.height().value);
-    eprintln!("pdf timing job={id} page_setup={:?}", phase.elapsed());
+    performance.record_duration("Page setup", phase.elapsed());
     let phase = Instant::now();
 
     if page_size_pts.x <= 0.0 || page_size_pts.y <= 0.0 {
@@ -126,12 +114,9 @@ fn render_tile(id: u64, data: &[u8], page: usize, target: RenderTarget) -> Rende
     );
     let width = ((region.width() * scale).round() as i32).clamp(1, DETAIL_MAX_DIM as i32);
     let height = ((region.height() * scale).round() as i32).clamp(1, DETAIL_MAX_DIM as i32);
-    eprintln!(
-        "pdf timing job={id} target_setup={:?} output={}x{}",
-        phase.elapsed(),
-        width,
-        height
-    );
+    performance.record_duration("Target setup", phase.elapsed());
+    performance.record_count("Output width", width as u64);
+    performance.record_count("Output height", height as u64);
 
     let phase = Instant::now();
 
@@ -140,22 +125,19 @@ fn render_tile(id: u64, data: &[u8], page: usize, target: RenderTarget) -> Rende
         .set_origin(-origin_px.x as i32, -origin_px.y as i32);
     let mut bitmap = PdfBitmap::empty(width, height, PdfBitmapFormat::default())
         .map_err(|error| error.to_string())?;
-    eprintln!("pdf timing job={id} bitmap_allocate={:?}", phase.elapsed());
+    performance.record_duration("Bitmap allocation", phase.elapsed());
     let phase = Instant::now();
     pdf_page
         .render_into_bitmap_with_config(&mut bitmap, &config)
         .map_err(|error| error.to_string())?;
-    eprintln!("pdf timing job={id} pdfium_render={:?}", phase.elapsed());
+    performance.record_duration("PDFium render", phase.elapsed());
     let phase = Instant::now();
     let rgba = bitmap.as_rgba_bytes();
-    eprintln!("pdf timing job={id} rgba_copy={:?}", phase.elapsed());
+    performance.record_duration("RGBA copy", phase.elapsed());
     let phase = Instant::now();
     let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
-    eprintln!(
-        "pdf timing job={id} color_image={:?} pixels={}",
-        phase.elapsed(),
-        width as u64 * height as u64
-    );
+    performance.record_duration("Color image", phase.elapsed());
+    performance.record_count("Pixels", width as u64 * height as u64);
     Ok(RenderedTile {
         page_count,
         page_index: index,

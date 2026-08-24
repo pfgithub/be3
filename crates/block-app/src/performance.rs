@@ -163,14 +163,15 @@ pub fn record_count(id: impl Into<String>, count: u64) {
     let Some(group) = active_group() else {
         return;
     };
-    state()
-        .groups
-        .entry(group)
-        .or_default()
-        .measurements
-        .entry(id.into())
-        .or_default()
-        .value = Some(Value::Count(count));
+    record_count_in(&group, &id.into(), count);
+}
+
+pub fn record_group_duration(group: &str, id: &str, duration: Duration) {
+    record_duration_in(group, id, duration);
+}
+
+pub fn record_group_count(group: &str, id: &str, count: u64) {
+    record_count_in(group, id, count);
 }
 
 pub struct GroupGuard {
@@ -220,15 +221,20 @@ fn active_group() -> Option<String> {
 
 fn record_duration_in(group: &str, id: &str, duration: Duration) {
     let mut state = state();
-    let measurement = state
-        .groups
-        .entry(group.to_owned())
-        .or_default()
-        .measurements
-        .entry(id.to_owned())
-        .or_default();
+    let frame = state.frame;
+    let group = state.groups.entry(group.to_owned()).or_default();
+    group.seen_frame = frame;
+    let measurement = group.measurements.entry(id.to_owned()).or_default();
     measurement.value = Some(Value::Duration);
     push_sample(&mut measurement.samples, duration);
+}
+
+fn record_count_in(group: &str, id: &str, count: u64) {
+    let mut state = state();
+    let frame = state.frame;
+    let group = state.groups.entry(group.to_owned()).or_default();
+    group.seen_frame = frame;
+    group.measurements.entry(id.to_owned()).or_default().value = Some(Value::Count(count));
 }
 
 fn push_sample(samples: &mut VecDeque<Duration>, duration: Duration) {

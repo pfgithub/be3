@@ -118,6 +118,12 @@ host embeds it. It is a request, not a constraint: the host may embed the
 instance at any size, and falls back to its own default until an instance
 reports one.
 
+An editor instance may report named duration and count measurements under a
+named performance group. Durations are measured by the plugin and sent as
+nanoseconds; the host only collects and displays the reported values. Reports
+are informational, require no response, and may arrive independently of a
+rendered frame.
+
 Neither peer polls the other: a plugin runs beside the host - a process of its
 own on the desktop, a worker of its own in the browser - and either side may
 send at any time.

@@ -32,7 +32,8 @@ use windows as platform;
 pub use block_plugin_api::EditorRegion;
 pub use block_ui;
 pub use host::{
-    Artifact, ArtifactDescription, BlockDrag, EditorHost, FileFilter, FilePicker, PickedFile, Waker,
+    Artifact, ArtifactDescription, BlockDrag, EditorHost, FileFilter, FilePicker,
+    PerformanceMeasurementGuard, PerformanceReporter, PickedFile, Waker,
 };
 
 pub trait App: Default + 'static {

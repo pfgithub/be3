@@ -1,12 +1,13 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 pub use block_plugin_api::FileFilter;
-use block_plugin_api::{FilePick, ViewChange};
+use block_plugin_api::{FilePick, PerformanceMeasurement, ViewChange};
 use block_ui::BlockCatalog;
 use eframe::egui;
 use uuid::Uuid;
@@ -49,6 +50,70 @@ impl Waker {
         Self(Some(Arc::new(wake)))
     }
 }
+struct PerformanceRecord {
+    group: Arc<str>,
+    measurement: PerformanceMeasurement,
+}
+
+#[derive(Clone)]
+pub struct PerformanceReporter {
+    group: Arc<str>,
+    records: Arc<Mutex<Vec<PerformanceRecord>>>,
+    waker: Waker,
+}
+
+impl PerformanceReporter {
+    pub fn measure(&self, name: impl Into<String>) -> PerformanceMeasurementGuard {
+        PerformanceMeasurementGuard {
+            reporter: self.clone(),
+            name: name.into(),
+            started: Instant::now(),
+        }
+    }
+
+    pub fn record_duration(&self, name: impl Into<String>, duration: Duration) {
+        self.record(PerformanceMeasurement::Duration {
+            name: name.into(),
+            nanoseconds: duration.as_nanos().min(u128::from(u64::MAX)) as u64,
+        });
+    }
+
+    pub fn record_count(&self, name: impl Into<String>, count: u64) {
+        self.record(PerformanceMeasurement::Count {
+            name: name.into(),
+            count,
+        });
+    }
+
+    fn record(&self, measurement: PerformanceMeasurement) {
+        let mut records = self
+            .records
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let should_wake = records.is_empty();
+        records.push(PerformanceRecord {
+            group: Arc::clone(&self.group),
+            measurement,
+        });
+        drop(records);
+        if should_wake {
+            self.waker.wake();
+        }
+    }
+}
+
+pub struct PerformanceMeasurementGuard {
+    reporter: PerformanceReporter,
+    name: String,
+    started: Instant,
+}
+
+impl Drop for PerformanceMeasurementGuard {
+    fn drop(&mut self) {
+        self.reporter
+            .record_duration(std::mem::take(&mut self.name), self.started.elapsed());
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct EditorHost {
@@ -65,6 +130,7 @@ pub struct EditorHost {
     view_changes: Rc<RefCell<Vec<ViewChange>>>,
     creation_ready: Rc<Cell<bool>>,
     creation_changed: Rc<Cell<bool>>,
+    performance: Arc<Mutex<Vec<PerformanceRecord>>>,
 }
 
 impl EditorHost {
@@ -78,6 +144,13 @@ impl EditorHost {
 
     pub fn waker(&self) -> Waker {
         self.waker.clone()
+    }
+    pub fn performance(&self, group: impl Into<String>) -> PerformanceReporter {
+        PerformanceReporter {
+            group: Arc::from(group.into()),
+            records: Arc::clone(&self.performance),
+            waker: self.waker.clone(),
+        }
     }
 
     pub fn open_block(&self, block_id: Uuid, block_type: Uuid) {
@@ -191,6 +264,27 @@ impl EditorHost {
         self.creation_changed
             .take()
             .then(|| self.creation_ready.get())
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn take_performance(&self) -> Vec<(String, Vec<PerformanceMeasurement>)> {
+        let records = std::mem::take(
+            &mut *self
+                .performance
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        let mut groups = BTreeMap::<Arc<str>, Vec<PerformanceMeasurement>>::new();
+        for record in records {
+            groups
+                .entry(record.group)
+                .or_default()
+                .push(record.measurement);
+        }
+        groups
+            .into_iter()
+            .map(|(group, measurements)| (group.to_string(), measurements))
+            .collect()
     }
 }
 

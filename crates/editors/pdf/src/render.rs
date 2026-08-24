@@ -57,7 +57,6 @@ pub(crate) struct RenderJobMessage {
 }
 
 pub(crate) struct RenderJob {
-    pub(crate) id: u64,
     pub(crate) receiver: Receiver<RenderJobMessage>,
 }
 

@@ -254,6 +254,13 @@ impl EguiSession {
             messages.push(Message::RegionSizes(sizes));
         }
         let instance = self.instance;
+        for (group, measurements) in self.host.take_performance() {
+            messages.push(Message::Editor(EditorMessage::Performance {
+                instance,
+                group,
+                measurements,
+            }));
+        }
         for (region, cursor) in self.cursors() {
             messages.push(Message::Editor(EditorMessage::Cursor {
                 instance,

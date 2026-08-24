@@ -2,7 +2,7 @@ use std::{sync::mpsc::TryRecvError, time::Instant};
 
 use block_editor_plugin::{
     egui::{self, Color32, Pos2, Rect, Vec2},
-    Waker,
+    PerformanceReporter, Waker,
 };
 
 use crate::render::{
@@ -48,19 +48,23 @@ pub(crate) struct Pane {
 }
 
 impl Pane {
-    pub(crate) fn poll(&mut self, context: &egui::Context) -> Option<PageFacts> {
+    pub(crate) fn poll(
+        &mut self,
+        context: &egui::Context,
+        performance: Option<&PerformanceReporter>,
+    ) -> Option<PageFacts> {
         let (request, job) = self.job.as_ref()?;
         let request = *request;
-        let job_id = job.id;
         let receive_started = Instant::now();
         let received = job.try_recv();
         let receive_elapsed = receive_started.elapsed();
         match received {
             Ok(message) => {
-                eprintln!(
-                    "pdf timing job={job_id} ready_to_poll={:?} try_receive={receive_elapsed:?}",
-                    message.completed_at.elapsed()
-                );
+                if let Some(performance) = performance {
+                    performance
+                        .record_duration("Result ready to poll", message.completed_at.elapsed());
+                    performance.record_duration("Result receive", receive_elapsed);
+                }
                 match message.result {
                     Ok(rendered) => {
                         self.job = None;
@@ -71,7 +75,7 @@ impl Pane {
                             page_index: rendered.page_index,
                             page_size_pts: rendered.page_size_pts,
                         };
-                        self.store(context, job_id, request, rendered);
+                        self.store(context, request, rendered, performance);
                         Some(facts)
                     }
                     Err(error) => {
@@ -93,9 +97,9 @@ impl Pane {
     fn store(
         &mut self,
         context: &egui::Context,
-        job_id: u64,
         request: RenderRequest,
         rendered: RenderedTile,
+        performance: Option<&PerformanceReporter>,
     ) {
         let (slot, name) = match request.target {
             RenderTarget::FullPage { .. } => (&mut self.base, "pdf-page"),
@@ -123,10 +127,9 @@ impl Pane {
                 });
             }
         }
-        eprintln!(
-            "pdf timing job={job_id} texture_delta={:?}",
-            texture_started.elapsed()
-        );
+        if let Some(performance) = performance {
+            performance.record_duration("Texture upload", texture_started.elapsed());
+        }
     }
 
     pub(crate) fn ensure(
@@ -138,6 +141,7 @@ impl Pane {
         visible_rect: Rect,
         pixels_per_point: f32,
         waker: Waker,
+        performance: Option<&PerformanceReporter>,
         data: impl FnOnce() -> Option<Vec<u8>>,
     ) {
         if self
@@ -175,23 +179,21 @@ impl Pane {
         let Some(data) = data() else {
             return;
         };
-        eprintln!(
-            "pdf timing revision={revision} page={page} data_copy={:?} bytes={}",
-            data_started.elapsed(),
-            data.len()
-        );
+        if let Some(performance) = performance {
+            performance.record_duration("PDF data copy", data_started.elapsed());
+            performance.record_count("PDF bytes", data.len() as u64);
+        }
         let request = RenderRequest {
             revision,
             page,
             target,
         };
+        let Some(performance) = performance else {
+            return;
+        };
         let spawn_started = Instant::now();
-        let job = spawn_render_job(data, page, target, waker);
-        eprintln!(
-            "pdf timing job={} spawn_render_job_call={:?}",
-            job.id,
-            spawn_started.elapsed()
-        );
+        let job = spawn_render_job(data, page, target, waker, performance.clone());
+        performance.record_duration("Spawn render job", spawn_started.elapsed());
         self.job = Some((request, job));
     }
 

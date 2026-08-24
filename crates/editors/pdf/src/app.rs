@@ -7,7 +7,7 @@ use block_client::{
 use block_editor_plugin::{
     egui,
     egui_material_icons::icons::{ICON_ARROW_BACK, ICON_ARROW_FORWARD},
-    EditorHost, FileFilter, FilePicker, PickedFile,
+    EditorHost, FileFilter, FilePicker, PerformanceReporter, PickedFile,
 };
 use uuid::Uuid;
 
@@ -32,6 +32,7 @@ struct Editing {
     host: EditorHost,
     _client: Arc<BlockClient>,
     block: BlockHandle<Pdf>,
+    performance: PerformanceReporter,
 }
 
 struct Creating {
@@ -55,10 +56,12 @@ pub struct PdfApp {
 impl block_editor_plugin::App for PdfApp {
     fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
         let block = client.get_block::<Pdf>(block_id);
+        let performance = host.performance(format!("PDF ({block_id})"));
         self.editing = Some(Editing {
             host,
             _client: client,
             block,
+            performance,
         });
     }
 
@@ -114,6 +117,10 @@ impl block_editor_plugin::App for PdfApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
+        let _performance = self
+            .editing
+            .as_ref()
+            .map(|editing| editing.performance.measure("Editor frame"));
         let available = ui.available_size().max(egui::Vec2::splat(1.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
         self.handle_input(&response);
@@ -136,6 +143,10 @@ impl block_editor_plugin::App for PdfApp {
     }
 
     fn preview_ui(&mut self, ui: &mut egui::Ui) {
+        let _performance = self
+            .editing
+            .as_ref()
+            .map(|editing| editing.performance.measure("Preview frame"));
         let rect = ui.available_rect_before_wrap();
         ui.allocate_rect(rect, egui::Sense::hover());
         if !matches!(self.draw(ui, PaneKey::Preview, rect, rect), Drawn::Page) {
@@ -249,7 +260,11 @@ impl PdfApp {
             return Drawn::Waiting;
         };
         let mut pane = self.panes.remove(&key).unwrap_or_default();
-        if let Some(facts) = pane.poll(ui.ctx()) {
+        let performance = self
+            .editing
+            .as_ref()
+            .map(|editing| editing.performance.clone());
+        if let Some(facts) = pane.poll(ui.ctx(), performance.as_ref()) {
             self.page_count = Some(facts.page_count);
             if self.page >= facts.page_count {
                 self.page = facts.page_index;
@@ -269,6 +284,7 @@ impl PdfApp {
             editing
                 .map(|editing| editing.host.waker())
                 .unwrap_or_default(),
+            performance.as_ref(),
             || {
                 let pdf = editing?.block.read()?;
                 Some(pdf.data().to_vec())

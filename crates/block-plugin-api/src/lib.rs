@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 22;
+pub const PROTOCOL_VERSION: u16 = 23;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -425,6 +425,11 @@ pub enum EditorMessage {
         width: f32,
         height: f32,
     },
+    Performance {
+        instance: EditorInstanceId,
+        group: String,
+        measurements: Vec<PerformanceMeasurement>,
+    },
     Acknowledged {
         instance: EditorInstanceId,
         request_id: u64,
@@ -434,6 +439,11 @@ pub enum EditorMessage {
         request_id: Option<u64>,
         message: String,
     },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PerformanceMeasurement {
+    Duration { name: String, nanoseconds: u64 },
+    Count { name: String, count: u64 },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -841,6 +851,18 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             collection(filter.extensions.len())?;
             collection(filter.mime_types.len())?;
             strings(filter.extensions.iter().chain(&filter.mime_types))
+        }
+        EditorMessage::Performance {
+            group,
+            measurements,
+            ..
+        } => {
+            string(group)?;
+            collection(measurements.len())?;
+            strings(measurements.iter().map(|measurement| match measurement {
+                PerformanceMeasurement::Duration { name, .. }
+                | PerformanceMeasurement::Count { name, .. } => name,
+            }))
         }
         EditorMessage::CreationBlock { outcome, .. } => match outcome {
             CreationOutcome::Created(_) => Ok(()),

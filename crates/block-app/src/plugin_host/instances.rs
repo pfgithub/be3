@@ -1,8 +1,8 @@
 use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
     ArtifactDescription, BlockTypeDescriptor, CreationOutcome, CursorIcon, EditorInstanceId,
-    EditorMessage, EditorRegion, FilePick, Message, RegenerationOutcome, RegionSize, ScreenId,
-    ScreenLayout, ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
+    EditorMessage, EditorRegion, FilePick, Message, PerformanceMeasurement, RegenerationOutcome,
+    RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{collections::HashMap, sync::Arc};
@@ -12,7 +12,10 @@ use super::{
     input::{viewport_metrics, BlockDragEvent, InputAdapter},
     EditorBlock, InstanceRole,
 };
-use crate::platform::{FileFilter, FilePicker};
+use crate::{
+    performance,
+    platform::{FileFilter, FilePicker},
+};
 
 #[derive(Default)]
 pub(super) struct Instances {
@@ -690,6 +693,26 @@ impl Instances {
             } => {
                 if let Some(entry) = self.entries.get_mut(&instance) {
                     entry.intrinsic = Some(egui::vec2(width, height));
+                }
+            }
+            EditorMessage::Performance {
+                instance,
+                group,
+                measurements,
+            } if self.entries.contains_key(&instance) => {
+                for measurement in measurements {
+                    match measurement {
+                        PerformanceMeasurement::Duration { name, nanoseconds } => {
+                            performance::record_group_duration(
+                                &group,
+                                &name,
+                                std::time::Duration::from_nanos(nanoseconds),
+                            );
+                        }
+                        PerformanceMeasurement::Count { name, count } => {
+                            performance::record_group_count(&group, &name, count);
+                        }
+                    }
                 }
             }
             _ => {}
