@@ -118,13 +118,18 @@ web-sys = { version = "0.3", features = [
     "HtmlElement",
     "HtmlInputElement",
     "HtmlMediaElement",
+    "MessageEvent",
     "Node",
+    "OffscreenCanvas",
     "Request",
     "RequestInit",
     "Response",
     "Storage",
     "Url",
     "Window",
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
     "console",
 ] }
 

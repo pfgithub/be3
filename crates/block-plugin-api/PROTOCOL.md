@@ -118,6 +118,10 @@ host embeds it. It is a request, not a constraint: the host may embed the
 instance at any size, and falls back to its own default until an instance
 reports one.
 
+Neither peer polls the other: a plugin runs beside the host - a process of its
+own on the desktop, a worker of its own in the browser - and either side may
+send at any time.
+
 A surface is transferred as native graphics resources, never as pixels: the
 Windows mechanism shares a D3D12 texture and fence, and the Linux one shares
 the dma-buf planes of a single image. A Linux surface declares one attachment

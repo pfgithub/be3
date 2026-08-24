@@ -24,15 +24,12 @@ pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
 pub(crate) struct WebFrame {
     pub(crate) size: [u32; 2],
     pub(crate) canvas_id: String,
-    pub(crate) plugin_id: String,
-    pub(crate) pass: u64,
 }
 
 struct Target {
     size: [u32; 2],
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
-    needs_copy: bool,
 }
 
 pub(crate) struct WebSurfacePresenter {
@@ -164,7 +161,6 @@ impl WebSurfacePresenter {
                 size,
                 texture,
                 bind_group,
-                needs_copy: true,
             },
         );
     }
@@ -177,14 +173,13 @@ impl WebSurfacePresenter {
             return;
         };
         let copy_size = wgpu::Extent3d {
-            width: target.size[0].min(canvas.width()),
-            height: target.size[1].min(canvas.height()),
+            width: target.size[0],
+            height: target.size[1],
             depth_or_array_layers: 1,
         };
         if copy_size.width == 0 || copy_size.height == 0 {
             return;
         }
-        target.needs_copy = false;
         queue.copy_external_image_to_texture(
             &wgpu::CopyExternalImageSourceInfo {
                 source: wgpu::ExternalImageSource::HTMLCanvasElement(canvas),
@@ -234,12 +229,7 @@ impl SurfacePresenter for WebSurfacePresenter {
         surface: u32,
         frame: &Self::Frame,
     ) -> Result<(), String> {
-        let painted = super::render(&frame.plugin_id, frame.pass);
-        let stale = self
-            .targets
-            .get(&surface)
-            .is_some_and(|target| target.needs_copy);
-        if (painted || stale) && frame.size[0] > 0 && frame.size[1] > 0 {
+        if frame.size[0] > 0 && frame.size[1] > 0 {
             self.copy_from_canvas(queue, surface, &frame.canvas_id);
         }
         Ok(())

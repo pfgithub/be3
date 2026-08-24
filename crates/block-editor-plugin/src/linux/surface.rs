@@ -88,7 +88,7 @@ impl Surface {
         &self.layout
     }
 
-    pub(crate) fn descriptor(&self) -> (Message, Vec<RawFd>) {
+    pub(crate) fn descriptor(&self) -> Option<(Message, Vec<RawFd>)> {
         let descriptor = LinuxSurfaceDescriptor {
             drm_format: DRM_FORMAT_ARGB8888,
             modifier: DRM_FORMAT_MOD_LINEAR,
@@ -102,7 +102,7 @@ impl Surface {
             self.layout.width,
             self.layout.height,
         );
-        (Message::Surface(descriptor), vec![self.memory.as_raw_fd()])
+        Some((Message::Surface(descriptor), vec![self.memory.as_raw_fd()]))
     }
 
     pub(crate) fn render(

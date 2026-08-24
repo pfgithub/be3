@@ -13,17 +13,19 @@ mod panes;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod runner;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+mod runtime;
+#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod screens;
 pub mod session;
 #[cfg(target_arch = "wasm32")]
 mod web;
-#[cfg(target_arch = "wasm32")]
-mod web_surface;
 #[cfg(target_os = "windows")]
 mod windows;
 
 #[cfg(target_os = "linux")]
 use linux as platform;
+#[cfg(target_arch = "wasm32")]
+use web as platform;
 #[cfg(target_os = "windows")]
 use windows as platform;
 
@@ -84,14 +86,20 @@ pub mod __private {
     pub use wasm_bindgen_futures;
 
     #[cfg(target_arch = "wasm32")]
-    pub async fn start<A: crate::App>(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
-        crate::web::start::<A>(canvas_id).await
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn hello(manifest: &str) -> Result<Vec<u8>, wasm_bindgen::JsValue> {
+    pub async fn start<A: crate::App>(
+        canvas: wasm_bindgen::JsValue,
+        post: js_sys::Function,
+        manifest: &str,
+    ) -> Result<(), wasm_bindgen::JsValue> {
         let identity = identity(manifest);
-        crate::web::hello(&identity.id, &identity.name, &identity.version)
+        crate::web::start::<A>(
+            canvas,
+            post,
+            &identity.id,
+            &identity.name,
+            &identity.version,
+        )
+        .await
     }
 
     pub fn identity(manifest: &str) -> block_plugin_api::PluginIdentity {
@@ -101,18 +109,8 @@ pub mod __private {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn receive(frame: Vec<u8>) -> Result<js_sys::Array, wasm_bindgen::JsValue> {
+    pub fn receive(frame: Vec<u8>) -> Result<(), wasm_bindgen::JsValue> {
         crate::web::receive(frame)
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn poll() -> Result<js_sys::Array, wasm_bindgen::JsValue> {
-        crate::web::poll()
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn render() -> Result<js_sys::Array, wasm_bindgen::JsValue> {
-        crate::web::render()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -138,44 +136,18 @@ macro_rules! plugin {
         #[cfg(target_arch = "wasm32")]
         #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
         pub async fn start(
-            canvas_id: String,
+            canvas: block_editor_plugin::__private::wasm_bindgen::JsValue,
+            post: block_editor_plugin::__private::js_sys::Function,
         ) -> Result<(), block_editor_plugin::__private::wasm_bindgen::JsValue> {
-            block_editor_plugin::__private::start::<$app>(canvas_id).await
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn hello() -> Result<Vec<u8>, block_editor_plugin::__private::wasm_bindgen::JsValue> {
-            block_editor_plugin::__private::hello(PLUGIN_MANIFEST)
+            block_editor_plugin::__private::start::<$app>(canvas, post, PLUGIN_MANIFEST).await
         }
 
         #[cfg(target_arch = "wasm32")]
         #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
         pub fn receive(
             frame: Vec<u8>,
-        ) -> Result<
-            block_editor_plugin::__private::js_sys::Array,
-            block_editor_plugin::__private::wasm_bindgen::JsValue,
-        > {
+        ) -> Result<(), block_editor_plugin::__private::wasm_bindgen::JsValue> {
             block_editor_plugin::__private::receive(frame)
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn poll() -> Result<
-            block_editor_plugin::__private::js_sys::Array,
-            block_editor_plugin::__private::wasm_bindgen::JsValue,
-        > {
-            block_editor_plugin::__private::poll()
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn render() -> Result<
-            block_editor_plugin::__private::js_sys::Array,
-            block_editor_plugin::__private::wasm_bindgen::JsValue,
-        > {
-            block_editor_plugin::__private::render()
         }
 
         #[cfg(target_arch = "wasm32")]

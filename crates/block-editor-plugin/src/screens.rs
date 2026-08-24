@@ -77,7 +77,6 @@ impl Screens {
         &self.layout
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
     pub(crate) fn set_generation(&mut self, generation: u64) {
         self.layout.generation = generation;
     }

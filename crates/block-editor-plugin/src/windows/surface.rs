@@ -104,7 +104,7 @@ impl Surface {
         &self.layout
     }
 
-    pub(crate) fn descriptor(&self) -> (Message, [RawHandle; 2]) {
+    pub(crate) fn descriptor(&self) -> Option<(Message, Vec<RawHandle>)> {
         let luid = unsafe {
             self.device
                 .as_hal::<wgpu_hal::api::Dx12>()
@@ -124,13 +124,13 @@ impl Surface {
             self.layout.width,
             self.layout.height,
         );
-        (
+        Some((
             Message::Surface(descriptor),
-            [
+            vec![
                 self.resource_handle.as_raw_handle(),
                 self.fence_handle.as_raw_handle(),
             ],
-        )
+        ))
     }
 
     pub(crate) fn render(

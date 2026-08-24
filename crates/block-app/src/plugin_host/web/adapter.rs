@@ -1,81 +1,83 @@
 use block_plugin_api::{
     encode_frame, Capability, HostSession, Message, QueueError, SessionState, SurfaceMechanism,
 };
-use std::time::Duration;
-use wasm_bindgen::prelude::*;
+use eframe::egui;
+use std::{cell::RefCell, rc::Rc};
+use wasm_bindgen::{prelude::*, JsCast};
 
-#[wasm_bindgen(inline_js = "
-const plugins = new Map();
+const WORKER_SOURCE: &str = r#"
+let plugin = null;
+const queued = [];
 
-export async function web_plugin_start(url, canvasId) {
-    const module = await import(new URL(url, document.baseURI).href);
-    await module.default();
-    await module.start(canvasId);
-    plugins.set(canvasId, module);
-    return module.hello();
+function post(frames) {
+    self.postMessage({ kind: "frames", frames });
 }
 
-export function web_plugin_send(canvasId, frames) {
-    const module = plugins.get(canvasId);
-    if (!module) throw new Error('the web plugin is not running');
-    const responses = [];
-    for (const frame of frames) {
-        for (const response of module.receive(frame)) {
-            responses.push(response);
+function fail(error) {
+    self.postMessage({ kind: "error", message: String((error && error.message) || error) });
+}
+
+self.onmessage = async (event) => {
+    const data = event.data;
+    try {
+        if (data.kind === "start") {
+            const module = await import(data.url);
+            const wasm = await module.default();
+            const shim = await import(new URL("../../wasi.js", data.url).href);
+            shim.bindMemory(wasm.memory);
+            await module.start(data.canvas, post);
+            plugin = module;
+            for (const frame of queued.splice(0)) plugin.receive(frame);
+        } else if (data.kind === "frames") {
+            for (const frame of data.frames) {
+                if (plugin) plugin.receive(frame);
+                else queued.push(frame);
+            }
+        } else if (data.kind === "shutdown") {
+            if (plugin) plugin.shutdown();
+            self.close();
         }
+    } catch (error) {
+        fail(error);
     }
-    return responses;
-}
+};
+"#;
 
-export function web_plugin_poll(canvasId) {
-    const module = plugins.get(canvasId);
-    if (!module) return [];
-    return module.poll();
-}
-
-export function web_plugin_render(canvasId) {
-    const module = plugins.get(canvasId);
-    if (!module) return [];
-    return module.render();
-}
-
-export function web_plugin_shutdown(canvasId) {
-    const module = plugins.get(canvasId);
-    if (module) {
-        module.shutdown();
-        plugins.delete(canvasId);
-    }
-}
-")]
-extern "C" {
-    #[wasm_bindgen(catch)]
-    async fn web_plugin_start(url: &str, canvas_id: &str) -> Result<js_sys::Uint8Array, JsValue>;
-    #[wasm_bindgen(catch)]
-    fn web_plugin_send(canvas_id: &str, frames: js_sys::Array) -> Result<js_sys::Array, JsValue>;
-    #[wasm_bindgen(catch)]
-    fn web_plugin_poll(canvas_id: &str) -> Result<js_sys::Array, JsValue>;
-    #[wasm_bindgen(catch)]
-    fn web_plugin_render(canvas_id: &str) -> Result<js_sys::Array, JsValue>;
-    fn web_plugin_shutdown(canvas_id: &str);
+#[derive(Default)]
+struct Inbox {
+    frames: Vec<Vec<u8>>,
+    error: Option<String>,
 }
 
 pub(super) struct WebProtocolAdapter {
-    canvas_id: String,
+    worker: web_sys::Worker,
     session: HostSession,
+    inbox: Rc<RefCell<Inbox>>,
     received: Vec<Message>,
-    repaint: Option<Duration>,
+    _onmessage: Closure<dyn FnMut(web_sys::MessageEvent)>,
 }
 
 impl WebProtocolAdapter {
-    pub(super) async fn start(
-        url: String,
-        canvas_id: String,
+    pub(super) fn start(
+        url: &str,
+        canvas: &web_sys::HtmlCanvasElement,
         dark_theme: bool,
+        context: &egui::Context,
     ) -> Result<Self, String> {
-        let hello = web_plugin_start(&url, &canvas_id)
-            .await
-            .map_err(js_error)?
-            .to_vec();
+        let offscreen = canvas
+            .transfer_control_to_offscreen()
+            .map_err(|_| "the plugin canvas could not be handed to its worker".to_owned())?;
+        let worker = spawn()?;
+        let inbox = Rc::new(RefCell::new(Inbox::default()));
+        let onmessage = listen(&worker, Rc::clone(&inbox), context.clone());
+        let message = js_sys::Object::new();
+        set(&message, "kind", &"start".into());
+        set(&message, "url", &absolute(url).into());
+        set(&message, "canvas", &offscreen);
+        let transfer = js_sys::Array::of1(&offscreen);
+        worker
+            .post_message_with_transfer(&message, &transfer)
+            .map_err(|_| "the plugin worker could not be started".to_owned())?;
         let mut session = HostSession::new(
             "BE3 web host",
             vec![
@@ -86,30 +88,49 @@ impl WebProtocolAdapter {
             dark_theme,
         );
         session.start(now());
-        session.receive(decode(&hello)?, now());
-        let mut adapter = Self {
-            canvas_id,
+        Ok(Self {
+            worker,
             session,
+            inbox,
             received: Vec::new(),
-            repaint: None,
-        };
-        adapter.flush()?;
-        if adapter.session.state() != &SessionState::Running {
-            web_plugin_shutdown(&adapter.canvas_id);
-            return Err("The web plugin protocol handshake failed.".to_owned());
-        }
-        Ok(adapter)
+            _onmessage: onmessage,
+        })
+    }
+
+    pub(super) fn running(&self) -> bool {
+        self.session.state() == &SessionState::Running
     }
 
     pub(super) fn send(&mut self, messages: Vec<Message>) -> Result<(), String> {
         for message in messages {
             self.session.send(message, now()).map_err(queue_error)?;
         }
+        self.flush()
+    }
+
+    pub(super) fn poll(&mut self) -> Result<(), String> {
+        let (frames, error) = {
+            let mut inbox = self.inbox.borrow_mut();
+            (std::mem::take(&mut inbox.frames), inbox.error.take())
+        };
+        if let Some(error) = error {
+            return Err(error);
+        }
+        for frame in frames {
+            let message = decode(&frame)?;
+            if message.is_session() {
+                self.session.receive(message, now());
+                continue;
+            }
+            if !matches!(message, Message::FrameReady(_)) {
+                self.received.push(message);
+            }
+        }
         self.flush()?;
         self.session.tick(now());
         match self.session.state() {
-            SessionState::Running => Ok(()),
-            state => Err(format!("Web plugin session stopped: {state:?}")),
+            SessionState::Starting | SessionState::Running => Ok(()),
+            state => Err(format!("The web plugin session stopped: {state:?}")),
         }
     }
 
@@ -117,56 +138,95 @@ impl WebProtocolAdapter {
         std::mem::take(&mut self.received)
     }
 
-    pub(super) fn poll(&mut self) -> Result<(), String> {
-        let responses = web_plugin_poll(&self.canvas_id).map_err(js_error)?;
-        self.receive_all(&responses)
-    }
-
-    pub(super) fn render(&mut self) -> Result<Option<Duration>, String> {
-        self.repaint = None;
-        let responses = web_plugin_render(&self.canvas_id).map_err(js_error)?;
-        self.receive_all(&responses)?;
-        Ok(self.repaint.take())
-    }
-
     pub(super) fn shutdown(&mut self) {
         self.session.shutdown(now());
         let _ = self.flush();
-        web_plugin_shutdown(&self.canvas_id);
+        let message = js_sys::Object::new();
+        set(&message, "kind", &"shutdown".into());
+        let _ = self.worker.post_message(&message);
+        self.worker.terminate();
     }
 
     fn flush(&mut self) -> Result<(), String> {
-        loop {
-            let frames = js_sys::Array::new();
-            while let Some(message) = self.session.next_outbound() {
-                let frame = encode_frame(&message).map_err(|error| error.to_string())?;
-                frames.push(&js_sys::Uint8Array::from(frame.as_slice()).into());
-            }
-            if frames.length() == 0 {
-                return Ok(());
-            }
-            let responses = web_plugin_send(&self.canvas_id, frames).map_err(js_error)?;
-            self.receive_all(&responses)?;
+        let frames = js_sys::Array::new();
+        while let Some(message) = self.session.next_outbound() {
+            let frame = encode_frame(&message).map_err(|error| error.to_string())?;
+            frames.push(&js_sys::Uint8Array::from(frame.as_slice()).into());
         }
+        if frames.length() == 0 {
+            return Ok(());
+        }
+        let message = js_sys::Object::new();
+        set(&message, "kind", &"frames".into());
+        set(&message, "frames", &frames);
+        self.worker
+            .post_message(&message)
+            .map_err(|_| "the plugin worker stopped listening".to_owned())
     }
+}
 
-    fn receive_all(&mut self, responses: &js_sys::Array) -> Result<(), String> {
-        for response in responses.iter() {
-            let response = js_sys::Uint8Array::new(&response).to_vec();
-            let message = decode(&response)?;
-            if message.is_session() {
-                self.session.receive(message, now());
-                continue;
-            }
-            match message {
-                Message::FrameReady(frame) => {
-                    self.repaint = frame.repaint_after_micros.map(Duration::from_micros);
+fn listen(
+    worker: &web_sys::Worker,
+    inbox: Rc<RefCell<Inbox>>,
+    context: egui::Context,
+) -> Closure<dyn FnMut(web_sys::MessageEvent)> {
+    let onmessage = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+        let data = event.data();
+        let kind = get(&data, "kind").as_string().unwrap_or_default();
+        let mut inbox = inbox.borrow_mut();
+        match kind.as_str() {
+            "frames" => {
+                let frames = js_sys::Array::from(&get(&data, "frames"));
+                for frame in frames.iter() {
+                    inbox.frames.push(js_sys::Uint8Array::new(&frame).to_vec());
                 }
-                message => self.received.push(message),
+            }
+            _ => {
+                inbox.error = Some(
+                    get(&data, "message")
+                        .as_string()
+                        .unwrap_or_else(|| "The plugin worker failed.".to_owned()),
+                );
             }
         }
-        Ok(())
-    }
+        context.request_repaint();
+    }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+    worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+    onmessage
+}
+
+fn spawn() -> Result<web_sys::Worker, String> {
+    let source = js_sys::Array::of1(&WORKER_SOURCE.into());
+    let options = web_sys::BlobPropertyBag::new();
+    options.set_type("text/javascript");
+    let blob = web_sys::Blob::new_with_str_sequence_and_options(&source, &options)
+        .map_err(|_| "the plugin worker could not be assembled".to_owned())?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob)
+        .map_err(|_| "the plugin worker could not be addressed".to_owned())?;
+    let options = web_sys::WorkerOptions::new();
+    options.set_type(web_sys::WorkerType::Module);
+    let worker = web_sys::Worker::new_with_options(&url, &options)
+        .map_err(|_| "the plugin worker could not be started".to_owned());
+    let _ = web_sys::Url::revoke_object_url(&url);
+    worker
+}
+
+fn absolute(url: &str) -> String {
+    let base = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.base_uri().ok().flatten())
+        .unwrap_or_default();
+    web_sys::Url::new_with_base(url, &base)
+        .map(|url| url.href())
+        .unwrap_or_else(|_| url.to_owned())
+}
+
+fn set(object: &js_sys::Object, key: &str, value: &JsValue) {
+    let _ = js_sys::Reflect::set(object, &key.into(), value);
+}
+
+fn get(object: &JsValue, key: &str) -> JsValue {
+    js_sys::Reflect::get(object, &key.into()).unwrap_or(JsValue::UNDEFINED)
 }
 
 fn decode(frame: &[u8]) -> Result<Message, String> {
@@ -174,13 +234,7 @@ fn decode(frame: &[u8]) -> Result<Message, String> {
 }
 
 fn queue_error(error: QueueError) -> String {
-    format!("The web plugin input queue failed: {error:?}")
-}
-
-fn js_error(error: JsValue) -> String {
-    error
-        .as_string()
-        .unwrap_or_else(|| "The web plugin JavaScript adapter failed.".to_owned())
+    format!("The web plugin message queue failed: {error:?}")
 }
 
 fn now() -> u64 {

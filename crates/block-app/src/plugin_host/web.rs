@@ -7,25 +7,18 @@ use wasm_bindgen::JsCast;
 mod adapter;
 pub(super) mod renderer;
 
-use super::runtime::{self, Backend};
+use super::runtime::Backend;
 use adapter::WebProtocolAdapter;
 
 const RENDERER_REQUIRED: &str = "wgpu is not available in this build.";
-const REPAINT_SLACK_MILLISECONDS: f64 = 2.0;
 
 pub(super) struct Web {
-    plugin_id: String,
     canvas_id: String,
     url: String,
     adapter: Option<WebProtocolAdapter>,
-    start: u64,
-    starting: bool,
     started: f64,
     error: Option<String>,
     pending: Vec<Message>,
-    dirty: bool,
-    rendered_pass: u64,
-    repaint_at: Option<f64>,
 }
 
 impl Backend for Web {
@@ -40,7 +33,6 @@ impl Backend for Web {
 
     fn new(plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self {
-            plugin_id: plugin.identity.id.clone(),
             canvas_id: format!("plugin-canvas-{}", plugin.identity.id),
             url: plugin
                 .entry_points
@@ -51,58 +43,40 @@ impl Backend for Web {
                 })
                 .unwrap_or_default(),
             adapter: None,
-            start: 0,
-            starting: false,
             started: now(),
             error: None,
             pending: Vec::new(),
-            dirty: false,
-            rendered_pass: u64::MAX,
-            repaint_at: None,
         }
     }
 
     fn start(&mut self, _plugin: &PluginManifest, context: &egui::Context) {
-        if let Some(mut adapter) = self.adapter.take() {
-            adapter.shutdown();
-        }
-        self.start += 1;
-        self.starting = true;
+        self.shutdown();
         self.started = now();
         self.error = None;
         self.pending.clear();
-        create_canvas(&self.canvas_id);
-        let start = self.start;
-        let plugin_id = self.plugin_id.clone();
-        let canvas_id = self.canvas_id.clone();
-        let url = self.url.clone();
-        let context = context.clone();
-        let dark_theme = context.style().visuals.dark_mode;
-        wasm_bindgen_futures::spawn_local(async move {
-            let mut result =
-                Some(WebProtocolAdapter::start(url, canvas_id.clone(), dark_theme).await);
-            runtime::with(&plugin_id, |runtime| {
-                runtime.backend.attach(start, &mut result);
-            });
-            if let Some(result) = result {
-                if let Ok(mut adapter) = result {
-                    adapter.shutdown();
-                }
-                remove_canvas(&canvas_id);
+        let dark_theme = context.global_style().visuals.dark_mode;
+        let Some(canvas) = create_canvas(&self.canvas_id) else {
+            self.error = Some("The plugin canvas could not be created.".to_owned());
+            return;
+        };
+        match WebProtocolAdapter::start(&self.url, &canvas, dark_theme, context) {
+            Ok(adapter) => self.adapter = Some(adapter),
+            Err(error) => {
+                self.error = Some(error);
+                remove_canvas(&self.canvas_id);
             }
-            context.request_repaint();
-        });
+        }
     }
 
     fn send(&mut self, messages: Vec<Message>) {
-        if self.adapter.is_none() {
-            if self.starting {
-                self.pending.extend(messages);
-            }
+        let Some(adapter) = &mut self.adapter else {
+            return;
+        };
+        if !adapter.running() {
+            self.pending.extend(messages);
             return;
         }
-        self.dirty = true;
-        if let Err(error) = self.adapter.as_mut().unwrap().send(messages) {
+        if let Err(error) = adapter.send(messages) {
             self.error = Some(error);
         }
     }
@@ -115,15 +89,20 @@ impl Backend for Web {
             self.error = Some(error);
             return Vec::new();
         }
-        self.take_output()
+        if adapter.running() && !self.pending.is_empty() {
+            let pending = std::mem::take(&mut self.pending);
+            self.send(pending);
+        }
+        match &mut self.adapter {
+            Some(adapter) => adapter.take_received(),
+            None => Vec::new(),
+        }
     }
 
-    fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Self::Frame {
+    fn frame(&mut self, layout: &ScreenLayout, _pass: u64) -> Self::Frame {
         renderer::WebFrame {
             size: [layout.width, layout.height],
             canvas_id: self.canvas_id.clone(),
-            plugin_id: self.plugin_id.clone(),
-            pass,
         }
     }
 
@@ -132,15 +111,16 @@ impl Backend for Web {
     }
 
     fn state(&self) -> &'static str {
-        match (self.adapter.is_some(), self.starting) {
-            (true, _) => "running",
-            (false, true) => "starting",
-            (false, false) => "stopped",
+        match &self.adapter {
+            Some(adapter) if adapter.running() => "running",
+            Some(_) => "starting",
+            None => "stopped",
         }
     }
 
     fn uptime(&self) -> Option<Duration> {
-        (self.adapter.is_some() || self.starting)
+        self.adapter
+            .is_some()
             .then(|| Duration::from_secs_f64((now() - self.started).max(0.0) / 1000.0))
     }
 
@@ -148,83 +128,8 @@ impl Backend for Web {
         if let Some(mut adapter) = self.adapter.take() {
             adapter.shutdown();
         }
-        if !self.starting {
-            remove_canvas(&self.canvas_id);
-        }
+        remove_canvas(&self.canvas_id);
     }
-}
-
-impl Web {
-    fn attach(&mut self, start: u64, result: &mut Option<Result<WebProtocolAdapter, String>>) {
-        if start != self.start || !self.starting {
-            return;
-        }
-        self.starting = false;
-        match result.take() {
-            Some(Ok(adapter)) => {
-                self.adapter = Some(adapter);
-                let pending = std::mem::take(&mut self.pending);
-                self.send(pending);
-            }
-            Some(Err(error)) => {
-                self.error = Some(error);
-                remove_canvas(&self.canvas_id);
-            }
-            None => {}
-        }
-    }
-
-    fn take_output(&mut self) -> Vec<Message> {
-        match &mut self.adapter {
-            Some(adapter) => adapter.take_received(),
-            None => Vec::new(),
-        }
-    }
-
-    fn draw(&mut self, pass: u64, context: &egui::Context) -> (bool, Vec<Message>) {
-        if self.rendered_pass == pass || self.adapter.is_none() {
-            return (false, Vec::new());
-        }
-        self.rendered_pass = pass;
-        let due = match self.repaint_at {
-            Some(deadline) if deadline <= now() + REPAINT_SLACK_MILLISECONDS => true,
-            Some(deadline) => {
-                context.request_repaint_after(Duration::from_secs_f64(
-                    (deadline - now()).max(0.0) / 1000.0,
-                ));
-                false
-            }
-            None => false,
-        };
-        if !self.dirty && !due {
-            return (false, Vec::new());
-        }
-        self.dirty = false;
-        self.repaint_at = None;
-        match self.adapter.as_mut().unwrap().render() {
-            Ok(Some(delay)) => {
-                self.repaint_at = Some(now() + delay.as_secs_f64() * 1000.0);
-                context.request_repaint_after(delay);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                self.error = Some(error);
-                context.request_repaint();
-                return (false, Vec::new());
-            }
-        }
-        (true, self.take_output())
-    }
-}
-
-pub(super) fn render(plugin_id: &str, pass: u64) -> bool {
-    runtime::with(plugin_id, |runtime| {
-        let context = runtime.context.clone();
-        let (painted, update) = runtime.backend.draw(pass, &context);
-        runtime.apply(update);
-        painted
-    })
-    .unwrap_or_default()
 }
 
 fn now() -> f64 {
@@ -234,22 +139,17 @@ fn now() -> f64 {
         .unwrap_or_default()
 }
 
-fn create_canvas(canvas_id: &str) {
-    (|| -> Option<()> {
-        let document = web_sys::window()?.document()?;
-        if document.get_element_by_id(canvas_id).is_some() {
-            return Some(());
-        }
-        let canvas: web_sys::HtmlCanvasElement =
-            document.create_element("canvas").ok()?.dyn_into().ok()?;
-        canvas.set_id(canvas_id);
-        let _ = canvas.style().set_property("left", "-10000px");
-        let _ = canvas.style().set_property("position", "fixed");
-        let _ = canvas.style().set_property("top", "0");
-        let _ = canvas.style().set_property("visibility", "hidden");
-        document.body()?.append_child(&canvas).ok()?;
-        Some(())
-    })();
+fn create_canvas(canvas_id: &str) -> Option<web_sys::HtmlCanvasElement> {
+    let document = web_sys::window()?.document()?;
+    let canvas: web_sys::HtmlCanvasElement =
+        document.create_element("canvas").ok()?.dyn_into().ok()?;
+    canvas.set_id(canvas_id);
+    let _ = canvas.style().set_property("left", "-10000px");
+    let _ = canvas.style().set_property("position", "fixed");
+    let _ = canvas.style().set_property("top", "0");
+    let _ = canvas.style().set_property("visibility", "hidden");
+    document.body()?.append_child(&canvas).ok()?;
+    Some(canvas)
 }
 
 fn remove_canvas(canvas_id: &str) {

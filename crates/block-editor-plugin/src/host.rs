@@ -45,7 +45,6 @@ impl Waker {
         }
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
     pub(crate) fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self(Some(Arc::new(wake)))
     }

@@ -156,7 +156,7 @@ fn drive(
     inbound: Inbound,
 ) -> io::Result<()> {
     let started = Instant::now();
-    let dark_theme = inbound.repaint.style().visuals.dark_mode;
+    let dark_theme = inbound.repaint.global_style().visuals.dark_mode;
     let mut session = handshake(&mut connection, started, dark_theme)?;
     let (reader, writer) = connection.split(child)?;
     thread::spawn(move || read_from_plugin(reader, sender));

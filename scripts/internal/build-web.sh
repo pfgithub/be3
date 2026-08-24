@@ -105,6 +105,9 @@ for plugin in "${plugins[@]}"; do
     plugin_directory="$plugins_directory/$id"
     mkdir -p "$plugin_directory"
     "$wasm_bindgen" --target web --no-typescript --out-dir "$plugin_directory" "$plugin_wasm"
+    # A plugin runs in a worker, which has no import map, so its WASI imports
+    # are pointed at the shim beside the app instead of a bare specifier.
+    sed -i 's|from "wasi_snapshot_preview1"|from "../../wasi.js"|g' "$plugin_directory"/*.js
     cp "$(plugin_manifest "$plugin")" "$plugin_directory/manifest.json"
     plugin_ids+=("$id")
 done

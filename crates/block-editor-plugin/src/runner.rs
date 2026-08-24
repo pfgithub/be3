@@ -1,15 +1,12 @@
 use std::{
+    io::{Read, Write},
     sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender},
     time::{Duration, Instant},
 };
 
 use block_plugin_api::{decode_frame, encode_frame, Message};
 
-use crate::{
-    platform::{self, Connection, Surface, SURFACE_KIND},
-    screens::Screens,
-    session::{ClientSession, State},
-};
+use crate::{platform, runtime::Runtime};
 
 pub(crate) fn run<A: crate::App>(id: &str, name: &str, version: &str) {
     let arguments: Vec<_> = std::env::args().collect();
@@ -37,87 +34,42 @@ fn run_endpoint<A: crate::App>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut connection = platform::connect(endpoint)?;
     eprintln!("connected to the host");
-    let (mut session, accepted) = handshake(&mut connection, id, name, version)?;
+    let (events, incoming) = channel();
+    let mut runtime = Runtime::new::<A>(id, name, version, waker(events.clone()));
+    let accepted = handshake(&mut connection, &runtime)?;
     eprintln!("protocol handshake completed");
     let (reader, mut sender) = connection.split()?;
-    let (events, incoming) = channel();
-    spawn_reader(reader, events.clone())?;
+    spawn_reader(reader, events)?;
     let started = Instant::now();
-    let mut screens = Screens::new::<A>(waker(events));
-    screens.receive(&accepted);
-    let mut surface: Option<Surface> = None;
-    let mut generation = 0;
-    let mut request_id = 0;
+    let mut batch = vec![accepted];
+    let mut draw = false;
     let mut repaint_at: Option<Instant> = None;
     loop {
-        let (batch, woken) = receive_batch(&incoming, repaint_at)?;
-        let received = !batch.is_empty();
-        for message in batch {
-            if let Message::Screens(set) = &message {
-                request_id = set.request_id;
-            }
-            screens.receive(&message);
-            for response in session.receive(message) {
-                sender.send(&response, &[])?;
-            }
-            if matches!(session.state(), State::Closed) {
-                return Ok(());
-            }
+        let step = runtime.step(batch, draw, started.elapsed().as_secs_f64())?;
+        for outbound in step.outbound {
+            sender.send(&outbound.message, &outbound.attachments)?;
         }
-        let layout = screens.layout().clone();
-        let replaced = !layout.is_empty()
-            && !surface
-                .as_ref()
-                .is_some_and(|surface| surface.layout().same_placements(&layout));
-        if replaced {
-            generation += 1;
-            screens.set_generation(generation);
-            let mut layout = layout;
-            layout.generation = generation;
-            eprintln!(
-                "creating a {SURFACE_KIND} surface {}x{} for {} screens",
-                layout.width,
-                layout.height,
-                layout.screens.len()
-            );
-            surface = Some(match surface.take() {
-                Some(previous) => previous.resize(request_id, layout.clone(), generation)?,
-                None => Surface::new(request_id, layout.clone(), generation)?,
-            });
-            sender.send(&Message::Layout(layout), &[])?;
+        if step.closed {
+            return Ok(());
         }
-        let due = repaint_at.is_some_and(|deadline| deadline <= Instant::now());
-        if let Some(surface) = &mut surface {
-            if replaced {
-                let (descriptor, attachments) = surface.descriptor();
-                sender.send(&descriptor, &attachments)?;
-                eprintln!("transferred {SURFACE_KIND} surface generation {generation}");
-            }
-            if received || replaced || due || woken {
-                let (messages, repaint) =
-                    surface.render(&mut screens, started.elapsed().as_secs_f64())?;
-                for message in messages {
-                    sender.send(&message, &[])?;
-                }
-                repaint_at = repaint.map(|delay| Instant::now() + delay);
-            }
+        if let Some(delay) = step.repaint {
+            repaint_at = Some(Instant::now() + delay);
         }
-        for message in screens.outbound() {
-            sender.send(&message, &[])?;
+        let (received, woken) = receive_batch(&incoming, repaint_at)?;
+        draw = woken || repaint_at.is_some_and(|deadline| deadline <= Instant::now());
+        if draw {
+            repaint_at = None;
         }
+        batch = received;
     }
 }
 
 fn handshake(
-    connection: &mut Connection,
-    id: &str,
-    name: &str,
-    version: &str,
-) -> Result<(ClientSession, Message), Box<dyn std::error::Error>> {
-    use std::io::{Read, Write};
-    let mut session = ClientSession::new(id, name, version);
+    connection: &mut platform::Connection,
+    runtime: &Runtime,
+) -> Result<Message, Box<dyn std::error::Error>> {
     let writer = connection.writer();
-    writer.write_all(&encode_frame(&session.hello())?)?;
+    writer.write_all(&encode_frame(&runtime.hello())?)?;
     writer.flush()?;
     let reader = connection.reader();
     let mut header = [0; 4];
@@ -127,14 +79,7 @@ fn handshake(
     frame.extend_from_slice(&header);
     frame.resize(length + 4, 0);
     reader.read_exact(&mut frame[4..])?;
-    let accepted = decode_frame(&frame)?;
-    let responses = session.receive(accepted.clone());
-    let writer = connection.writer();
-    for response in responses {
-        writer.write_all(&encode_frame(&response)?)?;
-    }
-    writer.flush()?;
-    Ok((session, accepted))
+    Ok(decode_frame(&frame)?)
 }
 
 fn spawn_reader(
