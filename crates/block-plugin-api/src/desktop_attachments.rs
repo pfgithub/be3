@@ -235,21 +235,21 @@ mod windows {
 
     pub struct WindowsAttachmentCarrier {
         stream: File,
-        peer_process: HANDLE,
+        peer_process: usize,
     }
 
     impl WindowsAttachmentCarrier {
         pub fn new(stream: File, peer_process: HANDLE) -> Self {
             Self {
                 stream,
-                peer_process,
+                peer_process: peer_process as usize,
             }
         }
 
         pub fn receiving(stream: File) -> Self {
             Self {
                 stream,
-                peer_process: std::ptr::null_mut(),
+                peer_process: 0,
             }
         }
 
@@ -280,7 +280,7 @@ mod windows {
                     DuplicateHandle(
                         GetCurrentProcess(),
                         *attachment as HANDLE,
-                        self.peer_process,
+                        self.peer_process as HANDLE,
                         &raw mut target,
                         0,
                         0,
