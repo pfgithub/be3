@@ -3,7 +3,7 @@ use std::{
     time::Instant,
 };
 
-use block_editor_plugin::egui::{Pos2, Vec2};
+use block_editor_plugin::egui::{ColorImage, Pos2, Vec2};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod pdfium;
@@ -25,9 +25,7 @@ pub(crate) struct RenderedTile {
     pub(crate) scale: f32,
     pub(crate) origin_pts: Pos2,
     pub(crate) size_pts: Vec2,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) rgba: Vec<u8>,
+    pub(crate) image: ColorImage,
 }
 
 #[derive(Clone, Copy)]

@@ -101,16 +101,7 @@ impl Pane {
             RenderTarget::FullPage { .. } => (&mut self.base, "pdf-page"),
             RenderTarget::Region { .. } => (&mut self.detail, "pdf-detail"),
         };
-        let convert_started = Instant::now();
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [rendered.width as usize, rendered.height as usize],
-            &rendered.rgba,
-        );
-        eprintln!(
-            "pdf timing job={job_id} color_image={:?} pixels={}",
-            convert_started.elapsed(),
-            rendered.width as u64 * rendered.height as u64
-        );
+        let image = rendered.image;
         let texture_started = Instant::now();
         match slot {
             Some(tile) => {

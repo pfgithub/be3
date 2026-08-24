@@ -149,6 +149,13 @@ fn render_tile(id: u64, data: &[u8], page: usize, target: RenderTarget) -> Rende
     let phase = Instant::now();
     let rgba = bitmap.as_rgba_bytes();
     eprintln!("pdf timing job={id} rgba_copy={:?}", phase.elapsed());
+    let phase = Instant::now();
+    let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
+    eprintln!(
+        "pdf timing job={id} color_image={:?} pixels={}",
+        phase.elapsed(),
+        width as u64 * height as u64
+    );
     Ok(RenderedTile {
         page_count,
         page_index: index,
@@ -156,9 +163,7 @@ fn render_tile(id: u64, data: &[u8], page: usize, target: RenderTarget) -> Rende
         scale,
         origin_pts: Pos2::new(origin_px.x / scale, origin_px.y / scale),
         size_pts: egui::vec2(width as f32 / scale, height as f32 / scale),
-        width: width as u32,
-        height: height as u32,
-        rgba,
+        image,
     })
 }
 
