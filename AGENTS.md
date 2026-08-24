@@ -1,41 +1,27 @@
 BE3 project
 
-Guides (read if they are relevant):
+You are inside of an ubuntu VM. You may install / remove programs as needed. If the disk runs out of space, you may free up space.
+
+Guides:
 - guides/adding_a_block.md
 - guides/adding_a_game.md
 - guides/adding_an_editor.md
 - guides/adding_a_plugin_editor.md
 
-Tooling:
-- Remember that subagents also read AGENTS.md automatically, so there is no need to reiterate information in here when spawning a subagent.
-
-Functionality:
-- When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data.
-
-UI style:
-- Never use unicode characters for icons. Always use an icon library instead, or no icon.
-
-Code style:
-- Prefer a.rs over a/mod.rs.
-- `./scripts/verify` fixes and enforces Rust source layout and strips comments and doc-comments.
-- Do not edit README.md
-
-Tests:
-- Keep test files seperate from code files.
-- Give every test its own seperate file named the same as the function inside it. Tests for `src/a.rs` go in `src/a/tests/fn_name_1.rs`; test imports and support functions go in `src/a/tests.rs`. Tests for a crate root such as `src/lib.rs` instead go in `src/tests/fn_name_1.rs`, with imports and support functions in `src/tests.rs`. Import test modules with plain `mod tests;` and plain child `mod fn_name_1;` declarations; do not use `#[path]`. Production files only import their `tests.rs` module and do not define every individual test.
+Do not:
+- When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data. The project is still early, and it is fine to ask the user to delete all their data. The crash handler in block-app will offer this automatically.
+- Do not use unicode symbols for icons, either use an icon library or no icon at all.
 - Do not add tests for GUI features.
-- If a change needs manual testing, note what needs testing in your final output.
+- Do not edit README.md. If it is out of date, you may say so in your handoff message.
 
 Verification:
 - These are the allowed commands for verification:
-  - `./scripts/verify`: always run this one before committing.
+  - `./scripts/verify`: always run this one before committing. This will run clippy --fix, cargo fmt, as well as enforcing project-specific rules: It will remove all code comments and format folder structure and tests.
   - `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build --target android --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
   - `./scripts/build --target web`: run this for changes that affect features specific to web
 - Do not perform any further verification. Do not use the browser tool. Do not additionally run `cargo build`, `cargo run`, `cargo test`, or the app itself to check your work. Do not try building for other platforms.
-- After running verification, commit and push changes in git.
-- When there are multiple or large changes, split them up into tasks and verify, commit, and push after each one.
-- Use commit message format `type: message` where type is fix/feat/docs/...
-- You may commit and push a change even if it still needs further verification beyond an allowed verify command.
 
-Environment:
-- You are inside of an ubuntu VM.
+Do:
+- Use commit message format `type: message`
+- After running verification, commit and push changes in git.
+- You may push a change even if it still needs further verification beyond an allowed verify command.
