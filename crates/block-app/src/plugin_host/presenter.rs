@@ -292,11 +292,9 @@ where
     }
 }
 
-#[cfg(target_os = "linux")]
-pub(super) use super::linux::LinuxSurfacePresenter as Presenter;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(super) use super::platform::Presenter;
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
 pub(super) use super::unavailable::UnavailablePresenter as Presenter;
 #[cfg(target_arch = "wasm32")]
 pub(super) use super::web::renderer::WebSurfacePresenter as Presenter;
-#[cfg(target_os = "windows")]
-pub(super) use super::windows::WindowsSurfacePresenter as Presenter;

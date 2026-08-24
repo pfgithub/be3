@@ -45,18 +45,8 @@ impl ClientSession {
     pub fn hello(&self) -> Message {
         #[allow(unused_mut)]
         let mut capabilities = vec![Capability::Lifecycle, Capability::Input];
-        #[cfg(target_os = "windows")]
-        capabilities.push(Capability::Surface(
-            block_plugin_api::SurfaceMechanism::WindowsDxgi,
-        ));
-        #[cfg(target_os = "linux")]
-        capabilities.push(Capability::Surface(
-            block_plugin_api::SurfaceMechanism::LinuxDmaBuf,
-        ));
-        #[cfg(target_arch = "wasm32")]
-        capabilities.push(Capability::Surface(
-            block_plugin_api::SurfaceMechanism::WebExternalImage,
-        ));
+        #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+        capabilities.push(Capability::Surface(crate::platform::SURFACE_MECHANISM));
         Message::Hello(Hello {
             minimum_version: PROTOCOL_VERSION,
             maximum_version: PROTOCOL_VERSION,
