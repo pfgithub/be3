@@ -21,6 +21,6 @@ Verification:
 - Do not perform any GUI verification. Do not run the GUI app or use the browser tool.
 
 Do:
-- Use commit message format `type: message`
+- Use commit message format `type: message`. Add Co-Authored-By: (model name).
 - After running verification, commit and push changes in git.
 - You may push a change even if it still needs GUI verification or other verification that you are unable to perform.
