@@ -14,7 +14,7 @@
 #   ./scripts/verify
 #   ./scripts/verify --check
 
-set -euo pipefail
+set -uo pipefail
 
 check=false
 if [[ "${1:-}" == "--check" ]]; then
@@ -24,8 +24,12 @@ fi
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository"
 
+failed=false
+
 t() {
-    /usr/bin/time -f "Took %E" "$@"
+    if ! /usr/bin/time -f "Took %E" "$@"; then
+        failed=true
+    fi
 }
 
 echo 'cargo fmt...'
@@ -52,6 +56,9 @@ else
     # The tree is expected to be mid-change; fixing only a pristine checkout
     # would make the script useless during development.
     t cargo clippy --quiet --fix --allow-dirty --allow-staged "${clippy_targets[@]}" -- -D warnings
+    # cargo clippy --fix caps lints while applying suggestions, so run clippy
+    # again to make any warnings that remain fail verification.
+    t cargo clippy --quiet "${clippy_targets[@]}" -- -D warnings
 fi
 
 echo 'cargo nextest run...'
@@ -62,4 +69,9 @@ else
 fi
 
 echo ''
+if $failed; then
+    echo 'Verification failed.'
+    exit 1
+fi
+
 echo 'All checks passed.'
