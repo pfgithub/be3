@@ -403,6 +403,7 @@ impl EguiSession {
     ) -> egui::FullOutput {
         context.set_pixels_per_point(self.scale_factor(region));
         let rect = self.rect(region);
+        let visible_rect = self.visible_rect(region);
         let state = self.regions.entry(region).or_default();
         state.input.screen_rect = Some(rect);
         state.input.time = Some(time);
@@ -431,10 +432,13 @@ impl EguiSession {
             .map(|artifact| artifact.draft.clone());
         let output = context.run_ui(input, |ui| {
             egui::CentralPanel::default().frame(frame).show_inside(ui, {
-                |ui| match (&mut draft, creating) {
-                    (Some(draft), _) => app.artifact_settings_ui(ui, draft),
-                    (None, true) => app.creation_ui(ui),
-                    (None, false) => app.ui(ui, region),
+                |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(visible_rect));
+                    match (&mut draft, creating) {
+                        (Some(draft), _) => app.artifact_settings_ui(ui, draft),
+                        (None, true) => app.creation_ui(ui),
+                        (None, false) => app.ui(ui, region),
+                    }
                 }
             });
         });
@@ -463,6 +467,20 @@ impl EguiSession {
         self.regions
             .get(&region)
             .and_then(|state| state.placement.as_ref())
+    }
+
+    fn visible_rect(&self, region: EditorRegion) -> egui::Rect {
+        let Some(placement) = self.placement(region) else {
+            return egui::Rect::ZERO;
+        };
+        let scale = placement.scale_factor();
+        egui::Rect::from_min_size(
+            egui::pos2(placement.x as f32 / scale, placement.y as f32 / scale),
+            egui::vec2(
+                placement.width as f32 / scale,
+                placement.height as f32 / scale,
+            ),
+        )
     }
 
     fn rect(&self, region: EditorRegion) -> egui::Rect {

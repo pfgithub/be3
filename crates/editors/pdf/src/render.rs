@@ -30,7 +30,10 @@ pub(crate) struct RenderedTile {
 #[derive(Clone, Copy)]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) enum RenderTarget {
-    FullPage,
+    FullPage {
+        max_width: f32,
+        max_height: f32,
+    },
     Region {
         scale: f32,
         origin_pts: Pos2,

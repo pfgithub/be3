@@ -9,7 +9,6 @@ use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfRenderConfig, Pdfium
 
 use super::{RenderJob, RenderJobResult, RenderTarget, RenderedTile, DETAIL_MAX_DIM, MIN_SCALE};
 
-const BASE_MAX_DIM: f32 = 1600.0;
 const MAX_PAGE_DIM: f32 = 100_000.0;
 
 pub(crate) fn spawn_render_job(
@@ -47,8 +46,11 @@ fn render_tile(data: &[u8], page: usize, target: RenderTarget) -> RenderJobResul
     }
     let bounds = Rect::from_min_size(Pos2::ZERO, page_size_pts);
     let (requested_scale, region) = match target {
-        RenderTarget::FullPage => (
-            (BASE_MAX_DIM / page_size_pts.x).min(BASE_MAX_DIM / page_size_pts.y),
+        RenderTarget::FullPage {
+            max_width,
+            max_height,
+        } => (
+            (max_width.max(1.0) / page_size_pts.x).min(max_height.max(1.0) / page_size_pts.y),
             bounds,
         ),
         RenderTarget::Region {

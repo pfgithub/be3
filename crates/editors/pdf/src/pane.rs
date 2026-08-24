@@ -10,7 +10,6 @@ use crate::render::{
     MIN_SCALE,
 };
 
-const TILE_MARGIN_FACTOR: f32 = 0.35;
 const TILE_MIN_SCALE_FACTOR: f32 = 0.4;
 const TILE_MAX_SCALE_FACTOR: f32 = 1.15;
 
@@ -81,7 +80,7 @@ impl Pane {
 
     fn store(&mut self, context: &egui::Context, request: RenderRequest, rendered: RenderedTile) {
         let (slot, name) = match request.target {
-            RenderTarget::FullPage => (&mut self.base, "pdf-page"),
+            RenderTarget::FullPage { .. } => (&mut self.base, "pdf-page"),
             RenderTarget::Region { .. } => (&mut self.detail, "pdf-detail"),
         };
         let image = egui::ColorImage::from_rgba_unmultiplied(
@@ -139,7 +138,13 @@ impl Pane {
             return;
         }
         let target = if self.base.is_none() {
-            RenderTarget::FullPage
+            if visible_rect.width() <= 0.0 || visible_rect.height() <= 0.0 {
+                return;
+            }
+            RenderTarget::FullPage {
+                max_width: visible_rect.width() * pixels_per_point,
+                max_height: visible_rect.height() * pixels_per_point,
+            }
         } else {
             match self.detail_target(page_size_pts, page_rect, visible_rect, pixels_per_point) {
                 Some(target) => target,
@@ -195,7 +200,7 @@ impl Pane {
             return None;
         }
 
-        let region = tile_region(visible, bounds, scale);
+        let region = tile_region(visible, bounds);
         Some(RenderTarget::Region {
             scale,
             origin_pts: region.min,
@@ -240,17 +245,8 @@ fn page_position(position: Pos2, page_rect: Rect, points_per_pdf_point: f32) -> 
     )
 }
 
-fn tile_region(visible: Rect, bounds: Rect, scale: f32) -> Rect {
-    let padded = visible
-        .expand2(visible.size() * TILE_MARGIN_FACTOR)
-        .intersect(bounds);
-    let width = padded.width().min(DETAIL_MAX_DIM / scale);
-    let height = padded.height().min(DETAIL_MAX_DIM / scale);
-    let center = visible.center();
-    let x = (center.x - width / 2.0).clamp(padded.min.x, (padded.max.x - width).max(padded.min.x));
-    let y =
-        (center.y - height / 2.0).clamp(padded.min.y, (padded.max.y - height).max(padded.min.y));
-    Rect::from_min_size(Pos2::new(x, y), egui::vec2(width, height))
+fn tile_region(visible: Rect, bounds: Rect) -> Rect {
+    visible.intersect(bounds)
 }
 
 #[cfg(test)]
