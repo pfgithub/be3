@@ -24,12 +24,14 @@ pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
 pub(crate) struct WebFrame {
     pub(crate) size: [u32; 2],
     pub(crate) canvas_id: String,
+    pub(crate) drawn: Option<u64>,
 }
 
 struct Target {
     size: [u32; 2],
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
+    copied: Option<u64>,
 }
 
 pub(crate) struct WebSurfacePresenter {
@@ -161,15 +163,19 @@ impl WebSurfacePresenter {
                 size,
                 texture,
                 bind_group,
+                copied: None,
             },
         );
     }
 
-    fn copy_from_canvas(&mut self, queue: &wgpu::Queue, surface: u32, canvas_id: &str) {
+    fn copy_from_canvas(&mut self, queue: &wgpu::Queue, surface: u32, frame: &WebFrame) {
         let Some(target) = self.targets.get_mut(&surface) else {
             return;
         };
-        let Some(canvas) = canvas_element(canvas_id) else {
+        if target.copied == frame.drawn {
+            return;
+        }
+        let Some(canvas) = canvas_element(&frame.canvas_id) else {
             return;
         };
         let copy_size = wgpu::Extent3d {
@@ -180,6 +186,7 @@ impl WebSurfacePresenter {
         if copy_size.width == 0 || copy_size.height == 0 {
             return;
         }
+        target.copied = frame.drawn;
         queue.copy_external_image_to_texture(
             &wgpu::CopyExternalImageSourceInfo {
                 source: wgpu::ExternalImageSource::HTMLCanvasElement(canvas),
@@ -230,7 +237,7 @@ impl SurfacePresenter for WebSurfacePresenter {
         frame: &Self::Frame,
     ) -> Result<(), String> {
         if frame.size[0] > 0 && frame.size[1] > 0 {
-            self.copy_from_canvas(queue, surface, &frame.canvas_id);
+            self.copy_from_canvas(queue, surface, frame);
         }
         Ok(())
     }

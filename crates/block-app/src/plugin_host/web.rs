@@ -103,6 +103,7 @@ impl Backend for Web {
         renderer::WebFrame {
             size: [layout.width, layout.height],
             canvas_id: self.canvas_id.clone(),
+            drawn: self.adapter.as_ref().map(WebProtocolAdapter::frames),
         }
     }
 

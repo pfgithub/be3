@@ -54,6 +54,7 @@ pub(super) struct WebProtocolAdapter {
     session: HostSession,
     inbox: Rc<RefCell<Inbox>>,
     received: Vec<Message>,
+    frames: u64,
     _onmessage: Closure<dyn FnMut(web_sys::MessageEvent)>,
 }
 
@@ -93,8 +94,13 @@ impl WebProtocolAdapter {
             session,
             inbox,
             received: Vec::new(),
+            frames: 0,
             _onmessage: onmessage,
         })
+    }
+
+    pub(super) fn frames(&self) -> u64 {
+        self.frames
     }
 
     pub(super) fn running(&self) -> bool {
@@ -122,8 +128,9 @@ impl WebProtocolAdapter {
                 self.session.receive(message, now());
                 continue;
             }
-            if !matches!(message, Message::FrameReady(_)) {
-                self.received.push(message);
+            match message {
+                Message::FrameReady(_) => self.frames += 1,
+                message => self.received.push(message),
             }
         }
         self.flush()?;
