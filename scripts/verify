@@ -24,39 +24,42 @@ fi
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository"
 
-echo 'Fixing Rust sources...'
-fix_arguments=()
+t() {
+    /usr/bin/time -f "Took %E" "$@"
+}
+
+echo 'cargo fmt...'
 if $check; then
-    fix_arguments+=(--check)
+    t cargo fmt --all --check
+else
+    t cargo fmt --all
 fi
-cargo run --quiet -p fix-rust-source -- "${fix_arguments[@]}"
+
+echo 'crates/fix-rust-source...'
+if $check; then
+    t cargo run -p fix-rust-source -- --check
+else
+    t cargo run --quiet -p fix-rust-source
+fi
 
 # Tests and examples are linted too, so a warning cannot hide in them.
 clippy_targets=(--workspace --all-targets --all-features)
 
+echo 'cargo clippy...'
 if $check; then
-    echo 'Checking for clippy warnings...'
-    cargo clippy "${clippy_targets[@]}" -- -D warnings
+    t cargo clippy "${clippy_targets[@]}" -- -D warnings
 else
-    echo 'Applying clippy fixes...'
     # The tree is expected to be mid-change; fixing only a pristine checkout
     # would make the script useless during development.
-    cargo clippy --fix --allow-dirty --allow-staged "${clippy_targets[@]}" -- -D warnings
+    t cargo clippy --quiet --fix --allow-dirty --allow-staged "${clippy_targets[@]}" -- -D warnings
 fi
 
-echo 'Formatting...'
-format_arguments=(--all)
+echo 'cargo nextest run...'
 if $check; then
-    format_arguments+=(--check)
+    t cargo nextest run --profile ci
+else
+    t cargo nextest run --cargo-quiet --show-progress=none
 fi
-cargo fmt "${format_arguments[@]}"
-
-echo 'Running tests...'
-test_arguments=(--workspace)
-if $check; then
-    test_arguments+=(--profile ci)
-fi
-cargo nextest run "${test_arguments[@]}"
 
 echo ''
 echo 'All checks passed.'
