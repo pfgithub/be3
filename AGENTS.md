@@ -15,7 +15,7 @@ Do not:
 - Do not edit README.md. If it is out of date, you may say so in your handoff message.
 
 Verification:
-- `./scripts/verify`: always run this one before committing. This will run clippy --fix, cargo fmt, as well as enforcing project-specific rules: It will remove all code comments and format folder structure and tests.
+- ~5 minutes: `./scripts/verify`: always run this one before committing. This will run clippy --fix, cargo fmt, as well as enforcing project-specific rules: It will remove all code comments and format folder structure and tests.
 - `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build --target android --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
 - `./scripts/build --target web`: run this for changes that affect features specific to web
 - Do not perform any GUI verification. Do not run the GUI app or use the browser tool.
