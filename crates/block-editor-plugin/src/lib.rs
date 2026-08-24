@@ -123,6 +123,13 @@ pub mod __private {
         let identity = identity(manifest);
         crate::runner::run::<A>(&identity.id, &identity.name, &identity.version);
     }
+
+    #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
+    pub fn run<A: crate::App>(manifest: &str) {
+        let identity = identity(manifest);
+        eprintln!("{} cannot run on this platform", identity.name);
+        std::process::exit(2);
+    }
 }
 
 #[macro_export]
