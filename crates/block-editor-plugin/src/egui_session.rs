@@ -2,7 +2,7 @@ use block_client::BlockClient;
 use block_plugin_api::{
     ArtifactDescription, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage,
     EditorRegion, FilePick, InputEvent, Message, PointerButton, RegionSize, ScreenPlacement,
-    WheelUnit,
+    ScreenRequest, ViewportMetrics, WheelUnit,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -54,6 +54,7 @@ impl ArtifactState {
 struct RegionState {
     input: egui::RawInput,
     placement: Option<ScreenPlacement>,
+    metrics: Option<ViewportMetrics>,
     used: Option<egui::Vec2>,
     reported: Option<egui::Vec2>,
     cursor: CursorIcon,
@@ -230,11 +231,19 @@ impl EguiSession {
         });
     }
 
-    pub(crate) fn place(&mut self, placements: &[ScreenPlacement]) {
+    pub(crate) fn place(&mut self, placements: &[ScreenPlacement], requests: &[ScreenRequest]) {
         self.regions
             .retain(|region, _| placements.iter().any(|it| it.region == *region));
         for placement in placements {
-            self.regions.entry(placement.region).or_default().placement = Some(*placement);
+            let Some(request) = requests
+                .iter()
+                .find(|request| request.screen == placement.screen)
+            else {
+                continue;
+            };
+            let state = self.regions.entry(placement.region).or_default();
+            state.placement = Some(*placement);
+            state.metrics = Some(request.metrics.clone());
         }
     }
 
@@ -457,16 +466,20 @@ impl EguiSession {
     }
 
     fn rect(&self, region: EditorRegion) -> egui::Rect {
-        let Some(placement) = self.placement(region) else {
+        let state = self.regions.get(&region);
+        let (Some(placement), Some(metrics)) = (
+            state.and_then(|state| state.placement.as_ref()),
+            state.and_then(|state| state.metrics.as_ref()),
+        ) else {
             return egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO);
         };
         let scale = placement.scale_factor();
         egui::Rect::from_min_size(
-            egui::pos2(placement.x as f32 / scale, placement.y as f32 / scale),
-            egui::vec2(
-                placement.width as f32 / scale,
-                placement.height as f32 / scale,
+            egui::pos2(
+                placement.x as f32 / scale - metrics.visible_x,
+                placement.y as f32 / scale - metrics.visible_y,
             ),
+            egui::vec2(metrics.logical_width, metrics.logical_height),
         )
     }
 

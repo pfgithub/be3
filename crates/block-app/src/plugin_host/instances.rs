@@ -132,6 +132,7 @@ impl Instances {
         role: InstanceRole,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
         size: egui::Vec2,
+        visible: egui::Rect,
         scale_factor: f32,
         pass: u64,
     ) -> ScreenId {
@@ -152,7 +153,7 @@ impl Instances {
                     screen: ScreenId(*next_screen),
                     instance,
                     region,
-                    metrics: viewport_metrics(size, scale_factor),
+                    metrics: viewport_metrics(size, visible, scale_factor),
                 },
                 last_seen: pass,
                 used: None,
@@ -160,7 +161,7 @@ impl Instances {
                 cursor: CursorIcon::Default,
             }
         });
-        screen.request.metrics = viewport_metrics(size, scale_factor);
+        screen.request.metrics = viewport_metrics(size, visible, scale_factor);
         screen.last_seen = pass;
         screen.request.screen
     }

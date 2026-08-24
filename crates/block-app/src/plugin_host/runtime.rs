@@ -301,6 +301,10 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         }
         let pass = runtime.pass;
         let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
+        let cropped = Quad::upright(response.rect).crop_to(ui.clip_rect());
+        let visible = cropped.as_ref().map_or(egui::Rect::ZERO, |(_, source)| {
+            scale_rect(*source, response.rect.size())
+        });
         let screen = runtime.instances.report(
             instance,
             region,
@@ -309,6 +313,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             role,
             block_types,
             response.rect.size(),
+            visible,
             ui.ctx().pixels_per_point(),
             pass,
         );
@@ -331,17 +336,22 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             }
         }
         let open_request = runtime.instances.take_open(instance);
-        let Some(atlas_region) = Region::of(
-            &runtime.layout,
-            runtime.surface,
-            screen,
-            Quad::upright(response.rect),
-        ) else {
+        let Some((quad, _)) = cropped else {
             return open_request;
         };
-        painter.add(runtime.present(response.rect, atlas_region));
+        let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen, quad) else {
+            return open_request;
+        };
+        painter.add(runtime.present(quad.rect.intersect(ui.clip_rect()), atlas_region));
         open_request
     })
+}
+
+fn scale_rect(rect: egui::Rect, size: egui::Vec2) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(rect.min.x * size.x, rect.min.y * size.y),
+        egui::pos2(rect.max.x * size.x, rect.max.y * size.y),
+    )
 }
 
 pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> CreationState {
@@ -436,6 +446,16 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
         }
         let rect = egui::Rect::from_points(&corners);
         let scale_factor = context.pixels_per_point();
+        let size = preview_size(rect.size(), scale_factor);
+        let cropped = Quad {
+            rect,
+            corners,
+            opacity,
+        }
+        .crop_to(painter.clip_rect());
+        let visible = cropped
+            .as_ref()
+            .map_or(egui::Rect::ZERO, |(_, source)| scale_rect(*source, size));
         let pass = runtime.pass;
         let screen = runtime.instances.report(
             instance,
@@ -447,23 +467,18 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
                 block_type,
             }),
             block_types,
-            preview_size(rect.size(), scale_factor),
+            size,
+            visible,
             scale_factor,
             pass,
         );
-        let Some(atlas_region) = Region::of(
-            &runtime.layout,
-            runtime.surface,
-            screen,
-            Quad {
-                rect,
-                corners,
-                opacity,
-            },
-        ) else {
+        let Some((quad, _)) = cropped else {
             return false;
         };
-        painter.add(runtime.present(rect, atlas_region));
+        let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen, quad) else {
+            return false;
+        };
+        painter.add(runtime.present(quad.rect.intersect(painter.clip_rect()), atlas_region));
         true
     })
 }

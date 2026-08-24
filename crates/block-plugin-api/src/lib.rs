@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 21;
+pub const PROTOCOL_VERSION: u16 = 22;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -590,6 +590,8 @@ pub enum ViewChange {
 pub struct ViewportMetrics {
     pub logical_width: f32,
     pub logical_height: f32,
+    pub visible_x: f32,
+    pub visible_y: f32,
     pub pixel_width: u32,
     pub pixel_height: u32,
     pub scale_factor: f32,

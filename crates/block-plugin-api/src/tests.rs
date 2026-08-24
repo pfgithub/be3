@@ -48,6 +48,8 @@ fn region_screen(
         metrics: ViewportMetrics {
             logical_width: pixel_width as f32 / scale_factor,
             logical_height: pixel_height as f32 / scale_factor,
+            visible_x: 0.0,
+            visible_y: 0.0,
             pixel_width,
             pixel_height,
             scale_factor,

@@ -299,7 +299,10 @@ impl Screens {
                 .push(*placement);
         }
         for (instance, session) in &mut self.sessions {
-            session.place(placements.get(instance).map_or(&[], Vec::as_slice));
+            session.place(
+                placements.get(instance).map_or(&[], Vec::as_slice),
+                &self.requests,
+            );
         }
     }
 }

@@ -31,6 +31,8 @@ fn screen(screen: ScreenId, instance: EditorInstanceId) -> ScreenRequest {
         metrics: ViewportMetrics {
             logical_width: 100.0,
             logical_height: 100.0,
+            visible_x: 0.0,
+            visible_y: 0.0,
             pixel_width: 100,
             pixel_height: 100,
             scale_factor: 1.0,

@@ -90,6 +90,50 @@ impl Quad {
             opacity: 1.0,
         }
     }
+
+    pub(super) fn crop_to(self, clip: egui::Rect) -> Option<(Self, egui::Rect)> {
+        let horizontal = self.corners[1] - self.corners[0];
+        let vertical = self.corners[3] - self.corners[0];
+        let determinant = horizontal.x * vertical.y - horizontal.y * vertical.x;
+        if determinant.abs() <= f32::EPSILON {
+            return None;
+        }
+        let to_uv = |point: egui::Pos2| {
+            let delta = point - self.corners[0];
+            egui::pos2(
+                (delta.x * vertical.y - delta.y * vertical.x) / determinant,
+                (horizontal.x * delta.y - horizontal.y * delta.x) / determinant,
+            )
+        };
+        let source = egui::Rect::from_points(&[
+            to_uv(clip.left_top()),
+            to_uv(clip.right_top()),
+            to_uv(clip.right_bottom()),
+            to_uv(clip.left_bottom()),
+        ])
+        .intersect(egui::Rect::from_min_max(
+            egui::Pos2::ZERO,
+            egui::Pos2::new(1.0, 1.0),
+        ));
+        if source.width() <= 0.0 || source.height() <= 0.0 {
+            return None;
+        }
+        let point = |u: f32, v: f32| self.corners[0] + horizontal * u + vertical * v;
+        let corners = [
+            point(source.min.x, source.min.y),
+            point(source.max.x, source.min.y),
+            point(source.max.x, source.max.y),
+            point(source.min.x, source.max.y),
+        ];
+        Some((
+            Self {
+                rect: egui::Rect::from_points(&corners),
+                corners,
+                opacity: self.opacity,
+            },
+            source,
+        ))
+    }
 }
 
 impl Default for Quad {

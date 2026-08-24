@@ -173,14 +173,21 @@ impl InputAdapter {
     }
 }
 
-pub(super) fn viewport_metrics(size: egui::Vec2, scale_factor: f32) -> ViewportMetrics {
+pub(super) fn viewport_metrics(
+    size: egui::Vec2,
+    visible: egui::Rect,
+    scale_factor: f32,
+) -> ViewportMetrics {
     let logical_width = size.x.max(0.0);
     let logical_height = size.y.max(0.0);
+    let visible = visible.intersect(egui::Rect::from_min_size(egui::Pos2::ZERO, size));
     ViewportMetrics {
         logical_width,
         logical_height,
-        pixel_width: (logical_width * scale_factor).round() as u32,
-        pixel_height: (logical_height * scale_factor).round() as u32,
+        visible_x: visible.min.x.max(0.0),
+        visible_y: visible.min.y.max(0.0),
+        pixel_width: (visible.width().max(0.0) * scale_factor).round() as u32,
+        pixel_height: (visible.height().max(0.0) * scale_factor).round() as u32,
         scale_factor,
     }
 }
