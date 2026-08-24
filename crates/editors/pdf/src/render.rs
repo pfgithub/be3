@@ -1,4 +1,7 @@
-use std::sync::mpsc::Receiver;
+use std::{
+    sync::mpsc::{Receiver, TryRecvError},
+    time::Instant,
+};
 
 use block_editor_plugin::egui::{Pos2, Vec2};
 
@@ -50,4 +53,18 @@ pub(crate) struct RenderRequest {
 
 pub(crate) type RenderJobResult = Result<RenderedTile, String>;
 
-pub(crate) type RenderJob = Receiver<RenderJobResult>;
+pub(crate) struct RenderJobMessage {
+    pub(crate) completed_at: Instant,
+    pub(crate) result: RenderJobResult,
+}
+
+pub(crate) struct RenderJob {
+    pub(crate) id: u64,
+    pub(crate) receiver: Receiver<RenderJobMessage>,
+}
+
+impl RenderJob {
+    pub(crate) fn try_recv(&self) -> Result<RenderJobMessage, TryRecvError> {
+        self.receiver.try_recv()
+    }
+}

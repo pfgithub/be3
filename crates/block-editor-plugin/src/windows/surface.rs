@@ -1,7 +1,7 @@
 use block_plugin_api::{FrameReady, Message, ScreenLayout, WindowsSurfaceDescriptor};
 use eframe::egui_wgpu::wgpu;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use windows::Win32::{
     Foundation::GENERIC_ALL,
     Graphics::{
@@ -138,12 +138,18 @@ impl Surface {
         screens: &mut crate::screens::Screens,
         phase: f64,
     ) -> Result<(Vec<Message>, Option<Duration>), String> {
+        let frame_started = Instant::now();
+        let view_started = Instant::now();
         let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let view_elapsed = view_started.elapsed();
+        let encoder_started = Instant::now();
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let encoder_elapsed = encoder_started.elapsed();
+        let paint_started = Instant::now();
         let painted = self.panes.paint(
             &self.device,
             &self.queue,
@@ -153,13 +159,25 @@ impl Surface {
             screens,
             phase,
         );
+        let paint_elapsed = paint_started.elapsed();
+        let texture_updates = painted.texture_updates;
+        let submit_started = Instant::now();
         self.queue
             .submit(painted.commands.into_iter().chain([encoder.finish()]));
+        let submit_elapsed = submit_started.elapsed();
         self.fence_value += 1;
+        let signal_started = Instant::now();
         let hal_queue = unsafe { self.queue.as_hal::<wgpu_hal::api::Dx12>() }
             .ok_or_else(|| "the plugin queue is not D3D12".to_owned())?;
         unsafe { hal_queue.as_raw().Signal(&self.fence, self.fence_value) }
             .map_err(|error| error.to_string())?;
+        let signal_elapsed = signal_started.elapsed();
+        if texture_updates > 0 {
+            eprintln!(
+                "plugin timing windows_frame textures={texture_updates} view={view_elapsed:?} encoder={encoder_elapsed:?} paint={paint_elapsed:?} submit={submit_elapsed:?} signal={signal_elapsed:?} frame_total={:?}",
+                frame_started.elapsed()
+            );
+        }
         Ok((
             vec![Message::FrameReady(FrameReady {
                 generation: self.generation,

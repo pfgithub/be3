@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::{screens::Screens, Waker};
@@ -59,6 +59,8 @@ pub(crate) struct Panes {
 pub(crate) struct Painted {
     pub(crate) commands: Vec<wgpu::CommandBuffer>,
     pub(crate) repaint: Option<Duration>,
+    #[cfg(target_os = "windows")]
+    pub(crate) texture_updates: usize,
 }
 
 impl Panes {
@@ -83,6 +85,8 @@ impl Panes {
         let mut commands = Vec::new();
         let mut cleared = false;
         let mut repaint = Duration::MAX;
+        #[cfg(target_os = "windows")]
+        let mut texture_updates = 0;
         let placements = layout.screens.clone();
         let waker = screens.waker();
         let theme = screens.theme();
@@ -100,17 +104,30 @@ impl Panes {
             for id in std::mem::take(&mut pane.freed) {
                 pane.renderer.free_texture(&id);
             }
+            let pane_started = Instant::now();
+            let session_started = Instant::now();
             let output = session.run(placement.region, &pane.context, time);
+            let session_elapsed = session_started.elapsed();
+            let updated_textures = output.textures_delta.set.len();
+            #[cfg(target_os = "windows")]
+            {
+                texture_updates += updated_textures;
+            }
             repaint = repaint.min(repaint_delay(&output));
             let scale = session.scale_factor(placement.region);
+            let tessellate_started = Instant::now();
             let paint_jobs = pane.context.tessellate(output.shapes, scale);
+            let tessellate_elapsed = tessellate_started.elapsed();
+            let texture_started = Instant::now();
             for (id, delta) in &output.textures_delta.set {
                 pane.renderer.update_texture(device, queue, *id, delta);
             }
+            let texture_elapsed = texture_started.elapsed();
             let screen = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [layout.width, layout.height],
                 pixels_per_point: scale,
             };
+            let buffers_started = Instant::now();
             commands.extend(pane.renderer.update_buffers(
                 device,
                 queue,
@@ -118,6 +135,8 @@ impl Panes {
                 &paint_jobs,
                 &screen,
             ));
+            let buffers_elapsed = buffers_started.elapsed();
+            let render_started = Instant::now();
             {
                 let load = if cleared {
                     wgpu::LoadOp::Load
@@ -144,6 +163,15 @@ impl Panes {
                 pane.renderer
                     .render(&mut pass.forget_lifetime(), &paint_jobs, &screen);
             }
+            let render_elapsed = render_started.elapsed();
+            if updated_textures > 0 {
+                eprintln!(
+                    "plugin timing screen={:?} textures={} session_run={session_elapsed:?} tessellate={tessellate_elapsed:?} update_texture={texture_elapsed:?} update_buffers={buffers_elapsed:?} render_encode={render_elapsed:?} pane_total={:?}",
+                    placement.screen,
+                    updated_textures,
+                    pane_started.elapsed()
+                );
+            }
             pane.freed = output.textures_delta.free;
         }
         self.painting.store(false, Ordering::Relaxed);
@@ -151,6 +179,8 @@ impl Panes {
         Painted {
             commands,
             repaint: (repaint < Duration::MAX).then(|| repaint.max(MINIMUM_FRAME_INTERVAL)),
+            #[cfg(target_os = "windows")]
+            texture_updates,
         }
     }
 }

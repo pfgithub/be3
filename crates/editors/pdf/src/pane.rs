@@ -1,4 +1,4 @@
-use std::sync::mpsc::TryRecvError;
+use std::{sync::mpsc::TryRecvError, time::Instant};
 
 use block_editor_plugin::{
     egui::{self, Color32, Pos2, Rect, Vec2},
@@ -49,26 +49,38 @@ pub(crate) struct Pane {
 
 impl Pane {
     pub(crate) fn poll(&mut self, context: &egui::Context) -> Option<PageFacts> {
-        let (request, receiver) = self.job.as_ref()?;
+        let (request, job) = self.job.as_ref()?;
         let request = *request;
-        match receiver.try_recv() {
-            Ok(Ok(rendered)) => {
-                self.job = None;
-                self.error = None;
-                self.failed = None;
-                let facts = PageFacts {
-                    page_count: rendered.page_count,
-                    page_index: rendered.page_index,
-                    page_size_pts: rendered.page_size_pts,
-                };
-                self.store(context, request, rendered);
-                Some(facts)
-            }
-            Ok(Err(error)) => {
-                self.job = None;
-                self.error = Some(error);
-                self.failed = Some((request.revision, request.page));
-                None
+        let job_id = job.id;
+        let receive_started = Instant::now();
+        let received = job.try_recv();
+        let receive_elapsed = receive_started.elapsed();
+        match received {
+            Ok(message) => {
+                eprintln!(
+                    "pdf timing job={job_id} ready_to_poll={:?} try_receive={receive_elapsed:?}",
+                    message.completed_at.elapsed()
+                );
+                match message.result {
+                    Ok(rendered) => {
+                        self.job = None;
+                        self.error = None;
+                        self.failed = None;
+                        let facts = PageFacts {
+                            page_count: rendered.page_count,
+                            page_index: rendered.page_index,
+                            page_size_pts: rendered.page_size_pts,
+                        };
+                        self.store(context, job_id, request, rendered);
+                        Some(facts)
+                    }
+                    Err(error) => {
+                        self.job = None;
+                        self.error = Some(error);
+                        self.failed = Some((request.revision, request.page));
+                        None
+                    }
+                }
             }
             Err(TryRecvError::Empty) => None,
             Err(TryRecvError::Disconnected) => {
@@ -78,15 +90,28 @@ impl Pane {
         }
     }
 
-    fn store(&mut self, context: &egui::Context, request: RenderRequest, rendered: RenderedTile) {
+    fn store(
+        &mut self,
+        context: &egui::Context,
+        job_id: u64,
+        request: RenderRequest,
+        rendered: RenderedTile,
+    ) {
         let (slot, name) = match request.target {
             RenderTarget::FullPage { .. } => (&mut self.base, "pdf-page"),
             RenderTarget::Region { .. } => (&mut self.detail, "pdf-detail"),
         };
+        let convert_started = Instant::now();
         let image = egui::ColorImage::from_rgba_unmultiplied(
             [rendered.width as usize, rendered.height as usize],
             &rendered.rgba,
         );
+        eprintln!(
+            "pdf timing job={job_id} color_image={:?} pixels={}",
+            convert_started.elapsed(),
+            rendered.width as u64 * rendered.height as u64
+        );
+        let texture_started = Instant::now();
         match slot {
             Some(tile) => {
                 tile.texture.set(image, egui::TextureOptions::LINEAR);
@@ -107,6 +132,10 @@ impl Pane {
                 });
             }
         }
+        eprintln!(
+            "pdf timing job={job_id} texture_delta={:?}",
+            texture_started.elapsed()
+        );
     }
 
     pub(crate) fn ensure(
@@ -151,15 +180,28 @@ impl Pane {
                 None => return,
             }
         };
+        let data_started = Instant::now();
         let Some(data) = data() else {
             return;
         };
+        eprintln!(
+            "pdf timing revision={revision} page={page} data_copy={:?} bytes={}",
+            data_started.elapsed(),
+            data.len()
+        );
         let request = RenderRequest {
             revision,
             page,
             target,
         };
-        self.job = Some((request, spawn_render_job(data, page, target, waker)));
+        let spawn_started = Instant::now();
+        let job = spawn_render_job(data, page, target, waker);
+        eprintln!(
+            "pdf timing job={} spawn_render_job_call={:?}",
+            job.id,
+            spawn_started.elapsed()
+        );
+        self.job = Some((request, job));
     }
 
     fn detail_target(
