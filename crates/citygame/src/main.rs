@@ -1029,40 +1029,4 @@ fn ground_point(point: Vec2, height: f32) -> Vec3 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mixed_road_layout_has_a_valid_camera_spawn_segment() {
-        let city = CityGenerator::new(WORLD_SEED, GeneratorConfig::default()).generate(WORLD_SEED);
-        let [start, end] = camera_spawn_segment(&city).expect("city should have a road segment");
-        assert!(start.distance(end) > 1.0);
-        assert!(city.roads.iter().any(|road| {
-            road.centerline
-                .windows(2)
-                .any(|segment| segment == [start, end])
-        }));
-    }
-
-    #[test]
-    fn generated_river_reconstructs_two_matching_banks() {
-        let city = CityGenerator::new(WORLD_SEED, GeneratorConfig::default()).generate(WORLD_SEED);
-        let banks = river_bank_pairs(&city.water.river);
-        assert_eq!(banks.len() * 2, city.water.river.len());
-        assert!(banks.len() > 2);
-        assert!(banks
-            .iter()
-            .all(|(left, right)| left.distance(*right) > 1.0));
-    }
-
-    #[test]
-    fn generated_river_has_spaced_bridges_away_from_its_ends() {
-        let city = CityGenerator::new(WORLD_SEED, GeneratorConfig::default()).generate(WORLD_SEED);
-        let banks = river_bank_pairs(&city.water.river);
-        let bridges = bridge_indices(&banks);
-        assert!(!bridges.is_empty());
-        assert!(bridges
-            .iter()
-            .all(|index| *index > 0 && *index < banks.len() - 1));
-    }
-}
+mod main_tests;

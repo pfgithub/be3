@@ -330,5 +330,4 @@ fn civil_from_days(days_since_epoch: i64) -> (i32, u8, u8) {
 }
 
 #[cfg(test)]
-#[path = "calendar/tests.rs"]
 mod tests;

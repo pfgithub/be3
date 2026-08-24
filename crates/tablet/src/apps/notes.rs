@@ -320,5 +320,4 @@ fn canvas_rect(size: Vector<2, f32>) -> Rect {
 }
 
 #[cfg(test)]
-#[path = "notes/tests.rs"]
 mod tests;

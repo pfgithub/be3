@@ -14,3 +14,22 @@ mod storage_state_renders_as_wire_value_rectangle;
 mod viewport_grid_and_entities_are_layered_and_bounded;
 mod wire_vertices_carry_segment_coordinates_and_value_indices;
 mod wires_and_components_are_emitted_as_filled_triangles;
+
+fn bbox(triangles: &[DrawTriangle]) -> [f32; 4] {
+    let mut bounds = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    for triangle in triangles {
+        for [x, y] in triangle.positions {
+            bounds[0] = bounds[0].min(x);
+            bounds[1] = bounds[1].min(y);
+            bounds[2] = bounds[2].max(x);
+            bounds[3] = bounds[3].max(y);
+        }
+    }
+    bounds
+}
+mod mirrored_merger_splitter_renders_crossing_order_lines;

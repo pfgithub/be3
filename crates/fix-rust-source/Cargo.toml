@@ -1,5 +1,5 @@
 [package]
-name = "strip-rust-comments"
+name = "fix-rust-source"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

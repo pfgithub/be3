@@ -1,15 +1,10 @@
 use super::*;
 
 #[test]
-fn bounds_exclude_input_and_output_components() {
+fn grid_with_only_input_and_output_has_no_bounds() {
     let mut grid = LogicGrid::new();
     grid.add_component(
         Point::new(0, 0),
-        Rotation::Up,
-        ComponentKind::Not { scale: scale(2) },
-    );
-    grid.add_component(
-        Point::new(0, -2),
         Rotation::Up,
         ComponentKind::Input {
             scale: scale(2),
@@ -19,7 +14,7 @@ fn bounds_exclude_input_and_output_components() {
         },
     );
     grid.add_component(
-        Point::new(0, 4),
+        Point::new(4, 4),
         Rotation::Down,
         ComponentKind::Output {
             scale: scale(2),
@@ -29,7 +24,5 @@ fn bounds_exclude_input_and_output_components() {
         },
     );
 
-    let bounds = grid.bounds().unwrap();
-    assert_eq!(bounds.min, Point::new(0, 0));
-    assert_eq!(bounds.max, Point::new(2, 4));
+    assert_eq!(grid.bounds(), None);
 }

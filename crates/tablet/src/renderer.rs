@@ -765,5 +765,4 @@ mod vulkan;
 use vulkan::Renderer;
 
 #[cfg(test)]
-#[path = "renderer/tests.rs"]
 mod tests;

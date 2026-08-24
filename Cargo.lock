@@ -2785,6 +2785,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "fix-rust-source"
+version = "0.1.0"
+dependencies = [
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
 name = "fixed-bump"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8136,14 +8144,6 @@ dependencies = [
  "phf_shared",
  "proc-macro2",
  "quote",
-]
-
-[[package]]
-name = "strip-rust-comments"
-version = "0.1.0"
-dependencies = [
- "tree-sitter",
- "tree-sitter-rust",
 ]
 
 [[package]]

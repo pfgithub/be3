@@ -1,7 +1,7 @@
+use fix_rust_source::fix_repository;
 use std::env;
 use std::error::Error;
 use std::path::Path;
-use strip_rust_comments::strip_repository;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = env::args().skip(1);
@@ -13,5 +13,5 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(argument) = arguments.next() {
         return Err(format!("unknown argument: {argument}").into());
     }
-    strip_repository(Path::new("."), check)
+    fix_repository(Path::new("."), check)
 }
