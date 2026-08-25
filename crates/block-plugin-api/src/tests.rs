@@ -59,6 +59,8 @@ fn region_screen(
 
 mod artifact_messages_round_trip;
 mod block_types_round_trip;
+mod child_placements_round_trip;
+mod child_statuses_round_trip;
 mod creation_messages_round_trip;
 mod cursor_round_trips;
 mod drag_messages_round_trip;
@@ -68,12 +70,14 @@ mod manifest_validation;
 mod multiplexed_messages_round_trip;
 mod open_block_request_round_trips;
 mod performance_messages_round_trip;
+mod pick_block_messages_round_trip;
 mod region_sizes_round_trip;
 mod rejects_artifact_settings_over_limit;
 mod rejects_collection_over_limit;
 mod rejects_malformed_payload;
 mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
+mod rejects_unordered_occluders;
 mod stacked_layout_keeps_each_region;
 mod stacked_layout_stacks_screens;
 mod view_messages_round_trip;

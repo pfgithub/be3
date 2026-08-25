@@ -370,6 +370,10 @@ impl<'a> EditorAccess<'a> {
         );
     }
 
+    pub fn is_open(&self, id: Uuid) -> bool {
+        self.editors.contains_key(&id)
+    }
+
     pub fn ensure(&mut self, id: Uuid, block_type: Uuid) {
         if !self.active.contains(&id) && !self.editors.contains_key(&id) {
             self.editors

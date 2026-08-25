@@ -1,7 +1,7 @@
 use block_client::{BlockClient, TunnelCarrier};
 use block_plugin_api::{
-    BlockTypeDescriptor, EditorInstanceId, EditorMessage, EditorRegion, Message, ScreenId,
-    ScreenLayout, ScreenRequest, TunnelMessage,
+    BlockTypeDescriptor, ChildStatus, EditorInstanceId, EditorMessage, EditorRegion, Message,
+    ScreenId, ScreenLayout, ScreenRequest, TunnelMessage,
 };
 use block_ui::{BlockCatalog, BlockTypeEntry};
 use eframe::egui;
@@ -248,6 +248,29 @@ impl Screens {
             }) => {
                 if let Some(session) = self.sessions.get(instance) {
                     session.file_picked(*request_id, pick.clone());
+                }
+            }
+            Message::Editor(EditorMessage::BlockPicked {
+                instance,
+                request_id,
+                pick,
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.block_picked(*request_id, pick.clone());
+                }
+            }
+            Message::ChildStatuses(statuses) => {
+                let mut grouped: HashMap<EditorInstanceId, Vec<ChildStatus>> = HashMap::new();
+                for status in statuses {
+                    grouped
+                        .entry(status.instance)
+                        .or_default()
+                        .push(status.clone());
+                }
+                for (instance, statuses) in grouped {
+                    if let Some(session) = self.sessions.get(&instance) {
+                        session.set_child_statuses(statuses);
+                    }
                 }
             }
             Message::Editor(EditorMessage::DragLeft { instance }) => {

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use block_client::BlockClient;
 use block_plugin_api::{
-    BlockTypeDescriptor, EditorInstanceId, EditorRegion, PluginManifest, ScreenId,
+    BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, EditorInstanceId, EditorRegion,
+    PluginManifest, ScreenId,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -30,10 +31,51 @@ use linux as platform;
 use windows as platform;
 
 pub(crate) use runtime::{
-    artifact, artifact_draft, aspect_ratio, close, commit_creation, creation, creation_ready,
-    editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact, region_size,
-    running, take_artifact_outcome, take_created, take_view_changes,
+    artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
+    creation_ready, editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact,
+    region_size, running, take_artifact_outcome, take_block_pick, take_created, take_view_changes,
 };
+
+pub(crate) const MAX_LIVE_CHILDREN: usize = 16;
+
+pub(crate) struct HostChild {
+    pub(crate) child: ChildId,
+    pub(crate) block_id: Uuid,
+    pub(crate) block_type: Uuid,
+    pub(crate) rect: egui::Rect,
+    pub(crate) clip: egui::Rect,
+    pub(crate) layer: ChildLayer,
+    pub(crate) mode: ChildMode,
+}
+
+impl HostChild {
+    pub(crate) fn is_below(&self) -> bool {
+        matches!(self.layer, ChildLayer::Below)
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        matches!(self.mode, ChildMode::Active)
+    }
+
+    pub(crate) fn is_preview(&self) -> bool {
+        matches!(self.mode, ChildMode::Preview)
+    }
+}
+
+pub(crate) struct HostChildStatus {
+    pub(crate) child: ChildId,
+    pub(crate) available: bool,
+    pub(crate) intrinsic: Option<egui::Vec2>,
+    pub(crate) aspect_ratio: Option<f32>,
+    pub(crate) hovered: bool,
+    pub(crate) active: bool,
+    pub(crate) error: Option<String>,
+}
+
+pub(crate) struct BlockPickRequest {
+    pub(crate) request_id: u64,
+    pub(crate) block_types: Vec<Uuid>,
+}
 
 pub(crate) struct RuntimeStatus {
     pub(crate) plugin_id: String,
@@ -79,6 +121,8 @@ pub(crate) struct ScreenStatus {
     pub(crate) used: Option<egui::Vec2>,
     pub(crate) placement: Option<[u32; 4]>,
     pub(crate) drawn: bool,
+    pub(crate) children: usize,
+    pub(crate) child_generation: u64,
 }
 
 pub(crate) struct PreviewSlot<'a> {

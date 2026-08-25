@@ -1,8 +1,9 @@
 use block_client::BlockClient;
 use block_plugin_api::{
-    ArtifactDescription, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage,
-    EditorRegion, FilePick, InputEvent, Message, PointerButton, RegionSize, ScreenPlacement,
-    ScreenRequest, ViewportMetrics, WheelUnit,
+    ArtifactDescription, BlockPick, ChildId, ChildPlacement, ChildPlacements, ChildStatus,
+    CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FilePick,
+    InputEvent, Message, Occluder, PointerButton, RegionSize, ScreenPlacement, ScreenRequest,
+    ViewportMetrics, WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -22,6 +23,7 @@ pub(crate) struct EguiSession {
     creating: bool,
     created: Option<CreationOutcome>,
     artifact: Option<ArtifactState>,
+    generation: u64,
 }
 
 struct ArtifactState {
@@ -59,6 +61,9 @@ struct RegionState {
     reported: Option<egui::Vec2>,
     cursor: CursorIcon,
     reported_cursor: Option<CursorIcon>,
+    children: Vec<ChildPlacement>,
+    occluders: Vec<Occluder>,
+    reported_children: Option<(Vec<ChildPlacement>, Vec<Occluder>)>,
 }
 
 trait AppUi {
@@ -162,6 +167,7 @@ impl EguiSession {
             creating: false,
             created: None,
             artifact: None,
+            generation: 0,
         }
     }
 
@@ -343,6 +349,17 @@ impl EguiSession {
                 filter,
             }));
         }
+        for (request_id, filter) in self.host.take_block_picks() {
+            messages.push(Message::Editor(EditorMessage::PickBlock {
+                instance,
+                request_id,
+                filter,
+            }));
+        }
+        for placements in self.children() {
+            messages.push(Message::Children(placements));
+        }
+        self.retain_child_statuses();
         for change in self.host.take_view_changes() {
             messages.push(Message::Editor(EditorMessage::ChangeView {
                 instance,
@@ -402,13 +419,54 @@ impl EguiSession {
         self.host.set_pick(request_id, pick);
     }
 
+    pub(crate) fn block_picked(&self, request_id: u64, pick: BlockPick) {
+        self.host.set_block_pick(request_id, pick);
+    }
+
+    pub(crate) fn set_child_statuses(&self, statuses: Vec<ChildStatus>) {
+        self.host.set_child_statuses(statuses);
+    }
+
+    fn children(&mut self) -> Vec<ChildPlacements> {
+        let instance = self.instance;
+        let generation = self.generation;
+        let mut messages = Vec::new();
+        for (region, state) in &mut self.regions {
+            let current = bounded(&state.children, &state.occluders);
+            if state.reported_children.as_ref() == Some(&current) {
+                continue;
+            }
+            state.reported_children = Some(current.clone());
+            let (children, occluders) = current;
+            messages.push(ChildPlacements {
+                instance,
+                region: *region,
+                generation,
+                children,
+                occluders,
+            });
+        }
+        messages
+    }
+
+    fn retain_child_statuses(&self) {
+        let live: Vec<ChildId> = self
+            .regions
+            .values()
+            .flat_map(|state| state.children.iter().map(|child| child.child))
+            .collect();
+        self.host.retain_child_statuses(&live);
+    }
+
     pub(crate) fn run(
         &mut self,
         region: EditorRegion,
         context: &egui::Context,
         time: f64,
+        generation: u64,
     ) -> egui::FullOutput {
         context.set_pixels_per_point(self.scale_factor(region));
+        self.generation = generation;
         let rect = self.rect(region);
         let visible_rect = self.visible_rect(region);
         let state = self.regions.entry(region).or_default();
@@ -437,6 +495,7 @@ impl EguiSession {
             .as_mut()
             .filter(|_| region == EditorRegion::ArtifactSettings)
             .map(|artifact| artifact.draft.clone());
+        self.host.begin_region(region, rect.min.to_vec2());
         let output = context.run_ui(input, |ui| {
             egui::CentralPanel::default().frame(frame).show_inside(ui, {
                 |ui| {
@@ -452,6 +511,14 @@ impl EguiSession {
         if let (Some(artifact), Some(draft)) = (artifact.as_mut(), draft) {
             artifact.edited |= artifact.draft != draft;
             artifact.draft = draft;
+        }
+        for occluder in floating_rects(context, visible_rect) {
+            self.host.occlude(occluder);
+        }
+        let (children, occluders) = self.host.end_region(region);
+        if let Some(state) = self.regions.get_mut(&region) {
+            state.children = children;
+            state.occluders = occluders;
         }
         self.host.set_drag(None);
         if delivered_drop {
@@ -569,6 +636,35 @@ impl EguiSession {
             InputEvent::Focus(focused) => state.input.focused = *focused,
         }
     }
+}
+
+fn bounded(
+    children: &[ChildPlacement],
+    occluders: &[Occluder],
+) -> (Vec<ChildPlacement>, Vec<Occluder>) {
+    let kept = children.len().min(MAX_CHILDREN);
+    (
+        children[..kept].to_vec(),
+        occluders
+            .iter()
+            .take(MAX_COLLECTION_ITEMS)
+            .map(|occluder| Occluder {
+                after: occluder.after.min(kept as u32),
+                rect: occluder.rect,
+            })
+            .collect(),
+    )
+}
+
+fn floating_rects(context: &egui::Context, visible: egui::Rect) -> Vec<egui::Rect> {
+    context.memory(|memory| {
+        memory
+            .layer_ids()
+            .filter(|layer| layer.order >= egui::Order::Middle)
+            .filter_map(|layer| memory.area_rect(layer.id))
+            .filter(|rect| rect.intersects(visible))
+            .collect()
+    })
 }
 
 fn cursor_icon(cursor: egui::CursorIcon) -> CursorIcon {

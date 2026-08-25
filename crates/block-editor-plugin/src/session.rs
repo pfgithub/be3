@@ -118,6 +118,13 @@ impl ClientSession {
             }
             (State::Running, Message::Client(_)) if !self.instances.is_empty() => Ok(Vec::new()),
             (State::Running, Message::BlockTypes(_)) => Ok(Vec::new()),
+            (State::Running, Message::ChildStatuses(statuses))
+                if statuses
+                    .iter()
+                    .all(|status| self.instances.contains(&status.instance)) =>
+            {
+                Ok(Vec::new())
+            }
             (
                 State::Running,
                 Message::Editor(
@@ -125,6 +132,7 @@ impl ClientSession {
                     | block_plugin_api::EditorMessage::DragLeft { instance }
                     | block_plugin_api::EditorMessage::CommitCreation { instance }
                     | block_plugin_api::EditorMessage::FilePicked { instance, .. }
+                    | block_plugin_api::EditorMessage::BlockPicked { instance, .. }
                     | block_plugin_api::EditorMessage::ArtifactSettings { instance, .. }
                     | block_plugin_api::EditorMessage::RegenerateArtifact { instance, .. },
                 ),

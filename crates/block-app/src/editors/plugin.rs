@@ -1,6 +1,6 @@
 use block_client::{blocks, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
-    BlockTypeDescriptor, CreationMode, EditorInstanceId, EditorRegion, InteractionMode,
+    BlockPick, BlockTypeDescriptor, CreationMode, EditorInstanceId, EditorRegion, InteractionMode,
     PluginManifest, ResizeMode, ViewChange,
 };
 use eframe::egui;
@@ -13,12 +13,17 @@ use uuid::Uuid;
 pub(crate) mod discovery;
 
 use super::{
-    ArtifactSession, ArtifactStatus, BlockEditor, BlockRenderContext, CreationStep,
-    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    DirectEditorViewportInput, EditorAccess, EditorAction, EditorRegistry, PendingCreation,
+    embedded_editor_ui, paint_block_fallback, rect_corners, ArtifactSession, ArtifactStatus,
+    BlockEditor, BlockRenderContext, CreationStep, DirectEditorCapabilities,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, DirectEditorViewportInput,
+    EditorAccess, EditorAction, EditorRegistry, PendingCreation,
 };
-use crate::plugin_host::{
-    ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, InstanceRole,
+use crate::{
+    block_picker::BlockPicker,
+    plugin_host::{
+        ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, HostChild,
+        HostChildStatus, InstanceRole,
+    },
 };
 
 pub(super) fn block_type_descriptors(
@@ -81,7 +86,8 @@ impl PluginCreation {
                 size: egui::vec2(ui.available_width(), height),
                 view: None,
             },
-        );
+        )
+        .present(ui);
     }
 }
 
@@ -153,6 +159,7 @@ impl PendingCreation for PluginCreation {
     }
 }
 
+const CHILD_UNAVAILABLE: &str = "the block is already open above this editor";
 const CREATION_DIALOG_HEIGHT: f32 = 96.0;
 const PLUGIN_MIN_ZOOM: f32 = 1.0 / 64.0;
 
@@ -161,6 +168,12 @@ pub(super) struct PluginEditor {
     block: Box<dyn BlockHandleAccess>,
     instance: EditorInstanceId,
     context: Option<egui::Context>,
+    block_pick: Option<PendingBlockPick>,
+}
+
+struct PendingBlockPick {
+    request_id: u64,
+    picker: BlockPicker,
 }
 
 impl PluginEditor {
@@ -170,6 +183,7 @@ impl PluginEditor {
             block,
             instance: next_instance(),
             context: None,
+            block_pick: None,
         }
     }
 
@@ -189,7 +203,7 @@ impl PluginEditor {
             return None;
         }
         self.context = Some(ui.ctx().clone());
-        let (id, block_type) = crate::plugin_host::editor_ui(
+        let presentation = crate::plugin_host::editor_ui(
             ui,
             crate::plugin_host::EditorSlot {
                 plugin: &self.plugin,
@@ -204,8 +218,122 @@ impl PluginEditor {
                 size,
                 view,
             },
-        )?;
-        Some(EditorAction::OpenBlock { id, block_type })
+        );
+        let mut action = presentation
+            .open
+            .map(|(id, block_type)| EditorAction::OpenBlock { id, block_type });
+        let mut statuses = Vec::new();
+        let mut child_viewport = DirectEditorViewport::new(1.0);
+        for child in presentation
+            .children
+            .iter()
+            .filter(|child| child.is_below())
+        {
+            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
+            action = action.or(next);
+        }
+        presentation.present(ui);
+        for child in presentation
+            .children
+            .iter()
+            .filter(|child| !child.is_below())
+        {
+            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
+            action = action.or(next);
+        }
+        presentation.report(statuses);
+        if region == EditorRegion::Main {
+            self.block_pick_ui(ui, editors);
+        }
+        action
+    }
+
+    fn child_ui(
+        &self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        child: &HostChild,
+        viewport: &mut DirectEditorViewport,
+        statuses: &mut Vec<HostChildStatus>,
+    ) -> Option<EditorAction> {
+        editors.ensure(child.block_id, child.block_type);
+        let available = editors.is_open(child.block_id);
+        let hovered = ui
+            .ctx()
+            .pointer_latest_pos()
+            .is_some_and(|position| child.rect.contains(position) && child.clip.contains(position));
+        let mut action = None;
+        if available && child.is_preview() {
+            let painter = ui.painter().with_clip_rect(child.clip);
+            let rendered = editors.render(
+                child.block_id,
+                BlockRenderContext {
+                    painter: &painter,
+                    corners: rect_corners(child.rect),
+                    opacity: 1.0,
+                },
+            );
+            if !rendered {
+                paint_block_fallback(&painter, child.rect, None, editors);
+            }
+        } else if available {
+            action = embedded_editor_ui(
+                ui,
+                editors,
+                child.block_id,
+                ("plugin-child", self.instance.0, child.child.0),
+                child.rect,
+                child.clip,
+                1.0,
+                viewport,
+            );
+            viewport.drain().for_each(drop);
+        }
+        statuses.push(HostChildStatus {
+            child: child.child,
+            available,
+            intrinsic: available
+                .then(|| editors.direct_editor_intrinsic_size(child.block_id))
+                .flatten(),
+            aspect_ratio: editors.preview_aspect_ratio(child.block_id),
+            hovered,
+            active: available && child.is_active(),
+            error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
+        });
+        action
+    }
+
+    fn block_pick_ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
+        let plugin_id = &self.plugin.identity.id;
+        if self.block_pick.is_none() {
+            if let Some(request) = crate::plugin_host::take_block_pick(plugin_id, self.instance) {
+                let mut picker = BlockPicker::default();
+                picker.open_for_types([self.block.id()], request.block_types);
+                self.block_pick = Some(PendingBlockPick {
+                    request_id: request.request_id,
+                    picker,
+                });
+            }
+        }
+        let Some(pending) = &mut self.block_pick else {
+            return;
+        };
+        let parent = block::BlockParent::Uuid(self.block.id());
+        let picked = pending.picker.handle(ui.ctx(), editors, parent);
+        let pick = match picked {
+            Some(result) => Some(BlockPick::Chosen {
+                block_id: result.id.into_bytes(),
+                block_type: result.block_type.into_bytes(),
+            }),
+            None if pending.picker.is_open() => None,
+            None => Some(BlockPick::Cancelled),
+        };
+        let Some(pick) = pick else {
+            return;
+        };
+        let request_id = pending.request_id;
+        self.block_pick = None;
+        crate::plugin_host::block_picked(plugin_id, self.instance, request_id, pick);
     }
 
     fn take_view_changes(&mut self, rect: egui::Rect, viewport: &mut DirectEditorViewport) {
@@ -498,7 +626,8 @@ impl ArtifactSession for PluginArtifact {
                 size: egui::vec2(ui.available_width(), height),
                 view: None,
             },
-        );
+        )
+        .present(ui);
         if let Some(edited) =
             crate::plugin_host::artifact_draft(&self.plugin.identity.id, self.instance)
         {

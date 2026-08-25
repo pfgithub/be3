@@ -201,7 +201,7 @@ fn show_instance(ui: &mut egui::Ui, instance: &InstanceStatus) {
 
 fn show_screen(ui: &mut egui::Ui, screen: &ScreenStatus) {
     let text = format!(
-        "        {:?} #{} — {} pt @ {:.2} ({}x{} px){}{}{}",
+        "        {:?} #{} — {} pt @ {:.2} ({}x{} px){}{}{}{}",
         screen.region,
         screen.screen.0,
         size(screen.logical),
@@ -216,7 +216,14 @@ fn show_screen(ui: &mut egui::Ui, screen: &ScreenStatus) {
             .placement
             .map(|[x, y, width, height]| format!(" · at {x},{y} {width}x{height} px"))
             .unwrap_or_else(|| " · unplaced".to_owned()),
-        if screen.drawn { "" } else { " · stale" }
+        if screen.drawn { "" } else { " · stale" },
+        match screen.children {
+            0 => String::new(),
+            children => format!(
+                " · {children} children at generation {}",
+                screen.child_generation
+            ),
+        }
     );
     if screen.drawn {
         ui.small(text);

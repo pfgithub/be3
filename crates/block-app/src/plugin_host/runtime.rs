@@ -1,8 +1,8 @@
 use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use block_plugin_api::{
-    ArtifactDescription, EditorInstanceId, EditorMessage, EditorRegion, Message, PluginManifest,
-    ScreenLayout, ScreenRequest, ViewChange,
+    ArtifactDescription, BlockPick, EditorInstanceId, EditorMessage, EditorRegion, Message,
+    PluginManifest, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -14,8 +14,9 @@ use super::{
         PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
         MAX_SURFACES,
     },
-    preview_size, ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock,
-    EditorSlot, InstanceRole, PreviewSlot, RuntimeStatus, SurfaceStatus,
+    preview_size, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot, CreationState,
+    EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole, PreviewSlot, RuntimeStatus,
+    SurfaceStatus,
 };
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -223,15 +224,20 @@ impl Runtime {
         if messages.is_empty() {
             return;
         }
+        let mut answers = Vec::new();
         for message in messages {
             match message {
                 Message::Layout(layout) => self.layout = layout,
                 Message::Client(message) => self.instances.client_message(message),
                 Message::Editor(message) => self.instances.editor_message(message),
                 Message::RegionSizes(sizes) => self.instances.set_region_sizes(sizes),
+                Message::Children(placements) => {
+                    answers.extend(self.instances.set_children(placements))
+                }
                 _ => {}
             }
         }
+        self.send(answers);
         self.context.request_repaint();
     }
 
@@ -272,7 +278,50 @@ pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     });
 }
 
-pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid, Uuid)> {
+pub(crate) struct EditorPresentation {
+    plugin_id: String,
+    instance: EditorInstanceId,
+    region: EditorRegion,
+    screen: Option<ScreenId>,
+    quad: Option<Quad>,
+    clip: egui::Rect,
+    pub(crate) open: Option<(Uuid, Uuid)>,
+    pub(crate) children: Vec<HostChild>,
+}
+
+impl EditorPresentation {
+    fn empty(plugin_id: &str, instance: EditorInstanceId, region: EditorRegion) -> Self {
+        Self {
+            plugin_id: plugin_id.to_owned(),
+            instance,
+            region,
+            screen: None,
+            quad: None,
+            clip: egui::Rect::ZERO,
+            open: None,
+            children: Vec::new(),
+        }
+    }
+
+    pub(crate) fn present(&self, ui: &mut egui::Ui) {
+        let (Some(screen), Some(quad)) = (self.screen, self.quad) else {
+            return;
+        };
+        with(&self.plugin_id, |runtime| {
+            let Some(region) = Region::of(&runtime.layout, runtime.surface, screen, quad) else {
+                return;
+            };
+            let callback = runtime.present(quad.rect.intersect(self.clip), region);
+            ui.painter().with_clip_rect(self.clip).add(callback);
+        });
+    }
+
+    pub(crate) fn report(&self, statuses: Vec<HostChildStatus>) {
+        report_children(&self.plugin_id, self.instance, self.region, statuses);
+    }
+}
+
+pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresentation {
     let EditorSlot {
         plugin,
         block_types,
@@ -289,7 +338,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             Ok(runtime) => runtime,
             Err(error) => {
                 ui.colored_label(egui::Color32::RED, error);
-                return None;
+                return EditorPresentation::empty(&plugin.identity.id, instance, region);
             }
         };
         if let Some(error) = runtime.error.clone() {
@@ -297,10 +346,10 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
             if ui.button("Restart plugin").clicked() {
                 runtime.restart(plugin);
             }
-            return None;
+            return EditorPresentation::empty(&plugin.identity.id, instance, region);
         }
         let pass = runtime.pass;
-        let (response, painter) = ui.allocate_painter(size, egui::Sense::click_and_drag());
+        let response = ui.allocate_response(size, egui::Sense::click_and_drag());
         let cropped = Quad::upright(response.rect).crop_to(ui.clip_rect());
         let visible = cropped.as_ref().map_or(egui::Rect::ZERO, |(_, source)| {
             scale_rect(*source, response.rect.size())
@@ -320,31 +369,83 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> Option<(Uuid
         if let Some(view) = view {
             runtime.instances.set_view(instance, view);
         }
+        let (children, holes) =
+            runtime
+                .instances
+                .host_children(instance, region, response.rect, ui.clip_rect());
         let messages = runtime.instances.input(instance, region, |input| {
-            input.update(ui, &response, screen)
+            input.update(ui, &response, screen, &holes)
         });
         runtime.send(messages);
-        let drag = input::block_drag(&response);
+        let over_hole = ui
+            .ctx()
+            .pointer_latest_pos()
+            .is_some_and(|position| holes.contains(position));
+        let dismissed = ui.input(|input| {
+            input.key_pressed(egui::Key::Escape)
+                || (input.pointer.button_pressed(egui::PointerButton::Primary) && !over_hole)
+        });
+        if dismissed {
+            runtime.instances.revoke_active(instance, region);
+        }
+        let drag = input::block_drag(&response).filter(|_| !over_hole);
         let hovering = drag.as_ref().is_some_and(|drag| !drag.dropped);
         let messages = runtime.instances.drag(instance, region, drag);
         runtime.send(messages);
         if hovering && runtime.instances.drag_accepted(instance) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
-        } else if response.hovered() {
+        } else if response.hovered() && !over_hole {
             if let Some(cursor) = runtime.instances.cursor(instance, region) {
                 ui.ctx().set_cursor_icon(cursor);
             }
         }
-        let open_request = runtime.instances.take_open(instance);
-        let Some((quad, _)) = cropped else {
-            return open_request;
-        };
-        let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen, quad) else {
-            return open_request;
-        };
-        painter.add(runtime.present(quad.rect.intersect(ui.clip_rect()), atlas_region));
-        open_request
+        EditorPresentation {
+            plugin_id: plugin.identity.id.clone(),
+            instance,
+            region,
+            screen: Some(screen),
+            quad: cropped.map(|(quad, _)| quad),
+            clip: ui.clip_rect(),
+            open: runtime.instances.take_open(instance),
+            children,
+        }
     })
+}
+
+pub(crate) fn report_children(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    region: EditorRegion,
+    statuses: Vec<HostChildStatus>,
+) {
+    with(plugin_id, |runtime| {
+        let messages = runtime
+            .instances
+            .set_child_statuses(instance, region, statuses);
+        runtime.send(messages);
+    });
+}
+
+pub(crate) fn take_block_pick(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+) -> Option<BlockPickRequest> {
+    with(plugin_id, |runtime| {
+        runtime.instances.take_block_pick(instance)
+    })
+    .flatten()
+}
+
+pub(crate) fn block_picked(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    request_id: u64,
+    pick: BlockPick,
+) {
+    with(plugin_id, |runtime| {
+        let messages = runtime.instances.block_picked(instance, request_id, pick);
+        runtime.send(messages);
+    });
 }
 
 fn scale_rect(rect: egui::Rect, size: egui::Vec2) -> egui::Rect {

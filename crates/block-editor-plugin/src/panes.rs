@@ -3,7 +3,7 @@ use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -37,16 +37,195 @@ impl Pane {
         });
         egui_material_icons::initialize(&context);
         context.set_theme(theme);
+        let mut renderer =
+            egui_wgpu::Renderer::new(device, format, egui_wgpu::RendererOptions::default());
+        renderer
+            .callback_resources
+            .insert(PunchResources::new(device, format));
         Self {
             instance,
             context,
-            renderer: egui_wgpu::Renderer::new(
-                device,
-                format,
-                egui_wgpu::RendererOptions::default(),
-            ),
+            renderer,
             freed: Vec::new(),
         }
+    }
+}
+
+const PUNCH_SLOTS: u32 = 256;
+const PUNCH_BYTES: u64 = 32;
+
+struct PunchResources {
+    pipeline: wgpu::RenderPipeline,
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    stride: u32,
+    next: u32,
+}
+
+impl PunchResources {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        let stride = device
+            .limits()
+            .min_uniform_buffer_offset_alignment
+            .max(PUNCH_BYTES as u32);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("plugin child holes"),
+            size: u64::from(stride) * u64::from(PUNCH_SLOTS),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("plugin child hole layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(PUNCH_BYTES),
+                },
+                count: None,
+            }],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("plugin child hole"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(PUNCH_BYTES),
+                }),
+            }],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("plugin child hole"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("punch.wgsl").into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("plugin child hole"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let erase = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Zero,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("plugin child hole"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("punch_vertex"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("punch_fragment"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: erase,
+                        alpha: erase,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        Self {
+            pipeline,
+            buffer,
+            bind_group,
+            stride,
+            next: 0,
+        }
+    }
+
+    fn allocate(&mut self, queue: &wgpu::Queue, values: [f32; 8]) -> u32 {
+        let slot = self.next % PUNCH_SLOTS;
+        self.next += 1;
+        let mut bytes = [0_u8; PUNCH_BYTES as usize];
+        for (index, value) in values.iter().enumerate() {
+            bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+        queue.write_buffer(
+            &self.buffer,
+            u64::from(self.stride) * u64::from(slot),
+            &bytes,
+        );
+        slot
+    }
+}
+
+struct Punch {
+    rect: egui::Rect,
+    radius: f32,
+    slot: AtomicU32,
+}
+
+pub(crate) fn punch(rect: egui::Rect, radius: f32) -> egui::Shape {
+    egui_wgpu::Callback::new_paint_callback(
+        rect,
+        Punch {
+            rect,
+            radius,
+            slot: AtomicU32::new(0),
+        },
+    )
+    .into()
+}
+
+impl egui_wgpu::CallbackTrait for Punch {
+    fn prepare(
+        &self,
+        _device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(punch) = resources.get_mut::<PunchResources>() {
+            let scale = screen_descriptor.pixels_per_point;
+            let slot = punch.allocate(
+                queue,
+                [
+                    self.rect.min.x * scale,
+                    self.rect.min.y * scale,
+                    self.rect.max.x * scale,
+                    self.rect.max.y * scale,
+                    self.radius * scale,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+            );
+            self.slot.store(slot, Ordering::Relaxed);
+        }
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        resources: &egui_wgpu::CallbackResources,
+    ) {
+        let Some(punch) = resources.get::<PunchResources>() else {
+            return;
+        };
+        let offset = punch.stride * self.slot.load(Ordering::Relaxed);
+        render_pass.set_pipeline(&punch.pipeline);
+        render_pass.set_bind_group(0, &punch.bind_group, &[offset]);
+        render_pass.draw(0..3, 0..1);
     }
 }
 
@@ -104,9 +283,12 @@ impl Panes {
             for id in std::mem::take(&mut pane.freed) {
                 pane.renderer.free_texture(&id);
             }
+            if let Some(punch) = pane.renderer.callback_resources.get_mut::<PunchResources>() {
+                punch.next = 0;
+            }
             let pane_started = Instant::now();
             let session_started = Instant::now();
-            let output = session.run(placement.region, &pane.context, time);
+            let output = session.run(placement.region, &pane.context, time, layout.generation);
             let session_elapsed = session_started.elapsed();
             let updated_textures = output.textures_delta.set.len();
             #[cfg(target_os = "windows")]

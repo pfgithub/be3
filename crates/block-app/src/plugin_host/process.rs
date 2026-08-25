@@ -228,9 +228,9 @@ fn pump(
         let mut delivered = false;
         for event in first.into_iter().chain(events.try_iter()) {
             match event {
-                Event::Send(message) => session
-                    .send(message, elapsed(started))
-                    .map_err(|error| queue_error(&error))?,
+                Event::Send(message) => {
+                    send_outbound(&mut carrier, session, message, elapsed(started))?
+                }
                 Event::Received(message, attachments) => {
                     delivered |= deliver(message, attachments, &inbound, session, elapsed(started));
                 }
@@ -244,12 +244,7 @@ fn pump(
         if delivered {
             inbound.repaint.request_repaint();
         }
-        while let Some(message) = session.next_outbound() {
-            if !quiet(&message) {
-                eprintln!("plugin host sending {} to the plugin", name(&message));
-            }
-            carrier.write(&message).map_err(carrier_error)?;
-        }
+        drain_outbound(&mut carrier, session)?;
         session.tick(elapsed(started));
         match session.state() {
             SessionState::Closed => return wait_for_shutdown(child),
@@ -259,6 +254,28 @@ fn pump(
             _ => {}
         }
     }
+}
+
+fn send_outbound(
+    carrier: &mut impl Writing,
+    session: &mut HostSession,
+    message: Message,
+    now: u64,
+) -> io::Result<()> {
+    session
+        .send(message, now)
+        .map_err(|error| queue_error(&error))?;
+    drain_outbound(carrier, session)
+}
+
+fn drain_outbound(carrier: &mut impl Writing, session: &mut HostSession) -> io::Result<()> {
+    while let Some(message) = session.next_outbound() {
+        if !quiet(&message) {
+            eprintln!("plugin host sending {} to the plugin", name(&message));
+        }
+        carrier.write(&message).map_err(carrier_error)?;
+    }
+    Ok(())
 }
 
 fn wait(events: &Receiver<Event>, session: &HostSession) -> Waited {
@@ -412,3 +429,6 @@ fn terminate(child: &mut Child) {
     }
     child.wait().ok();
 }
+
+#[cfg(test)]
+mod tests;

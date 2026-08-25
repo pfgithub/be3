@@ -23,11 +23,12 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 23;
+pub const PROTOCOL_VERSION: u16 = 24;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
 pub const MAX_QUEUED_MESSAGES: usize = 256;
+pub const MAX_CHILDREN: usize = 256;
 pub const REQUEST_TIMEOUT_MILLISECONDS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +121,92 @@ impl ScreenLayout {
     pub fn same_placements(&self, other: &Self) -> bool {
         self.width == other.width && self.height == other.height && self.screens == other.screens
     }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildId(pub u64);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChildLayer {
+    #[default]
+    Below,
+    Above,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChildMode {
+    Preview,
+    #[default]
+    Passive,
+    Active,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ChildRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChildPlacement {
+    pub child: ChildId,
+    pub block_id: [u8; 16],
+    pub block_type: [u8; 16],
+    pub rect: ChildRect,
+    pub clip: ChildRect,
+    pub corner_radius: f32,
+    pub layer: ChildLayer,
+    pub mode: ChildMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Occluder {
+    pub after: u32,
+    pub rect: ChildRect,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChildPlacements {
+    pub instance: EditorInstanceId,
+    pub region: EditorRegion,
+    pub generation: u64,
+    pub children: Vec<ChildPlacement>,
+    pub occluders: Vec<Occluder>,
+}
+
+impl ChildPlacements {
+    pub fn occluded(&self, index: usize, x: f32, y: f32) -> bool {
+        self.occluders
+            .iter()
+            .filter(|occluder| occluder.after as usize > index)
+            .any(|occluder| occluder.rect.contains(x, y))
+    }
+}
+
+impl ChildRect {
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.width <= 0.0 || self.height <= 0.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChildStatus {
+    pub instance: EditorInstanceId,
+    pub region: EditorRegion,
+    pub child: ChildId,
+    pub available: bool,
+    pub intrinsic_width: f32,
+    pub intrinsic_height: f32,
+    pub aspect_ratio: f32,
+    pub hovered: bool,
+    pub active: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -366,6 +453,16 @@ pub enum EditorMessage {
         request_id: u64,
         pick: FilePick,
     },
+    PickBlock {
+        instance: EditorInstanceId,
+        request_id: u64,
+        filter: BlockFilter,
+    },
+    BlockPicked {
+        instance: EditorInstanceId,
+        request_id: u64,
+        pick: BlockPick,
+    },
     OpenCreation {
         instance: EditorInstanceId,
         account_id: [u8; 16],
@@ -493,6 +590,22 @@ pub enum CreationOutcome {
     Failed(String),
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockFilter {
+    pub name: String,
+    pub block_types: Vec<[u8; 16]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlockPick {
+    Chosen {
+        block_id: [u8; 16],
+        block_type: [u8; 16],
+    },
+    Cancelled,
+    Failed(String),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FilePick {
     Chosen { name: String, data: Vec<u8> },
@@ -527,6 +640,8 @@ pub enum Message {
     Editor(EditorMessage),
     Client(TunnelMessage),
     BlockTypes(Vec<BlockTypeDescriptor>),
+    Children(ChildPlacements),
+    ChildStatuses(Vec<ChildStatus>),
 }
 
 impl Message {
@@ -838,8 +953,37 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             }
             Ok(())
         }
+        Message::Children(value) => validate_children(value),
+        Message::ChildStatuses(value) => {
+            collection(value.len())?;
+            for status in value {
+                if let Some(error) = &status.error {
+                    string(error)?;
+                }
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
+}
+
+fn validate_children(placements: &ChildPlacements) -> Result<(), DecodeError> {
+    if placements.children.len() > MAX_CHILDREN {
+        return Err(DecodeError::LimitExceeded("children"));
+    }
+    if placements.occluders.len() > MAX_COLLECTION_ITEMS {
+        return Err(DecodeError::LimitExceeded("occluders"));
+    }
+    let mut covered = 0;
+    for occluder in &placements.occluders {
+        if occluder.after as usize > placements.children.len()
+            || (occluder.after as usize) < covered
+        {
+            return Err(DecodeError::MalformedPayload);
+        }
+        covered = occluder.after as usize;
+    }
+    Ok(())
 }
 
 fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
@@ -884,6 +1028,14 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             FilePick::Chosen { name, .. } => string(name),
             FilePick::Failed(message) => string(message),
             FilePick::Cancelled => Ok(()),
+        },
+        EditorMessage::PickBlock { filter, .. } => {
+            string(&filter.name)?;
+            collection(filter.block_types.len())
+        }
+        EditorMessage::BlockPicked { pick, .. } => match pick {
+            BlockPick::Failed(message) => string(message),
+            BlockPick::Chosen { .. } | BlockPick::Cancelled => Ok(()),
         },
         _ => Ok(()),
     }

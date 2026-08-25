@@ -5,6 +5,7 @@ use block_plugin_api::{
 use eframe::egui;
 use uuid::Uuid;
 
+use super::instances::Holes;
 use crate::editors::SidebarDragPayload;
 
 pub(super) struct BlockDragEvent {
@@ -37,6 +38,7 @@ pub(super) struct InputAdapter {
     pressed_buttons: u8,
     focused: bool,
     modifiers: Modifiers,
+    over_hole: bool,
 }
 
 impl InputAdapter {
@@ -45,11 +47,17 @@ impl InputAdapter {
         ui: &egui::Ui,
         response: &egui::Response,
         screen: ScreenId,
+        holes: &Holes,
     ) -> Vec<Message> {
         if response.clicked() {
             response.request_focus();
         }
         let focused = response.has_focus();
+        self.over_hole = !self.captured
+            && ui
+                .ctx()
+                .pointer_latest_pos()
+                .is_some_and(|position| holes.contains(position));
         let events = ui.input(|input| input.events.clone());
         let mut normalized = Vec::new();
         if focused != self.focused {
@@ -64,6 +72,7 @@ impl InputAdapter {
                     response.rect,
                     response.hovered(),
                     focused,
+                    holes,
                     &mut normalized,
                 );
             }
@@ -84,10 +93,14 @@ impl InputAdapter {
         rect: egui::Rect,
         hovered: bool,
         focused: bool,
+        holes: &Holes,
         output: &mut Vec<InputEvent>,
     ) {
+        let pointer = |position: egui::Pos2, captured: bool| {
+            (rect.contains(position) && !holes.contains(position)) || captured
+        };
         match event {
-            egui::Event::PointerMoved(position) if rect.contains(position) || self.captured => {
+            egui::Event::PointerMoved(position) if pointer(position, self.captured) => {
                 let position = position - rect.min;
                 output.push(InputEvent::PointerMoved {
                     x: position.x,
@@ -99,7 +112,7 @@ impl InputAdapter {
                 button,
                 pressed,
                 modifiers,
-            } if rect.contains(pos) || self.captured => {
+            } if pointer(pos, self.captured) => {
                 let button_mask = 1 << pointer_button_index(button);
                 self.pressed_buttons = if pressed {
                     self.pressed_buttons | button_mask
@@ -131,7 +144,7 @@ impl InputAdapter {
                 delta,
                 modifiers,
                 ..
-            } if hovered => {
+            } if hovered && !self.over_hole => {
                 push_modifiers(&mut self.modifiers, modifiers, output);
                 output.push(InputEvent::Wheel {
                     x: delta.x,
@@ -139,7 +152,7 @@ impl InputAdapter {
                     unit: wheel_unit(unit),
                 });
             }
-            egui::Event::Zoom(factor) if hovered => {
+            egui::Event::Zoom(factor) if hovered && !self.over_hole => {
                 output.push(InputEvent::Zoom { factor });
             }
             egui::Event::Key {

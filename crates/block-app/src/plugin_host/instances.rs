@@ -1,16 +1,20 @@
 use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
-    ArtifactDescription, BlockTypeDescriptor, CreationOutcome, CursorIcon, EditorInstanceId,
-    EditorMessage, EditorRegion, FilePick, Message, PerformanceMeasurement, RegenerationOutcome,
+    ArtifactDescription, BlockPick, BlockTypeDescriptor, ChildId, ChildMode, ChildPlacement,
+    ChildPlacements, ChildStatus, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage,
+    EditorRegion, FilePick, Message, Occluder, PerformanceMeasurement, RegenerationOutcome,
     RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use uuid::Uuid;
 
 use super::{
     input::{viewport_metrics, BlockDragEvent, InputAdapter},
-    EditorBlock, InstanceRole,
+    BlockPickRequest, EditorBlock, HostChild, HostChildStatus, InstanceRole, MAX_LIVE_CHILDREN,
 };
 use crate::{
     performance,
@@ -45,6 +49,7 @@ struct Instance {
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
+    block_picks: Vec<BlockPickRequest>,
     view: Option<egui::Rect>,
     reported_view: Option<egui::Rect>,
     view_changes: Vec<ViewChange>,
@@ -73,6 +78,7 @@ impl Instance {
             intrinsic: None,
             aspect_ratio: None,
             picks: Vec::new(),
+            block_picks: Vec::new(),
             view: None,
             reported_view: None,
             view_changes: Vec::new(),
@@ -92,6 +98,39 @@ struct Screen {
     used: Option<egui::Vec2>,
     dragging: bool,
     cursor: CursorIcon,
+    children: ChildTable,
+    reported_statuses: HashMap<ChildId, ChildStatus>,
+    revoked: HashSet<ChildId>,
+}
+
+#[derive(Default)]
+struct ChildTable {
+    generation: u64,
+    size: egui::Vec2,
+    children: Vec<ChildPlacement>,
+    occluders: Vec<Occluder>,
+}
+
+struct Hole {
+    rect: egui::Rect,
+    occluders: Vec<egui::Rect>,
+}
+
+#[derive(Default)]
+pub(super) struct Holes {
+    holes: Vec<Hole>,
+}
+
+impl Holes {
+    pub(super) fn contains(&self, position: egui::Pos2) -> bool {
+        self.holes.iter().any(|hole| {
+            hole.rect.contains(position)
+                && !hole
+                    .occluders
+                    .iter()
+                    .any(|occluder| occluder.contains(position))
+        })
+    }
 }
 
 pub(super) struct NextScreens {
@@ -162,6 +201,9 @@ impl Instances {
                 used: None,
                 dragging: false,
                 cursor: CursorIcon::Default,
+                children: ChildTable::default(),
+                reported_statuses: HashMap::new(),
+                revoked: HashSet::new(),
             }
         });
         screen.request.metrics = viewport_metrics(size, visible, scale_factor);
@@ -411,6 +453,212 @@ impl Instances {
             .is_some_and(|entry| entry.drag_accepted)
     }
 
+    pub(super) fn set_children(&mut self, placements: ChildPlacements) -> Vec<Message> {
+        let ChildPlacements {
+            instance,
+            region,
+            generation,
+            children,
+            occluders,
+        } = placements;
+        let Some(screen) = self
+            .entries
+            .get_mut(&instance)
+            .and_then(|entry| entry.screens.get_mut(&region))
+        else {
+            return Vec::new();
+        };
+        screen.revoked.retain(|child| {
+            children
+                .iter()
+                .any(|placement| placement.child == *child && placement.mode == ChildMode::Active)
+        });
+        screen.children = ChildTable {
+            generation,
+            size: egui::vec2(
+                screen.request.metrics.logical_width,
+                screen.request.metrics.logical_height,
+            ),
+            children,
+            occluders,
+        };
+        if region != EditorRegion::Preview {
+            return Vec::new();
+        }
+        let statuses = screen
+            .children
+            .children
+            .iter()
+            .map(|child| HostChildStatus {
+                child: child.child,
+                available: false,
+                intrinsic: None,
+                aspect_ratio: None,
+                hovered: false,
+                active: false,
+                error: Some(NO_CHILDREN_IN_PREVIEWS.to_owned()),
+            })
+            .collect();
+        self.set_child_statuses(instance, region, statuses)
+    }
+
+    pub(super) fn host_children(
+        &self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        rect: egui::Rect,
+        clip: egui::Rect,
+    ) -> (Vec<HostChild>, Holes) {
+        let Some(screen) = self
+            .entries
+            .get(&instance)
+            .and_then(|entry| entry.screens.get(&region))
+        else {
+            return (Vec::new(), Holes::default());
+        };
+        let table = &screen.children;
+        let origin = rect.min.to_vec2();
+        let stretch = egui::vec2(
+            ratio(rect.width(), table.size.x),
+            ratio(rect.height(), table.size.y),
+        );
+        let mut children = Vec::new();
+        let mut holes = Holes::default();
+        let mut live = 0;
+        for (index, child) in table.children.iter().enumerate() {
+            if child.rect.is_empty() {
+                continue;
+            }
+            let requested = match child.mode {
+                ChildMode::Active if screen.revoked.contains(&child.child) => ChildMode::Passive,
+                mode => mode,
+            };
+            let mode = match requested {
+                ChildMode::Preview => ChildMode::Preview,
+                mode => {
+                    live += 1;
+                    match live > MAX_LIVE_CHILDREN {
+                        true => ChildMode::Preview,
+                        false => mode,
+                    }
+                }
+            };
+            let child_rect = host_rect(child.rect, origin, stretch);
+            let child_clip = host_rect(child.clip, origin, stretch).intersect(clip);
+            if mode == ChildMode::Active {
+                let interactive = child_rect.intersect(child_clip);
+                if interactive.is_positive() {
+                    holes.holes.push(Hole {
+                        rect: interactive,
+                        occluders: table
+                            .occluders
+                            .iter()
+                            .filter(|occluder| occluder.after as usize > index)
+                            .map(|occluder| host_rect(occluder.rect, origin, stretch))
+                            .collect(),
+                    });
+                }
+            }
+            children.push(HostChild {
+                child: child.child,
+                block_id: Uuid::from_bytes(child.block_id),
+                block_type: Uuid::from_bytes(child.block_type),
+                rect: child_rect,
+                clip: child_clip,
+                layer: child.layer,
+                mode,
+            });
+        }
+        (children, holes)
+    }
+
+    pub(super) fn revoke_active(&mut self, instance: EditorInstanceId, region: EditorRegion) {
+        let Some(screen) = self
+            .entries
+            .get_mut(&instance)
+            .and_then(|entry| entry.screens.get_mut(&region))
+        else {
+            return;
+        };
+        for child in &screen.children.children {
+            if child.mode == ChildMode::Active {
+                screen.revoked.insert(child.child);
+            }
+        }
+    }
+
+    pub(super) fn set_child_statuses(
+        &mut self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        statuses: Vec<HostChildStatus>,
+    ) -> Vec<Message> {
+        let Some(screen) = self
+            .entries
+            .get_mut(&instance)
+            .and_then(|entry| entry.screens.get_mut(&region))
+        else {
+            return Vec::new();
+        };
+        let mut changed = Vec::new();
+        let live: Vec<ChildId> = statuses.iter().map(|status| status.child).collect();
+        for status in statuses {
+            let status = ChildStatus {
+                instance,
+                region,
+                child: status.child,
+                available: status.available,
+                intrinsic_width: status.intrinsic.map_or(0.0, |size| size.x),
+                intrinsic_height: status.intrinsic.map_or(0.0, |size| size.y),
+                aspect_ratio: status.aspect_ratio.unwrap_or_default(),
+                hovered: status.hovered,
+                active: status.active,
+                error: status.error,
+            };
+            if screen.reported_statuses.get(&status.child) == Some(&status) {
+                continue;
+            }
+            screen
+                .reported_statuses
+                .insert(status.child, status.clone());
+            changed.push(status);
+        }
+        screen
+            .reported_statuses
+            .retain(|child, _| live.contains(child));
+        match changed.is_empty() {
+            true => Vec::new(),
+            false => vec![Message::ChildStatuses(changed)],
+        }
+    }
+
+    pub(super) fn take_block_pick(
+        &mut self,
+        instance: EditorInstanceId,
+    ) -> Option<BlockPickRequest> {
+        let entry = self.entries.get_mut(&instance)?;
+        match entry.block_picks.is_empty() {
+            true => None,
+            false => Some(entry.block_picks.remove(0)),
+        }
+    }
+
+    pub(super) fn block_picked(
+        &self,
+        instance: EditorInstanceId,
+        request_id: u64,
+        pick: BlockPick,
+    ) -> Vec<Message> {
+        if !self.entries.contains_key(&instance) {
+            return Vec::new();
+        }
+        vec![Message::Editor(EditorMessage::BlockPicked {
+            instance,
+            request_id,
+            pick,
+        })]
+    }
+
     pub(super) fn statuses(&self, layout: &ScreenLayout, pass: u64) -> Vec<super::InstanceStatus> {
         let mut statuses: Vec<_> = self
             .entries
@@ -437,6 +685,8 @@ impl Instances {
                             used: screen.used,
                             placement,
                             drawn: screen.last_seen >= pass,
+                            children: screen.children.children.len(),
+                            child_generation: screen.children.generation,
                         }
                     })
                     .collect();
@@ -629,6 +879,22 @@ impl Instances {
                     entry.picks.push(PendingPick { request_id, picker });
                 }
             }
+            EditorMessage::PickBlock {
+                instance,
+                request_id,
+                filter,
+            } => {
+                if let Some(entry) = self.entries.get_mut(&instance) {
+                    entry.block_picks.push(BlockPickRequest {
+                        request_id,
+                        block_types: filter
+                            .block_types
+                            .into_iter()
+                            .map(Uuid::from_bytes)
+                            .collect(),
+                    });
+                }
+            }
             EditorMessage::CreationReady { instance, ready } => {
                 if let Some(entry) = self.entries.get_mut(&instance) {
                     entry.creation_ready = ready;
@@ -744,6 +1010,26 @@ impl Instances {
             summary(&payload)
         ));
         connection.tunnel.send(payload);
+    }
+}
+
+const NO_CHILDREN_IN_PREVIEWS: &str = "a preview region does not composite children";
+
+fn host_rect(
+    rect: block_plugin_api::ChildRect,
+    origin: egui::Vec2,
+    stretch: egui::Vec2,
+) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(rect.x * stretch.x, rect.y * stretch.y) + origin,
+        egui::vec2(rect.width * stretch.x, rect.height * stretch.y),
+    )
+}
+
+fn ratio(current: f32, published: f32) -> f32 {
+    match published > 0.0 && current > 0.0 {
+        true => current / published,
+        false => 1.0,
     }
 }
 

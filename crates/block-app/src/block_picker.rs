@@ -47,6 +47,7 @@ pub struct BlockPicker {
     tab: BlockPickerTab,
     search: String,
     excluded: HashSet<Uuid>,
+    allowed: HashSet<Uuid>,
     pending_block: Option<PendingBlock>,
     error: Option<String>,
 }
@@ -59,6 +60,7 @@ impl Default for BlockPicker {
             tab: BlockPickerTab::Add,
             search: String::new(),
             excluded: HashSet::new(),
+            allowed: HashSet::new(),
             pending_block: None,
             error: None,
         }
@@ -67,10 +69,21 @@ impl Default for BlockPicker {
 
 impl BlockPicker {
     pub fn open(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
+        self.allowed.clear();
+        self.open_on_tab(excluded, BlockPickerTab::Add);
+    }
+
+    pub fn open_for_types(
+        &mut self,
+        excluded: impl IntoIterator<Item = Uuid>,
+        allowed: impl IntoIterator<Item = Uuid>,
+    ) {
+        self.allowed = allowed.into_iter().collect();
         self.open_on_tab(excluded, BlockPickerTab::Add);
     }
 
     pub fn open_on_templates(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
+        self.allowed.clear();
         self.open_on_tab(excluded, BlockPickerTab::Templates);
     }
 
@@ -83,6 +96,10 @@ impl BlockPicker {
 
     pub fn close(&mut self) {
         self.open = false;
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open || self.pending_block.is_some()
     }
 
     fn show_modal(
@@ -125,7 +142,8 @@ impl BlockPicker {
                         ui.set_min_width(ui.available_width());
                         match self.tab {
                             BlockPickerTab::Add => {
-                                new_type = show_add_grid(ui, registry, content_height);
+                                new_type =
+                                    show_add_grid(ui, registry, &self.allowed, content_height);
                             }
                             BlockPickerTab::Templates => {
                                 template = show_templates_grid(ui, content_height);
@@ -135,6 +153,7 @@ impl BlockPicker {
                                     ui,
                                     &mut self.search,
                                     &self.excluded,
+                                    &self.allowed,
                                     client,
                                     registry,
                                     content_height,
@@ -379,7 +398,12 @@ fn show_templates_grid(ui: &mut egui::Ui, max_height: f32) -> Option<SlideTempla
     selected
 }
 
-fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry, max_height: f32) -> Option<Uuid> {
+fn show_add_grid(
+    ui: &mut egui::Ui,
+    registry: &EditorRegistry,
+    allowed: &HashSet<Uuid>,
+    max_height: f32,
+) -> Option<Uuid> {
     let mut selected = None;
     egui::ScrollArea::vertical()
         .max_height(max_height)
@@ -388,7 +412,9 @@ fn show_add_grid(ui: &mut egui::Ui, registry: &EditorRegistry, max_height: f32) 
             let mut show_section = |ui: &mut egui::Ui, default: bool| {
                 ui.horizontal_wrapped(|ui| {
                     for &(label, block_type, is_default) in registry.new_block_actions() {
-                        if is_default != default {
+                        if is_default != default
+                            || !(allowed.is_empty() || allowed.contains(&block_type))
+                        {
                             continue;
                         }
                         let response = show_add_tile(ui, registry.icon(block_type), label)
@@ -447,6 +473,7 @@ fn show_link_content(
     ui: &mut egui::Ui,
     search: &mut String,
     excluded: &HashSet<Uuid>,
+    allowed: &HashSet<Uuid>,
     client: &BlockClient,
     registry: &EditorRegistry,
     max_height: f32,
@@ -458,6 +485,7 @@ fn show_link_content(
         .cached_blocks()
         .into_iter()
         .filter(|block| !excluded.contains(&block.id))
+        .filter(|block| allowed.is_empty() || allowed.contains(&block.block_type))
         .filter(|block| {
             query.is_empty()
                 || BlockLabel::for_cached(registry, block)

@@ -118,6 +118,48 @@ host embeds it. It is a request, not a constraint: the host may embed the
 instance at any size, and falls back to its own default until an instance
 reports one.
 
+An editor instance may embed other blocks' editors inside one of its regions.
+Once per frame the instance publishes, for that region, the frame generation
+it drew, an ordered list of the children it placed and the occluder rectangles
+declared between them, all in the region's own logical coordinates. A child
+carries its own identifier, the block and block type it shows, the rectangle
+and clip it was placed at, the corner radius of the hole cut for it, whether
+it composites below or above the instance's own pixels, and whether the host
+should draw it as a preview, a passive editor, or an active one. Occluders are
+ordered against the children: a child's interactive area is its rectangle
+minus every occluder declared after it, which is the same subtraction that
+decides what the host draws over it.
+
+A child placed below is cut out of the instance's own surface, which is
+cleared transparent, so the host composites the child's editor under the
+instance and anything the instance draws after the child covers it again. A
+child placed above composites against the instance's pixels instead and cannot
+be drawn over. The host draws the children below a region, then the region,
+then the children above it, at the placements belonging to the generation it
+is presenting; a placement published for a generation the host is not
+presenting is stretched into the region it is showing rather than dropped.
+
+The host answers with a status per child: whether the block could be opened at
+all, the size and shape its editor asks for, whether the pointer is over it,
+whether it is being given input, and why it is unavailable when it is. A block
+already open above the instance is refused, so an editor cannot be nested
+inside itself. The host bounds how many children of one region it will run as
+editors and falls back to preview rendering for the rest.
+
+The host owns input routing. Nothing is delivered to a child until the
+instance publishes it as active, so an instance keeps the clicks over its
+passive children; while a child is active the host stops delivering pointer
+input over the child's interactive area to the instance. Keyboard and text
+input go to the innermost active editor, and the cursor comes from the
+innermost editor the pointer is over.
+
+An editor instance may ask the host to choose a block for it, which is what
+lets an instance acquire a child without waiting for one to be dragged in. The
+request carries the name of what is being chosen and the block types that may
+be chosen, empty for any, and is answered exactly once, with the block the
+user chose or created, the picker the user closed, or why the block could not
+be made. Requests are identified per instance and may be outstanding together.
+
 An editor instance may report named duration and count measurements under a
 named performance group. Durations are measured by the plugin and sent as
 nanoseconds; the host only collects and displays the reported values. Reports
