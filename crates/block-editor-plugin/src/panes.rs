@@ -11,8 +11,6 @@ use std::{
 
 use crate::{screens::Screens, Waker};
 
-const MINIMUM_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
-
 struct Pane {
     instance: EditorInstanceId,
     context: egui::Context,
@@ -360,7 +358,7 @@ impl Panes {
         self.panes.retain(|_, pane| screens.is_open(pane.instance));
         Painted {
             commands,
-            repaint: (repaint < Duration::MAX).then(|| repaint.max(MINIMUM_FRAME_INTERVAL)),
+            repaint: (repaint < Duration::MAX).then_some(repaint),
             #[cfg(target_os = "windows")]
             texture_updates,
         }
