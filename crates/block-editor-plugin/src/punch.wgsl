@@ -1,7 +1,6 @@
 struct Punch {
     bounds: vec4<f32>,
-    radius: f32,
-    padding: vec3<f32>,
+    parameters: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -21,7 +20,7 @@ fn punch_vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f3
 fn punch_fragment(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let center = (punch.bounds.xy + punch.bounds.zw) * 0.5;
     let half_size = max((punch.bounds.zw - punch.bounds.xy) * 0.5, vec2<f32>(0.0, 0.0));
-    let radius = min(punch.radius, min(half_size.x, half_size.y));
+    let radius = min(punch.parameters.x, min(half_size.x, half_size.y));
     let corner = abs(position.xy - center) - (half_size - vec2<f32>(radius, radius));
     let outside = length(max(corner, vec2<f32>(0.0, 0.0)));
     let inside = min(max(corner.x, corner.y), 0.0);

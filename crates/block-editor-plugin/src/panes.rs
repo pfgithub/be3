@@ -373,3 +373,6 @@ fn repaint_delay(output: &egui::FullOutput) -> Duration {
         .get(&egui::ViewportId::ROOT)
         .map_or(Duration::MAX, |viewport| viewport.repaint_delay)
 }
+
+#[cfg(test)]
+mod tests;

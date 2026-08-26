@@ -15,6 +15,9 @@ futures-util = "0.3"
 serde = "1"
 uuid = "1"
 
+[dev-dependencies]
+naga = { version = "29", features = ["wgsl-in"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
