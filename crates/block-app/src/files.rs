@@ -720,6 +720,23 @@ impl BlockApp {
                         crate::debug::version::open();
                         ui.close();
                     }
+                    if ui.button("egui Inspection").clicked() {
+                        crate::debug::inspect::open(crate::debug::inspect::Window::Inspection);
+                        ui.close();
+                    }
+                    if ui.button("egui Memory").clicked() {
+                        crate::debug::inspect::open(crate::debug::inspect::Window::Memory);
+                        ui.close();
+                    }
+                    if ui.button("egui Style").clicked() {
+                        crate::debug::inspect::open(crate::debug::inspect::Window::Style);
+                        ui.close();
+                    }
+                    if ui.button("egui Textures").clicked() {
+                        crate::debug::inspect::open(crate::debug::inspect::Window::Textures);
+                        ui.close();
+                    }
+                    crate::debug::inspect::debug_on_hover_toggle(ui);
                     #[cfg(not(any(
                         target_os = "android",
                         target_os = "windows",

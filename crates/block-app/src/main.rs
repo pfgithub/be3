@@ -3581,6 +3581,7 @@ impl BlockApp {
             target_arch = "wasm32"
         )))]
         debug::terminal::show(ui.ctx());
+        debug::inspect::show(ui.ctx());
         debug::plugins::show(ui.ctx());
         debug::version::show(ui.ctx());
         self.show_invite(ui.ctx());
