@@ -3590,6 +3590,7 @@ impl BlockApp {
         self.show_dock(ui, frame);
         self.show_discard_confirmation(ui.ctx());
         performance::show(ui.ctx());
+        plugin_host::flush();
         performance::end_frame();
     }
 

@@ -1,4 +1,9 @@
-use std::{cell::RefCell, collections::HashMap, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use block_plugin_api::{
     ArtifactDescription, BlockPick, EditorInstanceId, EditorMessage, EditorRegion, Message,
@@ -9,10 +14,9 @@ use uuid::Uuid;
 
 use super::{
     input,
-    instances::Instances,
+    instances::{Instances, Placement},
     presenter::{
-        PresenterCallback, PresenterCommand, PresenterState, PresenterStatus, Quad, Region,
-        MAX_SURFACES,
+        PresenterCallback, PresenterState, PresenterStatus, Quad, Region, Shared, MAX_SURFACES,
     },
     preview_size, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot, CreationState,
     EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole, PreviewSlot, RuntimeStatus,
@@ -45,7 +49,7 @@ pub(super) trait Backend: Sized {
 
     fn receive(&mut self) -> Vec<Message>;
 
-    fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Self::Frame;
+    fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Option<Self::Frame>;
 
     fn take_error(&mut self) -> Option<String>;
 
@@ -120,14 +124,7 @@ impl Host {
             .debug_painter()
             .add(eframe::egui_wgpu::Callback::new_paint_callback(
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
-                PresenterCallback::<Frame> {
-                    command: PresenterCommand::Release,
-                    status: runtime.status.clone(),
-                    region: Region {
-                        surface: runtime.surface,
-                        ..Region::default()
-                    },
-                },
+                PresenterCallback::<Frame>::release(runtime.surface, runtime.status.clone()),
             ));
         Some(runtime.surface)
     }
@@ -141,6 +138,8 @@ pub(super) struct Runtime {
     pub(super) pass: u64,
     surface: u32,
     status: PresenterStatus,
+    shared: Arc<Mutex<Shared<Frame>>>,
+    presented: bool,
     sent: Vec<ScreenRequest>,
     error: Option<String>,
     paint_at: Option<f64>,
@@ -159,6 +158,8 @@ impl Runtime {
             pass: 0,
             surface,
             status: PresenterStatus::waiting(),
+            shared: Arc::new(Mutex::new(Shared::default())),
+            presented: false,
             sent: Vec::new(),
             error: None,
             paint_at: None,
@@ -204,12 +205,19 @@ impl Runtime {
         self.pump();
     }
 
-    fn request_frame(&mut self, pass: u64) {
-        if self.error.is_some() || self.pass + 1 < pass || !self.frame_due() {
+    fn begin_frame(&mut self, pass: u64) {
+        if self.error.is_some() || self.pass + 1 < pass {
             return;
         }
-        self.requested_at = Some(self.now());
-        self.send(vec![Message::DrawFrame]);
+        let mut messages = match self.pass + 1 == pass {
+            true => self.instances.frame_input(&self.context, self.pass),
+            false => Vec::new(),
+        };
+        if self.frame_due() {
+            self.requested_at = Some(self.now());
+            messages.push(Message::DrawFrame);
+        }
+        self.send(messages);
     }
 
     fn frame_due(&self) -> bool {
@@ -296,16 +304,32 @@ impl Runtime {
         self.backend.send(messages);
     }
 
-    fn present(&mut self, rect: egui::Rect, region: Region) -> egui::epaint::PaintCallback {
-        let frame = self.backend.frame(&self.layout, self.pass);
+    fn present(
+        &mut self,
+        rect: egui::Rect,
+        screen: ScreenId,
+        quad: Quad,
+    ) -> egui::epaint::PaintCallback {
+        self.presented = true;
         eframe::egui_wgpu::Callback::new_paint_callback(
             rect,
-            PresenterCallback {
-                command: PresenterCommand::Present(frame),
-                status: self.status.clone(),
-                region,
-            },
+            PresenterCallback::present(
+                self.surface,
+                self.status.clone(),
+                Arc::clone(&self.shared),
+                screen,
+                quad,
+            ),
         )
+    }
+
+    fn flush(&mut self) {
+        self.pump();
+        if !std::mem::take(&mut self.presented) {
+            return;
+        }
+        let frame = self.backend.frame(&self.layout, self.pass);
+        self.shared.lock().unwrap().publish(&self.layout, frame);
     }
 
     fn state(&self) -> String {
@@ -356,11 +380,7 @@ impl EditorPresentation {
             return;
         };
         with(&self.plugin_id, |runtime| {
-            runtime.pump();
-            let Some(region) = Region::of(&runtime.layout, runtime.surface, screen, quad) else {
-                return;
-            };
-            let callback = runtime.present(quad.rect.intersect(self.clip), region);
+            let callback = runtime.present(quad.rect.intersect(self.clip), screen, quad);
             ui.painter().with_clip_rect(self.clip).add(callback);
         });
     }
@@ -422,21 +442,20 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
             runtime
                 .instances
                 .host_children(instance, region, response.rect, ui.clip_rect());
-        let messages = runtime.instances.input(instance, region, |input| {
-            input.update(ui, &response, screen, &holes)
-        });
-        runtime.send(messages);
+        runtime.instances.place(
+            instance,
+            region,
+            Placement {
+                id: response.id,
+                rect: response.rect,
+                clip: ui.clip_rect(),
+                pass,
+            },
+        );
         let over_hole = ui
             .ctx()
             .pointer_latest_pos()
             .is_some_and(|position| holes.contains(position));
-        let dismissed = ui.input(|input| {
-            input.key_pressed(egui::Key::Escape)
-                || (input.pointer.button_pressed(egui::PointerButton::Primary) && !over_hole)
-        });
-        if dismissed {
-            runtime.instances.revoke_active(instance, region);
-        }
         let drag = input::block_drag(&response).filter(|_| !over_hole);
         let hovering = drag.as_ref().is_some_and(|drag| !drag.dropped);
         let messages = runtime.instances.drag(instance, region, drag);
@@ -621,10 +640,10 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
         let Some((quad, _)) = cropped else {
             return false;
         };
-        let Some(atlas_region) = Region::of(&runtime.layout, runtime.surface, screen, quad) else {
+        if Region::of(&runtime.layout, runtime.surface, screen, quad).is_none() {
             return false;
-        };
-        painter.add(runtime.present(quad.rect.intersect(painter.clip_rect()), atlas_region));
+        }
+        painter.add(runtime.present(quad.rect.intersect(painter.clip_rect()), screen, quad));
         true
     })
 }
@@ -635,7 +654,15 @@ pub(crate) fn poll(context: &egui::Context) {
         for runtime in host.borrow_mut().runtimes.values_mut() {
             runtime.detect_error();
             runtime.pump();
-            runtime.request_frame(pass);
+            runtime.begin_frame(pass);
+        }
+    });
+}
+
+pub(crate) fn flush() {
+    HOST.with(|host| {
+        for runtime in host.borrow_mut().runtimes.values_mut() {
+            runtime.flush();
         }
     });
 }

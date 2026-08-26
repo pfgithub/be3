@@ -46,6 +46,13 @@ event, carrying the factor the view is asked to grow by; a wheel turned with
 the zoom modifier held stays a wheel event, which the receiver reads as a zoom
 of its own. Consecutive zoom gestures coalesce by multiplying their factors.
 
+A region's input goes out at the start of the host frame that received it,
+before the host lays anything out, and it is routed against where the region
+sat and what covered it the last time the region was drawn. The host has that
+much of its own frame left to spend, so a plugin answering promptly is drawn
+into the frame that delivered the input rather than the one after it. A region
+the host did not draw last frame is sent nothing.
+
 Client messages tunnel the block protocol between an editor instance's own
 block client and the host's server connection. Their payloads are opaque JSON
 of any length: the host forwards them in both directions without interpreting
@@ -181,6 +188,12 @@ draws more slowly than the host is asked again only once the frame it owes has
 arrived, and a plugin animating without any delay is drawn once per host frame
 rather than as fast as its process can run. A plugin the host is not drawing is
 asked for nothing.
+
+The host shows whatever the plugin has published by the time it finishes
+building its own frame. Which part of the surface each region takes is settled
+then as well, against the layout that arrived with the frame being shown, so a
+plugin that republishes its layout mid-frame is never drawn through the
+placements of the one before it.
 
 A surface is transferred as native graphics resources, never as pixels: the
 Windows mechanism shares a D3D12 texture and fence, and the Linux one shares

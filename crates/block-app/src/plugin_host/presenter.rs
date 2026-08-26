@@ -3,8 +3,12 @@
     allow(dead_code)
 )]
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc, Mutex,
+};
 
+use block_plugin_api::{ScreenId, ScreenLayout};
 use eframe::{
     egui,
     egui_wgpu::{self, wgpu},
@@ -61,6 +65,8 @@ pub(super) trait SurfacePresenter {
 }
 
 pub(super) const MAX_SURFACES: u32 = 8;
+const MAX_PENDING_FRAMES: usize = 8;
+const UNPLACED: u32 = u32::MAX;
 pub(super) const MAX_REGIONS: u32 = 64;
 const MAX_SLOTS: u32 = MAX_SURFACES * MAX_REGIONS;
 const REGION_BYTES: u64 = 64;
@@ -136,12 +142,6 @@ impl Quad {
     }
 }
 
-impl Default for Quad {
-    fn default() -> Self {
-        Self::upright(egui::Rect::ZERO)
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Region {
     pub(super) surface: u32,
@@ -151,23 +151,11 @@ pub(super) struct Region {
     pub(super) quad: Quad,
 }
 
-impl Default for Region {
-    fn default() -> Self {
-        Self {
-            surface: 0,
-            slot: 0,
-            offset: [0.0, 0.0],
-            scale: [1.0, 1.0],
-            quad: Quad::default(),
-        }
-    }
-}
-
 impl Region {
     pub(super) fn of(
-        layout: &block_plugin_api::ScreenLayout,
+        layout: &ScreenLayout,
         surface: u32,
-        screen: block_plugin_api::ScreenId,
+        screen: ScreenId,
         quad: Quad,
     ) -> Option<Self> {
         if layout.is_empty() || surface >= MAX_SURFACES {
@@ -271,15 +259,77 @@ impl Regions {
     }
 }
 
+pub(super) struct Shared<Frame> {
+    pub(super) layout: ScreenLayout,
+    pub(super) frames: Vec<Frame>,
+}
+
+impl<Frame> Default for Shared<Frame> {
+    fn default() -> Self {
+        Self {
+            layout: ScreenLayout::default(),
+            frames: Vec::new(),
+        }
+    }
+}
+
+impl<Frame> Shared<Frame> {
+    pub(super) fn publish(&mut self, layout: &ScreenLayout, frame: Option<Frame>) {
+        self.layout.clone_from(layout);
+        let Some(frame) = frame else {
+            return;
+        };
+        if self.frames.len() >= MAX_PENDING_FRAMES {
+            self.frames.remove(0);
+        }
+        self.frames.push(frame);
+    }
+}
+
 pub(super) enum PresenterCommand<Frame> {
-    Present(Frame),
+    Present {
+        shared: Arc<Mutex<Shared<Frame>>>,
+        screen: ScreenId,
+        quad: Quad,
+    },
     Release,
 }
 
 pub(super) struct PresenterCallback<Frame> {
-    pub(super) command: PresenterCommand<Frame>,
-    pub(super) status: PresenterStatus,
-    pub(super) region: Region,
+    command: PresenterCommand<Frame>,
+    status: PresenterStatus,
+    surface: u32,
+    slot: AtomicU32,
+}
+
+impl<Frame> PresenterCallback<Frame> {
+    pub(super) fn present(
+        surface: u32,
+        status: PresenterStatus,
+        shared: Arc<Mutex<Shared<Frame>>>,
+        screen: ScreenId,
+        quad: Quad,
+    ) -> Self {
+        Self {
+            command: PresenterCommand::Present {
+                shared,
+                screen,
+                quad,
+            },
+            status,
+            surface,
+            slot: AtomicU32::new(UNPLACED),
+        }
+    }
+
+    pub(super) fn release(surface: u32, status: PresenterStatus) -> Self {
+        Self {
+            command: PresenterCommand::Release,
+            status,
+            surface,
+            slot: AtomicU32::new(UNPLACED),
+        }
+    }
 }
 
 impl<Frame> egui_wgpu::CallbackTrait for PresenterCallback<Frame>
@@ -302,20 +352,42 @@ where
             return Vec::new();
         };
         match &self.command {
-            PresenterCommand::Present(frame) => {
-                presenter
-                    .regions()
-                    .write(queue, &self.region, screen_descriptor);
-                if let Err(error) = presenter.replace(device, self.region.surface, frame) {
-                    self.status.set(PresenterState::Failed(error));
-                } else if let Err(error) = presenter.prepare(queue, self.region.surface, frame) {
-                    self.status.set(PresenterState::Failed(error));
-                } else {
-                    self.status.set(PresenterState::Presenting);
+            PresenterCommand::Present {
+                shared,
+                screen,
+                quad,
+            } => {
+                let (frames, region) = {
+                    let mut shared = shared.lock().unwrap();
+                    let frames = std::mem::take(&mut shared.frames);
+                    (
+                        frames,
+                        Region::of(&shared.layout, self.surface, *screen, *quad),
+                    )
+                };
+                let mut failure = None;
+                for frame in &frames {
+                    let applied = presenter
+                        .replace(device, self.surface, frame)
+                        .and_then(|()| presenter.prepare(queue, self.surface, frame));
+                    if let Err(error) = applied {
+                        failure = Some(error);
+                    }
+                }
+                match failure {
+                    Some(error) => self.status.set(PresenterState::Failed(error)),
+                    None => self.status.set(PresenterState::Presenting),
+                }
+                match region {
+                    Some(region) => {
+                        presenter.regions().write(queue, &region, screen_descriptor);
+                        self.slot.store(region.slot, Ordering::Relaxed);
+                    }
+                    None => self.slot.store(UNPLACED, Ordering::Relaxed),
                 }
             }
             PresenterCommand::Release => {
-                presenter.release(self.region.surface);
+                presenter.release(self.surface);
                 self.status.set(PresenterState::Released);
             }
         }
@@ -328,10 +400,12 @@ where
         render_pass: &mut wgpu::RenderPass<'static>,
         resources: &egui_wgpu::CallbackResources,
     ) {
-        if matches!(self.command, PresenterCommand::Present(_)) {
-            if let Some(presenter) = resources.get::<Presenter>() {
-                presenter.paint(render_pass, self.region.surface, self.region.slot);
-            }
+        let slot = self.slot.load(Ordering::Relaxed);
+        if slot == UNPLACED {
+            return;
+        }
+        if let Some(presenter) = resources.get::<Presenter>() {
+            presenter.paint(render_pass, self.surface, slot);
         }
     }
 }

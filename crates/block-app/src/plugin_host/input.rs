@@ -44,37 +44,27 @@ pub(super) struct InputAdapter {
 impl InputAdapter {
     pub(super) fn update(
         &mut self,
-        ui: &egui::Ui,
-        response: &egui::Response,
+        context: &egui::Context,
+        rect: egui::Rect,
+        hovered: bool,
+        focused: bool,
         screen: ScreenId,
         holes: &Holes,
     ) -> Vec<Message> {
-        if response.clicked() {
-            response.request_focus();
-        }
-        let focused = response.has_focus();
         self.over_hole = !self.captured
-            && ui
-                .ctx()
+            && context
                 .pointer_latest_pos()
                 .is_some_and(|position| holes.contains(position));
-        let events = ui.input(|input| input.events.clone());
+        let events = context.input(|input| input.events.clone());
         let mut normalized = Vec::new();
         if focused != self.focused {
             normalized.push(InputEvent::Focus(focused));
             self.focused = focused;
         }
 
-        if response.rect.width() > 0.0 && response.rect.height() > 0.0 {
+        if rect.width() > 0.0 && rect.height() > 0.0 {
             for event in events {
-                self.normalize_event(
-                    event,
-                    response.rect,
-                    response.hovered(),
-                    focused,
-                    holes,
-                    &mut normalized,
-                );
+                self.normalize_event(event, rect, hovered, focused, holes, &mut normalized);
             }
         }
 

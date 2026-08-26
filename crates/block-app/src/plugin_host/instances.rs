@@ -91,8 +91,17 @@ struct PendingPick {
     picker: FilePicker,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Placement {
+    pub(super) id: egui::Id,
+    pub(super) rect: egui::Rect,
+    pub(super) clip: egui::Rect,
+    pub(super) pass: u64,
+}
+
 struct Screen {
     input: InputAdapter,
+    placement: Option<Placement>,
     request: ScreenRequest,
     last_seen: u64,
     used: Option<egui::Vec2>,
@@ -191,6 +200,7 @@ impl Instances {
             *next_screen += 1;
             Screen {
                 input: InputAdapter::default(),
+                placement: None,
                 request: ScreenRequest {
                     screen: ScreenId(*next_screen),
                     instance,
@@ -803,7 +813,63 @@ impl Instances {
         })
     }
 
-    pub(super) fn input(
+    pub(super) fn place(
+        &mut self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        placement: Placement,
+    ) {
+        if let Some(screen) = self
+            .entries
+            .get_mut(&instance)
+            .and_then(|entry| entry.screens.get_mut(&region))
+        {
+            screen.placement = Some(placement);
+        }
+    }
+
+    pub(super) fn frame_input(&mut self, context: &egui::Context, pass: u64) -> Vec<Message> {
+        let mut placed: Vec<_> = self
+            .entries
+            .iter()
+            .flat_map(|(instance, entry)| {
+                entry.screens.iter().filter_map(move |(region, screen)| {
+                    let placement = screen.placement?;
+                    let live = placement.pass == pass && screen.last_seen == pass;
+                    live.then_some((*instance, *region, screen.request.screen, placement))
+                })
+            })
+            .collect();
+        placed.sort_by_key(|(instance, _, screen, _)| (instance.0, screen.0));
+        let mut messages = Vec::new();
+        for (instance, region, screen, placement) in placed {
+            let (_, holes) = self.host_children(instance, region, placement.rect, placement.clip);
+            let Some(response) = context.read_response(placement.id) else {
+                continue;
+            };
+            if response.clicked() {
+                response.request_focus();
+            }
+            let focused = response.has_focus();
+            let hovered = response.hovered();
+            messages.extend(self.input(instance, region, |input| {
+                input.update(context, placement.rect, hovered, focused, screen, &holes)
+            }));
+            let over_hole = context
+                .pointer_latest_pos()
+                .is_some_and(|position| holes.contains(position));
+            let dismissed = context.input(|input| {
+                input.key_pressed(egui::Key::Escape)
+                    || (input.pointer.button_pressed(egui::PointerButton::Primary) && !over_hole)
+            });
+            if dismissed {
+                self.revoke_active(instance, region);
+            }
+        }
+        messages
+    }
+
+    fn input(
         &mut self,
         instance: EditorInstanceId,
         region: EditorRegion,

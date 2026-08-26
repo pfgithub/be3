@@ -99,12 +99,12 @@ impl Backend for Web {
         }
     }
 
-    fn frame(&mut self, layout: &ScreenLayout, _pass: u64) -> Self::Frame {
-        renderer::WebFrame {
+    fn frame(&mut self, layout: &ScreenLayout, _pass: u64) -> Option<Self::Frame> {
+        Some(renderer::WebFrame {
             size: [layout.width, layout.height],
             canvas_id: self.canvas_id.clone(),
             drawn: self.adapter.as_ref().map(WebProtocolAdapter::frames),
-        }
+        })
     }
 
     fn take_error(&mut self) -> Option<String> {

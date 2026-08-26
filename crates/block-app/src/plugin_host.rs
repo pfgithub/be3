@@ -32,8 +32,9 @@ use windows as platform;
 
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
-    creation_ready, editor_ui, install, intrinsic_size, kill, poll, preview, regenerate_artifact,
-    region_size, running, take_artifact_outcome, take_block_pick, take_created, take_view_changes,
+    creation_ready, editor_ui, flush, install, intrinsic_size, kill, poll, preview,
+    regenerate_artifact, region_size, running, take_artifact_outcome, take_block_pick,
+    take_created, take_view_changes,
 };
 
 pub(crate) const MAX_LIVE_CHILDREN: usize = 16;

@@ -31,7 +31,9 @@ impl Backend for Unavailable {
         Vec::new()
     }
 
-    fn frame(&mut self, _layout: &ScreenLayout, _pass: u64) -> Self::Frame {}
+    fn frame(&mut self, _layout: &ScreenLayout, _pass: u64) -> Option<Self::Frame> {
+        None
+    }
 
     fn take_error(&mut self) -> Option<String> {
         Some(UNSUPPORTED.to_owned())

@@ -12,7 +12,7 @@ use super::{
 pub(super) struct Native {
     process: Option<Process>,
     started: Instant,
-    pending_frame: Option<PlatformFrame>,
+    pending: Vec<SurfaceEvent>,
     pending_layouts: Vec<ScreenLayout>,
     path: PathBuf,
 }
@@ -31,7 +31,7 @@ impl Backend for Native {
         Self {
             process: None,
             started: Instant::now(),
-            pending_frame: None,
+            pending: Vec::new(),
             pending_layouts: Vec::new(),
             path: platform::entry_point(plugin),
         }
@@ -53,7 +53,6 @@ impl Backend for Native {
             return Vec::new();
         };
         let mut messages = Vec::new();
-        let mut frames: Vec<SurfaceEvent> = Vec::new();
         for received in process.receive() {
             match received {
                 Received::Message(Message::Layout(layout)) => self.pending_layouts.push(layout),
@@ -64,29 +63,25 @@ impl Backend for Native {
                             if let Some(layout) = self.take_layout(descriptor.generation) {
                                 messages.push(Message::Layout(layout));
                             }
-                            frames.clear();
+                            self.pending.clear();
                         }
                         SurfaceEvent::Frame(frame) => {
                             messages.push(Message::FrameReady(frame.clone()));
-                            if matches!(frames.last(), Some(SurfaceEvent::Frame(_))) {
-                                frames.pop();
+                            if matches!(self.pending.last(), Some(SurfaceEvent::Frame(_))) {
+                                self.pending.pop();
                             }
                         }
                     }
-                    frames.push(event);
+                    self.pending.push(event);
                 }
             }
-        }
-        if !frames.is_empty() {
-            self.pending_frame = Some(PlatformFrame::Events(frames));
         }
         messages
     }
 
-    fn frame(&mut self, _layout: &ScreenLayout, _pass: u64) -> Self::Frame {
-        self.pending_frame
-            .take()
-            .unwrap_or(PlatformFrame::Events(Vec::new()))
+    fn frame(&mut self, _layout: &ScreenLayout, _pass: u64) -> Option<Self::Frame> {
+        let events = std::mem::take(&mut self.pending);
+        (!events.is_empty()).then(|| PlatformFrame::Events(events))
     }
 
     fn take_error(&mut self) -> Option<String> {
