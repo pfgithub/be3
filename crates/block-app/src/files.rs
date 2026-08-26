@@ -677,12 +677,21 @@ impl BlockApp {
                 ui.spinner();
                 ui.small("Submitting changes\u{2026}");
             }
-            if let Some((frame, duration)) = performance::last_frame() {
+            if let Some(frame) = performance::last_frame() {
                 ui.separator();
-                ui.small(format!(
-                    "Frame {frame}: {:.3} ms",
-                    duration.as_secs_f64() * 1_000.0
+                let cause = frame
+                    .causes
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("unknown cause");
+                let milliseconds = frame.duration.as_secs_f64() * 1_000.0;
+                let response = ui.small(format!(
+                    "Frame {}: {milliseconds:.3} ms from {cause}",
+                    frame.number
                 ));
+                if frame.causes.len() > 1 {
+                    response.on_hover_text(frame.causes.join("\n"));
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button("More", |ui| {

@@ -3538,7 +3538,7 @@ impl eframe::App for BlockApp {
 
 impl BlockApp {
     fn run_frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        performance::begin_frame();
+        performance::begin_frame(ui.ctx());
         plugin_host::poll(ui.ctx());
         if !self.signed_in {
             self.show_account_onboarding(ui);

@@ -8,6 +8,14 @@ use std::{
 use eframe::egui;
 
 const SAMPLE_CAPACITY: usize = 120;
+const CAUSE_CAPACITY: usize = 8;
+
+#[derive(Clone)]
+pub struct LastFrame {
+    pub number: u64,
+    pub duration: Duration,
+    pub causes: Vec<String>,
+}
 
 #[derive(Clone)]
 enum Value {
@@ -32,7 +40,8 @@ struct PerformanceState {
     open: bool,
     frame: u64,
     frame_start: Option<Instant>,
-    last_frame: Option<(u64, Duration)>,
+    frame_causes: Vec<String>,
+    last_frame: Option<LastFrame>,
     frame_times: VecDeque<Duration>,
     groups: BTreeMap<String, Group>,
 }
@@ -54,10 +63,12 @@ fn state() -> MutexGuard<'static, PerformanceState> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-pub fn begin_frame() {
+pub fn begin_frame(context: &egui::Context) {
+    let causes = repaint_causes(context);
     let mut state = state();
     state.frame = state.frame.wrapping_add(1);
     state.frame_start = Some(Instant::now());
+    state.frame_causes = causes;
     ACTIVE.with(|active| active.borrow_mut().clear());
 }
 
@@ -65,15 +76,51 @@ pub fn end_frame() {
     let mut state = state();
     let elapsed = state.frame_start.take().map(|start| start.elapsed());
     if let Some(elapsed) = elapsed {
-        state.last_frame = Some((state.frame, elapsed));
+        state.last_frame = Some(LastFrame {
+            number: state.frame,
+            duration: elapsed,
+            causes: state.frame_causes.clone(),
+        });
         push_sample(&mut state.frame_times, elapsed);
     }
     drop(state);
     ACTIVE.with(|active| active.borrow_mut().clear());
 }
 
-pub fn last_frame() -> Option<(u64, Duration)> {
-    state().last_frame
+pub fn last_frame() -> Option<LastFrame> {
+    state().last_frame.clone()
+}
+
+fn repaint_causes(context: &egui::Context) -> Vec<String> {
+    let mut causes: Vec<String> = Vec::new();
+    for cause in context.repaint_causes() {
+        let cause = format_cause(&cause);
+        if !causes.contains(&cause) {
+            causes.push(cause);
+        }
+        if causes.len() == CAUSE_CAPACITY {
+            break;
+        }
+    }
+    causes
+}
+
+fn format_cause(cause: &egui::RepaintCause) -> String {
+    let file = shorten_path(cause.file);
+    let line = cause.line;
+    if cause.reason.is_empty() {
+        format!("{file}:{line}")
+    } else {
+        format!("{file}:{line} ({})", cause.reason)
+    }
+}
+
+fn shorten_path(path: &str) -> String {
+    let mut components: Vec<&str> = path.split(['/', '\\']).collect();
+    if components.len() > 3 {
+        components = components.split_off(components.len() - 3);
+    }
+    components.join("/")
 }
 
 pub fn open() {
