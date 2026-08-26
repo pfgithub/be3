@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 24;
+pub const PROTOCOL_VERSION: u16 = 25;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -630,6 +630,7 @@ pub enum Message {
     RegionSizes(Vec<RegionSize>),
     Input(InputBatch),
     Surface(SurfaceDescriptor),
+    DrawFrame,
     FrameReady(FrameReady),
     Acknowledged { request_id: u64 },
     Ping { nonce: u64 },

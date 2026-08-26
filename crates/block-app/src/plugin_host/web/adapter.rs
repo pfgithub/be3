@@ -128,10 +128,10 @@ impl WebProtocolAdapter {
                 self.session.receive(message, now());
                 continue;
             }
-            match message {
-                Message::FrameReady(_) => self.frames += 1,
-                message => self.received.push(message),
+            if matches!(message, Message::FrameReady(_)) {
+                self.frames += 1;
             }
+            self.received.push(message);
         }
         self.flush()?;
         self.session.tick(now());

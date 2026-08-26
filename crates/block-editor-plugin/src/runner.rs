@@ -1,7 +1,7 @@
 use std::{
     io::{Read, Write},
-    sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender},
-    time::{Duration, Instant},
+    sync::mpsc::{channel, Receiver, Sender},
+    time::Instant,
 };
 
 use block_plugin_api::{decode_frame, encode_frame, Message};
@@ -43,7 +43,6 @@ fn run_endpoint<A: crate::App>(
     let started = Instant::now();
     let mut batch = vec![accepted];
     let mut draw = false;
-    let mut repaint_at: Option<Instant> = None;
     loop {
         let step = runtime.step(batch, draw, started.elapsed().as_secs_f64())?;
         for outbound in step.outbound {
@@ -52,14 +51,8 @@ fn run_endpoint<A: crate::App>(
         if step.closed {
             return Ok(());
         }
-        if let Some(delay) = step.repaint {
-            repaint_at = Some(Instant::now() + delay);
-        }
-        let (received, woken) = receive_batch(&incoming, repaint_at)?;
-        draw = woken || repaint_at.is_some_and(|deadline| deadline <= Instant::now());
-        if draw {
-            repaint_at = None;
-        }
+        let (received, woken) = receive_batch(&incoming)?;
+        draw = woken;
         batch = received;
     }
 }
@@ -112,19 +105,11 @@ fn waker(events: Sender<Event>) -> crate::Waker {
 
 fn receive_batch(
     events: &Receiver<Event>,
-    deadline: Option<Instant>,
 ) -> Result<(Vec<Message>, bool), Box<dyn std::error::Error>> {
-    let first = match deadline {
-        Some(deadline) => match events.recv_timeout(remaining(deadline)) {
-            Ok(event) => Some(event),
-            Err(RecvTimeoutError::Timeout) => None,
-            Err(RecvTimeoutError::Disconnected) => return Err("the host reader stopped".into()),
-        },
-        None => Some(events.recv()?),
-    };
+    let first = events.recv()?;
     let mut messages = Vec::new();
     let mut woken = false;
-    for event in first.into_iter().chain(events.try_iter()) {
+    for event in [first].into_iter().chain(events.try_iter()) {
         match event {
             Event::Received(message) => messages.push(message),
             Event::Woken => woken = true,
@@ -132,8 +117,4 @@ fn receive_batch(
         }
     }
     Ok((messages, woken))
-}
-
-fn remaining(deadline: Instant) -> Duration {
-    deadline.saturating_duration_since(Instant::now())
 }

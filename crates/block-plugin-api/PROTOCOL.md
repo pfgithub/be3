@@ -170,6 +170,18 @@ Neither peer polls the other: a plugin runs beside the host - a process of its
 own on the desktop, a worker of its own in the browser - and either side may
 send at any time.
 
+The host decides when a plugin draws. A plugin paints when a message changes
+what it shows and when something inside it wakes it, and otherwise only when
+the host asks it for a frame; it never schedules one of its own on a timer.
+Every published frame carries how long the plugin wants to wait before it is
+drawn again, absent when it wants nothing further, and the host holds that
+request until the delay comes due and then asks for a single frame at the
+start of its own. Only one request is outstanding at a time, so a plugin that
+draws more slowly than the host is asked again only once the frame it owes has
+arrived, and a plugin animating without any delay is drawn once per host frame
+rather than as fast as its process can run. A plugin the host is not drawing is
+asked for nothing.
+
 A surface is transferred as native graphics resources, never as pixels: the
 Windows mechanism shares a D3D12 texture and fence, and the Linux one shares
 the dma-buf planes of a single image. A Linux surface declares one attachment

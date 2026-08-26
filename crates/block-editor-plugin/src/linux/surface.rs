@@ -3,10 +3,7 @@ use block_plugin_api::{
     FrameReady, LinuxSurfaceDescriptor, LinuxSurfacePlane, Message, ScreenLayout,
 };
 use eframe::egui_wgpu::wgpu;
-use std::{
-    os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
-    time::Duration,
-};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
 use crate::panes::Panes;
 
@@ -109,7 +106,7 @@ impl Surface {
         &mut self,
         screens: &mut crate::screens::Screens,
         phase: f64,
-    ) -> Result<(Vec<Message>, Option<Duration>), String> {
+    ) -> Result<Vec<Message>, String> {
         let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -131,16 +128,13 @@ impl Surface {
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|error| error.to_string())?;
         self.frame = self.frame.wrapping_add(1).max(1);
-        Ok((
-            vec![Message::FrameReady(FrameReady {
-                generation: self.generation,
-                damage: Vec::new(),
-                synchronization_value: u64::from(self.frame),
-                repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
-                attachments: Vec::new(),
-            })],
-            painted.repaint,
-        ))
+        Ok(vec![Message::FrameReady(FrameReady {
+            generation: self.generation,
+            damage: Vec::new(),
+            synchronization_value: u64::from(self.frame),
+            repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
+            attachments: Vec::new(),
+        })])
     }
 }
 

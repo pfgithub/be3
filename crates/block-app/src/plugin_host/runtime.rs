@@ -30,6 +30,7 @@ type Frame = <Platform as Backend>::Frame;
 
 const NOT_INSTALLED: &str = "The plugin host is not installed.";
 const CROWDED: &str = "Too many plugin runtimes are already presenting.";
+const FRAME_TIMEOUT_SECONDS: f64 = 1.0;
 
 pub(super) trait Backend: Sized {
     type Frame: Send + Sync + 'static;
@@ -142,6 +143,8 @@ pub(super) struct Runtime {
     status: PresenterStatus,
     sent: Vec<ScreenRequest>,
     error: Option<String>,
+    paint_at: Option<f64>,
+    requested_at: Option<f64>,
 }
 
 impl Runtime {
@@ -158,6 +161,8 @@ impl Runtime {
             status: PresenterStatus::waiting(),
             sent: Vec::new(),
             error: None,
+            paint_at: None,
+            requested_at: None,
         }
     }
 
@@ -166,6 +171,8 @@ impl Runtime {
         self.status = PresenterStatus::waiting();
         self.layout = ScreenLayout::default();
         self.sent.clear();
+        self.paint_at = None;
+        self.requested_at = None;
         self.instances.reopen();
         self.backend.start(plugin, &self.context);
     }
@@ -195,6 +202,26 @@ impl Runtime {
             self.context.request_repaint();
         }
         self.pump();
+    }
+
+    fn request_frame(&mut self, pass: u64) {
+        if self.error.is_some() || self.pass + 1 < pass || !self.frame_due() {
+            return;
+        }
+        self.requested_at = Some(self.now());
+        self.send(vec![Message::DrawFrame]);
+    }
+
+    fn frame_due(&self) -> bool {
+        let now = self.now();
+        self.paint_at.is_some_and(|at| at <= now)
+            && self
+                .requested_at
+                .is_none_or(|at| now - at >= FRAME_TIMEOUT_SECONDS)
+    }
+
+    fn now(&self) -> f64 {
+        self.context.input(|input| input.time)
     }
 
     fn detect_error(&mut self) {
@@ -234,6 +261,10 @@ impl Runtime {
                     false
                 }
                 Message::Editor(message) => self.instances.editor_message(message),
+                Message::FrameReady(frame) => {
+                    self.await_next_frame(frame.repaint_after_micros);
+                    false
+                }
                 Message::RegionSizes(sizes) => self.instances.set_region_sizes(sizes),
                 Message::Children(placements) => {
                     let (answered, changed) = self.instances.set_children(placements);
@@ -247,6 +278,15 @@ impl Runtime {
         if changed {
             self.context.request_repaint();
         }
+    }
+
+    fn await_next_frame(&mut self, repaint_after_micros: Option<u64>) {
+        self.requested_at = None;
+        self.paint_at = repaint_after_micros.map(|micros| {
+            let delay = Duration::from_micros(micros);
+            self.context.request_repaint_after(delay);
+            self.now() + delay.as_secs_f64()
+        });
     }
 
     fn send(&mut self, messages: Vec<Message>) {
@@ -316,6 +356,7 @@ impl EditorPresentation {
             return;
         };
         with(&self.plugin_id, |runtime| {
+            runtime.pump();
             let Some(region) = Region::of(&runtime.layout, runtime.surface, screen, quad) else {
                 return;
             };
@@ -588,11 +629,13 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
     })
 }
 
-pub(crate) fn poll(_context: &egui::Context) {
+pub(crate) fn poll(context: &egui::Context) {
+    let pass = context.cumulative_pass_nr();
     HOST.with(|host| {
         for runtime in host.borrow_mut().runtimes.values_mut() {
             runtime.detect_error();
             runtime.pump();
+            runtime.request_frame(pass);
         }
     });
 }

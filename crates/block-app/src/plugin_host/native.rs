@@ -59,13 +59,19 @@ impl Backend for Native {
                 Received::Message(Message::Layout(layout)) => self.pending_layouts.push(layout),
                 Received::Message(message) => messages.push(message),
                 Received::Surface(event) => {
-                    if let SurfaceEvent::Surface(descriptor, _) = &event {
-                        if let Some(layout) = self.take_layout(descriptor.generation) {
-                            messages.push(Message::Layout(layout));
+                    match &event {
+                        SurfaceEvent::Surface(descriptor, _) => {
+                            if let Some(layout) = self.take_layout(descriptor.generation) {
+                                messages.push(Message::Layout(layout));
+                            }
+                            frames.clear();
                         }
-                        frames.clear();
-                    } else if matches!(frames.last(), Some(SurfaceEvent::Frame(_))) {
-                        frames.pop();
+                        SurfaceEvent::Frame(frame) => {
+                            messages.push(Message::FrameReady(frame.clone()));
+                            if matches!(frames.last(), Some(SurfaceEvent::Frame(_))) {
+                                frames.pop();
+                            }
+                        }
                     }
                     frames.push(event);
                 }

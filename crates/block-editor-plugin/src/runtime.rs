@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use block_plugin_api::Message;
 
 use crate::{
@@ -17,7 +15,6 @@ pub(crate) struct Outbound {
 
 pub(crate) struct Step {
     pub(crate) outbound: Vec<Outbound>,
-    pub(crate) repaint: Option<Duration>,
     pub(crate) closed: bool,
 }
 
@@ -47,14 +44,16 @@ impl Runtime {
     pub(crate) fn step(
         &mut self,
         batch: Vec<Message>,
-        draw: bool,
+        mut draw: bool,
         phase: f64,
     ) -> Result<Step, String> {
         let mut changed = false;
         let mut outbound = Vec::new();
         for message in batch {
-            if let Message::Screens(set) = &message {
-                self.request_id = set.request_id;
+            match &message {
+                Message::Screens(set) => self.request_id = set.request_id,
+                Message::DrawFrame => draw = true,
+                _ => {}
             }
             changed |= self.screens.receive(&message);
             for response in self.session.receive(message) {
@@ -63,13 +62,11 @@ impl Runtime {
             if matches!(self.session.state(), State::Closed) {
                 return Ok(Step {
                     outbound,
-                    repaint: None,
                     closed: true,
                 });
             }
         }
         let replaced = self.replace_surface(&mut outbound)?;
-        let mut repaint = None;
         if let Some(surface) = &mut self.surface {
             if replaced {
                 if let Some((descriptor, attachments)) = surface.descriptor() {
@@ -84,15 +81,13 @@ impl Runtime {
                 }
             }
             if changed || replaced || draw {
-                let (messages, delay) = surface.render(&mut self.screens, phase)?;
+                let messages = surface.render(&mut self.screens, phase)?;
                 outbound.extend(messages.into_iter().map(plain));
-                repaint = delay;
             }
         }
         outbound.extend(self.screens.outbound().into_iter().map(plain));
         Ok(Step {
             outbound,
-            repaint,
             closed: false,
         })
     }

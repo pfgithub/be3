@@ -1,6 +1,6 @@
 use block_plugin_api::{FrameReady, Message, ScreenLayout};
 use eframe::egui_wgpu::wgpu;
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{panes::Panes, screens::Screens, web::Attachment};
 
@@ -134,16 +134,16 @@ impl Surface {
         &mut self,
         screens: &mut Screens,
         phase: f64,
-    ) -> Result<(Vec<Message>, Option<Duration>), String> {
+    ) -> Result<Vec<Message>, String> {
         if self.layout.is_empty() {
-            return Ok((Vec::new(), None));
+            return Ok(Vec::new());
         }
         let frame = match self.gpu.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Outdated => {
                 self.gpu.configure(&self.layout);
-                return Ok((Vec::new(), None));
+                return Ok(Vec::new());
             }
             status => return Err(format!("the plugin canvas is unavailable: {status:?}")),
         };
@@ -167,16 +167,13 @@ impl Surface {
             .queue
             .submit(painted.commands.into_iter().chain([encoder.finish()]));
         frame.present();
-        Ok((
-            vec![Message::FrameReady(FrameReady {
-                generation: self.generation,
-                damage: Vec::new(),
-                synchronization_value: 0,
-                repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
-                attachments: Vec::new(),
-            })],
-            painted.repaint,
-        ))
+        Ok(vec![Message::FrameReady(FrameReady {
+            generation: self.generation,
+            damage: Vec::new(),
+            synchronization_value: 0,
+            repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
+            attachments: Vec::new(),
+        })])
     }
 }
 

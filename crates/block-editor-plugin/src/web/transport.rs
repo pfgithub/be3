@@ -7,13 +7,11 @@ use crate::{runtime::Runtime, web::surface, Waker};
 
 pub(crate) type Attachment = ();
 
-const TICK_SLACK_MILLISECONDS: f64 = 1.0;
-
 thread_local! {
     static PLUGIN: RefCell<Option<Plugin>> = const { RefCell::new(None) };
     static PENDING: RefCell<Vec<Message>> = const { RefCell::new(Vec::new()) };
     static WOKEN: Cell<bool> = const { Cell::new(false) };
-    static SCHEDULED: Cell<Option<f64>> = const { Cell::new(None) };
+    static SCHEDULED: Cell<bool> = const { Cell::new(false) };
 }
 
 struct Plugin {
@@ -46,7 +44,7 @@ pub(crate) async fn start<A: crate::App>(
 pub(crate) fn receive(frame: Vec<u8>) -> Result<(), JsValue> {
     let message = decode_frame(&frame).map_err(|error| failure(format!("{error:?}")))?;
     PENDING.with(|pending| pending.borrow_mut().push(message));
-    schedule(0.0);
+    schedule();
     Ok(())
 }
 
@@ -58,32 +56,28 @@ pub(crate) fn shutdown() {
 fn waker() -> Waker {
     Waker::new(|| {
         WOKEN.with(|woken| woken.set(true));
-        schedule(0.0);
+        schedule();
     })
 }
 
-fn schedule(delay: f64) {
-    let delay = delay.max(0.0);
-    let at = now() + delay;
-    if SCHEDULED
-        .with(|scheduled| scheduled.get())
-        .is_some_and(|already| already <= at + TICK_SLACK_MILLISECONDS)
-    {
+fn schedule() {
+    if SCHEDULED.with(Cell::get) {
         return;
     }
-    SCHEDULED.with(|scheduled| scheduled.set(Some(at)));
-    let callback = Closure::once_into_js(tick);
     let Some(global) = global() else {
         return;
     };
-    let _ = global.set_timeout_with_callback_and_timeout_and_arguments_0(
-        callback.unchecked_ref(),
-        delay as i32,
-    );
+    let callback = Closure::once_into_js(tick);
+    if global
+        .set_timeout_with_callback_and_timeout_and_arguments_0(callback.unchecked_ref(), 0)
+        .is_ok()
+    {
+        SCHEDULED.with(|scheduled| scheduled.set(true));
+    }
 }
 
 fn tick() {
-    SCHEDULED.with(|scheduled| scheduled.set(None));
+    SCHEDULED.with(|scheduled| scheduled.set(false));
     let batch = PENDING.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
     let draw = WOKEN.with(|woken| woken.replace(false));
     let outcome = PLUGIN.with(|plugin| {
@@ -97,20 +91,18 @@ fn tick() {
                     step.outbound.into_iter().map(|out| out.message).collect(),
                 );
                 match sent {
-                    Ok(()) => (step.repaint, step.closed),
-                    Err(_) => (None, true),
+                    Ok(()) => step.closed,
+                    Err(_) => true,
                 }
             }
             Err(error) => {
                 let _ = post_messages(&plugin.post, vec![protocol_error(error)]);
-                (None, true)
+                true
             }
         })
     });
-    match outcome {
-        Some((_, true)) => shutdown(),
-        Some((Some(delay), false)) => schedule(delay.as_secs_f64() * 1000.0),
-        _ => {}
+    if outcome == Some(true) {
+        shutdown();
     }
 }
 

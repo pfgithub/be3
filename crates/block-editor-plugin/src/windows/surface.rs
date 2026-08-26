@@ -1,7 +1,7 @@
 use block_plugin_api::{FrameReady, Message, ScreenLayout, WindowsSurfaceDescriptor};
 use eframe::egui_wgpu::wgpu;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use windows::Win32::{
     Foundation::GENERIC_ALL,
     Graphics::{
@@ -137,7 +137,7 @@ impl Surface {
         &mut self,
         screens: &mut crate::screens::Screens,
         phase: f64,
-    ) -> Result<(Vec<Message>, Option<Duration>), String> {
+    ) -> Result<Vec<Message>, String> {
         let frame_started = Instant::now();
         let view_started = Instant::now();
         let view = self
@@ -178,16 +178,13 @@ impl Surface {
                 frame_started.elapsed()
             );
         }
-        Ok((
-            vec![Message::FrameReady(FrameReady {
-                generation: self.generation,
-                damage: Vec::new(),
-                synchronization_value: self.fence_value,
-                repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
-                attachments: Vec::new(),
-            })],
-            painted.repaint,
-        ))
+        Ok(vec![Message::FrameReady(FrameReady {
+            generation: self.generation,
+            damage: Vec::new(),
+            synchronization_value: self.fence_value,
+            repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
+            attachments: Vec::new(),
+        })])
     }
 }
 
