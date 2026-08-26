@@ -271,7 +271,7 @@ fn send_outbound(
 fn drain_outbound(carrier: &mut impl Writing, session: &mut HostSession) -> io::Result<()> {
     while let Some(message) = session.next_outbound() {
         if !quiet(&message) {
-            eprintln!("plugin host sending {} to the plugin", name(&message));
+            eprintln!("plugin host sending {:?} to the plugin", &message);
         }
         carrier.write(&message).map_err(carrier_error)?;
     }
@@ -342,35 +342,6 @@ fn quiet(message: &Message) -> bool {
                     | block_plugin_api::EditorMessage::ChangeView { .. },
             )
     )
-}
-
-fn name(message: &Message) -> &'static str {
-    match message {
-        Message::Screens(_) => "Screens",
-        Message::Layout(_) => "Layout",
-        Message::RegionSizes(_) => "RegionSizes",
-        Message::Input(_) => "Input",
-        Message::Editor(message) => editor_name(message),
-        Message::Client(_) => "Client",
-        Message::Shutdown => "Shutdown",
-        _ => "a message",
-    }
-}
-
-fn editor_name(message: &block_plugin_api::EditorMessage) -> &'static str {
-    use block_plugin_api::EditorMessage;
-    match message {
-        EditorMessage::Open { .. } => "Editor::Open",
-        EditorMessage::Close { .. } => "Editor::Close",
-        EditorMessage::OpenCreation { .. } => "Editor::OpenCreation",
-        EditorMessage::CommitCreation { .. } => "Editor::CommitCreation",
-        EditorMessage::CreationBlock { .. } => "Editor::CreationBlock",
-        EditorMessage::OpenArtifact { .. } => "Editor::OpenArtifact",
-        EditorMessage::EditabilityChanged { .. } => "Editor::EditabilityChanged",
-        EditorMessage::ViewChanged { .. } => "Editor::ViewChanged",
-        EditorMessage::ChangeView { .. } => "Editor::ChangeView",
-        _ => "Editor",
-    }
 }
 
 fn carrier_error(error: CarrierError) -> io::Error {
