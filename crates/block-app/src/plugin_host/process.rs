@@ -270,9 +270,7 @@ fn send_outbound(
 
 fn drain_outbound(carrier: &mut impl Writing, session: &mut HostSession) -> io::Result<()> {
     while let Some(message) = session.next_outbound() {
-        if !quiet(&message) {
-            eprintln!("plugin host sending {:?} to the plugin", &message);
-        }
+        eprintln!("plugin host sending {:?} to the plugin", &message);
         carrier.write(&message).map_err(carrier_error)?;
     }
     Ok(())
@@ -330,18 +328,6 @@ fn failed(failure: SessionFailure, child: &mut Child, disconnection: Option<Stri
         (None, None) => format!("plugin session failed: {failure:?}"),
     };
     io::Error::new(io::ErrorKind::ConnectionAborted, reason)
-}
-
-fn quiet(message: &Message) -> bool {
-    matches!(
-        message,
-        Message::Input(_)
-            | Message::Editor(
-                block_plugin_api::EditorMessage::DragOver { .. }
-                    | block_plugin_api::EditorMessage::ViewChanged { .. }
-                    | block_plugin_api::EditorMessage::ChangeView { .. },
-            )
-    )
 }
 
 fn carrier_error(error: CarrierError) -> io::Error {
