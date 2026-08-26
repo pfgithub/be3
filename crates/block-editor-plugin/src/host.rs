@@ -62,7 +62,6 @@ struct PerformanceRecord {
 pub struct PerformanceReporter {
     group: Arc<str>,
     records: Arc<Mutex<Vec<PerformanceRecord>>>,
-    waker: Waker,
 }
 
 impl PerformanceReporter {
@@ -89,19 +88,13 @@ impl PerformanceReporter {
     }
 
     fn record(&self, measurement: PerformanceMeasurement) {
-        let mut records = self
-            .records
+        self.records
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let should_wake = records.is_empty();
-        records.push(PerformanceRecord {
-            group: Arc::clone(&self.group),
-            measurement,
-        });
-        drop(records);
-        if should_wake {
-            self.waker.wake();
-        }
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(PerformanceRecord {
+                group: Arc::clone(&self.group),
+                measurement,
+            });
     }
 }
 
@@ -242,7 +235,6 @@ impl EditorHost {
         PerformanceReporter {
             group: Arc::from(group.into()),
             records: Arc::clone(&self.performance),
-            waker: self.waker.clone(),
         }
     }
 

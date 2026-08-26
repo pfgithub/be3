@@ -270,7 +270,7 @@ fn send_outbound(
 
 fn drain_outbound(carrier: &mut impl Writing, session: &mut HostSession) -> io::Result<()> {
     while let Some(message) = session.next_outbound() {
-        eprintln!("plugin host sending {:?} to the plugin", &message);
+        eprintln!("plugin host sending {:?} to the plugin", message);
         carrier.write(&message).map_err(carrier_error)?;
     }
     Ok(())
