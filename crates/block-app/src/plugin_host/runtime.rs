@@ -142,6 +142,7 @@ pub(super) struct Runtime {
     presented: bool,
     sent: Vec<ScreenRequest>,
     error: Option<String>,
+    needed: bool,
     paint_at: Option<f64>,
     requested_at: Option<f64>,
 }
@@ -162,6 +163,7 @@ impl Runtime {
             presented: false,
             sent: Vec::new(),
             error: None,
+            needed: false,
             paint_at: None,
             requested_at: None,
         }
@@ -172,6 +174,7 @@ impl Runtime {
         self.status = PresenterStatus::waiting();
         self.layout = ScreenLayout::default();
         self.sent.clear();
+        self.needed = false;
         self.paint_at = None;
         self.requested_at = None;
         self.instances.reopen();
@@ -198,6 +201,7 @@ impl Runtime {
                 Message::Editor(EditorMessage::Open { .. } | EditorMessage::OpenArtifact { .. })
             )
         });
+        self.needed |= !messages.is_empty();
         self.send(messages);
         if awaited {
             self.context.request_repaint();
@@ -213,6 +217,7 @@ impl Runtime {
             true => self.instances.frame_input(&self.context, self.pass),
             false => Vec::new(),
         };
+        self.needed |= !messages.is_empty();
         if self.frame_due() {
             self.requested_at = Some(self.now());
             messages.push(Message::DrawFrame);
@@ -222,7 +227,7 @@ impl Runtime {
 
     fn frame_due(&self) -> bool {
         let now = self.now();
-        self.paint_at.is_some_and(|at| at <= now)
+        (self.needed || self.paint_at.is_some_and(|at| at <= now))
             && self
                 .requested_at
                 .is_none_or(|at| now - at >= FRAME_TIMEOUT_SECONDS)
@@ -269,6 +274,10 @@ impl Runtime {
                     false
                 }
                 Message::Editor(message) => self.instances.editor_message(message),
+                Message::FrameNeeded => {
+                    self.needed = true;
+                    true
+                }
                 Message::FrameReady(frame) => {
                     self.await_next_frame(frame.repaint_after_micros);
                     false
@@ -289,6 +298,7 @@ impl Runtime {
     }
 
     fn await_next_frame(&mut self, repaint_after_micros: Option<u64>) {
+        self.needed = false;
         self.requested_at = None;
         self.paint_at = repaint_after_micros.map(|micros| {
             let delay = Duration::from_micros(micros);

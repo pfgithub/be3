@@ -79,12 +79,12 @@ fn schedule() {
 fn tick() {
     SCHEDULED.with(|scheduled| scheduled.set(false));
     let batch = PENDING.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
-    let draw = WOKEN.with(|woken| woken.replace(false));
+    let woken = WOKEN.with(|woken| woken.replace(false));
     let outcome = PLUGIN.with(|plugin| {
         let mut plugin = plugin.borrow_mut();
         let plugin = plugin.as_mut()?;
         let phase = (now() - plugin.started) / 1000.0;
-        Some(match plugin.runtime.step(batch, draw, phase) {
+        Some(match plugin.runtime.step(batch, woken, phase) {
             Ok(step) => {
                 let sent = post_messages(
                     &plugin.post,

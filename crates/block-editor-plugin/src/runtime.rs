@@ -24,6 +24,7 @@ pub(crate) struct Runtime {
     surface: Option<Surface>,
     generation: u64,
     request_id: u64,
+    asked: bool,
 }
 
 impl Runtime {
@@ -34,6 +35,7 @@ impl Runtime {
             surface: None,
             generation: 0,
             request_id: 0,
+            asked: false,
         }
     }
 
@@ -44,10 +46,11 @@ impl Runtime {
     pub(crate) fn step(
         &mut self,
         batch: Vec<Message>,
-        mut draw: bool,
+        woken: bool,
         phase: f64,
     ) -> Result<Step, String> {
-        let mut changed = false;
+        let mut changed = woken;
+        let mut draw = false;
         let mut outbound = Vec::new();
         for message in batch {
             match &message {
@@ -80,9 +83,13 @@ impl Runtime {
                     ));
                 }
             }
-            if changed || replaced || draw {
+            if draw || replaced {
+                self.asked = false;
                 let messages = surface.render(&mut self.screens, phase)?;
                 outbound.extend(messages.into_iter().map(plain));
+            } else if changed && !self.asked {
+                self.asked = true;
+                outbound.push(plain(Message::FrameNeeded));
             }
         }
         outbound.extend(self.screens.outbound().into_iter().map(plain));

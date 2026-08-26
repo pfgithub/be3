@@ -42,17 +42,17 @@ fn run_endpoint<A: crate::App>(
     spawn_reader(reader, events)?;
     let started = Instant::now();
     let mut batch = vec![accepted];
-    let mut draw = false;
+    let mut woken = false;
     loop {
-        let step = runtime.step(batch, draw, started.elapsed().as_secs_f64())?;
+        let step = runtime.step(batch, woken, started.elapsed().as_secs_f64())?;
         for outbound in step.outbound {
             sender.send(&outbound.message, &outbound.attachments)?;
         }
         if step.closed {
             return Ok(());
         }
-        let (received, woken) = receive_batch(&incoming)?;
-        draw = woken;
+        let (received, wake) = receive_batch(&incoming)?;
+        woken = wake;
         batch = received;
     }
 }

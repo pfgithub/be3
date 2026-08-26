@@ -631,6 +631,7 @@ pub enum Message {
     Input(InputBatch),
     Surface(SurfaceDescriptor),
     DrawFrame,
+    FrameNeeded,
     FrameReady(FrameReady),
     Acknowledged { request_id: u64 },
     Ping { nonce: u64 },
