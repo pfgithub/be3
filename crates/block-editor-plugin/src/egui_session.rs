@@ -412,7 +412,8 @@ impl EguiSession {
         let Some(state) = self.regions.get_mut(&region) else {
             return;
         };
-        state.used = Some((content.max - origin).max(egui::Vec2::ZERO));
+        let used = (content.max - origin).max(egui::Vec2::ZERO);
+        state.used = Some(egui::vec2(used.x.round(), used.y.round()));
     }
 
     pub(crate) fn file_picked(&self, request_id: u64, pick: FilePick) {
@@ -465,14 +466,19 @@ impl EguiSession {
         time: f64,
         generation: u64,
     ) -> egui::FullOutput {
-        context.set_pixels_per_point(self.scale_factor(region));
         self.generation = generation;
+        let scale_factor = self.scale_factor(region);
         let rect = self.rect(region);
         let visible_rect = self.visible_rect(region);
         let state = self.regions.entry(region).or_default();
         state.input.screen_rect = Some(rect);
         state.input.time = Some(time);
-        let input = std::mem::take(&mut state.input);
+        let mut input = std::mem::take(&mut state.input);
+        input
+            .viewports
+            .entry(input.viewport_id)
+            .or_default()
+            .native_pixels_per_point = Some(scale_factor);
         state.input.focused = input.focused;
         state.input.modifiers = input.modifiers;
         let drag = self.drag.and_then(|(dragged, drag)| {
@@ -496,6 +502,7 @@ impl EguiSession {
             .filter(|_| region == EditorRegion::ArtifactSettings)
             .map(|artifact| artifact.draft.clone());
         self.host.begin_region(region, rect.min.to_vec2());
+        let mut content = rect;
         let output = context.run_ui(input, |ui| {
             egui::CentralPanel::default().frame(frame).show_inside(ui, {
                 |ui| {
@@ -507,6 +514,7 @@ impl EguiSession {
                     }
                 }
             });
+            content = ui.min_rect();
         });
         if let (Some(artifact), Some(draft)) = (artifact.as_mut(), draft) {
             artifact.edited |= artifact.draft != draft;
@@ -524,7 +532,7 @@ impl EguiSession {
         if delivered_drop {
             self.drag = None;
         }
-        self.used(region, context.globally_used_rect());
+        self.used(region, content);
         let cursor = cursor_icon(output.platform_output.cursor_icon);
         if let Some(state) = self.regions.get_mut(&region) {
             state.cursor = cursor;

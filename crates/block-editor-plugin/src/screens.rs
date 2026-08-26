@@ -81,7 +81,7 @@ impl Screens {
         self.layout.generation = generation;
     }
 
-    pub(crate) fn receive(&mut self, message: &Message) {
+    pub(crate) fn receive(&mut self, message: &Message) -> bool {
         match message {
             Message::HelloAccepted(accepted) => {
                 self.theme = match accepted.dark_theme {
@@ -195,10 +195,10 @@ impl Screens {
             }
             Message::Input(batch) => {
                 let Some((instance, region)) = self.screen(batch.screen) else {
-                    return;
+                    return false;
                 };
                 let Some(session) = self.sessions.get_mut(&instance) else {
-                    return;
+                    return false;
                 };
                 for event in &batch.events {
                     session.input(region, event);
@@ -210,9 +210,10 @@ impl Screens {
                         "dropped a server frame: the runtime has no client: {}",
                         summary(payload)
                     ));
-                    return;
+                    return false;
                 };
                 client.carrier.send(payload.clone());
+                return false;
             }
             Message::BlockTypes(descriptors) => {
                 self.block_types = Rc::new(catalog(descriptors));
@@ -278,8 +279,9 @@ impl Screens {
                     session.set_drag(None);
                 }
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(crate) fn outbound(&mut self) -> Vec<Message> {

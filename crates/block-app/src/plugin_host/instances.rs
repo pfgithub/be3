@@ -103,7 +103,7 @@ struct Screen {
     revoked: HashSet<ChildId>,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 struct ChildTable {
     generation: u64,
     size: egui::Vec2,
@@ -396,7 +396,8 @@ impl Instances {
         NextScreens { opened, screens }
     }
 
-    pub(super) fn set_region_sizes(&mut self, sizes: Vec<RegionSize>) {
+    pub(super) fn set_region_sizes(&mut self, sizes: Vec<RegionSize>) -> bool {
+        let mut changed = false;
         for size in sizes {
             for entry in self.entries.values_mut() {
                 if let Some(screen) = entry
@@ -404,10 +405,13 @@ impl Instances {
                     .values_mut()
                     .find(|screen| screen.request.screen == size.screen)
                 {
-                    screen.used = Some(egui::vec2(size.logical_width, size.logical_height));
+                    let used = egui::vec2(size.logical_width, size.logical_height);
+                    changed |= screen.used != Some(used);
+                    screen.used = Some(used);
                 }
             }
         }
+        changed
     }
 
     pub(super) fn drag(
@@ -453,7 +457,7 @@ impl Instances {
             .is_some_and(|entry| entry.drag_accepted)
     }
 
-    pub(super) fn set_children(&mut self, placements: ChildPlacements) -> Vec<Message> {
+    pub(super) fn set_children(&mut self, placements: ChildPlacements) -> (Vec<Message>, bool) {
         let ChildPlacements {
             instance,
             region,
@@ -466,14 +470,14 @@ impl Instances {
             .get_mut(&instance)
             .and_then(|entry| entry.screens.get_mut(&region))
         else {
-            return Vec::new();
+            return (Vec::new(), false);
         };
         screen.revoked.retain(|child| {
             children
                 .iter()
                 .any(|placement| placement.child == *child && placement.mode == ChildMode::Active)
         });
-        screen.children = ChildTable {
+        let table = ChildTable {
             generation,
             size: egui::vec2(
                 screen.request.metrics.logical_width,
@@ -482,8 +486,10 @@ impl Instances {
             children,
             occluders,
         };
+        let changed = screen.children != table;
+        screen.children = table;
         if region != EditorRegion::Preview {
-            return Vec::new();
+            return (Vec::new(), changed);
         }
         let statuses = screen
             .children
@@ -499,7 +505,7 @@ impl Instances {
                 error: Some(NO_CHILDREN_IN_PREVIEWS.to_owned()),
             })
             .collect();
-        self.set_child_statuses(instance, region, statuses)
+        (self.set_child_statuses(instance, region, statuses), changed)
     }
 
     pub(super) fn host_children(
@@ -850,116 +856,149 @@ impl Instances {
         messages
     }
 
-    pub(super) fn editor_message(&mut self, message: EditorMessage) {
+    pub(super) fn editor_message(&mut self, message: EditorMessage) -> bool {
         match message {
             EditorMessage::OpenBlock {
                 instance,
                 block_id,
                 block_type,
             } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry
-                        .opens
-                        .push((Uuid::from_bytes(block_id), Uuid::from_bytes(block_type)));
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry
+                    .opens
+                    .push((Uuid::from_bytes(block_id), Uuid::from_bytes(block_type)));
+                true
             }
             EditorMessage::DragAccepted { instance, accepted } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.drag_accepted = accepted;
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let changed = entry.drag_accepted != accepted;
+                entry.drag_accepted = accepted;
+                changed
             }
             EditorMessage::PickFile {
                 instance,
                 request_id,
                 filter,
             } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    let mut picker = FilePicker::default();
-                    picker.open(&entry.context, &host_filter(filter));
-                    entry.picks.push(PendingPick { request_id, picker });
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let mut picker = FilePicker::default();
+                picker.open(&entry.context, &host_filter(filter));
+                entry.picks.push(PendingPick { request_id, picker });
+                true
             }
             EditorMessage::PickBlock {
                 instance,
                 request_id,
                 filter,
             } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.block_picks.push(BlockPickRequest {
-                        request_id,
-                        block_types: filter
-                            .block_types
-                            .into_iter()
-                            .map(Uuid::from_bytes)
-                            .collect(),
-                    });
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.block_picks.push(BlockPickRequest {
+                    request_id,
+                    block_types: filter
+                        .block_types
+                        .into_iter()
+                        .map(Uuid::from_bytes)
+                        .collect(),
+                });
+                true
             }
             EditorMessage::CreationReady { instance, ready } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.creation_ready = ready;
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let changed = entry.creation_ready != ready;
+                entry.creation_ready = ready;
+                changed
             }
             EditorMessage::CreationBlock { instance, outcome } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.created = Some(match outcome {
-                        CreationOutcome::Created(block_id) => Ok(Uuid::from_bytes(block_id)),
-                        CreationOutcome::Failed(error) => Err(error),
-                    });
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.created = Some(match outcome {
+                    CreationOutcome::Created(block_id) => Ok(Uuid::from_bytes(block_id)),
+                    CreationOutcome::Failed(error) => Err(error),
+                });
+                true
             }
             EditorMessage::Cursor {
                 instance,
                 region,
                 cursor,
             } => {
-                if let Some(screen) = self
+                let Some(screen) = self
                     .entries
                     .get_mut(&instance)
                     .and_then(|entry| entry.screens.get_mut(&region))
-                {
-                    screen.cursor = cursor;
-                }
+                else {
+                    return false;
+                };
+                let changed = screen.cursor != cursor;
+                screen.cursor = cursor;
+                changed
             }
             EditorMessage::ArtifactDescribed {
                 instance,
                 description,
             } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.artifact.description = Some(description);
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.artifact.description = Some(description);
+                true
             }
             EditorMessage::ArtifactEdited { instance, data } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.artifact.draft = Some(data);
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let changed = entry.artifact.draft.as_ref() != Some(&data);
+                entry.artifact.draft = Some(data);
+                changed
             }
             EditorMessage::ArtifactRegenerated { instance, outcome } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.artifact.outcome = Some(match outcome {
-                        RegenerationOutcome::Done => Ok(()),
-                        RegenerationOutcome::Failed(error) => Err(error),
-                    });
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.artifact.outcome = Some(match outcome {
+                    RegenerationOutcome::Done => Ok(()),
+                    RegenerationOutcome::Failed(error) => Err(error),
+                });
+                true
             }
             EditorMessage::ChangeView { instance, change } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.view_changes.push(change);
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.view_changes.push(change);
+                true
             }
             EditorMessage::AspectRatio { instance, ratio } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.aspect_ratio = Some(ratio);
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let changed = entry.aspect_ratio != Some(ratio);
+                entry.aspect_ratio = Some(ratio);
+                changed
             }
             EditorMessage::IntrinsicSize {
                 instance,
                 width,
                 height,
             } => {
-                if let Some(entry) = self.entries.get_mut(&instance) {
-                    entry.intrinsic = Some(egui::vec2(width, height));
-                }
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let intrinsic = egui::vec2(width, height);
+                let changed = entry.intrinsic != Some(intrinsic);
+                entry.intrinsic = Some(intrinsic);
+                changed
             }
             EditorMessage::Performance {
                 instance,
@@ -980,8 +1019,9 @@ impl Instances {
                         }
                     }
                 }
+                false
             }
-            _ => {}
+            _ => false,
         }
     }
 

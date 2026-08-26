@@ -214,10 +214,7 @@ impl Runtime {
         let received = self.backend.receive();
         self.apply(received);
         let responses = self.instances.client_responses();
-        if !responses.is_empty() {
-            self.send(responses);
-            self.context.request_repaint();
-        }
+        self.send(responses);
     }
 
     pub(super) fn apply(&mut self, messages: Vec<Message>) {
@@ -225,20 +222,31 @@ impl Runtime {
             return;
         }
         let mut answers = Vec::new();
+        let mut changed = false;
         for message in messages {
-            match message {
-                Message::Layout(layout) => self.layout = layout,
-                Message::Client(message) => self.instances.client_message(message),
+            changed |= match message {
+                Message::Layout(layout) => {
+                    self.layout = layout;
+                    true
+                }
+                Message::Client(message) => {
+                    self.instances.client_message(message);
+                    false
+                }
                 Message::Editor(message) => self.instances.editor_message(message),
                 Message::RegionSizes(sizes) => self.instances.set_region_sizes(sizes),
                 Message::Children(placements) => {
-                    answers.extend(self.instances.set_children(placements))
+                    let (answered, changed) = self.instances.set_children(placements);
+                    answers.extend(answered);
+                    changed
                 }
-                _ => {}
-            }
+                _ => false,
+            };
         }
         self.send(answers);
-        self.context.request_repaint();
+        if changed {
+            self.context.request_repaint();
+        }
     }
 
     fn send(&mut self, messages: Vec<Message>) {
@@ -471,7 +479,6 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
         if let Some(error) = runtime.error.clone() {
             return CreationState::Failed(error);
         }
-        context.request_repaint();
         match runtime
             .instances
             .report_creation(instance, context, &client, block_types)
@@ -517,10 +524,7 @@ pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> Artif
                 summary,
             },
             Some(ArtifactDescription::Unreadable(error)) => ArtifactState::Failed(error),
-            None => {
-                context.request_repaint();
-                ArtifactState::Starting
-            }
+            None => ArtifactState::Starting,
         }
     })
 }

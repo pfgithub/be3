@@ -50,13 +50,13 @@ impl Runtime {
         draw: bool,
         phase: f64,
     ) -> Result<Step, String> {
-        let received = !batch.is_empty();
+        let mut changed = false;
         let mut outbound = Vec::new();
         for message in batch {
             if let Message::Screens(set) = &message {
                 self.request_id = set.request_id;
             }
-            self.screens.receive(&message);
+            changed |= self.screens.receive(&message);
             for response in self.session.receive(message) {
                 outbound.push(plain(response));
             }
@@ -83,7 +83,7 @@ impl Runtime {
                     ));
                 }
             }
-            if received || replaced || draw {
+            if changed || replaced || draw {
                 let (messages, delay) = surface.render(&mut self.screens, phase)?;
                 outbound.extend(messages.into_iter().map(plain));
                 repaint = delay;
