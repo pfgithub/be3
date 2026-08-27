@@ -183,6 +183,10 @@ impl EguiSession {
         self.host.set_view(view);
     }
 
+    pub(crate) fn set_presenting(&self, presenting: bool) {
+        self.host.set_presenting(presenting);
+    }
+
     pub(crate) fn set_drag(&mut self, drag: Option<(EditorRegion, BlockDrag)>) {
         self.drag = drag;
     }
@@ -360,6 +364,12 @@ impl EguiSession {
             messages.push(Message::Children(placements));
         }
         self.retain_child_statuses();
+        for presenting in self.host.take_present_requests() {
+            messages.push(Message::Editor(EditorMessage::Present {
+                instance,
+                presenting,
+            }));
+        }
         for change in self.host.take_view_changes() {
             messages.push(Message::Editor(EditorMessage::ChangeView {
                 instance,

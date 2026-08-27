@@ -132,7 +132,8 @@ declared between them, all in the region's own logical coordinates. A child
 carries its own identifier, the block and block type it shows, the rectangle
 and clip it was placed at, the corner radius of the hole cut for it, whether
 it composites below or above the instance's own pixels, and whether the host
-should draw it as a preview, a passive editor, or an active one. Occluders are
+should draw it as a preview, a passive editor, an active one, or a live one.
+Occluders are
 ordered against the children: a child's interactive area is its rectangle
 minus every occluder declared after it, which is the same subtraction that
 decides what the host draws over it.
@@ -158,14 +159,26 @@ instance publishes it as active, so an instance keeps the clicks over its
 passive children; while a child is active the host stops delivering pointer
 input over the child's interactive area to the instance. Keyboard and text
 input go to the innermost active editor, and the cursor comes from the
-innermost editor the pointer is over.
+innermost editor the pointer is over. Promotion to active is the user's, so
+the host takes it away again when the user presses Escape or clicks outside
+the child. A live child is the instance's own content rather than something
+the user promoted - the whole of what the region shows - so it is given input
+from the moment it is placed and the host never takes that away.
 
 An editor instance may ask the host to choose a block for it, which is what
 lets an instance acquire a child without waiting for one to be dragged in. The
-request carries the name of what is being chosen and the block types that may
-be chosen, empty for any, and is answered exactly once, with the block the
-user chose or created, the picker the user closed, or why the block could not
-be made. Requests are identified per instance and may be outstanding together.
+request carries the name of what is being chosen, the block types that may be
+chosen, empty for any, and whether the picker should open on the templates the
+host offers, and is answered exactly once, with the block the user chose or
+created, the picker the user closed, or why the block could not be made.
+Requests are identified per instance and may be outstanding together.
+
+An editor instance may ask the host to present it: to give its main region the
+whole window and show nothing else of the app, which is what a slideshow or a
+video played back full screen wants. The host owns the answer and reports the
+state it settled on, since it may refuse, and takes presenting away again when
+the instance is no longer the one on screen. An instance draws its main region
+the same way either way; only the size it is given changes.
 
 An editor instance may report named duration and count measurements under a
 named performance group. Durations are measured by the plugin and sent as

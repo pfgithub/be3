@@ -53,6 +53,8 @@ struct Instance {
     view: Option<egui::Rect>,
     reported_view: Option<egui::Rect>,
     view_changes: Vec<ViewChange>,
+    presenting: bool,
+    reported_presenting: bool,
 }
 
 #[derive(Default)]
@@ -82,6 +84,8 @@ impl Instance {
             view: None,
             reported_view: None,
             view_changes: Vec::new(),
+            presenting: false,
+            reported_presenting: false,
         }
     }
 }
@@ -227,6 +231,21 @@ impl Instances {
         }
     }
 
+    pub(super) fn presenting(&self, instance: EditorInstanceId) -> bool {
+        self.entries
+            .get(&instance)
+            .is_some_and(|entry| entry.presenting)
+    }
+
+    pub(super) fn set_presenting(&mut self, instance: EditorInstanceId, presenting: bool) -> bool {
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return false;
+        };
+        let changed = entry.presenting != presenting;
+        entry.presenting = presenting;
+        changed
+    }
+
     pub(super) fn take_view_changes(&mut self, instance: EditorInstanceId) -> Vec<ViewChange> {
         self.entries
             .get_mut(&instance)
@@ -322,6 +341,7 @@ impl Instances {
         for entry in self.entries.values_mut() {
             entry.opened = false;
             entry.reported_view = None;
+            entry.reported_presenting = false;
         }
     }
 
@@ -388,6 +408,13 @@ impl Instances {
                         data: entry.artifact.data.clone(),
                     }),
                 });
+            }
+            if entry.presenting != entry.reported_presenting {
+                entry.reported_presenting = entry.presenting;
+                opened.push(Message::Editor(EditorMessage::PresentingChanged {
+                    instance,
+                    presenting: entry.presenting,
+                }));
             }
             if entry.view != entry.reported_view {
                 entry.reported_view = entry.view;
@@ -561,7 +588,7 @@ impl Instances {
             };
             let child_rect = host_rect(child.rect, origin, stretch);
             let child_clip = host_rect(child.clip, origin, stretch).intersect(clip);
-            if mode == ChildMode::Active {
+            if matches!(mode, ChildMode::Active | ChildMode::Live) {
                 let interactive = child_rect.intersect(child_clip);
                 if interactive.is_positive() {
                     holes.holes.push(Hole {
@@ -973,6 +1000,7 @@ impl Instances {
                         .into_iter()
                         .map(Uuid::from_bytes)
                         .collect(),
+                    templates: filter.templates,
                 });
                 true
             }
@@ -1038,6 +1066,10 @@ impl Instances {
                 });
                 true
             }
+            EditorMessage::Present {
+                instance,
+                presenting,
+            } => self.set_presenting(instance, presenting),
             EditorMessage::ChangeView { instance, change } => {
                 let Some(entry) = self.entries.get_mut(&instance) else {
                     return false;

@@ -13,7 +13,6 @@ mod logic_grid;
 mod map;
 mod pixel_ray_tracer;
 pub(crate) mod plugin;
-mod presentation;
 mod scene_3d;
 pub(crate) mod settings;
 mod text;
@@ -525,18 +524,6 @@ impl<'a> EditorAccess<'a> {
     ) -> Option<EditorAction> {
         self.with_editor_ui(id, ui, |editor, editors, ui| {
             editor.direct_editor_right_sidebar(ui, editors)
-        })?
-    }
-
-    pub fn direct_editor_ui(
-        &mut self,
-        id: Uuid,
-        ui: &mut egui::Ui,
-        scale: f32,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        self.with_editor_ui(id, ui, |editor, editors, ui| {
-            editor.direct_editor_ui(ui, editors, scale, viewport)
         })?
     }
 
@@ -1313,7 +1300,6 @@ impl EditorRegistry {
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
-        registry.register_creatable::<presentation::PresentationEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register::<settings::SettingsEditor>();
         registry.register_creatable::<text::TextEditor>();

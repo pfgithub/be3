@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 25;
+pub const PROTOCOL_VERSION: u16 = 26;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -139,6 +139,7 @@ pub enum ChildMode {
     #[default]
     Passive,
     Active,
+    Live,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -415,6 +416,14 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         change: ViewChange,
     },
+    Present {
+        instance: EditorInstanceId,
+        presenting: bool,
+    },
+    PresentingChanged {
+        instance: EditorInstanceId,
+        presenting: bool,
+    },
     Close {
         instance: EditorInstanceId,
     },
@@ -594,6 +603,7 @@ pub enum CreationOutcome {
 pub struct BlockFilter {
     pub name: String,
     pub block_types: Vec<[u8; 16]>,
+    pub templates: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

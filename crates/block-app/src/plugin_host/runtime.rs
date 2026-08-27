@@ -364,6 +364,7 @@ pub(crate) struct EditorPresentation {
     plugin_id: String,
     instance: EditorInstanceId,
     region: EditorRegion,
+    pub(crate) id: Option<egui::Id>,
     screen: Option<ScreenId>,
     quad: Option<Quad>,
     clip: egui::Rect,
@@ -377,6 +378,7 @@ impl EditorPresentation {
             plugin_id: plugin_id.to_owned(),
             instance,
             region,
+            id: None,
             screen: None,
             quad: None,
             clip: egui::Rect::ZERO,
@@ -481,6 +483,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
             plugin_id: plugin.identity.id.clone(),
             instance,
             region,
+            id: Some(response.id),
             screen: Some(screen),
             quad: cropped.map(|(quad, _)| quad),
             clip: ui.clip_rect(),
@@ -752,6 +755,23 @@ pub(crate) fn take_created(
         runtime.instances.take_created(instance)
     })
     .flatten()
+}
+
+pub(crate) fn presenting(plugin_id: &str, instance: EditorInstanceId) -> bool {
+    with(plugin_id, |runtime| runtime.instances.presenting(instance)).unwrap_or_default()
+}
+
+pub(crate) fn present(
+    context: &egui::Context,
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    presenting: bool,
+) {
+    with(plugin_id, |runtime| {
+        if runtime.instances.set_presenting(instance, presenting) {
+            context.request_repaint();
+        }
+    });
 }
 
 pub(crate) fn take_view_changes(plugin_id: &str, instance: EditorInstanceId) -> Vec<ViewChange> {

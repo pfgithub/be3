@@ -169,6 +169,14 @@ impl Screens {
                     session.set_editable(*editable);
                 }
             }
+            Message::Editor(EditorMessage::PresentingChanged {
+                instance,
+                presenting,
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.set_presenting(*presenting);
+                }
+            }
             Message::Editor(EditorMessage::ViewChanged {
                 instance,
                 x,

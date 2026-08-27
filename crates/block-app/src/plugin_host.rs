@@ -32,8 +32,8 @@ use windows as platform;
 
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
-    creation_ready, editor_ui, flush, install, intrinsic_size, kill, poll, preview,
-    regenerate_artifact, region_size, running, take_artifact_outcome, take_block_pick,
+    creation_ready, editor_ui, flush, install, intrinsic_size, kill, poll, present, presenting,
+    preview, regenerate_artifact, region_size, running, take_artifact_outcome, take_block_pick,
     take_created, take_view_changes,
 };
 
@@ -55,7 +55,7 @@ impl HostChild {
     }
 
     pub(crate) fn is_active(&self) -> bool {
-        matches!(self.mode, ChildMode::Active)
+        matches!(self.mode, ChildMode::Active | ChildMode::Live)
     }
 
     pub(crate) fn is_preview(&self) -> bool {
@@ -76,6 +76,7 @@ pub(crate) struct HostChildStatus {
 pub(crate) struct BlockPickRequest {
     pub(crate) request_id: u64,
     pub(crate) block_types: Vec<Uuid>,
+    pub(crate) templates: bool,
 }
 
 pub(crate) struct RuntimeStatus {

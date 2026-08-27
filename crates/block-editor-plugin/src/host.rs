@@ -184,6 +184,10 @@ impl ChildHandle {
         self.set_mode(ChildMode::Active);
     }
 
+    pub fn keep_active(&self) {
+        self.set_mode(ChildMode::Live);
+    }
+
     pub fn set_corner_radius(&self, radius: f32) {
         let layer = self.host.update_child(self.index, |placement| {
             placement.corner_radius = radius;
@@ -217,6 +221,8 @@ pub struct EditorHost {
     block_picks: Rc<RefCell<Vec<(u64, BlockFilter)>>>,
     blocks_picked: Rc<RefCell<HashMap<u64, BlockPick>>>,
     next_block_pick: Rc<Cell<u64>>,
+    presenting: Rc<Cell<bool>>,
+    present_requests: Rc<RefCell<Vec<bool>>>,
 }
 
 impl EditorHost {
@@ -303,11 +309,34 @@ impl EditorHost {
     }
 
     pub fn child(&self, ui: &mut egui::Ui, block_id: Uuid, block_type: Uuid) -> ChildHandle {
-        self.place_child(ui, block_id, block_type, ChildLayer::Below)
+        let size = ui.available_size_before_wrap();
+        self.place_child(ui, size, block_id, block_type, ChildLayer::Below)
+    }
+
+    pub fn child_sized(
+        &self,
+        ui: &mut egui::Ui,
+        size: egui::Vec2,
+        block_id: Uuid,
+        block_type: Uuid,
+    ) -> ChildHandle {
+        self.place_child(ui, size, block_id, block_type, ChildLayer::Below)
     }
 
     pub fn child_above(&self, ui: &mut egui::Ui, block_id: Uuid, block_type: Uuid) -> ChildHandle {
-        self.place_child(ui, block_id, block_type, ChildLayer::Above)
+        let size = ui.available_size_before_wrap();
+        self.place_child(ui, size, block_id, block_type, ChildLayer::Above)
+    }
+
+    pub fn presenting(&self) -> bool {
+        self.presenting.get()
+    }
+
+    pub fn present(&self, presenting: bool) {
+        if self.presenting.get() == presenting {
+            return;
+        }
+        self.present_requests.borrow_mut().push(presenting);
     }
 
     pub fn occlude(&self, rect: egui::Rect) {
@@ -323,11 +352,11 @@ impl EditorHost {
     fn place_child(
         &self,
         ui: &mut egui::Ui,
+        size: egui::Vec2,
         block_id: Uuid,
         block_type: Uuid,
         layer: ChildLayer,
     ) -> ChildHandle {
-        let size = ui.available_size_before_wrap();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let painter = ui.painter().clone();
         let shape = painter.add(match layer {
@@ -489,6 +518,16 @@ impl EditorHost {
         self.child_statuses
             .borrow_mut()
             .retain(|child, _| live.contains(child));
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn set_presenting(&self, presenting: bool) {
+        self.presenting.set(presenting);
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn take_present_requests(&self) -> Vec<bool> {
+        std::mem::take(&mut self.present_requests.borrow_mut())
     }
 
     #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]

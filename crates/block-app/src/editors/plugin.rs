@@ -169,6 +169,9 @@ pub(super) struct PluginEditor {
     instance: EditorInstanceId,
     context: Option<egui::Context>,
     block_pick: Option<PendingBlockPick>,
+    fullscreen: bool,
+    active_this_frame: bool,
+    main_region_id: Option<egui::Id>,
 }
 
 struct PendingBlockPick {
@@ -184,7 +187,61 @@ impl PluginEditor {
             instance: next_instance(),
             context: None,
             block_pick: None,
+            fullscreen: false,
+            active_this_frame: false,
+            main_region_id: None,
         }
+    }
+
+    fn presenting(&self) -> bool {
+        crate::plugin_host::presenting(&self.plugin.identity.id, self.instance)
+    }
+
+    fn stop_presenting(&mut self) {
+        let fullscreen = std::mem::take(&mut self.fullscreen);
+        let Some(context) = self.context.clone() else {
+            return;
+        };
+        if fullscreen {
+            context.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
+        if self.presenting() {
+            crate::plugin_host::present(&context, &self.plugin.identity.id, self.instance, false);
+            context.request_repaint();
+        }
+    }
+
+    fn presenting_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        let screen = ui.ctx().content_rect();
+        let entered = !std::mem::replace(&mut self.fullscreen, true);
+        if entered {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        }
+        if ui.ctx().input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.stop_presenting();
+            return None;
+        }
+        let area = egui::Id::new(("plugin-presenting", self.instance.0));
+        let mut action = None;
+        egui::Area::new(area)
+            .order(egui::Order::Tooltip)
+            .fixed_pos(screen.min)
+            .show(ui.ctx(), |ui| {
+                ui.set_min_size(screen.size());
+                ui.painter().rect_filled(screen, 0.0, egui::Color32::BLACK);
+                action = self.region_ui(ui, editors, EditorRegion::Main, screen.size(), None);
+                if entered {
+                    if let Some(id) = self.main_region_id {
+                        ui.ctx().memory_mut(|memory| memory.request_focus(id));
+                    }
+                }
+            });
+        action
     }
 
     fn has_region(&self, region: EditorRegion) -> bool {
@@ -219,6 +276,9 @@ impl PluginEditor {
                 view,
             },
         );
+        if region == EditorRegion::Main {
+            self.main_region_id = presentation.id;
+        }
         let mut action = presentation
             .open
             .map(|(id, block_type)| EditorAction::OpenBlock { id, block_type });
@@ -308,7 +368,11 @@ impl PluginEditor {
         if self.block_pick.is_none() {
             if let Some(request) = crate::plugin_host::take_block_pick(plugin_id, self.instance) {
                 let mut picker = BlockPicker::default();
-                picker.open_for_types([self.block.id()], request.block_types);
+                if request.templates {
+                    picker.open_templates_for_types([self.block.id()], request.block_types);
+                } else {
+                    picker.open_for_types([self.block.id()], request.block_types);
+                }
                 self.block_pick = Some(PendingBlockPick {
                     request_id: request.request_id,
                     picker,
@@ -361,6 +425,7 @@ impl PluginEditor {
 
 impl Drop for PluginEditor {
     fn drop(&mut self) {
+        self.stop_presenting();
         self.close();
     }
 }
@@ -458,6 +523,9 @@ impl BlockEditor for PluginEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        if self.presenting() {
+            return None;
+        }
         let height = crate::plugin_host::region_size(
             &self.plugin.identity.id,
             self.instance,
@@ -469,7 +537,7 @@ impl BlockEditor for PluginEditor {
     }
 
     fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        self.has_region(EditorRegion::LeftSidebar)
+        self.has_region(EditorRegion::LeftSidebar) && !self.presenting()
     }
 
     fn direct_editor_left_sidebar(
@@ -482,7 +550,7 @@ impl BlockEditor for PluginEditor {
     }
 
     fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        self.has_region(EditorRegion::RightSidebar)
+        self.has_region(EditorRegion::RightSidebar) && !self.presenting()
     }
 
     fn direct_editor_right_sidebar(
@@ -501,6 +569,12 @@ impl BlockEditor for PluginEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
+        self.active_this_frame = true;
+        self.context = Some(ui.ctx().clone());
+        if self.presenting() {
+            return self.presenting_ui(ui, editors);
+        }
+        self.stop_presenting();
         let rect = ui.available_rect_before_wrap();
         if self.plugin.capabilities.pan_and_zoom {
             viewport.auto_fit(self.block.id());
@@ -516,7 +590,20 @@ impl BlockEditor for PluginEditor {
         action
     }
 
+    fn set_tab_active(&mut self, active: bool) {
+        if active {
+            self.active_this_frame = true;
+        }
+    }
+
+    fn finish_frame(&mut self) {
+        if !std::mem::take(&mut self.active_this_frame) {
+            self.stop_presenting();
+        }
+    }
+
     fn tab_closed(&mut self) {
+        self.stop_presenting();
         self.close();
     }
 }

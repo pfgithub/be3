@@ -8,6 +8,7 @@ fn pick_block_messages_round_trip() {
         filter: BlockFilter {
             name: "Slide".into(),
             block_types: vec![[9; 16]],
+            templates: true,
         },
     });
     assert_eq!(
@@ -40,6 +41,7 @@ fn pick_block_messages_round_trip() {
         filter: BlockFilter {
             name: "x".repeat(MAX_STRING_BYTES + 1),
             block_types: Vec::new(),
+            templates: false,
         },
     });
     assert_eq!(

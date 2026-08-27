@@ -82,8 +82,12 @@ impl BlockPicker {
         self.open_on_tab(excluded, BlockPickerTab::Add);
     }
 
-    pub fn open_on_templates(&mut self, excluded: impl IntoIterator<Item = Uuid>) {
-        self.allowed.clear();
+    pub fn open_templates_for_types(
+        &mut self,
+        excluded: impl IntoIterator<Item = Uuid>,
+        allowed: impl IntoIterator<Item = Uuid>,
+    ) {
+        self.allowed = allowed.into_iter().collect();
         self.open_on_tab(excluded, BlockPickerTab::Templates);
     }
 

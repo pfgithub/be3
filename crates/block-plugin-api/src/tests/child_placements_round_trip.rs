@@ -45,7 +45,7 @@ fn child_placements_round_trip() {
                 },
                 corner_radius: 0.0,
                 layer: ChildLayer::Above,
-                mode: ChildMode::Active,
+                mode: ChildMode::Live,
             },
         ],
         occluders: vec![Occluder {

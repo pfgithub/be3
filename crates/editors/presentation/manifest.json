@@ -1,0 +1,31 @@
+{
+  "id": "be3.presentation",
+  "name": "Presentation",
+  "version": "0.1.0",
+  "block_type": "00007072-6573-656e-7461-74696f6e0001",
+  "display_name": "Presentation",
+  "icon": "\ue41b",
+  "creation": "Immediate",
+  "children": {
+    "add": true,
+    "delete": true,
+    "replace": true
+  },
+  "interaction": "Playback",
+  "resize": "Both",
+  "regions": [
+    "Main",
+    "Toolbar",
+    "LeftSidebar"
+  ],
+  "entry_points": {
+    "web": "presentation.js",
+    "windows": "presentation-host.exe",
+    "linux": "presentation-host"
+  },
+  "surfaces": [
+    "WebExternalImage",
+    "WindowsDxgi",
+    "LinuxDmaBuf"
+  ]
+}
