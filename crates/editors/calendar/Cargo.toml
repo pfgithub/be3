@@ -1,0 +1,20 @@
+[package]
+name = "calendar"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "calendar-host"
+path = "src/main.rs"
+
+[dependencies]
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
+uuid = "1"
+
+[lints]
+workspace = true

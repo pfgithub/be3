@@ -19,6 +19,7 @@ members = [
     "crates/citygenerator",
     "crates/logicgame",
     "crates/cvl2",
+    "crates/editors/calendar",
     "crates/editors/checklist",
     "crates/editors/counter",
     "crates/editors/hotbar",

@@ -1,24 +1,21 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use block_client::{
     blocks::calendar::{Calendar, CalendarEvent, CalendarOperation},
     BlockClient, BlockHandle,
 };
-use eframe::egui;
-use egui_material_icons::{
-    icons::{
-        ICON_ADD, ICON_CALENDAR_MONTH, ICON_CALENDAR_VIEW_DAY, ICON_CALENDAR_VIEW_MONTH,
-        ICON_CALENDAR_VIEW_WEEK, ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_DELETE,
-        ICON_SAVE,
+use block_editor_plugin::{
+    egui,
+    egui_material_icons::icons::{
+        ICON_ADD, ICON_CALENDAR_VIEW_DAY, ICON_CALENDAR_VIEW_MONTH, ICON_CALENDAR_VIEW_WEEK,
+        ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_DELETE, ICON_SAVE,
     },
-    MaterialIcon,
+    EditorHost,
 };
 use uuid::Uuid;
-
-use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
-};
 
 const SECONDS_PER_DAY: i64 = 86_400;
 const DIRECT_EDITOR_WIDTH: f32 = 880.0;
@@ -57,27 +54,11 @@ const MONTH_NAMES: [&str; 12] = [
     "December",
 ];
 
-impl EditorKind for CalendarEditor {
-    type Block = Calendar;
-
-    const DISPLAY_NAME: &'static str = "Calendar";
-    const ICON: MaterialIcon = ICON_CALENDAR_MONTH;
-
-    fn open(_client: &BlockClient, block: BlockHandle<Calendar>) -> Self {
-        Self::new(block)
-    }
-}
-
-impl CreatableEditor for CalendarEditor {
-    fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(Calendar::new()))
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum CalendarView {
     Day,
     Week,
+    #[default]
     Month,
 }
 
@@ -141,22 +122,36 @@ impl EventForm {
     }
 }
 
-pub(super) struct CalendarEditor {
-    block: BlockHandle<Calendar>,
+#[derive(Default)]
+pub struct CalendarApp {
+    host: Option<EditorHost>,
+    block: Option<BlockHandle<Calendar>>,
+    creation: Option<Arc<BlockClient>>,
     view: CalendarView,
-
     anchor_day: i64,
     form: Option<EventForm>,
 }
 
-impl CalendarEditor {
-    fn new(block: BlockHandle<Calendar>) -> Self {
-        Self {
-            block,
-            view: CalendarView::Month,
-            anchor_day: today_days_since_epoch(),
-            form: None,
+impl CalendarApp {
+    fn editable(&self) -> bool {
+        self.host.as_ref().is_none_or(EditorHost::editable)
+    }
+
+    fn operate(&self, operation: CalendarOperation) {
+        if !self.editable() {
+            return;
         }
+        if let Some(block) = &self.block {
+            block.operate(operation);
+        }
+    }
+
+    fn events(&self) -> Option<Vec<CalendarEvent>> {
+        let calendar = self.block.as_ref()?.read()?;
+        let mut events = calendar.events().to_vec();
+        drop(calendar);
+        events.sort_by_key(|event| event.start);
+        Some(events)
     }
 
     fn go_previous(&mut self) {
@@ -238,39 +233,6 @@ impl CalendarEditor {
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            if ui.button(ICON_CHEVRON_LEFT).clicked() {
-                self.go_previous();
-            }
-            if ui.button("Today").clicked() {
-                self.go_today();
-            }
-            if ui.button(ICON_CHEVRON_RIGHT).clicked() {
-                self.go_next();
-            }
-            ui.separator();
-            ui.strong(self.header_label());
-            ui.separator();
-            for (view, icon, label) in [
-                (CalendarView::Day, ICON_CALENDAR_VIEW_DAY, "Day"),
-                (CalendarView::Week, ICON_CALENDAR_VIEW_WEEK, "Week"),
-                (CalendarView::Month, ICON_CALENDAR_VIEW_MONTH, "Month"),
-            ] {
-                if ui
-                    .selectable_label(self.view == view, format!("{} {label}", icon.codepoint))
-                    .clicked()
-                {
-                    self.view = view;
-                }
-            }
-            ui.separator();
-            if ui.button(format!("{} Event", ICON_ADD.codepoint)).clicked() {
-                self.form = Some(EventForm::new_at(self.anchor_day, 9));
-            }
-        });
-    }
-
     fn month_view(&mut self, ui: &mut egui::Ui, events: &[CalendarEvent]) {
         let (year, month, _) = civil_from_days(self.anchor_day);
         let first_of_month = days_from_civil(year, month, 1);
@@ -287,7 +249,7 @@ impl CalendarEditor {
             }
         });
 
-        egui::Grid::new(("calendar-month-grid", self.block.id()))
+        egui::Grid::new("calendar-month-grid")
             .num_columns(7)
             .spacing(egui::Vec2::splat(2.0))
             .show(ui, |ui| {
@@ -401,7 +363,7 @@ impl CalendarEditor {
             y += 17.0;
         }
 
-        if response.clicked() && !event_clicked {
+        if response.clicked() && !event_clicked && self.editable() {
             self.form = Some(EventForm::new_at(day, 9));
         }
     }
@@ -440,8 +402,10 @@ impl CalendarEditor {
         });
         ui.separator();
 
+        let editable = self.editable();
+        let mut form = None;
         egui::ScrollArea::vertical()
-            .id_salt(("calendar-timeline-scroll", self.block.id()))
+            .id_salt("calendar-timeline-scroll")
             .max_height(TIMELINE_VIEW_HEIGHT)
             .show(ui, |ui| {
                 let (rect, response) = ui.allocate_exact_size(
@@ -523,13 +487,13 @@ impl CalendarEditor {
                             ui.visuals().strong_text_color(),
                         );
                         if event_response.clicked() {
-                            self.form = Some(EventForm::edit(event));
+                            form = Some(EventForm::edit(event));
                         }
                         event_rects.push(event_rect);
                     }
                 }
 
-                if response.clicked() {
+                if response.clicked() && editable {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         let inside_event = event_rects
                             .iter()
@@ -542,18 +506,21 @@ impl CalendarEditor {
                             let hour = ((pointer.y - rect.top()) / HOUR_HEIGHT)
                                 .floor()
                                 .clamp(0.0, 23.0) as u8;
-                            self.form = Some(EventForm::new_at(first_day + day_index, hour));
+                            form = Some(EventForm::new_at(first_day + day_index, hour));
                         }
                     }
                 }
             });
+        if form.is_some() {
+            self.form = form;
+        }
     }
 
-    fn show_form(&mut self, ctx: &egui::Context) {
+    fn show_form(&mut self, ui: &egui::Ui) {
+        let editable = self.editable();
         let Some(form) = &mut self.form else {
             return;
         };
-        let mut open = true;
         let mut save = false;
         let mut delete = false;
         let mut cancel = false;
@@ -563,24 +530,26 @@ impl CalendarEditor {
             "New event"
         };
 
-        egui::Window::new(title)
-            .id(egui::Id::new(("calendar-event-form", self.block.id())))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Title");
-                    ui.text_edit_singleline(&mut form.title);
+        let response =
+            egui::Modal::new(egui::Id::new("calendar-event-form")).show(ui.ctx(), |ui| {
+                ui.set_width(340.0);
+                ui.heading(title);
+                ui.add_space(8.0);
+                ui.add_enabled_ui(editable, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Title");
+                        ui.text_edit_singleline(&mut form.title);
+                    });
+                    ui.label("Start");
+                    date_time_row(ui, &mut form.start);
+                    ui.label("End");
+                    date_time_row(ui, &mut form.end);
                 });
-                ui.label("Start");
-                date_time_row(ui, &mut form.start);
-                ui.label("End");
-                date_time_row(ui, &mut form.end);
+                ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(
-                            !form.title.trim().is_empty(),
+                            editable && !form.title.trim().is_empty(),
                             egui::Button::new(format!("{} Save", ICON_SAVE.codepoint)),
                         )
                         .clicked()
@@ -589,7 +558,10 @@ impl CalendarEditor {
                     }
                     if form.editing_id.is_some()
                         && ui
-                            .button(format!("{} Delete", ICON_DELETE.codepoint))
+                            .add_enabled(
+                                editable,
+                                egui::Button::new(format!("{} Delete", ICON_DELETE.codepoint)),
+                            )
                             .clicked()
                     {
                         delete = true;
@@ -618,13 +590,13 @@ impl CalendarEditor {
             } else {
                 CalendarOperation::AddEvent { event }
             };
-            self.block.operate(operation);
+            self.operate(operation);
         } else if delete {
             let form = self.form.take().expect("the form is shown above");
             if let Some(id) = form.editing_id {
-                self.block.operate(CalendarOperation::RemoveEvent { id });
+                self.operate(CalendarOperation::RemoveEvent { id });
             }
-        } else if !open || cancel {
+        } else if cancel || response.should_close() {
             self.form = None;
         }
     }
@@ -736,23 +708,26 @@ fn civil_from_days(days_since_epoch: i64) -> (i32, u8, u8) {
     (year, month as u8, day as u8)
 }
 
-impl BlockEditor for CalendarEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+impl block_editor_plugin::App for CalendarApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        self.host = Some(host);
+        self.block = Some(client.get_block(block_id));
+        self.anchor_day = today_days_since_epoch();
     }
 
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: false,
-        }
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
+        self.creation = Some(client);
     }
 
-    fn direct_editor_intrinsic_size(
-        &mut self,
-        _editors: &mut EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(Calendar::new()).id())
+    }
+
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         Some(egui::vec2(
             DIRECT_EDITOR_WIDTH,
             match self.view {
@@ -762,30 +737,51 @@ impl BlockEditor for CalendarEditor {
         ))
     }
 
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        self.toolbar(ui);
-        None
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        let editable = self.editable();
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(ICON_CHEVRON_LEFT).clicked() {
+                self.go_previous();
+            }
+            if ui.button("Today").clicked() {
+                self.go_today();
+            }
+            if ui.button(ICON_CHEVRON_RIGHT).clicked() {
+                self.go_next();
+            }
+            ui.separator();
+            ui.strong(self.header_label());
+            ui.separator();
+            for (view, icon, label) in [
+                (CalendarView::Day, ICON_CALENDAR_VIEW_DAY, "Day"),
+                (CalendarView::Week, ICON_CALENDAR_VIEW_WEEK, "Week"),
+                (CalendarView::Month, ICON_CALENDAR_VIEW_MONTH, "Month"),
+            ] {
+                if ui
+                    .selectable_label(self.view == view, format!("{} {label}", icon.codepoint))
+                    .clicked()
+                {
+                    self.view = view;
+                }
+            }
+            ui.separator();
+            if ui
+                .add_enabled(
+                    editable,
+                    egui::Button::new(format!("{} Event", ICON_ADD.codepoint)),
+                )
+                .clicked()
+            {
+                self.form = Some(EventForm::new_at(self.anchor_day, 9));
+            }
+        });
     }
 
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let Some(calendar) = self.block.read() else {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let Some(events) = self.events() else {
             ui.spinner();
-            return None;
+            return;
         };
-        let mut events = calendar.events().to_vec();
-        drop(calendar);
-        events.sort_by_key(|event| event.start);
 
         match self.view {
             CalendarView::Month => self.month_view(ui, &events),
@@ -796,7 +792,6 @@ impl BlockEditor for CalendarEditor {
             CalendarView::Day => self.timeline_view(ui, &events, self.anchor_day, 1),
         }
 
-        self.show_form(ui.ctx());
-        None
+        self.show_form(ui);
     }
 }

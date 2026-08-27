@@ -1148,6 +1148,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "calendar"
+version = "0.1.0"
+dependencies = [
+ "block-client",
+ "block-editor-plugin",
+ "uuid",
+]
+
+[[package]]
 name = "calloop"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

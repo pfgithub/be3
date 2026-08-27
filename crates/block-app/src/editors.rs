@@ -1,6 +1,5 @@
 mod audio;
 mod browser_tab;
-mod calendar;
 mod clipboard;
 mod compiled_logic;
 mod database;
@@ -1303,7 +1302,6 @@ impl EditorRegistry {
             plugin_block_types: Arc::default(),
         };
         registry.register_configurable::<audio::AudioEditor>();
-        registry.register_creatable::<calendar::CalendarEditor>();
         registry.register_creatable::<database::DatabaseEditor>();
         registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
         registry.register_creatable::<database_view::DatabaseViewEditor>();
