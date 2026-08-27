@@ -131,12 +131,13 @@ it drew, an ordered list of the children it placed and the occluder rectangles
 declared between them, all in the region's own logical coordinates. A child
 carries its own identifier, the block and block type it shows, the rectangle
 and clip it was placed at, the corner radius of the hole cut for it, whether
-it composites below or above the instance's own pixels, and whether the host
-should draw it as a preview, a passive editor, an active one, or a live one.
-Occluders are
-ordered against the children: a child's interactive area is its rectangle
-minus every occluder declared after it, which is the same subtraction that
-decides what the host draws over it.
+it composites below or above the instance's own pixels, whether the host
+should draw it as a preview, a passive editor, an active one, or a live one,
+and which part of that child's editor belongs in the rectangle: the block
+itself, or the toolbar or one of the sidebars its editor draws around it.
+Occluders are ordered against the children: a child's interactive area is
+its rectangle minus every occluder declared after it, which is the same
+subtraction that decides what the host draws over it.
 
 A child placed below is cut out of the instance's own surface, which is
 cleared transparent, so the host composites the child's editor under the
@@ -147,12 +148,21 @@ then the children above it, at the placements belonging to the generation it
 is presenting; a placement published for a generation the host is not
 presenting is stretched into the region it is showing rather than dropped.
 
-The host answers with a status per child: whether the block could be opened at
-all, the size and shape its editor asks for, whether the pointer is over it,
-whether it is being given input, and why it is unavailable when it is. A block
-already open above the instance is refused, so an editor cannot be nested
-inside itself. The host bounds how many children of one region it will run as
-editors and falls back to preview rendering for the rest.
+A child placed for a part other than the block itself is that child's own
+chrome: the host draws the toolbar or the sidebar that editor would be given
+in a tab of its own, in the rectangle it was placed at, and reports back the
+size it took as the size that child asks for, so an instance editing a block
+can put the block's own chrome in its regions and lay the rest out around it.
+Chrome is live from the moment it is placed, is never drawn as a preview, and
+is not drawn in a preview region, where a block has no chrome at all.
+
+The host answers with a status per child: whether the block could be opened
+at all, the size and shape its editor asks for, whether its editor offers a
+left or a right sidebar, whether the pointer is over it, whether it is being
+given input, and why it is unavailable when it is. A block already open
+above the instance is refused, so an editor cannot be nested inside itself.
+The host bounds how many children of one region it will run as editors and
+falls back to preview rendering for the rest.
 
 A child drawn as a preview is a picture the instance asks the host for rather
 than something the host composites over it. The instance publishes a preview
@@ -197,6 +207,13 @@ video played back full screen wants. The host owns the answer and reports the
 state it settled on, since it may refuse, and takes presenting away again when
 the instance is no longer the one on screen. An instance draws its main region
 the same way either way; only the size it is given changes.
+
+An editor instance may tell the host that one of the regions its manifest
+declares has nothing in it at the moment - a sidebar that is only ever its
+child's sidebar, when that child has none - and the host then shows that
+region no more than a region the plugin never declared. Every declared region
+is shown until the instance says otherwise, and the manifest still bounds
+which regions an instance may ever be given.
 
 An editor instance may report named duration and count measurements under a
 named performance group. Durations are measured by the plugin and sent as

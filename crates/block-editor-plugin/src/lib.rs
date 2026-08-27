@@ -29,7 +29,9 @@ use web as platform;
 #[cfg(target_os = "windows")]
 use windows as platform;
 
-pub use block_plugin_api::{BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, EditorRegion};
+pub use block_plugin_api::{
+    BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, EditorRegion,
+};
 pub use block_ui;
 pub use host::{
     Artifact, ArtifactDescription, BlockDrag, BlockPicker, ChildHandle, EditorHost, FileFilter,

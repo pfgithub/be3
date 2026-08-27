@@ -14,6 +14,7 @@ fn placements(occluders: Vec<Occluder>) -> Message {
             corner_radius: 0.0,
             layer: ChildLayer::Below,
             mode: ChildMode::Preview,
+            part: ChildPart::Main,
         }],
         occluders,
     })

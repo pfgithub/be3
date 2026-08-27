@@ -846,6 +846,17 @@ pub(crate) fn preview_painter(
     previews::painter(context, plugin_id, rect)
 }
 
+pub(crate) fn region_shown(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    region: EditorRegion,
+) -> bool {
+    with(plugin_id, |runtime| {
+        runtime.instances.region_shown(instance, region)
+    })
+    .unwrap_or(true)
+}
+
 pub(crate) fn presenting(plugin_id: &str, instance: EditorInstanceId) -> bool {
     with(plugin_id, |runtime| runtime.instances.presenting(instance)).unwrap_or_default()
 }

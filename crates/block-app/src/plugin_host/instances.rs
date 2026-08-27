@@ -55,6 +55,7 @@ struct Instance {
     view_changes: Vec<ViewChange>,
     presenting: bool,
     reported_presenting: bool,
+    hidden_regions: HashSet<EditorRegion>,
 }
 
 #[derive(Default)]
@@ -86,6 +87,7 @@ impl Instance {
             view_changes: Vec::new(),
             presenting: false,
             reported_presenting: false,
+            hidden_regions: HashSet::new(),
         }
     }
 }
@@ -229,6 +231,12 @@ impl Instances {
         if let Some(entry) = self.entries.get_mut(&instance) {
             entry.view = Some(view);
         }
+    }
+
+    pub(super) fn region_shown(&self, instance: EditorInstanceId, region: EditorRegion) -> bool {
+        self.entries
+            .get(&instance)
+            .is_none_or(|entry| !entry.hidden_regions.contains(&region))
     }
 
     pub(super) fn presenting(&self, instance: EditorInstanceId) -> bool {
@@ -552,7 +560,7 @@ impl Instances {
         let mut holes = Holes::default();
         let mut live = 0;
         for (index, child) in table.children.iter().enumerate() {
-            if child.rect.is_empty() {
+            if child.rect.is_empty() || (!child.part.is_main() && region == EditorRegion::Preview) {
                 continue;
             }
             let requested = match (region, child.mode) {
@@ -562,15 +570,16 @@ impl Instances {
                 }
                 (_, mode) => mode,
             };
-            let mode = match requested {
-                ChildMode::Preview => ChildMode::Preview,
-                mode => {
+            let mode = match (child.part.is_main(), requested) {
+                (true, ChildMode::Preview) => ChildMode::Preview,
+                (true, mode) => {
                     live += 1;
                     match live > MAX_LIVE_CHILDREN {
                         true => ChildMode::Preview,
                         false => mode,
                     }
                 }
+                (false, _) => ChildMode::Live,
             };
             let child_rect = host_rect(child.rect, origin, stretch);
             let child_clip = host_rect(child.clip, origin, stretch).intersect(clip);
@@ -596,6 +605,7 @@ impl Instances {
                 clip: child_clip,
                 layer: child.layer,
                 mode,
+                part: child.part,
             });
         }
         (children, holes)
@@ -642,6 +652,8 @@ impl Instances {
                 aspect_ratio: status.aspect_ratio.unwrap_or_default(),
                 hovered: status.hovered,
                 active: status.active,
+                has_left_sidebar: status.has_left_sidebar,
+                has_right_sidebar: status.has_right_sidebar,
                 error: status.error,
             };
             if screen.reported_statuses.get(&status.child) == Some(&status) {
@@ -1056,6 +1068,19 @@ impl Instances {
                 instance,
                 presenting,
             } => self.set_presenting(instance, presenting),
+            EditorMessage::ShowRegion {
+                instance,
+                region,
+                shown,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                match shown {
+                    true => entry.hidden_regions.remove(&region),
+                    false => entry.hidden_regions.insert(region),
+                }
+            }
             EditorMessage::ChangeView { instance, change } => {
                 let Some(entry) = self.entries.get_mut(&instance) else {
                     return false;

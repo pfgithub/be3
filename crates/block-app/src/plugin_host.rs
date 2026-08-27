@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use block_client::BlockClient;
 use block_plugin_api::{
-    BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, EditorInstanceId, EditorRegion,
+    BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, ChildPart, EditorInstanceId, EditorRegion,
     PluginManifest, ScreenId,
 };
 use eframe::egui;
@@ -34,8 +34,9 @@ use windows as platform;
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
     creation_ready, editor_ui, flush, install, intrinsic_size, kill, poll, present, presenting,
-    preview, preview_painter, preview_target, regenerate_artifact, region_size, report_children,
-    running, take_artifact_outcome, take_block_pick, take_created, take_view_changes,
+    preview, preview_painter, preview_target, regenerate_artifact, region_shown, region_size,
+    report_children, running, take_artifact_outcome, take_block_pick, take_created,
+    take_view_changes,
 };
 
 pub(crate) const MAX_LIVE_CHILDREN: usize = 16;
@@ -48,6 +49,7 @@ pub(crate) struct HostChild {
     pub(crate) clip: egui::Rect,
     pub(crate) layer: ChildLayer,
     pub(crate) mode: ChildMode,
+    pub(crate) part: ChildPart,
 }
 
 impl HostChild {
@@ -82,6 +84,8 @@ pub(crate) struct HostChildStatus {
     pub(crate) aspect_ratio: Option<f32>,
     pub(crate) hovered: bool,
     pub(crate) active: bool,
+    pub(crate) has_left_sidebar: bool,
+    pub(crate) has_right_sidebar: bool,
     pub(crate) error: Option<String>,
 }
 

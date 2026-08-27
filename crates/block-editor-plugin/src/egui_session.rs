@@ -371,6 +371,13 @@ impl EguiSession {
                 presenting,
             }));
         }
+        for (region, shown) in self.host.take_region_changes() {
+            messages.push(Message::Editor(EditorMessage::ShowRegion {
+                instance,
+                region,
+                shown,
+            }));
+        }
         for change in self.host.take_view_changes() {
             messages.push(Message::Editor(EditorMessage::ChangeView {
                 instance,

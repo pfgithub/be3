@@ -1,7 +1,7 @@
 use block_client::{blocks, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
-    BlockPick, BlockTypeDescriptor, CreationMode, EditorInstanceId, EditorRegion, InteractionMode,
-    PluginManifest, ResizeMode, ViewChange,
+    BlockPick, BlockTypeDescriptor, ChildPart, CreationMode, EditorInstanceId, EditorRegion,
+    InteractionMode, PluginManifest, ResizeMode, ViewChange,
 };
 use eframe::egui;
 use std::sync::{
@@ -248,6 +248,12 @@ impl PluginEditor {
         self.plugin.regions.contains(&region)
     }
 
+    fn shows_region(&self, region: EditorRegion) -> bool {
+        self.has_region(region)
+            && !self.presenting()
+            && crate::plugin_host::region_shown(&self.plugin.identity.id, self.instance, region)
+    }
+
     fn region_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -338,7 +344,13 @@ impl PluginEditor {
             .pointer_latest_pos()
             .is_some_and(|position| child.rect.contains(position) && child.clip.contains(position));
         let mut action = None;
-        if available && child.is_preview() {
+        let mut used = None;
+        if available && !child.part.is_main() {
+            let (next, size) = self.chrome_ui(ui, editors, child, viewport);
+            viewport.drain().for_each(drop);
+            action = next;
+            used = Some(size);
+        } else if available && child.is_preview() {
             let target = crate::plugin_host::preview_target(
                 &self.plugin.identity.id,
                 self.instance,
@@ -378,15 +390,53 @@ impl PluginEditor {
         statuses.push(HostChildStatus {
             child: child.child,
             available,
-            intrinsic: available
-                .then(|| editors.direct_editor_intrinsic_size(child.block_id))
-                .flatten(),
+            intrinsic: match used {
+                Some(size) => Some(size),
+                None => available
+                    .then(|| editors.direct_editor_intrinsic_size(child.block_id))
+                    .flatten(),
+            },
             aspect_ratio: editors.preview_aspect_ratio(child.block_id),
             hovered,
             active: available && child.is_active(),
+            has_left_sidebar: available && editors.direct_editor_has_left_sidebar(child.block_id),
+            has_right_sidebar: available && editors.direct_editor_has_right_sidebar(child.block_id),
             error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
         });
         action
+    }
+
+    fn chrome_ui(
+        &self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        child: &HostChild,
+        viewport: &mut DirectEditorViewport,
+    ) -> (Option<EditorAction>, egui::Vec2) {
+        let clip = child.clip.intersect(ui.clip_rect());
+        ui.painter()
+            .with_clip_rect(clip)
+            .rect_filled(child.rect, 0.0, ui.visuals().panel_fill);
+        let mut chrome = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("plugin-chrome", self.instance.0, child.child.0))
+                .max_rect(child.rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        chrome.set_clip_rect(clip);
+        let action = match child.part {
+            ChildPart::Toolbar => {
+                editors.direct_editor_top_bar(child.block_id, &mut chrome, viewport)
+            }
+            ChildPart::LeftSidebar => {
+                editors.direct_editor_left_sidebar(child.block_id, &mut chrome)
+            }
+            ChildPart::RightSidebar => {
+                editors.direct_editor_right_sidebar(child.block_id, &mut chrome)
+            }
+            ChildPart::Main => None,
+        };
+        (action, chrome.min_rect().size())
     }
 
     fn atlas_ui(
@@ -456,6 +506,8 @@ impl PluginEditor {
                 aspect_ratio: editors.preview_aspect_ratio(child.block_id),
                 hovered: false,
                 active: false,
+                has_left_sidebar: false,
+                has_right_sidebar: false,
                 error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
             });
         }
@@ -635,7 +687,7 @@ impl BlockEditor for PluginEditor {
         editors: &mut EditorAccess<'_>,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        if self.presenting() {
+        if !self.shows_region(EditorRegion::Toolbar) {
             return None;
         }
         let height = crate::plugin_host::region_size(
@@ -649,7 +701,7 @@ impl BlockEditor for PluginEditor {
     }
 
     fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        self.has_region(EditorRegion::LeftSidebar) && !self.presenting()
+        self.shows_region(EditorRegion::LeftSidebar)
     }
 
     fn direct_editor_left_sidebar(
@@ -662,7 +714,7 @@ impl BlockEditor for PluginEditor {
     }
 
     fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        self.has_region(EditorRegion::RightSidebar) && !self.presenting()
+        self.shows_region(EditorRegion::RightSidebar)
     }
 
     fn direct_editor_right_sidebar(

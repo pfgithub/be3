@@ -17,6 +17,7 @@
     "Main",
     "Toolbar",
     "LeftSidebar",
+    "RightSidebar",
     "Preview"
   ],
   "entry_points": {

@@ -12,6 +12,8 @@ fn status(instance: EditorInstanceId) -> ChildStatus {
         aspect_ratio: 0.0,
         hovered: false,
         active: false,
+        has_left_sidebar: false,
+        has_right_sidebar: false,
         error: None,
     }
 }

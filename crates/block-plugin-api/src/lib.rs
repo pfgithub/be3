@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 27;
+pub const PROTOCOL_VERSION: u16 = 28;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -144,6 +144,21 @@ pub enum ChildMode {
     Live,
 }
 
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChildPart {
+    #[default]
+    Main,
+    Toolbar,
+    LeftSidebar,
+    RightSidebar,
+}
+
+impl ChildPart {
+    pub fn is_main(&self) -> bool {
+        matches!(self, Self::Main)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ChildRect {
     pub x: f32,
@@ -162,6 +177,7 @@ pub struct ChildPlacement {
     pub corner_radius: f32,
     pub layer: ChildLayer,
     pub mode: ChildMode,
+    pub part: ChildPart,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -209,6 +225,8 @@ pub struct ChildStatus {
     pub aspect_ratio: f32,
     pub hovered: bool,
     pub active: bool,
+    pub has_left_sidebar: bool,
+    pub has_right_sidebar: bool,
     pub error: Option<String>,
 }
 
@@ -518,6 +536,11 @@ pub enum EditorMessage {
     PresentingChanged {
         instance: EditorInstanceId,
         presenting: bool,
+    },
+    ShowRegion {
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        shown: bool,
     },
     Close {
         instance: EditorInstanceId,
