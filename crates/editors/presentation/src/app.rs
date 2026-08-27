@@ -507,6 +507,30 @@ impl block_editor_plugin::App for PresentationApp {
         }
     }
 
+    fn preview_ui(&mut self, ui: &mut egui::Ui) {
+        self.poll();
+        let Some(slides) = self.slides() else {
+            return;
+        };
+        let rect = ui.available_rect_before_wrap();
+        let Some(slide) = slides.first() else {
+            ui.centered_and_justified(|ui| {
+                ui.weak("Empty presentation");
+            });
+            return;
+        };
+        let stage = fit_rect(rect, self.slide_ratio(slide));
+        let child = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(stage), |ui| {
+                self.place_slide(ui, slide, Some(stage.size()))
+            })
+            .inner;
+        match child {
+            Some(child) => child.set_mode(ChildMode::Preview),
+            None => Self::missing_slide(ui, slide),
+        }
+    }
+
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         let selected = self.selected?;
         let editor = self.editor.as_ref()?;

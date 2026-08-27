@@ -119,6 +119,7 @@ impl ClientSession {
             }
             (State::Running, Message::Client(_)) if !self.instances.is_empty() => Ok(Vec::new()),
             (State::Running, Message::DrawFrame) => Ok(Vec::new()),
+            (State::Running, Message::PreviewsReady { .. }) => Ok(Vec::new()),
             (State::Running, Message::BlockTypes(_)) => Ok(Vec::new()),
             (State::Running, Message::ChildStatuses(statuses))
                 if statuses

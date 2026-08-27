@@ -41,6 +41,7 @@ fn screen(screen: ScreenId, instance: EditorInstanceId) -> ScreenRequest {
 }
 
 mod accepts_ordered_lifecycle;
+mod accepts_previews_ready;
 mod opens_and_closes_editor_instance;
 mod rejects_child_statuses_for_unopened_instances;
 mod rejects_out_of_order_messages;

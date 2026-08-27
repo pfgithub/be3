@@ -289,7 +289,14 @@ impl PluginEditor {
             .iter()
             .filter(|child| child.is_below())
         {
-            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
+            let next = self.child_ui(
+                ui,
+                editors,
+                region,
+                child,
+                &mut child_viewport,
+                &mut statuses,
+            );
             action = action.or(next);
         }
         presentation.present(ui);
@@ -298,7 +305,14 @@ impl PluginEditor {
             .iter()
             .filter(|child| !child.is_below())
         {
-            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
+            let next = self.child_ui(
+                ui,
+                editors,
+                region,
+                child,
+                &mut child_viewport,
+                &mut statuses,
+            );
             action = action.or(next);
         }
         presentation.report(statuses);
@@ -312,6 +326,7 @@ impl PluginEditor {
         &self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
+        region: EditorRegion,
         child: &HostChild,
         viewport: &mut DirectEditorViewport,
         statuses: &mut Vec<HostChildStatus>,
@@ -324,17 +339,28 @@ impl PluginEditor {
             .is_some_and(|position| child.rect.contains(position) && child.clip.contains(position));
         let mut action = None;
         if available && child.is_preview() {
-            let painter = ui.painter().with_clip_rect(child.clip);
-            let rendered = editors.render(
-                child.block_id,
-                BlockRenderContext {
-                    painter: &painter,
-                    corners: rect_corners(child.rect),
-                    opacity: 1.0,
-                },
+            let target = crate::plugin_host::preview_target(
+                &self.plugin.identity.id,
+                self.instance,
+                region,
+                child.child,
             );
-            if !rendered {
-                paint_block_fallback(&painter, child.rect, None, editors);
+            if let Some(atlas) = target.atlas {
+                self.atlas_ui(ui.ctx(), editors, child.block_id, atlas);
+            }
+            if target.composite {
+                let painter = ui.painter().with_clip_rect(child.clip);
+                let rendered = editors.render(
+                    child.block_id,
+                    BlockRenderContext {
+                        painter: &painter,
+                        corners: rect_corners(child.rect),
+                        opacity: 1.0,
+                    },
+                );
+                if !rendered {
+                    paint_block_fallback(&painter, child.rect, None, editors);
+                }
             }
         } else if available {
             action = embedded_editor_ui(
@@ -361,6 +387,84 @@ impl PluginEditor {
             error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
         });
         action
+    }
+
+    fn atlas_ui(
+        &self,
+        context: &egui::Context,
+        editors: &mut EditorAccess<'_>,
+        block_id: Uuid,
+        rect: egui::Rect,
+    ) {
+        let painter = crate::plugin_host::preview_painter(context, &self.plugin.identity.id, rect);
+        let rendered = editors.render(
+            block_id,
+            BlockRenderContext {
+                painter: &painter,
+                corners: rect_corners(rect),
+                opacity: 1.0,
+            },
+        );
+        if !rendered {
+            paint_block_fallback(&painter, rect, None, editors);
+        }
+    }
+
+    fn preview_children_ui(
+        &self,
+        painter: &egui::Painter,
+        editors: &mut EditorAccess<'_>,
+        presentation: &crate::plugin_host::PreviewPresentation,
+        corners: [egui::Pos2; 4],
+        opacity: f32,
+    ) {
+        if presentation.children.is_empty() {
+            return;
+        }
+        let mut statuses = Vec::new();
+        for child in &presentation.children {
+            editors.ensure(child.block_id, child.block_type);
+            let available = editors.is_open(child.block_id);
+            if available && child.is_preview() {
+                let target = crate::plugin_host::preview_target(
+                    &self.plugin.identity.id,
+                    self.instance,
+                    EditorRegion::Preview,
+                    child.child,
+                );
+                if let Some(atlas) = target.atlas {
+                    self.atlas_ui(painter.ctx(), editors, child.block_id, atlas);
+                }
+                if target.composite && presentation.drawn {
+                    let corners = mapped_corners(corners, presentation.size, child.rect);
+                    editors.render(
+                        child.block_id,
+                        BlockRenderContext {
+                            painter,
+                            corners,
+                            opacity,
+                        },
+                    );
+                }
+            }
+            statuses.push(HostChildStatus {
+                child: child.child,
+                available,
+                intrinsic: available
+                    .then(|| editors.direct_editor_intrinsic_size(child.block_id))
+                    .flatten(),
+                aspect_ratio: editors.preview_aspect_ratio(child.block_id),
+                hovered: false,
+                active: false,
+                error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
+            });
+        }
+        crate::plugin_host::report_children(
+            &self.plugin.identity.id,
+            self.instance,
+            EditorRegion::Preview,
+            statuses,
+        );
     }
 
     fn block_pick_ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
@@ -440,7 +544,7 @@ impl BlockEditor for PluginEditor {
             return false;
         }
         self.context = Some(context.painter.ctx().clone());
-        crate::plugin_host::preview(
+        let presentation = crate::plugin_host::preview(
             context.painter,
             crate::plugin_host::PreviewSlot {
                 plugin: &self.plugin,
@@ -452,7 +556,15 @@ impl BlockEditor for PluginEditor {
                 corners: context.corners,
                 opacity: context.opacity,
             },
-        )
+        );
+        self.preview_children_ui(
+            context.painter,
+            editors,
+            &presentation,
+            context.corners,
+            context.opacity,
+        );
+        presentation.drawn
     }
 
     fn render_aspect_ratio(&self) -> Option<f32> {
@@ -746,3 +858,19 @@ impl ArtifactSession for PluginArtifact {
 }
 
 const ARTIFACT_SETTINGS_HEIGHT: f32 = 72.0;
+
+fn mapped_corners(corners: [egui::Pos2; 4], size: egui::Vec2, rect: egui::Rect) -> [egui::Pos2; 4] {
+    let horizontal = corners[1] - corners[0];
+    let vertical = corners[3] - corners[0];
+    let at = |x: f32, y: f32| {
+        corners[0]
+            + horizontal * (x / size.x.max(f32::EPSILON))
+            + vertical * (y / size.y.max(f32::EPSILON))
+    };
+    [
+        at(rect.min.x, rect.min.y),
+        at(rect.max.x, rect.min.y),
+        at(rect.max.x, rect.max.y),
+        at(rect.min.x, rect.max.y),
+    ]
+}

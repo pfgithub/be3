@@ -154,6 +154,24 @@ already open above the instance is refused, so an editor cannot be nested
 inside itself. The host bounds how many children of one region it will run as
 editors and falls back to preview rendering for the rest.
 
+A child drawn as a preview is a picture the instance asks the host for rather
+than something the host composites over it. The instance publishes a preview
+layout: one image it has allocated, with a rectangle in it for every preview
+child of every one of its regions, the scale those rectangles are measured at,
+and the generation of the layout. It transfers that image the way it transfers
+the surface it draws its own regions on. The host draws each of those children
+into the rectangle it was given, at the scale the layout declares, and tells
+the instance which generation it has drawn; the instance then samples the
+image where it placed the child and composites the preview itself, clipped,
+scaled and blended like anything else it draws. No pixels cross the
+connection: the picture is one shared image, written by the host and read by
+the plugin. Until the host has drawn a generation, and for a few frames after,
+it also composites that preview over the instance, so a child is never missing
+while the two sides settle on a layout. A plugin whose platform cannot share
+an image back publishes no layout at all, and the host composites every
+preview over it as before. A layout carries at most 64 previews and no edge
+longer than 4096 pixels.
+
 The host owns input routing. Nothing is delivered to a child until the
 instance publishes it as active, so an instance keeps the clicks over its
 passive children; while a child is active the host stops delivering pointer
@@ -211,6 +229,11 @@ building its own frame. Which part of the surface each region takes is settled
 then as well, against the layout that arrived with the frame being shown, so a
 plugin that republishes its layout mid-frame is never drawn through the
 placements of the one before it.
+
+A surface carries the role it serves: the screens the plugin draws its regions
+on, or the previews the host draws into for it. They are separate images with
+separate generations, transferred by the same mechanism in the same direction,
+and only the drawing runs the other way.
 
 A surface is transferred as native graphics resources, never as pixels: the
 Windows mechanism shares a D3D12 texture and fence, and the Linux one shares

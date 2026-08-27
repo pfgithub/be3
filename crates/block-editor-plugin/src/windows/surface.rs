@@ -1,4 +1,6 @@
-use block_plugin_api::{FrameReady, Message, ScreenLayout, WindowsSurfaceDescriptor};
+use block_plugin_api::{
+    FrameReady, Message, PreviewLayout, ScreenLayout, SurfaceRole, WindowsSurfaceDescriptor,
+};
 use eframe::egui_wgpu::wgpu;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::time::Instant;
@@ -22,6 +24,14 @@ const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 
 pub(crate) const SURFACE_KIND: &str = "DXGI";
 
+struct Previews {
+    texture: wgpu::Texture,
+    resource_handle: OwnedHandle,
+    generation: u64,
+    width: u32,
+    height: u32,
+}
+
 pub(crate) struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -34,6 +44,7 @@ pub(crate) struct Surface {
     fence_value: u64,
     request_id: u64,
     layout: ScreenLayout,
+    previews: Option<Previews>,
 }
 
 impl Surface {
@@ -69,7 +80,7 @@ impl Surface {
                 OwnedHandle::from_raw_handle(handle.0 as RawHandle)
             })
         };
-        let (texture, resource_handle) = shared_texture(&device, &layout)?;
+        let (texture, resource_handle) = shared_texture(&device, layout.width, layout.height)?;
         Ok(Self {
             device,
             queue,
@@ -82,6 +93,7 @@ impl Surface {
             fence_value: 0,
             request_id,
             layout,
+            previews: None,
         })
     }
 
@@ -91,7 +103,7 @@ impl Surface {
         layout: ScreenLayout,
         generation: u64,
     ) -> Result<Self, String> {
-        let (texture, resource_handle) = shared_texture(&self.device, &layout)?;
+        let (texture, resource_handle) = shared_texture(&self.device, layout.width, layout.height)?;
         self.texture = texture;
         self.resource_handle = resource_handle;
         self.request_id = request_id;
@@ -105,22 +117,15 @@ impl Surface {
     }
 
     pub(crate) fn descriptor(&self) -> Option<(Message, Vec<RawHandle>)> {
-        let luid = unsafe {
-            self.device
-                .as_hal::<wgpu_hal::api::Dx12>()
-                .unwrap()
-                .raw_device()
-                .GetAdapterLuid()
-        };
-        let adapter_luid = (luid.HighPart as u64) << 32 | luid.LowPart as u64;
         let descriptor = WindowsSurfaceDescriptor {
-            adapter_luid,
+            adapter_luid: self.adapter_luid(),
             texture_format: DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32,
             initial_fence_value: self.fence_value,
         }
         .surface(
             self.request_id,
             self.generation,
+            SurfaceRole::Screens,
             self.layout.width,
             self.layout.height,
         );
@@ -131,6 +136,69 @@ impl Surface {
                 self.fence_handle.as_raw_handle(),
             ],
         ))
+    }
+
+    fn adapter_luid(&self) -> u64 {
+        let luid = unsafe {
+            self.device
+                .as_hal::<wgpu_hal::api::Dx12>()
+                .unwrap()
+                .raw_device()
+                .GetAdapterLuid()
+        };
+        (luid.HighPart as u64) << 32 | luid.LowPart as u64
+    }
+
+    pub(crate) fn set_previews(
+        &mut self,
+        layout: &PreviewLayout,
+    ) -> Result<Option<(Message, Vec<RawHandle>)>, String> {
+        if layout.is_empty() {
+            self.previews = None;
+            return Ok(None);
+        }
+        if self.previews.as_ref().is_some_and(|previews| {
+            previews.width == layout.width && previews.height == layout.height
+        }) {
+            return Ok(None);
+        }
+        let generation = self
+            .previews
+            .as_ref()
+            .map_or(0, |previews| previews.generation)
+            + 1;
+        let (texture, resource_handle) = shared_texture(&self.device, layout.width, layout.height)?;
+        let adapter_luid = self.adapter_luid();
+        let fence_handle = self.fence_handle.as_raw_handle();
+        let previews = self.previews.insert(Previews {
+            texture,
+            resource_handle,
+            generation,
+            width: layout.width,
+            height: layout.height,
+        });
+        let descriptor = WindowsSurfaceDescriptor {
+            adapter_luid,
+            texture_format: DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32,
+            initial_fence_value: 0,
+        }
+        .surface(
+            self.request_id,
+            generation,
+            SurfaceRole::Previews,
+            previews.width,
+            previews.height,
+        );
+        Ok(Some((
+            Message::Surface(descriptor),
+            vec![previews.resource_handle.as_raw_handle(), fence_handle],
+        )))
+    }
+
+    fn preview_texture(&self) -> Option<(&wgpu::Texture, u64)> {
+        self.previews
+            .as_ref()
+            .map(|previews| (&previews.texture, previews.generation))
     }
 
     pub(crate) fn render(
@@ -149,12 +217,21 @@ impl Surface {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let encoder_elapsed = encoder_started.elapsed();
+        let previews = self.preview_texture().map(|(texture, generation)| {
+            (
+                texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                generation,
+            )
+        });
         let paint_started = Instant::now();
         let painted = self.panes.paint(
             &self.device,
             &self.queue,
             &mut encoder,
             &view,
+            previews
+                .as_ref()
+                .map(|(view, generation)| (view, *generation)),
             &self.layout,
             screens,
             phase,
@@ -190,11 +267,12 @@ impl Surface {
 
 fn shared_texture(
     device: &wgpu::Device,
-    layout: &ScreenLayout,
+    width: u32,
+    height: u32,
 ) -> Result<(wgpu::Texture, OwnedHandle), String> {
     let size = wgpu::Extent3d {
-        width: layout.width.max(1),
-        height: layout.height.max(1),
+        width: width.max(1),
+        height: height.max(1),
         depth_or_array_layers: 1,
     };
     let hal_device = unsafe { device.as_hal::<wgpu_hal::api::Dx12>() }

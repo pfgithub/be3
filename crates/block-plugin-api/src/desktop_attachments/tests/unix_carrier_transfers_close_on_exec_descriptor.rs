@@ -1,7 +1,7 @@
 use crate::{
     desktop_attachments::UnixAttachmentCarrier, AlphaMode, AttachmentDescriptor,
     AttachmentOwnership, AttachmentType, ColorFormat, ColorSpace, Message, SurfaceDescriptor,
-    SurfaceMechanism,
+    SurfaceMechanism, SurfaceRole,
 };
 use std::{fs::File, os::fd::AsRawFd, os::unix::net::UnixStream, thread};
 
@@ -12,6 +12,7 @@ fn unix_carrier_transfers_close_on_exec_descriptor() {
     let message = Message::Surface(SurfaceDescriptor {
         request_id: 1,
         generation: 2,
+        role: SurfaceRole::Screens,
         mechanism: SurfaceMechanism::LinuxDmaBuf,
         width: 1,
         height: 1,

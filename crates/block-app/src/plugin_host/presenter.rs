@@ -59,6 +59,8 @@ pub(super) trait SurfacePresenter {
 
     fn regions(&self) -> &Regions;
 
+    fn preview_texture(&self, surface: u32) -> Option<&wgpu::Texture>;
+
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32);
 
     fn release(&mut self, surface: u32);

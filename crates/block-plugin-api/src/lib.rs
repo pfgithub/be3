@@ -23,12 +23,14 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 26;
+pub const PROTOCOL_VERSION: u16 = 27;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
 pub const MAX_QUEUED_MESSAGES: usize = 256;
 pub const MAX_CHILDREN: usize = 256;
+pub const MAX_PREVIEWS: usize = 64;
+pub const MAX_PREVIEW_EDGE: u32 = 4096;
 pub const REQUEST_TIMEOUT_MILLISECONDS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +210,99 @@ pub struct ChildStatus {
     pub hovered: bool,
     pub active: bool,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewSlot {
+    pub instance: EditorInstanceId,
+    pub region: EditorRegion,
+    pub child: ChildId,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreviewRequest {
+    pub instance: EditorInstanceId,
+    pub region: EditorRegion,
+    pub child: ChildId,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewLayout {
+    pub generation: u64,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor_millis: u32,
+    pub slots: Vec<PreviewSlot>,
+}
+
+impl PreviewLayout {
+    pub fn packed(requests: &[PreviewRequest], scale_factor: f32) -> Self {
+        let mut layout = Self {
+            scale_factor_millis: (scale_factor * 1000.0).round().max(1.0) as u32,
+            ..Self::default()
+        };
+        let mut row_top = 0;
+        let mut row_height = 0;
+        let mut x = 0;
+        for request in requests.iter().take(MAX_PREVIEWS) {
+            let width = request.width.clamp(1, MAX_PREVIEW_EDGE);
+            let height = request.height.clamp(1, MAX_PREVIEW_EDGE);
+            if x > 0 && x + width > MAX_PREVIEW_EDGE {
+                row_top += row_height;
+                row_height = 0;
+                x = 0;
+            }
+            if row_top + height > MAX_PREVIEW_EDGE {
+                break;
+            }
+            layout.slots.push(PreviewSlot {
+                instance: request.instance,
+                region: request.region,
+                child: request.child,
+                x,
+                y: row_top,
+                width,
+                height,
+            });
+            x += width;
+            row_height = row_height.max(height);
+            layout.width = layout.width.max(x);
+            layout.height = layout.height.max(row_top + height);
+        }
+        layout
+    }
+
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor_millis as f32 / 1000.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0 || self.slots.is_empty()
+    }
+
+    pub fn slot(
+        &self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        child: ChildId,
+    ) -> Option<&PreviewSlot> {
+        self.slots
+            .iter()
+            .find(|slot| slot.instance == instance && slot.region == region && slot.child == child)
+    }
+
+    pub fn same_slots(&self, other: &Self) -> bool {
+        self.width == other.width
+            && self.height == other.height
+            && self.scale_factor_millis == other.scale_factor_millis
+            && self.slots == other.slots
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -654,6 +749,8 @@ pub enum Message {
     BlockTypes(Vec<BlockTypeDescriptor>),
     Children(ChildPlacements),
     ChildStatuses(Vec<ChildStatus>),
+    Previews(PreviewLayout),
+    PreviewsReady { generation: u64 },
 }
 
 impl Message {
@@ -701,6 +798,13 @@ pub enum Capability {
     Input,
     Lifecycle,
     Surface(SurfaceMechanism),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SurfaceRole {
+    #[default]
+    Screens,
+    Previews,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -806,6 +910,7 @@ pub struct Modifiers {
 pub struct SurfaceDescriptor {
     pub request_id: u64,
     pub generation: u64,
+    pub role: SurfaceRole,
     pub mechanism: SurfaceMechanism,
     pub width: u32,
     pub height: u32,
@@ -966,6 +1071,10 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             Ok(())
         }
         Message::Children(value) => validate_children(value),
+        Message::Previews(value) => match value.slots.len() > MAX_PREVIEWS {
+            true => Err(DecodeError::LimitExceeded("previews")),
+            false => Ok(()),
+        },
         Message::ChildStatuses(value) => {
             collection(value.len())?;
             for status in value {

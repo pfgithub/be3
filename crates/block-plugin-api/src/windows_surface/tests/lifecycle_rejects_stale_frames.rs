@@ -7,7 +7,7 @@ fn lifecycle_rejects_stale_frames() {
         texture_format: 87,
         initial_fence_value: 4,
     }
-    .surface(1, 2, 64, 32);
+    .surface(1, 2, SurfaceRole::Screens, 64, 32);
     let mut lifecycle = WindowsSurfaceLifecycle::default();
     lifecycle.replace(&surface).unwrap();
     assert_eq!(

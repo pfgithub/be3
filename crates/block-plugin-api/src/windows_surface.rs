@@ -1,6 +1,6 @@
 use crate::{
     AlphaMode, AttachmentDescriptor, AttachmentOwnership, AttachmentType, ColorFormat, ColorSpace,
-    SurfaceDescriptor, SurfaceMechanism,
+    SurfaceDescriptor, SurfaceMechanism, SurfaceRole,
 };
 use std::fmt;
 
@@ -73,12 +73,14 @@ impl WindowsSurfaceDescriptor {
         self,
         request_id: u64,
         generation: u64,
+        role: SurfaceRole,
         width: u32,
         height: u32,
     ) -> SurfaceDescriptor {
         SurfaceDescriptor {
             request_id,
             generation,
+            role,
             mechanism: SurfaceMechanism::WindowsDxgi,
             width,
             height,

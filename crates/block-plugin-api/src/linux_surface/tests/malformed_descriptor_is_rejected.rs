@@ -12,7 +12,7 @@ fn malformed_descriptor_is_rejected() {
             stride: 256,
         }],
     };
-    let mut surface = descriptor.surface(1, 2, 64, 32);
+    let mut surface = descriptor.surface(1, 2, SurfaceRole::Screens, 64, 32);
     surface.opaque.pop();
     assert_eq!(
         LinuxSurfaceDescriptor::decode(&surface),

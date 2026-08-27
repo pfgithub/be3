@@ -12,6 +12,6 @@ fn descriptor_round_trips() {
             stride: 256,
         }],
     };
-    let surface = descriptor.surface(1, 2, 64, 32);
+    let surface = descriptor.surface(1, 2, SurfaceRole::Screens, 64, 32);
     assert_eq!(LinuxSurfaceDescriptor::decode(&surface), Ok(descriptor));
 }

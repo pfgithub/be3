@@ -1,6 +1,6 @@
 use crate::{
     AlphaMode, AttachmentDescriptor, AttachmentOwnership, AttachmentType, ColorFormat, ColorSpace,
-    SurfaceDescriptor, SurfaceMechanism,
+    SurfaceDescriptor, SurfaceMechanism, SurfaceRole,
 };
 use std::fmt;
 
@@ -115,6 +115,7 @@ impl LinuxSurfaceDescriptor {
         &self,
         request_id: u64,
         generation: u64,
+        role: SurfaceRole,
         width: u32,
         height: u32,
     ) -> SurfaceDescriptor {
@@ -128,6 +129,7 @@ impl LinuxSurfaceDescriptor {
         SurfaceDescriptor {
             request_id,
             generation,
+            role,
             mechanism: SurfaceMechanism::LinuxDmaBuf,
             width,
             height,

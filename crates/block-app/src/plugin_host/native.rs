@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Instant};
 
-use block_plugin_api::{Message, PluginManifest, ScreenLayout};
+use block_plugin_api::{Message, PluginManifest, ScreenLayout, SurfaceRole};
 use eframe::egui;
 
 use super::{
@@ -59,12 +59,21 @@ impl Backend for Native {
                 Received::Message(message) => messages.push(message),
                 Received::Surface(event) => {
                     match &event {
-                        SurfaceEvent::Surface(descriptor, _) => {
+                        SurfaceEvent::Surface(descriptor, _)
+                            if descriptor.role == SurfaceRole::Screens =>
+                        {
                             if let Some(layout) = self.take_layout(descriptor.generation) {
                                 messages.push(Message::Layout(layout));
                             }
-                            self.pending.clear();
+                            self.pending.retain(|pending| {
+                                matches!(
+                                    pending,
+                                    SurfaceEvent::Surface(pending, _)
+                                        if pending.role == SurfaceRole::Previews
+                                )
+                            });
                         }
+                        SurfaceEvent::Surface(_, _) => {}
                         SurfaceEvent::Frame(frame) => {
                             messages.push(Message::FrameReady(frame.clone()));
                             if matches!(self.pending.last(), Some(SurfaceEvent::Frame(_))) {

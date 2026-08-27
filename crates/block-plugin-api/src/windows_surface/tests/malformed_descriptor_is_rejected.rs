@@ -7,7 +7,7 @@ fn malformed_descriptor_is_rejected() {
         texture_format: 87,
         initial_fence_value: 4,
     }
-    .surface(1, 2, 64, 32);
+    .surface(1, 2, SurfaceRole::Screens, 64, 32);
     surface.opaque.pop();
     assert_eq!(
         WindowsSurfaceDescriptor::decode(&surface),

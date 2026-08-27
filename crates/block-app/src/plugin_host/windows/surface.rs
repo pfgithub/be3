@@ -2,7 +2,7 @@ use crate::plugin_host::{
     presenter::{Regions, SurfacePresenter},
     process::SurfaceEvent,
 };
-use block_plugin_api::{SurfaceDescriptor, WindowsSurfaceLifecycle};
+use block_plugin_api::{SurfaceDescriptor, SurfaceRole, WindowsSurfaceLifecycle};
 use eframe::egui_wgpu::wgpu;
 use std::{
     collections::HashMap,
@@ -29,6 +29,8 @@ struct ImportedSurface {
 struct Surface {
     lifecycle: WindowsSurfaceLifecycle,
     imported: Option<ImportedSurface>,
+    previews: WindowsSurfaceLifecycle,
+    preview_texture: Option<wgpu::Texture>,
 }
 
 pub(crate) struct WindowsSurfacePresenter {
@@ -131,11 +133,12 @@ impl WindowsSurfacePresenter {
         if handles.len() != 2 {
             return Err("Windows DXGI surface did not include texture and fence handles".into());
         }
-        let descriptor = self
-            .surfaces
-            .entry(index)
-            .or_default()
-            .lifecycle
+        let entry = self.surfaces.entry(index).or_default();
+        let lifecycle = match surface.role {
+            SurfaceRole::Screens => &mut entry.lifecycle,
+            SurfaceRole::Previews => &mut entry.previews,
+        };
+        let descriptor = lifecycle
             .replace(surface)
             .map_err(|error| error.to_string())?;
         let hal_device = unsafe { device.as_hal::<wgpu_hal::api::Dx12>() }
@@ -191,6 +194,10 @@ impl WindowsSurfacePresenter {
                 },
             )
         };
+        if surface.role == SurfaceRole::Previews {
+            self.surfaces.entry(index).or_default().preview_texture = Some(texture);
+            return Ok(());
+        }
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Windows plugin surface bind group"),
@@ -278,6 +285,10 @@ impl SurfacePresenter for WindowsSurfacePresenter {
         &self.regions
     }
 
+    fn preview_texture(&self, index: u32) -> Option<&wgpu::Texture> {
+        self.surfaces.get(&index)?.preview_texture.as_ref()
+    }
+
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, index: u32, slot: u32) {
         if let Some(imported) = self
             .surfaces
@@ -294,7 +305,9 @@ impl SurfacePresenter for WindowsSurfacePresenter {
     fn release(&mut self, index: u32) {
         if let Some(surface) = self.surfaces.get_mut(&index) {
             surface.imported = None;
+            surface.preview_texture = None;
             surface.lifecycle.release();
+            surface.previews.release();
         }
     }
 }

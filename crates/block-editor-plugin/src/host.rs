@@ -111,6 +111,28 @@ impl Drop for PerformanceMeasurementGuard {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct PreviewAtlas {
+    pub(crate) texture: Option<egui::TextureId>,
+    pub(crate) size: egui::Vec2,
+    pub(crate) slots: HashMap<(EditorRegion, ChildId), egui::Rect>,
+}
+
+impl PreviewAtlas {
+    fn brush(&self, region: EditorRegion, child: ChildId) -> Option<(egui::TextureId, egui::Rect)> {
+        let texture = self.texture?;
+        let slot = self.slots.get(&(region, child))?;
+        if self.size.x <= 0.0 || self.size.y <= 0.0 {
+            return None;
+        }
+        let uv = egui::Rect::from_min_max(
+            egui::pos2(slot.min.x / self.size.x, slot.min.y / self.size.y),
+            egui::pos2(slot.max.x / self.size.x, slot.max.y / self.size.y),
+        );
+        Some((texture, uv))
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Region {
     region: Option<EditorRegion>,
@@ -131,6 +153,7 @@ pub struct ChildHandle {
     host: EditorHost,
     index: usize,
     child: ChildId,
+    region: EditorRegion,
     painter: egui::Painter,
     shape: egui::layers::ShapeIdx,
     rect: egui::Rect,
@@ -193,9 +216,14 @@ impl ChildHandle {
             placement.corner_radius = radius;
             placement.layer
         });
-        if layer == Some(ChildLayer::Below) {
-            self.painter.set(self.shape, punch_shape(self.rect, radius));
-        }
+        let Some(layer) = layer else {
+            return;
+        };
+        self.painter.set(
+            self.shape,
+            self.host
+                .child_shape(self.region, self.child, self.rect, radius, layer),
+        );
     }
 }
 
@@ -223,6 +251,7 @@ pub struct EditorHost {
     next_block_pick: Rc<Cell<u64>>,
     presenting: Rc<Cell<bool>>,
     present_requests: Rc<RefCell<Vec<bool>>>,
+    previews: Rc<RefCell<PreviewAtlas>>,
 }
 
 impl EditorHost {
@@ -359,10 +388,6 @@ impl EditorHost {
     ) -> ChildHandle {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let painter = ui.painter().clone();
-        let shape = painter.add(match layer {
-            ChildLayer::Below => punch_shape(rect, 0.0),
-            ChildLayer::Above => egui::Shape::Noop,
-        });
         let state = self.region.get();
         let region = state.region.unwrap_or(EditorRegion::Main);
         let mut children = self.children.borrow_mut();
@@ -383,6 +408,7 @@ impl EditorHost {
             }
         };
         children.used.push(key);
+        let shape = painter.add(self.child_shape(region, child, rect, 0.0, layer));
         let index = children.placements.len();
         children.placements.push(ChildPlacement {
             child,
@@ -399,11 +425,31 @@ impl EditorHost {
             host: self.clone(),
             index,
             child,
+            region,
             painter,
             shape,
             rect,
             status: self.child_statuses.borrow().get(&child).cloned(),
             response,
+        }
+    }
+
+    fn child_shape(
+        &self,
+        region: EditorRegion,
+        child: ChildId,
+        rect: egui::Rect,
+        radius: f32,
+        layer: ChildLayer,
+    ) -> egui::Shape {
+        if let Some((texture, uv)) = self.previews.borrow().brush(region, child) {
+            return egui::epaint::RectShape::filled(rect, radius, egui::Color32::WHITE)
+                .with_texture(texture, uv)
+                .into();
+        }
+        match layer {
+            ChildLayer::Below => punch_shape(rect, radius),
+            ChildLayer::Above => egui::Shape::Noop,
         }
     }
 
@@ -518,6 +564,22 @@ impl EditorHost {
         self.child_statuses
             .borrow_mut()
             .retain(|child, _| live.contains(child));
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn set_preview_slots(
+        &self,
+        size: egui::Vec2,
+        slots: HashMap<(EditorRegion, ChildId), egui::Rect>,
+    ) {
+        let mut previews = self.previews.borrow_mut();
+        previews.size = size;
+        previews.slots = slots;
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    pub(crate) fn set_preview_texture(&self, texture: Option<egui::TextureId>) {
+        self.previews.borrow_mut().texture = texture;
     }
 
     #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]

@@ -12,7 +12,7 @@ fn lifecycle_rejects_stale_frames() {
             stride: 256,
         }],
     }
-    .surface(1, 2, 64, 32);
+    .surface(1, 2, SurfaceRole::Screens, 64, 32);
     let mut lifecycle = LinuxSurfaceLifecycle::default();
     lifecycle.replace(&surface).unwrap();
     assert_eq!(

@@ -525,24 +525,7 @@ impl Instances {
         };
         let changed = screen.children != table;
         screen.children = table;
-        if region != EditorRegion::Preview {
-            return (Vec::new(), changed);
-        }
-        let statuses = screen
-            .children
-            .children
-            .iter()
-            .map(|child| HostChildStatus {
-                child: child.child,
-                available: false,
-                intrinsic: None,
-                aspect_ratio: None,
-                hovered: false,
-                active: false,
-                error: Some(NO_CHILDREN_IN_PREVIEWS.to_owned()),
-            })
-            .collect();
-        (self.set_child_statuses(instance, region, statuses), changed)
+        (Vec::new(), changed)
     }
 
     pub(super) fn host_children(
@@ -572,9 +555,12 @@ impl Instances {
             if child.rect.is_empty() {
                 continue;
             }
-            let requested = match child.mode {
-                ChildMode::Active if screen.revoked.contains(&child.child) => ChildMode::Passive,
-                mode => mode,
+            let requested = match (region, child.mode) {
+                (EditorRegion::Preview, _) => ChildMode::Preview,
+                (_, ChildMode::Active) if screen.revoked.contains(&child.child) => {
+                    ChildMode::Passive
+                }
+                (_, mode) => mode,
             };
             let mode = match requested {
                 ChildMode::Preview => ChildMode::Preview,
@@ -1150,8 +1136,6 @@ impl Instances {
         connection.tunnel.send(payload);
     }
 }
-
-const NO_CHILDREN_IN_PREVIEWS: &str = "a preview region does not composite children";
 
 fn host_rect(
     rect: block_plugin_api::ChildRect,

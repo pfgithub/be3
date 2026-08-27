@@ -1,6 +1,7 @@
 use ash::vk;
 use block_plugin_api::{
-    FrameReady, LinuxSurfaceDescriptor, LinuxSurfacePlane, Message, ScreenLayout,
+    FrameReady, LinuxSurfaceDescriptor, LinuxSurfacePlane, Message, PreviewLayout, ScreenLayout,
+    SurfaceRole,
 };
 use eframe::egui_wgpu::wgpu;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -14,6 +15,15 @@ const DRM_FORMAT_MOD_LINEAR: u64 = 0;
 
 pub(crate) const SURFACE_KIND: &str = "dma-buf";
 
+struct Previews {
+    texture: wgpu::Texture,
+    memory: OwnedFd,
+    plane: LinuxSurfacePlane,
+    generation: u64,
+    width: u32,
+    height: u32,
+}
+
 pub(crate) struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -26,6 +36,7 @@ pub(crate) struct Surface {
     frame: u32,
     request_id: u64,
     layout: ScreenLayout,
+    previews: Option<Previews>,
 }
 
 impl Surface {
@@ -49,7 +60,7 @@ impl Surface {
         }))
         .map_err(|error| error.to_string())?;
         let device_id = device_id(&device)?;
-        let (texture, memory, plane) = exported_texture(&device, &layout)?;
+        let (texture, memory, plane) = exported_texture(&device, layout.width, layout.height)?;
         Ok(Self {
             device,
             queue,
@@ -62,6 +73,7 @@ impl Surface {
             frame: 0,
             request_id,
             layout,
+            previews: None,
         })
     }
 
@@ -71,7 +83,7 @@ impl Surface {
         layout: ScreenLayout,
         generation: u64,
     ) -> Result<Self, String> {
-        let (texture, memory, plane) = exported_texture(&self.device, &layout)?;
+        let (texture, memory, plane) = exported_texture(&self.device, layout.width, layout.height)?;
         self.texture = texture;
         self.memory = memory;
         self.plane = plane;
@@ -96,10 +108,64 @@ impl Surface {
         .surface(
             self.request_id,
             self.generation,
+            SurfaceRole::Screens,
             self.layout.width,
             self.layout.height,
         );
         Some((Message::Surface(descriptor), vec![self.memory.as_raw_fd()]))
+    }
+
+    pub(crate) fn set_previews(
+        &mut self,
+        layout: &PreviewLayout,
+    ) -> Result<Option<(Message, Vec<RawFd>)>, String> {
+        if layout.is_empty() {
+            self.previews = None;
+            return Ok(None);
+        }
+        if self.previews.as_ref().is_some_and(|previews| {
+            previews.width == layout.width && previews.height == layout.height
+        }) {
+            return Ok(None);
+        }
+        let generation = self
+            .previews
+            .as_ref()
+            .map_or(0, |previews| previews.generation)
+            + 1;
+        let (texture, memory, plane) = exported_texture(&self.device, layout.width, layout.height)?;
+        let previews = self.previews.insert(Previews {
+            texture,
+            memory,
+            plane,
+            generation,
+            width: layout.width,
+            height: layout.height,
+        });
+        let descriptor = LinuxSurfaceDescriptor {
+            drm_format: DRM_FORMAT_ARGB8888,
+            modifier: DRM_FORMAT_MOD_LINEAR,
+            synchronization_value: 1,
+            device: self.device_id,
+            planes: vec![previews.plane],
+        }
+        .surface(
+            self.request_id,
+            generation,
+            SurfaceRole::Previews,
+            previews.width,
+            previews.height,
+        );
+        Ok(Some((
+            Message::Surface(descriptor),
+            vec![previews.memory.as_raw_fd()],
+        )))
+    }
+
+    fn preview_texture(&self) -> Option<(&wgpu::Texture, u64)> {
+        self.previews
+            .as_ref()
+            .map(|previews| (&previews.texture, previews.generation))
     }
 
     pub(crate) fn render(
@@ -113,11 +179,20 @@ impl Surface {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let previews = self.preview_texture().map(|(texture, generation)| {
+            (
+                texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                generation,
+            )
+        });
         let painted = self.panes.paint(
             &self.device,
             &self.queue,
             &mut encoder,
             &view,
+            previews
+                .as_ref()
+                .map(|(view, generation)| (view, *generation)),
             &self.layout,
             screens,
             phase,
@@ -154,11 +229,12 @@ fn device_id(device: &wgpu::Device) -> Result<[u8; 16], String> {
 
 fn exported_texture(
     device: &wgpu::Device,
-    layout: &ScreenLayout,
+    width: u32,
+    height: u32,
 ) -> Result<(wgpu::Texture, OwnedFd, LinuxSurfacePlane), String> {
     let size = wgpu::Extent3d {
-        width: layout.width.max(1),
-        height: layout.height.max(1),
+        width: width.max(1),
+        height: height.max(1),
         depth_or_array_layers: 1,
     };
     let hal_device = unsafe { device.as_hal::<wgpu_hal::api::Vulkan>() }

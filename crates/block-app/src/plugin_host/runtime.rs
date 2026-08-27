@@ -6,8 +6,8 @@ use std::{
 };
 
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, EditorInstanceId, EditorMessage, EditorRegion, Message,
-    PluginManifest, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
+    ArtifactDescription, BlockPick, ChildId, EditorInstanceId, EditorMessage, EditorRegion,
+    Message, PluginManifest, PreviewLayout, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -18,9 +18,9 @@ use super::{
     presenter::{
         PresenterCallback, PresenterState, PresenterStatus, Quad, Region, Shared, MAX_SURFACES,
     },
-    preview_size, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot, CreationState,
-    EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole, PreviewSlot, RuntimeStatus,
-    SurfaceStatus,
+    preview_size, previews, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot,
+    CreationState, EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole,
+    PreviewPresentation, PreviewSlot, PreviewTarget, RuntimeStatus, SurfaceStatus,
 };
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -35,6 +35,7 @@ type Frame = <Platform as Backend>::Frame;
 const NOT_INSTALLED: &str = "The plugin host is not installed.";
 const CROWDED: &str = "Too many plugin runtimes are already presenting.";
 const FRAME_TIMEOUT_SECONDS: f64 = 1.0;
+const SETTLED_PREVIEW_FRAMES: u32 = 3;
 
 pub(super) trait Backend: Sized {
     type Frame: Send + Sync + 'static;
@@ -132,6 +133,7 @@ impl Host {
 
 pub(super) struct Runtime {
     pub(super) context: egui::Context,
+    plugin_id: String,
     pub(super) backend: Platform,
     pub(super) instances: Instances,
     pub(super) layout: ScreenLayout,
@@ -145,6 +147,8 @@ pub(super) struct Runtime {
     needed: bool,
     paint_at: Option<f64>,
     requested_at: Option<f64>,
+    previews: PreviewLayout,
+    preview_frames: u32,
 }
 
 impl Runtime {
@@ -153,6 +157,7 @@ impl Runtime {
         backend.start(plugin, context);
         Self {
             context: context.clone(),
+            plugin_id: plugin.identity.id.clone(),
             backend,
             instances: Instances::default(),
             layout: ScreenLayout::default(),
@@ -166,6 +171,8 @@ impl Runtime {
             needed: false,
             paint_at: None,
             requested_at: None,
+            previews: PreviewLayout::default(),
+            preview_frames: 0,
         }
     }
 
@@ -177,6 +184,8 @@ impl Runtime {
         self.needed = false;
         self.paint_at = None;
         self.requested_at = None;
+        self.previews = PreviewLayout::default();
+        self.preview_frames = 0;
         self.instances.reopen();
         self.backend.start(plugin, &self.context);
     }
@@ -282,6 +291,11 @@ impl Runtime {
                     self.await_next_frame(frame.repaint_after_micros);
                     false
                 }
+                Message::Previews(layout) => {
+                    self.previews = layout;
+                    self.preview_frames = 0;
+                    true
+                }
                 Message::RegionSizes(sizes) => self.instances.set_region_sizes(sizes),
                 Message::Children(placements) => {
                     let (answered, changed) = self.instances.set_children(placements);
@@ -335,11 +349,25 @@ impl Runtime {
 
     fn flush(&mut self) {
         self.pump();
+        self.draw_previews();
         if !std::mem::take(&mut self.presented) {
             return;
         }
         let frame = self.backend.frame(&self.layout, self.pass);
         self.shared.lock().unwrap().publish(&self.layout, frame);
+    }
+
+    fn draw_previews(&mut self) {
+        let plugin_id = self.plugin_id.clone();
+        if !previews::render(&self.context, &plugin_id, self.surface, &self.previews) {
+            return;
+        }
+        self.preview_frames += 1;
+        if self.preview_frames == 1 {
+            let generation = self.previews.generation;
+            self.send(vec![Message::PreviewsReady { generation }]);
+            self.context.request_repaint();
+        }
     }
 
     fn state(&self) -> String {
@@ -355,6 +383,7 @@ impl Runtime {
 
 pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     let availability = Platform::install(creation_context);
+    previews::install(creation_context);
     HOST.with(|host| {
         host.borrow_mut().availability = availability;
     });
@@ -602,7 +631,7 @@ pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> Artif
     })
 }
 
-pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
+pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> PreviewPresentation {
     let PreviewSlot {
         plugin,
         block_types,
@@ -617,10 +646,10 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         let Ok(runtime) = host.runtime(plugin, &context) else {
-            return false;
+            return PreviewPresentation::empty();
         };
         if runtime.error.is_some() {
-            return false;
+            return PreviewPresentation::empty();
         }
         let rect = egui::Rect::from_points(&corners);
         let scale_factor = context.pixels_per_point();
@@ -650,15 +679,39 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> bool {
             scale_factor,
             pass,
         );
+        let (children, _) = runtime.instances.host_children(
+            instance,
+            EditorRegion::Preview,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, size),
+            egui::Rect::EVERYTHING,
+        );
         let Some((quad, _)) = cropped else {
-            return false;
+            return PreviewPresentation {
+                drawn: false,
+                size,
+                children,
+            };
         };
-        if Region::of(&runtime.layout, runtime.surface, screen, quad).is_none() {
-            return false;
+        let placed = Region::of(&runtime.layout, runtime.surface, screen, quad).is_some();
+        if placed {
+            painter.add(runtime.present(quad.rect.intersect(painter.clip_rect()), screen, quad));
         }
-        painter.add(runtime.present(quad.rect.intersect(painter.clip_rect()), screen, quad));
-        true
+        PreviewPresentation {
+            drawn: placed,
+            size,
+            children,
+        }
     })
+}
+
+impl PreviewPresentation {
+    fn empty() -> Self {
+        Self {
+            drawn: false,
+            size: egui::Vec2::ZERO,
+            children: Vec::new(),
+        }
+    }
 }
 
 pub(crate) fn poll(context: &egui::Context) {
@@ -755,6 +808,42 @@ pub(crate) fn take_created(
         runtime.instances.take_created(instance)
     })
     .flatten()
+}
+
+pub(crate) fn preview_target(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    region: EditorRegion,
+    child: ChildId,
+) -> PreviewTarget {
+    with(plugin_id, |runtime| {
+        let Some(slot) = runtime.previews.slot(instance, region, child) else {
+            return PreviewTarget {
+                atlas: None,
+                composite: true,
+            };
+        };
+        let scale = runtime.previews.scale_factor().max(f32::EPSILON);
+        PreviewTarget {
+            atlas: Some(egui::Rect::from_min_size(
+                egui::pos2(slot.x as f32 / scale, slot.y as f32 / scale),
+                egui::vec2(slot.width as f32 / scale, slot.height as f32 / scale),
+            )),
+            composite: runtime.preview_frames < SETTLED_PREVIEW_FRAMES,
+        }
+    })
+    .unwrap_or(PreviewTarget {
+        atlas: None,
+        composite: true,
+    })
+}
+
+pub(crate) fn preview_painter(
+    context: &egui::Context,
+    plugin_id: &str,
+    rect: egui::Rect,
+) -> egui::Painter {
+    previews::painter(context, plugin_id, rect)
 }
 
 pub(crate) fn presenting(plugin_id: &str, instance: EditorInstanceId) -> bool {

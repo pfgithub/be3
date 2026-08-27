@@ -1,7 +1,7 @@
 use block_client::{BlockClient, TunnelCarrier};
 use block_plugin_api::{
     BlockTypeDescriptor, ChildStatus, EditorInstanceId, EditorMessage, EditorRegion, Message,
-    ScreenId, ScreenLayout, ScreenRequest, TunnelMessage,
+    PreviewLayout, PreviewRequest, ScreenId, ScreenLayout, ScreenRequest, TunnelMessage,
 };
 use block_ui::{BlockCatalog, BlockTypeEntry};
 use eframe::egui;
@@ -75,6 +75,37 @@ impl Screens {
 
     pub(crate) fn layout(&self) -> &ScreenLayout {
         &self.layout
+    }
+
+    pub(crate) fn scale_factor(&self) -> f32 {
+        self.layout
+            .screens
+            .first()
+            .map_or(1.0, |placement| placement.scale_factor())
+    }
+
+    pub(crate) fn preview_requests(&self) -> Vec<PreviewRequest> {
+        let mut requests = Vec::new();
+        for session in self.sessions.values() {
+            session.preview_requests(&mut requests);
+        }
+        requests.sort_by_key(|request| {
+            (
+                request.instance.0,
+                EditorRegion::ALL
+                    .iter()
+                    .position(|region| *region == request.region)
+                    .unwrap_or_default(),
+                request.child.0,
+            )
+        });
+        requests
+    }
+
+    pub(crate) fn set_previews(&self, layout: &PreviewLayout) {
+        for session in self.sessions.values() {
+            session.set_previews(layout);
+        }
     }
 
     pub(crate) fn set_generation(&mut self, generation: u64) {

@@ -130,6 +130,13 @@ impl Surface {
         None
     }
 
+    pub(crate) fn set_previews(
+        &mut self,
+        _layout: &block_plugin_api::PreviewLayout,
+    ) -> Result<Option<(Message, Vec<Attachment>)>, String> {
+        Ok(None)
+    }
+
     pub(crate) fn render(
         &mut self,
         screens: &mut Screens,
@@ -159,6 +166,7 @@ impl Surface {
             &self.gpu.queue,
             &mut encoder,
             &view,
+            None,
             &self.layout,
             screens,
             phase,

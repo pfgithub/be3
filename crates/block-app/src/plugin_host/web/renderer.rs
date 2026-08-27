@@ -246,6 +246,10 @@ impl SurfacePresenter for WebSurfacePresenter {
         &self.regions
     }
 
+    fn preview_texture(&self, _surface: u32) -> Option<&wgpu::Texture> {
+        None
+    }
+
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32) {
         self.blit(render_pass, surface, slot);
     }

@@ -16,7 +16,8 @@
   "regions": [
     "Main",
     "Toolbar",
-    "LeftSidebar"
+    "LeftSidebar",
+    "Preview"
   ],
   "entry_points": {
     "web": "presentation.js",

@@ -77,6 +77,10 @@ impl SurfacePresenter for UnavailablePresenter {
         match *self {}
     }
 
+    fn preview_texture(&self, _surface: u32) -> Option<&wgpu::Texture> {
+        match *self {}
+    }
+
     fn paint(&self, _render_pass: &mut wgpu::RenderPass<'static>, _surface: u32, _slot: u32) {
         match *self {}
     }

@@ -5,6 +5,7 @@ use crate::plugin_host::{
 use ash::vk;
 use block_plugin_api::{
     LinuxSurfaceDescriptor, LinuxSurfaceLifecycle, LinuxSurfacePlane, SurfaceDescriptor,
+    SurfaceRole,
 };
 use eframe::egui_wgpu::wgpu;
 use std::{
@@ -32,6 +33,8 @@ struct ImportedSurface {
 struct Surface {
     lifecycle: LinuxSurfaceLifecycle,
     imported: Option<ImportedSurface>,
+    previews: LinuxSurfaceLifecycle,
+    preview_texture: Option<wgpu::Texture>,
 }
 
 pub(crate) struct LinuxSurfacePresenter {
@@ -131,11 +134,12 @@ impl LinuxSurfacePresenter {
         surface: &SurfaceDescriptor,
         planes: &[OwnedFd],
     ) -> Result<(), String> {
-        let descriptor = self
-            .surfaces
-            .entry(index)
-            .or_default()
-            .lifecycle
+        let entry = self.surfaces.entry(index).or_default();
+        let lifecycle = match surface.role {
+            SurfaceRole::Screens => &mut entry.lifecycle,
+            SurfaceRole::Previews => &mut entry.previews,
+        };
+        let descriptor = lifecycle
             .replace(surface)
             .map_err(|error| error.to_string())?;
         if descriptor.planes.len() != planes.len() {
@@ -149,7 +153,28 @@ impl LinuxSurfacePresenter {
         {
             return Err("the plugin surface is not a linear BGRA image".into());
         }
-        let texture = self.texture(device, surface, &descriptor, plane, &planes[0])?;
+        if surface.role == SurfaceRole::Previews {
+            let texture = self.texture(
+                device,
+                surface,
+                &descriptor,
+                plane,
+                &planes[0],
+                wgpu::TextureUses::COLOR_TARGET,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+            )?;
+            self.surfaces.entry(index).or_default().preview_texture = Some(texture);
+            return Ok(());
+        }
+        let texture = self.texture(
+            device,
+            surface,
+            &descriptor,
+            plane,
+            &planes[0],
+            wgpu::TextureUses::RESOURCE,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        )?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Linux plugin surface bind group"),
@@ -176,6 +201,7 @@ impl LinuxSurfacePresenter {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn texture(
         &self,
         device: &wgpu::Device,
@@ -183,6 +209,8 @@ impl LinuxSurfacePresenter {
         descriptor: &LinuxSurfaceDescriptor,
         placement: &LinuxSurfacePlane,
         plane: &OwnedFd,
+        hal_usage: wgpu::TextureUses,
+        usage: wgpu::TextureUsages,
     ) -> Result<wgpu::Texture, String> {
         let size = wgpu::Extent3d {
             width: surface.width,
@@ -222,7 +250,7 @@ impl LinuxSurfacePresenter {
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::LINEAR)
-            .usage(vk::ImageUsageFlags::SAMPLED)
+            .usage(image_usage(usage))
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .push_next(&mut external);
@@ -247,7 +275,7 @@ impl LinuxSurfacePresenter {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: TEXTURE_FORMAT,
-                    usage: wgpu::TextureUses::RESOURCE,
+                    usage: hal_usage,
                     memory_flags: wgpu_hal::MemoryFlags::empty(),
                     view_formats: Vec::new(),
                 },
@@ -265,11 +293,18 @@ impl LinuxSurfacePresenter {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: TEXTURE_FORMAT,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    usage,
                     view_formats: &[],
                 },
             )
         })
+    }
+}
+
+fn image_usage(usage: wgpu::TextureUsages) -> vk::ImageUsageFlags {
+    match usage.contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
+        true => vk::ImageUsageFlags::COLOR_ATTACHMENT,
+        false => vk::ImageUsageFlags::SAMPLED,
     }
 }
 
@@ -409,6 +444,10 @@ impl SurfacePresenter for LinuxSurfacePresenter {
         &self.regions
     }
 
+    fn preview_texture(&self, index: u32) -> Option<&wgpu::Texture> {
+        self.surfaces.get(&index)?.preview_texture.as_ref()
+    }
+
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, index: u32, slot: u32) {
         if let Some(imported) = self
             .surfaces
@@ -425,7 +464,9 @@ impl SurfacePresenter for LinuxSurfacePresenter {
     fn release(&mut self, index: u32) {
         if let Some(surface) = self.surfaces.get_mut(&index) {
             surface.imported = None;
+            surface.preview_texture = None;
             surface.lifecycle.release();
+            surface.previews.release();
         }
     }
 }

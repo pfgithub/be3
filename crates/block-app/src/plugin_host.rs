@@ -15,6 +15,7 @@ mod linux;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod native;
 mod presenter;
+mod previews;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod process;
 mod runtime;
@@ -33,8 +34,8 @@ use windows as platform;
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
     creation_ready, editor_ui, flush, install, intrinsic_size, kill, poll, present, presenting,
-    preview, regenerate_artifact, region_size, running, take_artifact_outcome, take_block_pick,
-    take_created, take_view_changes,
+    preview, preview_painter, preview_target, regenerate_artifact, region_size, report_children,
+    running, take_artifact_outcome, take_block_pick, take_created, take_view_changes,
 };
 
 pub(crate) const MAX_LIVE_CHILDREN: usize = 16;
@@ -61,6 +62,17 @@ impl HostChild {
     pub(crate) fn is_preview(&self) -> bool {
         matches!(self.mode, ChildMode::Preview)
     }
+}
+
+pub(crate) struct PreviewPresentation {
+    pub(crate) drawn: bool,
+    pub(crate) size: egui::Vec2,
+    pub(crate) children: Vec<HostChild>,
+}
+
+pub(crate) struct PreviewTarget {
+    pub(crate) atlas: Option<egui::Rect>,
+    pub(crate) composite: bool,
 }
 
 pub(crate) struct HostChildStatus {

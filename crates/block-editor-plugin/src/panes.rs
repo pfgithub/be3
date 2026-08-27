@@ -16,6 +16,8 @@ struct Pane {
     context: egui::Context,
     renderer: egui_wgpu::Renderer,
     freed: Vec<egui::TextureId>,
+    previews: Option<egui::TextureId>,
+    preview_generation: u64,
 }
 
 impl Pane {
@@ -45,7 +47,35 @@ impl Pane {
             context,
             renderer,
             freed: Vec::new(),
+            previews: None,
+            preview_generation: 0,
         }
+    }
+
+    fn set_previews(&mut self, device: &wgpu::Device, previews: Option<(&wgpu::TextureView, u64)>) {
+        let Some((view, generation)) = previews else {
+            self.previews = None;
+            self.preview_generation = 0;
+            return;
+        };
+        if self.previews.is_some() && self.preview_generation == generation {
+            return;
+        }
+        self.preview_generation = generation;
+        self.previews = Some(match self.previews {
+            Some(id) => {
+                self.renderer.update_egui_texture_from_wgpu_texture(
+                    device,
+                    view,
+                    wgpu::FilterMode::Linear,
+                    id,
+                );
+                id
+            }
+            None => self
+                .renderer
+                .register_native_texture(device, view, wgpu::FilterMode::Linear),
+        });
     }
 }
 
@@ -255,6 +285,7 @@ impl Panes {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
+        previews: Option<(&wgpu::TextureView, u64)>,
         layout: &ScreenLayout,
         screens: &mut Screens,
         time: f64,
@@ -284,6 +315,8 @@ impl Panes {
             if let Some(punch) = pane.renderer.callback_resources.get_mut::<PunchResources>() {
                 punch.next = 0;
             }
+            pane.set_previews(device, previews);
+            session.set_preview_texture(pane.previews);
             let pane_started = Instant::now();
             let session_started = Instant::now();
             let output = session.run(placement.region, &pane.context, time, layout.generation);
