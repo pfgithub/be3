@@ -14,8 +14,8 @@ pub use attachment::{
     AttachmentType, MAX_ATTACHMENTS,
 };
 pub use linux_surface::{
-    LinuxGraphicsBackend, LinuxSurfaceDescriptor, LinuxSurfaceError, LinuxSurfaceLifecycle,
-    LinuxSurfacePlane, LinuxSurfaceState,
+    LinuxGraphicsBackend, LinuxSurfaceBuffer, LinuxSurfaceDescriptor, LinuxSurfaceError,
+    LinuxSurfaceLifecycle, LinuxSurfaceState,
 };
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 28;
+pub const PROTOCOL_VERSION: u16 = 29;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -31,6 +31,25 @@ pub const MAX_QUEUED_MESSAGES: usize = 256;
 pub const MAX_CHILDREN: usize = 256;
 pub const MAX_PREVIEWS: usize = 64;
 pub const MAX_PREVIEW_EDGE: u32 = 4096;
+pub const SURFACE_BUFFERS: usize = 3;
+pub const MAX_SURFACE_BUFFERS: usize = 4;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SurfaceRotation {
+    next: usize,
+}
+
+impl SurfaceRotation {
+    pub fn advance(&mut self, buffers: usize) -> usize {
+        let buffer = self.next % buffers.max(1);
+        self.next = buffer + 1;
+        buffer
+    }
+
+    pub fn restart(&mut self) {
+        self.next = 0;
+    }
+}
 pub const REQUEST_TIMEOUT_MILLISECONDS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -967,6 +986,7 @@ pub enum AlphaMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameReady {
     pub generation: u64,
+    pub buffer: u32,
     pub damage: Vec<DamageRect>,
     pub synchronization_value: u64,
     pub repaint_after_micros: Option<u64>,
@@ -1082,7 +1102,10 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             if value.attachments.len() > MAX_ATTACHMENTS {
                 return Err(DecodeError::LimitExceeded("frame attachments"));
             }
-            Ok(())
+            match value.buffer as usize >= MAX_SURFACE_BUFFERS {
+                true => Err(DecodeError::LimitExceeded("frame buffer")),
+                false => Ok(()),
+            }
         }
         Message::Editor(value) => validate_editor(value),
         Message::BlockTypes(value) => {

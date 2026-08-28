@@ -81,6 +81,7 @@ mod rejects_malformed_payload;
 mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
 mod rejects_unordered_occluders;
+mod rotation_leaves_shown_buffers_alone;
 mod show_region_messages_round_trip;
 mod stacked_layout_keeps_each_region;
 mod stacked_layout_stacks_screens;

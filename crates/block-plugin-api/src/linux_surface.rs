@@ -1,13 +1,12 @@
 use crate::{
     AlphaMode, AttachmentDescriptor, AttachmentOwnership, AttachmentType, ColorFormat, ColorSpace,
-    SurfaceDescriptor, SurfaceMechanism, SurfaceRole,
+    SurfaceDescriptor, SurfaceMechanism, SurfaceRole, MAX_SURFACE_BUFFERS,
 };
 use std::fmt;
 
 const DESCRIPTOR_VERSION: u16 = 1;
 const HEADER_LENGTH: usize = 35;
-const PLANE_LENGTH: usize = 8;
-const MAX_PLANES: usize = 4;
+const BUFFER_LENGTH: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinuxGraphicsBackend {
@@ -17,7 +16,7 @@ pub enum LinuxGraphicsBackend {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinuxSurfacePlane {
+pub struct LinuxSurfaceBuffer {
     pub offset: u32,
     pub stride: u32,
 }
@@ -28,7 +27,7 @@ pub struct LinuxSurfaceDescriptor {
     pub modifier: u64,
     pub synchronization_value: u32,
     pub device: [u8; 16],
-    pub planes: Vec<LinuxSurfacePlane>,
+    pub buffers: Vec<LinuxSurfaceBuffer>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,16 +57,16 @@ impl std::error::Error for LinuxSurfaceError {}
 
 impl LinuxSurfaceDescriptor {
     pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(HEADER_LENGTH + self.planes.len() * PLANE_LENGTH);
+        let mut bytes = Vec::with_capacity(HEADER_LENGTH + self.buffers.len() * BUFFER_LENGTH);
         bytes.extend_from_slice(&DESCRIPTOR_VERSION.to_be_bytes());
         bytes.extend_from_slice(&self.drm_format.to_be_bytes());
         bytes.extend_from_slice(&self.modifier.to_be_bytes());
         bytes.extend_from_slice(&self.synchronization_value.to_be_bytes());
         bytes.extend_from_slice(&self.device);
-        bytes.push(self.planes.len() as u8);
-        for plane in &self.planes {
-            bytes.extend_from_slice(&plane.offset.to_be_bytes());
-            bytes.extend_from_slice(&plane.stride.to_be_bytes());
+        bytes.push(self.buffers.len() as u8);
+        for buffer in &self.buffers {
+            bytes.extend_from_slice(&buffer.offset.to_be_bytes());
+            bytes.extend_from_slice(&buffer.stride.to_be_bytes());
         }
         bytes
     }
@@ -79,31 +78,31 @@ impl LinuxSurfaceDescriptor {
         {
             return Err(LinuxSurfaceError::MalformedDescriptor);
         }
-        let plane_count = surface.opaque[HEADER_LENGTH - 1] as usize;
-        if plane_count == 0
-            || plane_count > MAX_PLANES
-            || surface.opaque.len() != HEADER_LENGTH + plane_count * PLANE_LENGTH
-            || surface.attachments.len() != plane_count
+        let buffer_count = surface.opaque[HEADER_LENGTH - 1] as usize;
+        if buffer_count == 0
+            || buffer_count > MAX_SURFACE_BUFFERS
+            || surface.opaque.len() != HEADER_LENGTH + buffer_count * BUFFER_LENGTH
+            || surface.attachments.len() != buffer_count
         {
             return Err(LinuxSurfaceError::MalformedDescriptor);
         }
-        let mut planes = Vec::with_capacity(plane_count);
-        for bytes in surface.opaque[HEADER_LENGTH..].chunks_exact(PLANE_LENGTH) {
-            let plane = LinuxSurfacePlane {
+        let mut buffers = Vec::with_capacity(buffer_count);
+        for bytes in surface.opaque[HEADER_LENGTH..].chunks_exact(BUFFER_LENGTH) {
+            let buffer = LinuxSurfaceBuffer {
                 offset: u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
                 stride: u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
             };
-            if plane.stride == 0 {
+            if buffer.stride == 0 {
                 return Err(LinuxSurfaceError::MalformedDescriptor);
             }
-            planes.push(plane);
+            buffers.push(buffer);
         }
         let descriptor = Self {
             drm_format: u32::from_be_bytes(surface.opaque[2..6].try_into().unwrap()),
             modifier: u64::from_be_bytes(surface.opaque[6..14].try_into().unwrap()),
             synchronization_value: u32::from_be_bytes(surface.opaque[14..18].try_into().unwrap()),
             device: surface.opaque[18..34].try_into().unwrap(),
-            planes,
+            buffers,
         };
         if descriptor.drm_format == 0 {
             return Err(LinuxSurfaceError::MalformedDescriptor);
@@ -124,7 +123,7 @@ impl LinuxSurfaceDescriptor {
                 attachment_type: AttachmentType::Image,
                 ownership: AttachmentOwnership::Transferred,
             };
-            self.planes.len()
+            self.buffers.len()
         ];
         SurfaceDescriptor {
             request_id,

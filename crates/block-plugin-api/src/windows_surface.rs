@@ -1,17 +1,18 @@
 use crate::{
     AlphaMode, AttachmentDescriptor, AttachmentOwnership, AttachmentType, ColorFormat, ColorSpace,
-    SurfaceDescriptor, SurfaceMechanism, SurfaceRole,
+    SurfaceDescriptor, SurfaceMechanism, SurfaceRole, MAX_SURFACE_BUFFERS,
 };
 use std::fmt;
 
 const DESCRIPTOR_VERSION: u16 = 1;
-const DESCRIPTOR_LENGTH: usize = 22;
+const DESCRIPTOR_LENGTH: usize = 23;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowsSurfaceDescriptor {
     pub adapter_luid: u64,
     pub texture_format: u32,
     pub initial_fence_value: u64,
+    pub buffers: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +46,7 @@ impl WindowsSurfaceDescriptor {
         bytes.extend_from_slice(&self.adapter_luid.to_be_bytes());
         bytes.extend_from_slice(&self.texture_format.to_be_bytes());
         bytes.extend_from_slice(&self.initial_fence_value.to_be_bytes());
+        bytes.push(self.buffers);
         bytes
     }
 
@@ -62,8 +64,14 @@ impl WindowsSurfaceDescriptor {
             adapter_luid: u64::from_be_bytes(bytes[2..10].try_into().unwrap()),
             texture_format: u32::from_be_bytes(bytes[10..14].try_into().unwrap()),
             initial_fence_value: u64::from_be_bytes(bytes[14..22].try_into().unwrap()),
+            buffers: bytes[22],
         };
-        if descriptor.adapter_luid == 0 || descriptor.texture_format == 0 {
+        if descriptor.adapter_luid == 0
+            || descriptor.texture_format == 0
+            || descriptor.buffers == 0
+            || descriptor.buffers as usize > MAX_SURFACE_BUFFERS
+            || surface.attachments.len() != descriptor.buffers as usize + 1
+        {
             return Err(WindowsSurfaceError::MalformedDescriptor);
         }
         Ok(descriptor)
@@ -87,19 +95,25 @@ impl WindowsSurfaceDescriptor {
             format: ColorFormat::Bgra8Srgb,
             color_space: ColorSpace::Srgb,
             alpha_mode: AlphaMode::Premultiplied,
-            attachments: vec![
-                AttachmentDescriptor {
-                    attachment_type: AttachmentType::Image,
-                    ownership: AttachmentOwnership::Transferred,
-                },
-                AttachmentDescriptor {
-                    attachment_type: AttachmentType::Synchronization,
-                    ownership: AttachmentOwnership::Transferred,
-                },
-            ],
+            attachments: attachments(self.buffers),
             opaque: self.encode(),
         }
     }
+}
+
+fn attachments(buffers: u8) -> Vec<AttachmentDescriptor> {
+    let mut attachments = vec![
+        AttachmentDescriptor {
+            attachment_type: AttachmentType::Image,
+            ownership: AttachmentOwnership::Transferred,
+        };
+        buffers as usize
+    ];
+    attachments.push(AttachmentDescriptor {
+        attachment_type: AttachmentType::Synchronization,
+        ownership: AttachmentOwnership::Transferred,
+    });
+    attachments
 }
 
 fn validate_surface(surface: &SurfaceDescriptor) -> Result<(), WindowsSurfaceError> {
@@ -118,17 +132,10 @@ fn validate_surface(surface: &SurfaceDescriptor) -> Result<(), WindowsSurfaceErr
     if surface.alpha_mode != AlphaMode::Premultiplied {
         return Err(WindowsSurfaceError::UnsupportedAlphaMode);
     }
-    if surface.attachments
-        != [
-            AttachmentDescriptor {
-                attachment_type: AttachmentType::Image,
-                ownership: AttachmentOwnership::Transferred,
-            },
-            AttachmentDescriptor {
-                attachment_type: AttachmentType::Synchronization,
-                ownership: AttachmentOwnership::Transferred,
-            },
-        ]
+    let images = surface.attachments.len().saturating_sub(1);
+    if images == 0
+        || images > MAX_SURFACE_BUFFERS
+        || surface.attachments != attachments(images as u8)
     {
         return Err(WindowsSurfaceError::InvalidAttachments);
     }

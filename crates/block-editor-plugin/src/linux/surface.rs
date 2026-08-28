@@ -1,7 +1,7 @@
 use ash::vk;
 use block_plugin_api::{
-    FrameReady, LinuxSurfaceDescriptor, LinuxSurfacePlane, Message, PreviewLayout, ScreenLayout,
-    SurfaceRole,
+    FrameReady, LinuxSurfaceBuffer, LinuxSurfaceDescriptor, Message, PreviewLayout, ScreenLayout,
+    SurfaceRole, SurfaceRotation, SURFACE_BUFFERS,
 };
 use eframe::egui_wgpu::wgpu;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -15,10 +15,16 @@ const DRM_FORMAT_MOD_LINEAR: u64 = 0;
 
 pub(crate) const SURFACE_KIND: &str = "dma-buf";
 
+struct Buffer {
+    texture: wgpu::Texture,
+    memory: OwnedFd,
+    layout: LinuxSurfaceBuffer,
+}
+
 struct Previews {
     texture: wgpu::Texture,
     memory: OwnedFd,
-    plane: LinuxSurfacePlane,
+    layout: LinuxSurfaceBuffer,
     generation: u64,
     width: u32,
     height: u32,
@@ -27,10 +33,9 @@ struct Previews {
 pub(crate) struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    texture: wgpu::Texture,
+    buffers: Vec<Buffer>,
+    rotation: SurfaceRotation,
     panes: Panes,
-    plane: LinuxSurfacePlane,
-    memory: OwnedFd,
     device_id: [u8; 16],
     generation: u64,
     frame: u32,
@@ -60,14 +65,13 @@ impl Surface {
         }))
         .map_err(|error| error.to_string())?;
         let device_id = device_id(&device)?;
-        let (texture, memory, plane) = exported_texture(&device, layout.width, layout.height)?;
+        let buffers = exported_buffers(&device, layout.width, layout.height)?;
         Ok(Self {
             device,
             queue,
-            texture,
+            buffers,
+            rotation: SurfaceRotation::default(),
             panes: Panes::new(TARGET_FORMAT),
-            plane,
-            memory,
             device_id,
             generation,
             frame: 0,
@@ -83,10 +87,8 @@ impl Surface {
         layout: ScreenLayout,
         generation: u64,
     ) -> Result<Self, String> {
-        let (texture, memory, plane) = exported_texture(&self.device, layout.width, layout.height)?;
-        self.texture = texture;
-        self.memory = memory;
-        self.plane = plane;
+        self.buffers = exported_buffers(&self.device, layout.width, layout.height)?;
+        self.rotation.restart();
         self.request_id = request_id;
         self.generation = generation;
         self.layout = layout;
@@ -103,7 +105,7 @@ impl Surface {
             modifier: DRM_FORMAT_MOD_LINEAR,
             synchronization_value: self.frame,
             device: self.device_id,
-            planes: vec![self.plane],
+            buffers: self.buffers.iter().map(|buffer| buffer.layout).collect(),
         }
         .surface(
             self.request_id,
@@ -112,7 +114,13 @@ impl Surface {
             self.layout.width,
             self.layout.height,
         );
-        Some((Message::Surface(descriptor), vec![self.memory.as_raw_fd()]))
+        Some((
+            Message::Surface(descriptor),
+            self.buffers
+                .iter()
+                .map(|buffer| buffer.memory.as_raw_fd())
+                .collect(),
+        ))
     }
 
     pub(crate) fn set_previews(
@@ -133,11 +141,11 @@ impl Surface {
             .as_ref()
             .map_or(0, |previews| previews.generation)
             + 1;
-        let (texture, memory, plane) = exported_texture(&self.device, layout.width, layout.height)?;
+        let (texture, memory, image) = exported_texture(&self.device, layout.width, layout.height)?;
         let previews = self.previews.insert(Previews {
             texture,
             memory,
-            plane,
+            layout: image,
             generation,
             width: layout.width,
             height: layout.height,
@@ -147,7 +155,7 @@ impl Surface {
             modifier: DRM_FORMAT_MOD_LINEAR,
             synchronization_value: 1,
             device: self.device_id,
-            planes: vec![previews.plane],
+            buffers: vec![previews.layout],
         }
         .surface(
             self.request_id,
@@ -173,7 +181,8 @@ impl Surface {
         screens: &mut crate::screens::Screens,
         phase: f64,
     ) -> Result<Vec<Message>, String> {
-        let view = self
+        let buffer = self.rotation.advance(self.buffers.len());
+        let view = self.buffers[buffer]
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
@@ -205,6 +214,7 @@ impl Surface {
         self.frame = self.frame.wrapping_add(1).max(1);
         Ok(vec![Message::FrameReady(FrameReady {
             generation: self.generation,
+            buffer: buffer as u32,
             damage: Vec::new(),
             synchronization_value: u64::from(self.frame),
             repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
@@ -227,11 +237,24 @@ fn device_id(device: &wgpu::Device) -> Result<[u8; 16], String> {
     Ok(identity.device_uuid)
 }
 
+fn exported_buffers(device: &wgpu::Device, width: u32, height: u32) -> Result<Vec<Buffer>, String> {
+    (0..SURFACE_BUFFERS)
+        .map(|_| {
+            let (texture, memory, layout) = exported_texture(device, width, height)?;
+            Ok(Buffer {
+                texture,
+                memory,
+                layout,
+            })
+        })
+        .collect()
+}
+
 fn exported_texture(
     device: &wgpu::Device,
     width: u32,
     height: u32,
-) -> Result<(wgpu::Texture, OwnedFd, LinuxSurfacePlane), String> {
+) -> Result<(wgpu::Texture, OwnedFd, LinuxSurfaceBuffer), String> {
     let size = wgpu::Extent3d {
         width: width.max(1),
         height: height.max(1),
@@ -298,7 +321,7 @@ fn exported_texture(
         .mip_level(0)
         .array_layer(0);
     let subresource_layout = unsafe { raw_device.get_image_subresource_layout(image, subresource) };
-    let plane = LinuxSurfacePlane {
+    let image_layout = LinuxSurfaceBuffer {
         offset: subresource_layout.offset as u32,
         stride: subresource_layout.row_pitch as u32,
     };
@@ -336,7 +359,7 @@ fn exported_texture(
             },
         )
     };
-    Ok((texture, fd, plane))
+    Ok((texture, fd, image_layout))
 }
 
 fn allocate(

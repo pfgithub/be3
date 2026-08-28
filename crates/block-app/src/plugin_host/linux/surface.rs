@@ -4,7 +4,7 @@ use crate::plugin_host::{
 };
 use ash::vk;
 use block_plugin_api::{
-    LinuxSurfaceDescriptor, LinuxSurfaceLifecycle, LinuxSurfacePlane, SurfaceDescriptor,
+    LinuxSurfaceBuffer, LinuxSurfaceDescriptor, LinuxSurfaceLifecycle, SurfaceDescriptor,
     SurfaceRole,
 };
 use eframe::egui_wgpu::wgpu;
@@ -25,8 +25,9 @@ pub(crate) enum LinuxFrame {
 }
 
 struct ImportedSurface {
-    texture: wgpu::Texture,
-    bind_group: wgpu::BindGroup,
+    textures: Vec<wgpu::Texture>,
+    bind_groups: Vec<wgpu::BindGroup>,
+    shown: usize,
 }
 
 #[derive(Default)]
@@ -142,23 +143,23 @@ impl LinuxSurfacePresenter {
         let descriptor = lifecycle
             .replace(surface)
             .map_err(|error| error.to_string())?;
-        if descriptor.planes.len() != planes.len() {
-            return Err("the plugin surface did not include one buffer per plane".into());
+        if descriptor.buffers.len() != planes.len() {
+            return Err("the plugin surface did not include one buffer per image".into());
         }
-        let [plane] = descriptor.planes.as_slice() else {
-            return Err("only a single-plane plugin surface can be presented".into());
-        };
         if descriptor.drm_format != DRM_FORMAT_ARGB8888
             || descriptor.modifier != DRM_FORMAT_MOD_LINEAR
         {
             return Err("the plugin surface is not a linear BGRA image".into());
         }
         if surface.role == SurfaceRole::Previews {
+            let [buffer] = descriptor.buffers.as_slice() else {
+                return Err("a plugin preview surface is a single image".into());
+            };
             let texture = self.texture(
                 device,
                 surface,
                 &descriptor,
-                plane,
+                buffer,
                 &planes[0],
                 wgpu::TextureUses::COLOR_TARGET,
                 wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -166,37 +167,43 @@ impl LinuxSurfacePresenter {
             self.surfaces.entry(index).or_default().preview_texture = Some(texture);
             return Ok(());
         }
-        let texture = self.texture(
-            device,
-            surface,
-            &descriptor,
-            plane,
-            &planes[0],
-            wgpu::TextureUses::RESOURCE,
-            wgpu::TextureUsages::TEXTURE_BINDING,
-        )?;
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Linux plugin surface bind group"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.regions.binding(),
-                },
-            ],
-        });
+        let mut textures = Vec::with_capacity(descriptor.buffers.len());
+        let mut bind_groups = Vec::with_capacity(descriptor.buffers.len());
+        for (buffer, plane) in descriptor.buffers.iter().zip(planes) {
+            let texture = self.texture(
+                device,
+                surface,
+                &descriptor,
+                buffer,
+                plane,
+                wgpu::TextureUses::RESOURCE,
+                wgpu::TextureUsages::TEXTURE_BINDING,
+            )?;
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            bind_groups.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Linux plugin surface bind group"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.regions.binding(),
+                    },
+                ],
+            }));
+            textures.push(texture);
+        }
         self.surfaces.entry(index).or_default().imported = Some(ImportedSurface {
-            texture,
-            bind_group,
+            textures,
+            bind_groups,
+            shown: 0,
         });
         Ok(())
     }
@@ -207,7 +214,7 @@ impl LinuxSurfacePresenter {
         device: &wgpu::Device,
         surface: &SurfaceDescriptor,
         descriptor: &LinuxSurfaceDescriptor,
-        placement: &LinuxSurfacePlane,
+        placement: &LinuxSurfaceBuffer,
         plane: &OwnedFd,
         hal_usage: wgpu::TextureUses,
         usage: wgpu::TextureUsages,
@@ -318,7 +325,7 @@ fn device_id(raw_instance: &ash::Instance, physical_device: vk::PhysicalDevice) 
 fn layout_matches(
     raw_device: &ash::Device,
     image: vk::Image,
-    placement: &LinuxSurfacePlane,
+    placement: &LinuxSurfaceBuffer,
 ) -> Result<(), String> {
     let subresource = vk::ImageSubresource::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -434,9 +441,15 @@ impl SurfacePresenter for LinuxSurfacePresenter {
             .lifecycle
             .frame_ready(frame.generation, frame.synchronization_value as u32)
             .map_err(|error| error.to_string())?;
-        if surface.imported.is_none() {
-            return Err("frame arrived before its Linux surface".into());
+        let imported = surface
+            .imported
+            .as_mut()
+            .ok_or_else(|| "frame arrived before its Linux surface".to_owned())?;
+        let shown = frame.buffer as usize;
+        if shown >= imported.bind_groups.len() {
+            return Err("the plugin drew into a buffer its surface never shared".into());
         }
+        imported.shown = shown;
         Ok(())
     }
 
@@ -454,9 +467,12 @@ impl SurfacePresenter for LinuxSurfacePresenter {
             .get(&index)
             .and_then(|surface| surface.imported.as_ref())
         {
-            let _ = &imported.texture;
+            let _ = &imported.textures;
+            let Some(bind_group) = imported.bind_groups.get(imported.shown) else {
+                return;
+            };
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, &imported.bind_group, &[self.regions.offset(slot)]);
+            render_pass.set_bind_group(0, bind_group, &[self.regions.offset(slot)]);
             render_pass.draw(0..6, 0..1);
         }
     }

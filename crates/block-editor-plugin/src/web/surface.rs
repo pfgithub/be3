@@ -177,6 +177,7 @@ impl Surface {
         frame.present();
         Ok(vec![Message::FrameReady(FrameReady {
             generation: self.generation,
+            buffer: 0,
             damage: Vec::new(),
             synchronization_value: 0,
             repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),

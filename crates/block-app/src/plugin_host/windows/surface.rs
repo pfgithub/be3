@@ -20,9 +20,10 @@ pub(crate) enum WindowsFrame {
 }
 
 struct ImportedSurface {
-    texture: wgpu::Texture,
-    bind_group: wgpu::BindGroup,
+    textures: Vec<wgpu::Texture>,
+    bind_groups: Vec<wgpu::BindGroup>,
     fence: ID3D12Fence,
+    shown: usize,
 }
 
 #[derive(Default)]
@@ -130,7 +131,7 @@ impl WindowsSurfacePresenter {
         surface: &SurfaceDescriptor,
         handles: &[OwnedHandle],
     ) -> Result<(), String> {
-        if handles.len() != 2 {
+        if handles.len() < 2 {
             return Err("Windows DXGI surface did not include texture and fence handles".into());
         }
         let entry = self.surfaces.entry(index).or_default();
@@ -149,18 +150,22 @@ impl WindowsSurfacePresenter {
         if descriptor.adapter_luid != actual_luid {
             return Err("plugin surface was created on a different graphics adapter".into());
         }
-        let mut resource = None;
+        let (images, fence_handle) = handles.split_at(handles.len() - 1);
+        if images.len() != descriptor.buffers as usize {
+            return Err("Windows DXGI surface did not include one texture per buffer".into());
+        }
+        if surface.role == SurfaceRole::Previews && images.len() != 1 {
+            return Err("a plugin preview surface is a single image".into());
+        }
         let mut fence = None;
         unsafe {
             raw_device
-                .OpenSharedHandle(HANDLE(handles[0].as_raw_handle() as *mut _), &mut resource)
-                .map_err(|error| error.to_string())?;
-            raw_device
-                .OpenSharedHandle(HANDLE(handles[1].as_raw_handle() as *mut _), &mut fence)
+                .OpenSharedHandle(
+                    HANDLE(fence_handle[0].as_raw_handle() as *mut _),
+                    &mut fence,
+                )
                 .map_err(|error| error.to_string())?;
         }
-        let resource: ID3D12Resource =
-            resource.ok_or_else(|| "shared texture handle returned no resource".to_owned())?;
         let fence: ID3D12Fence =
             fence.ok_or_else(|| "shared synchronization handle returned no fence".to_owned())?;
         let size = wgpu::Extent3d {
@@ -168,63 +173,80 @@ impl WindowsSurfacePresenter {
             height: surface.height,
             depth_or_array_layers: 1,
         };
-        let hal_texture = unsafe {
-            wgpu_hal::dx12::Device::texture_from_raw(
-                resource,
-                wgpu::TextureFormat::Bgra8Unorm,
-                wgpu::TextureDimension::D2,
-                size,
-                1,
-                1,
-            )
-        };
-        let texture = unsafe {
-            device.create_texture_from_hal::<wgpu_hal::api::Dx12>(
-                hal_texture,
-                &wgpu::TextureDescriptor {
-                    label: Some("imported Windows plugin surface"),
+        let mut textures = Vec::with_capacity(images.len());
+        for image in images {
+            let mut resource = None;
+            unsafe {
+                raw_device
+                    .OpenSharedHandle(HANDLE(image.as_raw_handle() as *mut _), &mut resource)
+                    .map_err(|error| error.to_string())?;
+            }
+            let resource: ID3D12Resource =
+                resource.ok_or_else(|| "shared texture handle returned no resource".to_owned())?;
+            let hal_texture = unsafe {
+                wgpu_hal::dx12::Device::texture_from_raw(
+                    resource,
+                    wgpu::TextureFormat::Bgra8Unorm,
+                    wgpu::TextureDimension::D2,
                     size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Bgra8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    view_formats: &[],
-                },
-            )
-        };
+                    1,
+                    1,
+                )
+            };
+            textures.push(unsafe {
+                device.create_texture_from_hal::<wgpu_hal::api::Dx12>(
+                    hal_texture,
+                    &wgpu::TextureDescriptor {
+                        label: Some("imported Windows plugin surface"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        view_formats: &[],
+                    },
+                )
+            });
+        }
         if surface.role == SurfaceRole::Previews {
-            self.surfaces.entry(index).or_default().preview_texture = Some(texture);
+            self.surfaces.entry(index).or_default().preview_texture = textures.pop();
             return Ok(());
         }
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Windows plugin surface bind group"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.regions.binding(),
-                },
-            ],
-        });
+        let bind_groups = textures
+            .iter()
+            .map(|texture| {
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Windows plugin surface bind group"),
+                    layout: &self.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: self.regions.binding(),
+                        },
+                    ],
+                })
+            })
+            .collect();
         self.surfaces.entry(index).or_default().imported = Some(ImportedSurface {
-            texture,
-            bind_group,
+            textures,
+            bind_groups,
             fence,
+            shown: 0,
         });
         eprintln!(
-            "plugin presenter imported DXGI surface generation {} size={}x{}",
-            surface.generation, surface.width, surface.height
+            "plugin presenter imported DXGI surface generation {} size={}x{} buffers={}",
+            surface.generation, surface.width, surface.height, descriptor.buffers
         );
         Ok(())
     }
@@ -268,8 +290,13 @@ impl SurfacePresenter for WindowsSurfacePresenter {
             .map_err(|error| error.to_string())?;
         let imported = surface
             .imported
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| "frame arrived before its Windows surface".to_owned())?;
+        let shown = frame.buffer as usize;
+        if shown >= imported.bind_groups.len() {
+            return Err("the plugin drew into a buffer its surface never shared".into());
+        }
+        imported.shown = shown;
         let hal_queue = unsafe { queue.as_hal::<wgpu_hal::api::Dx12>() }
             .ok_or_else(|| "the active wgpu queue is not D3D12".to_owned())?;
         unsafe {
@@ -295,9 +322,12 @@ impl SurfacePresenter for WindowsSurfacePresenter {
             .get(&index)
             .and_then(|surface| surface.imported.as_ref())
         {
-            let _ = &imported.texture;
+            let _ = &imported.textures;
+            let Some(bind_group) = imported.bind_groups.get(imported.shown) else {
+                return;
+            };
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, &imported.bind_group, &[self.regions.offset(slot)]);
+            render_pass.set_bind_group(0, bind_group, &[self.regions.offset(slot)]);
             render_pass.draw(0..6, 0..1);
         }
     }

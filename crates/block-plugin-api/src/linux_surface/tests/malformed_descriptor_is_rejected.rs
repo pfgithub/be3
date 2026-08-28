@@ -7,7 +7,7 @@ fn malformed_descriptor_is_rejected() {
         modifier: 0,
         synchronization_value: 4,
         device: [7; 16],
-        planes: vec![LinuxSurfacePlane {
+        buffers: vec![LinuxSurfaceBuffer {
             offset: 0,
             stride: 256,
         }],

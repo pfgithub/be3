@@ -1,5 +1,6 @@
 use block_plugin_api::{
-    FrameReady, Message, PreviewLayout, ScreenLayout, SurfaceRole, WindowsSurfaceDescriptor,
+    FrameReady, Message, PreviewLayout, ScreenLayout, SurfaceRole, SurfaceRotation,
+    WindowsSurfaceDescriptor, SURFACE_BUFFERS,
 };
 use eframe::egui_wgpu::wgpu;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
@@ -24,6 +25,11 @@ const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 
 pub(crate) const SURFACE_KIND: &str = "DXGI";
 
+struct Buffer {
+    texture: wgpu::Texture,
+    resource_handle: OwnedHandle,
+}
+
 struct Previews {
     texture: wgpu::Texture,
     resource_handle: OwnedHandle,
@@ -35,10 +41,10 @@ struct Previews {
 pub(crate) struct Surface {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    texture: wgpu::Texture,
+    buffers: Vec<Buffer>,
+    rotation: SurfaceRotation,
     panes: Panes,
     fence: ID3D12Fence,
-    resource_handle: OwnedHandle,
     fence_handle: OwnedHandle,
     generation: u64,
     fence_value: u64,
@@ -80,14 +86,14 @@ impl Surface {
                 OwnedHandle::from_raw_handle(handle.0 as RawHandle)
             })
         };
-        let (texture, resource_handle) = shared_texture(&device, layout.width, layout.height)?;
+        let buffers = shared_buffers(&device, layout.width, layout.height)?;
         Ok(Self {
             device,
             queue,
-            texture,
+            buffers,
+            rotation: SurfaceRotation::default(),
             panes: Panes::new(TARGET_FORMAT),
             fence,
-            resource_handle,
             fence_handle,
             generation,
             fence_value: 0,
@@ -103,9 +109,8 @@ impl Surface {
         layout: ScreenLayout,
         generation: u64,
     ) -> Result<Self, String> {
-        let (texture, resource_handle) = shared_texture(&self.device, layout.width, layout.height)?;
-        self.texture = texture;
-        self.resource_handle = resource_handle;
+        self.buffers = shared_buffers(&self.device, layout.width, layout.height)?;
+        self.rotation.restart();
         self.request_id = request_id;
         self.generation = generation;
         self.layout = layout;
@@ -121,6 +126,7 @@ impl Surface {
             adapter_luid: self.adapter_luid(),
             texture_format: DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32,
             initial_fence_value: self.fence_value,
+            buffers: self.buffers.len() as u8,
         }
         .surface(
             self.request_id,
@@ -129,13 +135,13 @@ impl Surface {
             self.layout.width,
             self.layout.height,
         );
-        Some((
-            Message::Surface(descriptor),
-            vec![
-                self.resource_handle.as_raw_handle(),
-                self.fence_handle.as_raw_handle(),
-            ],
-        ))
+        let mut handles: Vec<RawHandle> = self
+            .buffers
+            .iter()
+            .map(|buffer| buffer.resource_handle.as_raw_handle())
+            .collect();
+        handles.push(self.fence_handle.as_raw_handle());
+        Some((Message::Surface(descriptor), handles))
     }
 
     fn adapter_luid(&self) -> u64 {
@@ -181,6 +187,7 @@ impl Surface {
             adapter_luid,
             texture_format: DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32,
             initial_fence_value: 0,
+            buffers: 1,
         }
         .surface(
             self.request_id,
@@ -208,7 +215,8 @@ impl Surface {
     ) -> Result<Vec<Message>, String> {
         let frame_started = Instant::now();
         let view_started = Instant::now();
-        let view = self
+        let buffer = self.rotation.advance(self.buffers.len());
+        let view = self.buffers[buffer]
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let view_elapsed = view_started.elapsed();
@@ -257,12 +265,25 @@ impl Surface {
         }
         Ok(vec![Message::FrameReady(FrameReady {
             generation: self.generation,
+            buffer: buffer as u32,
             damage: Vec::new(),
             synchronization_value: self.fence_value,
             repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
             attachments: Vec::new(),
         })])
     }
+}
+
+fn shared_buffers(device: &wgpu::Device, width: u32, height: u32) -> Result<Vec<Buffer>, String> {
+    (0..SURFACE_BUFFERS)
+        .map(|_| {
+            let (texture, resource_handle) = shared_texture(device, width, height)?;
+            Ok(Buffer {
+                texture,
+                resource_handle,
+            })
+        })
+        .collect()
 }
 
 fn shared_texture(

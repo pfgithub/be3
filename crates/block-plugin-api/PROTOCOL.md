@@ -253,12 +253,19 @@ separate generations, transferred by the same mechanism in the same direction,
 and only the drawing runs the other way.
 
 A surface is transferred as native graphics resources, never as pixels: the
-Windows mechanism shares a D3D12 texture and fence, and the Linux one shares
-the dma-buf planes of a single image. A Linux surface declares one attachment
-per plane and no fence, so the plugin publishes a frame only once the work
-writing it has retired, and the monotonic synchronization value in its
-descriptor tells the host which frame it is looking at rather than what to
-wait on.
+Windows mechanism shares D3D12 textures and a fence, and the Linux one shares
+the dma-buf memory of each image. A surface is a rotation of images rather
+than one image, because the host goes on showing the frame it last took while
+the plugin draws the next one: the descriptor declares one attachment per
+image, the plugin draws into them in turn, and every published frame names the
+image it was drawn into, which is the one the host samples until another frame
+arrives. A plugin never draws into the image it last published, nor into the
+one before that, so nothing the host is showing or has only just stopped
+showing is written while it is being read. A previews surface is a single
+image, since the host draws it and the plugin only reads it. A Linux surface
+carries no fence, so the plugin publishes a frame only once the work writing it
+has retired, and the monotonic synchronization value in its descriptor tells
+the host which frame it is looking at rather than what to wait on.
 
 Surface messages may declare at most 16 native attachments. Each declaration
 records the resource type and whether ownership is borrowed or transferred.
