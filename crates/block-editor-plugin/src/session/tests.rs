@@ -1,6 +1,7 @@
 use super::*;
 use block_plugin_api::{
-    EditorRegion, HelloAccepted, InputBatch, ScreenRequest, ScreenSet, ViewportMetrics,
+    EditorRegion, HelloAccepted, InputBatch, ScreenRequest, ScreenSet, TunnelMessage,
+    ViewportMetrics,
 };
 
 fn accept(session: &mut ClientSession) {
@@ -40,6 +41,7 @@ fn screen(screen: ScreenId, instance: EditorInstanceId) -> ScreenRequest {
     }
 }
 
+mod accepts_client_responses_after_the_last_instance_closes;
 mod accepts_ordered_lifecycle;
 mod accepts_previews_ready;
 mod opens_and_closes_editor_instance;
