@@ -20,7 +20,7 @@ use block_editor_plugin::{
 use uuid::Uuid;
 
 use crate::download::{Download, Painting, Source, BRANCH};
-use crate::render::Rendered;
+use crate::render::{Paintings, Rendered};
 
 const INTRINSIC_SIZE: egui::Vec2 = egui::vec2(960.0, 640.0);
 
@@ -32,13 +32,6 @@ pub enum Showing {
 }
 
 impl Showing {
-    fn key(self) -> &'static str {
-        match self {
-            Self::Approved => "approved",
-            Self::Current => "current",
-        }
-    }
-
     fn label(self) -> String {
         match self {
             Self::Approved => "the painting you approved".to_owned(),
@@ -99,7 +92,7 @@ pub struct PaintReviewApp {
     error: Option<String>,
     selected: Option<String>,
     showing: Showing,
-    view: Option<(String, Result<Rendered, String>)>,
+    paintings: Paintings,
     change: Option<(String, String)>,
     pending: Option<String>,
 }
@@ -109,6 +102,11 @@ impl PaintReviewApp {
     pub fn review(&mut self, source: Source) {
         self.source = source;
         self.refresh();
+    }
+
+    #[cfg(test)]
+    pub fn rasters(&self) -> usize {
+        self.paintings.rasters()
     }
 
     pub fn entries(&self) -> Option<Vec<Entry>> {
@@ -197,8 +195,6 @@ impl PaintReviewApp {
     fn refresh(&mut self) {
         self.download = None;
         self.downloaded = false;
-        self.view = None;
-        self.change = None;
     }
 
     fn editable(&self) -> bool {
@@ -208,8 +204,6 @@ impl PaintReviewApp {
     }
 
     fn approve(&mut self, path: &str) {
-        self.view = None;
-        self.change = None;
         self.showing = Showing::Current;
         self.pending = Some(path.to_owned());
         self.settle();
@@ -267,12 +261,11 @@ impl PaintReviewApp {
         true
     }
 
-    fn forget(&mut self, path: &str) {
-        self.view = None;
-        self.change = None;
-        if self.selected.as_deref() == Some(path) {
-            self.selected = None;
+    fn unapprove(&mut self, path: &str) {
+        if self.pending.as_deref() == Some(path) {
+            self.pending = None;
         }
+        self.showing = Showing::Current;
         if !self.editable() {
             return;
         }
@@ -293,16 +286,29 @@ impl PaintReviewApp {
         });
     }
 
-    fn painting(&self, path: &str, showing: Showing) -> Result<(String, Vec<u8>), Option<String>> {
+    fn hash(&self, path: &str, showing: Showing) -> Result<String, Option<String>> {
         match showing {
-            Showing::Current => {
-                let painting = self
-                    .found
-                    .iter()
-                    .find(|found| found.path == path)
-                    .ok_or_else(|| Some(format!("{path} is not on the {BRANCH} branch")))?;
-                Ok((painting.hash.clone(), painting.data.clone()))
-            }
+            Showing::Current => self
+                .found
+                .iter()
+                .find(|found| found.path == path)
+                .map(|painting| painting.hash.clone())
+                .ok_or_else(|| Some(format!("{path} is not on the {BRANCH} branch"))),
+            Showing::Approved => self
+                .approval(path)
+                .map(|approved| approved.hash)
+                .ok_or_else(|| Some(format!("{path} has never been approved"))),
+        }
+    }
+
+    fn data(&self, path: &str, showing: Showing) -> Result<Vec<u8>, Option<String>> {
+        match showing {
+            Showing::Current => self
+                .found
+                .iter()
+                .find(|found| found.path == path)
+                .map(|painting| painting.data.clone())
+                .ok_or_else(|| Some(format!("{path} is not on the {BRANCH} branch"))),
             Showing::Approved => {
                 let approval = self
                     .approval(path)
@@ -313,16 +319,18 @@ impl PaintReviewApp {
                 let editing = self.editing.as_ref().ok_or(None)?;
                 let snapshot = editing.client.get_block::<PaintSnapshot>(id);
                 let data = snapshot.read().ok_or(None)?.data().to_vec();
-                Ok((approval.hash.clone(), data))
+                Ok(data)
             }
         }
     }
 
     fn change_description(&mut self, path: &str) -> Option<String> {
-        let (current_hash, current) = self.painting(path, Showing::Current).ok()?;
-        let (approved_hash, approved) = self.painting(path, Showing::Approved).ok()?;
-        let key = format!("{path}\u{1}{approved_hash}\u{1}{current_hash}");
+        let current_hash = self.hash(path, Showing::Current).ok()?;
+        let approved_hash = self.hash(path, Showing::Approved).ok()?;
+        let key = format!("{approved_hash}\u{1}{current_hash}");
         if self.change.as_ref().is_none_or(|(seen, _)| *seen != key) {
+            let approved = self.data(path, Showing::Approved).ok()?;
+            let current = self.data(path, Showing::Current).ok()?;
             let description = crate::render::change(&approved, &current)
                 .unwrap_or_else(|error| format!("the paintings could not be compared: {error}"));
             self.change = Some((key, description));
@@ -333,34 +341,26 @@ impl PaintReviewApp {
     }
 
     fn view(&mut self, ui: &mut egui::Ui, path: &str, showing: Showing) {
-        let (hash, data) = match self.painting(path, showing) {
-            Ok(painting) => painting,
-            Err(error) => {
-                ui.centered_and_justified(|ui| match error {
-                    Some(error) => {
-                        ui.colored_label(ui.visuals().error_fg_color, error);
-                    }
-                    None => {
-                        ui.spinner();
-                    }
-                });
-                return;
-            }
+        let hash = match self.hash(path, showing) {
+            Ok(hash) => hash,
+            Err(error) => return waiting(ui, error),
         };
-        let key = format!("{path}\u{1}{}\u{1}{hash}", showing.key());
-        if self.view.as_ref().is_none_or(|(seen, _)| *seen != key) {
-            let rendered = crate::render::render(ui.ctx(), "paint-review", &data);
-            self.view = Some((key, rendered));
-        }
-        match &self.view {
-            Some((_, Ok(rendered))) => {
-                ui.weak(rendered.description.clone());
-                paint(ui, rendered);
+        if self.paintings.rendered(ui.ctx(), &hash).is_none() {
+            let waker = self.waker();
+            match self.data(path, showing) {
+                Ok(data) => self.paintings.start(&hash, data, waker),
+                Err(error) => return waiting(ui, error),
             }
-            Some((_, Err(error))) => {
+        }
+        match self.paintings.rendered(ui.ctx(), &hash) {
+            Some(Ok(rendered)) => {
+                ui.weak(rendered.description.clone());
+                draw(ui, rendered);
+            }
+            Some(Err(error)) => {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
-            None => {}
+            None => waiting(ui, None),
         }
     }
 }
@@ -425,17 +425,21 @@ impl block_editor_plugin::App for PaintReviewApp {
                     self.approve(path);
                 }
             }
-            let forgettable = editable && status == Some(Status::Removed);
+            let unapprovable = editable
+                && matches!(
+                    status,
+                    Some(Status::Modified | Status::Removed | Status::Unchanged)
+                );
             if ui
                 .add_enabled(
-                    forgettable,
-                    egui::Button::new(format!("{} Forget", ICON_DELETE.codepoint)),
+                    unapprovable,
+                    egui::Button::new(format!("{} Unapprove", ICON_DELETE.codepoint)),
                 )
-                .test_id("paint_review.forget")
+                .test_id("paint_review.unapprove")
                 .clicked()
             {
                 if let Some(path) = &selected {
-                    self.forget(path);
+                    self.unapprove(path);
                 }
             }
             if status == Some(Status::Modified) {
@@ -535,7 +539,18 @@ impl block_editor_plugin::App for PaintReviewApp {
     }
 }
 
-fn paint(ui: &mut egui::Ui, rendered: &Rendered) {
+fn waiting(ui: &mut egui::Ui, error: Option<String>) {
+    ui.centered_and_justified(|ui| match error {
+        Some(error) => {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        None => {
+            ui.spinner();
+        }
+    });
+}
+
+fn draw(ui: &mut egui::Ui, rendered: &Rendered) {
     let available = ui.available_size().max(egui::Vec2::splat(1.0));
     let scale = (available.x / rendered.size.x)
         .min(available.y / rendered.size.y)

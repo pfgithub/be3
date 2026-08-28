@@ -14,7 +14,7 @@ fn a_painting_that_vanished_is_removed() {
     assert_eq!(status(&mut editor, PATH), Some(Status::Removed));
     assert!(review.approved(PATH).is_some());
 
-    editor.find("paint_review.forget").click();
+    editor.find("paint_review.unapprove").click();
     editor.run();
     assert_eq!(status(&mut editor, PATH), None);
     assert_eq!(review.approvals(), 0);

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use block::BlockParent;
 use block_client::blocks::paint_review::PaintReview;
 use block_client::blocks::paint_snapshot::PaintSnapshot;
 use block_client::{BlockClient, BlockHandle};
@@ -12,11 +13,13 @@ use uuid::Uuid;
 use crate::app::{PaintReviewApp, Status};
 use crate::download::{Painting, Source};
 
+mod a_painting_is_only_rastered_once;
 mod a_painting_that_changed_on_the_branch_is_modified;
 mod a_painting_that_vanished_is_removed;
 mod a_painting_that_was_never_approved_is_new;
 mod a_tree_lists_only_the_paintings_on_it;
 mod a_tree_that_says_nothing_useful_is_an_error;
+mod unapproving_a_painting_makes_it_new_again;
 
 const PATH: &str = "counter.a_button_is_drawn.paint";
 
@@ -75,6 +78,14 @@ impl Review {
 
     fn reference(&self, path: &str) -> Option<Uuid> {
         self.block.read()?.approval(path)?.snapshot.as_direct()
+    }
+
+    fn orphaned(&self, id: Uuid) -> bool {
+        self.client
+            .get_block::<PaintSnapshot>(id)
+            .relationships()
+            .parent
+            == BlockParent::Orphaned
     }
 
     fn approvals(&self) -> usize {
