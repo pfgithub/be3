@@ -26,6 +26,7 @@ pub(super) struct Instances {
     entries: HashMap<EditorInstanceId, Instance>,
     connection: Option<Connection>,
     next_screen: u64,
+    announced: HashSet<ScreenId>,
     request_id: u64,
     block_types: Option<Arc<Vec<BlockTypeDescriptor>>>,
     sent_block_types: bool,
@@ -346,6 +347,7 @@ impl Instances {
 
     pub(super) fn reopen(&mut self) {
         self.sent_block_types = false;
+        self.announced.clear();
         for entry in self.entries.values_mut() {
             entry.opened = false;
             entry.reported_view = None;
@@ -831,6 +833,7 @@ impl Instances {
     }
 
     pub(super) fn screen_set(&mut self, screens: Vec<ScreenRequest>) -> Message {
+        self.announced = screens.iter().map(|screen| screen.screen).collect();
         self.request_id += 1;
         Message::Screens(ScreenSet {
             request_id: self.request_id,
@@ -854,13 +857,16 @@ impl Instances {
     }
 
     pub(super) fn frame_input(&mut self, context: &egui::Context, pass: u64) -> Vec<Message> {
+        let announced = &self.announced;
         let mut placed: Vec<_> = self
             .entries
             .iter()
             .flat_map(|(instance, entry)| {
                 entry.screens.iter().filter_map(move |(region, screen)| {
                     let placement = screen.placement?;
-                    let live = placement.pass == pass && screen.last_seen == pass;
+                    let live = placement.pass == pass
+                        && screen.last_seen == pass
+                        && announced.contains(&screen.request.screen);
                     live.then_some((*instance, *region, screen.request.screen, placement))
                 })
             })
@@ -1203,3 +1209,6 @@ fn host_filter(filter: block_plugin_api::FileFilter) -> FileFilter {
         mime_types: filter.mime_types,
     }
 }
+
+#[cfg(test)]
+mod tests;
