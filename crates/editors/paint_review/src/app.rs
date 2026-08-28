@@ -11,7 +11,7 @@ use block_client::{
 };
 use block_editor_plugin::{
     block_ui::test_id::TestId,
-    egui,
+    egui::{self, emath::GuiRounding as _},
     egui_material_icons::icons::{
         ICON_CHECK, ICON_DELETE, ICON_DIFFERENCE, ICON_DONE_ALL, ICON_FIBER_NEW, ICON_REFRESH,
     },
@@ -541,7 +541,8 @@ fn paint(ui: &mut egui::Ui, rendered: &Rendered) {
         .min(available.y / rendered.size.y)
         .min(1.0);
     let (viewport, _) = ui.allocate_exact_size(available, egui::Sense::hover());
-    let rect = egui::Rect::from_center_size(viewport.center(), rendered.size * scale);
+    let rect = egui::Rect::from_center_size(viewport.center(), rendered.size * scale)
+        .round_to_pixels(ui.pixels_per_point());
     ui.painter_at(viewport).image(
         rendered.texture.id(),
         rect,
