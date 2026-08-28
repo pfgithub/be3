@@ -7,11 +7,12 @@ Guides:
 - guides/adding_a_game.md
 - guides/adding_an_editor.md
 - guides/adding_a_plugin_editor.md
+- guides/testing_a_gui.md
 
 Do not:
 - When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data. The project is still early, and it is fine to ask the user to delete all their data. The crash handler in block-app will offer this automatically.
 - Do not use unicode symbols for icons, either use an icon library or no icon at all.
-- Do not add tests for GUI features.
+- Do not test a GUI by opening a window, by asserting on coordinates, or by taking a screenshot. GUI tests are headless and assert on the block and on a snapshot of the painting: guides/testing_a_gui.md.
 - Do not edit README.md. If it is out of date, you may say so in your handoff message.
 
 Verification:

@@ -1,0 +1,14 @@
+[package]
+name = "block-ui-test"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+block-editor-plugin = { path = "../block-editor-plugin" }
+egui = "0.34.3"
+egui_kittest = { version = "0.34", default-features = false }
+paint-snapshot = { path = "../paint-snapshot" }
+
+[lints]
+workspace = true

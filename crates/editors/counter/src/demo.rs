@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use block_client::blocks::counter::{Counter, CounterOperation};
+use block_editor_plugin::block_ui::test_id::TestId;
 use block_editor_plugin::egui;
 
 pub struct CounterApp {
@@ -74,13 +75,13 @@ impl block_editor_plugin::App for CounterApp {
         };
         ui.centered_and_justified(|ui| {
             ui.horizontal(|ui| {
-                if ui.button("Remove").clicked() {
+                if ui.button("Remove").test_id("counter.decrement").clicked() {
                     #[cfg(target_os = "windows")]
                     eprintln!("plugin input guest activated remove");
                     self.apply(CounterOperation::Decrement);
                 }
-                ui.label(count.to_string());
-                if ui.button("Add").clicked() {
+                ui.label(count.to_string()).test_id("counter.count");
+                if ui.button("Add").test_id("counter.increment").clicked() {
                     #[cfg(target_os = "windows")]
                     eprintln!("plugin input guest activated add");
                     self.apply(CounterOperation::Increment);
@@ -113,6 +114,7 @@ impl block_editor_plugin::App for CounterApp {
         for step in [1, 5, 10] {
             if ui
                 .selectable_label(self.step == step, step.to_string())
+                .test_id(&format!("counter.step.{step}"))
                 .clicked()
             {
                 self.step = step;
@@ -120,7 +122,7 @@ impl block_editor_plugin::App for CounterApp {
         }
         ui.separator();
         ui.heading("Actions");
-        if ui.button("Add step").clicked() {
+        if ui.button("Add step").test_id("counter.add-step").clicked() {
             self.apply(CounterOperation::Increment);
         }
         if ui.button("Remove step").clicked() {

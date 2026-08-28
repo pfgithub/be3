@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use block_client::blocks::checklist::{Checklist, ChecklistOperation};
+use block_editor_plugin::block_ui::test_id::TestId;
 use block_editor_plugin::egui;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
@@ -63,14 +64,16 @@ impl ChecklistApp {
     }
 
     fn draft_ui(&mut self, ui: &mut egui::Ui) {
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut self.draft)
-                .hint_text("New item")
-                .desired_width(160.0),
-        );
+        let response = ui
+            .add(
+                egui::TextEdit::singleline(&mut self.draft)
+                    .hint_text("New item")
+                    .desired_width(160.0),
+            )
+            .test_id("checklist.draft");
         let submitted =
             response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if ui.button("Add").clicked() || submitted {
+        if ui.button("Add").test_id("checklist.add").clicked() || submitted {
             self.add_draft();
         }
     }
@@ -116,13 +119,21 @@ impl block_editor_plugin::App for ChecklistApp {
                 shown += 1;
                 ui.horizontal(|ui| {
                     let mut checked = *done;
-                    if ui.checkbox(&mut checked, text).changed() {
+                    if ui
+                        .checkbox(&mut checked, text)
+                        .test_id(&format!("checklist.item.{index}.done"))
+                        .changed()
+                    {
                         self.apply(ChecklistOperation::SetDone {
                             index: index as u32,
                             done: checked,
                         });
                     }
-                    if ui.button("Remove").clicked() {
+                    if ui
+                        .button("Remove")
+                        .test_id(&format!("checklist.item.{index}.remove"))
+                        .clicked()
+                    {
                         self.apply(ChecklistOperation::Remove {
                             index: index as u32,
                         });
@@ -139,7 +150,11 @@ impl block_editor_plugin::App for ChecklistApp {
         ui.horizontal(|ui| {
             self.draft_ui(ui);
             ui.separator();
-            if ui.button("Clear done").clicked() {
+            if ui
+                .button("Clear done")
+                .test_id("checklist.clear-done")
+                .clicked()
+            {
                 self.apply(ChecklistOperation::ClearDone);
             }
         });
@@ -148,7 +163,11 @@ impl block_editor_plugin::App for ChecklistApp {
     fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("Show");
         for (filter, label) in Filter::ALL {
-            if ui.selectable_label(self.filter == filter, label).clicked() {
+            if ui
+                .selectable_label(self.filter == filter, label)
+                .test_id(&format!("checklist.filter.{}", label.to_lowercase()))
+                .clicked()
+            {
                 self.filter = filter;
             }
         }
