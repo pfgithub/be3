@@ -19,17 +19,12 @@ pub fn render(snapshot: &Snapshot) -> Result<RgbaImage, String> {
     for primitive in &snapshot.primitives {
         let clip = scaled(primitive.clip, scale, &canvas);
         match &primitive.content {
-            Content::Mesh(mesh) => {
-                let sampler = textures
-                    .get(&mesh.texture)
-                    .ok_or("the snapshot is missing a texture the painting uses")?;
-                for triangle in mesh.indices.chunks_exact(3) {
-                    let corners = [
-                        mesh.vertices[triangle[0] as usize],
-                        mesh.vertices[triangle[1] as usize],
-                        mesh.vertices[triangle[2] as usize],
-                    ];
-                    fill(&mut canvas, clip, corners, scale, sampler);
+            Content::Mesh(triangles) => {
+                for triangle in triangles {
+                    let sampler = textures
+                        .get(&triangle.texture)
+                        .ok_or("the snapshot is missing a texture the painting uses")?;
+                    fill(&mut canvas, clip, triangle.corners, scale, sampler);
                 }
             }
             Content::Callback(rect) => {

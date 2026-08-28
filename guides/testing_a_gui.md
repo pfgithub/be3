@@ -62,9 +62,9 @@ matches, which is usually a widget that was never given a test id.
 4. Snapshots of the painting
 
 editor.snapshot(name) records everything the editor painted into
-<crate>/snapshots/<name>.paint: the triangles egui tessellated, and the textures they
-sample, compressed. It is a few kilobytes rather than the hundreds a screenshot costs, and
-it is compared exactly, so nothing about it is flaky.
+<crate>/snapshots/<name>.paint: the triangles egui tessellated, and the scrap of texture
+each one samples, compressed. It is a few kilobytes rather than the hundreds a screenshot
+costs, and it is compared exactly, so nothing about it is flaky.
 
 - Accept a new or changed painting with UPDATE_SNAPSHOTS=1 cargo nextest run --workspace.
   A test that fails without it says what changed and leaves the accepted file as it was.
@@ -78,11 +78,12 @@ it is compared exactly, so nothing about it is flaky.
   again the next time the block is opened, and one nobody had approved before it vanished
   is not reported at all.
 
-A snapshot samples the font atlas, and the atlas is packed as glyphs are first drawn, so
-text that differs between runs - a temporary directory's name, a uuid, the time - moves
-every glyph that follows it and makes the snapshot flaky. That holds for every frame the
-test draws, not only the one it captures: put the state the test needs in place before the
-first run() rather than letting an earlier frame paint something variable.
+A snapshot never holds the font atlas. Each triangle carries the piece of texture it
+samples, cut out of the atlas and keyed by what is in it, so where a glyph happened to land
+in the atlas cannot reach the file: text an earlier frame drew - a temporary directory's
+name, a uuid, the time - repacks the atlas without moving anything in the snapshot. Text
+that varies in the frame the test captures is of course a different painting, and still
+has to be kept out of it.
 
 Regenerating them is cheap and mechanical - an egui upgrade rewrites every one - so a
 changed snapshot is not by itself a failure to explain. You should not look at the image,

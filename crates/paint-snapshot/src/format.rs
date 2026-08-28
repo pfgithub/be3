@@ -7,7 +7,7 @@ use flate2::Compression;
 use serde::{Deserialize, Serialize};
 
 const MAGIC: &[u8; 8] = b"BE3PAINT";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 pub type TextureKey = u64;
 
@@ -28,15 +28,14 @@ pub struct Primitive {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Content {
-    Mesh(Mesh),
+    Mesh(Vec<Triangle>),
     Callback([f32; 4]),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Mesh {
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Triangle {
     pub texture: TextureKey,
-    pub indices: Vec<u32>,
-    pub vertices: Vec<Vertex>,
+    pub corners: [Vertex; 3],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

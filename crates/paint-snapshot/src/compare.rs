@@ -49,19 +49,19 @@ fn changes(before: &Content, after: &Content) -> String {
     let (Content::Mesh(before), Content::Mesh(after)) = (before, after) else {
         return replaced;
     };
-    if before.texture != after.texture || before.vertices.len() != after.vertices.len() {
+    if before.len() != after.len() {
         return replaced;
     }
 
     let moved: Vec<[f32; 2]> = before
-        .vertices
         .iter()
-        .zip(&after.vertices)
+        .zip(after)
+        .flat_map(|(before, after)| before.corners.into_iter().zip(after.corners))
         .filter(|(before, after)| before != after)
         .map(|(_, after)| after.pos)
         .collect();
     if moved.is_empty() {
-        return "the triangles are ordered differently".to_owned();
+        return "the triangles sample different textures".to_owned();
     }
 
     let region = moved
@@ -77,7 +77,7 @@ fn changes(before: &Content, after: &Content) -> String {
     format!(
         "{} of {} corners moved or changed colour, between ({}, {}) and ({}, {})",
         moved.len(),
-        after.vertices.len(),
+        after.len() * 3,
         region[0].round(),
         region[1].round(),
         region[2].round(),
@@ -87,10 +87,14 @@ fn changes(before: &Content, after: &Content) -> String {
 
 fn summary(content: &Content) -> String {
     match content {
-        Content::Mesh(mesh) => format!(
-            "a mesh of {} triangles on texture {}",
-            mesh.indices.len() / 3,
-            mesh.texture
+        Content::Mesh(triangles) => format!(
+            "a mesh of {} triangles on {} textures",
+            triangles.len(),
+            triangles
+                .iter()
+                .map(|triangle| triangle.texture)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
         ),
         Content::Callback(rect) => format!("a callback over {rect:?}"),
     }
