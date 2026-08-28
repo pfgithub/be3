@@ -32,13 +32,40 @@ pub fn assert_snapshot(name: &str, snapshot: &Snapshot) {
 }
 
 fn accepted_path(name: &str) -> PathBuf {
-    directory().join(format!("{name}.paint"))
+    let manifest = manifest();
+    directory(&manifest).join(format!("{}.{name}.paint", crate_name(&manifest)))
 }
 
-fn directory() -> PathBuf {
+fn manifest() -> PathBuf {
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR is not set, run these tests through cargo");
-    PathBuf::from(manifest).join("snapshots")
+    PathBuf::from(manifest)
+}
+
+fn crate_name(manifest: &Path) -> String {
+    manifest
+        .file_name()
+        .unwrap_or_else(|| panic!("{} names no crate", manifest.display()))
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn directory(manifest: &Path) -> PathBuf {
+    manifest
+        .ancestors()
+        .find(|directory| holds_the_workspace(directory))
+        .unwrap_or_else(|| {
+            panic!(
+                "no workspace holds {}, run these tests through cargo",
+                manifest.display()
+            )
+        })
+        .join("snapshots")
+}
+
+fn holds_the_workspace(directory: &Path) -> bool {
+    std::fs::read_to_string(directory.join("Cargo.toml"))
+        .is_ok_and(|manifest| manifest.contains("[workspace]"))
 }
 
 fn write(path: &Path, bytes: &[u8]) {

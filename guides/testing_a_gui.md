@@ -62,14 +62,16 @@ matches, which is usually a widget that was never given a test id.
 4. Snapshots of the painting
 
 editor.snapshot(name) records everything the editor painted into
-<crate>/snapshots/<name>.paint: the triangles egui tessellated, and the scrap of texture
+snapshots/<crate>.<name>.paint, one folder at the root of the repository holding every
+painting the workspace accepted: the triangles egui tessellated, and the scrap of texture
 each one samples, compressed. It is a few kilobytes rather than the hundreds a screenshot
 costs, and it is compared exactly, so nothing about it is flaky.
 
 - Accept a new or changed painting with UPDATE_SNAPSHOTS=1 cargo nextest run --workspace.
   A test that fails without it says what changed and leaves the accepted file as it was.
-- Look at them in a Paint review block, which is what a person reviews them with. It
-  downloads every .paint file on the repository's dev branch from GitHub, so a painting is
+- Look at them in a Paint review block, which is what a person reviews them with. It asks
+  GitHub for that one folder on the repository's dev branch - a single request that lists
+  the paintings rather than the whole tree - and downloads each of them, so a painting is
   reviewed once it has been pushed rather than from the machine that made it, and works the
   same in the browser as on the desktop. It sorts them into the ones it has never seen, the
   ones whose contents changed since they were approved, and the ones that have gone.

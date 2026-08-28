@@ -18,6 +18,7 @@ use web::start as start_download;
 
 pub const REPOSITORY: &str = "pfgithub/be3";
 pub const BRANCH: &str = "dev";
+pub const FOLDER: &str = "snapshots";
 
 #[derive(Clone)]
 pub struct Painting {
@@ -60,11 +61,11 @@ pub fn start(source: &Source, waker: Waker) -> Download {
 }
 
 fn tree_url() -> String {
-    format!("https://api.github.com/repos/{REPOSITORY}/git/trees/{BRANCH}?recursive=1")
+    format!("https://api.github.com/repos/{REPOSITORY}/git/trees/{BRANCH}:{FOLDER}")
 }
 
 fn file_url(path: &str) -> String {
-    format!("https://raw.githubusercontent.com/{REPOSITORY}/{BRANCH}/{path}")
+    format!("https://raw.githubusercontent.com/{REPOSITORY}/{BRANCH}/{FOLDER}/{path}")
 }
 
 fn painting(path: String, data: Vec<u8>) -> Painting {
@@ -79,17 +80,19 @@ pub(crate) fn paths_in(tree: &[u8]) -> Result<Vec<String>, String> {
     let tree: Value = serde_json::from_slice(tree)
         .map_err(|error| format!("GitHub answered with something unreadable: {error}"))?;
     if let Some(message) = tree.get("message").and_then(Value::as_str) {
-        return Err(format!("GitHub refused to list {BRANCH}: {message}"));
+        return Err(format!(
+            "GitHub refused to list {FOLDER} on {BRANCH}: {message}"
+        ));
     }
     if tree.get("truncated").and_then(Value::as_bool) == Some(true) {
         return Err(format!(
-            "{BRANCH} holds more files than GitHub will list at once"
+            "{FOLDER} holds more paintings than GitHub will list at once"
         ));
     }
     let entries = tree
         .get("tree")
         .and_then(Value::as_array)
-        .ok_or_else(|| format!("GitHub sent no listing of {BRANCH}"))?;
+        .ok_or_else(|| format!("GitHub sent no listing of {FOLDER}"))?;
     let suffix = format!(".{}", PaintSnapshot::FILE_EXTENSION);
     let mut paths: Vec<String> = entries
         .iter()

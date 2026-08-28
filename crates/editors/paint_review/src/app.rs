@@ -479,7 +479,7 @@ impl block_editor_plugin::App for PaintReviewApp {
                 for entry in group {
                     let selected = self.selected.as_deref() == Some(entry.path.as_str());
                     let clicked = ui
-                        .selectable_label(selected, name(&entry.path))
+                        .selectable_label(selected, entry.path.clone())
                         .test_id(&format!("paint_review.entry.{}", entry.path))
                         .clicked();
                     if clicked {
@@ -533,10 +533,6 @@ impl block_editor_plugin::App for PaintReviewApp {
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         Some(INTRINSIC_SIZE)
     }
-}
-
-fn name(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
 }
 
 fn paint(ui: &mut egui::Ui, rendered: &Rendered) {

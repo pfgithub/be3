@@ -18,7 +18,7 @@ mod a_painting_that_was_never_approved_is_new;
 mod a_tree_lists_only_the_paintings_on_it;
 mod a_tree_that_says_nothing_useful_is_an_error;
 
-const PATH: &str = "snapshots/a_button_is_drawn.paint";
+const PATH: &str = "counter.a_button_is_drawn.paint";
 
 struct Review {
     branch: Arc<Mutex<Vec<Painting>>>,
