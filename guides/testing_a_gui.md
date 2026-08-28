@@ -68,12 +68,14 @@ costs, and it is compared exactly, so nothing about it is flaky.
 
 - Accept a new or changed painting with UPDATE_SNAPSHOTS=1 cargo nextest run --workspace.
   A test that fails without it says what changed and leaves the accepted file as it was.
-- Look at them in a Paint review block, which is what a person reviews them with. It finds
-  every .paint file under the directory the app was launched from (./scripts/run, from the
-  root of the repository) and sorts them into the ones it has never seen, the ones whose
-  contents changed since they were approved, and the ones that have gone. Choosing one
-  renders it, a changed one toggles between the painting that was approved and the one on
-  disk, and approving it keeps a copy of the painting - a block of its own - and the hash.
+- Look at them in a Paint review block, which is what a person reviews them with. It
+  downloads every .paint file on the repository's dev branch from GitHub, so a painting is
+  reviewed once it has been pushed rather than from the machine that made it, and works the
+  same in the browser as on the desktop. It sorts them into the ones it has never seen, the
+  ones whose contents changed since they were approved, and the ones that have gone.
+  Choosing one renders it, a changed one toggles between the painting that was approved and
+  the one on the branch, and approving it keeps a copy of the painting - a block of its own
+  - and the hash.
 - Approving is not git, and a reviewer is not the tests: a painting nobody approved is new
   again the next time the block is opened, and one nobody had approved before it vanished
   is not reported at all.

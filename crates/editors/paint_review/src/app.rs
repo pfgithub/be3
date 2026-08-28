@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use block::BlockParent;
 use block_client::{
@@ -15,12 +15,12 @@ use block_editor_plugin::{
     egui_material_icons::icons::{
         ICON_CHECK, ICON_DELETE, ICON_DIFFERENCE, ICON_DONE_ALL, ICON_FIBER_NEW, ICON_REFRESH,
     },
-    EditorHost,
+    EditorHost, Waker,
 };
 use uuid::Uuid;
 
+use crate::download::{Download, Painting, Source, BRANCH};
 use crate::render::Rendered;
-use crate::scan::Painting;
 
 const INTRINSIC_SIZE: egui::Vec2 = egui::vec2(960.0, 640.0);
 
@@ -39,10 +39,10 @@ impl Showing {
         }
     }
 
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            Self::Approved => "the painting you approved",
-            Self::Current => "the painting on disk",
+            Self::Approved => "the painting you approved".to_owned(),
+            Self::Current => format!("the painting on the {BRANCH} branch"),
         }
     }
 }
@@ -92,10 +92,10 @@ struct Editing {
 pub struct PaintReviewApp {
     editing: Option<Editing>,
     creation: Option<Arc<BlockClient>>,
-    root: Option<PathBuf>,
-    looked_in: Option<PathBuf>,
+    source: Source,
+    download: Option<Download>,
     found: Vec<Painting>,
-    scanned: bool,
+    downloaded: bool,
     error: Option<String>,
     selected: Option<String>,
     showing: Showing,
@@ -105,9 +105,10 @@ pub struct PaintReviewApp {
 }
 
 impl PaintReviewApp {
-    pub fn review_in(&mut self, root: PathBuf) {
-        self.root = Some(root);
-        self.scanned = false;
+    #[cfg(test)]
+    pub fn review(&mut self, source: Source) {
+        self.source = source;
+        self.refresh();
     }
 
     pub fn entries(&self) -> Option<Vec<Entry>> {
@@ -166,31 +167,38 @@ impl PaintReviewApp {
     }
 
     fn poll(&mut self) {
-        if !self.scanned {
-            self.rescan();
+        if self.download.is_none() && !self.downloaded {
+            self.download = Some(crate::download::start(&self.source, self.waker()));
+        }
+        if let Some(result) = self.download.as_mut().and_then(Download::poll) {
+            self.download = None;
+            self.downloaded = true;
+            match result {
+                Ok(found) => {
+                    self.found = found;
+                    self.error = None;
+                }
+                Err(error) => {
+                    self.found.clear();
+                    self.error = Some(error);
+                }
+            }
         }
         self.settle();
     }
 
-    fn rescan(&mut self) {
-        self.scanned = true;
+    fn waker(&self) -> Waker {
+        self.editing
+            .as_ref()
+            .map(|editing| editing.host.waker())
+            .unwrap_or_default()
+    }
+
+    fn refresh(&mut self) {
+        self.download = None;
+        self.downloaded = false;
         self.view = None;
         self.change = None;
-        let root = match &self.root {
-            Some(root) => Ok(root.clone()),
-            None => crate::scan::root(),
-        };
-        self.looked_in = root.as_ref().ok().cloned();
-        match root.and_then(|root| crate::scan::scan(&root)) {
-            Ok(found) => {
-                self.found = found;
-                self.error = None;
-            }
-            Err(error) => {
-                self.found.clear();
-                self.error = Some(error);
-            }
-        }
     }
 
     fn editable(&self) -> bool {
@@ -292,7 +300,7 @@ impl PaintReviewApp {
                     .found
                     .iter()
                     .find(|found| found.path == path)
-                    .ok_or_else(|| Some(format!("{path} is not on disk")))?;
+                    .ok_or_else(|| Some(format!("{path} is not on the {BRANCH} branch")))?;
                 Ok((painting.hash.clone(), painting.data.clone()))
             }
             Showing::Approved => {
@@ -388,11 +396,17 @@ impl block_editor_plugin::App for PaintReviewApp {
             .and_then(|(entries, path)| self.status(&entries, path));
         ui.horizontal(|ui| {
             if ui
-                .button(format!("{} Rescan", ICON_REFRESH.codepoint))
-                .test_id("paint_review.rescan")
+                .add_enabled(
+                    self.download.is_none(),
+                    egui::Button::new(format!("{} Refresh", ICON_REFRESH.codepoint)),
+                )
+                .test_id("paint_review.refresh")
                 .clicked()
             {
-                self.rescan();
+                self.refresh();
+            }
+            if self.download.is_some() {
+                ui.spinner();
             }
             ui.separator();
             let editable = self.editable();
@@ -475,10 +489,11 @@ impl block_editor_plugin::App for PaintReviewApp {
                 }
             }
             if entries.is_empty() {
-                match &self.looked_in {
-                    Some(root) => ui.weak(format!("No paintings under {}", root.display())),
-                    None => ui.weak("No paintings were found"),
-                };
+                if self.download.is_some() {
+                    ui.spinner();
+                } else {
+                    ui.weak(format!("No paintings on the {BRANCH} branch"));
+                }
             }
         });
     }

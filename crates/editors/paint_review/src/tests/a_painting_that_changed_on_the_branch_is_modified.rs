@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn a_painting_that_changed_on_disk_is_modified() {
+fn a_painting_that_changed_on_the_branch_is_modified() {
     let (review, mut editor) = Review::open();
     editor.find(&entry_id(PATH)).click();
     editor.run();
@@ -10,7 +10,7 @@ fn a_painting_that_changed_on_disk_is_modified() {
     let snapshot = review.reference(PATH);
 
     review.write(PATH, &painting(200));
-    editor.find("paint_review.rescan").click();
+    editor.find("paint_review.refresh").click();
     editor.run();
     assert_eq!(status(&mut editor, PATH), Some(Status::Modified));
 

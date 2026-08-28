@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use block_client::blocks::paint_review::PaintReview;
 use block_client::blocks::paint_snapshot::PaintSnapshot;
@@ -11,31 +10,34 @@ use paint_snapshot::Snapshot;
 use uuid::Uuid;
 
 use crate::app::{PaintReviewApp, Status};
+use crate::download::{Painting, Source};
 
-mod a_painting_that_changed_on_disk_is_modified;
+mod a_painting_that_changed_on_the_branch_is_modified;
 mod a_painting_that_vanished_is_removed;
 mod a_painting_that_was_never_approved_is_new;
+mod a_tree_lists_only_the_paintings_on_it;
+mod a_tree_that_says_nothing_useful_is_an_error;
 
 const PATH: &str = "snapshots/a_button_is_drawn.paint";
 
 struct Review {
-    directory: PathBuf,
+    branch: Arc<Mutex<Vec<Painting>>>,
     client: Arc<BlockClient>,
     block: BlockHandle<PaintReview>,
 }
 
 impl Review {
     fn open() -> (Self, EditorTest<'static, PaintReviewApp>) {
-        let directory = std::env::temp_dir().join(format!("paint-review-test-{}", Uuid::new_v4()));
+        let branch = Arc::new(Mutex::new(Vec::new()));
         let client = Arc::new(BlockClient::new(Uuid::new_v4(), Uuid::new_v4()));
         let block = client.create_block(PaintReview::new());
         let host = EditorHost::default();
         host.set_editable(true);
         let mut app = PaintReviewApp::default();
         app.connect(host, Arc::clone(&client), block.id());
-        app.review_in(directory.clone());
+        app.review(Source::Fixed(Arc::clone(&branch)));
         let review = Self {
-            directory,
+            branch,
             client,
             block,
         };
@@ -46,13 +48,19 @@ impl Review {
     }
 
     fn write(&self, path: &str, painting: &Snapshot) {
-        let file = self.directory.join(path);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, painting.encode().unwrap()).unwrap();
+        let data = painting.encode().unwrap();
+        let mut branch = self.branch.lock().unwrap();
+        branch.retain(|held| held.path != path);
+        branch.push(Painting {
+            path: path.to_owned(),
+            hash: PaintSnapshot::fingerprint(&data),
+            data,
+        });
+        branch.sort_by(|left, right| left.path.cmp(&right.path));
     }
 
     fn remove(&self, path: &str) {
-        std::fs::remove_file(self.directory.join(path)).unwrap();
+        self.branch.lock().unwrap().retain(|held| held.path != path);
     }
 
     fn approved(&self, path: &str) -> Option<PaintSnapshot> {
@@ -71,12 +79,6 @@ impl Review {
 
     fn approvals(&self) -> usize {
         self.block.read().unwrap().approved().len()
-    }
-}
-
-impl Drop for Review {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.directory).ok();
     }
 }
 

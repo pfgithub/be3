@@ -1,6 +1,6 @@
 pub mod app;
+pub mod download;
 pub mod render;
-pub mod scan;
 
 #[cfg(test)]
 mod tests;

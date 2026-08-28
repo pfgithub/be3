@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use paint_snapshot::Snapshot;
 
 const REVIEW: &str =
-    "review it in a Paint review block, in the app run from the root of the repository";
+    "push it to the dev branch and review it in a Paint review block, which reads them from there";
 
 pub fn assert_snapshot(name: &str, snapshot: &Snapshot) {
     let bytes = snapshot

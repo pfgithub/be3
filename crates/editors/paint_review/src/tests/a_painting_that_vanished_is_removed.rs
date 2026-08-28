@@ -9,7 +9,7 @@ fn a_painting_that_vanished_is_removed() {
     editor.run();
 
     review.remove(PATH);
-    editor.find("paint_review.rescan").click();
+    editor.find("paint_review.refresh").click();
     editor.run();
     assert_eq!(status(&mut editor, PATH), Some(Status::Removed));
     assert!(review.approved(PATH).is_some());
