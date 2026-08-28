@@ -41,46 +41,6 @@ pub fn render(snapshot: &Snapshot) -> Result<RgbaImage, String> {
     Ok(canvas)
 }
 
-pub fn comparison(before: &Snapshot, after: &Snapshot) -> Result<(RgbaImage, u64), String> {
-    let before = render(before)?;
-    let after = render(after)?;
-    let gutter = 8;
-    let width = before.width().max(after.width());
-    let height = before.height().max(after.height());
-    let mut canvas = RgbaImage::from_pixel(
-        width * 3 + gutter * 2,
-        height,
-        image::Rgba([24, 24, 24, 255]),
-    );
-
-    let mut differing = 0;
-    for y in 0..height {
-        for x in 0..width {
-            let left = pixel(&before, x, y);
-            let right = pixel(&after, x, y);
-            canvas.put_pixel(x, y, image::Rgba(left));
-            canvas.put_pixel(x + width + gutter, y, image::Rgba(right));
-            let marker = if left == right {
-                let grey = (left[0] / 4).saturating_add(24);
-                [grey, grey, grey, 255]
-            } else {
-                differing += 1;
-                [255, 32, 96, 255]
-            };
-            canvas.put_pixel(x + (width + gutter) * 2, y, image::Rgba(marker));
-        }
-    }
-    Ok((canvas, differing))
-}
-
-fn pixel(image: &RgbaImage, x: u32, y: u32) -> [u8; 4] {
-    if x < image.width() && y < image.height() {
-        image.get_pixel(x, y).0
-    } else {
-        [0, 0, 0, 255]
-    }
-}
-
 struct Sampler {
     size: [u32; 2],
     pixels: Vec<[u8; 4]>,

@@ -4,10 +4,6 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "paint-snapshot"
-path = "src/main.rs"
-
 [dependencies]
 bincode = "1"
 egui = "0.34.3"

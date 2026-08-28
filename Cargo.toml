@@ -25,6 +25,7 @@ members = [
     "crates/editors/counter",
     "crates/editors/hotbar",
     "crates/editors/image_block",
+    "crates/editors/paint_review",
     "crates/editors/pdf",
     "crates/editors/pixel_art",
     "crates/editors/presentation",

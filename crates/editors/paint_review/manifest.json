@@ -1,0 +1,25 @@
+{
+  "id": "be3.paint-review",
+  "name": "Paint review",
+  "version": "0.1.0",
+  "block_type": "7061696e-742d-7265-7669-65772d620001",
+  "display_name": "Paint review",
+  "icon": "",
+  "creation": "Immediate",
+  "interaction": "Live",
+  "regions": [
+    "Main",
+    "Toolbar",
+    "LeftSidebar"
+  ],
+  "entry_points": {
+    "web": "paint_review.js",
+    "windows": "paint_review-host.exe",
+    "linux": "paint_review-host"
+  },
+  "surfaces": [
+    "WebExternalImage",
+    "WindowsDxgi",
+    "LinuxDmaBuf"
+  ]
+}

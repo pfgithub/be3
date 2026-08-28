@@ -551,8 +551,7 @@ impl EditorHost {
         *self.block_types.borrow_mut() = catalog;
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
-    pub(crate) fn set_editable(&self, editable: bool) {
+    pub fn set_editable(&self, editable: bool) {
         self.editable.set(editable);
     }
 

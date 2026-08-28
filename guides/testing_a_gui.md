@@ -1,7 +1,7 @@
 GUI tests run headless: no window, no GPU, no server. A test builds an editor, drives it the
 way a person would, and checks two things — what the block became, and what the editor
-painted. They are fast enough to belong in ./scripts/verify: the three that exist run in
-under a fifth of a second.
+painted. They are fast enough to belong in ./scripts/verify: the six that exist run in
+well under a second.
 
 1. What a GUI test may look at
 
@@ -67,14 +67,27 @@ sample, compressed. It is a few kilobytes rather than the hundreds a screenshot 
 it is compared exactly, so nothing about it is flaky.
 
 - Accept a new or changed painting with UPDATE_SNAPSHOTS=1 cargo nextest run --workspace.
-- Look at one: cargo run -p paint-snapshot -- render <snapshot> <output.png>.
-- Look at a change: a test that fails prints the command. It renders before, after and the
-  pixels that differ side by side into one image, which is what a person reviews.
+  A test that fails without it says what changed and leaves the accepted file as it was.
+- Look at them in a Paint review block, which is what a person reviews them with. It finds
+  every .paint file under the directory the app was launched from (./scripts/run, from the
+  root of the repository) and sorts them into the ones it has never seen, the ones whose
+  contents changed since they were approved, and the ones that have gone. Choosing one
+  renders it, a changed one toggles between the painting that was approved and the one on
+  disk, and approving it keeps a copy of the painting - a block of its own - and the hash.
+- Approving is not git, and a reviewer is not the tests: a painting nobody approved is new
+  again the next time the block is opened, and one nobody had approved before it vanished
+  is not reported at all.
+
+A snapshot samples the font atlas, and the atlas is packed as glyphs are first drawn, so
+text that differs between runs - a temporary directory's name, a uuid, the time - moves
+every glyph that follows it and makes the snapshot flaky. That holds for every frame the
+test draws, not only the one it captures: put the state the test needs in place before the
+first run() rather than letting an earlier frame paint something variable.
 
 Regenerating them is cheap and mechanical - an egui upgrade rewrites every one - so a
 changed snapshot is not by itself a failure to explain. You should not look at the image,
-images are for a human to review later. The rendered image is close to what the app
-draws rather than identical: it blends in sRGB where the GPU blends in linear light, and a
+images are for a human to review later. What the review block renders is close to what the
+app draws rather than identical: it blends in sRGB where the GPU blends in linear light, and a
 region drawn by a paint callback (a plugin's surface, a 3D scene) is a magenta outline,
 since its contents never reach the painter.
 

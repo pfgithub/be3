@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 
 use paint_snapshot::Snapshot;
 
+const REVIEW: &str =
+    "review it in a Paint review block, in the app run from the root of the repository";
+
 pub fn assert_snapshot(name: &str, snapshot: &Snapshot) {
     let bytes = snapshot
         .encode()
@@ -14,11 +17,7 @@ pub fn assert_snapshot(name: &str, snapshot: &Snapshot) {
         if updating {
             return;
         }
-        panic!(
-            "wrote a new painting to {}, look at it with:\n  {}",
-            accepted.display(),
-            render_command(&accepted, name)
-        );
+        panic!("wrote a new painting to {}, {REVIEW}", accepted.display());
     }
 
     let previous = Snapshot::decode(&read(&accepted)).expect("the accepted painting is unreadable");
@@ -26,34 +25,10 @@ pub fn assert_snapshot(name: &str, snapshot: &Snapshot) {
         return;
     };
 
-    let proposed = accepted.with_extension("new.paint");
-    write(&proposed, &bytes);
     panic!(
-        "the painting changed: {}\nto look at it:\n  {}\nto accept it:\n  UPDATE_SNAPSHOTS=1 cargo nextest run --workspace",
-        difference.description,
-        diff_command(&accepted, &proposed, name)
+        "the painting changed: {}\nto accept it:\n  UPDATE_SNAPSHOTS=1 cargo nextest run --workspace\nthen {REVIEW}",
+        difference.description
     );
-}
-
-fn render_command(accepted: &Path, name: &str) -> String {
-    format!(
-        "cargo run -p paint-snapshot -- render {} {}",
-        accepted.display(),
-        output_path(name).display()
-    )
-}
-
-fn diff_command(accepted: &Path, proposed: &Path, name: &str) -> String {
-    format!(
-        "cargo run -p paint-snapshot -- diff {} {} {}",
-        accepted.display(),
-        proposed.display(),
-        output_path(name).display()
-    )
-}
-
-fn output_path(name: &str) -> PathBuf {
-    directory().join(format!("{name}.png"))
 }
 
 fn accepted_path(name: &str) -> PathBuf {

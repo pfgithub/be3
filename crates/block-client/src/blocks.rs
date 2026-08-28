@@ -44,6 +44,8 @@ block_types! {
     logic_game::LogicGame;
     logic_grid::LogicGrid;
     map::Map;
+    paint_review::PaintReview;
+    paint_snapshot::PaintSnapshot;
     pdf::Pdf;
     pixel_art::PixelArt;
     pixel_ray_tracer::PixelRayTracer;

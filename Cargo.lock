@@ -6087,6 +6087,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "paint_review"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "paint-snapshot",
+ "uuid",
+]
+
+[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
