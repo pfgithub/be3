@@ -1,13 +1,14 @@
 use image::RgbaImage;
 
-use crate::format::{Content, Snapshot, Texture};
+use crate::format::{Content, Frame, Snapshot, Texture};
 
-pub fn render(snapshot: &Snapshot) -> Result<RgbaImage, String> {
-    let [width, height] = snapshot.size;
+pub fn render(snapshot: &Snapshot, frame: usize) -> Result<RgbaImage, String> {
+    let frame: &Frame = snapshot.frame(frame)?;
+    let [width, height] = frame.size;
     let mut canvas = RgbaImage::from_pixel(
         width.max(1),
         height.max(1),
-        image::Rgba(opaque(snapshot.background)),
+        image::Rgba(opaque(frame.background)),
     );
 
     let mut textures = std::collections::HashMap::new();
@@ -15,8 +16,8 @@ pub fn render(snapshot: &Snapshot) -> Result<RgbaImage, String> {
         textures.insert(*key, Sampler::new(texture)?);
     }
 
-    let scale = snapshot.pixels_per_point;
-    for primitive in &snapshot.primitives {
+    let scale = frame.pixels_per_point;
+    for primitive in &frame.primitives {
         let clip = scaled(primitive.clip, scale, &canvas);
         match &primitive.content {
             Content::Mesh(triangles) => {

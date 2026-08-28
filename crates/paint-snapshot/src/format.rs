@@ -7,17 +7,22 @@ use flate2::Compression;
 use serde::{Deserialize, Serialize};
 
 const MAGIC: &[u8; 8] = b"BE3PAINT";
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 pub type TextureKey = u64;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
+    pub frames: Vec<Frame>,
+    pub textures: BTreeMap<TextureKey, Texture>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Frame {
     pub size: [u32; 2],
     pub pixels_per_point: f32,
     pub background: [u8; 4],
     pub primitives: Vec<Primitive>,
-    pub textures: BTreeMap<TextureKey, Texture>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,6 +94,28 @@ impl Texture {
 }
 
 impl Snapshot {
+    pub fn of(frame: Frame, textures: BTreeMap<TextureKey, Texture>) -> Self {
+        Self {
+            frames: vec![frame],
+            textures,
+        }
+    }
+
+    pub fn frame(&self, index: usize) -> Result<&Frame, String> {
+        self.frames.get(index).ok_or_else(|| {
+            format!(
+                "the recording has {} frames, there is no frame {}",
+                self.frames.len(),
+                index + 1
+            )
+        })
+    }
+
+    pub fn append(&mut self, other: Self) {
+        self.frames.extend(other.frames);
+        self.textures.extend(other.textures);
+    }
+
     pub fn encode(&self) -> Result<Vec<u8>, String> {
         let body = bincode::serialize(self)
             .map_err(|error| format!("could not serialize snapshot: {error}"))?;

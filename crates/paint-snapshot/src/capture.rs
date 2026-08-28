@@ -4,7 +4,7 @@ use egui::epaint::Primitive as EguiPrimitive;
 use egui::{ImageData, TextureId, TexturesDelta};
 use sha2::{Digest as _, Sha256};
 
-use crate::format::{Content, Primitive, Snapshot, Texture, TextureKey, Triangle, Vertex};
+use crate::format::{Content, Frame, Primitive, Snapshot, Texture, TextureKey, Triangle, Vertex};
 
 const USER_TEXTURE: u64 = 1 << 63;
 
@@ -182,16 +182,18 @@ pub fn capture(
         primitives.push(Primitive { clip, content });
     }
 
-    Ok(Snapshot {
-        size: [
-            (screen.width() * pixels_per_point).round() as u32,
-            (screen.height() * pixels_per_point).round() as u32,
-        ],
-        pixels_per_point,
-        background: context.global_style().visuals.panel_fill.to_array(),
-        primitives,
-        textures: crops.textures,
-    })
+    Ok(Snapshot::of(
+        Frame {
+            size: [
+                (screen.width() * pixels_per_point).round() as u32,
+                (screen.height() * pixels_per_point).round() as u32,
+            ],
+            pixels_per_point,
+            background: context.global_style().visuals.panel_fill.to_array(),
+            primitives,
+        },
+        crops.textures,
+    ))
 }
 
 fn rectangle(rect: egui::Rect) -> [f32; 4] {

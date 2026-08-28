@@ -1,47 +1,87 @@
-use crate::format::{Content, Snapshot};
+use crate::format::{Content, Frame, Snapshot};
 
 pub struct Difference {
     pub description: String,
+    pub frame: Option<usize>,
 }
 
 pub fn difference(before: &Snapshot, after: &Snapshot) -> Option<Difference> {
     if before == after {
         return None;
     }
-    let description = if before.size != after.size {
-        format!(
+    if before.frames.len() != after.frames.len() {
+        return Some(Difference {
+            description: format!(
+                "the recording is {} long, it used to be {}",
+                frames(after.frames.len()),
+                frames(before.frames.len())
+            ),
+            frame: None,
+        });
+    }
+    let changed = before
+        .frames
+        .iter()
+        .zip(&after.frames)
+        .position(|(before, after)| before != after);
+    let Some(index) = changed else {
+        return Some(Difference {
+            description: "the textures the painting uses changed".to_owned(),
+            frame: None,
+        });
+    };
+    let description = within(&before.frames[index], &after.frames[index]);
+    Some(Difference {
+        description: match after.frames.len() {
+            1 => description,
+            count => format!("frame {} of {count} changed: {description}", index + 1),
+        },
+        frame: Some(index),
+    })
+}
+
+fn frames(count: usize) -> String {
+    match count {
+        1 => "one frame".to_owned(),
+        count => format!("{count} frames"),
+    }
+}
+
+fn within(before: &Frame, after: &Frame) -> String {
+    if before.size != after.size {
+        return format!(
             "the painting is {}x{}, it used to be {}x{}",
             after.size[0], after.size[1], before.size[0], before.size[1]
-        )
-    } else if before.background != after.background {
-        format!(
+        );
+    }
+    if before.background != after.background {
+        return format!(
             "the background is {:?}, it used to be {:?}",
             after.background, before.background
-        )
-    } else if before.primitives.len() != after.primitives.len() {
-        format!(
+        );
+    }
+    if before.primitives.len() != after.primitives.len() {
+        return format!(
             "the painting has {} draw calls, it used to have {}",
             after.primitives.len(),
             before.primitives.len()
-        )
-    } else {
-        let index = before
-            .primitives
-            .iter()
-            .zip(&after.primitives)
-            .position(|(before, after)| before != after);
-        match index {
-            Some(index) => format!(
-                "draw call {index} changed: {}",
-                changes(
-                    &before.primitives[index].content,
-                    &after.primitives[index].content
-                )
-            ),
-            None => "the textures the painting uses changed".to_owned(),
-        }
-    };
-    Some(Difference { description })
+        );
+    }
+    let index = before
+        .primitives
+        .iter()
+        .zip(&after.primitives)
+        .position(|(before, after)| before != after);
+    match index {
+        Some(index) => format!(
+            "draw call {index} changed: {}",
+            changes(
+                &before.primitives[index].content,
+                &after.primitives[index].content
+            )
+        ),
+        None => "the painting is scaled differently".to_owned(),
+    }
 }
 
 fn changes(before: &Content, after: &Content) -> String {

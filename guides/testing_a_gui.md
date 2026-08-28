@@ -1,14 +1,15 @@
 GUI tests run headless: no window, no GPU, no server. A test builds an editor, drives it the
 way a person would, and checks two things — what the block became, and what the editor
-painted. They are fast enough to belong in ./scripts/verify: the six that exist run in
+painted. They are fast enough to belong in ./scripts/verify: the handful that exist run in
 well under a second.
 
 1. What a GUI test may look at
 
 - The block. An editor's job is to turn gestures into operations, so the assertion is on
   the block the operations reached, exactly as in block-e2e.
-- The painting, as a snapshot (see 4). This catches what an assertion on the block cannot:
-  a control that vanished, a panel that lost its contents, a colour that changed.
+- The painting, as a snapshot (see 4) - one frame, or a recording of several. This catches
+  what an assertion on the block cannot: a control that vanished, a panel that lost its
+  contents, a colour that changed.
 - Never a coordinate, a widget's size, or the order of the accessibility tree. Those change
   whenever anyone touches a layout and say nothing about whether the editor works.
 
@@ -59,16 +60,37 @@ every gesture — egui only sees an event on the frame after it arrives — and 
 field before typing into it. find() panics with the whole accessibility tree when nothing
 matches, which is usually a widget that was never given a test id.
 
+run() paints until the editor asks for no more immediate repaints, so an editor that is
+animating — a recording playing, a spinner turning — never lets it return. Drive those a
+frame at a time with step(), which paints once however much the editor wanted.
+
 4. Snapshots of the painting
 
-editor.snapshot(name) records everything the editor painted into
+editor.snapshot(name) writes everything the editor painted into
 snapshots/<crate>.<name>.paint, one folder at the root of the repository holding every
 painting the workspace accepted: the triangles egui tessellated, and the scrap of texture
 each one samples, compressed. It is a few kilobytes rather than the hundreds a screenshot
 costs, and it is compared exactly, so nothing about it is flaky.
 
+A painting is a recording: one frame by default, or the frames the test kept. record()
+keeps the frame the editor has just painted, and snapshot(name) writes the frames kept
+since the last one — or the frame the test is on, if it kept none — so recording a gesture
+at a time paints how the editor got somewhere rather than only where it ended up.
+
+    editor.record();
+    editor.find("checklist.add").click();
+    editor.run();
+    editor.record();
+    editor.snapshot("adding_an_item_puts_it_on_the_list");
+
+The frames of a recording share one table of textures, so a frame that draws the same text
+as the last costs the triangles that draw it and nothing more. Keep recordings to the
+frames that say something: every frame is compared, so a frame nobody looks at is one more
+way for the test to fail.
+
 - Accept a new or changed painting with UPDATE_SNAPSHOTS=1 cargo nextest run --workspace.
-  A test that fails without it says what changed and leaves the accepted file as it was.
+  A test that fails without it says what changed — which frame, and what moved in it — and
+  leaves the accepted file as it was.
 - Look at them in a Paint review block, which is what a person reviews them with. It asks
   GitHub for that one folder on the repository's dev branch - a single request that lists
   the paintings rather than the whole tree - and downloads each of them, so a painting is
@@ -77,7 +99,8 @@ costs, and it is compared exactly, so nothing about it is flaky.
   ones whose contents changed since they were approved, and the ones that have gone.
   Choosing one renders it, a changed one toggles between the painting that was approved and
   the one on the branch, and approving it keeps a copy of the painting - a block of its own
-  - and the hash.
+  — and the hash. A recording is shown a frame at a time: step through it, play it, drag the
+  slider, or jump straight to the frame that changed.
 - Approving is not git, and a reviewer is not the tests: a painting nobody approved is new
   again the next time the block is opened, and one nobody had approved before it vanished
   is not reported at all.

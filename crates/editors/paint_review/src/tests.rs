@@ -7,7 +7,7 @@ use block_client::blocks::paint_snapshot::PaintSnapshot;
 use block_client::{BlockClient, BlockHandle};
 use block_editor_plugin::{App as _, EditorHost};
 use block_ui_test::EditorTest;
-use paint_snapshot::Snapshot;
+use paint_snapshot::{Frame, Snapshot};
 use uuid::Uuid;
 
 use crate::app::{PaintReviewApp, Status};
@@ -17,6 +17,7 @@ mod a_painting_is_only_rastered_once;
 mod a_painting_that_changed_on_the_branch_is_modified;
 mod a_painting_that_vanished_is_removed;
 mod a_painting_that_was_never_approved_is_new;
+mod a_recording_is_reviewed_one_frame_at_a_time;
 mod a_tree_lists_only_the_paintings_on_it;
 mod a_tree_that_says_nothing_useful_is_an_error;
 mod unapproving_a_painting_makes_it_new_again;
@@ -103,11 +104,20 @@ fn status(editor: &mut EditorTest<'_, PaintReviewApp>, path: &str) -> Option<Sta
 }
 
 fn painting(background: u8) -> Snapshot {
+    recording(&[background])
+}
+
+fn recording(backgrounds: &[u8]) -> Snapshot {
     Snapshot {
-        size: [24, 16],
-        pixels_per_point: 1.0,
-        background: [background, background, background, 255],
-        primitives: Vec::new(),
+        frames: backgrounds
+            .iter()
+            .map(|background| Frame {
+                size: [24, 16],
+                pixels_per_point: 1.0,
+                background: [*background, *background, *background, 255],
+                primitives: Vec::new(),
+            })
+            .collect(),
         textures: BTreeMap::new(),
     }
 }

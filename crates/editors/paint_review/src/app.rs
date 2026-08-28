@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use block::BlockParent;
 use block_client::{
@@ -13,16 +15,18 @@ use block_editor_plugin::{
     block_ui::test_id::TestId,
     egui::{self, emath::GuiRounding as _},
     egui_material_icons::icons::{
-        ICON_CHECK, ICON_DELETE, ICON_DIFFERENCE, ICON_DONE_ALL, ICON_FIBER_NEW, ICON_REFRESH,
+        ICON_CHECK, ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_DELETE, ICON_DIFFERENCE,
+        ICON_DONE_ALL, ICON_FIBER_NEW, ICON_PAUSE, ICON_PLAY_ARROW, ICON_REFRESH,
     },
     EditorHost, Waker,
 };
 use uuid::Uuid;
 
 use crate::download::{Download, Painting, Source, BRANCH};
-use crate::render::{Paintings, Rendered};
+use crate::render::{Change, Paintings, Rendered};
 
 const INTRINSIC_SIZE: egui::Vec2 = egui::vec2(960.0, 640.0);
+const FRAME_SECONDS: f64 = 0.25;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum Showing {
@@ -93,8 +97,12 @@ pub struct PaintReviewApp {
     selected: Option<String>,
     showing: Showing,
     paintings: Paintings,
-    change: Option<(String, String)>,
+    change: Option<(String, Change)>,
     pending: Option<String>,
+    frame: usize,
+    playing: bool,
+    advanced: Option<f64>,
+    counts: HashMap<String, usize>,
 }
 
 impl PaintReviewApp {
@@ -107,6 +115,11 @@ impl PaintReviewApp {
     #[cfg(test)]
     pub fn rasters(&self) -> usize {
         self.paintings.rasters()
+    }
+
+    #[cfg(test)]
+    pub fn frame(&self) -> usize {
+        self.frame
     }
 
     pub fn entries(&self) -> Option<Vec<Entry>> {
@@ -324,43 +337,140 @@ impl PaintReviewApp {
         }
     }
 
-    fn change_description(&mut self, path: &str) -> Option<String> {
+    fn change(&mut self, path: &str) -> Option<(String, Option<usize>)> {
         let current_hash = self.hash(path, Showing::Current).ok()?;
         let approved_hash = self.hash(path, Showing::Approved).ok()?;
         let key = format!("{approved_hash}\u{1}{current_hash}");
         if self.change.as_ref().is_none_or(|(seen, _)| *seen != key) {
             let approved = self.data(path, Showing::Approved).ok()?;
             let current = self.data(path, Showing::Current).ok()?;
-            let description = crate::render::change(&approved, &current)
-                .unwrap_or_else(|error| format!("the paintings could not be compared: {error}"));
-            self.change = Some((key, description));
+            let change =
+                crate::render::change(&approved, &current).unwrap_or_else(|error| Change {
+                    description: format!("the paintings could not be compared: {error}"),
+                    frame: None,
+                });
+            self.change = Some((key, change));
         }
         self.change
             .as_ref()
-            .map(|(_, description)| description.clone())
+            .map(|(_, change)| (change.description.clone(), change.frame))
     }
 
-    fn view(&mut self, ui: &mut egui::Ui, path: &str, showing: Showing) {
+    fn count(&mut self, path: &str, showing: Showing) -> usize {
+        let Ok(hash) = self.hash(path, showing) else {
+            return 1;
+        };
+        if let Some(count) = self.counts.get(&hash) {
+            return *count;
+        }
+        let Ok(data) = self.data(path, showing) else {
+            return 1;
+        };
+        let count = crate::render::frames(&data).unwrap_or(1).max(1);
+        self.counts.insert(hash, count);
+        count
+    }
+
+    fn frames_ui(&mut self, ui: &mut egui::Ui, count: usize, changed: Option<usize>) {
+        ui.horizontal(|ui| {
+            let step = |ui: &mut egui::Ui, icon: &str, id: &str, enabled: bool| {
+                ui.add_enabled(enabled, egui::Button::new(icon))
+                    .test_id(id)
+                    .clicked()
+            };
+            if step(
+                ui,
+                ICON_CHEVRON_LEFT.codepoint,
+                "paint_review.frame.previous",
+                self.frame > 0,
+            ) {
+                self.frame -= 1;
+                self.playing = false;
+            }
+            let playing = self.playing;
+            let icon = if playing { ICON_PAUSE } else { ICON_PLAY_ARROW };
+            if step(ui, icon.codepoint, "paint_review.frame.play", true) {
+                self.playing = !playing;
+                self.advanced = None;
+            }
+            if step(
+                ui,
+                ICON_CHEVRON_RIGHT.codepoint,
+                "paint_review.frame.next",
+                self.frame + 1 < count,
+            ) {
+                self.frame += 1;
+                self.playing = false;
+            }
+            let slider = ui
+                .add(egui::Slider::new(&mut self.frame, 0..=count - 1).show_value(false))
+                .test_id("paint_review.frame.at");
+            if slider.changed() {
+                self.playing = false;
+            }
+            ui.weak(format!("Frame {} of {count}", self.frame + 1));
+            if let Some(changed) = changed.filter(|changed| *changed != self.frame) {
+                if ui
+                    .button(format!("{} Changed frame", ICON_DIFFERENCE.codepoint))
+                    .test_id("paint_review.frame.changed")
+                    .clicked()
+                {
+                    self.frame = changed;
+                    self.playing = false;
+                }
+            }
+        });
+    }
+
+    fn advance(&mut self, ui: &egui::Ui, count: usize, rendered: bool) {
+        if !self.playing || count < 2 {
+            self.advanced = None;
+            return;
+        }
+        let now = ui.input(|input| input.time);
+        let due = self
+            .advanced
+            .is_none_or(|advanced| now - advanced >= FRAME_SECONDS);
+        if rendered && due {
+            self.frame = (self.frame + 1) % count;
+            self.advanced = Some(now);
+        }
+        ui.ctx()
+            .request_repaint_after(Duration::from_secs_f64(FRAME_SECONDS));
+    }
+
+    fn view(&mut self, ui: &mut egui::Ui, path: &str, showing: Showing, frame: usize) -> bool {
         let hash = match self.hash(path, showing) {
             Ok(hash) => hash,
-            Err(error) => return waiting(ui, error),
+            Err(error) => {
+                waiting(ui, error);
+                return false;
+            }
         };
-        if self.paintings.rendered(ui.ctx(), &hash).is_none() {
+        if self.paintings.rendered(ui.ctx(), &hash, frame).is_none() {
             let waker = self.waker();
             match self.data(path, showing) {
-                Ok(data) => self.paintings.start(&hash, data, waker),
-                Err(error) => return waiting(ui, error),
+                Ok(data) => self.paintings.start(&hash, frame, data, waker),
+                Err(error) => {
+                    waiting(ui, error);
+                    return false;
+                }
             }
         }
-        match self.paintings.rendered(ui.ctx(), &hash) {
+        match self.paintings.rendered(ui.ctx(), &hash, frame) {
             Some(Ok(rendered)) => {
                 ui.weak(rendered.description.clone());
                 draw(ui, rendered);
+                true
             }
             Some(Err(error)) => {
                 ui.colored_label(ui.visuals().error_fg_color, error);
+                true
             }
-            None => waiting(ui, None),
+            None => {
+                waiting(ui, None);
+                false
+            }
         }
     }
 }
@@ -489,6 +599,9 @@ impl block_editor_plugin::App for PaintReviewApp {
                     if clicked {
                         self.selected = Some(entry.path.clone());
                         self.showing = Showing::Current;
+                        self.frame = 0;
+                        self.playing = false;
+                        self.advanced = None;
                     }
                 }
             }
@@ -524,14 +637,22 @@ impl block_editor_plugin::App for PaintReviewApp {
             ui.weak(status.label());
             ui.weak(showing.label());
         });
+        let mut changed = None;
         if self.pending.is_some() {
             ui.weak("Waiting for the painting you approved before to arrive");
         } else if status == Status::Modified {
-            if let Some(description) = self.change_description(&path) {
+            if let Some((description, frame)) = self.change(&path) {
                 ui.weak(description);
+                changed = frame;
             }
         }
-        self.view(ui, &path, showing);
+        let count = self.count(&path, showing);
+        self.frame = self.frame.min(count - 1);
+        if count > 1 {
+            self.frames_ui(ui, count, changed.filter(|frame| *frame < count));
+        }
+        let rendered = self.view(ui, &path, showing, self.frame);
+        self.advance(ui, count, rendered);
     }
 
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
