@@ -72,8 +72,8 @@ it is compared exactly, so nothing about it is flaky.
   pixels that differ side by side into one image, which is what a person reviews.
 
 Regenerating them is cheap and mechanical - an egui upgrade rewrites every one - so a
-changed snapshot is not by itself a failure to explain. Look at the image, decide whether
-the editor still looks right, and accept it. The rendered image is close to what the app
+changed snapshot is not by itself a failure to explain. You should not look at the image,
+images are for a human to review later. The rendered image is close to what the app
 draws rather than identical: it blends in sRGB where the GPU blends in linear light, and a
 region drawn by a paint callback (a plugin's surface, a 3D scene) is a magenta outline,
 since its contents never reach the painter.
