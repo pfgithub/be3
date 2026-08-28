@@ -97,10 +97,16 @@ way for the test to fail.
   reviewed once it has been pushed rather than from the machine that made it, and works the
   same in the browser as on the desktop. It sorts them into the ones it has never seen, the
   ones whose contents changed since they were approved, and the ones that have gone.
-  Choosing one renders it, a changed one toggles between the painting that was approved and
-  the one on the branch, and approving it keeps a copy of the painting - a block of its own
-  — and the hash. A recording is shown a frame at a time: step through it, play it, drag the
-  slider, or jump straight to the frame that changed.
+  Choosing one renders every frame of it, and every frame of the one it was approved as,
+  before you ask for them, so stepping through a recording or flicking between the two never
+  waits on a rasteriser. Approving it keeps a copy of the painting - a block of its own - and
+  the hash. A recording is shown a frame at a time: step through it, play it, drag the
+  slider, or jump straight to the frame that changed. A changed painting is shown four ways:
+  the painting that was approved, the one on the branch, the difference - the pixels that
+  moved or changed colour, in red, over a ghost of the ones that did not, counted and
+  bounded - and the two side by side. Scroll to zoom and drag to pan, or fit it to the
+  panel; past 1:1 it is drawn a pixel at a time rather than smoothed, so a single pixel is
+  something you can look at.
 - Approving is not git, and a reviewer is not the tests: a painting nobody approved is new
   again the next time the block is opened, and one nobody had approved before it vanished
   is not reported at all.

@@ -2,15 +2,13 @@ use std::sync::mpsc::{self, Receiver};
 
 use block_editor_plugin::Waker;
 
-use super::Painted;
+use super::Message;
 
-pub(super) fn start(
-    data: Vec<u8>,
-    frame: usize,
-    waker: Waker,
-) -> Receiver<Result<Painted, String>> {
+pub(super) fn start(data: Vec<u8>, waker: Waker) -> Receiver<Message> {
     let (sender, receiver) = mpsc::channel();
-    let _ = sender.send(super::paint(&data, frame));
+    super::paint_all(&data, &mut |message| {
+        let _ = sender.send(message);
+    });
     waker.wake();
     receiver
 }

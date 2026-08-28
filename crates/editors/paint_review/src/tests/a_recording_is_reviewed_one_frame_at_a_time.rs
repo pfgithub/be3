@@ -9,13 +9,13 @@ fn a_recording_is_reviewed_one_frame_at_a_time() {
     editor.find(&entry_id(PATH)).click();
     editor.run();
     assert_eq!(editor.app().frame(), 0);
-    assert_eq!(editor.app().rasters(), 1);
+    assert_eq!(editor.app().rasters(), 3);
     editor.record();
 
     editor.find("paint_review.frame.next").click();
     editor.run();
     assert_eq!(editor.app().frame(), 1);
-    assert_eq!(editor.app().rasters(), 2);
+    assert_eq!(editor.app().rasters(), 3);
     editor.record();
 
     editor.find("paint_review.frame.next").click();

@@ -1,6 +1,7 @@
 pub mod app;
 pub mod download;
 pub mod render;
+pub mod view;
 
 #[cfg(test)]
 mod tests;

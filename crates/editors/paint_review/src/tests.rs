@@ -2,12 +2,13 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use block::BlockParent;
-use block_client::blocks::paint_review::PaintReview;
+use block_client::block_ref::BlockRef;
+use block_client::blocks::paint_review::{ApprovedPainting, PaintReview, PaintReviewOperation};
 use block_client::blocks::paint_snapshot::PaintSnapshot;
 use block_client::{BlockClient, BlockHandle};
-use block_editor_plugin::{App as _, EditorHost};
+use block_editor_plugin::{egui, App as _, EditorHost};
 use block_ui_test::EditorTest;
-use paint_snapshot::{Frame, Snapshot};
+use paint_snapshot::{Content, Frame, Primitive, Snapshot, Texture, Triangle, Vertex};
 use uuid::Uuid;
 
 use crate::app::{PaintReviewApp, Status};
@@ -20,6 +21,10 @@ mod a_painting_that_was_never_approved_is_new;
 mod a_recording_is_reviewed_one_frame_at_a_time;
 mod a_tree_lists_only_the_paintings_on_it;
 mod a_tree_that_says_nothing_useful_is_an_error;
+mod choosing_a_painting_rasters_the_one_it_was_approved_as;
+mod the_difference_counts_the_pixels_that_changed;
+mod the_difference_shows_the_pixels_that_changed;
+mod the_painting_can_be_zoomed_in_on;
 mod unapproving_a_painting_makes_it_new_again;
 
 const PATH: &str = "counter.a_button_is_drawn.paint";
@@ -61,6 +66,20 @@ impl Review {
             data,
         });
         branch.sort_by(|left, right| left.path.cmp(&right.path));
+    }
+
+    fn approve(&self, path: &str, painting: &Snapshot) {
+        let data = painting.encode().unwrap();
+        let hash = PaintSnapshot::fingerprint(&data);
+        let created = self.client.create_block(PaintSnapshot::new(path, data));
+        created.set_parent(BlockParent::Uuid(self.block.id()));
+        self.block.operate(PaintReviewOperation::Approve {
+            painting: ApprovedPainting {
+                path: path.to_owned(),
+                hash,
+                snapshot: BlockRef::Direct(created.id()),
+            },
+        });
     }
 
     fn remove(&self, path: &str) {
@@ -119,6 +138,34 @@ fn recording(backgrounds: &[u8]) -> Snapshot {
             })
             .collect(),
         textures: BTreeMap::new(),
+    }
+}
+
+fn marked(background: u8, left: f32) -> Snapshot {
+    let white = Texture::encode([1, 1], &[[255, 255, 255, 255]]).unwrap();
+    let corner = |x: f32, y: f32| Vertex {
+        pos: [x, y],
+        uv: [0.5, 0.5],
+        color: [220, 40, 60, 255],
+    };
+    Snapshot {
+        frames: vec![Frame {
+            size: [24, 16],
+            pixels_per_point: 1.0,
+            background: [background, background, background, 255],
+            primitives: vec![Primitive {
+                clip: [0.0, 0.0, 24.0, 16.0],
+                content: Content::Mesh(vec![Triangle {
+                    texture: 0,
+                    corners: [
+                        corner(left, 3.0),
+                        corner(left + 7.0, 3.0),
+                        corner(left, 12.0),
+                    ],
+                }]),
+            }],
+        }],
+        textures: BTreeMap::from([(0, white)]),
     }
 }
 
