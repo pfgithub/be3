@@ -35,6 +35,7 @@ members = [
     "crates/gpui-demo",
     "crates/paint-snapshot",
     "crates/fix-rust-source",
+    "crates/wasi-threads",
 ]
 resolver = "2"
 

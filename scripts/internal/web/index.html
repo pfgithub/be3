@@ -46,14 +46,16 @@
         </style>
 
         <!--
-            The module is built for wasm32-wasip1, so wasm-bindgen emits its
-            WASI calls as imports from this bare specifier. The import map is
-            what points them at the shim.
+            The module is built for wasm32-wasip1-threads, so wasm-bindgen emits
+            its WASI calls as imports from these bare specifiers: the ordinary
+            ones from "wasi_snapshot_preview1", and thread-spawn from "wasi".
+            The import map is what points them at the shims.
         -->
         <script type="importmap">
             {
                 "imports": {
-                    "wasi_snapshot_preview1": "./wasi.js"
+                    "wasi_snapshot_preview1": "./wasi.js",
+                    "wasi": "./threads.js"
                 }
             }
         </script>
@@ -64,6 +66,7 @@
 
         <script type="module">
             import { bindMemory } from "./wasi.js";
+            import { bindThreads } from "./threads.js";
             import init, { run_web } from "./block_app_lib.js";
 
             const status = document.getElementById("status");
@@ -80,10 +83,24 @@
             }
 
             try {
-                const wasm = await init();
+                if (!self.crossOriginIsolated) {
+                    throw new Error(
+                        "the page is not cross-origin isolated, so it cannot hold the " +
+                            "shared memory the module's threads run on; the server must send " +
+                            "Cross-Origin-Opener-Policy: same-origin and " +
+                            "Cross-Origin-Embedder-Policy: require-corp",
+                    );
+                }
+
+                // The module is compiled here rather than inside the glue,
+                // because starting a thread means instantiating this very
+                // module again on a Worker, and only the page holds it.
+                const module = await WebAssembly.compileStreaming(fetch("./block_app_lib_bg.wasm"));
+                const wasm = await init({ module_or_path: module });
                 // The glue runs the module's start function before returning,
-                // so this is the earliest the shim can be given memory.
+                // so this is the earliest the shims can be given memory.
                 bindMemory(wasm.memory);
+                bindThreads(module, wasm.memory);
 
                 status.hidden = true;
                 await run_web("block");

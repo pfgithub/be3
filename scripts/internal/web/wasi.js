@@ -1,15 +1,19 @@
 // The wasi_snapshot_preview1 calls the module makes.
 //
-// block-app is built for wasm32-wasip1, so Rust's standard library and the C in
-// FreeType and HarfBuzz both reach the host through WASI. wasm-bindgen emits
-// those as imports from the bare specifier "wasi_snapshot_preview1", which
-// index.html points at this file with an import map.
+// block-app is built for wasm32-wasip1-threads, so Rust's standard library and
+// the C in FreeType and HarfBuzz both reach the host through WASI. wasm-bindgen
+// emits those as imports from the bare specifier "wasi_snapshot_preview1",
+// which index.html points at this file with an import map.
 //
 // A browser is not a WASI host: there is no filesystem, no environment, and no
 // process to exit. Only the calls the module actually makes are implemented,
 // and the rest report that they are unsupported rather than pretending to
 // succeed, so a wrong assumption surfaces as a clear error instead of silently
 // corrupting state.
+//
+// The memory is shared, so it is a SharedArrayBuffer. TextDecoder and
+// getRandomValues both refuse to look at one, and every call that reads or
+// writes bytes copies through an unshared buffer for that reason.
 
 /** @type {WebAssembly.Memory | null} */
 let memory = null;
@@ -53,6 +57,10 @@ function bytes(pointer, length) {
     return new Uint8Array(memory.buffer, pointer, length);
 }
 
+function copied(pointer, length) {
+    return bytes(pointer, length).slice();
+}
+
 // Text written to a stream is buffered until a newline, so a line logged in
 // pieces arrives in the console as one message.
 const pending = new Map();
@@ -82,7 +90,7 @@ export function fd_write(fd, iovsPointer, iovsLength, writtenPointer) {
         const entry = iovsPointer + index * 8;
         const bufferPointer = data.getUint32(entry, true);
         const bufferLength = data.getUint32(entry + 4, true);
-        text += decoder.decode(bytes(bufferPointer, bufferLength));
+        text += decoder.decode(copied(bufferPointer, bufferLength));
         written += bufferLength;
     }
     writeStream(fd, text);
@@ -167,13 +175,15 @@ export function clock_time_get(clockId, precision, resultPointer) {
 }
 
 export function random_get(pointer, length) {
-    crypto.getRandomValues(bytes(pointer, length));
+    const filled = new Uint8Array(length);
+    crypto.getRandomValues(filled);
+    bytes(pointer, length).set(filled);
     return SUCCESS;
 }
 
 export function sched_yield() {
-    // Yielding cannot be honoured on the browser's single thread, and the
-    // caller only needs it to not fail.
+    // A thread cannot hand the rest of its slice to another one from inside
+    // WebAssembly, and the caller only needs the call to not fail.
     return SUCCESS;
 }
 

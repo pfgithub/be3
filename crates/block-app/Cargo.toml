@@ -58,6 +58,7 @@ serde_json = "1"
 text-editor-core = { path = "../text-editor-core" }
 unicode-script = "0.5"
 uuid = { version = "1", features = ["serde", "v4"] }
+wasi-threads = { path = "../wasi-threads" }
 
 # Desktop and Android. The web build has no embedded server, no SQLite file to
 # put app state in, and no blocking HTTP client.

@@ -6,6 +6,9 @@ use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 
 const WORKER_SOURCE: &str = r#"
+// A plugin's own threads instantiate its module again, so the worker compiles
+// it here rather than letting the glue fetch it: only what compiled the module
+// holds it, and web/threads.js has to be handed it to start a thread at all.
 let plugin = null;
 const queued = [];
 
@@ -22,9 +25,14 @@ self.onmessage = async (event) => {
     try {
         if (data.kind === "start") {
             const module = await import(data.url);
-            const wasm = await module.default();
+            const compiled = await WebAssembly.compileStreaming(
+                fetch(data.url.replace(/\.js$/, "_bg.wasm")),
+            );
+            const wasm = await module.default({ module_or_path: compiled });
             const shim = await import(new URL("./wasi.js", data.url).href);
             shim.bindMemory(wasm.memory);
+            const threads = await import(new URL("./threads.js", data.url).href);
+            threads.bindThreads(compiled, wasm.memory);
             await module.start(data.canvas, post);
             plugin = module;
             for (const frame of queued.splice(0)) plugin.receive(frame);

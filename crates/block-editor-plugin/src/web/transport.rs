@@ -27,6 +27,7 @@ pub(crate) async fn start<A: crate::App>(
     name: &str,
     version: &str,
 ) -> Result<(), JsValue> {
+    wasi_threads::initialize_main_thread();
     let canvas: web_sys::OffscreenCanvas = canvas.dyn_into()?;
     surface::initialize(canvas).await.map_err(failure)?;
     let runtime = Runtime::new::<A>(id, name, version, waker());
@@ -54,9 +55,12 @@ pub(crate) fn shutdown() {
 }
 
 fn waker() -> Waker {
-    Waker::new(|| {
-        WOKEN.with(|woken| woken.set(true));
-        schedule();
+    let plugin_thread = std::thread::current().id();
+    Waker::new(move || {
+        if std::thread::current().id() == plugin_thread {
+            WOKEN.with(|woken| woken.set(true));
+            schedule();
+        }
     })
 }
 

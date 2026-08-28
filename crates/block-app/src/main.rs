@@ -113,6 +113,7 @@ pub fn run() -> eframe::Result {
 pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
     use wasm_bindgen::JsCast;
 
+    wasi_threads::initialize_main_thread();
     panic_guard::install();
 
     let document = web_sys::window()

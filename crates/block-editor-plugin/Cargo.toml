@@ -14,6 +14,7 @@ egui_material_icons = "0.6.0"
 futures-util = "0.3"
 serde = "1"
 uuid = "1"
+wasi-threads = { path = "../wasi-threads" }
 
 [dev-dependencies]
 naga = { version = "29", features = ["wgsl-in"] }

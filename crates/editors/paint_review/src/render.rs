@@ -6,17 +6,16 @@ use block_editor_plugin::{egui, Waker};
 use paint_snapshot::{Content, Snapshot};
 
 mod difference;
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(test)]
 mod inline;
-#[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(test, allow(dead_code))]
 mod worker;
 
 pub use difference::difference;
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(test)]
 use inline::start as start_raster;
-#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+#[cfg(not(test))]
 use worker::start as start_raster;
 
 const BUDGET: usize = 48 * 1024 * 1024;

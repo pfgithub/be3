@@ -3,6 +3,13 @@
         reverse_proxy {$BE3_BACKEND_URL}
     }
     handle {
+        # The module's memory is shared, which a browser only hands out to a
+        # cross-origin isolated page. Without these two headers the app cannot
+        # start at all, and index.html says so rather than failing obscurely.
+        header {
+            Cross-Origin-Opener-Policy same-origin
+            Cross-Origin-Embedder-Policy require-corp
+        }
         file_server {
             root target/web
         }
