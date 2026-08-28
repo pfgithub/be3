@@ -1,10 +1,10 @@
-use std::{ffi::CString, io::Read, path::PathBuf};
+use std::{ffi::CString, io::Read};
 
 use winit::platform::android::activity::AndroidApp;
 
 use super::Plugins;
 
-const ROOT: &str = "plugins";
+const INDEX: &str = "plugins.json";
 
 pub(crate) fn load(app: &AndroidApp) {
     let assets = app.asset_manager();
@@ -18,25 +18,19 @@ pub(crate) fn load(app: &AndroidApp) {
         Ok(document)
     };
     let mut plugins = Plugins::default();
-    let index = format!("{ROOT}/index.json");
-    match read(&index) {
+    match read(INDEX) {
         Ok(document) => match serde_json::from_str::<Vec<String>>(&document) {
-            Ok(directories) => {
-                for directory in directories {
-                    let source = format!("{ROOT}/{directory}/manifest.json");
-                    match read(&source) {
-                        Ok(document) => plugins.add(
-                            &source,
-                            PathBuf::from(format!("{ROOT}/{directory}")),
-                            &document,
-                        ),
-                        Err(error) => plugins.error(&source, error),
+            Ok(manifests) => {
+                for manifest in manifests {
+                    match read(&manifest) {
+                        Ok(document) => plugins.add(&manifest, &document),
+                        Err(error) => plugins.error(&manifest, error),
                     }
                 }
             }
-            Err(error) => plugins.error(&index, error),
+            Err(error) => plugins.error(INDEX, error),
         },
-        Err(error) => plugins.error(&index, error),
+        Err(error) => plugins.error(INDEX, error),
     }
     super::install(plugins);
 }

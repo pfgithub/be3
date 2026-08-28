@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{cell::RefCell, sync::Arc};
 
 use block_plugin_api::PluginManifest;
 use uuid::Uuid;
@@ -24,7 +24,7 @@ pub(crate) type Location = std::path::PathBuf;
 #[derive(Default)]
 pub(crate) struct Plugins {
     manifests: Vec<Arc<PluginManifest>>,
-    directories: HashMap<String, Location>,
+    root: Location,
     errors: Vec<String>,
 }
 
@@ -37,7 +37,7 @@ impl Plugins {
         &self.errors
     }
 
-    fn add(&mut self, source: &str, directory: Location, document: &str) {
+    fn add(&mut self, source: &str, document: &str) {
         let manifest = match block_plugin_api::manifest_from_json(document) {
             Ok(manifest) => manifest,
             Err(error) => {
@@ -74,8 +74,6 @@ impl Plugins {
             ));
             return;
         }
-        self.directories
-            .insert(manifest.identity.id.clone(), directory);
         self.manifests.push(Arc::new(manifest));
     }
 
@@ -123,10 +121,16 @@ pub(crate) fn manifests() -> Vec<Arc<PluginManifest>> {
 )]
 pub(crate) fn entry_point(plugin_id: &str, entry: &str) -> Option<Location> {
     let plugins = plugins();
-    let directory = plugins.directories.get(plugin_id)?;
+    if !plugins
+        .manifests
+        .iter()
+        .any(|manifest| manifest.identity.id == plugin_id)
+    {
+        return None;
+    }
     #[cfg(target_arch = "wasm32")]
-    let location = format!("{directory}/{entry}");
+    let location = format!("{}{entry}", plugins.root);
     #[cfg(not(target_arch = "wasm32"))]
-    let location = directory.join(entry);
+    let location = plugins.root.join(entry);
     Some(location)
 }

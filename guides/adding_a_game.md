@@ -127,8 +127,11 @@ reaches the test as a trap rather than a message.
 ## 4. Nothing else
 
 `./scripts/build` finds every crate under `crates/tabletop_games/rules` for
-each target, stages the modules in `games/` beside the app with an index the
-browser and Android read in place of listing a directory, and the app
-compiles what it finds at startup. The block stores the id of the module it plays and the name
+each target, builds them all in one cargo call, and writes a `games.json`
+beside the app whose entries are paths relative to the index itself. A build
+that has to bundle the modules — the browser, an APK, a packaged directory —
+copies them into `games/` and points the index there; a build that runs out of
+`target/` points it straight at what cargo compiled, so nothing is moved. The
+app compiles what the index names at startup. The block stores the id of the module it plays and the name
 that module gave itself, so a client without the module still names the
 block, and a game that is not installed is reported in its place.

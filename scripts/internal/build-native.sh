@@ -52,14 +52,17 @@ target_triple="${triple:-$host_triple}"
 
 cargo_arguments=()
 artifact_directory="$repository/target"
+games_prefix='../wasm32-unknown-unknown'
 if [[ -n "$triple" ]]; then
     cargo_arguments+=(--target "$triple")
     artifact_directory+="/$triple"
+    games_prefix="../$games_prefix"
 fi
 if [[ "$profile" == 'release' ]]; then
     cargo_arguments+=(--release)
 fi
 artifact_directory+="/$profile"
+games_prefix+="/$profile/"
 
 extension=''
 case "$target_triple" in
@@ -78,64 +81,76 @@ if [[ -n "$sign_identity" ]]; then
     esac
 fi
 
-if $server; then
-    echo 'Building block-server...'
-    cargo build -p block-server --bins "${cargo_arguments[@]}"
-fi
-
-plugins_directory="$artifact_directory/plugins"
-games_directory="$artifact_directory/games"
-if $client; then
-    echo 'Building block-app...'
-    cargo build -p block-app --bins "${cargo_arguments[@]}"
-
-    load_plugins
-    rm -rf "$plugins_directory"
-    for plugin in "${plugins[@]}"; do
-        id="$(plugin_id "$plugin")"
-        echo "Building the $plugin plugin..."
-        cargo build -p "$plugin" --bin "$plugin-host" "${cargo_arguments[@]}"
-        executable="$artifact_directory/$plugin-host$extension"
-        if [[ ! -f "$executable" ]]; then
-            echo "cargo did not produce $executable" >&2
-            exit 1
-        fi
-        plugin_directory="$plugins_directory/$id"
-        mkdir -p "$plugin_directory"
-        cp "$(plugin_manifest "$plugin")" "$plugin_directory/manifest.json"
-        cp "$executable" "$plugin_directory/$plugin-host$extension"
-        if [[ -n "$sign_identity" ]]; then
-            codesign --force --options runtime --sign "$sign_identity" \
-                "$plugin_directory/$plugin-host$extension"
-        fi
-    done
-
-    build_games "$games_directory" "$profile"
-
-    "$internal/fetch-pdfium.sh" --triple "$target_triple" --output "$artifact_directory"
-
+sign() {
     if [[ -n "$sign_identity" ]]; then
-        codesign --force --options runtime --sign "$sign_identity" \
-            "$artifact_directory/block-app$extension"
+        codesign --force --options runtime --sign "$sign_identity" "$1"
     fi
+}
+
+# The app, the server and every plugin are one cargo call, so cargo builds the
+# dependencies they share once and compiles the rest of them at the same time.
+load_plugins
+selection=()
+if $server; then
+    selection+=(-p block-server --bin block-server)
+fi
+if $client; then
+    selection+=(-p block-app --bin block-app)
+    for plugin in "${plugins[@]}"; do
+        selection+=(-p "$plugin" --bin "$plugin-host")
+    done
+fi
+if [[ ${#selection[@]} -eq 0 ]]; then
+    echo '--no-client and --no-server together leave nothing to build' >&2
+    exit 1
+fi
+echo 'Building the app, the server and every plugin...'
+cargo build "${cargo_arguments[@]}" "${selection[@]}"
+
+executables=()
+if $server; then
+    executables+=("block-server$extension")
+fi
+if $client; then
+    executables+=("block-app$extension")
+    for plugin in "${plugins[@]}"; do
+        executables+=("$plugin-host$extension")
+    done
+fi
+for executable in "${executables[@]}"; do
+    if [[ ! -f "$artifact_directory/$executable" ]]; then
+        echo "cargo did not produce $artifact_directory/$executable" >&2
+        exit 1
+    fi
+    sign "$artifact_directory/$executable"
+done
+
+if $client; then
+    stage_plugin_manifests "$artifact_directory"
+    build_games "$profile"
+    write_games_index "$artifact_directory/games.json" "$games_prefix"
+    "$internal/fetch-pdfium.sh" --triple "$target_triple" --output "$artifact_directory"
 fi
 
+# Packaging is the one place files are copied: what a directory to hand over
+# holds cannot be spread across the target directory the way a local build is.
 if [[ -n "$output" ]]; then
     mkdir -p "$output"
-    if $server; then
-        cp "$artifact_directory/block-server$extension" "$output/"
-    fi
+    for executable in "${executables[@]}"; do
+        cp "$artifact_directory/$executable" "$output/$executable"
+    done
     if $client; then
-        cp "$artifact_directory/block-app$extension" "$output/"
         for library in libpdfium.so libpdfium.dylib pdfium.dll; do
             if [[ -f "$artifact_directory/$library" ]]; then
                 cp "$artifact_directory/$library" "$output/"
             fi
         done
-        rm -rf "$output/plugins"
-        cp -R "$plugins_directory" "$output/plugins"
-        rm -rf "$output/games"
-        cp -R "$games_directory" "$output/games"
+        rm -f "$output"/*.plugin.json
+        for manifest in "${plugin_manifests[@]}"; do
+            cp "$artifact_directory/$manifest" "$output/$manifest"
+        done
+        stage_games "$output/games"
+        write_games_index "$output/games.json" 'games/'
     fi
     echo "Packaged $target_triple in $output"
 fi

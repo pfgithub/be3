@@ -3,31 +3,29 @@ use wasm_bindgen_futures::JsFuture;
 
 use super::Installed;
 
-const ROOT: &str = "games";
+const INDEX: &str = "games.json";
 
 pub(crate) async fn load() {
     let mut installed = Installed::default();
-    let index = format!("{ROOT}/index.json");
-    match get(&index).await {
+    match get(INDEX).await {
         Ok(document) => match serde_json::from_slice::<Vec<String>>(&document) {
             Ok(modules) => {
                 for module in modules {
                     read(&mut installed, &module).await;
                 }
             }
-            Err(error) => installed.error(&index, error),
+            Err(error) => installed.error(INDEX, error),
         },
-        Err(error) => installed.error(&index, error),
+        Err(error) => installed.error(INDEX, error),
     }
     super::install(installed);
 }
 
 async fn read(installed: &mut Installed, module: &str) {
-    let source = format!("{ROOT}/{module}");
-    let id = module.strip_suffix(".wasm").unwrap_or(module).to_owned();
-    match get(&source).await {
-        Ok(bytes) => installed.add(&source, &id, &bytes),
-        Err(error) => installed.error(&source, error),
+    let id = super::identify(module);
+    match get(module).await {
+        Ok(bytes) => installed.add(module, &id, &bytes),
+        Err(error) => installed.error(module, error),
     }
 }
 

@@ -44,10 +44,27 @@ plugin_id() {
     echo "$id"
 }
 
-write_plugin_index() {
+# Puts every plugin's manifest beside the artifacts cargo produced, named after
+# the plugin's id, and leaves the names it wrote in plugin_manifests. Nothing a
+# plugin was compiled to is moved: the manifest names its entry point and the
+# app resolves that against the directory the manifest itself was found in.
+stage_plugin_manifests() {
     local directory="$1"
-    shift
-    write_index "$directory/index.json" "$@"
+    mkdir -p "$directory"
+    rm -f "$directory"/*.plugin.json
+    plugin_manifests=()
+    local plugin id
+    for plugin in "${plugins[@]}"; do
+        id="$(plugin_id "$plugin")"
+        cp "$(plugin_manifest "$plugin")" "$directory/$id.plugin.json"
+        plugin_manifests+=("$id.plugin.json")
+    done
+}
+
+# The browser and Android read an index because neither can list a directory.
+# Native discovery scans for the manifests instead, so it needs no index.
+write_plugin_index() {
+    write_index "$1/plugins.json" "${plugin_manifests[@]}"
 }
 
 write_index() {
@@ -81,13 +98,15 @@ load_games() {
     fi
 }
 
-# Compiles every game to its own WebAssembly module and stages them, with an
-# index the browser and Android builds read in place of listing a directory.
-# The modules are interpreted wherever the app runs, so they are built the
-# same way for every target.
+games_directory=''
+
+# Compiles every game to its own WebAssembly module in one cargo call and
+# leaves them where cargo put them, in games_directory. The modules are
+# interpreted wherever the app runs, so they are built the same way for every
+# target.
 build_games() {
-    local output="$1" profile="$2"
-    local arguments=()
+    local profile="$1"
+    local arguments=(--lib --target wasm32-unknown-unknown)
     if [[ "$profile" == 'release' ]]; then
         arguments+=(--release)
     fi
@@ -97,27 +116,41 @@ build_games() {
     fi
 
     load_games
-    rm -rf "$output"
-    mkdir -p "$output"
-    local game module modules=()
+    local game
     for game in "${games[@]}"; do
-        echo "Building the $game game..."
-        (cd "$repository" && cargo build -p "$game" --lib --target wasm32-unknown-unknown "${arguments[@]}")
-        module="$repository/target/wasm32-unknown-unknown/$profile/$game.wasm"
-        if [[ ! -f "$module" ]]; then
-            echo "cargo did not produce $module" >&2
+        arguments+=(-p "$game")
+    done
+    echo "Building ${#games[@]} games..."
+    (cd "$repository" && cargo build "${arguments[@]}")
+
+    games_directory="$repository/target/wasm32-unknown-unknown/$profile"
+    for game in "${games[@]}"; do
+        if [[ ! -f "$games_directory/$game.wasm" ]]; then
+            echo "cargo did not produce $games_directory/$game.wasm" >&2
             exit 1
         fi
-        cp "$module" "$output/$game.wasm"
-        modules+=("$game.wasm")
     done
-    write_index "$output/index.json" "${modules[@]}"
 }
 
-profile_directory() {
-    if [[ "$1" == 'release' ]]; then
-        echo 'release'
-    else
-        echo 'debug'
-    fi
+# The app reads games.json beside itself, whose entries are paths relative to
+# the index. A build that has to bundle the modules — the browser, an APK, a
+# packaged directory — copies them and points the index at the copies; a build
+# that runs out of target/ points it straight at what cargo compiled.
+write_games_index() {
+    local file="$1" prefix="$2"
+    local entries=() game
+    for game in "${games[@]}"; do
+        entries+=("$prefix$game.wasm")
+    done
+    write_index "$file" "${entries[@]}"
+}
+
+stage_games() {
+    local directory="$1"
+    rm -rf "$directory"
+    mkdir -p "$directory"
+    local game
+    for game in "${games[@]}"; do
+        cp "$games_directory/$game.wasm" "$directory/$game.wasm"
+    done
 }

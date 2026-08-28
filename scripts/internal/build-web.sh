@@ -54,7 +54,16 @@ if [[ "$profile" == 'release' ]]; then
     cargo_arguments+=(--release)
 fi
 
-build_games "$output_directory/games" "$profile"
+# The bundle is the whole of what is served, so it is rebuilt from nothing
+# rather than left holding what a plugin that has since gone produced.
+rm -rf "$output_directory"
+mkdir -p "$output_directory"
+
+# The games are compiled for a target of their own, before the WASI toolchain
+# below is exported over the environment the rest of the build runs in.
+build_games "$profile"
+stage_games "$output_directory/games"
+write_games_index "$output_directory/games.json" 'games/'
 
 if [[ -z "$wasi_sysroot" ]]; then
     wasi_sysroot="$tools_directory/wasi-sysroot"
@@ -86,44 +95,71 @@ export CXXSTDLIB_wasm32_wasip1='c++'
 export HARFBUZZ_SYS_NO_PKG_CONFIG='1'
 export RUSTFLAGS="-C link-arg=-L$wasi_sysroot/lib/wasm32-wasip1/noeh -C link-arg=$wasi_sysroot/lib/wasm32-wasip1/libsetjmp.a"
 
+# The app and every plugin are one cargo call, the way the native build makes
+# them, so the C and Rust dependencies they share are compiled once.
 load_plugins
-plugins_directory="$output_directory/plugins"
-rm -rf "$plugins_directory"
-mkdir -p "$plugins_directory"
-plugin_ids=()
+selection=(-p block-app)
 for plugin in "${plugins[@]}"; do
-    id="$(plugin_id "$plugin")"
-    echo "Building $plugin for wasm32-wasip1..."
-    cargo build -p "$plugin" --target wasm32-wasip1 "${cargo_arguments[@]}"
-    plugin_wasm="$repository/target/wasm32-wasip1/$profile/$plugin.wasm"
-    if [[ ! -f "$plugin_wasm" ]]; then
-        echo "cargo did not produce $plugin_wasm" >&2
+    selection+=(-p "$plugin")
+done
+echo "Building the app and ${#plugins[@]} plugins for wasm32-wasip1..."
+cargo build --lib --target wasm32-wasip1 "${cargo_arguments[@]}" "${selection[@]}"
+
+modules_directory="$repository/target/wasm32-wasip1/$profile"
+
+# wasm-bindgen holds the whole module in memory, and a debug build of the app
+# or of a plugin is hundreds of megabytes, so how many run at once is bounded
+# by memory rather than by cores.
+bindgen_jobs=2
+bindgen_pids=()
+bindgen_modules=()
+
+await_bindings() {
+    local index failed=false
+    for index in "${!bindgen_pids[@]}"; do
+        if ! wait "${bindgen_pids[$index]}"; then
+            echo "wasm-bindgen failed for ${bindgen_modules[$index]}" >&2
+            failed=true
+        fi
+    done
+    bindgen_pids=()
+    bindgen_modules=()
+    if $failed; then
         exit 1
     fi
+}
 
-    echo "Generating JavaScript bindings for $plugin..."
-    plugin_directory="$plugins_directory/$id"
-    mkdir -p "$plugin_directory"
-    "$wasm_bindgen" --target web --no-typescript --out-dir "$plugin_directory" "$plugin_wasm"
-    # A plugin runs in a worker, which has no import map, so its WASI imports
-    # are pointed at the shim beside the app instead of a bare specifier.
-    sed -i 's|from "wasi_snapshot_preview1"|from "../../wasi.js"|g' "$plugin_directory"/*.js
-    cp "$(plugin_manifest "$plugin")" "$plugin_directory/manifest.json"
-    plugin_ids+=("$id")
-done
-write_plugin_index "$plugins_directory" "${plugin_ids[@]}"
-
-echo 'Building block-app for wasm32-wasip1...'
-cargo build -p block-app --lib --target wasm32-wasip1 "${cargo_arguments[@]}"
-wasm="$repository/target/wasm32-wasip1/$profile/block_app_lib.wasm"
-if [[ ! -f "$wasm" ]]; then
-    echo "cargo did not produce $wasm" >&2
-    exit 1
-fi
+generate() {
+    local module="$modules_directory/$1.wasm"
+    if [[ ! -f "$module" ]]; then
+        echo "cargo did not produce $module" >&2
+        exit 1
+    fi
+    if [[ ${#bindgen_pids[@]} -ge $bindgen_jobs ]]; then
+        await_bindings
+    fi
+    "$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$module" &
+    bindgen_pids+=($!)
+    bindgen_modules+=("$module")
+}
 
 echo 'Generating JavaScript bindings...'
-mkdir -p "$output_directory"
-"$wasm_bindgen" --target web --no-typescript --out-dir "$output_directory" "$wasm"
+generate block_app_lib
+for plugin in "${plugins[@]}"; do
+    generate "$plugin"
+done
+await_bindings
+
+# A plugin runs in a worker, which has no import map, so its WASI imports are
+# pointed at the shim beside it rather than at the bare specifier the app's own
+# module keeps and the page's import map resolves.
+for plugin in "${plugins[@]}"; do
+    sed -i 's|from "wasi_snapshot_preview1"|from "./wasi.js"|g' "$output_directory/$plugin.js"
+done
+
+stage_plugin_manifests "$output_directory"
+write_plugin_index "$output_directory"
+
 cp "$internal/web/index.html" "$output_directory"
 cp "$internal/web/wasi.js" "$output_directory"
 

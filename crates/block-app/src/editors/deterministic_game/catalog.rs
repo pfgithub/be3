@@ -94,6 +94,12 @@ fn scan() -> Installed {
     Installed::default()
 }
 
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+fn identify(module: &str) -> String {
+    let name = module.rsplit('/').next().unwrap_or(module);
+    name.strip_suffix(".wasm").unwrap_or(name).to_owned()
+}
+
 pub(crate) fn game(id: &str) -> Option<Arc<Game>> {
     installed()
         .games

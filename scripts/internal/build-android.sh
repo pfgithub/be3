@@ -85,28 +85,30 @@ export CXX_aarch64_linux_android="$toolchain/aarch64-linux-android26-clang++"
 export AR_aarch64_linux_android="$toolchain/llvm-ar"
 
 cd "$repository"
-cargo build -p block-app --lib --target aarch64-linux-android
-cargo build -p counter --lib --target aarch64-linux-android
-cargo build -p checklist --lib --target aarch64-linux-android
 
+# The app and the libraries the plugin services load are one cargo call, the
+# way the native and web builds compile everything they need at once.
+android_libraries=(libblock_app_lib.so libcounter.so libchecklist.so)
+echo 'Building the app and its plugin libraries for aarch64-linux-android...'
+cargo build --lib --target aarch64-linux-android -p block-app -p counter -p checklist
+
+# An APK holds what the app reads, so this is a staging step whatever the
+# layout: assets are flattened the way a native build lays them out beside the
+# executable, with the index the asset manager needs in place of a listing.
 load_plugins
-rm -rf "$assets/plugins"
-mkdir -p "$assets/plugins"
-plugin_ids=()
-for plugin in "${plugins[@]}"; do
-    id="$(plugin_id "$plugin")"
-    mkdir -p "$assets/plugins/$id"
-    cp "$(plugin_manifest "$plugin")" "$assets/plugins/$id/manifest.json"
-    plugin_ids+=("$id")
-done
-write_plugin_index "$assets/plugins" "${plugin_ids[@]}"
+rm -rf "$assets"
+stage_plugin_manifests "$assets"
+write_plugin_index "$assets"
 
-build_games "$assets/games" debug
+build_games debug
+stage_games "$assets/games"
+write_games_index "$assets/games.json" 'games/'
 
+rm -rf "$native_libraries"
 mkdir -p "$native_libraries" "$(dirname "$apk")"
-cp "$repository/target/aarch64-linux-android/debug/libblock_app_lib.so" "$native_libraries/"
-cp "$repository/target/aarch64-linux-android/debug/libcounter.so" "$native_libraries/"
-cp "$repository/target/aarch64-linux-android/debug/libchecklist.so" "$native_libraries/"
+for library in "${android_libraries[@]}"; do
+    cp "$repository/target/aarch64-linux-android/debug/$library" "$native_libraries/"
+done
 cp "$cpp_runtime" "$native_libraries/"
 
 (

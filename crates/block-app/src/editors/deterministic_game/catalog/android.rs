@@ -4,7 +4,7 @@ use winit::platform::android::activity::AndroidApp;
 
 use super::Installed;
 
-const ROOT: &str = "games";
+const INDEX: &str = "games.json";
 
 pub(crate) fn load(app: &AndroidApp) {
     let assets = app.asset_manager();
@@ -18,22 +18,20 @@ pub(crate) fn load(app: &AndroidApp) {
         Ok(bytes)
     };
     let mut installed = Installed::default();
-    let index = format!("{ROOT}/index.json");
-    match read(&index) {
+    match read(INDEX) {
         Ok(document) => match serde_json::from_slice::<Vec<String>>(&document) {
             Ok(modules) => {
                 for module in modules {
-                    let source = format!("{ROOT}/{module}");
-                    let id = module.strip_suffix(".wasm").unwrap_or(&module).to_owned();
-                    match read(&source) {
-                        Ok(bytes) => installed.add(&source, &id, &bytes),
-                        Err(error) => installed.error(&source, error),
+                    let id = super::identify(&module);
+                    match read(&module) {
+                        Ok(bytes) => installed.add(&module, &id, &bytes),
+                        Err(error) => installed.error(&module, error),
                     }
                 }
             }
-            Err(error) => installed.error(&index, error),
+            Err(error) => installed.error(INDEX, error),
         },
-        Err(error) => installed.error(&index, error),
+        Err(error) => installed.error(INDEX, error),
     }
     super::install(installed);
 }

@@ -23,7 +23,7 @@ self.onmessage = async (event) => {
         if (data.kind === "start") {
             const module = await import(data.url);
             const wasm = await module.default();
-            const shim = await import(new URL("../../wasi.js", data.url).href);
+            const shim = await import(new URL("./wasi.js", data.url).href);
             shim.bindMemory(wasm.memory);
             await module.start(data.canvas, post);
             plugin = module;
