@@ -1,4 +1,4 @@
-use std::{ffi::CString, io::Read};
+use std::{ffi::CString, io::Read, sync::Arc};
 
 use winit::platform::android::activity::AndroidApp;
 
@@ -8,21 +8,23 @@ const INDEX: &str = "plugins.json";
 
 pub(crate) fn load(app: &AndroidApp) {
     let assets = app.asset_manager();
-    let read = |path: &str| -> Result<String, String> {
+    let read = |path: &str| -> Result<Vec<u8>, String> {
         let name = CString::new(path).map_err(|_| "the asset path is not a C string".to_owned())?;
         let mut asset = assets.open(&name).ok_or("no such asset")?;
-        let mut document = String::new();
+        let mut bytes = Vec::new();
         asset
-            .read_to_string(&mut document)
+            .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
-        Ok(document)
+        Ok(bytes)
     };
     let mut plugins = Plugins::default();
     match read(INDEX) {
-        Ok(document) => match serde_json::from_str::<Vec<String>>(&document) {
+        Ok(document) => match serde_json::from_slice::<Vec<String>>(&document) {
             Ok(manifests) => {
                 for manifest in manifests {
-                    match read(&manifest) {
+                    match read(&manifest).and_then(|bytes| {
+                        String::from_utf8(bytes).map_err(|error| error.to_string())
+                    }) {
                         Ok(document) => plugins.add(&manifest, &document),
                         Err(error) => plugins.error(&manifest, error),
                     }
@@ -31,6 +33,19 @@ pub(crate) fn load(app: &AndroidApp) {
             Err(error) => plugins.error(INDEX, error),
         },
         Err(error) => plugins.error(INDEX, error),
+    }
+    let wanted: Vec<String> = plugins
+        .manifests
+        .iter()
+        .filter_map(|manifest| manifest.entry_points.wasm.clone())
+        .collect();
+    for entry in wanted {
+        match read(&entry) {
+            Ok(bytes) => {
+                plugins.modules.insert(entry, Arc::new(bytes));
+            }
+            Err(error) => plugins.error(&entry, error),
+        }
     }
     super::install(plugins);
 }

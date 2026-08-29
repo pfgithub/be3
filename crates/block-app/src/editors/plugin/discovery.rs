@@ -21,11 +21,18 @@ pub(crate) type Location = String;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) type Location = std::path::PathBuf;
 
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+pub(crate) type Module = std::path::PathBuf;
+#[cfg(target_os = "android")]
+pub(crate) type Module = Arc<Vec<u8>>;
+
 #[derive(Default)]
 pub(crate) struct Plugins {
     manifests: Vec<Arc<PluginManifest>>,
     root: Location,
     errors: Vec<String>,
+    #[cfg(target_os = "android")]
+    modules: std::collections::HashMap<String, Module>,
 }
 
 impl Plugins {
@@ -133,4 +140,19 @@ pub(crate) fn entry_point(plugin_id: &str, entry: &str) -> Option<Location> {
     #[cfg(not(target_arch = "wasm32"))]
     let location = plugins.root.join(entry);
     Some(location)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+pub(crate) fn module(plugin_id: &str, entry: &str) -> Option<Module> {
+    entry_point(plugin_id, entry)
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn module(plugin_id: &str, entry: &str) -> Option<Module> {
+    let plugins = plugins();
+    plugins
+        .manifests
+        .iter()
+        .find(|manifest| manifest.identity.id == plugin_id)?;
+    plugins.modules.get(entry).cloned()
 }

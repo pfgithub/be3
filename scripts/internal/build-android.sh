@@ -86,11 +86,11 @@ export AR_aarch64_linux_android="$toolchain/llvm-ar"
 
 cd "$repository"
 
-# The app and the libraries the plugin services load are one cargo call, the
-# way the native and web builds compile everything they need at once.
-android_libraries=(libblock_app_lib.so libcounter.so libchecklist.so)
-echo 'Building the app and its plugin libraries for aarch64-linux-android...'
-cargo build --lib --target aarch64-linux-android -p block-app -p counter -p checklist
+# A plugin is a wasm asset the app runs in wasmtime, so the only native library
+# an APK carries is the app itself.
+android_libraries=(libblock_app_lib.so)
+echo 'Building the app for aarch64-linux-android...'
+cargo build --lib --target aarch64-linux-android -p block-app
 
 # An APK holds what the app reads, so this is a staging step whatever the
 # layout: assets are flattened the way a native build lays them out beside the
@@ -98,6 +98,7 @@ cargo build --lib --target aarch64-linux-android -p block-app -p counter -p chec
 load_plugins
 rm -rf "$assets"
 stage_plugin_manifests "$assets"
+build_plugin_wasm debug "$assets"
 write_plugin_index "$assets"
 
 build_games debug

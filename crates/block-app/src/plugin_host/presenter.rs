@@ -411,7 +411,7 @@ pub(super) struct Presenter {
     regions: Regions,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     platform: Option<super::platform::Presenter>,
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(not(target_arch = "wasm32"))]
     hosted: Option<super::wasm::Presenter>,
     #[cfg(target_arch = "wasm32")]
     web: Option<super::web::renderer::WebSurfacePresenter>,
@@ -460,12 +460,22 @@ fn build(render_state: &egui_wgpu::RenderState) -> (Presenter, Availability) {
     (presenter, availability)
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "windows"),
+    not(target_os = "linux")
+))]
 fn build(render_state: &egui_wgpu::RenderState) -> (Presenter, Availability) {
+    let hosted = super::wasm::presenter(render_state);
+    let availability = Availability {
+        platform: Err(super::backend::ONLY_HOSTED.to_owned()),
+        hosted: hosted.as_ref().map(|_| ()).map_err(Clone::clone),
+    };
     let presenter = Presenter {
         regions: Regions::new(&render_state.device),
+        hosted: hosted.ok(),
     };
-    (presenter, Availability::missing())
+    (presenter, availability)
 }
 
 impl Presenter {
@@ -481,16 +491,11 @@ impl Presenter {
                 Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
                 None => Err(UNSUPPORTED.to_owned()),
             },
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(not(target_arch = "wasm32"))]
             Frame::Hosted(frame) => match &mut self.hosted {
                 Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
                 None => Err(UNSUPPORTED.to_owned()),
             },
-            #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-            Frame::Missing(()) => {
-                let _ = (device, surface);
-                Err(UNSUPPORTED.to_owned())
-            }
             #[cfg(target_arch = "wasm32")]
             Frame::Web(frame) => match &mut self.web {
                 Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
@@ -506,16 +511,11 @@ impl Presenter {
                 Some(presenter) => presenter.prepare(queue, surface, frame),
                 None => Err(UNSUPPORTED.to_owned()),
             },
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(not(target_arch = "wasm32"))]
             Frame::Hosted(frame) => match &mut self.hosted {
                 Some(presenter) => presenter.prepare(queue, surface, frame),
                 None => Err(UNSUPPORTED.to_owned()),
             },
-            #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-            Frame::Missing(()) => {
-                let _ = (queue, surface);
-                Err(UNSUPPORTED.to_owned())
-            }
             #[cfg(target_arch = "wasm32")]
             Frame::Web(frame) => match &mut self.web {
                 Some(presenter) => presenter.prepare(queue, surface, frame),
@@ -525,16 +525,19 @@ impl Presenter {
     }
 
     pub(super) fn preview_texture(&self, surface: u32) -> Option<&wgpu::Texture> {
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            self.platform
+            let hosted = self
+                .hosted
                 .as_ref()
-                .and_then(|presenter| presenter.preview_texture(surface))
-                .or_else(|| {
-                    self.hosted
-                        .as_ref()
-                        .and_then(|presenter| presenter.preview_texture(surface))
-                })
+                .and_then(|presenter| presenter.preview_texture(surface));
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            let hosted = hosted.or_else(|| {
+                self.platform
+                    .as_ref()
+                    .and_then(|presenter| presenter.preview_texture(surface))
+            });
+            hosted
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -542,50 +545,35 @@ impl Presenter {
                 .as_ref()
                 .and_then(|presenter| presenter.preview_texture(surface))
         }
-        #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-        {
-            let _ = surface;
-            None
-        }
     }
 
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32) {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
-        {
-            if let Some(presenter) = &self.platform {
-                presenter.paint(render_pass, &self.regions, surface, slot);
-            }
-            if let Some(presenter) = &self.hosted {
-                presenter.paint(render_pass, &self.regions, surface, slot);
-            }
+        if let Some(presenter) = &self.platform {
+            presenter.paint(render_pass, &self.regions, surface, slot);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(presenter) = &self.hosted {
+            presenter.paint(render_pass, &self.regions, surface, slot);
         }
         #[cfg(target_arch = "wasm32")]
         if let Some(presenter) = &self.web {
             presenter.paint(render_pass, &self.regions, surface, slot);
         }
-        #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-        {
-            let _ = (render_pass, surface, slot);
-        }
     }
 
     fn release(&mut self, surface: u32) {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
-        {
-            if let Some(presenter) = &mut self.platform {
-                presenter.release(surface);
-            }
-            if let Some(presenter) = &mut self.hosted {
-                presenter.release(surface);
-            }
+        if let Some(presenter) = &mut self.platform {
+            presenter.release(surface);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(presenter) = &mut self.hosted {
+            presenter.release(surface);
         }
         #[cfg(target_arch = "wasm32")]
         if let Some(presenter) = &mut self.web {
             presenter.release(surface);
-        }
-        #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-        {
-            let _ = surface;
         }
     }
 }

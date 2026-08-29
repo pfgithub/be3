@@ -3,14 +3,20 @@ use std::time::Duration;
 use block_plugin_api::{Message, PluginManifest, ScreenLayout};
 use eframe::egui;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-use super::unavailable::Unavailable;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use super::native::Native;
+#[cfg(not(target_arch = "wasm32"))]
+use super::wasm::Wasm;
 #[cfg(target_arch = "wasm32")]
 use super::web::Web;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use super::{native::Native, wasm::Wasm};
 
 pub(super) const NOT_INSTALLED: &str = "The plugin host is not installed.";
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "windows"),
+    not(target_os = "linux")
+))]
+pub(super) const ONLY_HOSTED: &str = "This platform runs only plugins with a wasm entry point.";
 
 pub(super) trait Backend: Sized {
     type Frame;
@@ -37,10 +43,8 @@ pub(super) trait Backend: Sized {
 pub(super) enum Platform {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     Process(Native),
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(not(target_arch = "wasm32"))]
     Hosted(Wasm),
-    #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-    Missing(Unavailable),
     #[cfg(target_arch = "wasm32")]
     Web(Web),
 }
@@ -48,10 +52,8 @@ pub(super) enum Platform {
 pub(super) enum Frame {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     Process(<Native as Backend>::Frame),
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(not(target_arch = "wasm32"))]
     Hosted(<Wasm as Backend>::Frame),
-    #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-    Missing(<Unavailable as Backend>::Frame),
     #[cfg(target_arch = "wasm32")]
     Web(<Web as Backend>::Frame),
 }
@@ -61,10 +63,8 @@ macro_rules! dispatch {
         match $platform {
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             Platform::Process($backend) => $body,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(not(target_arch = "wasm32"))]
             Platform::Hosted($backend) => $body,
-            #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-            Platform::Missing($backend) => $body,
             #[cfg(target_arch = "wasm32")]
             Platform::Web($backend) => $body,
         }
@@ -94,10 +94,8 @@ impl Backend for Platform {
         match self {
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             Platform::Process(backend) => backend.frame(layout, pass).map(Frame::Process),
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(not(target_arch = "wasm32"))]
             Platform::Hosted(backend) => backend.frame(layout, pass).map(Frame::Hosted),
-            #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-            Platform::Missing(backend) => backend.frame(layout, pass).map(Frame::Missing),
             #[cfg(target_arch = "wasm32")]
             Platform::Web(backend) => backend.frame(layout, pass).map(Frame::Web),
         }
@@ -128,9 +126,13 @@ fn create(plugin: &PluginManifest, context: &egui::Context) -> Platform {
     }
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "windows"),
+    not(target_os = "linux")
+))]
 fn create(plugin: &PluginManifest, context: &egui::Context) -> Platform {
-    Platform::Missing(Unavailable::new(plugin, context))
+    Platform::Hosted(Wasm::new(plugin, context))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -138,12 +140,12 @@ fn create(plugin: &PluginManifest, context: &egui::Context) -> Platform {
     Platform::Web(Web::new(plugin, context))
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn hosted(plugin: &PluginManifest) -> bool {
     plugin.entry_points.wasm.is_some()
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(target_arch = "wasm32")]
 pub(super) fn hosted(_plugin: &PluginManifest) -> bool {
     false
 }

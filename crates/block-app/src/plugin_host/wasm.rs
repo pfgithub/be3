@@ -6,6 +6,8 @@ use std::{
     time::Instant,
 };
 
+use crate::editors::plugin::discovery::{self, Module};
+
 use block_plugin_api::{decode_frame, encode_frame, Message, PluginManifest, ScreenLayout};
 use block_wasm_host::{Host, Plugin};
 use eframe::{
@@ -83,7 +85,7 @@ struct Worker {
 
 pub(super) struct Wasm {
     worker: Option<Worker>,
-    module: Option<PathBuf>,
+    module: Option<Module>,
     started: Instant,
     error: Option<String>,
 }
@@ -94,9 +96,11 @@ impl super::backend::Backend for Wasm {
     fn new(plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self {
             worker: None,
-            module: plugin.entry_points.wasm.as_deref().and_then(|entry| {
-                crate::editors::plugin::discovery::entry_point(&plugin.identity.id, entry)
-            }),
+            module: plugin
+                .entry_points
+                .wasm
+                .as_deref()
+                .and_then(|entry| discovery::module(&plugin.identity.id, entry)),
             started: Instant::now(),
             error: None,
         }
@@ -256,14 +260,25 @@ fn decode(frames: Vec<Vec<u8>>, error: &mut Option<String>) -> Vec<Message> {
     messages
 }
 
+fn open(host: &Host, module: &Module) -> Result<Plugin, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        host.load(module)
+    }
+    #[cfg(target_os = "android")]
+    {
+        host.load_bytes(module)
+    }
+}
+
 fn run(
     host: Host,
-    module: PathBuf,
+    module: Module,
     orders: Receiver<Command>,
     reports: Sender<Event>,
     context: egui::Context,
 ) {
-    let mut plugin = match host.load(&module).and_then(|mut plugin| {
+    let mut plugin = match open(&host, &module).and_then(|mut plugin| {
         plugin.start()?;
         Ok(plugin)
     }) {

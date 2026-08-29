@@ -8,7 +8,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service android:name="com.be3.block.plugin.CounterService" android:enabled="@bool/plugins_supported" android:exported="false" android:process=":counter" />
-        <service android:name="com.be3.block.plugin.ChecklistService" android:enabled="@bool/plugins_supported" android:exported="false" android:process=":checklist" />
     </application>
 </manifest>
