@@ -113,15 +113,24 @@ for symbol in __heap_base __tls_base __tls_size __tls_align __wasm_init_tls; do
 done
 export RUSTFLAGS="-C link-arg=-L$wasi_sysroot/lib/$rust_target/noeh -C link-arg=$wasi_sysroot/lib/$rust_target/libsetjmp.a$thread_exports"
 
-# The app and every plugin are one cargo call, the way the native build makes
-# them, so the C and Rust dependencies they share are compiled once.
+# The app links wgpu's real backends and a plugin links only the custom one, so
+# they are separate cargo calls; a single call would unify the two features and
+# leave the guest carrying a backend it cannot use.
 load_plugins
-selection=(-p block-app)
-for plugin in "${plugins[@]}"; do
-    selection+=(-p "$plugin")
-done
-echo "Building the app and ${#plugins[@]} plugins for $rust_target..."
-cargo build --lib --target "$rust_target" "${cargo_arguments[@]}" "${selection[@]}"
+echo "Building the app for $rust_target..."
+cargo build --lib --target "$rust_target" "${cargo_arguments[@]}" -p block-app
+
+# The shim is the only other module the browser needs bindings for. It holds a
+# real wgpu device on the plugin's canvas and answers the gpu abi from it.
+echo 'Building the gpu shim for wasm32-unknown-unknown...'
+if ! rustup target list --installed | grep -qx 'wasm32-unknown-unknown'; then
+    echo 'Installing the wasm32-unknown-unknown Rust target...'
+    rustup target add wasm32-unknown-unknown
+fi
+(
+    unset RUSTFLAGS
+    cargo build --lib --target wasm32-unknown-unknown "${cargo_arguments[@]}" -p block-gpu-shim
+)
 
 modules_directory="$repository/target/$rust_target/$profile"
 
@@ -148,7 +157,11 @@ await_bindings() {
 }
 
 generate() {
-    local module="$modules_directory/$1.wasm"
+    generate_from "$modules_directory" "$1"
+}
+
+generate_from() {
+    local module="$1/$2.wasm"
     if [[ ! -f "$module" ]]; then
         echo "cargo did not produce $module" >&2
         exit 1
@@ -163,24 +176,15 @@ generate() {
 
 echo 'Generating JavaScript bindings...'
 generate block_app_lib
-for plugin in "${plugins[@]}"; do
-    generate "$plugin"
-done
+generate_from "$repository/target/wasm32-unknown-unknown/$profile" block_gpu_shim
 await_bindings
 
-# A plugin runs in a worker, which has no import map, so its WASI imports are
-# pointed at the shims beside it rather than at the bare specifiers the app's
-# own module keeps and the page's import map resolves. The specific shim is
-# replaced first, so that what is left to match "wasi" is thread-spawn alone.
-for plugin in "${plugins[@]}"; do
-    sed -i 's|from "wasi_snapshot_preview1"|from "./wasi.js"|g' "$output_directory/$plugin.js"
-    sed -i 's|from "wasi"|from "./threads.js"|g' "$output_directory/$plugin.js"
-done
-
+build_plugin_wasm "$profile" "$output_directory"
 stage_plugin_manifests "$output_directory"
 write_plugin_index "$output_directory"
 
 cp "$internal/web/index.html" "$output_directory"
+cp "$internal/web/plugin.js" "$output_directory"
 cp "$internal/web/wasi.js" "$output_directory"
 cp "$internal/web/threads.js" "$output_directory"
 cp "$internal/web/thread.js" "$output_directory"

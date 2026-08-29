@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "63616c65-6e64-6172-2d62-6c6f636b0001",
   "display_name": "Calendar",
-  "icon": "\uebcc",
+  "icon": "",
   "creation": "Immediate",
   "interaction": "Preview",
   "resize": "None",
@@ -13,12 +13,12 @@
     "Toolbar"
   ],
   "entry_points": {
-    "web": "calendar.js",
+    "wasm": "calendar.wasm",
     "windows": "calendar-host.exe",
     "linux": "calendar-host"
   },
   "surfaces": [
-    "WebExternalImage",
+    "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"
   ]

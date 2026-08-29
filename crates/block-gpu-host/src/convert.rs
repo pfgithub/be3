@@ -2,7 +2,7 @@ use block_gpu_abi as abi;
 
 macro_rules! plain_map {
     ($function:ident, $from:path, $to:path, { $($variant:ident),+ $(,)? }) => {
-        pub(crate) fn $function(value: $from) -> $to {
+        pub fn $function(value: $from) -> $to {
             use $from as From;
             use $to as To;
             match value {

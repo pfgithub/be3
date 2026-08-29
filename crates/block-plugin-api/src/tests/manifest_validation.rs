@@ -19,13 +19,12 @@ fn manifest_validation() {
         resize: ResizeMode::Both,
         regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
         entry_points: EntryPoints {
-            web: Some("/counter.js".into()),
-            wasm: None,
+            wasm: Some("counter.wasm".into()),
             windows: Some("counter.exe".into()),
             linux: Some("counter-host".into()),
         },
         surfaces: vec![
-            SurfaceMechanism::WebExternalImage,
+            SurfaceMechanism::HostTexture,
             SurfaceMechanism::WindowsDxgi,
             SurfaceMechanism::LinuxDmaBuf,
         ],

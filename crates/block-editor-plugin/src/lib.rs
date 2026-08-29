@@ -17,19 +17,15 @@ mod runtime;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod screens;
 pub mod session;
-#[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+#[cfg(target_arch = "wasm32")]
 mod wasm;
-#[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-mod web;
 #[cfg(target_os = "windows")]
 mod windows;
 
 #[cfg(target_os = "linux")]
 use linux as platform;
-#[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+#[cfg(target_arch = "wasm32")]
 use wasm as platform;
-#[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-use web as platform;
 #[cfg(target_os = "windows")]
 use windows as platform;
 
@@ -85,19 +81,12 @@ pub trait App: Default + 'static {
 
 #[doc(hidden)]
 pub mod __private {
-    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-    pub use js_sys;
-    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-    pub use wasm_bindgen;
-    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-    pub use wasm_bindgen_futures;
-
-    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    #[cfg(target_arch = "wasm32")]
     pub fn initialize_tls(size: usize, align: usize) {
         crate::wasm::initialize_storage(size, align);
     }
 
-    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    #[cfg(target_arch = "wasm32")]
     pub fn start_wasm<A: crate::App>(manifest: &str) {
         let identity = identity(manifest);
         if let Err(error) = crate::wasm::start::<A>(&identity.id, &identity.name, &identity.version)
@@ -106,49 +95,22 @@ pub mod __private {
         }
     }
 
-    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    #[cfg(target_arch = "wasm32")]
     pub fn step_wasm() {
         if let Err(error) = crate::wasm::step() {
             panic!("the plugin could not run a frame: {error}");
         }
     }
 
-    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    #[cfg(target_arch = "wasm32")]
     pub fn shutdown_wasm() {
         crate::wasm::shutdown();
-    }
-
-    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-    pub async fn start<A: crate::App>(
-        canvas: wasm_bindgen::JsValue,
-        post: js_sys::Function,
-        manifest: &str,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        let identity = identity(manifest);
-        crate::web::start::<A>(
-            canvas,
-            post,
-            &identity.id,
-            &identity.name,
-            &identity.version,
-        )
-        .await
     }
 
     pub fn identity(manifest: &str) -> block_plugin_api::PluginIdentity {
         block_plugin_api::ManifestDocument::parse(manifest)
             .unwrap_or_else(|error| panic!("this plugin's manifest is invalid: {error}"))
             .identity()
-    }
-
-    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-    pub fn receive(frame: Vec<u8>) -> Result<(), wasm_bindgen::JsValue> {
-        crate::web::receive(frame)
-    }
-
-    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-    pub fn shutdown() {
-        crate::web::shutdown();
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -165,7 +127,7 @@ pub mod __private {
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+#[cfg(target_arch = "wasm32")]
 #[macro_export]
 macro_rules! platform_entry {
     ($app:ty, $manifest:ident) => {
@@ -187,32 +149,6 @@ macro_rules! platform_entry {
         #[no_mangle]
         pub extern "C" fn plugin_shutdown() {
             $crate::__private::shutdown_wasm();
-        }
-    };
-}
-
-#[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
-#[macro_export]
-macro_rules! platform_entry {
-    ($app:ty, $manifest:ident) => {
-        use $crate::__private::{js_sys, wasm_bindgen, wasm_bindgen_futures};
-
-        #[$crate::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub async fn start(
-            canvas: $crate::__private::wasm_bindgen::JsValue,
-            post: $crate::__private::js_sys::Function,
-        ) -> Result<(), $crate::__private::wasm_bindgen::JsValue> {
-            $crate::__private::start::<$app>(canvas, post, $manifest).await
-        }
-
-        #[$crate::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn receive(frame: Vec<u8>) -> Result<(), $crate::__private::wasm_bindgen::JsValue> {
-            $crate::__private::receive(frame)
-        }
-
-        #[$crate::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn shutdown() {
-            $crate::__private::shutdown();
         }
     };
 }

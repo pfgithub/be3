@@ -85,7 +85,6 @@ fn show_manifest(ui: &mut egui::Ui, manifest: &PluginManifest) {
         )
     ));
     let entries = [
-        ("web", manifest.entry_points.web.as_deref()),
         ("windows", manifest.entry_points.windows.as_deref()),
         ("linux", manifest.entry_points.linux.as_deref()),
     ];

@@ -994,15 +994,11 @@ dependencies = [
  "eframe",
  "egui_material_icons",
  "futures-util",
- "js-sys",
  "naga 29.0.3",
  "pollster 0.4.0",
  "serde",
  "uuid",
  "wasi-threads",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
  "wgpu",
  "wgpu-hal",
  "windows 0.62.2",
@@ -1032,6 +1028,19 @@ name = "block-gpu-host"
 version = "0.1.0"
 dependencies = [
  "block-gpu-abi",
+ "wgpu",
+]
+
+[[package]]
+name = "block-gpu-shim"
+version = "0.1.0"
+dependencies = [
+ "block-gpu-abi",
+ "block-gpu-host",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
 ]
 

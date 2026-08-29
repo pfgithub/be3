@@ -11,11 +11,7 @@ use super::wasm::Wasm;
 use super::web::Web;
 
 pub(super) const NOT_INSTALLED: &str = "The plugin host is not installed.";
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "windows"),
-    not(target_os = "linux")
-))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub(super) const ONLY_HOSTED: &str = "This platform runs only plugins with a wasm entry point.";
 
 pub(super) trait Backend: Sized {
@@ -140,14 +136,8 @@ fn create(plugin: &PluginManifest, context: &egui::Context) -> Platform {
     Platform::Web(Web::new(plugin, context))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn hosted(plugin: &PluginManifest) -> bool {
     plugin.entry_points.wasm.is_some()
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn hosted(_plugin: &PluginManifest) -> bool {
-    false
 }
 
 pub(super) struct Availability {

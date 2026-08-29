@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "7064662d-626c-6f63-6b2d-747970652d01",
   "display_name": "PDF",
-  "icon": "\ue415",
+  "icon": "",
   "creation": "Dialog",
   "interaction": "Preview",
   "capabilities": {
@@ -20,12 +20,12 @@
     "Preview"
   ],
   "entry_points": {
-    "web": "pdf.js",
+    "wasm": "pdf.wasm",
     "windows": "pdf-host.exe",
     "linux": "pdf-host"
   },
   "surfaces": [
-    "WebExternalImage",
+    "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"
   ]

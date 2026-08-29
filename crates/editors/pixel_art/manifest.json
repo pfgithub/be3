@@ -22,12 +22,12 @@
     "ArtifactSettings"
   ],
   "entry_points": {
-    "web": "pixel_art.js",
+    "wasm": "pixel_art.wasm",
     "windows": "pixel_art-host.exe",
     "linux": "pixel_art-host"
   },
   "surfaces": [
-    "WebExternalImage",
+    "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"
   ]

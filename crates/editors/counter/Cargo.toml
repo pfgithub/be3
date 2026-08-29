@@ -17,9 +17,9 @@ block-editor-plugin = { path = "../../block-editor-plugin", default-features = f
 uuid = "1"
 
 [features]
-default = ["web"]
-web = ["block-editor-plugin/web"]
-wasi = ["block-editor-plugin/wasi"]
+default = ["native"]
+native = ["block-editor-plugin/native"]
+hosted = ["block-editor-plugin/hosted"]
 
 [dev-dependencies]
 block-ui-test = { path = "../../block-ui-test" }

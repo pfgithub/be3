@@ -6,11 +6,16 @@ use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 
 const WORKER_SOURCE: &str = r#"
-// A plugin's own threads instantiate its module again, so the worker compiles
-// it here rather than letting the glue fetch it: only what compiled the module
-// holds it, and web/threads.js has to be handed it to start a thread at all.
+// The worker one plugin runs in.
+//
+// A plugin is the same wasm every other platform runs, so the worker hands it
+// to plugin.js, which stands block-gpu-shim up on this worker's canvas and
+// answers the plugin's gpu abi from it. Stepping is scheduled rather than
+// immediate: a step that produced something schedules the next one, and a
+// quiet plugin stops until the host says something.
 let plugin = null;
 const queued = [];
+let scheduled = false;
 
 function post(frames) {
     self.postMessage({ kind: "frames", frames });
@@ -20,27 +25,59 @@ function fail(error) {
     self.postMessage({ kind: "error", message: String((error && error.message) || error) });
 }
 
+function schedule() {
+    if (scheduled || plugin === null) {
+        return;
+    }
+    scheduled = true;
+    setTimeout(step, 0);
+}
+
+function drain() {
+    const frames = plugin.collect();
+    if (frames.length > 0) {
+        post(frames);
+        schedule();
+    }
+    const failure = plugin.failure();
+    if (failure) {
+        fail(failure);
+    }
+}
+
+function step() {
+    scheduled = false;
+    if (plugin === null) {
+        return;
+    }
+    try {
+        plugin.step();
+        drain();
+    } catch (error) {
+        plugin = null;
+        fail(error);
+    }
+}
+
 self.onmessage = async (event) => {
     const data = event.data;
     try {
         if (data.kind === "start") {
-            const module = await import(data.url);
-            const compiled = await WebAssembly.compileStreaming(
-                fetch(data.url.replace(/\.js$/, "_bg.wasm")),
+            const bootstrap = await import(new URL("./plugin.js", data.url).href);
+            plugin = await bootstrap.boot(
+                new URL("./block_gpu_shim.js", data.url).href,
+                data.url,
+                data.canvas,
             );
-            const wasm = await module.default({ module_or_path: compiled });
-            const shim = await import(new URL("./wasi.js", data.url).href);
-            shim.bindMemory(wasm.memory);
-            const threads = await import(new URL("./threads.js", data.url).href);
-            threads.bindThreads(compiled, wasm.memory);
-            await module.start(data.canvas, post);
-            plugin = module;
-            for (const frame of queued.splice(0)) plugin.receive(frame);
+            drain();
+            for (const frame of queued.splice(0)) plugin.deliver(frame);
+            schedule();
         } else if (data.kind === "frames") {
             for (const frame of data.frames) {
-                if (plugin) plugin.receive(frame);
+                if (plugin) plugin.deliver(frame);
                 else queued.push(frame);
             }
+            schedule();
         } else if (data.kind === "shutdown") {
             if (plugin) plugin.shutdown();
             self.close();
@@ -92,7 +129,7 @@ impl WebProtocolAdapter {
             vec![
                 Capability::Input,
                 Capability::Lifecycle,
-                Capability::Surface(SurfaceMechanism::WebExternalImage),
+                Capability::Surface(SurfaceMechanism::HostTexture),
             ],
             dark_theme,
         );

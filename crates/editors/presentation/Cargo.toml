@@ -14,8 +14,13 @@ path = "src/main.rs"
 [dependencies]
 block = { path = "../../block" }
 block-client = { path = "../../block-client" }
-block-editor-plugin = { path = "../../block-editor-plugin" }
+block-editor-plugin = { path = "../../block-editor-plugin", default-features = false }
 uuid = "1"
+
+[features]
+default = ["native"]
+native = ["block-editor-plugin/native"]
+hosted = ["block-editor-plugin/hosted"]
 
 [lints]
 workspace = true

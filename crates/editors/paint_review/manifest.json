@@ -13,12 +13,10 @@
     "LeftSidebar"
   ],
   "entry_points": {
-    "web": "paint_review.js",
     "windows": "paint_review-host.exe",
     "linux": "paint_review-host"
   },
   "surfaces": [
-    "WebExternalImage",
     "WindowsDxgi",
     "LinuxDmaBuf"
   ]

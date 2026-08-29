@@ -11,7 +11,7 @@ fn hello() -> Message {
         },
         capabilities: vec![
             Capability::Input,
-            Capability::Surface(SurfaceMechanism::WebExternalImage),
+            Capability::Surface(SurfaceMechanism::HostTexture),
         ],
     })
 }

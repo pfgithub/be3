@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use block_gpu_abi as abi;
 use tables::Table;
 
+pub use convert::texture_format;
 pub use wgpu;
 
 pub struct Gpu {

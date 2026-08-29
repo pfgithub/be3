@@ -228,7 +228,7 @@ build_plugin_wasm() {
         --target "$wasm_rust_target"
         --profile "$wasm_profile"
         --no-default-features
-        --features wasi
+        --features hosted
     )
     local selection=()
     for plugin in "${wasm_plugins[@]}"; do

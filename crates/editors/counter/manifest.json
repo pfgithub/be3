@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "636f756e-7465-722d-626c-6f636b2d0001",
   "display_name": "Counter",
-  "icon": "\ueb8d",
+  "icon": "",
   "creation": "Immediate",
   "regions": [
     "Main",
@@ -13,13 +13,11 @@
     "RightSidebar"
   ],
   "entry_points": {
-    "web": "counter.js",
     "wasm": "counter.wasm",
     "windows": "counter-host.exe",
     "linux": "counter-host"
   },
   "surfaces": [
-    "WebExternalImage",
     "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"

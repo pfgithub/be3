@@ -18,7 +18,7 @@ fn manifest_from_json_reads_a_document() {
         manifest.regions,
         vec![EditorRegion::Main, EditorRegion::Toolbar]
     );
-    assert_eq!(manifest.entry_points.web.as_deref(), Some("counter.js"));
+    assert_eq!(manifest.entry_points.wasm.as_deref(), Some("counter.wasm"));
     assert_eq!(manifest.entry_points.windows, None);
     assert_eq!(manifest.entry_points.linux, None);
 }

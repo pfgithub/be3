@@ -9,8 +9,8 @@ pub(super) const DOCUMENT: &str = r#"{
     "icon": "\ueb8d",
     "creation": "Immediate",
     "regions": ["Main", "Toolbar"],
-    "entry_points": { "web": "counter.js" },
-    "surfaces": ["WebExternalImage"]
+    "entry_points": { "wasm": "counter.wasm" },
+    "surfaces": ["HostTexture"]
 }"#;
 
 mod a_wasm_entry_point_needs_a_host_texture_surface;

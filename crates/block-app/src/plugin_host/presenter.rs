@@ -450,8 +450,8 @@ fn build(render_state: &egui_wgpu::RenderState) -> (Presenter, Availability) {
 fn build(render_state: &egui_wgpu::RenderState) -> (Presenter, Availability) {
     let web = super::web::renderer::presenter(render_state);
     let availability = Availability {
-        platform: web.as_ref().map(|_| ()).map_err(Clone::clone),
-        hosted: Err(super::backend::NOT_INSTALLED.to_owned()),
+        platform: Err(super::backend::ONLY_HOSTED.to_owned()),
+        hosted: web.as_ref().map(|_| ()).map_err(Clone::clone),
     };
     let presenter = Presenter {
         regions: Regions::new(&render_state.device),

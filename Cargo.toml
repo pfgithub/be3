@@ -34,6 +34,7 @@ members = [
     "crates/block-gpu-abi",
     "crates/block-gpu-guest",
     "crates/block-gpu-host",
+    "crates/block-gpu-shim",
     "crates/block-wasm-host",
     "crates/block-plugin-api",
     "crates/gpui-demo",

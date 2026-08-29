@@ -429,8 +429,6 @@ impl EditorRegion {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntryPoints {
     #[serde(default)]
-    pub web: Option<String>,
-    #[serde(default)]
     pub wasm: Option<String>,
     #[serde(default)]
     pub windows: Option<String>,
@@ -492,7 +490,6 @@ impl PluginManifest {
             return Err(ManifestError::InvalidRegions);
         }
         let entries = [
-            &self.entry_points.web,
             &self.entry_points.wasm,
             &self.entry_points.windows,
             &self.entry_points.linux,
@@ -503,15 +500,13 @@ impl PluginManifest {
         for entry in entries.into_iter().flatten() {
             manifest_string("entry point", entry)?;
         }
-        let web_valid = self.entry_points.web.is_none()
-            || self.surfaces.contains(&SurfaceMechanism::WebExternalImage);
         let windows_valid = self.entry_points.windows.is_none()
             || self.surfaces.contains(&SurfaceMechanism::WindowsDxgi);
         let linux_valid = self.entry_points.linux.is_none()
             || self.surfaces.contains(&SurfaceMechanism::LinuxDmaBuf);
         let wasm_valid = self.entry_points.wasm.is_none()
             || self.surfaces.contains(&SurfaceMechanism::HostTexture);
-        if !web_valid || !windows_valid || !linux_valid || !wasm_valid {
+        if !windows_valid || !linux_valid || !wasm_valid {
             return Err(ManifestError::MissingSurface);
         }
         Ok(())
@@ -856,7 +851,6 @@ pub enum SurfaceRole {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SurfaceMechanism {
-    WebExternalImage,
     WindowsDxgi,
     LinuxDmaBuf,
     HostTexture,

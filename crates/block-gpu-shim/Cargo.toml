@@ -1,0 +1,20 @@
+[package]
+name = "block-gpu-shim"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+block-gpu-abi = { path = "../block-gpu-abi" }
+block-gpu-host = { path = "../block-gpu-host" }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["OffscreenCanvas"] }
+wgpu = { version = "29", default-features = false, features = ["std", "webgl", "webgpu", "wgsl"] }
+
+[lints]
+workspace = true

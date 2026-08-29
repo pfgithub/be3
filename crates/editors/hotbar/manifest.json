@@ -4,18 +4,18 @@
   "version": "0.1.0",
   "block_type": "6c6f6769-632d-686f-7462-617201010101",
   "display_name": "Hotbar",
-  "icon": "\ue1bd",
+  "icon": "",
   "creation": "None",
   "regions": [
     "Main"
   ],
   "entry_points": {
-    "web": "hotbar.js",
+    "wasm": "hotbar.wasm",
     "windows": "hotbar-host.exe",
     "linux": "hotbar-host"
   },
   "surfaces": [
-    "WebExternalImage",
+    "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"
   ]

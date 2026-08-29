@@ -27,7 +27,7 @@ impl Backend for Web {
             canvas_id: format!("plugin-canvas-{}", plugin.identity.id),
             url: plugin
                 .entry_points
-                .web
+                .wasm
                 .as_deref()
                 .and_then(|entry| {
                     crate::editors::plugin::discovery::entry_point(&plugin.identity.id, entry)

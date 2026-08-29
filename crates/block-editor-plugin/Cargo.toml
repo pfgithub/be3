@@ -20,18 +20,15 @@ wasi-threads = { path = "../wasi-threads" }
 wgpu = { version = "29", default-features = false, features = ["custom", "std", "web", "wgsl"], optional = true }
 
 [features]
-default = ["web"]
-web = ["eframe/wgpu"]
-wasi = ["block-client/hosted", "eframe/wgpu_no_default_features", "dep:block-gpu-abi", "dep:block-gpu-guest", "dep:wgpu"]
+default = ["native"]
+# A plugin that runs as a subprocess links wgpu's real backends. One that runs
+# as a wasm guest links only the custom backend, and reaches the host's device
+# through the gpu abi, whether wasmtime or the browser is holding it.
+native = ["eframe/wgpu"]
+hosted = ["block-client/hosted", "eframe/wgpu_no_default_features", "dep:block-gpu-abi", "dep:block-gpu-guest", "dep:wgpu"]
 
 [dev-dependencies]
 naga = { version = "29", features = ["wgsl-in"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "OffscreenCanvas", "Performance", "Window"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 eframe = { version = "0.34.3", default-features = false, features = ["android-native-activity", "default_fonts", "wgpu"] }

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "63686563-6b6c-6973-742d-626c6f636b31",
   "display_name": "Checklist",
-  "icon": "\ue6b1",
+  "icon": "",
   "creation": "Immediate",
   "regions": [
     "Main",
@@ -13,12 +13,12 @@
     "RightSidebar"
   ],
   "entry_points": {
-    "web": "checklist.js",
+    "wasm": "checklist.wasm",
     "windows": "checklist-host.exe",
     "linux": "checklist-host"
   },
   "surfaces": [
-    "WebExternalImage",
+    "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"
   ]

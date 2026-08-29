@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "696d6167-652d-626c-6f63-6b2d74797001",
   "display_name": "Image",
-  "icon": "\ue3f4",
+  "icon": "",
   "creation": "Dialog",
   "interaction": "Preview",
   "capabilities": {
@@ -19,12 +19,12 @@
     "Preview"
   ],
   "entry_points": {
-    "web": "image_block.js",
+    "wasm": "image_block.wasm",
     "windows": "image_block-host.exe",
     "linux": "image_block-host"
   },
   "surfaces": [
-    "WebExternalImage",
+    "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"
   ]
