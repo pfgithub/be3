@@ -23,6 +23,12 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["sync"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
+# A hosted client runs inside a wasm plugin: it reaches the server through the
+# tunnel its host owns, so it wants neither a browser socket nor a browser
+# executor. Its futures are polled by whoever calls pump().
+[features]
+hosted = []
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.23", features = ["rustls-tls-webpki-roots"] }

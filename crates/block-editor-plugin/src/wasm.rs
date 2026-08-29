@@ -10,3 +10,7 @@ pub(crate) const SURFACE_MECHANISM: block_plugin_api::SurfaceMechanism =
     block_plugin_api::SurfaceMechanism::HostTexture;
 
 pub(crate) use transport::{initialize_storage, shutdown, start, step, Attachment};
+
+pub(crate) fn pump() {
+    block_client::pump();
+}

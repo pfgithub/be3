@@ -34,6 +34,9 @@ pub mod presence;
 pub mod properties;
 pub mod references;
 mod transport;
+
+#[cfg(all(target_arch = "wasm32", feature = "hosted"))]
+pub use transport::pump;
 pub mod version_control_checkout;
 pub mod version_control_commit;
 

@@ -79,6 +79,7 @@ impl Runtime {
                 });
             }
         }
+        crate::platform::pump();
         let replaced = self.replace_surface(&mut outbound)?;
         if let Some(surface) = &mut self.surface {
             if replaced {

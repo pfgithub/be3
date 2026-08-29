@@ -44,6 +44,7 @@ impl Surface {
         generation: u64,
     ) -> Result<Self, String> {
         let gpu = gpu()?;
+        configure(&layout);
         Ok(Self {
             panes: Panes::new(FORMAT),
             gpu,
@@ -58,6 +59,7 @@ impl Surface {
         layout: ScreenLayout,
         generation: u64,
     ) -> Result<Self, String> {
+        configure(&layout);
         self.layout = layout;
         self.generation = generation;
         Ok(self)
@@ -115,6 +117,13 @@ impl Surface {
             attachments: Vec::new(),
         })])
     }
+}
+
+fn configure(layout: &ScreenLayout) {
+    if layout.is_empty() {
+        return;
+    }
+    block_gpu_guest::configure_surface(SCREENS_SURFACE, layout.width, layout.height, FORMAT);
 }
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;

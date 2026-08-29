@@ -22,7 +22,7 @@ wgpu = { version = "29", default-features = false, features = ["custom", "std", 
 [features]
 default = ["web"]
 web = ["eframe/wgpu"]
-wasi = ["eframe/wgpu_no_default_features", "dep:block-gpu-abi", "dep:block-gpu-guest", "dep:wgpu"]
+wasi = ["block-client/hosted", "eframe/wgpu_no_default_features", "dep:block-gpu-abi", "dep:block-gpu-guest", "dep:wgpu"]
 
 [dev-dependencies]
 naga = { version = "29", features = ["wgsl-in"] }
