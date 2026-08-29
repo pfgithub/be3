@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 block-gpu-abi = { path = "../block-gpu-abi" }
 block-gpu-host = { path = "../block-gpu-host" }
-wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "threads"] }
+wasmtime = { version = "48", default-features = false, features = ["cranelift", "parallel-compilation", "runtime", "std", "threads"] }
 wasmtime-wasi = { version = "48", default-features = false, features = ["p1"] }
 wgpu = { version = "29", default-features = false, features = ["std", "wgsl"] }
 

@@ -50,3 +50,14 @@ license = "MIT"
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"
+
+[profile.plugin]
+inherits = "dev"
+opt-level = 2
+debug = false
+strip = "debuginfo"
+incremental = false
+
+[profile.plugin-release]
+inherits = "release"
+strip = "debuginfo"

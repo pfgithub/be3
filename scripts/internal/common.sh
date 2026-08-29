@@ -206,7 +206,9 @@ export_wasi_toolchain() {
 
 # A plugin for wasmtime is its own cargo call: the app links wgpu with real
 # backends and a guest links it with only the custom one, and a single call
-# would unify the two into a guest that carries a backend it cannot use.
+# would unify the two into a guest that carries a backend it cannot use. It also
+# gets its own profile, because an unoptimised guest is hundreds of megabytes of
+# wasm that Cranelift then spends minutes compiling at every launch.
 build_plugin_wasm() {
     local profile="$1" destination="$2"
     local wasm_plugins=() plugin
@@ -218,10 +220,16 @@ build_plugin_wasm() {
     if [[ ${#wasm_plugins[@]} -eq 0 ]]; then
         return 0
     fi
-    local arguments=(--target "$wasm_rust_target" --no-default-features --features wasi)
+    local wasm_profile='plugin'
     if [[ "$profile" == 'release' ]]; then
-        arguments+=(--release)
+        wasm_profile='plugin-release'
     fi
+    local arguments=(
+        --target "$wasm_rust_target"
+        --profile "$wasm_profile"
+        --no-default-features
+        --features wasi
+    )
     local selection=()
     for plugin in "${wasm_plugins[@]}"; do
         selection+=(-p "$plugin")
@@ -231,7 +239,7 @@ build_plugin_wasm() {
         export_wasi_toolchain "${wasi_sysroot:-}"
         cargo build "${arguments[@]}" "${selection[@]}"
     )
-    local built="$repository/target/$wasm_rust_target/$profile"
+    local built="$repository/target/$wasm_rust_target/$wasm_profile"
     mkdir -p "$destination"
     for plugin in "${wasm_plugins[@]}"; do
         local module="$built/${plugin//-/_}.wasm"
