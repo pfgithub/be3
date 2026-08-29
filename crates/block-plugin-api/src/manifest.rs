@@ -34,6 +34,8 @@ pub struct ManifestDocument {
     pub entry_points: EntryPoints,
     #[serde(default)]
     pub surfaces: Vec<SurfaceMechanism>,
+    #[serde(default)]
+    pub network: Vec<String>,
 }
 
 impl ManifestDocument {
@@ -70,6 +72,7 @@ impl ManifestDocument {
             regions: self.regions,
             entry_points: self.entry_points,
             surfaces: self.surfaces,
+            network: self.network,
         };
         manifest.validate()?;
         Ok(manifest)

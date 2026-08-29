@@ -22,6 +22,7 @@ mod a_recording_is_reviewed_one_frame_at_a_time;
 mod a_tree_lists_only_the_paintings_on_it;
 mod a_tree_that_says_nothing_useful_is_an_error;
 mod choosing_a_painting_rasters_the_one_it_was_approved_as;
+mod paintings_are_downloaded_a_few_at_a_time;
 mod the_difference_counts_the_pixels_that_changed;
 mod the_difference_shows_the_pixels_that_changed;
 mod the_painting_can_be_zoomed_in_on;

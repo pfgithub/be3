@@ -213,20 +213,22 @@ impl PaintReviewApp {
     }
 
     fn poll(&mut self, context: &egui::Context) {
-        if self.download.is_none() && !self.downloaded {
-            self.download = Some(crate::download::start(&self.source, self.waker()));
-        }
-        if let Some(result) = self.download.as_mut().and_then(Download::poll) {
-            self.download = None;
-            self.downloaded = true;
-            match result {
-                Ok(found) => {
-                    self.found = found;
-                    self.error = None;
-                }
-                Err(error) => {
-                    self.found.clear();
-                    self.error = Some(error);
+        if let Some(host) = self.editing.as_ref().map(|editing| editing.host.clone()) {
+            if self.download.is_none() && !self.downloaded {
+                self.download = Some(crate::download::start(&self.source, &host));
+            }
+            if let Some(result) = self.download.as_mut().and_then(|it| it.poll(&host)) {
+                self.download = None;
+                self.downloaded = true;
+                match result {
+                    Ok(found) => {
+                        self.found = found;
+                        self.error = None;
+                    }
+                    Err(error) => {
+                        self.found.clear();
+                        self.error = Some(error);
+                    }
                 }
             }
         }

@@ -28,6 +28,7 @@ fn manifest_validation() {
             SurfaceMechanism::WindowsDxgi,
             SurfaceMechanism::LinuxDmaBuf,
         ],
+        network: vec!["api.github.com".into()],
     };
     assert_eq!(manifest.validate(), Ok(()));
 
@@ -45,7 +46,18 @@ fn manifest_validation() {
         .retain(|surface| *surface != SurfaceMechanism::LinuxDmaBuf);
     assert_eq!(invalid.validate(), Err(ManifestError::MissingSurface));
 
-    let mut invalid = manifest;
+    let mut invalid = manifest.clone();
     invalid.surfaces.clear();
     assert_eq!(invalid.validate(), Err(ManifestError::MissingSurface));
+
+    let mut invalid = manifest.clone();
+    invalid.network = vec!["https://api.github.com/".into()];
+    assert_eq!(invalid.validate(), Err(ManifestError::InvalidNetworkHost));
+
+    let mut invalid = manifest;
+    invalid.network = vec![String::new()];
+    assert_eq!(
+        invalid.validate(),
+        Err(ManifestError::Empty("network host"))
+    );
 }

@@ -299,6 +299,15 @@ impl Screens {
                     session.block_picked(*request_id, pick.clone());
                 }
             }
+            Message::Editor(EditorMessage::Fetched {
+                instance,
+                request_id,
+                result,
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.fetched(*request_id, result.clone());
+                }
+            }
             Message::ChildStatuses(statuses) => {
                 let mut grouped: HashMap<EditorInstanceId, Vec<ChildStatus>> = HashMap::new();
                 for status in statuses {

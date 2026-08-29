@@ -1,20 +1,12 @@
-use std::sync::mpsc::Receiver;
+use std::collections::VecDeque;
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
 
 use block_client::blocks::paint_snapshot::PaintSnapshot;
-use block_editor_plugin::Waker;
+use block_editor_plugin::{EditorHost, FetchResult};
 use serde_json::Value;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
-#[cfg(target_arch = "wasm32")]
-mod web;
-
-#[cfg(not(target_arch = "wasm32"))]
-use native::start as start_download;
-#[cfg(target_arch = "wasm32")]
-use web::start as start_download;
+const AT_ONCE: usize = 8;
 
 pub const REPOSITORY: &str = "pfgithub/be3";
 pub const BRANCH: &str = "dev";
@@ -35,29 +27,106 @@ pub enum Source {
     Fixed(Arc<Mutex<Vec<Painting>>>),
 }
 
+struct Wanted {
+    request: u64,
+    path: String,
+}
+
+struct Files {
+    queued: VecDeque<String>,
+    wanted: Vec<Wanted>,
+    found: Vec<Painting>,
+}
+
+enum Stage {
+    Tree(u64),
+    Files(Files),
+    Finished,
+    #[cfg(test)]
+    Fixed(Vec<Painting>),
+}
+
 pub struct Download {
-    receiver: Receiver<Result<Vec<Painting>, String>>,
+    stage: Stage,
 }
 
 impl Download {
-    pub fn poll(&mut self) -> Option<Result<Vec<Painting>, String>> {
-        self.receiver.try_recv().ok()
+    pub fn poll(&mut self, host: &EditorHost) -> Option<Result<Vec<Painting>, String>> {
+        let found = self.advance(host)?;
+        self.stage = Stage::Finished;
+        Some(found)
     }
 
-    #[cfg(test)]
-    fn ready(result: Result<Vec<Painting>, String>) -> Self {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let _ = sender.send(result);
-        Self { receiver }
+    fn advance(&mut self, host: &EditorHost) -> Option<Result<Vec<Painting>, String>> {
+        match &mut self.stage {
+            Stage::Finished => return None,
+            #[cfg(test)]
+            Stage::Fixed(paintings) => return Some(Ok(std::mem::take(paintings))),
+            Stage::Tree(request) => {
+                let listing = match host.take_fetch(*request)? {
+                    FetchResult::Body(listing) => listing,
+                    FetchResult::Failed(error) => return Some(Err(error)),
+                };
+                let paths = match paths_in(&listing) {
+                    Ok(paths) => paths,
+                    Err(error) => return Some(Err(error)),
+                };
+                self.stage = Stage::Files(Files {
+                    queued: paths.into(),
+                    wanted: Vec::new(),
+                    found: Vec::new(),
+                });
+            }
+            Stage::Files(..) => {}
+        }
+        let Stage::Files(Files {
+            queued,
+            wanted,
+            found,
+        }) = &mut self.stage
+        else {
+            return None;
+        };
+        let mut failure = None;
+        wanted.retain(|painting| match host.take_fetch(painting.request) {
+            None => true,
+            Some(FetchResult::Body(data)) => {
+                found.push(read(painting.path.clone(), data));
+                false
+            }
+            Some(FetchResult::Failed(error)) => {
+                failure = Some(error);
+                false
+            }
+        });
+        if let Some(error) = failure {
+            return Some(Err(error));
+        }
+        while wanted.len() < AT_ONCE {
+            let Some(path) = queued.pop_front() else {
+                break;
+            };
+            wanted.push(Wanted {
+                request: host.fetch(file_url(&path)),
+                path,
+            });
+        }
+        if !wanted.is_empty() {
+            return None;
+        }
+        let mut found = std::mem::take(found);
+        found.sort_by(|left, right| left.path.cmp(&right.path));
+        Some(Ok(found))
     }
 }
 
-pub fn start(source: &Source, waker: Waker) -> Download {
-    match source {
-        Source::Branch => start_download(waker),
+pub fn start(source: &Source, host: &EditorHost) -> Download {
+    let stage = match source {
+        Source::Branch => Stage::Tree(host.fetch(tree_url())),
         #[cfg(test)]
-        Source::Fixed(paintings) => Download::ready(Ok(paintings.lock().unwrap().clone())),
-    }
+        Source::Fixed(paintings) => Stage::Fixed(paintings.lock().unwrap().clone()),
+    };
+    Download { stage }
 }
 
 fn tree_url() -> String {
@@ -68,7 +137,7 @@ fn file_url(path: &str) -> String {
     format!("https://raw.githubusercontent.com/{REPOSITORY}/{BRANCH}/{FOLDER}/{path}")
 }
 
-fn painting(path: String, data: Vec<u8>) -> Painting {
+fn read(path: String, data: Vec<u8>) -> Painting {
     Painting {
         hash: PaintSnapshot::fingerprint(&data),
         path,

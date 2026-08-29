@@ -1,5 +1,4 @@
 mod github;
-mod http;
 
 #[cfg(target_os = "android")]
 mod install;
@@ -8,6 +7,7 @@ use std::cell::RefCell;
 
 use eframe::egui;
 
+use crate::platform::http;
 use github::WorkflowRun;
 
 thread_local! {

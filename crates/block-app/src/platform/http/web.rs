@@ -3,15 +3,12 @@ use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-pub(in crate::debug::version) struct Fetch {
+pub(crate) struct Fetch {
     state: Rc<RefCell<Option<Result<Vec<u8>, String>>>>,
 }
 
 impl Fetch {
-    pub(in crate::debug::version) fn get(
-        url: String,
-        headers: Vec<(&'static str, String)>,
-    ) -> Self {
+    pub(crate) fn get(url: String, headers: Vec<(&'static str, String)>) -> Self {
         let state = Rc::new(RefCell::new(None));
         let state_for_task = state.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -21,7 +18,13 @@ impl Fetch {
         Self { state }
     }
 
-    pub(in crate::debug::version) fn poll(&self) -> Option<Result<Vec<u8>, String>> {
+    pub(crate) fn refused(reason: String) -> Self {
+        Self {
+            state: Rc::new(RefCell::new(Some(Err(reason)))),
+        }
+    }
+
+    pub(crate) fn poll(&self) -> Option<Result<Vec<u8>, String>> {
         self.state.borrow_mut().take()
     }
 }
@@ -72,6 +75,12 @@ async fn run(url: String, headers: Vec<(&'static str, String)>) -> Result<Vec<u8
         .await
         .map_err(|error| format!("unreadable response: {}", describe(&error)))?;
     let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    if bytes.len() > super::MAX_BODY_BYTES {
+        return Err(format!(
+            "{url} sent more than {} bytes",
+            super::MAX_BODY_BYTES
+        ));
+    }
 
     if !(200..300).contains(&status) {
         return Err(format!(

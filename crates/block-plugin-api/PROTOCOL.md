@@ -94,6 +94,15 @@ the picker offers and is answered exactly once, with the file the host read,
 the picker the user closed, or why the file could not be read. Requests are
 identified per instance and may be outstanding together.
 
+An editor instance may ask the host to fetch a URL for it, which is the only
+network a plugin has: a plugin runs with no sockets of its own, and its block
+client already reaches the server through the host's connection. The request
+carries the URL and is answered exactly once, with the body the host read or
+with why it could not be read. Requests are identified per instance and may be
+outstanding together. The host refuses a URL that is not https, or whose host
+name is not one the plugin's manifest names, and reports the refusal as an
+ordinary failure rather than as a protocol error.
+
 The host describes its registered block types once per plugin runtime, before
 the first editor instance is opened, so an editor can name and illustrate
 blocks it only holds a reference to. Each description carries the block type,

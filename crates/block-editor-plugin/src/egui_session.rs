@@ -2,9 +2,9 @@ use block_client::BlockClient;
 use block_plugin_api::{
     ArtifactDescription, BlockPick, ChildId, ChildMode, ChildPlacement, ChildPlacements,
     ChildStatus, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion,
-    FilePick, InputEvent, Message, Occluder, PointerButton, PreviewLayout, PreviewRequest,
-    RegionSize, ScreenPlacement, ScreenRequest, ViewportMetrics, WheelUnit, MAX_CHILDREN,
-    MAX_COLLECTION_ITEMS,
+    FetchResult, FilePick, InputEvent, Message, Occluder, PointerButton, PreviewLayout,
+    PreviewRequest, RegionSize, ScreenPlacement, ScreenRequest, ViewportMetrics, WheelUnit,
+    MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -361,6 +361,13 @@ impl EguiSession {
                 filter,
             }));
         }
+        for (request_id, url) in self.host.take_fetches() {
+            messages.push(Message::Editor(EditorMessage::Fetch {
+                instance,
+                request_id,
+                url,
+            }));
+        }
         for placements in self.children() {
             messages.push(Message::Children(placements));
         }
@@ -440,6 +447,10 @@ impl EguiSession {
 
     pub(crate) fn block_picked(&self, request_id: u64, pick: BlockPick) {
         self.host.set_block_pick(request_id, pick);
+    }
+
+    pub(crate) fn fetched(&self, request_id: u64, result: FetchResult) {
+        self.host.set_fetched(request_id, result);
     }
 
     pub(crate) fn set_child_statuses(&self, statuses: Vec<ChildStatus>) {

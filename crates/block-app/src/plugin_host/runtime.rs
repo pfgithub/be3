@@ -123,11 +123,13 @@ impl Runtime {
     fn new(plugin: &PluginManifest, surface: u32, context: &egui::Context) -> Self {
         let mut backend = Platform::new(plugin, context);
         backend.start(plugin, context);
+        let mut instances = Instances::default();
+        instances.allow_network(plugin.network.clone());
         Self {
             context: context.clone(),
             plugin_id: plugin.identity.id.clone(),
             backend,
-            instances: Instances::default(),
+            instances,
             layout: ScreenLayout::default(),
             pass: 0,
             surface,

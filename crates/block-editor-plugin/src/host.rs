@@ -9,7 +9,7 @@ use std::{
 pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_plugin_api::{
     BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, ChildPlacement, ChildRect, ChildStatus,
-    EditorRegion, FilePick, Occluder, PerformanceMeasurement, ViewChange,
+    EditorRegion, FetchResult, FilePick, Occluder, PerformanceMeasurement, ViewChange,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -263,6 +263,9 @@ pub struct EditorHost {
     block_picks: Rc<RefCell<Vec<(u64, BlockFilter)>>>,
     blocks_picked: Rc<RefCell<HashMap<u64, BlockPick>>>,
     next_block_pick: Rc<Cell<u64>>,
+    fetches: Rc<RefCell<Vec<(u64, String)>>>,
+    fetched: Rc<RefCell<HashMap<u64, FetchResult>>>,
+    next_fetch: Rc<Cell<u64>>,
     presenting: Rc<Cell<bool>>,
     present_requests: Rc<RefCell<Vec<bool>>>,
     shown_regions: Rc<RefCell<HashMap<EditorRegion, bool>>>,
@@ -351,6 +354,25 @@ impl EditorHost {
 
     pub fn take_block_pick(&self, request: u64) -> Option<BlockPick> {
         self.blocks_picked.borrow_mut().remove(&request)
+    }
+
+    pub fn fetch(&self, url: impl Into<String>) -> u64 {
+        let request = self.next_fetch.get() + 1;
+        self.next_fetch.set(request);
+        self.fetches.borrow_mut().push((request, url.into()));
+        request
+    }
+
+    pub fn take_fetch(&self, request: u64) -> Option<FetchResult> {
+        self.fetched.borrow_mut().remove(&request)
+    }
+
+    pub fn take_fetches(&self) -> Vec<(u64, String)> {
+        std::mem::take(&mut self.fetches.borrow_mut())
+    }
+
+    pub fn set_fetched(&self, request: u64, result: FetchResult) {
+        self.fetched.borrow_mut().insert(request, result);
     }
 
     pub fn child(&self, ui: &mut egui::Ui, block_id: Uuid, block_type: Uuid) -> ChildHandle {

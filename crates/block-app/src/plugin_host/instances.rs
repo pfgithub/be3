@@ -2,13 +2,15 @@ use block_client::{BlockClient, Tunnel};
 use block_plugin_api::{
     ArtifactDescription, BlockPick, BlockTypeDescriptor, ChildId, ChildMode, ChildPlacement,
     ChildPlacements, ChildStatus, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage,
-    EditorRegion, FilePick, Message, Occluder, PerformanceMeasurement, RegenerationOutcome,
-    RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
+    EditorRegion, FetchResult, FilePick, Message, Occluder, PerformanceMeasurement,
+    RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet,
+    TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Duration,
 };
 use uuid::Uuid;
 
@@ -18,8 +20,11 @@ use super::{
 };
 use crate::{
     performance,
-    platform::{FileFilter, FilePicker},
+    platform::{http::Fetch, FileFilter, FilePicker},
 };
+
+const FETCH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const REFUSED: &str = "this plugin's manifest does not allow it to reach";
 
 #[derive(Default)]
 pub(super) struct Instances {
@@ -30,6 +35,7 @@ pub(super) struct Instances {
     request_id: u64,
     block_types: Option<Arc<Vec<BlockTypeDescriptor>>>,
     sent_block_types: bool,
+    network: Vec<String>,
 }
 
 struct Connection {
@@ -50,6 +56,7 @@ struct Instance {
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
+    fetches: Vec<PendingFetch>,
     block_picks: Vec<BlockPickRequest>,
     view: Option<egui::Rect>,
     reported_view: Option<egui::Rect>,
@@ -82,6 +89,7 @@ impl Instance {
             intrinsic: None,
             aspect_ratio: None,
             picks: Vec::new(),
+            fetches: Vec::new(),
             block_picks: Vec::new(),
             view: None,
             reported_view: None,
@@ -96,6 +104,11 @@ impl Instance {
 struct PendingPick {
     request_id: u64,
     picker: FilePicker,
+}
+
+struct PendingFetch {
+    request_id: u64,
+    fetch: Fetch,
 }
 
 #[derive(Clone, Copy)]
@@ -345,6 +358,10 @@ impl Instances {
         self.entries.get_mut(&instance)?.artifact.outcome.take()
     }
 
+    pub(super) fn allow_network(&mut self, hosts: Vec<String>) {
+        self.network = hosts;
+    }
+
     pub(super) fn reopen(&mut self) {
         self.sent_block_types = false;
         self.announced.clear();
@@ -352,6 +369,7 @@ impl Instances {
             entry.opened = false;
             entry.reported_view = None;
             entry.reported_presenting = false;
+            entry.fetches.clear();
         }
     }
 
@@ -949,6 +967,22 @@ impl Instances {
                 false
             });
             self.entries.get_mut(&instance).unwrap().picks = picks;
+            let entry = self.entries.get_mut(&instance).unwrap();
+            entry.fetches.retain(|pending| {
+                let Some(result) = pending.fetch.poll() else {
+                    context.request_repaint_after(FETCH_POLL_INTERVAL);
+                    return true;
+                };
+                messages.push(Message::Editor(EditorMessage::Fetched {
+                    instance,
+                    request_id: pending.request_id,
+                    result: match result {
+                        Ok(body) => FetchResult::Body(body),
+                        Err(error) => FetchResult::Failed(error),
+                    },
+                }));
+                false
+            });
         }
         messages
     }
@@ -987,6 +1021,21 @@ impl Instances {
                 let mut picker = FilePicker::default();
                 picker.open(&entry.context, &host_filter(filter));
                 entry.picks.push(PendingPick { request_id, picker });
+                true
+            }
+            EditorMessage::Fetch {
+                instance,
+                request_id,
+                url,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let fetch = match allowed(&url, &self.network) {
+                    true => Fetch::get(url, Vec::new()),
+                    false => Fetch::refused(format!("{REFUSED} {url}")),
+                };
+                entry.fetches.push(PendingFetch { request_id, fetch });
                 true
             }
             EditorMessage::PickBlock {
@@ -1208,6 +1257,14 @@ fn host_filter(filter: block_plugin_api::FileFilter) -> FileFilter {
         extensions: filter.extensions,
         mime_types: filter.mime_types,
     }
+}
+
+fn allowed(url: &str, hosts: &[String]) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    hosts.iter().any(|allowed| allowed == host)
 }
 
 #[cfg(test)]

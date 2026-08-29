@@ -1,6 +1,6 @@
 use block_plugin_api::{
-    decode_frame, encode_frame, EditorInstanceId, EditorMessage, EditorRegion, HelloAccepted,
-    Message, ScreenId, ScreenRequest, ScreenSet, ViewportMetrics, PROTOCOL_VERSION,
+    decode_frame, encode_frame, EditorInstanceId, EditorMessage, EditorRegion, FetchResult,
+    HelloAccepted, Message, ScreenId, ScreenRequest, ScreenSet, ViewportMetrics, PROTOCOL_VERSION,
 };
 use block_wasm_host::{Host, Plugin};
 
@@ -36,10 +36,17 @@ fn main() {
     send(&mut plugin, open());
     send(&mut plugin, screens());
     check(plugin.step());
-    report("open", &mut plugin);
+    let opened = report("open", &mut plugin);
+    if !opened.fetches.is_empty() {
+        for request_id in opened.fetches {
+            send(&mut plugin, fetched(request_id));
+        }
+        check(plugin.step());
+        report("fetched", &mut plugin);
+    }
     send(&mut plugin, Message::DrawFrame);
     check(plugin.step());
-    let drawn = report("draw", &mut plugin);
+    let drawn = report("draw", &mut plugin).drawn;
     match plugin.surface(SCREENS_SURFACE) {
         Some((texture, generation)) => println!(
             "surface {SCREENS_SURFACE} is {}x{} at generation {generation}",
@@ -63,20 +70,39 @@ fn main() {
     plugin.stop();
 }
 
-fn report(stage: &str, plugin: &mut Plugin) -> bool {
+struct Report {
+    drawn: bool,
+    fetches: Vec<u64>,
+}
+
+fn report(stage: &str, plugin: &mut Plugin) -> Report {
     let outbound = plugin.take_outbound();
     println!("{stage} sent {} frame(s)", outbound.len());
-    let mut drawn = false;
+    let mut report = Report {
+        drawn: false,
+        fetches: Vec::new(),
+    };
     for frame in &outbound {
         match decode_frame(frame) {
             Ok(message) => {
-                drawn |= matches!(message, Message::FrameReady(_));
+                report.drawn |= matches!(message, Message::FrameReady(_));
+                if let Message::Editor(EditorMessage::Fetch { request_id, .. }) = &message {
+                    report.fetches.push(*request_id);
+                }
                 println!("  {message:?}");
             }
             Err(error) => println!("  undecodable: {error:?}"),
         }
     }
-    drawn
+    report
+}
+
+fn fetched(request_id: u64) -> Message {
+    Message::Editor(EditorMessage::Fetched {
+        instance: EditorInstanceId(1),
+        request_id,
+        result: FetchResult::Failed("instantiate does not reach the network".to_owned()),
+    })
 }
 
 fn send(plugin: &mut Plugin, message: Message) {

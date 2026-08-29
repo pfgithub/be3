@@ -23,7 +23,7 @@ pub use windows_surface::{
     WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
 };
 
-pub const PROTOCOL_VERSION: u16 = 29;
+pub const PROTOCOL_VERSION: u16 = 30;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -357,6 +357,7 @@ pub struct PluginManifest {
     pub regions: Vec<EditorRegion>,
     pub entry_points: EntryPoints,
     pub surfaces: Vec<SurfaceMechanism>,
+    pub network: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -446,6 +447,7 @@ pub enum ManifestError {
     InvalidRegions,
     MissingEntryPoint,
     MissingSurface,
+    InvalidNetworkHost,
 }
 
 impl fmt::Display for ManifestError {
@@ -462,6 +464,9 @@ impl fmt::Display for ManifestError {
             Self::MissingEntryPoint => formatter.write_str("no entry point is given"),
             Self::MissingSurface => {
                 formatter.write_str("an entry point has no surface mechanism to present with")
+            }
+            Self::InvalidNetworkHost => {
+                formatter.write_str("a network host is not a plain host name")
             }
         }
     }
@@ -508,6 +513,15 @@ impl PluginManifest {
             || self.surfaces.contains(&SurfaceMechanism::HostTexture);
         if !windows_valid || !linux_valid || !wasm_valid {
             return Err(ManifestError::MissingSurface);
+        }
+        for host in &self.network {
+            manifest_string("network host", host)?;
+            if !host
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
+            {
+                return Err(ManifestError::InvalidNetworkHost);
+            }
         }
         Ok(())
     }
@@ -608,6 +622,16 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         request_id: u64,
         pick: BlockPick,
+    },
+    Fetch {
+        instance: EditorInstanceId,
+        request_id: u64,
+        url: String,
+    },
+    Fetched {
+        instance: EditorInstanceId,
+        request_id: u64,
+        result: FetchResult,
     },
     OpenCreation {
         instance: EditorInstanceId,
@@ -757,6 +781,12 @@ pub enum BlockPick {
 pub enum FilePick {
     Chosen { name: String, data: Vec<u8> },
     Cancelled,
+    Failed(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FetchResult {
+    Body(Vec<u8>),
     Failed(String),
 }
 
@@ -1203,6 +1233,11 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
         EditorMessage::BlockPicked { pick, .. } => match pick {
             BlockPick::Failed(message) => string(message),
             BlockPick::Chosen { .. } | BlockPick::Cancelled => Ok(()),
+        },
+        EditorMessage::Fetch { url, .. } => string(url),
+        EditorMessage::Fetched { result, .. } => match result {
+            FetchResult::Failed(message) => string(message),
+            FetchResult::Body(_) => Ok(()),
         },
         _ => Ok(()),
     }

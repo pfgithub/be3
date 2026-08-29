@@ -30,7 +30,7 @@ use wasm as platform;
 use windows as platform;
 
 pub use block_plugin_api::{
-    BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, EditorRegion,
+    BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, EditorRegion, FetchResult,
 };
 pub use block_ui;
 pub use host::{

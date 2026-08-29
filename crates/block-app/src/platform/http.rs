@@ -1,9 +1,11 @@
+pub(crate) const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) use native::Fetch;
+pub(crate) use native::Fetch;
 #[cfg(target_arch = "wasm32")]
-pub(super) use web::Fetch;
+pub(crate) use web::Fetch;

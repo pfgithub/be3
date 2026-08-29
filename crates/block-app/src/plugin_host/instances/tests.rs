@@ -46,4 +46,5 @@ fn placed() -> (Instances, egui::Context, egui::Id) {
     (instances, context, id)
 }
 
+mod a_plugin_reaches_only_the_hosts_its_manifest_names;
 mod input_is_withheld_from_screens_the_plugin_no_longer_has;

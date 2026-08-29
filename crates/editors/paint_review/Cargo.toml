@@ -14,19 +14,15 @@ path = "src/main.rs"
 [dependencies]
 block = { path = "../../block" }
 block-client = { path = "../../block-client" }
-block-editor-plugin = { path = "../../block-editor-plugin" }
+block-editor-plugin = { path = "../../block-editor-plugin", default-features = false }
 paint-snapshot = { path = "../../paint-snapshot" }
 serde_json = "1"
 uuid = "1"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-ureq = "2"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Response", "Window", "WorkerGlobalScope"] }
+[features]
+default = ["native"]
+native = ["block-editor-plugin/native"]
+hosted = ["block-editor-plugin/hosted"]
 
 [dev-dependencies]
 block-ui-test = { path = "../../block-ui-test" }

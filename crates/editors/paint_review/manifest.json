@@ -13,11 +13,17 @@
     "LeftSidebar"
   ],
   "entry_points": {
+    "wasm": "paint_review.wasm",
     "windows": "paint_review-host.exe",
     "linux": "paint_review-host"
   },
   "surfaces": [
+    "HostTexture",
     "WindowsDxgi",
     "LinuxDmaBuf"
+  ],
+  "network": [
+    "api.github.com",
+    "raw.githubusercontent.com"
   ]
 }
