@@ -6,19 +6,13 @@ use super::super::presenter::{Regions, SurfacePresenter};
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> bool {
-    let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
-        return false;
-    };
-    render_state
-        .renderer
-        .write()
-        .callback_resources
-        .insert(WebSurfacePresenter::new(
-            &render_state.device,
-            render_state.target_format,
-        ));
-    true
+pub(crate) fn presenter(
+    render_state: &eframe::egui_wgpu::RenderState,
+) -> Result<WebSurfacePresenter, String> {
+    Ok(WebSurfacePresenter::new(
+        &render_state.device,
+        render_state.target_format,
+    ))
 }
 
 pub(crate) struct WebFrame {
@@ -38,7 +32,6 @@ pub(crate) struct WebSurfacePresenter {
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    regions: Regions,
     targets: HashMap<u32, Target>,
 }
 
@@ -111,12 +104,17 @@ impl WebSurfacePresenter {
             blit_pipeline,
             blit_bind_group_layout,
             sampler,
-            regions: Regions::new(device),
             targets: HashMap::new(),
         }
     }
 
-    fn ensure_target(&mut self, device: &wgpu::Device, surface: u32, size: [u32; 2]) {
+    fn ensure_target(
+        &mut self,
+        device: &wgpu::Device,
+        regions: &Regions,
+        surface: u32,
+        size: [u32; 2],
+    ) {
         if self
             .targets
             .get(&surface)
@@ -153,7 +151,7 @@ impl WebSurfacePresenter {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: self.regions.binding(),
+                    resource: regions.binding(),
                 },
             ],
         });
@@ -205,12 +203,18 @@ impl WebSurfacePresenter {
         );
     }
 
-    fn blit(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32) {
+    fn blit(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        regions: &Regions,
+        surface: u32,
+        slot: u32,
+    ) {
         let Some(target) = self.targets.get(&surface) else {
             return;
         };
         render_pass.set_pipeline(&self.blit_pipeline);
-        render_pass.set_bind_group(0, &target.bind_group, &[self.regions.offset(slot)]);
+        render_pass.set_bind_group(0, &target.bind_group, &[regions.offset(slot)]);
         render_pass.draw(0..6, 0..1);
     }
 }
@@ -221,11 +225,12 @@ impl SurfacePresenter for WebSurfacePresenter {
     fn replace(
         &mut self,
         device: &wgpu::Device,
+        regions: &Regions,
         surface: u32,
         frame: &Self::Frame,
     ) -> Result<(), String> {
         if frame.size[0] > 0 && frame.size[1] > 0 {
-            self.ensure_target(device, surface, frame.size);
+            self.ensure_target(device, regions, surface, frame.size);
         }
         Ok(())
     }
@@ -242,16 +247,18 @@ impl SurfacePresenter for WebSurfacePresenter {
         Ok(())
     }
 
-    fn regions(&self) -> &Regions {
-        &self.regions
-    }
-
     fn preview_texture(&self, _surface: u32) -> Option<&wgpu::Texture> {
         None
     }
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32) {
-        self.blit(render_pass, surface, slot);
+    fn paint(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        regions: &Regions,
+        surface: u32,
+        slot: u32,
+    ) {
+        self.blit(render_pass, regions, surface, slot);
     }
 
     fn release(&mut self, surface: u32) {

@@ -8,6 +8,7 @@ use block_plugin_api::{
 use eframe::egui;
 use uuid::Uuid;
 
+mod backend;
 mod input;
 mod instances;
 #[cfg(target_os = "linux")]
@@ -21,6 +22,8 @@ mod process;
 mod runtime;
 #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
 mod unavailable;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+mod wasm;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_os = "windows")]

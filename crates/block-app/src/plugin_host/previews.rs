@@ -6,7 +6,7 @@ use eframe::{
     egui_wgpu::{self, wgpu},
 };
 
-use super::presenter::{Presenter, SurfacePresenter};
+use super::presenter::Presenter;
 
 thread_local! {
     static RENDER_STATE: RefCell<Option<egui_wgpu::RenderState>> = const { RefCell::new(None) };

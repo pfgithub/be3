@@ -1,12 +1,9 @@
 use std::time::Duration;
 
 use block_plugin_api::{Message, PluginManifest, ScreenLayout};
-use eframe::{egui, egui_wgpu::wgpu};
+use eframe::egui;
 
-use super::{
-    presenter::{Regions, SurfacePresenter},
-    runtime::Backend,
-};
+use super::backend::Backend;
 
 const UNSUPPORTED: &str = "Plugins are not supported on this platform.";
 
@@ -14,10 +11,6 @@ pub(super) struct Unavailable;
 
 impl Backend for Unavailable {
     type Frame = ();
-
-    fn install(_creation_context: &eframe::CreationContext<'_>) -> Result<(), String> {
-        Err(UNSUPPORTED.to_owned())
-    }
 
     fn new(_plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self
@@ -48,44 +41,4 @@ impl Backend for Unavailable {
     }
 
     fn shutdown(&mut self) {}
-}
-
-pub(super) enum UnavailablePresenter {}
-
-impl SurfacePresenter for UnavailablePresenter {
-    type Frame = ();
-
-    fn replace(
-        &mut self,
-        _device: &wgpu::Device,
-        _surface: u32,
-        _frame: &Self::Frame,
-    ) -> Result<(), String> {
-        match *self {}
-    }
-
-    fn prepare(
-        &mut self,
-        _queue: &wgpu::Queue,
-        _surface: u32,
-        _frame: &Self::Frame,
-    ) -> Result<(), String> {
-        match *self {}
-    }
-
-    fn regions(&self) -> &Regions {
-        match *self {}
-    }
-
-    fn preview_texture(&self, _surface: u32) -> Option<&wgpu::Texture> {
-        match *self {}
-    }
-
-    fn paint(&self, _render_pass: &mut wgpu::RenderPass<'static>, _surface: u32, _slot: u32) {
-        match *self {}
-    }
-
-    fn release(&mut self, _surface: u32) {
-        match *self {}
-    }
 }

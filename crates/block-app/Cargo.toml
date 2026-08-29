@@ -134,6 +134,11 @@ web-sys = { version = "0.3", features = [
     "console",
 ] }
 
+# The wasmtime plugin host, on the desktop platforms that can also launch a
+# plugin as a subprocess. A manifest with a wasm entry point picks this one.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+block-wasm-host = { path = "../block-wasm-host" }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 ash = "0.38"
 wgpu-hal = { version = "29", features = ["vulkan"] }

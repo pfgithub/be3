@@ -7,10 +7,8 @@ use wasm_bindgen::JsCast;
 mod adapter;
 pub(super) mod renderer;
 
-use super::runtime::Backend;
+use super::backend::Backend;
 use adapter::WebProtocolAdapter;
-
-const RENDERER_REQUIRED: &str = "wgpu is not available in this build.";
 
 pub(super) struct Web {
     canvas_id: String,
@@ -23,13 +21,6 @@ pub(super) struct Web {
 
 impl Backend for Web {
     type Frame = renderer::WebFrame;
-
-    fn install(creation_context: &eframe::CreationContext<'_>) -> Result<(), String> {
-        match renderer::install(creation_context) {
-            true => Ok(()),
-            false => Err(RENDERER_REQUIRED.to_owned()),
-        }
-    }
 
     fn new(plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self {

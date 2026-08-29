@@ -42,26 +42,19 @@ pub(crate) struct LinuxSurfacePresenter {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    regions: Regions,
     surfaces: HashMap<u32, Surface>,
 }
 
-pub(crate) fn install(context: &eframe::CreationContext<'_>) -> bool {
-    let Some(render_state) = context.wgpu_render_state.as_ref() else {
-        return false;
-    };
+pub(crate) fn presenter(
+    render_state: &eframe::egui_wgpu::RenderState,
+) -> Result<LinuxSurfacePresenter, String> {
     if unsafe { render_state.device.as_hal::<wgpu_hal::api::Vulkan>() }.is_none() {
-        return false;
+        return Err(RENDERER_REQUIRED.to_owned());
     }
-    render_state
-        .renderer
-        .write()
-        .callback_resources
-        .insert(LinuxSurfacePresenter::new(
-            &render_state.device,
-            render_state.target_format,
-        ));
-    true
+    Ok(LinuxSurfacePresenter::new(
+        &render_state.device,
+        render_state.target_format,
+    ))
 }
 
 impl LinuxSurfacePresenter {
@@ -123,7 +116,6 @@ impl LinuxSurfacePresenter {
             pipeline,
             layout,
             sampler: device.create_sampler(&wgpu::SamplerDescriptor::default()),
-            regions: Regions::new(device),
             surfaces: HashMap::new(),
         }
     }
@@ -131,6 +123,7 @@ impl LinuxSurfacePresenter {
     fn import(
         &mut self,
         device: &wgpu::Device,
+        regions: &Regions,
         index: u32,
         surface: &SurfaceDescriptor,
         planes: &[OwnedFd],
@@ -194,7 +187,7 @@ impl LinuxSurfacePresenter {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: self.regions.binding(),
+                        resource: regions.binding(),
                     },
                 ],
             }));
@@ -411,13 +404,14 @@ impl SurfacePresenter for LinuxSurfacePresenter {
     fn replace(
         &mut self,
         device: &wgpu::Device,
+        regions: &Regions,
         index: u32,
         frame: &Self::Frame,
     ) -> Result<(), String> {
         let LinuxFrame::Events(events) = frame;
         for event in events {
             if let SurfaceEvent::Surface(surface, planes) = event {
-                self.import(device, index, surface, planes)?;
+                self.import(device, regions, index, surface, planes)?;
             }
         }
         Ok(())
@@ -453,15 +447,17 @@ impl SurfacePresenter for LinuxSurfacePresenter {
         Ok(())
     }
 
-    fn regions(&self) -> &Regions {
-        &self.regions
-    }
-
     fn preview_texture(&self, index: u32) -> Option<&wgpu::Texture> {
         self.surfaces.get(&index)?.preview_texture.as_ref()
     }
 
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, index: u32, slot: u32) {
+    fn paint(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        regions: &Regions,
+        index: u32,
+        slot: u32,
+    ) {
         if let Some(imported) = self
             .surfaces
             .get(&index)
@@ -472,7 +468,7 @@ impl SurfacePresenter for LinuxSurfacePresenter {
                 return;
             };
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, bind_group, &[self.regions.offset(slot)]);
+            render_pass.set_bind_group(0, bind_group, &[regions.offset(slot)]);
             render_pass.draw(0..6, 0..1);
         }
     }

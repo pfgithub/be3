@@ -4,9 +4,9 @@ use block_plugin_api::{Message, PluginManifest, ScreenLayout, SurfaceRole};
 use eframe::egui;
 
 use super::{
-    platform::{self, Frame as PlatformFrame, RENDERER_REQUIRED},
+    backend::Backend,
+    platform::{self, Frame as PlatformFrame},
     process::{Process, Received, SurfaceEvent},
-    runtime::Backend,
 };
 
 pub(super) struct Native {
@@ -19,13 +19,6 @@ pub(super) struct Native {
 
 impl Backend for Native {
     type Frame = PlatformFrame;
-
-    fn install(creation_context: &eframe::CreationContext<'_>) -> Result<(), String> {
-        match platform::install(creation_context) {
-            true => Ok(()),
-            false => Err(RENDERER_REQUIRED.to_owned()),
-        }
-    }
 
     fn new(plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self {

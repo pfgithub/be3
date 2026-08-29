@@ -13,67 +13,35 @@ use eframe::egui;
 use uuid::Uuid;
 
 use super::{
+    backend::{Availability, Backend, Platform},
     input,
     instances::{Instances, Placement},
     presenter::{
-        PresenterCallback, PresenterState, PresenterStatus, Quad, Region, Shared, MAX_SURFACES,
+        self, PresenterCallback, PresenterState, PresenterStatus, Quad, Region, Shared,
+        MAX_SURFACES,
     },
     preview_size, previews, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot,
     CreationState, EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole,
     PreviewPresentation, PreviewSlot, PreviewTarget, RuntimeStatus, SurfaceStatus,
 };
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use super::native::Native as Platform;
-#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-use super::unavailable::Unavailable as Platform;
-#[cfg(target_arch = "wasm32")]
-use super::web::Web as Platform;
-
-type Frame = <Platform as Backend>::Frame;
-
-const NOT_INSTALLED: &str = "The plugin host is not installed.";
 const CROWDED: &str = "Too many plugin runtimes are already presenting.";
 const FRAME_TIMEOUT_SECONDS: f64 = 1.0;
 const SETTLED_PREVIEW_FRAMES: u32 = 3;
-
-pub(super) trait Backend: Sized {
-    type Frame: Send + Sync + 'static;
-
-    fn install(creation_context: &eframe::CreationContext<'_>) -> Result<(), String>;
-
-    fn new(plugin: &PluginManifest, context: &egui::Context) -> Self;
-
-    fn start(&mut self, plugin: &PluginManifest, context: &egui::Context);
-
-    fn send(&mut self, messages: Vec<Message>);
-
-    fn receive(&mut self) -> Vec<Message>;
-
-    fn frame(&mut self, layout: &ScreenLayout, pass: u64) -> Option<Self::Frame>;
-
-    fn take_error(&mut self) -> Option<String>;
-
-    fn state(&self) -> &'static str;
-
-    fn uptime(&self) -> Option<Duration>;
-
-    fn shutdown(&mut self);
-}
 
 thread_local! {
     static HOST: RefCell<Host> = RefCell::new(Host::new());
 }
 
 struct Host {
-    availability: Result<(), String>,
+    availability: Availability,
     runtimes: HashMap<String, Runtime>,
 }
 
 impl Host {
     fn new() -> Self {
         Self {
-            availability: Err(NOT_INSTALLED.to_owned()),
+            availability: Availability::missing(),
             runtimes: HashMap::new(),
         }
     }
@@ -83,7 +51,7 @@ impl Host {
         plugin: &PluginManifest,
         context: &egui::Context,
     ) -> Result<&mut Runtime, String> {
-        if let Err(error) = &self.availability {
+        if let Err(error) = self.availability.of(plugin) {
             return Err(error.clone());
         }
         let Some(surface) = self.surface_for(&plugin.identity.id, context) else {
@@ -125,7 +93,7 @@ impl Host {
             .debug_painter()
             .add(eframe::egui_wgpu::Callback::new_paint_callback(
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
-                PresenterCallback::<Frame>::release(runtime.surface, runtime.status.clone()),
+                PresenterCallback::release(runtime.surface, runtime.status.clone()),
             ));
         Some(runtime.surface)
     }
@@ -140,7 +108,7 @@ pub(super) struct Runtime {
     pub(super) pass: u64,
     surface: u32,
     status: PresenterStatus,
-    shared: Arc<Mutex<Shared<Frame>>>,
+    shared: Arc<Mutex<Shared>>,
     presented: bool,
     sent: Vec<ScreenRequest>,
     error: Option<String>,
@@ -382,7 +350,7 @@ impl Runtime {
 }
 
 pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
-    let availability = Platform::install(creation_context);
+    let availability = presenter::install(creation_context);
     previews::install(creation_context);
     HOST.with(|host| {
         host.borrow_mut().availability = availability;
