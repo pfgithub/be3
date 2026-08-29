@@ -2,8 +2,9 @@ use super::*;
 
 use block_gpu_abi as abi;
 
-fn devices() -> (wgpu::Device, wgpu::Queue) {
-    wgpu::Device::noop(&wgpu::DeviceDescriptor::default())
+fn host() -> Host {
+    let (device, queue) = wgpu::Device::noop(&wgpu::DeviceDescriptor::default());
+    Host::new(device, queue, None).unwrap()
 }
 
 fn escaped(bytes: &[u8]) -> String {
@@ -45,3 +46,4 @@ fn guest(body: &str) -> String {
 mod a_guest_creates_a_buffer_and_reports_its_handle;
 mod a_guest_pointer_past_its_memory_is_refused;
 mod a_guest_reads_a_frame_the_host_queued;
+mod a_plugin_runs_on_a_thread_of_its_own;

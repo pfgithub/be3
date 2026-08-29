@@ -2,7 +2,7 @@ use block_plugin_api::{
     decode_frame, encode_frame, EditorInstanceId, EditorMessage, EditorRegion, HelloAccepted,
     Message, ScreenId, ScreenRequest, ScreenSet, ViewportMetrics, PROTOCOL_VERSION,
 };
-use block_wasm_host::Plugin;
+use block_wasm_host::{Host, Plugin};
 
 const SCREENS_SURFACE: u32 = 0;
 const WIDTH: u32 = 640;
@@ -10,11 +10,19 @@ const HEIGHT: u32 = 400;
 
 fn main() {
     let Some(path) = std::env::args().nth(1) else {
-        eprintln!("usage: instantiate PLUGIN.wasm");
+        eprintln!("usage: instantiate PLUGIN.wasm [CACHE_DIRECTORY]");
         std::process::exit(2);
     };
+    let cache = std::env::args().nth(2).map(std::path::PathBuf::from);
     let (device, queue) = wgpu::Device::noop(&wgpu::DeviceDescriptor::default());
-    let mut plugin = match Plugin::from_file(path.as_ref(), device, queue) {
+    let host = match Host::new(device, queue, cache.as_deref()) {
+        Ok(host) => host,
+        Err(error) => {
+            eprintln!("host failed: {error}");
+            std::process::exit(1);
+        }
+    };
+    let mut plugin = match host.load(path.as_ref()) {
         Ok(plugin) => plugin,
         Err(error) => {
             eprintln!("load failed: {error}");

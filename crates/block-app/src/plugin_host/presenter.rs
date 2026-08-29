@@ -487,7 +487,10 @@ impl Presenter {
                 None => Err(UNSUPPORTED.to_owned()),
             },
             #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-            Frame::Missing(()) => Err(UNSUPPORTED.to_owned()),
+            Frame::Missing(()) => {
+                let _ = (device, surface);
+                Err(UNSUPPORTED.to_owned())
+            }
             #[cfg(target_arch = "wasm32")]
             Frame::Web(frame) => match &mut self.web {
                 Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
@@ -509,7 +512,10 @@ impl Presenter {
                 None => Err(UNSUPPORTED.to_owned()),
             },
             #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-            Frame::Missing(()) => Err(UNSUPPORTED.to_owned()),
+            Frame::Missing(()) => {
+                let _ = (queue, surface);
+                Err(UNSUPPORTED.to_owned())
+            }
             #[cfg(target_arch = "wasm32")]
             Frame::Web(frame) => match &mut self.web {
                 Some(presenter) => presenter.prepare(queue, surface, frame),

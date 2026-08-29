@@ -42,6 +42,14 @@ pub(crate) use runtime::{
     take_view_changes,
 };
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn cache_in(directory: std::path::PathBuf) {
+    wasm::cache_in(directory);
+}
+
+#[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
+pub(crate) fn cache_in(_directory: std::path::PathBuf) {}
+
 pub(crate) const MAX_LIVE_CHILDREN: usize = 16;
 
 pub(crate) struct HostChild {

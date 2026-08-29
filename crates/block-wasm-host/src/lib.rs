@@ -8,10 +8,43 @@ mod tests;
 use std::{path::Path, time::Instant};
 
 use block_gpu_host::Gpu;
-use wasmtime::{Config, Engine, Instance, Linker, Module, SharedMemory, Store, TypedFunc};
+use wasmtime::{
+    Cache, CacheConfig, Config, Engine, Instance, Linker, Module, SharedMemory, Store, TypedFunc,
+};
 use wasmtime_wasi::{p1, WasiCtxBuilder};
 
 pub use state::State;
+
+#[derive(Clone)]
+pub struct Host {
+    engine: Engine,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+}
+
+impl Host {
+    pub fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        cache: Option<&Path>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            engine: engine(cache)?,
+            device,
+            queue,
+        })
+    }
+
+    pub fn load(&self, path: &Path) -> Result<Plugin, String> {
+        let bytes = std::fs::read(path)
+            .map_err(|error| format!("{} could not be read: {error}", path.display()))?;
+        self.load_bytes(&bytes)
+    }
+
+    pub fn load_bytes(&self, bytes: &[u8]) -> Result<Plugin, String> {
+        Plugin::new(self, bytes)
+    }
+}
 
 pub struct Plugin {
     store: Store<State>,
@@ -22,22 +55,15 @@ pub struct Plugin {
 }
 
 impl Plugin {
-    pub fn from_file(
-        path: &Path,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-    ) -> Result<Self, String> {
-        let bytes = std::fs::read(path)
-            .map_err(|error| format!("{} could not be read: {error}", path.display()))?;
-        Self::from_bytes(&bytes, device, queue)
-    }
-
-    pub fn from_bytes(
-        bytes: &[u8],
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-    ) -> Result<Self, String> {
-        let engine = engine()?;
+    fn new(host: &Host, bytes: &[u8]) -> Result<Self, String> {
+        let Host {
+            engine,
+            device,
+            queue,
+        } = host;
+        let engine = engine.clone();
+        let device = device.clone();
+        let queue = queue.clone();
         let module = Module::new(&engine, bytes)
             .map_err(|error| format!("the plugin module could not be compiled: {error}"))?;
         let memory = shared_memory(&engine, &module)?;
@@ -156,12 +182,34 @@ fn global(instance: &Instance, store: &mut Store<State>, name: &str) -> Result<u
         .ok_or_else(|| format!("the plugin does not export {name}"))
 }
 
-fn engine() -> Result<Engine, String> {
+fn engine(cache: Option<&Path>) -> Result<Engine, String> {
     let mut config = Config::new();
     config.wasm_threads(true);
     config.shared_memory(true);
     config.wasm_bulk_memory(true);
+    if let Some(directory) = cache {
+        config.cache(Some(compilation_cache(directory)?));
+    }
     Engine::new(&config).map_err(|error| format!("the wasm engine could not start: {error}"))
+}
+
+fn compilation_cache(directory: &Path) -> Result<Cache, String> {
+    std::fs::create_dir_all(directory).map_err(|error| {
+        format!(
+            "the plugin cache directory {} could not be made: {error}",
+            directory.display()
+        )
+    })?;
+    let directory = directory.canonicalize().map_err(|error| {
+        format!(
+            "the plugin cache directory {} could not be resolved: {error}",
+            directory.display()
+        )
+    })?;
+    let mut configuration = CacheConfig::new();
+    configuration.with_directory(directory);
+    Cache::new(configuration)
+        .map_err(|error| format!("the plugin cache could not be opened: {error}"))
 }
 
 fn shared_memory(engine: &Engine, module: &Module) -> Result<SharedMemory, String> {
