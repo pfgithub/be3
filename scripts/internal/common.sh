@@ -8,6 +8,17 @@ assert_command() {
     fi
 }
 
+# clang and rust-lld are native programs even when the build runs under a POSIX
+# shell on Windows, and neither can open the /c/... form such a shell hands out,
+# so every path that travels to one of them as an argument goes through here.
+native_path() {
+    if [[ "${OS:-}" == 'Windows_NT' ]] && command -v cygpath > /dev/null; then
+        cygpath -m "$1"
+    else
+        echo "$1"
+    fi
+}
+
 manifest_field() {
     sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -1
 }
@@ -161,6 +172,15 @@ stage_games() {
 wasi_sdk_version='33'
 wasm_rust_target='wasm32-wasip1-threads'
 
+# An extraction that was interrupted leaves the headers behind without the
+# archives the link needs, so what is checked for is what is actually linked
+# against rather than the directory merely existing.
+wasi_sysroot_is_complete() {
+    [[ -d "$1/include" \
+        && -d "$1/lib/$wasm_rust_target/noeh" \
+        && -f "$1/lib/$wasm_rust_target/libsetjmp.a" ]]
+}
+
 export_wasi_toolchain() {
     local requested="${1:-}"
     assert_command clang 'Install LLVM and put its bin directory on PATH.'
@@ -171,24 +191,43 @@ export_wasi_toolchain() {
     fi
     wasi_sysroot="$requested"
     if [[ -z "$wasi_sysroot" ]]; then
-        wasi_sysroot="$repository/target/tools/wasi-sysroot"
-        if [[ ! -d "$wasi_sysroot/include" ]]; then
-            local archive="$repository/target/tools/wasi-sysroot.tar.gz"
+        local tools="$repository/target/tools"
+        wasi_sysroot="$tools/wasi-sysroot"
+        if ! wasi_sysroot_is_complete "$wasi_sysroot"; then
+            local archive="$tools/wasi-sysroot.tar.gz"
+            local extracted="$tools/wasi-sysroot-$wasi_sdk_version.0+m"
             local url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$wasi_sdk_version/wasi-sysroot-$wasi_sdk_version.0+m.tar.gz"
             echo "Downloading the WASI sysroot from $url..."
-            mkdir -p "$repository/target/tools"
+            mkdir -p "$tools"
+            rm -rf "$wasi_sysroot" "$extracted"
             curl --fail --location --output "$archive" "$url"
-            tar -xzf "$archive" -C "$repository/target/tools"
-            mv "$repository/target/tools/wasi-sysroot-$wasi_sdk_version.0+m" "$wasi_sysroot"
+            tar -xzf "$archive" -C "$tools"
+            mv "$extracted" "$wasi_sysroot"
             rm "$archive"
         fi
     fi
-    if [[ ! -d "$wasi_sysroot/include" ]]; then
-        echo "no WASI sysroot at $wasi_sysroot" >&2
+    if ! wasi_sysroot_is_complete "$wasi_sysroot"; then
+        echo "The WASI sysroot at $wasi_sysroot has no lib/$wasm_rust_target to link against." >&2
+        echo 'Delete it and run the build again to fetch it afresh, or pass --wasi-sysroot a complete one.' >&2
         exit 1
     fi
     wasi_sysroot="$(cd "$wasi_sysroot" && pwd)"
-    local flags="--sysroot=$wasi_sysroot -isystem $wasi_sysroot/include/c++/v1 -pthread -mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false -fno-exceptions -fno-rtti -DHB_NO_MT -O2 -w"
+    local sysroot
+    sysroot="$(native_path "$wasi_sysroot")"
+    # cc and rustc both split these variables on whitespace, so a sysroot with a
+    # space in its path arrives at clang as two flags that mean nothing.
+    if [[ "$sysroot" == *' '* ]]; then
+        echo "The WASI sysroot path contains a space, which cc and rustc split on: $sysroot" >&2
+        echo 'Pass --wasi-sysroot a path without spaces, or move the checkout to one.' >&2
+        exit 1
+    fi
+    echo "Building against the WASI sysroot at $sysroot"
+    # -pthread is what marks the C objects as using atomics and bulk memory,
+    # which is what lets them be linked into a module with a shared memory at
+    # all. HarfBuzz itself is still left single-threaded, because only the
+    # thread that draws shapes text and HB_NO_MT keeps it from paying for locks
+    # nothing contends.
+    local flags="--sysroot=$sysroot -isystem $sysroot/include/c++/v1 -pthread -mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false -fno-exceptions -fno-rtti -DHB_NO_MT -O2 -w"
     export CC_wasm32_wasip1_threads='clang'
     export CXX_wasm32_wasip1_threads='clang++'
     export AR_wasm32_wasip1_threads='llvm-ar'
@@ -196,12 +235,15 @@ export_wasi_toolchain() {
     export CXXFLAGS_wasm32_wasip1_threads="$flags"
     export CXXSTDLIB_wasm32_wasip1_threads='c++'
     export HARFBUZZ_SYS_NO_PKG_CONFIG='1'
+    # rustc links a cdylib with --no-entry, so lld strips the symbols a host
+    # needs to lay out a thread's own storage. Exporting them is what lets it
+    # turn the module into one that can be instantiated more than once.
     local exports=''
     local symbol
     for symbol in __heap_base __tls_base __tls_size __tls_align __wasm_init_tls; do
         exports+=" -C link-arg=--export=$symbol"
     done
-    export RUSTFLAGS="-C link-arg=-L$wasi_sysroot/lib/$wasm_rust_target/noeh -C link-arg=$wasi_sysroot/lib/$wasm_rust_target/libsetjmp.a$exports"
+    export RUSTFLAGS="-C link-arg=-L$sysroot/lib/$wasm_rust_target/noeh -C link-arg=$sysroot/lib/$wasm_rust_target/libsetjmp.a$exports"
 }
 
 # A plugin for wasmtime is its own cargo call: the app links wgpu with real

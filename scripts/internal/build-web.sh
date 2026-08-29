@@ -28,22 +28,15 @@ assert_command clang 'Install LLVM and put its bin directory on PATH.'
 assert_command llvm-ar 'Install LLVM and put its bin directory on PATH.'
 cd "$repository"
 
-tools_directory="$repository/target/tools"
 output_directory="$repository/target/web"
 # Threads, so that the app and its plugins can move work off the thread that
 # draws. The target gives the module a shared memory and wasi-libc's pthreads,
 # which reach the browser through the wasi-threads import that web/threads.js
 # answers by starting a Worker on the very same module and memory.
-rust_target='wasm32-wasip1-threads'
-wasi_sdk_version='33'
+rust_target="$wasm_rust_target"
 wasm_bindgen_version='0.2.122'
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 wasm_bindgen="$cargo_home/bin/wasm-bindgen"
-
-if ! rustup target list --installed | grep -qx "$rust_target"; then
-    echo "Installing the $rust_target Rust target..."
-    rustup target add "$rust_target"
-fi
 
 if [[ ! -x "$wasm_bindgen" ]]; then
     echo "Installing wasm-bindgen-cli $wasm_bindgen_version..."
@@ -70,48 +63,10 @@ build_games "$profile"
 stage_games "$output_directory/games"
 write_games_index "$output_directory/games.json" 'games/'
 
-if [[ -z "$wasi_sysroot" ]]; then
-    wasi_sysroot="$tools_directory/wasi-sysroot"
-    if [[ ! -d "$wasi_sysroot/include" ]]; then
-        archive="$tools_directory/wasi-sysroot.tar.gz"
-        url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$wasi_sdk_version/wasi-sysroot-$wasi_sdk_version.0+m.tar.gz"
-        echo "Downloading the WASI sysroot from $url..."
-        mkdir -p "$tools_directory"
-        curl --fail --location --output "$archive" "$url"
-        tar -xzf "$archive" -C "$tools_directory"
-        mv "$tools_directory/wasi-sysroot-$wasi_sdk_version.0+m" "$wasi_sysroot"
-        rm "$archive"
-    fi
-fi
-if [[ ! -d "$wasi_sysroot/include" ]]; then
-    echo "no WASI sysroot at $wasi_sysroot" >&2
-    exit 1
-fi
-wasi_sysroot="$(cd "$wasi_sysroot" && pwd)"
-echo "Building against the WASI sysroot at $wasi_sysroot"
-
-# -pthread is what marks the C objects as using atomics and bulk memory, which
-# is what lets them be linked into a module with a shared memory at all.
-# HarfBuzz itself is still left single-threaded, because only the thread that
-# draws shapes text and HB_NO_MT keeps it from paying for locks nothing
-# contends.
-compiler_flags="--sysroot=$wasi_sysroot -isystem $wasi_sysroot/include/c++/v1 -pthread -mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false -fno-exceptions -fno-rtti -DHB_NO_MT -O2 -w"
-export CC_wasm32_wasip1_threads='clang'
-export CXX_wasm32_wasip1_threads='clang++'
-export AR_wasm32_wasip1_threads='llvm-ar'
-export CFLAGS_wasm32_wasip1_threads="$compiler_flags"
-export CXXFLAGS_wasm32_wasip1_threads="$compiler_flags"
-export CXXSTDLIB_wasm32_wasip1_threads='c++'
-export HARFBUZZ_SYS_NO_PKG_CONFIG='1'
-
-# rustc links a cdylib with --no-entry, so lld strips the symbols wasm-bindgen
-# needs to lay out a thread's own storage. Exporting them is what lets it turn
-# the module into one that can be instantiated more than once.
-thread_exports=''
-for symbol in __heap_base __tls_base __tls_size __tls_align __wasm_init_tls; do
-    thread_exports+=" -C link-arg=--export=$symbol"
-done
-export RUSTFLAGS="-C link-arg=-L$wasi_sysroot/lib/$rust_target/noeh -C link-arg=$wasi_sysroot/lib/$rust_target/libsetjmp.a$thread_exports"
+# The plugins built below export the same toolchain for a cargo call of their
+# own, so where the sysroot comes from and what it is linked with lives in one
+# place rather than being spelled out again here.
+export_wasi_toolchain "$wasi_sysroot"
 
 # The app links wgpu's real backends and a plugin links only the custom one, so
 # they are separate cargo calls; a single call would unify the two features and
