@@ -1,0 +1,15 @@
+[package]
+name = "block-gpu-host"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+block-gpu-abi = { path = "../block-gpu-abi" }
+wgpu = { version = "29", default-features = false, features = ["std", "wgsl"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+wgpu = { version = "29", default-features = false, features = ["noop", "std", "wgsl"] }

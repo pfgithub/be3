@@ -1,0 +1,12 @@
+[package]
+name = "block-gpu-abi"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

@@ -991,6 +991,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-gpu-abi"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "serde",
+]
+
+[[package]]
+name = "block-gpu-guest"
+version = "0.1.0"
+dependencies = [
+ "block-gpu-abi",
+ "serde",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
+name = "block-gpu-host"
+version = "0.1.0"
+dependencies = [
+ "block-gpu-abi",
+ "wgpu",
+]
+
+[[package]]
 name = "block-padding"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

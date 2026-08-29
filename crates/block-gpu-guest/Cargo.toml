@@ -1,0 +1,16 @@
+[package]
+name = "block-gpu-guest"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+block-gpu-abi = { path = "../block-gpu-abi" }
+serde = { version = "1", features = ["derive"] }
+wgpu = { version = "29", default-features = false, features = ["custom", "std", "web", "wgsl"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window"] }
+
+[lints]
+workspace = true
