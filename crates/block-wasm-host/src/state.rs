@@ -1,8 +1,10 @@
-use std::{collections::VecDeque, time::Instant};
+use std::{collections::VecDeque, sync::Arc, time::Instant};
 
 use block_gpu_host::Gpu;
 use wasmtime::SharedMemory;
 use wasmtime_wasi::p1::WasiP1Ctx;
+
+use crate::threads::{Spawner, Spawns};
 
 pub struct State {
     pub(crate) wasi: WasiP1Ctx,
@@ -11,6 +13,24 @@ pub struct State {
     pub(crate) inbox: VecDeque<Vec<u8>>,
     pub(crate) outbox: Vec<Vec<u8>>,
     pub(crate) started: Instant,
+    pub(crate) threads: Arc<Spawner>,
+}
+
+pub(crate) struct Threaded {
+    pub(crate) wasi: WasiP1Ctx,
+    pub(crate) threads: Arc<Spawner>,
+}
+
+impl Spawns for State {
+    fn spawner(&self) -> &Arc<Spawner> {
+        &self.threads
+    }
+}
+
+impl Spawns for Threaded {
+    fn spawner(&self) -> &Arc<Spawner> {
+        &self.threads
+    }
 }
 
 impl State {

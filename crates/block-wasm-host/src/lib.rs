@@ -1,5 +1,6 @@
 mod gpu;
 mod state;
+mod threads;
 mod transport;
 
 #[cfg(test)]
@@ -12,6 +13,8 @@ use wasmtime::{
     Cache, CacheConfig, Config, Engine, Instance, Linker, Module, SharedMemory, Store, TypedFunc,
 };
 use wasmtime_wasi::{p1, WasiCtxBuilder};
+
+use threads::Spawner;
 
 pub use state::State;
 
@@ -75,6 +78,7 @@ impl Plugin {
             inbox: Default::default(),
             outbox: Vec::new(),
             started: Instant::now(),
+            threads: Spawner::new(engine.clone(), module.clone(), memory.clone()),
         };
         let mut store = Store::new(&engine, state);
         let mut linker: Linker<State> = Linker::new(&engine);
@@ -122,7 +126,12 @@ impl Plugin {
             self.stopped = true;
             return Err(error);
         }
-        match self.store.data_mut().gpu.take_error() {
+        let state = self.store.data_mut();
+        match state
+            .gpu
+            .take_error()
+            .or_else(|| state.threads.take_failure())
+        {
             Some(error) => Err(error),
             None => Ok(()),
         }
@@ -161,6 +170,7 @@ impl Plugin {
             return;
         }
         self.stopped = true;
+        self.store.data().threads.stop();
         let _ = self.shutdown.call(&mut self.store, ());
     }
 }
@@ -237,17 +247,4 @@ where
     instance
         .get_typed_func(store, name)
         .map_err(|error| format!("the plugin has no usable {name} export: {error}"))
-}
-
-mod threads {
-    use wasmtime::Linker;
-
-    use crate::State;
-
-    pub(super) fn link(linker: &mut Linker<State>) -> Result<(), String> {
-        linker
-            .func_wrap("wasi", "thread-spawn", |_: i32| -> i32 { -1 })
-            .map_err(|error| format!("thread spawn could not be linked: {error}"))?;
-        Ok(())
-    }
 }
