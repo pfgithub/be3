@@ -12,14 +12,5 @@
     "LeftSidebar",
     "RightSidebar"
   ],
-  "entry_points": {
-    "wasm": "counter.wasm",
-    "windows": "counter-host.exe",
-    "linux": "counter-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "counter.wasm"
 }

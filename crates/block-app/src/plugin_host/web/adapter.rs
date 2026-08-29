@@ -1,6 +1,4 @@
-use block_plugin_api::{
-    encode_frame, Capability, HostSession, Message, QueueError, SessionState, SurfaceMechanism,
-};
+use block_plugin_api::{encode_frame, Capability, HostSession, Message, QueueError, SessionState};
 use eframe::egui;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
@@ -129,7 +127,7 @@ impl WebProtocolAdapter {
             vec![
                 Capability::Input,
                 Capability::Lifecycle,
-                Capability::Surface(SurfaceMechanism::HostTexture),
+                Capability::Surface,
             ],
             dark_theme,
         );

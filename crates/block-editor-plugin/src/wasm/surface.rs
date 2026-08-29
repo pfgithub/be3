@@ -3,9 +3,7 @@ use std::cell::RefCell;
 use block_plugin_api::{FrameReady, Message, ScreenLayout};
 use eframe::egui_wgpu::wgpu;
 
-use crate::{panes::Panes, screens::Screens, wasm::Attachment};
-
-pub(crate) const SURFACE_KIND: &str = "host texture";
+use crate::{panes::Panes, screens::Screens};
 
 const SCREENS_SURFACE: u32 = 0;
 
@@ -38,11 +36,7 @@ pub(crate) struct Surface {
 }
 
 impl Surface {
-    pub(crate) fn new(
-        _request_id: u64,
-        layout: ScreenLayout,
-        generation: u64,
-    ) -> Result<Self, String> {
+    pub(crate) fn new(layout: ScreenLayout, generation: u64) -> Result<Self, String> {
         let gpu = gpu()?;
         configure(&layout);
         Ok(Self {
@@ -53,12 +47,7 @@ impl Surface {
         })
     }
 
-    pub(crate) fn resize(
-        mut self,
-        _request_id: u64,
-        layout: ScreenLayout,
-        generation: u64,
-    ) -> Result<Self, String> {
+    pub(crate) fn resize(mut self, layout: ScreenLayout, generation: u64) -> Result<Self, String> {
         configure(&layout);
         self.layout = layout;
         self.generation = generation;
@@ -67,17 +56,6 @@ impl Surface {
 
     pub(crate) fn layout(&self) -> &ScreenLayout {
         &self.layout
-    }
-
-    pub(crate) fn descriptor(&self) -> Option<(Message, Vec<Attachment>)> {
-        None
-    }
-
-    pub(crate) fn set_previews(
-        &mut self,
-        _layout: &block_plugin_api::PreviewLayout,
-    ) -> Result<Option<(Message, Vec<Attachment>)>, String> {
-        Ok(None)
     }
 
     pub(crate) fn render(
@@ -99,7 +77,6 @@ impl Surface {
             &self.gpu.queue,
             &mut encoder,
             &view,
-            None,
             &self.layout,
             screens,
             phase,
@@ -110,11 +87,7 @@ impl Surface {
         block_gpu_guest::present_surface(SCREENS_SURFACE);
         Ok(vec![Message::FrameReady(FrameReady {
             generation: self.generation,
-            buffer: 0,
-            damage: Vec::new(),
-            synchronization_value: 0,
             repaint_after_micros: painted.repaint.map(|delay| delay.as_micros() as u64),
-            attachments: Vec::new(),
         })])
     }
 }

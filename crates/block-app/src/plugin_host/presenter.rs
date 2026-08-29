@@ -1,8 +1,3 @@
-#![cfg_attr(
-    not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")),
-    allow(dead_code)
-)]
-
 use std::sync::{
     atomic::{AtomicU32, Ordering},
     Arc, Mutex,
@@ -15,6 +10,13 @@ use eframe::{
 };
 
 use super::backend::{Availability, Frame};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::wasm::{presenter as build_presenter, Presenter as PlatformPresenter};
+#[cfg(target_arch = "wasm32")]
+use super::web::renderer::{
+    presenter as build_presenter, WebSurfacePresenter as PlatformPresenter,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PresenterState {
@@ -59,8 +61,6 @@ pub(super) trait SurfacePresenter {
         surface: u32,
         frame: &Self::Frame,
     ) -> Result<(), String>;
-
-    fn preview_texture(&self, surface: u32) -> Option<&wgpu::Texture>;
 
     fn paint(
         &self,
@@ -409,73 +409,24 @@ impl egui_wgpu::CallbackTrait for PresenterCallback {
 
 pub(super) struct Presenter {
     regions: Regions,
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    platform: Option<super::platform::Presenter>,
-    #[cfg(not(target_arch = "wasm32"))]
-    hosted: Option<super::wasm::Presenter>,
-    #[cfg(target_arch = "wasm32")]
-    web: Option<super::web::renderer::WebSurfacePresenter>,
+    platform: Option<PlatformPresenter>,
 }
 
 pub(super) fn install(creation_context: &eframe::CreationContext<'_>) -> Availability {
     let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
         return Availability::missing();
     };
-    let (presenter, availability) = build(render_state);
+    let platform = build_presenter(render_state);
+    let availability = Availability(platform.as_ref().map(|_| ()).map_err(Clone::clone));
     render_state
         .renderer
         .write()
         .callback_resources
-        .insert(presenter);
+        .insert(Presenter {
+            regions: Regions::new(&render_state.device),
+            platform: platform.ok(),
+        });
     availability
-}
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-fn build(render_state: &egui_wgpu::RenderState) -> (Presenter, Availability) {
-    let platform = super::platform::presenter(render_state);
-    let hosted = super::wasm::presenter(render_state);
-    let availability = Availability {
-        platform: platform.as_ref().map(|_| ()).map_err(Clone::clone),
-        hosted: hosted.as_ref().map(|_| ()).map_err(Clone::clone),
-    };
-    let presenter = Presenter {
-        regions: Regions::new(&render_state.device),
-        platform: platform.ok(),
-        hosted: hosted.ok(),
-    };
-    (presenter, availability)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn build(render_state: &egui_wgpu::RenderState) -> (Presenter, Availability) {
-    let web = super::web::renderer::presenter(render_state);
-    let availability = Availability {
-        platform: Err(super::backend::ONLY_HOSTED.to_owned()),
-        hosted: web.as_ref().map(|_| ()).map_err(Clone::clone),
-    };
-    let presenter = Presenter {
-        regions: Regions::new(&render_state.device),
-        web: web.ok(),
-    };
-    (presenter, availability)
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "windows"),
-    not(target_os = "linux")
-))]
-fn build(render_state: &egui_wgpu::RenderState) -> (Presenter, Availability) {
-    let hosted = super::wasm::presenter(render_state);
-    let availability = Availability {
-        platform: Err(super::backend::ONLY_HOSTED.to_owned()),
-        hosted: hosted.as_ref().map(|_| ()).map_err(Clone::clone),
-    };
-    let presenter = Presenter {
-        regions: Regions::new(&render_state.device),
-        hosted: hosted.ok(),
-    };
-    (presenter, availability)
 }
 
 impl Presenter {
@@ -485,94 +436,27 @@ impl Presenter {
         surface: u32,
         frame: &Frame,
     ) -> Result<(), String> {
-        match frame {
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
-            Frame::Process(frame) => match &mut self.platform {
-                Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
-                None => Err(UNSUPPORTED.to_owned()),
-            },
-            #[cfg(not(target_arch = "wasm32"))]
-            Frame::Hosted(frame) => match &mut self.hosted {
-                Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
-                None => Err(UNSUPPORTED.to_owned()),
-            },
-            #[cfg(target_arch = "wasm32")]
-            Frame::Web(frame) => match &mut self.web {
-                Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
-                None => Err(UNSUPPORTED.to_owned()),
-            },
+        match &mut self.platform {
+            Some(presenter) => presenter.replace(device, &self.regions, surface, frame),
+            None => Err(UNSUPPORTED.to_owned()),
         }
     }
 
     fn prepare(&mut self, queue: &wgpu::Queue, surface: u32, frame: &Frame) -> Result<(), String> {
-        match frame {
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
-            Frame::Process(frame) => match &mut self.platform {
-                Some(presenter) => presenter.prepare(queue, surface, frame),
-                None => Err(UNSUPPORTED.to_owned()),
-            },
-            #[cfg(not(target_arch = "wasm32"))]
-            Frame::Hosted(frame) => match &mut self.hosted {
-                Some(presenter) => presenter.prepare(queue, surface, frame),
-                None => Err(UNSUPPORTED.to_owned()),
-            },
-            #[cfg(target_arch = "wasm32")]
-            Frame::Web(frame) => match &mut self.web {
-                Some(presenter) => presenter.prepare(queue, surface, frame),
-                None => Err(UNSUPPORTED.to_owned()),
-            },
-        }
-    }
-
-    pub(super) fn preview_texture(&self, surface: u32) -> Option<&wgpu::Texture> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let hosted = self
-                .hosted
-                .as_ref()
-                .and_then(|presenter| presenter.preview_texture(surface));
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
-            let hosted = hosted.or_else(|| {
-                self.platform
-                    .as_ref()
-                    .and_then(|presenter| presenter.preview_texture(surface))
-            });
-            hosted
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.web
-                .as_ref()
-                .and_then(|presenter| presenter.preview_texture(surface))
+        match &mut self.platform {
+            Some(presenter) => presenter.prepare(queue, surface, frame),
+            None => Err(UNSUPPORTED.to_owned()),
         }
     }
 
     fn paint(&self, render_pass: &mut wgpu::RenderPass<'static>, surface: u32, slot: u32) {
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
         if let Some(presenter) = &self.platform {
-            presenter.paint(render_pass, &self.regions, surface, slot);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(presenter) = &self.hosted {
-            presenter.paint(render_pass, &self.regions, surface, slot);
-        }
-        #[cfg(target_arch = "wasm32")]
-        if let Some(presenter) = &self.web {
             presenter.paint(render_pass, &self.regions, surface, slot);
         }
     }
 
     fn release(&mut self, surface: u32) {
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
         if let Some(presenter) = &mut self.platform {
-            presenter.release(surface);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(presenter) = &mut self.hosted {
-            presenter.release(surface);
-        }
-        #[cfg(target_arch = "wasm32")]
-        if let Some(presenter) = &mut self.web {
             presenter.release(surface);
         }
     }

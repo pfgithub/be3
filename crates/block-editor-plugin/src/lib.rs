@@ -3,31 +3,20 @@ pub use egui_material_icons;
 
 use std::sync::Arc;
 
-#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+#[cfg(target_arch = "wasm32")]
 mod egui_session;
 mod host;
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+#[cfg(target_arch = "wasm32")]
 mod panes;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-mod runner;
-#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod punch;
+#[cfg(target_arch = "wasm32")]
 mod runtime;
-#[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+#[cfg(target_arch = "wasm32")]
 mod screens;
 pub mod session;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
-#[cfg(target_os = "windows")]
-mod windows;
-
-#[cfg(target_os = "linux")]
-use linux as platform;
-#[cfg(target_arch = "wasm32")]
-use wasm as platform;
-#[cfg(target_os = "windows")]
-use windows as platform;
 
 pub use block_plugin_api::{
     BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, EditorRegion, FetchResult,
@@ -112,19 +101,6 @@ pub mod __private {
             .unwrap_or_else(|error| panic!("this plugin's manifest is invalid: {error}"))
             .identity()
     }
-
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    pub fn run<A: crate::App>(manifest: &str) {
-        let identity = identity(manifest);
-        crate::runner::run::<A>(&identity.id, &identity.name, &identity.version);
-    }
-
-    #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
-    pub fn run<A: crate::App>(manifest: &str) {
-        let identity = identity(manifest);
-        eprintln!("{} cannot run on this platform", identity.name);
-        std::process::exit(2);
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -156,11 +132,7 @@ macro_rules! platform_entry {
 #[cfg(not(target_arch = "wasm32"))]
 #[macro_export]
 macro_rules! platform_entry {
-    ($app:ty, $manifest:ident) => {
-        pub fn run() {
-            $crate::__private::run::<$app>($manifest);
-        }
-    };
+    ($app:ty, $manifest:ident) => {};
 }
 
 #[macro_export]

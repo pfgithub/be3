@@ -45,8 +45,8 @@ impl ClientSession {
     pub fn hello(&self) -> Message {
         #[allow(unused_mut)]
         let mut capabilities = vec![Capability::Lifecycle, Capability::Input];
-        #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
-        capabilities.push(Capability::Surface(crate::platform::SURFACE_MECHANISM));
+        #[cfg(target_arch = "wasm32")]
+        capabilities.push(Capability::Surface);
         Message::Hello(Hello {
             minimum_version: PROTOCOL_VERSION,
             maximum_version: PROTOCOL_VERSION,
@@ -119,7 +119,6 @@ impl ClientSession {
             }
             (State::Running, Message::Client(_)) => Ok(Vec::new()),
             (State::Running, Message::DrawFrame) => Ok(Vec::new()),
-            (State::Running, Message::PreviewsReady { .. }) => Ok(Vec::new()),
             (State::Running, Message::BlockTypes(_)) => Ok(Vec::new()),
             (State::Running, Message::ChildStatuses(statuses))
                 if statuses

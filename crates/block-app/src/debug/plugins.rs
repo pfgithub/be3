@@ -75,27 +75,7 @@ fn show_manifest(ui: &mut egui::Ui, manifest: &PluginManifest) {
         "capabilities {}",
         capabilities(&manifest.capabilities)
     ));
-    ui.small(format!(
-        "surfaces {}",
-        list(
-            manifest
-                .surfaces
-                .iter()
-                .map(|surface| format!("{surface:?}"))
-        )
-    ));
-    let entries = [
-        ("windows", manifest.entry_points.windows.as_deref()),
-        ("linux", manifest.entry_points.linux.as_deref()),
-    ];
-    ui.small(format!(
-        "entry points {}",
-        list(
-            entries
-                .iter()
-                .filter_map(|(name, entry)| entry.map(|entry| format!("{name} {entry}")))
-        )
-    ));
+    ui.small(format!("entry point {}", manifest.entry_point));
 }
 
 fn show_running(ui: &mut egui::Ui) -> Option<String> {

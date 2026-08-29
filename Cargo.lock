@@ -877,7 +877,6 @@ name = "block-app"
 version = "0.1.0"
 dependencies = [
  "arboard",
- "ash",
  "block 0.1.0",
  "block-client",
  "block-plugin-api",
@@ -914,8 +913,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu-hal",
- "windows 0.62.2",
  "windows-sys 0.59.0",
  "winit",
  "wry",
@@ -984,7 +981,6 @@ dependencies = [
 name = "block-editor-plugin"
 version = "0.1.0"
 dependencies = [
- "ash",
  "block 0.1.0",
  "block-client",
  "block-gpu-abi",
@@ -995,14 +991,10 @@ dependencies = [
  "egui_material_icons",
  "futures-util",
  "naga 29.0.3",
- "pollster 0.4.0",
  "serde",
  "uuid",
  "wasi-threads",
  "wgpu",
- "wgpu-hal",
- "windows 0.62.2",
- "windows-sys 0.59.0",
 ]
 
 [[package]]

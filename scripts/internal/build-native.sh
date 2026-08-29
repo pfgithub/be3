@@ -87,8 +87,8 @@ sign() {
     fi
 }
 
-# The app, the server and every plugin are one cargo call, so cargo builds the
-# dependencies they share once and compiles the rest of them at the same time.
+# The app and the server are one cargo call, so cargo builds the dependencies
+# they share once. Every plugin is a wasm guest, built for its own target below.
 load_plugins
 selection=()
 if $server; then
@@ -96,15 +96,12 @@ if $server; then
 fi
 if $client; then
     selection+=(-p block-app --bin block-app)
-    for plugin in "${plugins[@]}"; do
-        selection+=(-p "$plugin" --bin "$plugin-host")
-    done
 fi
 if [[ ${#selection[@]} -eq 0 ]]; then
     echo '--no-client and --no-server together leave nothing to build' >&2
     exit 1
 fi
-echo 'Building the app, the server and every plugin...'
+echo 'Building the app and the server...'
 cargo build "${cargo_arguments[@]}" "${selection[@]}"
 
 executables=()
@@ -113,9 +110,6 @@ if $server; then
 fi
 if $client; then
     executables+=("block-app$extension")
-    for plugin in "${plugins[@]}"; do
-        executables+=("$plugin-host$extension")
-    done
 fi
 for executable in "${executables[@]}"; do
     if [[ ! -f "$artifact_directory/$executable" ]]; then

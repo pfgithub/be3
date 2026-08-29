@@ -1,20 +1,14 @@
-use block_plugin_api::{Message, PreviewLayout};
+use block_plugin_api::Message;
 
 use crate::{
-    platform::{Attachment, Surface, SHARED_PREVIEWS, SURFACE_KIND},
     screens::Screens,
     session::{ClientSession, State},
+    wasm::Surface,
     Waker,
 };
 
-pub(crate) struct Outbound {
-    pub(crate) message: Message,
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(crate) attachments: Vec<Attachment>,
-}
-
 pub(crate) struct Step {
-    pub(crate) outbound: Vec<Outbound>,
+    pub(crate) outbound: Vec<Message>,
     pub(crate) closed: bool,
 }
 
@@ -23,10 +17,7 @@ pub(crate) struct Runtime {
     screens: Screens,
     surface: Option<Surface>,
     generation: u64,
-    request_id: u64,
     asked: bool,
-    previews: PreviewLayout,
-    preview_generation: u64,
 }
 
 impl Runtime {
@@ -36,10 +27,7 @@ impl Runtime {
             screens: Screens::new::<A>(waker),
             surface: None,
             generation: 0,
-            request_id: 0,
             asked: false,
-            previews: PreviewLayout::default(),
-            preview_generation: 0,
         }
     }
 
@@ -57,21 +45,11 @@ impl Runtime {
         let mut draw = false;
         let mut outbound = Vec::new();
         for message in batch {
-            match &message {
-                Message::Screens(set) => self.request_id = set.request_id,
-                Message::DrawFrame => draw = true,
-                Message::PreviewsReady { generation }
-                    if *generation == self.previews.generation =>
-                {
-                    self.screens.set_previews(&self.previews);
-                    changed = true;
-                }
-                _ => {}
+            if matches!(message, Message::DrawFrame) {
+                draw = true;
             }
             changed |= self.screens.receive(&message);
-            for response in self.session.receive(message) {
-                outbound.push(plain(response));
-            }
+            outbound.extend(self.session.receive(message));
             if matches!(self.session.state(), State::Closed) {
                 return Ok(Step {
                     outbound,
@@ -79,69 +57,25 @@ impl Runtime {
                 });
             }
         }
-        crate::platform::pump();
+        block_client::pump();
         let replaced = self.replace_surface(&mut outbound)?;
         if let Some(surface) = &mut self.surface {
-            if replaced {
-                if let Some((descriptor, attachments)) = surface.descriptor() {
-                    outbound.push(Outbound {
-                        message: descriptor,
-                        attachments,
-                    });
-                    log(&format!(
-                        "transferred {SURFACE_KIND} surface generation {}",
-                        self.generation
-                    ));
-                }
-            }
             if draw || replaced {
                 self.asked = false;
-                let messages = surface.render(&mut self.screens, phase)?;
-                outbound.extend(messages.into_iter().map(plain));
+                outbound.extend(surface.render(&mut self.screens, phase)?);
             } else if changed && !self.asked {
                 self.asked = true;
-                outbound.push(plain(Message::FrameNeeded));
+                outbound.push(Message::FrameNeeded);
             }
         }
-        self.update_previews(&mut outbound)?;
-        outbound.extend(self.screens.outbound().into_iter().map(plain));
+        outbound.extend(self.screens.outbound());
         Ok(Step {
             outbound,
             closed: false,
         })
     }
 
-    fn update_previews(&mut self, outbound: &mut Vec<Outbound>) -> Result<(), String> {
-        if !SHARED_PREVIEWS {
-            return Ok(());
-        }
-        let requests = self.screens.preview_requests();
-        let scale_factor = self.screens.scale_factor();
-        let Some(surface) = &mut self.surface else {
-            return Ok(());
-        };
-        let mut layout = PreviewLayout::packed(&requests, scale_factor);
-        if layout.same_slots(&self.previews) {
-            return Ok(());
-        }
-        self.preview_generation += 1;
-        layout.generation = self.preview_generation;
-        if let Some((message, attachments)) = surface.set_previews(&layout)? {
-            log(&format!(
-                "transferred a {SURFACE_KIND} preview surface {}x{}",
-                layout.width, layout.height
-            ));
-            outbound.push(Outbound {
-                message,
-                attachments,
-            });
-        }
-        self.previews = layout.clone();
-        outbound.push(plain(Message::Previews(layout)));
-        Ok(())
-    }
-
-    fn replace_surface(&mut self, outbound: &mut Vec<Outbound>) -> Result<bool, String> {
+    fn replace_surface(&mut self, outbound: &mut Vec<Message>) -> Result<bool, String> {
         let layout = self.screens.layout().clone();
         if layout.is_empty()
             || self
@@ -156,24 +90,17 @@ impl Runtime {
         let mut layout = layout;
         layout.generation = self.generation;
         log(&format!(
-            "creating a {SURFACE_KIND} surface {}x{} for {} screens",
+            "creating a surface {}x{} for {} screens",
             layout.width,
             layout.height,
             layout.screens.len()
         ));
         self.surface = Some(match self.surface.take() {
-            Some(previous) => previous.resize(self.request_id, layout.clone(), self.generation)?,
-            None => Surface::new(self.request_id, layout.clone(), self.generation)?,
+            Some(previous) => previous.resize(layout.clone(), self.generation)?,
+            None => Surface::new(layout.clone(), self.generation)?,
         });
-        outbound.push(plain(Message::Layout(layout)));
+        outbound.push(Message::Layout(layout));
         Ok(true)
-    }
-}
-
-fn plain(message: Message) -> Outbound {
-    Outbound {
-        message,
-        attachments: Vec::new(),
     }
 }
 

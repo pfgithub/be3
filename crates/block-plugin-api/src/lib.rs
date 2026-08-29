@@ -2,54 +2,17 @@ use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-mod attachment;
-#[cfg(any(unix, windows))]
-pub mod desktop_attachments;
-mod linux_surface;
 mod manifest;
 mod session;
-mod windows_surface;
-pub use attachment::{
-    validate_attachments, AttachmentDescriptor, AttachmentError, AttachmentOwnership,
-    AttachmentType, MAX_ATTACHMENTS,
-};
-pub use linux_surface::{
-    LinuxGraphicsBackend, LinuxSurfaceBuffer, LinuxSurfaceDescriptor, LinuxSurfaceError,
-    LinuxSurfaceLifecycle, LinuxSurfaceState,
-};
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
-pub use windows_surface::{
-    WindowsSurfaceDescriptor, WindowsSurfaceError, WindowsSurfaceLifecycle, WindowsSurfaceState,
-};
 
-pub const PROTOCOL_VERSION: u16 = 30;
+pub const PROTOCOL_VERSION: u16 = 31;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
 pub const MAX_QUEUED_MESSAGES: usize = 256;
 pub const MAX_CHILDREN: usize = 256;
-pub const MAX_PREVIEWS: usize = 64;
-pub const MAX_PREVIEW_EDGE: u32 = 4096;
-pub const SURFACE_BUFFERS: usize = 3;
-pub const MAX_SURFACE_BUFFERS: usize = 4;
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SurfaceRotation {
-    next: usize,
-}
-
-impl SurfaceRotation {
-    pub fn advance(&mut self, buffers: usize) -> usize {
-        let buffer = self.next % buffers.max(1);
-        self.next = buffer + 1;
-        buffer
-    }
-
-    pub fn restart(&mut self) {
-        self.next = 0;
-    }
-}
 pub const REQUEST_TIMEOUT_MILLISECONDS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,99 +212,6 @@ pub struct ChildStatus {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PreviewSlot {
-    pub instance: EditorInstanceId,
-    pub region: EditorRegion,
-    pub child: ChildId,
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PreviewRequest {
-    pub instance: EditorInstanceId,
-    pub region: EditorRegion,
-    pub child: ChildId,
-    pub width: u32,
-    pub height: u32,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PreviewLayout {
-    pub generation: u64,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor_millis: u32,
-    pub slots: Vec<PreviewSlot>,
-}
-
-impl PreviewLayout {
-    pub fn packed(requests: &[PreviewRequest], scale_factor: f32) -> Self {
-        let mut layout = Self {
-            scale_factor_millis: (scale_factor * 1000.0).round().max(1.0) as u32,
-            ..Self::default()
-        };
-        let mut row_top = 0;
-        let mut row_height = 0;
-        let mut x = 0;
-        for request in requests.iter().take(MAX_PREVIEWS) {
-            let width = request.width.clamp(1, MAX_PREVIEW_EDGE);
-            let height = request.height.clamp(1, MAX_PREVIEW_EDGE);
-            if x > 0 && x + width > MAX_PREVIEW_EDGE {
-                row_top += row_height;
-                row_height = 0;
-                x = 0;
-            }
-            if row_top + height > MAX_PREVIEW_EDGE {
-                break;
-            }
-            layout.slots.push(PreviewSlot {
-                instance: request.instance,
-                region: request.region,
-                child: request.child,
-                x,
-                y: row_top,
-                width,
-                height,
-            });
-            x += width;
-            row_height = row_height.max(height);
-            layout.width = layout.width.max(x);
-            layout.height = layout.height.max(row_top + height);
-        }
-        layout
-    }
-
-    pub fn scale_factor(&self) -> f32 {
-        self.scale_factor_millis as f32 / 1000.0
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.width == 0 || self.height == 0 || self.slots.is_empty()
-    }
-
-    pub fn slot(
-        &self,
-        instance: EditorInstanceId,
-        region: EditorRegion,
-        child: ChildId,
-    ) -> Option<&PreviewSlot> {
-        self.slots
-            .iter()
-            .find(|slot| slot.instance == instance && slot.region == region && slot.child == child)
-    }
-
-    pub fn same_slots(&self, other: &Self) -> bool {
-        self.width == other.width
-            && self.height == other.height
-            && self.scale_factor_millis == other.scale_factor_millis
-            && self.slots == other.slots
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub identity: PluginIdentity,
@@ -355,8 +225,7 @@ pub struct PluginManifest {
     pub capabilities: EditorCapabilities,
     pub resize: ResizeMode,
     pub regions: Vec<EditorRegion>,
-    pub entry_points: EntryPoints,
-    pub surfaces: Vec<SurfaceMechanism>,
+    pub entry_point: String,
     pub network: Vec<String>,
 }
 
@@ -427,16 +296,6 @@ impl EditorRegion {
     ];
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EntryPoints {
-    #[serde(default)]
-    pub wasm: Option<String>,
-    #[serde(default)]
-    pub windows: Option<String>,
-    #[serde(default)]
-    pub linux: Option<String>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ManifestError {
     Malformed(String),
@@ -445,8 +304,6 @@ pub enum ManifestError {
     InvalidIdentity,
     InvalidBlockType,
     InvalidRegions,
-    MissingEntryPoint,
-    MissingSurface,
     InvalidNetworkHost,
 }
 
@@ -460,10 +317,6 @@ impl fmt::Display for ManifestError {
             Self::InvalidBlockType => formatter.write_str("the block type is not a uuid"),
             Self::InvalidRegions => {
                 formatter.write_str("the regions must include the main one exactly once")
-            }
-            Self::MissingEntryPoint => formatter.write_str("no entry point is given"),
-            Self::MissingSurface => {
-                formatter.write_str("an entry point has no surface mechanism to present with")
             }
             Self::InvalidNetworkHost => {
                 formatter.write_str("a network host is not a plain host name")
@@ -494,26 +347,7 @@ impl PluginManifest {
         {
             return Err(ManifestError::InvalidRegions);
         }
-        let entries = [
-            &self.entry_points.wasm,
-            &self.entry_points.windows,
-            &self.entry_points.linux,
-        ];
-        if entries.iter().all(|entry| entry.is_none()) {
-            return Err(ManifestError::MissingEntryPoint);
-        }
-        for entry in entries.into_iter().flatten() {
-            manifest_string("entry point", entry)?;
-        }
-        let windows_valid = self.entry_points.windows.is_none()
-            || self.surfaces.contains(&SurfaceMechanism::WindowsDxgi);
-        let linux_valid = self.entry_points.linux.is_none()
-            || self.surfaces.contains(&SurfaceMechanism::LinuxDmaBuf);
-        let wasm_valid = self.entry_points.wasm.is_none()
-            || self.surfaces.contains(&SurfaceMechanism::HostTexture);
-        if !windows_valid || !linux_valid || !wasm_valid {
-            return Err(ManifestError::MissingSurface);
-        }
+        manifest_string("entry point", &self.entry_point)?;
         for host in &self.network {
             manifest_string("network host", host)?;
             if !host
@@ -806,7 +640,6 @@ pub enum Message {
     Layout(ScreenLayout),
     RegionSizes(Vec<RegionSize>),
     Input(InputBatch),
-    Surface(SurfaceDescriptor),
     DrawFrame,
     FrameNeeded,
     FrameReady(FrameReady),
@@ -821,8 +654,6 @@ pub enum Message {
     BlockTypes(Vec<BlockTypeDescriptor>),
     Children(ChildPlacements),
     ChildStatuses(Vec<ChildStatus>),
-    Previews(PreviewLayout),
-    PreviewsReady { generation: u64 },
 }
 
 impl Message {
@@ -869,21 +700,7 @@ pub struct PluginIdentity {
 pub enum Capability {
     Input,
     Lifecycle,
-    Surface(SurfaceMechanism),
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SurfaceRole {
-    #[default]
-    Screens,
-    Previews,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SurfaceMechanism {
-    WindowsDxgi,
-    LinuxDmaBuf,
-    HostTexture,
+    Surface,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -979,56 +796,9 @@ pub struct Modifiers {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SurfaceDescriptor {
-    pub request_id: u64,
-    pub generation: u64,
-    pub role: SurfaceRole,
-    pub mechanism: SurfaceMechanism,
-    pub width: u32,
-    pub height: u32,
-    pub format: ColorFormat,
-    pub color_space: ColorSpace,
-    pub alpha_mode: AlphaMode,
-    pub attachments: Vec<AttachmentDescriptor>,
-    pub opaque: Vec<u8>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ColorFormat {
-    Rgba8Srgb,
-    Bgra8Srgb,
-    Rgba16Float,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ColorSpace {
-    Srgb,
-    DisplayP3,
-    ExtendedSrgb,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AlphaMode {
-    Opaque,
-    Premultiplied,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameReady {
     pub generation: u64,
-    pub buffer: u32,
-    pub damage: Vec<DamageRect>,
-    pub synchronization_value: u64,
     pub repaint_after_micros: Option<u64>,
-    pub attachments: Vec<AttachmentDescriptor>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DamageRect {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1118,25 +888,6 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
         Message::Screens(value) => collection(value.screens.len()),
         Message::Layout(value) => collection(value.screens.len()),
         Message::RegionSizes(value) => collection(value.len()),
-        Message::Surface(value) => {
-            if value.opaque.len() > MAX_OPAQUE_DESCRIPTOR_BYTES {
-                return Err(DecodeError::LimitExceeded("surface descriptor"));
-            }
-            if value.attachments.len() > MAX_ATTACHMENTS {
-                return Err(DecodeError::LimitExceeded("surface attachments"));
-            }
-            Ok(())
-        }
-        Message::FrameReady(value) => {
-            collection(value.damage.len())?;
-            if value.attachments.len() > MAX_ATTACHMENTS {
-                return Err(DecodeError::LimitExceeded("frame attachments"));
-            }
-            match value.buffer as usize >= MAX_SURFACE_BUFFERS {
-                true => Err(DecodeError::LimitExceeded("frame buffer")),
-                false => Ok(()),
-            }
-        }
         Message::Editor(value) => validate_editor(value),
         Message::BlockTypes(value) => {
             collection(value.len())?;
@@ -1147,10 +898,6 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             Ok(())
         }
         Message::Children(value) => validate_children(value),
-        Message::Previews(value) => match value.slots.len() > MAX_PREVIEWS {
-            true => Err(DecodeError::LimitExceeded("previews")),
-            false => Ok(()),
-        },
         Message::ChildStatuses(value) => {
             collection(value.len())?;
             for status in value {

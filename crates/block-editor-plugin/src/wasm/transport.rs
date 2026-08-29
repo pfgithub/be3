@@ -4,8 +4,6 @@ use block_plugin_api::{decode_frame, encode_frame, ErrorCode, Message, ProtocolE
 
 use crate::{runtime::Runtime, wasm::host, wasm::surface, Waker};
 
-pub(crate) type Attachment = ();
-
 thread_local! {
     static PLUGIN: RefCell<Option<Runtime>> = const { RefCell::new(None) };
     static WOKEN: Cell<bool> = const { Cell::new(false) };
@@ -35,8 +33,7 @@ pub(crate) fn step() -> Result<(), String> {
         };
         match runtime.step(batch, woken, phase) {
             Ok(step) => {
-                let messages = step.outbound.into_iter().map(|out| out.message).collect();
-                post(messages)?;
+                post(step.outbound)?;
                 Ok(step.closed)
             }
             Err(error) => {

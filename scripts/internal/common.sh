@@ -246,44 +246,30 @@ export_wasi_toolchain() {
     export RUSTFLAGS="-C link-arg=-L$sysroot/lib/$wasm_rust_target/noeh -C link-arg=$sysroot/lib/$wasm_rust_target/libsetjmp.a$exports"
 }
 
-# A plugin for wasmtime is its own cargo call: the app links wgpu with real
-# backends and a guest links it with only the custom one, and a single call
-# would unify the two into a guest that carries a backend it cannot use. It also
-# gets its own profile, because an unoptimised guest is hundreds of megabytes of
-# wasm that Cranelift then spends minutes compiling at every launch.
+# A plugin is its own cargo call: the app links wgpu with real backends and a
+# guest links it with only the custom one, and a single call would unify the two
+# into a guest that carries a backend it cannot use. It also gets its own
+# profile, because an unoptimised guest is hundreds of megabytes of wasm that
+# Cranelift then spends minutes compiling at every launch.
 build_plugin_wasm() {
     local profile="$1" destination="$2"
-    local wasm_plugins=() plugin
-    for plugin in "${plugins[@]}"; do
-        if [[ -n "$(manifest_field "$(plugin_manifest "$plugin")" wasm)" ]]; then
-            wasm_plugins+=("$plugin")
-        fi
-    done
-    if [[ ${#wasm_plugins[@]} -eq 0 ]]; then
-        return 0
-    fi
     local wasm_profile='plugin'
     if [[ "$profile" == 'release' ]]; then
         wasm_profile='plugin-release'
     fi
-    local arguments=(
-        --target "$wasm_rust_target"
-        --profile "$wasm_profile"
-        --no-default-features
-        --features hosted
-    )
-    local selection=()
-    for plugin in "${wasm_plugins[@]}"; do
+    local arguments=(--target "$wasm_rust_target" --profile "$wasm_profile")
+    local plugin selection=()
+    for plugin in "${plugins[@]}"; do
         selection+=(-p "$plugin")
     done
-    echo "Building ${#wasm_plugins[@]} plugins for $wasm_rust_target..."
+    echo "Building ${#plugins[@]} plugins for $wasm_rust_target..."
     (
         export_wasi_toolchain "${wasi_sysroot:-}"
         cargo build "${arguments[@]}" "${selection[@]}"
     )
     local built="$repository/target/$wasm_rust_target/$wasm_profile"
     mkdir -p "$destination"
-    for plugin in "${wasm_plugins[@]}"; do
+    for plugin in "${plugins[@]}"; do
         local module="$built/${plugin//-/_}.wasm"
         if [[ ! -f "$module" ]]; then
             echo "cargo did not produce $module" >&2

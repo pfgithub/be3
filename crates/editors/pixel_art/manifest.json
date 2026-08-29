@@ -21,14 +21,5 @@
     "Preview",
     "ArtifactSettings"
   ],
-  "entry_points": {
-    "wasm": "pixel_art.wasm",
-    "windows": "pixel_art-host.exe",
-    "linux": "pixel_art-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "pixel_art.wasm"
 }

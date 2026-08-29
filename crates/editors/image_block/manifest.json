@@ -18,14 +18,5 @@
     "RightSidebar",
     "Preview"
   ],
-  "entry_points": {
-    "wasm": "image_block.wasm",
-    "windows": "image_block-host.exe",
-    "linux": "image_block-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "image_block.wasm"
 }

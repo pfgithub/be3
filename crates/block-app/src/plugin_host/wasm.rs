@@ -96,11 +96,7 @@ impl super::backend::Backend for Wasm {
     fn new(plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self {
             worker: None,
-            module: plugin
-                .entry_points
-                .wasm
-                .as_deref()
-                .and_then(|entry| discovery::module(&plugin.identity.id, entry)),
+            module: discovery::module(&plugin.identity.id, &plugin.entry_point),
             started: Instant::now(),
             error: None,
         }

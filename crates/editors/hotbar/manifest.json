@@ -9,14 +9,5 @@
   "regions": [
     "Main"
   ],
-  "entry_points": {
-    "wasm": "hotbar.wasm",
-    "windows": "hotbar-host.exe",
-    "linux": "hotbar-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "hotbar.wasm"
 }

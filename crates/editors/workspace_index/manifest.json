@@ -18,14 +18,5 @@
     "Main",
     "Toolbar"
   ],
-  "entry_points": {
-    "wasm": "workspace_index.wasm",
-    "windows": "workspace_index-host.exe",
-    "linux": "workspace_index-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "workspace_index.wasm"
 }

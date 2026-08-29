@@ -247,10 +247,6 @@ impl SurfacePresenter for WebSurfacePresenter {
         Ok(())
     }
 
-    fn preview_texture(&self, _surface: u32) -> Option<&wgpu::Texture> {
-        None
-    }
-
     fn paint(
         &self,
         render_pass: &mut wgpu::RenderPass<'static>,

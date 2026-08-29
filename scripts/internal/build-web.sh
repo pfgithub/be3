@@ -69,8 +69,8 @@ write_games_index "$output_directory/games.json" 'games/'
 export_wasi_toolchain "$wasi_sysroot"
 
 # The app links wgpu's real backends and a plugin links only the custom one, so
-# they are separate cargo calls; a single call would unify the two features and
-# leave the guest carrying a backend it cannot use.
+# they are separate cargo calls; a single call would unify the two and leave the
+# guest carrying a backend it cannot use.
 load_plugins
 echo "Building the app for $rust_target..."
 cargo build --lib --target "$rust_target" "${cargo_arguments[@]}" -p block-app

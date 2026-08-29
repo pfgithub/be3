@@ -9,10 +9,7 @@ fn hello() -> Message {
             name: "Plugin Demo".into(),
             version: "1.0".into(),
         },
-        capabilities: vec![
-            Capability::Input,
-            Capability::Surface(SurfaceMechanism::HostTexture),
-        ],
+        capabilities: vec![Capability::Input, Capability::Surface],
     })
 }
 
@@ -70,11 +67,9 @@ mod frame_round_trips;
 mod manifest_validation;
 mod multiplexed_messages_round_trip;
 mod open_block_request_round_trips;
-mod packed_previews_fill_rows;
 mod performance_messages_round_trip;
 mod pick_block_messages_round_trip;
 mod present_messages_round_trip;
-mod preview_messages_round_trip;
 mod region_sizes_round_trip;
 mod rejects_artifact_settings_over_limit;
 mod rejects_collection_over_limit;
@@ -82,7 +77,6 @@ mod rejects_malformed_payload;
 mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
 mod rejects_unordered_occluders;
-mod rotation_leaves_shown_buffers_alone;
 mod show_region_messages_round_trip;
 mod stacked_layout_keeps_each_region;
 mod stacked_layout_stacks_screens;

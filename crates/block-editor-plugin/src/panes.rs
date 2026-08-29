@@ -16,8 +16,6 @@ struct Pane {
     context: egui::Context,
     renderer: egui_wgpu::Renderer,
     freed: Vec<egui::TextureId>,
-    previews: Option<egui::TextureId>,
-    preview_generation: u64,
 }
 
 impl Pane {
@@ -47,40 +45,9 @@ impl Pane {
             context,
             renderer,
             freed: Vec::new(),
-            previews: None,
-            preview_generation: 0,
         }
-    }
-
-    fn set_previews(&mut self, device: &wgpu::Device, previews: Option<(&wgpu::TextureView, u64)>) {
-        let Some((view, generation)) = previews else {
-            self.previews = None;
-            self.preview_generation = 0;
-            return;
-        };
-        if self.previews.is_some() && self.preview_generation == generation {
-            return;
-        }
-        self.preview_generation = generation;
-        self.previews = Some(match self.previews {
-            Some(id) => {
-                self.renderer.update_egui_texture_from_wgpu_texture(
-                    device,
-                    view,
-                    wgpu::FilterMode::Linear,
-                    id,
-                );
-                id
-            }
-            None => self
-                .renderer
-                .register_native_texture(device, view, wgpu::FilterMode::Linear),
-        });
     }
 }
-
-const PUNCH_SLOTS: u32 = 256;
-const PUNCH_BYTES: u64 = 32;
 
 struct PunchResources {
     pipeline: wgpu::RenderPipeline,
@@ -95,10 +62,10 @@ impl PunchResources {
         let stride = device
             .limits()
             .min_uniform_buffer_offset_alignment
-            .max(PUNCH_BYTES as u32);
+            .max(crate::punch::BYTES as u32);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("plugin child holes"),
-            size: u64::from(stride) * u64::from(PUNCH_SLOTS),
+            size: u64::from(stride) * u64::from(crate::punch::SLOTS),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -110,7 +77,7 @@ impl PunchResources {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: wgpu::BufferSize::new(PUNCH_BYTES),
+                    min_binding_size: wgpu::BufferSize::new(crate::punch::BYTES),
                 },
                 count: None,
             }],
@@ -123,13 +90,13 @@ impl PunchResources {
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &buffer,
                     offset: 0,
-                    size: wgpu::BufferSize::new(PUNCH_BYTES),
+                    size: wgpu::BufferSize::new(crate::punch::BYTES),
                 }),
             }],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("plugin child hole"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("punch.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(crate::punch::SHADER.into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("plugin child hole"),
@@ -179,9 +146,9 @@ impl PunchResources {
     }
 
     fn allocate(&mut self, queue: &wgpu::Queue, values: [f32; 8]) -> u32 {
-        let slot = self.next % PUNCH_SLOTS;
+        let slot = self.next % crate::punch::SLOTS;
         self.next += 1;
-        let mut bytes = [0_u8; PUNCH_BYTES as usize];
+        let mut bytes = [0_u8; crate::punch::BYTES as usize];
         for (index, value) in values.iter().enumerate() {
             bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_ne_bytes());
         }
@@ -266,8 +233,6 @@ pub(crate) struct Panes {
 pub(crate) struct Painted {
     pub(crate) commands: Vec<wgpu::CommandBuffer>,
     pub(crate) repaint: Option<Duration>,
-    #[cfg(target_os = "windows")]
-    pub(crate) texture_updates: usize,
 }
 
 impl Panes {
@@ -285,7 +250,6 @@ impl Panes {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        previews: Option<(&wgpu::TextureView, u64)>,
         layout: &ScreenLayout,
         screens: &mut Screens,
         time: f64,
@@ -293,8 +257,6 @@ impl Panes {
         let mut commands = Vec::new();
         let mut cleared = false;
         let mut repaint = Duration::MAX;
-        #[cfg(target_os = "windows")]
-        let mut texture_updates = 0;
         let placements = layout.screens.clone();
         let waker = screens.waker();
         let theme = screens.theme();
@@ -315,17 +277,11 @@ impl Panes {
             if let Some(punch) = pane.renderer.callback_resources.get_mut::<PunchResources>() {
                 punch.next = 0;
             }
-            pane.set_previews(device, previews);
-            session.set_preview_texture(pane.previews);
             let pane_started = Instant::now();
             let session_started = Instant::now();
             let output = session.run(placement.region, &pane.context, time, layout.generation);
             let session_elapsed = session_started.elapsed();
             let updated_textures = output.textures_delta.set.len();
-            #[cfg(target_os = "windows")]
-            {
-                texture_updates += updated_textures;
-            }
             repaint = repaint.min(repaint_delay(&output));
             let scale = session.scale_factor(placement.region);
             let tessellate_started = Instant::now();
@@ -392,8 +348,6 @@ impl Panes {
         Painted {
             commands,
             repaint: (repaint < Duration::MAX).then_some(repaint),
-            #[cfg(target_os = "windows")]
-            texture_updates,
         }
     }
 }
@@ -404,6 +358,3 @@ fn repaint_delay(output: &egui::FullOutput) -> Duration {
         .get(&egui::ViewportId::ROOT)
         .map_or(Duration::MAX, |viewport| viewport.repaint_delay)
 }
-
-#[cfg(test)]
-mod tests;

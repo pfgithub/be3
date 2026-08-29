@@ -1,10 +1,9 @@
 use block_client::BlockClient;
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, ChildId, ChildMode, ChildPlacement, ChildPlacements,
-    ChildStatus, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion,
-    FetchResult, FilePick, InputEvent, Message, Occluder, PointerButton, PreviewLayout,
-    PreviewRequest, RegionSize, ScreenPlacement, ScreenRequest, ViewportMetrics, WheelUnit,
-    MAX_CHILDREN, MAX_COLLECTION_ITEMS,
+    ArtifactDescription, BlockPick, ChildId, ChildPlacement, ChildPlacements, ChildStatus,
+    CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult,
+    FilePick, InputEvent, Message, Occluder, PointerButton, RegionSize, ScreenPlacement,
+    ScreenRequest, ViewportMetrics, WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -457,47 +456,6 @@ impl EguiSession {
         self.host.set_child_statuses(statuses);
     }
 
-    pub(crate) fn set_previews(&self, layout: &PreviewLayout) {
-        let size = egui::vec2(layout.width as f32, layout.height as f32);
-        let slots = layout
-            .slots
-            .iter()
-            .filter(|slot| slot.instance == self.instance)
-            .map(|slot| {
-                (
-                    (slot.region, slot.child),
-                    egui::Rect::from_min_size(
-                        egui::pos2(slot.x as f32, slot.y as f32),
-                        egui::vec2(slot.width as f32, slot.height as f32),
-                    ),
-                )
-            })
-            .collect();
-        self.host.set_preview_slots(size, slots);
-    }
-
-    pub(crate) fn set_preview_texture(&self, texture: Option<egui::TextureId>) {
-        self.host.set_preview_texture(texture);
-    }
-
-    pub(crate) fn preview_requests(&self, requests: &mut Vec<PreviewRequest>) {
-        for (region, state) in &self.regions {
-            let scale = self.scale_factor(*region);
-            for child in &state.children {
-                if child.mode != ChildMode::Preview || child.rect.is_empty() {
-                    continue;
-                }
-                requests.push(PreviewRequest {
-                    instance: self.instance,
-                    region: *region,
-                    child: child.child,
-                    width: preview_edge(child.rect.width * scale),
-                    height: preview_edge(child.rect.height * scale),
-                });
-            }
-        }
-    }
-
     fn children(&mut self) -> Vec<ChildPlacements> {
         let instance = self.instance;
         let generation = self.generation;
@@ -743,11 +701,6 @@ fn floating_rects(context: &egui::Context, visible: egui::Rect) -> Vec<egui::Rec
             .filter(|rect| rect.intersects(visible))
             .collect()
     })
-}
-
-fn preview_edge(pixels: f32) -> u32 {
-    const STEP: f32 = 32.0;
-    ((pixels / STEP).ceil() * STEP).max(STEP) as u32
 }
 
 fn cursor_icon(cursor: egui::CursorIcon) -> CursorIcon {

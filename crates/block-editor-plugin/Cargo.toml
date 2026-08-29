@@ -9,40 +9,27 @@ block-client = { path = "../block-client" }
 block = { path = "../block" }
 block-plugin-api = { path = "../block-plugin-api" }
 block-ui = { path = "../block-ui" }
-block-gpu-abi = { path = "../block-gpu-abi", optional = true }
-block-gpu-guest = { path = "../block-gpu-guest", optional = true }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts"] }
 egui_material_icons = "0.6.0"
 futures-util = "0.3"
 serde = "1"
 uuid = "1"
-wasi-threads = { path = "../wasi-threads" }
-wgpu = { version = "29", default-features = false, features = ["custom", "std", "web", "wgsl"], optional = true }
-
-[features]
-default = ["native"]
-# A plugin that runs as a subprocess links wgpu's real backends. One that runs
-# as a wasm guest links only the custom backend, and reaches the host's device
-# through the gpu abi, whether wasmtime or the browser is holding it.
-native = ["eframe/wgpu"]
-hosted = ["block-client/hosted", "eframe/wgpu_no_default_features", "dep:block-gpu-abi", "dep:block-gpu-guest", "dep:wgpu"]
 
 [dev-dependencies]
 naga = { version = "29", features = ["wgsl-in"] }
 
-[target.'cfg(target_os = "android")'.dependencies]
-eframe = { version = "0.34.3", default-features = false, features = ["android-native-activity", "default_fonts", "wgpu"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-ash = "0.38"
-pollster = "0.4"
-wgpu-hal = { version = "29", features = ["vulkan"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-pollster = "0.4"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common", "Win32_Security"] }
-wgpu-hal = { version = "29", features = ["dx12"] }
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_System_Threading"] }
+# A plugin is a wasm guest wherever it runs, so it links wgpu with only the
+# custom backend and reaches the host's device through the gpu abi, whether
+# wasmtime or the browser is holding it. Everything under here is the guest,
+# which is why a native build of this crate is only the App trait and the host
+# types an editor's own tests drive it through.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+block-client = { path = "../block-client", features = ["hosted"] }
+block-gpu-abi = { path = "../block-gpu-abi" }
+block-gpu-guest = { path = "../block-gpu-guest" }
+eframe = { version = "0.34.3", default-features = false, features = ["wgpu_no_default_features"] }
+wasi-threads = { path = "../wasi-threads" }
+wgpu = { version = "29", default-features = false, features = ["custom", "std", "web", "wgsl"] }
 
 [lints]
 workspace = true

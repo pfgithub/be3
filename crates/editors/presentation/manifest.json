@@ -20,14 +20,5 @@
     "RightSidebar",
     "Preview"
   ],
-  "entry_points": {
-    "wasm": "presentation.wasm",
-    "windows": "presentation-host.exe",
-    "linux": "presentation-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "presentation.wasm"
 }

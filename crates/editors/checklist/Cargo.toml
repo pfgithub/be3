@@ -7,19 +7,10 @@ license.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "checklist-host"
-path = "src/main.rs"
-
 [dependencies]
 block-client = { path = "../../block-client" }
-block-editor-plugin = { path = "../../block-editor-plugin", default-features = false }
+block-editor-plugin = { path = "../../block-editor-plugin" }
 uuid = "1"
-
-[features]
-default = ["native"]
-native = ["block-editor-plugin/native"]
-hosted = ["block-editor-plugin/hosted"]
 
 [dev-dependencies]
 block-ui-test = { path = "../../block-ui-test" }

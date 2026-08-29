@@ -23,7 +23,6 @@ impl Canvas {
         canvas: web_sys::OffscreenCanvas,
     ) -> Result<(Self, wgpu::Device, wgpu::Queue), String> {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
         descriptor.display = Some(Box::new(Display));
         let instance = wgpu::Instance::new(descriptor);
         let surface = instance

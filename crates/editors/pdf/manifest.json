@@ -19,14 +19,5 @@
     "RightSidebar",
     "Preview"
   ],
-  "entry_points": {
-    "wasm": "pdf.wasm",
-    "windows": "pdf-host.exe",
-    "linux": "pdf-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "pdf.wasm"
 }

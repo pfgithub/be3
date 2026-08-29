@@ -295,14 +295,7 @@ impl PluginEditor {
             .iter()
             .filter(|child| child.is_below())
         {
-            let next = self.child_ui(
-                ui,
-                editors,
-                region,
-                child,
-                &mut child_viewport,
-                &mut statuses,
-            );
+            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
             action = action.or(next);
         }
         presentation.present(ui);
@@ -311,14 +304,7 @@ impl PluginEditor {
             .iter()
             .filter(|child| !child.is_below())
         {
-            let next = self.child_ui(
-                ui,
-                editors,
-                region,
-                child,
-                &mut child_viewport,
-                &mut statuses,
-            );
+            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
             action = action.or(next);
         }
         presentation.report(statuses);
@@ -332,7 +318,6 @@ impl PluginEditor {
         &self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        region: EditorRegion,
         child: &HostChild,
         viewport: &mut DirectEditorViewport,
         statuses: &mut Vec<HostChildStatus>,
@@ -351,28 +336,17 @@ impl PluginEditor {
             action = next;
             used = Some(size);
         } else if available && child.is_preview() {
-            let target = crate::plugin_host::preview_target(
-                &self.plugin.identity.id,
-                self.instance,
-                region,
-                child.child,
+            let painter = ui.painter().with_clip_rect(child.clip);
+            let rendered = editors.render(
+                child.block_id,
+                BlockRenderContext {
+                    painter: &painter,
+                    corners: rect_corners(child.rect),
+                    opacity: 1.0,
+                },
             );
-            if let Some(atlas) = target.atlas {
-                self.atlas_ui(ui.ctx(), editors, child.block_id, atlas);
-            }
-            if target.composite {
-                let painter = ui.painter().with_clip_rect(child.clip);
-                let rendered = editors.render(
-                    child.block_id,
-                    BlockRenderContext {
-                        painter: &painter,
-                        corners: rect_corners(child.rect),
-                        opacity: 1.0,
-                    },
-                );
-                if !rendered {
-                    paint_block_fallback(&painter, child.rect, None, editors);
-                }
+            if !rendered {
+                paint_block_fallback(&painter, child.rect, None, editors);
             }
         } else if available {
             action = embedded_editor_ui(
@@ -439,27 +413,6 @@ impl PluginEditor {
         (action, chrome.min_rect().size())
     }
 
-    fn atlas_ui(
-        &self,
-        context: &egui::Context,
-        editors: &mut EditorAccess<'_>,
-        block_id: Uuid,
-        rect: egui::Rect,
-    ) {
-        let painter = crate::plugin_host::preview_painter(context, &self.plugin.identity.id, rect);
-        let rendered = editors.render(
-            block_id,
-            BlockRenderContext {
-                painter: &painter,
-                corners: rect_corners(rect),
-                opacity: 1.0,
-            },
-        );
-        if !rendered {
-            paint_block_fallback(&painter, rect, None, editors);
-        }
-    }
-
     fn preview_children_ui(
         &self,
         painter: &egui::Painter,
@@ -475,27 +428,16 @@ impl PluginEditor {
         for child in &presentation.children {
             editors.ensure(child.block_id, child.block_type);
             let available = editors.is_open(child.block_id);
-            if available && child.is_preview() {
-                let target = crate::plugin_host::preview_target(
-                    &self.plugin.identity.id,
-                    self.instance,
-                    EditorRegion::Preview,
-                    child.child,
+            if available && child.is_preview() && presentation.drawn {
+                let corners = mapped_corners(corners, presentation.size, child.rect);
+                editors.render(
+                    child.block_id,
+                    BlockRenderContext {
+                        painter,
+                        corners,
+                        opacity,
+                    },
                 );
-                if let Some(atlas) = target.atlas {
-                    self.atlas_ui(painter.ctx(), editors, child.block_id, atlas);
-                }
-                if target.composite && presentation.drawn {
-                    let corners = mapped_corners(corners, presentation.size, child.rect);
-                    editors.render(
-                        child.block_id,
-                        BlockRenderContext {
-                            painter,
-                            corners,
-                            opacity,
-                        },
-                    );
-                }
             }
             statuses.push(HostChildStatus {
                 child: child.child,

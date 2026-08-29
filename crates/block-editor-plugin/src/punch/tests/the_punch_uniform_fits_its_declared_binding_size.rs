@@ -1,9 +1,8 @@
-use super::PUNCH_BYTES;
+use super::{BYTES, SHADER};
 
 #[test]
 fn the_punch_uniform_fits_its_declared_binding_size() {
-    let source = include_str!("../../punch.wgsl");
-    let module = naga::front::wgsl::parse_str(source).expect("the punch shader should parse");
+    let module = naga::front::wgsl::parse_str(SHADER).expect("the punch shader should parse");
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
@@ -19,5 +18,5 @@ fn the_punch_uniform_fits_its_declared_binding_size() {
         .expect("the punch shader should declare a uniform");
     let size = module.types[uniform].inner.size(module.to_ctx());
 
-    assert_eq!(u64::from(size), PUNCH_BYTES);
+    assert_eq!(u64::from(size), BYTES);
 }

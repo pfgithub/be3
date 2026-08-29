@@ -12,14 +12,5 @@
     "Main",
     "Toolbar"
   ],
-  "entry_points": {
-    "wasm": "calendar.wasm",
-    "windows": "calendar-host.exe",
-    "linux": "calendar-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "calendar.wasm"
 }

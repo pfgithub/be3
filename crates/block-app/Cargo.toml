@@ -63,9 +63,8 @@ wasi-threads = { path = "../wasi-threads" }
 # Desktop and Android. The web build has no embedded server, no SQLite file to
 # put app state in, and no blocking HTTP client.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# The wasmtime plugin host. Every platform but the browser runs a manifest with
-# a wasm entry point through it; Linux and Windows can also launch a plugin as a
-# subprocess, and the manifest decides which.
+# The wasmtime plugin host, which runs every plugin on every platform but the
+# browser. The browser runs the same wasm in a worker of its own.
 block-wasm-host = { path = "../block-wasm-host" }
 block-server = { path = "../block-server" }
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -138,14 +137,8 @@ web-sys = { version = "0.3", features = [
     "console",
 ] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-ash = "0.38"
-wgpu-hal = { version = "29", features = ["vulkan"] }
-
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D12"] }
-wgpu-hal = { version = "29", features = ["dx12"] }
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse"] }
 
 [lints]
 workspace = true

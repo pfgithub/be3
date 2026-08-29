@@ -37,7 +37,7 @@ pub(crate) fn load(app: &AndroidApp) {
     let wanted: Vec<String> = plugins
         .manifests
         .iter()
-        .filter_map(|manifest| manifest.entry_points.wasm.clone())
+        .map(|manifest| manifest.entry_point.clone())
         .collect();
     for entry in wanted {
         match read(&entry) {

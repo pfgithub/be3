@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     rc::Rc,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -49,10 +49,12 @@ impl Waker {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self(Some(Arc::new(wake)))
     }
 }
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 struct PerformanceRecord {
     group: Arc<str>,
     measurement: PerformanceMeasurement,
@@ -111,28 +113,6 @@ impl Drop for PerformanceMeasurementGuard {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct PreviewAtlas {
-    pub(crate) texture: Option<egui::TextureId>,
-    pub(crate) size: egui::Vec2,
-    pub(crate) slots: HashMap<(EditorRegion, ChildId), egui::Rect>,
-}
-
-impl PreviewAtlas {
-    fn brush(&self, region: EditorRegion, child: ChildId) -> Option<(egui::TextureId, egui::Rect)> {
-        let texture = self.texture?;
-        let slot = self.slots.get(&(region, child))?;
-        if self.size.x <= 0.0 || self.size.y <= 0.0 {
-            return None;
-        }
-        let uv = egui::Rect::from_min_max(
-            egui::pos2(slot.min.x / self.size.x, slot.min.y / self.size.y),
-            egui::pos2(slot.max.x / self.size.x, slot.max.y / self.size.y),
-        );
-        Some((texture, uv))
-    }
-}
-
 #[derive(Clone, Copy, Default)]
 struct Region {
     region: Option<EditorRegion>,
@@ -155,7 +135,6 @@ pub struct ChildHandle {
     host: EditorHost,
     index: usize,
     child: ChildId,
-    region: EditorRegion,
     painter: egui::Painter,
     shape: egui::layers::ShapeIdx,
     rect: egui::Rect,
@@ -233,11 +212,8 @@ impl ChildHandle {
         let Some(layer) = layer else {
             return;
         };
-        self.painter.set(
-            self.shape,
-            self.host
-                .child_shape(self.region, self.child, self.rect, radius, layer),
-        );
+        self.painter
+            .set(self.shape, self.host.child_shape(self.rect, radius, layer));
     }
 }
 
@@ -270,11 +246,10 @@ pub struct EditorHost {
     present_requests: Rc<RefCell<Vec<bool>>>,
     shown_regions: Rc<RefCell<HashMap<EditorRegion, bool>>>,
     region_changes: Rc<RefCell<Vec<(EditorRegion, bool)>>>,
-    previews: Rc<RefCell<PreviewAtlas>>,
 }
 
 impl EditorHost {
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn new(waker: Waker) -> Self {
         Self {
             waker,
@@ -498,7 +473,7 @@ impl EditorHost {
             }
         };
         children.used.push(key);
-        let shape = painter.add(self.child_shape(region, child, rect, 0.0, layer));
+        let shape = painter.add(self.child_shape(rect, 0.0, layer));
         let index = children.placements.len();
         children.placements.push(ChildPlacement {
             child,
@@ -519,7 +494,6 @@ impl EditorHost {
             host: self.clone(),
             index,
             child,
-            region,
             painter,
             shape,
             rect,
@@ -528,19 +502,7 @@ impl EditorHost {
         }
     }
 
-    fn child_shape(
-        &self,
-        region: EditorRegion,
-        child: ChildId,
-        rect: egui::Rect,
-        radius: f32,
-        layer: ChildLayer,
-    ) -> egui::Shape {
-        if let Some((texture, uv)) = self.previews.borrow().brush(region, child) {
-            return egui::epaint::RectShape::filled(rect, radius, egui::Color32::WHITE)
-                .with_texture(texture, uv)
-                .into();
-        }
+    fn child_shape(&self, rect: egui::Rect, radius: f32, layer: ChildLayer) -> egui::Shape {
         match layer {
             ChildLayer::Below => punch_shape(rect, radius),
             ChildLayer::Above => egui::Shape::Noop,
@@ -563,12 +525,12 @@ impl EditorHost {
         self.creation_changed.set(true);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_opens(&self) -> Vec<(Uuid, Uuid)> {
         std::mem::take(&mut self.opens.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_block_types(&self, catalog: Rc<BlockCatalog>) {
         *self.block_types.borrow_mut() = catalog;
     }
@@ -577,47 +539,47 @@ impl EditorHost {
         self.editable.set(editable);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_view(&self, view: egui::Rect) {
         self.view.set(Some(view));
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_view_changes(&self) -> Vec<ViewChange> {
         std::mem::take(&mut self.view_changes.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_drag(&self, drag: Option<BlockDrag>) {
         self.drag.set(drag);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_drag_accepted(&self) -> Option<bool> {
         self.drag_accepted.take()
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_picks(&self) -> Vec<(u64, FileFilter)> {
         std::mem::take(&mut self.picks.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_pick(&self, request: u64, pick: FilePick) {
         self.picked.borrow_mut().insert(request, pick);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_block_picks(&self) -> Vec<(u64, BlockFilter)> {
         std::mem::take(&mut self.block_picks.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_block_pick(&self, request: u64, pick: BlockPick) {
         self.blocks_picked.borrow_mut().insert(request, pick);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn begin_region(&self, region: EditorRegion, origin: egui::Vec2) {
         self.region.set(Region {
             region: Some(region),
@@ -630,7 +592,7 @@ impl EditorHost {
         children.used.clear();
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn end_region(&self, region: EditorRegion) -> (Vec<ChildPlacement>, Vec<Occluder>) {
         self.region.set(Region::default());
         let mut children = self.children.borrow_mut();
@@ -644,7 +606,7 @@ impl EditorHost {
         )
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_child_statuses(&self, statuses: Vec<ChildStatus>) {
         let mut current = self.child_statuses.borrow_mut();
         for status in statuses {
@@ -652,52 +614,36 @@ impl EditorHost {
         }
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn retain_child_statuses(&self, live: &[ChildId]) {
         self.child_statuses
             .borrow_mut()
             .retain(|child, _| live.contains(child));
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
-    pub(crate) fn set_preview_slots(
-        &self,
-        size: egui::Vec2,
-        slots: HashMap<(EditorRegion, ChildId), egui::Rect>,
-    ) {
-        let mut previews = self.previews.borrow_mut();
-        previews.size = size;
-        previews.slots = slots;
-    }
-
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
-    pub(crate) fn set_preview_texture(&self, texture: Option<egui::TextureId>) {
-        self.previews.borrow_mut().texture = texture;
-    }
-
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_presenting(&self, presenting: bool) {
         self.presenting.set(presenting);
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_present_requests(&self) -> Vec<bool> {
         std::mem::take(&mut self.present_requests.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_region_changes(&self) -> Vec<(EditorRegion, bool)> {
         std::mem::take(&mut self.region_changes.borrow_mut())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_creation_ready(&self) -> Option<bool> {
         self.creation_changed
             .take()
             .then(|| self.creation_ready.get())
     }
 
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_performance(&self) -> Vec<(String, Vec<PerformanceMeasurement>)> {
         let records = std::mem::take(
             &mut *self
@@ -705,7 +651,7 @@ impl EditorHost {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
         );
-        let mut groups = BTreeMap::<Arc<str>, Vec<PerformanceMeasurement>>::new();
+        let mut groups = std::collections::BTreeMap::<Arc<str>, Vec<PerformanceMeasurement>>::new();
         for record in records {
             groups
                 .entry(record.group)
@@ -754,11 +700,11 @@ fn child_rect(rect: egui::Rect) -> ChildRect {
 }
 
 fn punch_shape(rect: egui::Rect, radius: f32) -> egui::Shape {
-    #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
+    #[cfg(target_arch = "wasm32")]
     {
         crate::panes::punch(rect, radius)
     }
-    #[cfg(not(any(target_arch = "wasm32", target_os = "windows", target_os = "linux")))]
+    #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (rect, radius);
         egui::Shape::Noop

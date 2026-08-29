@@ -18,16 +18,7 @@ fn manifest_validation() {
         capabilities: EditorCapabilities::default(),
         resize: ResizeMode::Both,
         regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
-        entry_points: EntryPoints {
-            wasm: Some("counter.wasm".into()),
-            windows: Some("counter.exe".into()),
-            linux: Some("counter-host".into()),
-        },
-        surfaces: vec![
-            SurfaceMechanism::HostTexture,
-            SurfaceMechanism::WindowsDxgi,
-            SurfaceMechanism::LinuxDmaBuf,
-        ],
+        entry_point: "counter.wasm".into(),
         network: vec!["api.github.com".into()],
     };
     assert_eq!(manifest.validate(), Ok(()));
@@ -41,14 +32,8 @@ fn manifest_validation() {
     assert_eq!(invalid.validate(), Err(ManifestError::InvalidRegions));
 
     let mut invalid = manifest.clone();
-    invalid
-        .surfaces
-        .retain(|surface| *surface != SurfaceMechanism::LinuxDmaBuf);
-    assert_eq!(invalid.validate(), Err(ManifestError::MissingSurface));
-
-    let mut invalid = manifest.clone();
-    invalid.surfaces.clear();
-    assert_eq!(invalid.validate(), Err(ManifestError::MissingSurface));
+    invalid.entry_point = String::new();
+    assert_eq!(invalid.validate(), Err(ManifestError::Empty("entry point")));
 
     let mut invalid = manifest.clone();
     invalid.network = vec!["https://api.github.com/".into()];

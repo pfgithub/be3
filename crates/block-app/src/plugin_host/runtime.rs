@@ -6,8 +6,8 @@ use std::{
 };
 
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, ChildId, EditorInstanceId, EditorMessage, EditorRegion,
-    Message, PluginManifest, PreviewLayout, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
+    ArtifactDescription, BlockPick, EditorInstanceId, EditorMessage, EditorRegion, Message,
+    PluginManifest, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -20,14 +20,13 @@ use super::{
         self, PresenterCallback, PresenterState, PresenterStatus, Quad, Region, Shared,
         MAX_SURFACES,
     },
-    preview_size, previews, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot,
-    CreationState, EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole,
-    PreviewPresentation, PreviewSlot, PreviewTarget, RuntimeStatus, SurfaceStatus,
+    preview_size, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot, CreationState,
+    EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole, PreviewPresentation,
+    PreviewSlot, RuntimeStatus, SurfaceStatus,
 };
 
 const CROWDED: &str = "Too many plugin runtimes are already presenting.";
 const FRAME_TIMEOUT_SECONDS: f64 = 1.0;
-const SETTLED_PREVIEW_FRAMES: u32 = 3;
 
 thread_local! {
     static HOST: RefCell<Host> = RefCell::new(Host::new());
@@ -51,7 +50,7 @@ impl Host {
         plugin: &PluginManifest,
         context: &egui::Context,
     ) -> Result<&mut Runtime, String> {
-        if let Err(error) = self.availability.of(plugin) {
+        if let Err(error) = &self.availability.0 {
             return Err(error.clone());
         }
         let Some(surface) = self.surface_for(&plugin.identity.id, context) else {
@@ -101,7 +100,6 @@ impl Host {
 
 pub(super) struct Runtime {
     pub(super) context: egui::Context,
-    plugin_id: String,
     pub(super) backend: Platform,
     pub(super) instances: Instances,
     pub(super) layout: ScreenLayout,
@@ -115,8 +113,6 @@ pub(super) struct Runtime {
     needed: bool,
     paint_at: Option<f64>,
     requested_at: Option<f64>,
-    previews: PreviewLayout,
-    preview_frames: u32,
 }
 
 impl Runtime {
@@ -127,7 +123,6 @@ impl Runtime {
         instances.allow_network(plugin.network.clone());
         Self {
             context: context.clone(),
-            plugin_id: plugin.identity.id.clone(),
             backend,
             instances,
             layout: ScreenLayout::default(),
@@ -141,8 +136,6 @@ impl Runtime {
             needed: false,
             paint_at: None,
             requested_at: None,
-            previews: PreviewLayout::default(),
-            preview_frames: 0,
         }
     }
 
@@ -154,8 +147,6 @@ impl Runtime {
         self.needed = false;
         self.paint_at = None;
         self.requested_at = None;
-        self.previews = PreviewLayout::default();
-        self.preview_frames = 0;
         self.instances.reopen();
         self.backend.start(plugin, &self.context);
     }
@@ -261,11 +252,6 @@ impl Runtime {
                     self.await_next_frame(frame.repaint_after_micros);
                     false
                 }
-                Message::Previews(layout) => {
-                    self.previews = layout;
-                    self.preview_frames = 0;
-                    true
-                }
                 Message::RegionSizes(sizes) => self.instances.set_region_sizes(sizes),
                 Message::Children(placements) => {
                     let (answered, changed) = self.instances.set_children(placements);
@@ -319,25 +305,11 @@ impl Runtime {
 
     fn flush(&mut self) {
         self.pump();
-        self.draw_previews();
         if !std::mem::take(&mut self.presented) {
             return;
         }
         let frame = self.backend.frame(&self.layout, self.pass);
         self.shared.lock().unwrap().publish(&self.layout, frame);
-    }
-
-    fn draw_previews(&mut self) {
-        let plugin_id = self.plugin_id.clone();
-        if !previews::render(&self.context, &plugin_id, self.surface, &self.previews) {
-            return;
-        }
-        self.preview_frames += 1;
-        if self.preview_frames == 1 {
-            let generation = self.previews.generation;
-            self.send(vec![Message::PreviewsReady { generation }]);
-            self.context.request_repaint();
-        }
     }
 
     fn state(&self) -> String {
@@ -353,7 +325,6 @@ impl Runtime {
 
 pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     let availability = presenter::install(creation_context);
-    previews::install(creation_context);
     HOST.with(|host| {
         host.borrow_mut().availability = availability;
     });
@@ -778,42 +749,6 @@ pub(crate) fn take_created(
         runtime.instances.take_created(instance)
     })
     .flatten()
-}
-
-pub(crate) fn preview_target(
-    plugin_id: &str,
-    instance: EditorInstanceId,
-    region: EditorRegion,
-    child: ChildId,
-) -> PreviewTarget {
-    with(plugin_id, |runtime| {
-        let Some(slot) = runtime.previews.slot(instance, region, child) else {
-            return PreviewTarget {
-                atlas: None,
-                composite: true,
-            };
-        };
-        let scale = runtime.previews.scale_factor().max(f32::EPSILON);
-        PreviewTarget {
-            atlas: Some(egui::Rect::from_min_size(
-                egui::pos2(slot.x as f32 / scale, slot.y as f32 / scale),
-                egui::vec2(slot.width as f32 / scale, slot.height as f32 / scale),
-            )),
-            composite: runtime.preview_frames < SETTLED_PREVIEW_FRAMES,
-        }
-    })
-    .unwrap_or(PreviewTarget {
-        atlas: None,
-        composite: true,
-    })
-}
-
-pub(crate) fn preview_painter(
-    context: &egui::Context,
-    plugin_id: &str,
-    rect: egui::Rect,
-) -> egui::Painter {
-    previews::painter(context, plugin_id, rect)
 }
 
 pub(crate) fn region_shown(

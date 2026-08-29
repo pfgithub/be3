@@ -12,14 +12,5 @@
     "LeftSidebar",
     "RightSidebar"
   ],
-  "entry_points": {
-    "wasm": "checklist.wasm",
-    "windows": "checklist-host.exe",
-    "linux": "checklist-host"
-  },
-  "surfaces": [
-    "HostTexture",
-    "WindowsDxgi",
-    "LinuxDmaBuf"
-  ]
+  "entry_point": "checklist.wasm"
 }

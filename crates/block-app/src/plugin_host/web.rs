@@ -25,14 +25,11 @@ impl Backend for Web {
     fn new(plugin: &PluginManifest, _context: &egui::Context) -> Self {
         Self {
             canvas_id: format!("plugin-canvas-{}", plugin.identity.id),
-            url: plugin
-                .entry_points
-                .wasm
-                .as_deref()
-                .and_then(|entry| {
-                    crate::editors::plugin::discovery::entry_point(&plugin.identity.id, entry)
-                })
-                .unwrap_or_default(),
+            url: crate::editors::plugin::discovery::entry_point(
+                &plugin.identity.id,
+                &plugin.entry_point,
+            )
+            .unwrap_or_default(),
             adapter: None,
             started: now(),
             error: None,

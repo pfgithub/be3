@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    ChildOperations, CreationMode, EditorCapabilities, EditorRegion, EntryPoints, InteractionMode,
-    ManifestError, PluginIdentity, PluginManifest, ResizeMode, SurfaceMechanism,
+    ChildOperations, CreationMode, EditorCapabilities, EditorRegion, InteractionMode,
+    ManifestError, PluginIdentity, PluginManifest, ResizeMode,
 };
 
 #[cfg(test)]
@@ -30,10 +30,7 @@ pub struct ManifestDocument {
     #[serde(default)]
     pub resize: ResizeMode,
     pub regions: Vec<EditorRegion>,
-    #[serde(default)]
-    pub entry_points: EntryPoints,
-    #[serde(default)]
-    pub surfaces: Vec<SurfaceMechanism>,
+    pub entry_point: String,
     #[serde(default)]
     pub network: Vec<String>,
 }
@@ -70,8 +67,7 @@ impl ManifestDocument {
             capabilities: self.capabilities,
             resize: self.resize,
             regions: self.regions,
-            entry_points: self.entry_points,
-            surfaces: self.surfaces,
+            entry_point: self.entry_point,
             network: self.network,
         };
         manifest.validate()?;
