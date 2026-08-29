@@ -27,12 +27,18 @@ pub struct Gpu {
     encoders: Table<wgpu::CommandEncoder>,
     command_buffers: Table<wgpu::CommandBuffer>,
     passes: Table<wgpu::RenderPass<'static>>,
-    surfaces: HashMap<u32, wgpu::Texture>,
+    surfaces: HashMap<u32, Surface>,
     presented: Vec<u32>,
+    generation: u64,
     error: Option<String>,
 }
 
 type Outcome<T> = Result<T, String>;
+
+struct Surface {
+    texture: wgpu::Texture,
+    generation: u64,
+}
 
 impl Gpu {
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
@@ -55,6 +61,7 @@ impl Gpu {
             passes: Table::new(),
             surfaces: HashMap::new(),
             presented: Vec::new(),
+            generation: 0,
             error: None,
         }
     }
@@ -68,11 +75,23 @@ impl Gpu {
     }
 
     pub fn attach_surface(&mut self, surface: u32, texture: wgpu::Texture) {
-        self.surfaces.insert(surface, texture);
+        self.generation += 1;
+        self.surfaces.insert(
+            surface,
+            Surface {
+                texture,
+                generation: self.generation,
+            },
+        );
     }
 
     pub fn detach_surface(&mut self, surface: u32) {
         self.surfaces.remove(&surface);
+    }
+
+    pub fn surface(&self, surface: u32) -> Option<(&wgpu::Texture, u64)> {
+        let surface = self.surfaces.get(&surface)?;
+        Some((&surface.texture, surface.generation))
     }
 
     pub fn take_presented(&mut self) -> Vec<u32> {
@@ -479,6 +498,28 @@ impl Gpu {
         Ok(self.encoders.insert(encoder))
     }
 
+    pub fn write_mapped_buffer(&mut self, buffer: abi::Handle, offset: u64, data: &[u8]) {
+        let result = self.buffers.get(buffer, "buffer").and_then(|buffer| {
+            let end = offset
+                .checked_add(data.len() as u64)
+                .ok_or_else(|| "a mapped write ran past the end of its buffer".to_owned())?;
+            if end > buffer.size() {
+                return Err("a mapped write ran past the end of its buffer".to_owned());
+            }
+            buffer
+                .slice(offset..end)
+                .get_mapped_range_mut()
+                .copy_from_slice(data);
+            Ok(())
+        });
+        self.fail(result, ());
+    }
+
+    pub fn unmap_buffer(&mut self, buffer: abi::Handle) {
+        let result = self.buffers.get(buffer, "buffer").map(wgpu::Buffer::unmap);
+        self.fail(result, ());
+    }
+
     pub fn write_buffer(&mut self, buffer: abi::Handle, offset: u64, data: &[u8]) {
         let result = self
             .buffers
@@ -838,11 +879,58 @@ impl Gpu {
         }
     }
 
+    pub fn configure_surface(&mut self, surface: u32, bytes: &[u8]) {
+        let configuration: abi::SurfaceConfiguration = match abi::decode(bytes) {
+            Ok(configuration) => configuration,
+            Err(message) => {
+                self.error = Some(message);
+                return;
+            }
+        };
+        let abi::SurfaceConfiguration {
+            width,
+            height,
+            format,
+        } = configuration;
+        let limit = self.device.limits().max_texture_dimension_2d;
+        if width == 0 || height == 0 || width > limit || height > limit {
+            self.error = Some(format!(
+                "surface {surface} asked for a {width} by {height} target, which this device cannot make"
+            ));
+            return;
+        }
+        let format = convert::texture_format(format);
+        let matches = self.surfaces.get(&surface).is_some_and(|existing| {
+            existing.texture.width() == width
+                && existing.texture.height() == height
+                && existing.texture.format() == format
+        });
+        if matches {
+            return;
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("plugin surface"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        self.attach_surface(surface, texture);
+    }
+
     pub fn acquire_surface(&mut self, surface: u32) -> abi::Handle {
-        let Some(texture) = self.surfaces.get(&surface).cloned() else {
+        let Some(target) = self.surfaces.get(&surface) else {
             self.error = Some(format!("surface {surface} has no target texture"));
             return abi::NULL_HANDLE;
         };
+        let texture = target.texture.clone();
         self.textures.insert(texture)
     }
 

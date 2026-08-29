@@ -95,7 +95,26 @@ pub(crate) struct StagingBuffer {
 
 #[derive(Debug)]
 pub(crate) struct MappedRange {
+    buffer: abi::Handle,
+    offset: u64,
     bytes: Vec<u8>,
+    written: bool,
+}
+
+impl Drop for MappedRange {
+    fn drop(&mut self) {
+        if !self.written {
+            return;
+        }
+        unsafe {
+            imports::buffer_write_mapped(
+                self.buffer,
+                self.offset,
+                self.bytes.as_ptr() as u32,
+                self.bytes.len() as u32,
+            )
+        };
+    }
 }
 
 #[derive(Debug)]
@@ -594,9 +613,13 @@ impl QueueInterface for Queue {
 
     fn submit(&self, command_buffers: &mut dyn Iterator<Item = DispatchCommandBuffer>) -> u64 {
         let handles: Vec<u32> = command_buffers
-            .map(|buffer| match buffer.as_custom::<CommandBuffer>() {
-                Some(buffer) => buffer.handle,
-                None => panic!("a command buffer from another wgpu backend reached the abi"),
+            .map(|buffer| {
+                let handle = match buffer.as_custom::<CommandBuffer>() {
+                    Some(buffer) => buffer.handle,
+                    None => panic!("a command buffer from another wgpu backend reached the abi"),
+                };
+                std::mem::forget(buffer);
+                handle
             })
             .collect();
         unsafe { imports::queue_submit(handles.as_ptr() as u32, handles.len() as u32) };
@@ -650,11 +673,16 @@ impl BufferInterface for Buffer {
     fn get_mapped_range(&self, sub_range: Range<wgpu::BufferAddress>) -> DispatchBufferMappedRange {
         let length = sub_range.end.saturating_sub(sub_range.start) as usize;
         DispatchBufferMappedRange::custom(MappedRange {
+            buffer: self.handle,
+            offset: sub_range.start,
             bytes: vec![0u8; length],
+            written: false,
         })
     }
 
-    fn unmap(&self) {}
+    fn unmap(&self) {
+        unsafe { imports::buffer_unmap(self.handle) };
+    }
 
     fn destroy(&self) {}
 }
@@ -701,6 +729,7 @@ impl BufferMappedRangeInterface for MappedRange {
     }
 
     unsafe fn write_slice(&mut self) -> wgpu::WriteOnly<'_, [u8]> {
+        self.written = true;
         wgpu::WriteOnly::from_mut(&mut self.bytes)
     }
 }

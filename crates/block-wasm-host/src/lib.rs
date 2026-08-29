@@ -114,6 +114,14 @@ impl Plugin {
         self.store.data_mut().gpu.take_presented()
     }
 
+    pub fn surface(&self, surface: u32) -> Option<(wgpu::Texture, u64)> {
+        self.store
+            .data()
+            .gpu
+            .surface(surface)
+            .map(|(texture, generation)| (texture.clone(), generation))
+    }
+
     pub fn attach_surface(&mut self, surface: u32, texture: wgpu::Texture) {
         self.store.data_mut().gpu.attach_surface(surface, texture);
     }

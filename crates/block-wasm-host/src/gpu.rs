@@ -49,6 +49,24 @@ pub(super) fn link(linker: &mut Linker<State>) -> Result<(), String> {
     )?;
     wrap(
         linker,
+        "buffer_write_mapped",
+        |mut caller: Caller<'_, State>, buffer: u32, offset: u64, pointer: u32, length: u32| {
+            let state = caller.data_mut();
+            match state.read(pointer, length) {
+                Ok(data) => state.gpu.write_mapped_buffer(buffer, offset, &data),
+                Err(message) => state.report(message),
+            }
+        },
+    )?;
+    wrap(
+        linker,
+        "buffer_unmap",
+        |mut caller: Caller<'_, State>, buffer: u32| {
+            caller.data_mut().gpu.unmap_buffer(buffer);
+        },
+    )?;
+    wrap(
+        linker,
         "queue_write_buffer",
         |mut caller: Caller<'_, State>, buffer: u32, offset: u64, pointer: u32, length: u32| {
             let state = caller.data_mut();
@@ -258,6 +276,17 @@ pub(super) fn link(linker: &mut Linker<State>) -> Result<(), String> {
         "resource_drop",
         |mut caller: Caller<'_, State>, kind: u32, handle: u32| {
             caller.data_mut().gpu.drop_resource(kind, handle);
+        },
+    )?;
+    wrap(
+        linker,
+        "surface_configure",
+        |mut caller: Caller<'_, State>, surface: u32, pointer: u32, length: u32| {
+            let state = caller.data_mut();
+            match state.read(pointer, length) {
+                Ok(bytes) => state.gpu.configure_surface(surface, &bytes),
+                Err(message) => state.report(message),
+            }
         },
     )?;
     wrap(

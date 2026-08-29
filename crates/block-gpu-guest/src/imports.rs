@@ -32,6 +32,8 @@ gpu_imports! {
     fn create_shader_module(pointer: u32, length: u32) -> u32;
     fn create_render_pipeline(pointer: u32, length: u32) -> u32;
     fn create_command_encoder(pointer: u32, length: u32) -> u32;
+    fn buffer_write_mapped(buffer: u32, offset: u64, pointer: u32, length: u32);
+    fn buffer_unmap(buffer: u32);
     fn queue_write_buffer(buffer: u32, offset: u64, pointer: u32, length: u32);
     fn queue_write_texture(pointer: u32, length: u32, data: u32, data_length: u32);
     fn queue_submit(pointer: u32, length: u32);
@@ -76,6 +78,7 @@ gpu_imports! {
     );
     fn pass_end(pass: u32);
     fn resource_drop(kind: u32, handle: u32);
+    fn surface_configure(surface: u32, pointer: u32, length: u32);
     fn surface_acquire(surface: u32) -> u32;
     fn surface_present(surface: u32);
     fn texture_describe(texture: u32, pointer: u32, capacity: u32) -> u32;

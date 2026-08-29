@@ -23,6 +23,13 @@ pub struct Extent3d {
     pub depth_or_array_layers: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceConfiguration {
+    pub width: u32,
+    pub height: u32,
+    pub format: TextureFormat,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextureDescriptor {
     pub label: String,

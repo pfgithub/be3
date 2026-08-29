@@ -11,6 +11,16 @@ pub fn device_and_queue() -> (wgpu::Device, wgpu::Queue) {
     )
 }
 
+pub fn configure_surface(surface: u32, width: u32, height: u32, format: wgpu::TextureFormat) {
+    let configuration = abi::SurfaceConfiguration {
+        width,
+        height,
+        format: convert::texture_format(format),
+    };
+    let bytes = abi::encode(&configuration);
+    unsafe { imports::surface_configure(surface, bytes.as_ptr() as u32, bytes.len() as u32) };
+}
+
 pub fn acquire_surface_texture(surface: u32) -> Result<wgpu::Texture, String> {
     let handle = unsafe { imports::surface_acquire(surface) };
     if handle == abi::NULL_HANDLE {
