@@ -154,3 +154,91 @@ stage_games() {
         cp "$games_directory/$game.wasm" "$directory/$game.wasm"
     done
 }
+
+# Both the WASI toolchain and the guest flags a plugin needs to compile without
+# wasm-bindgen. The web build exports the same environment for its own cargo
+# call; a plugin built for wasmtime is the same target with none of the glue.
+wasi_sdk_version='33'
+wasm_rust_target='wasm32-wasip1-threads'
+
+export_wasi_toolchain() {
+    local requested="${1:-}"
+    assert_command clang 'Install LLVM and put its bin directory on PATH.'
+    assert_command llvm-ar 'Install LLVM and put its bin directory on PATH.'
+    if ! rustup target list --installed | grep -qx "$wasm_rust_target"; then
+        echo "Installing the $wasm_rust_target Rust target..."
+        rustup target add "$wasm_rust_target"
+    fi
+    wasi_sysroot="$requested"
+    if [[ -z "$wasi_sysroot" ]]; then
+        wasi_sysroot="$repository/target/tools/wasi-sysroot"
+        if [[ ! -d "$wasi_sysroot/include" ]]; then
+            local archive="$repository/target/tools/wasi-sysroot.tar.gz"
+            local url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$wasi_sdk_version/wasi-sysroot-$wasi_sdk_version.0+m.tar.gz"
+            echo "Downloading the WASI sysroot from $url..."
+            mkdir -p "$repository/target/tools"
+            curl --fail --location --output "$archive" "$url"
+            tar -xzf "$archive" -C "$repository/target/tools"
+            mv "$repository/target/tools/wasi-sysroot-$wasi_sdk_version.0+m" "$wasi_sysroot"
+            rm "$archive"
+        fi
+    fi
+    if [[ ! -d "$wasi_sysroot/include" ]]; then
+        echo "no WASI sysroot at $wasi_sysroot" >&2
+        exit 1
+    fi
+    wasi_sysroot="$(cd "$wasi_sysroot" && pwd)"
+    local flags="--sysroot=$wasi_sysroot -isystem $wasi_sysroot/include/c++/v1 -pthread -mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false -fno-exceptions -fno-rtti -DHB_NO_MT -O2 -w"
+    export CC_wasm32_wasip1_threads='clang'
+    export CXX_wasm32_wasip1_threads='clang++'
+    export AR_wasm32_wasip1_threads='llvm-ar'
+    export CFLAGS_wasm32_wasip1_threads="$flags"
+    export CXXFLAGS_wasm32_wasip1_threads="$flags"
+    export CXXSTDLIB_wasm32_wasip1_threads='c++'
+    export HARFBUZZ_SYS_NO_PKG_CONFIG='1'
+    local exports=''
+    local symbol
+    for symbol in __heap_base __tls_base __tls_size __tls_align __wasm_init_tls; do
+        exports+=" -C link-arg=--export=$symbol"
+    done
+    export RUSTFLAGS="-C link-arg=-L$wasi_sysroot/lib/$wasm_rust_target/noeh -C link-arg=$wasi_sysroot/lib/$wasm_rust_target/libsetjmp.a$exports"
+}
+
+# A plugin for wasmtime is its own cargo call: the app links wgpu with real
+# backends and a guest links it with only the custom one, and a single call
+# would unify the two into a guest that carries a backend it cannot use.
+build_plugin_wasm() {
+    local profile="$1" destination="$2"
+    local wasm_plugins=() plugin
+    for plugin in "${plugins[@]}"; do
+        if [[ -n "$(manifest_field "$(plugin_manifest "$plugin")" wasm)" ]]; then
+            wasm_plugins+=("$plugin")
+        fi
+    done
+    if [[ ${#wasm_plugins[@]} -eq 0 ]]; then
+        return 0
+    fi
+    local arguments=(--target "$wasm_rust_target" --no-default-features --features wasi)
+    if [[ "$profile" == 'release' ]]; then
+        arguments+=(--release)
+    fi
+    local selection=()
+    for plugin in "${wasm_plugins[@]}"; do
+        selection+=(-p "$plugin")
+    done
+    echo "Building ${#wasm_plugins[@]} plugins for $wasm_rust_target..."
+    (
+        export_wasi_toolchain "${wasi_sysroot:-}"
+        cargo build "${arguments[@]}" "${selection[@]}"
+    )
+    local built="$repository/target/$wasm_rust_target/$profile"
+    mkdir -p "$destination"
+    for plugin in "${wasm_plugins[@]}"; do
+        local module="$built/${plugin//-/_}.wasm"
+        if [[ ! -f "$module" ]]; then
+            echo "cargo did not produce $module" >&2
+            exit 1
+        fi
+        cp "$module" "$destination/$plugin.wasm"
+    done
+}

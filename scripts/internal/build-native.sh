@@ -126,6 +126,7 @@ for executable in "${executables[@]}"; do
 done
 
 if $client; then
+    build_plugin_wasm "$profile" "$artifact_directory"
     stage_plugin_manifests "$artifact_directory"
     build_games "$profile"
     write_games_index "$artifact_directory/games.json" "$games_prefix"
