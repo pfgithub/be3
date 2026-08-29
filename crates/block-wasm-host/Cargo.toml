@@ -1,0 +1,19 @@
+[package]
+name = "block-wasm-host"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+block-gpu-abi = { path = "../block-gpu-abi" }
+block-gpu-host = { path = "../block-gpu-host" }
+wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "threads"] }
+wasmtime-wasi = { version = "48", default-features = false, features = ["p1"] }
+wgpu = { version = "29", default-features = false, features = ["std", "wgsl"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "threads", "wat"] }
+wgpu = { version = "29", default-features = false, features = ["noop", "std", "wgsl"] }

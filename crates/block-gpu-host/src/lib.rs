@@ -83,6 +83,12 @@ impl Gpu {
         self.error.take()
     }
 
+    pub fn report(&mut self, message: String) {
+        if self.error.is_none() {
+            self.error = Some(message);
+        }
+    }
+
     pub fn limits(&self) -> Vec<u8> {
         abi::encode(&self.limits)
     }
