@@ -431,6 +431,8 @@ pub struct EntryPoints {
     #[serde(default)]
     pub web: Option<String>,
     #[serde(default)]
+    pub wasm: Option<String>,
+    #[serde(default)]
     pub windows: Option<String>,
     #[serde(default)]
     pub linux: Option<String>,
@@ -491,6 +493,7 @@ impl PluginManifest {
         }
         let entries = [
             &self.entry_points.web,
+            &self.entry_points.wasm,
             &self.entry_points.windows,
             &self.entry_points.linux,
         ];
@@ -506,7 +509,9 @@ impl PluginManifest {
             || self.surfaces.contains(&SurfaceMechanism::WindowsDxgi);
         let linux_valid = self.entry_points.linux.is_none()
             || self.surfaces.contains(&SurfaceMechanism::LinuxDmaBuf);
-        if !web_valid || !windows_valid || !linux_valid {
+        let wasm_valid = self.entry_points.wasm.is_none()
+            || self.surfaces.contains(&SurfaceMechanism::HostTexture);
+        if !web_valid || !windows_valid || !linux_valid || !wasm_valid {
             return Err(ManifestError::MissingSurface);
         }
         Ok(())
@@ -854,6 +859,7 @@ pub enum SurfaceMechanism {
     WebExternalImage,
     WindowsDxgi,
     LinuxDmaBuf,
+    HostTexture,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

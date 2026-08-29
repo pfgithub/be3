@@ -15,5 +15,6 @@ wgpu = { version = "29", default-features = false, features = ["std", "wgsl"] }
 workspace = true
 
 [dev-dependencies]
+block-plugin-api = { path = "../block-plugin-api" }
 wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "threads", "wat"] }
 wgpu = { version = "29", default-features = false, features = ["noop", "std", "wgsl"] }

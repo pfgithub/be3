@@ -20,6 +20,7 @@ fn manifest_validation() {
         regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
         entry_points: EntryPoints {
             web: Some("/counter.js".into()),
+            wasm: None,
             windows: Some("counter.exe".into()),
             linux: Some("counter-host".into()),
         },

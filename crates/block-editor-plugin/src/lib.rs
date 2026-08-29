@@ -17,14 +17,18 @@ mod runtime;
 #[cfg(any(target_arch = "wasm32", target_os = "windows", target_os = "linux"))]
 mod screens;
 pub mod session;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+mod wasm;
+#[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
 mod web;
 #[cfg(target_os = "windows")]
 mod windows;
 
 #[cfg(target_os = "linux")]
 use linux as platform;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+use wasm as platform;
+#[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
 use web as platform;
 #[cfg(target_os = "windows")]
 use windows as platform;
@@ -81,14 +85,40 @@ pub trait App: Default + 'static {
 
 #[doc(hidden)]
 pub mod __private {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
     pub use js_sys;
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
     pub use wasm_bindgen;
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
     pub use wasm_bindgen_futures;
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    pub fn initialize_tls(size: usize, align: usize) {
+        crate::wasm::initialize_storage(size, align);
+    }
+
+    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    pub fn start_wasm<A: crate::App>(manifest: &str) {
+        let identity = identity(manifest);
+        if let Err(error) = crate::wasm::start::<A>(&identity.id, &identity.name, &identity.version)
+        {
+            panic!("{} could not start: {error}", identity.name);
+        }
+    }
+
+    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    pub fn step_wasm() {
+        if let Err(error) = crate::wasm::step() {
+            panic!("the plugin could not run a frame: {error}");
+        }
+    }
+
+    #[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+    pub fn shutdown_wasm() {
+        crate::wasm::shutdown();
+    }
+
+    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
     pub async fn start<A: crate::App>(
         canvas: wasm_bindgen::JsValue,
         post: js_sys::Function,
@@ -111,12 +141,12 @@ pub mod __private {
             .identity()
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
     pub fn receive(frame: Vec<u8>) -> Result<(), wasm_bindgen::JsValue> {
         crate::web::receive(frame)
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
     pub fn shutdown() {
         crate::web::shutdown();
     }
@@ -135,40 +165,73 @@ pub mod __private {
     }
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "wasi"))]
+#[macro_export]
+macro_rules! platform_entry {
+    ($app:ty, $manifest:ident) => {
+        #[no_mangle]
+        pub extern "C" fn plugin_initialize_tls(size: u32, align: u32) {
+            $crate::__private::initialize_tls(size as usize, align as usize);
+        }
+
+        #[no_mangle]
+        pub extern "C" fn plugin_start() {
+            $crate::__private::start_wasm::<$app>($manifest);
+        }
+
+        #[no_mangle]
+        pub extern "C" fn plugin_step() {
+            $crate::__private::step_wasm();
+        }
+
+        #[no_mangle]
+        pub extern "C" fn plugin_shutdown() {
+            $crate::__private::shutdown_wasm();
+        }
+    };
+}
+
+#[cfg(all(target_arch = "wasm32", not(feature = "wasi")))]
+#[macro_export]
+macro_rules! platform_entry {
+    ($app:ty, $manifest:ident) => {
+        use $crate::__private::{js_sys, wasm_bindgen, wasm_bindgen_futures};
+
+        #[$crate::__private::wasm_bindgen::prelude::wasm_bindgen]
+        pub async fn start(
+            canvas: $crate::__private::wasm_bindgen::JsValue,
+            post: $crate::__private::js_sys::Function,
+        ) -> Result<(), $crate::__private::wasm_bindgen::JsValue> {
+            $crate::__private::start::<$app>(canvas, post, $manifest).await
+        }
+
+        #[$crate::__private::wasm_bindgen::prelude::wasm_bindgen]
+        pub fn receive(frame: Vec<u8>) -> Result<(), $crate::__private::wasm_bindgen::JsValue> {
+            $crate::__private::receive(frame)
+        }
+
+        #[$crate::__private::wasm_bindgen::prelude::wasm_bindgen]
+        pub fn shutdown() {
+            $crate::__private::shutdown();
+        }
+    };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[macro_export]
+macro_rules! platform_entry {
+    ($app:ty, $manifest:ident) => {
+        pub fn run() {
+            $crate::__private::run::<$app>($manifest);
+        }
+    };
+}
+
 #[macro_export]
 macro_rules! plugin {
     ($app:ty, $manifest:expr) => {
         const PLUGIN_MANIFEST: &str = include_str!($manifest);
 
-        #[cfg(target_arch = "wasm32")]
-        use block_editor_plugin::__private::{js_sys, wasm_bindgen, wasm_bindgen_futures};
-
-        #[cfg(target_arch = "wasm32")]
-        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub async fn start(
-            canvas: block_editor_plugin::__private::wasm_bindgen::JsValue,
-            post: block_editor_plugin::__private::js_sys::Function,
-        ) -> Result<(), block_editor_plugin::__private::wasm_bindgen::JsValue> {
-            block_editor_plugin::__private::start::<$app>(canvas, post, PLUGIN_MANIFEST).await
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn receive(
-            frame: Vec<u8>,
-        ) -> Result<(), block_editor_plugin::__private::wasm_bindgen::JsValue> {
-            block_editor_plugin::__private::receive(frame)
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        #[block_editor_plugin::__private::wasm_bindgen::prelude::wasm_bindgen]
-        pub fn shutdown() {
-            block_editor_plugin::__private::shutdown();
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        pub fn run() {
-            block_editor_plugin::__private::run::<$app>(PLUGIN_MANIFEST);
-        }
+        $crate::platform_entry!($app, PLUGIN_MANIFEST);
     };
 }

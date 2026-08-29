@@ -9,12 +9,20 @@ block-client = { path = "../block-client" }
 block = { path = "../block" }
 block-plugin-api = { path = "../block-plugin-api" }
 block-ui = { path = "../block-ui" }
-eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "wgpu"] }
+block-gpu-abi = { path = "../block-gpu-abi", optional = true }
+block-gpu-guest = { path = "../block-gpu-guest", optional = true }
+eframe = { version = "0.34.3", default-features = false, features = ["default_fonts"] }
 egui_material_icons = "0.6.0"
 futures-util = "0.3"
 serde = "1"
 uuid = "1"
 wasi-threads = { path = "../wasi-threads" }
+wgpu = { version = "29", default-features = false, features = ["custom", "std", "web", "wgsl"], optional = true }
+
+[features]
+default = ["web"]
+web = ["eframe/wgpu"]
+wasi = ["eframe/wgpu_no_default_features", "dep:block-gpu-abi", "dep:block-gpu-guest", "dep:wgpu"]
 
 [dev-dependencies]
 naga = { version = "29", features = ["wgsl-in"] }
@@ -23,7 +31,7 @@ naga = { version = "29", features = ["wgsl-in"] }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "OffscreenCanvas", "Performance"] }
+web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "OffscreenCanvas", "Performance", "Window"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 eframe = { version = "0.34.3", default-features = false, features = ["android-native-activity", "default_fonts", "wgpu"] }

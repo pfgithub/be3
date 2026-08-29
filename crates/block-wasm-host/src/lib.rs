@@ -60,9 +60,13 @@ impl Plugin {
         gpu::link(&mut linker)?;
         transport::link(&mut linker)?;
         threads::link(&mut linker)?;
+        linker
+            .define_unknown_imports_as_traps(&module)
+            .map_err(|error| format!("the plugin imports could not be stubbed: {error}"))?;
         let instance = linker
             .instantiate(&mut store, &module)
             .map_err(|error| format!("the plugin could not be instantiated: {error}"))?;
+        initialize_storage(&instance, &mut store)?;
         let plugin = Self {
             start: typed(&instance, &mut store, "plugin_start")?,
             step: typed(&instance, &mut store, "plugin_step")?,
@@ -125,6 +129,23 @@ impl Plugin {
         self.stopped = true;
         let _ = self.shutdown.call(&mut self.store, ());
     }
+}
+
+fn initialize_storage(instance: &Instance, store: &mut Store<State>) -> Result<(), String> {
+    let size = global(instance, store, "__tls_size")?;
+    let align = global(instance, store, "__tls_align")?;
+    let initialize: TypedFunc<(u32, u32), ()> = typed(instance, store, "plugin_initialize_tls")?;
+    initialize
+        .call(store, (size, align))
+        .map_err(|error| format!("the plugin could not set up thread storage: {error}"))
+}
+
+fn global(instance: &Instance, store: &mut Store<State>, name: &str) -> Result<u32, String> {
+    instance
+        .get_global(&mut *store, name)
+        .and_then(|global| global.get(store).i32())
+        .map(|value| value as u32)
+        .ok_or_else(|| format!("the plugin does not export {name}"))
 }
 
 fn engine() -> Result<Engine, String> {

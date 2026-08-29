@@ -13,6 +13,7 @@ pub(super) const DOCUMENT: &str = r#"{
     "surfaces": ["WebExternalImage"]
 }"#;
 
+mod a_wasm_entry_point_needs_a_host_texture_surface;
 mod manifest_document_defaults_what_the_host_can;
 mod manifest_document_rejects_a_bad_block_type;
 mod manifest_document_rejects_unknown_fields;
