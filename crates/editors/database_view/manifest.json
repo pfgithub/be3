@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "00006461-7461-6261-7365-2d7669657701",
   "display_name": "Database View",
-  "icon": "",
+  "icon": "",
   "creation": "Immediate",
   "interaction": "Live",
   "capabilities": {

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "64617461-6261-7365-2d73-6368656d6101",
   "display_name": "Database Schema",
-  "icon": "",
+  "icon": "",
   "creation": "Immediate",
   "regions": [
     "Main"

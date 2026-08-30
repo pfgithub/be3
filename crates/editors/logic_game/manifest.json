@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "6c6f6769-632d-6761-6d65-2d626c6b0101",
   "display_name": "Logic Game",
-  "icon": "",
+  "icon": "",
   "creation": "Immediate",
   "regions": [
     "Main"

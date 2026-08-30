@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "76696465-6f5f-626c-6f63-6b0000000001",
   "display_name": "Video Editor",
-  "icon": "",
+  "icon": "",
   "creation": "Immediate",
   "children": {
     "add": true,
