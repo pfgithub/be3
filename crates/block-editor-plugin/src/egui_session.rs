@@ -83,6 +83,7 @@ trait AppUi {
     fn poll_artifact(&mut self) -> Option<Result<(), String>>;
     fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
     fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
+    fn set_intrinsic_size(&mut self, size: egui::Vec2);
     fn aspect_ratio(&mut self) -> Option<f32>;
 }
 
@@ -147,6 +148,10 @@ impl<A: crate::App> AppUi for A {
 
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         crate::App::intrinsic_size(self)
+    }
+
+    fn set_intrinsic_size(&mut self, size: egui::Vec2) {
+        crate::App::set_intrinsic_size(self, size);
     }
 
     fn aspect_ratio(&mut self) -> Option<f32> {
