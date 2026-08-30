@@ -5,22 +5,21 @@ use block_client::{
     block_ref::BlockRef,
     blocks::video::{Video, VideoAttachment, VideoClip, MAX_CLIP_LENGTH},
 };
-use eframe::egui;
-use egui_material_icons::icons::ICON_LINK_OFF;
+use block_editor_plugin::block_ui::{BlockCatalog, BlockLabel};
+use block_editor_plugin::egui;
+use block_editor_plugin::egui_material_icons::icons::ICON_LINK_OFF;
 use uuid::Uuid;
 
-use crate::editors::{BlockLabel, EditorAccess};
+use crate::app::VideoApp;
 
-use super::VideoEditor;
-
-impl VideoEditor {
-    pub(super) fn effects_ui(
+impl VideoApp {
+    pub(crate) fn effects_ui(
         &mut self,
         ui: &mut egui::Ui,
         video: &Video,
         resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
-        editors: &EditorAccess<'_>,
+        types: &BlockCatalog,
     ) {
         ui.heading("Effects");
         ui.separator();
@@ -37,9 +36,7 @@ impl VideoEditor {
                 .and_then(|id| dependencies.get(&id));
             let label = reference.map_or_else(
                 || egui::RichText::new("Loading…").into(),
-                |reference| {
-                    BlockLabel::for_reference(editors.registry(), reference).widget_text(ui.style())
-                },
+                |reference| BlockLabel::for_reference(types, reference).widget_text(ui.style()),
             );
             ui.add(egui::Label::new(label).truncate());
         });
@@ -49,7 +46,7 @@ impl VideoEditor {
             .num_columns(2)
             .spacing([8.0, 6.0])
             .show(ui, |ui| {
-                self.placement_ui(ui, video, resolved, dependencies, &clip, editors)
+                self.placement_ui(ui, video, resolved, dependencies, &clip, types)
             });
 
         ui.add_space(10.0);
@@ -74,7 +71,7 @@ impl VideoEditor {
         resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
         clip: &VideoClip,
-        editors: &EditorAccess<'_>,
+        types: &BlockCatalog,
     ) {
         let frame_rate = video.frame_rate();
         let mut updated = clip.clone();
@@ -93,7 +90,7 @@ impl VideoEditor {
 
         ui.label("Starts at");
         let start = video.timing(clip.id).map_or(0, |timing| timing.start);
-        ui.weak(super::timeline::timecode(frame_rate, start));
+        ui.weak(crate::timeline::timecode(frame_rate, start));
         ui.end_row();
 
         ui.label("Attached to");
@@ -109,9 +106,7 @@ impl VideoEditor {
                         .and_then(|id| dependencies.get(&id))
                         .map_or_else(
                             || egui::RichText::new("Loading…"),
-                            |reference| {
-                                BlockLabel::for_reference(editors.registry(), reference).rich_text()
-                            },
+                            |reference| BlockLabel::for_reference(types, reference).rich_text(),
                         );
                     ui.add(egui::Label::new(name).truncate());
                     if ui

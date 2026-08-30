@@ -1,23 +1,23 @@
 use std::collections::HashMap;
 
-use block::{BlockParent, BlockReference};
+use block::BlockReference;
 use block_client::{
     block_ref::BlockRef,
     blocks::video::{
         Video, VideoAttachment, VideoClip, VideoClipTiming, VideoFrameRate, VideoOperation,
     },
 };
-use eframe::egui::{self, Color32, Rect, Sense, Stroke, Vec2};
+use block_editor_plugin::block_ui::{paint_name, BlockCatalog, BlockLabel};
+use block_editor_plugin::egui::{self, Color32, Rect, Sense, Stroke, Vec2};
+use block_editor_plugin::EditorHost;
 use uuid::Uuid;
 
-use crate::editors::{
-    paint_name, rect_corners, BlockLabel, BlockRenderContext, EditorAccess, SidebarDragPayload,
-};
+use block_client::blocks::video::DEFAULT_CLIP_SECONDS;
 
-use super::{ClipDrag, VideoEditor, DEFAULT_CLIP_SECONDS};
+use crate::app::{ClipDrag, VideoApp};
 
-pub(super) const MIN_PIXELS_PER_FRAME: f32 = 0.02;
-pub(super) const MAX_PIXELS_PER_FRAME: f32 = 40.0;
+pub(crate) const MIN_PIXELS_PER_FRAME: f32 = 0.02;
+pub(crate) const MAX_PIXELS_PER_FRAME: f32 = 40.0;
 
 const RULER_HEIGHT: f32 = 22.0;
 const LANE_HEIGHT: f32 = 38.0;
@@ -35,7 +35,7 @@ struct ClipRow {
     lane: usize,
 }
 
-pub(super) fn timecode(frame_rate: VideoFrameRate, frame: u64) -> String {
+pub(crate) fn timecode(frame_rate: VideoFrameRate, frame: u64) -> String {
     let fps = (frame_rate.frames_per_second().round() as u64).max(1);
     let seconds = frame / fps;
     format!("{}:{:02}.{:02}", seconds / 60, seconds % 60, frame % fps)
@@ -265,14 +265,15 @@ fn tick_seconds(frame_rate: VideoFrameRate, pixels_per_frame: f32) -> f64 {
         .unwrap_or(3600.0)
 }
 
-impl VideoEditor {
-    pub(super) fn timeline_ui(
+impl VideoApp {
+    pub(crate) fn timeline_ui(
         &mut self,
         ui: &mut egui::Ui,
         video: &Video,
         resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
-        editors: &mut EditorAccess<'_>,
+        host: &EditorHost,
+        types: &BlockCatalog,
     ) {
         let rows = lane_rows(video);
         let lanes = rows.iter().map(|row| row.lane + 1).max().unwrap_or(1) + 1;
@@ -283,7 +284,7 @@ impl VideoEditor {
                 / duration as f32)
                 .clamp(MIN_PIXELS_PER_FRAME, MAX_PIXELS_PER_FRAME);
         }
-        let block_id = self.block.id();
+        let block_id = self.block_id();
         let content = Vec2::new(
             (duration as f32 * self.pixels_per_frame + TAIL_PADDING).max(viewport.x),
             (RULER_HEIGHT + lanes as f32 * (LANE_HEIGHT + LANE_GAP)).max(viewport.y),
@@ -301,7 +302,8 @@ impl VideoEditor {
                     video,
                     resolved,
                     dependencies,
-                    editors,
+                    host,
+                    types,
                 );
             });
     }
@@ -315,7 +317,8 @@ impl VideoEditor {
         video: &Video,
         resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
-        editors: &mut EditorAccess<'_>,
+        host: &EditorHost,
+        types: &BlockCatalog,
     ) {
         let pixels_per_frame = self.pixels_per_frame;
         let frame_at = move |x: f32| ((x - content.left()) / pixels_per_frame).max(0.0) as u64;
@@ -386,14 +389,15 @@ impl VideoEditor {
             }
 
             self.paint_clip(
-                &painter,
+                ui,
                 clip_rect,
                 &clip,
                 selected,
                 parent_of_selected == Some(clip.id),
                 resolved,
                 dependencies,
-                editors,
+                host,
+                types,
                 &visuals,
             );
 
@@ -435,13 +439,9 @@ impl VideoEditor {
                 drop_target_at(video, rows, content, pixels_per_frame, pointer, Some(drag))
             })
         });
-        let sidebar_payload = background
-            .dnd_hover_payload::<SidebarDragPayload>()
-            .filter(|dragged| dragged.reference.id != self.block.id());
-        let sidebar_target = sidebar_payload.as_ref().and_then(|_| {
-            pointer.and_then(|pointer| {
-                drop_target_at(video, rows, content, pixels_per_frame, pointer, None)
-            })
+        let dragged_block = host.drag().filter(|drag| drag.block_id != self.block_id());
+        let sidebar_target = dragged_block.as_ref().and_then(|drag| {
+            drop_target_at(video, rows, content, pixels_per_frame, drag.position, None)
         });
         if internal_target.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -460,33 +460,20 @@ impl VideoEditor {
             }
             self.drag = None;
         }
-        if let Some(dragged) = background.dnd_release_payload::<SidebarDragPayload>() {
-            if dragged.reference.id != self.block.id() {
+        if let Some(dragged) = &dragged_block {
+            host.accept_drag(sidebar_target.is_some());
+            if dragged.dropped {
                 if let Some(target) = sidebar_target {
                     match target {
                         TimelineDropTarget::Attach { parent, start, .. } => {
-                            self.insert_clip(
-                                editors,
-                                video,
-                                dragged.reference.id,
-                                Some(parent),
-                                start,
-                                Some(0),
-                            );
+                            self.insert_clip(video, dragged.block_id, Some(parent), start, Some(0));
                         }
                         TimelineDropTarget::Base { index, .. } => {
-                            self.insert_clip(
-                                editors,
-                                video,
-                                dragged.reference.id,
-                                None,
-                                0,
-                                Some(index),
-                            );
+                            self.insert_clip(video, dragged.block_id, None, 0, Some(index));
                         }
                         TimelineDropTarget::Offset { .. } => {}
                     }
-                    editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
+                    self.set_child_parent(dragged.block_id);
                 }
             }
         }
@@ -499,7 +486,7 @@ impl VideoEditor {
             }
         }
         for operation in operations {
-            self.block.operate(operation);
+            self.operate(operation);
         }
 
         let playhead_x = x_at(self.playhead);
@@ -559,16 +546,18 @@ impl VideoEditor {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint_clip(
         &self,
-        painter: &egui::Painter,
+        ui: &mut egui::Ui,
         rect: Rect,
         clip: &VideoClip,
         selected: bool,
         is_parent_of_selected: bool,
         resolved: &HashMap<BlockRef, Option<Uuid>>,
         dependencies: &HashMap<Uuid, BlockReference>,
-        editors: &mut EditorAccess<'_>,
+        host: &EditorHost,
+        types: &BlockCatalog,
         visuals: &egui::Visuals,
     ) {
         let fill = if clip.attachment.is_some() {
@@ -576,8 +565,8 @@ impl VideoEditor {
         } else {
             visuals.widgets.active.bg_fill
         };
-        painter.rect_filled(rect, 4.0, fill);
-        let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+        ui.painter().rect_filled(rect, 4.0, fill);
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
 
         let thumbnail = Rect::from_min_size(
             rect.left_top() + Vec2::splat(3.0),
@@ -585,15 +574,8 @@ impl VideoEditor {
         );
         let resolved_id = resolved.get(&clip.block_id).copied().flatten();
         if rect.width() > thumbnail.width() + 8.0 {
-            if let Some(id) = resolved_id {
-                editors.render(
-                    id,
-                    BlockRenderContext {
-                        painter: &painter,
-                        corners: rect_corners(thumbnail),
-                        opacity: 1.0,
-                    },
-                );
+            if let Some(reference) = resolved_id.and_then(|id| dependencies.get(&id)) {
+                crate::app::place_preview(ui, host, thumbnail, reference.id, reference.block_type);
             }
             let (name, automatic) = resolved_id
                 .and_then(|id| dependencies.get(&id))
@@ -609,7 +591,7 @@ impl VideoEditor {
                         )
                     },
                     |reference| {
-                        let label = BlockLabel::for_reference(editors.registry(), reference);
+                        let label = BlockLabel::for_reference(types, reference);
                         (label.name, label.automatic)
                     },
                 );

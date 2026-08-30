@@ -1,0 +1,21 @@
+{
+  "id": "be3.video",
+  "name": "Video Editor",
+  "version": "0.1.0",
+  "block_type": "76696465-6f5f-626c-6f63-6b0000000001",
+  "display_name": "Video Editor",
+  "icon": "",
+  "creation": "Immediate",
+  "children": {
+    "add": true,
+    "delete": true,
+    "replace": true
+  },
+  "resize": "Both",
+  "regions": [
+    "Main",
+    "Toolbar",
+    "Preview"
+  ],
+  "entry_point": "video_block.wasm"
+}

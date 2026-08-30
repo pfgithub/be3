@@ -10,7 +10,6 @@ mod scene_3d;
 mod text;
 mod unsupported;
 mod version_control_worktree;
-mod video;
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -210,17 +209,6 @@ fn rect_corners(rect: egui::Rect) -> [egui::Pos2; 4] {
         rect.right_bottom(),
         rect.left_bottom(),
     ]
-}
-
-fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
-    let ratio = ratio.max(0.01);
-    let available_ratio = available.width() / available.height().max(1.0);
-    let size = if available_ratio > ratio {
-        egui::Vec2::new(available.height() * ratio, available.height())
-    } else {
-        egui::Vec2::new(available.width(), available.width() / ratio)
-    };
-    egui::Rect::from_center_size(available.center(), size)
 }
 
 fn paint_block_fallback(
@@ -1286,7 +1274,6 @@ impl EditorRegistry {
         registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register_creatable::<text::TextEditor>();
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
-        registry.register_creatable::<video::VideoEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         for manifest in plugin::discovery::manifests() {
             registry.register_plugin(manifest);

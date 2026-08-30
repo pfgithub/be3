@@ -39,6 +39,7 @@ members = [
     "crates/editors/settings",
     "crates/editors/ui_settings",
     "crates/editors/version_control_data",
+    "crates/editors/video_block",
     "crates/editors/workspace_index",
     "crates/block-editor-plugin",
     "crates/block-gpu-abi",

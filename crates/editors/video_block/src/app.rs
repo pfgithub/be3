@@ -1,37 +1,23 @@
-mod effects;
-mod player;
-mod timeline;
-
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use block::{BlockParent, BlockReference, BlockReferenceList};
-use block_client::{
-    block_ref::BlockRef,
-    blocks::video::{
-        Video, VideoAttachment, VideoClip, VideoFrameRate, VideoOperation, DEFAULT_CLIP_SECONDS,
-    },
-    BlockClient, BlockHandle, ReferenceList,
-};
-use eframe::egui::{self, Sense, Vec2};
-use egui_material_icons::{
-    icons::{
-        ICON_ADD, ICON_CONTENT_CUT, ICON_DELETE, ICON_FIT_SCREEN, ICON_MOVIE, ICON_PAUSE,
-        ICON_PLAY_ARROW, ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_SUBDIRECTORY_ARROW_RIGHT,
-        ICON_ZOOM_IN, ICON_ZOOM_OUT,
-    },
-    MaterialIcon,
-};
-use uuid::Uuid;
-
-use crate::block_picker::BlockPicker;
-
-use super::{
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities, DirectEditorResize,
-    DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
+use block_client::block_ref::BlockRef;
+use block_client::blocks::video::{
+    Video, VideoAttachment, VideoClip, VideoFrameRate, VideoOperation, DEFAULT_CLIP_SECONDS,
 };
 use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
+use block_client::{BlockClient, BlockHandle, ReferenceList};
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::egui::{self, Sense, Vec2};
+use block_editor_plugin::egui_material_icons::icons::{
+    ICON_ADD, ICON_CONTENT_CUT, ICON_DELETE, ICON_FIT_SCREEN, ICON_PAUSE, ICON_PLAY_ARROW,
+    ICON_SKIP_NEXT, ICON_SKIP_PREVIOUS, ICON_SUBDIRECTORY_ARROW_RIGHT, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+};
+use block_editor_plugin::{BlockFilter, BlockPicker, ChildHandle, ChildMode, EditorHost};
+use uuid::Uuid;
 
-use self::timeline::{MAX_PIXELS_PER_FRAME, MIN_PIXELS_PER_FRAME};
+use crate::timeline::{self, MAX_PIXELS_PER_FRAME, MIN_PIXELS_PER_FRAME};
 
 const EFFECTS_WIDTH: f32 = 268.0;
 const MIN_TIMELINE_HEIGHT: f32 = 176.0;
@@ -39,85 +25,74 @@ const MAX_TIMELINE_HEIGHT: f32 = 380.0;
 const DEFAULT_EDITOR_SIZE: Vec2 = egui::vec2(1000.0, 640.0);
 const DEFAULT_PIXELS_PER_FRAME: f32 = 4.0;
 const PANEL_GAP: f32 = 6.0;
-
 const PLAYBACK_BAR_HEIGHT: f32 = 30.0;
-
 const TIMELINE_TOOLBAR_HEIGHT: f32 = 30.0;
 
-impl EditorKind for VideoEditor {
-    type Block = Video;
-
-    const DISPLAY_NAME: &'static str = "Video Editor";
-    const ICON: MaterialIcon = ICON_MOVIE;
-    const CAN_ADD_CHILD: bool = true;
-    const CAN_DELETE_CHILD: bool = true;
-    const CAN_REPLACE_CHILD: bool = true;
-
-    fn open(client: &BlockClient, block: BlockHandle<Video>) -> Self {
-        Self::new(block, client)
-    }
+pub(crate) struct ClipDrag {
+    pub(crate) clip: Uuid,
+    pub(crate) grab: u64,
 }
 
-impl CreatableEditor for VideoEditor {
-    fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(Video::new()), client)
-    }
-}
-
-pub(super) struct ClipDrag {
-    clip: Uuid,
-    grab: u64,
-}
-
-pub(super) struct VideoEditor {
+struct Editing {
+    host: EditorHost,
+    client: Arc<BlockClient>,
     block: BlockHandle<Video>,
     dependencies: ReferenceList,
+}
+
+#[derive(Default)]
+pub struct VideoApp {
+    editing: Option<Editing>,
+    creation: Option<Arc<BlockClient>>,
     picker: BlockPicker,
-
     picker_attachment: Option<Uuid>,
-    selected: Option<Uuid>,
-    playhead: u64,
+    pub(crate) selected: Option<Uuid>,
+    pub(crate) playhead: u64,
     playing: bool,
-
     play_origin: Option<(f64, u64)>,
-
-    pixels_per_frame: f32,
-
-    fit_requested: bool,
-    drag: Option<ClipDrag>,
+    pub(crate) pixels_per_frame: f32,
+    pub(crate) fit_requested: bool,
+    pub(crate) drag: Option<ClipDrag>,
+    pub(crate) aspect_ratios: HashMap<Uuid, f32>,
     reference_cache: ReferenceResolutionCache,
     pending_clips: ReferenceClassificationQueue<(Uuid, u64, Option<VideoAttachment>, usize)>,
 }
 
-impl VideoEditor {
-    fn new(block: BlockHandle<Video>, client: &BlockClient) -> Self {
-        let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
-        Self {
-            block,
-            dependencies,
-            picker: BlockPicker::default(),
-            picker_attachment: None,
-            selected: None,
-            playhead: 0,
-            playing: false,
-            play_origin: None,
-            pixels_per_frame: DEFAULT_PIXELS_PER_FRAME,
-            fit_requested: false,
-            drag: None,
-            reference_cache: ReferenceResolutionCache::default(),
-            pending_clips: ReferenceClassificationQueue::default(),
+impl VideoApp {
+    pub(crate) fn block_id(&self) -> Uuid {
+        self.editing
+            .as_ref()
+            .map_or_else(Uuid::nil, |editing| editing.block.id())
+    }
+
+    pub(crate) fn operate(&self, operation: VideoOperation) {
+        if let Some(editing) = &self.editing {
+            editing.block.operate(operation);
+        }
+    }
+
+    pub(crate) fn set_child_parent(&self, block_id: Uuid) {
+        if let Some(editing) = &self.editing {
+            editing
+                .client
+                .set_block_parent(block_id, BlockParent::Uuid(editing.block.id()));
         }
     }
 
     fn video(&self) -> Option<Video> {
-        self.block.read().map(|video| video.clone())
+        self.editing
+            .as_ref()?
+            .block
+            .read()
+            .map(|video| video.clone())
     }
 
     fn dependency_map(&self) -> HashMap<Uuid, BlockReference> {
-        self.dependencies
-            .read()
-            .iter()
-            .cloned()
+        self.editing
+            .as_ref()
+            .map(|editing| editing.dependencies.read())
+            .unwrap_or_default()
+            .into_iter()
             .map(|reference| (reference.id, reference))
             .collect()
     }
@@ -132,18 +107,19 @@ impl VideoEditor {
                 attachment,
                 effects: Vec::new(),
             };
-            self.block
-                .operate(VideoOperation::InsertClip { clip, index });
+            self.operate(VideoOperation::InsertClip { clip, index });
         }
     }
 
-    fn resolve_clips(
-        &mut self,
-        editors: &EditorAccess<'_>,
-        video: &Video,
-    ) -> HashMap<BlockRef, Option<Uuid>> {
-        let client = editors.client_handle();
-        let referencing_id = self.block.id();
+    fn resolve_clips(&mut self, video: &Video) -> HashMap<BlockRef, Option<Uuid>> {
+        let Some(client) = self
+            .editing
+            .as_ref()
+            .map(|editing| Arc::clone(&editing.client))
+        else {
+            return HashMap::new();
+        };
+        let referencing_id = self.block_id();
         video
             .clips()
             .iter()
@@ -157,24 +133,6 @@ impl VideoEditor {
             .collect()
     }
 
-    fn ensure_clip_editors(
-        video: &Video,
-        resolved: &HashMap<BlockRef, Option<Uuid>>,
-        dependencies: &HashMap<Uuid, BlockReference>,
-        editors: &mut EditorAccess<'_>,
-    ) {
-        for clip in video.clips() {
-            if let Some(reference) = resolved
-                .get(&clip.block_id)
-                .copied()
-                .flatten()
-                .and_then(|id| dependencies.get(&id))
-            {
-                editors.ensure(reference.id, reference.block_type);
-            }
-        }
-    }
-
     fn synchronize(&mut self, video: &Video) {
         if self
             .selected
@@ -185,24 +143,29 @@ impl VideoEditor {
         self.playhead = self.playhead.min(video.duration());
     }
 
-    fn selected_clip<'a>(&self, video: &'a Video) -> Option<&'a VideoClip> {
+    pub(crate) fn selected_clip<'a>(&self, video: &'a Video) -> Option<&'a VideoClip> {
         video.clip(self.selected?)
     }
 
-    fn update_clip(&self, clip: VideoClip) {
-        self.block
-            .operate(VideoOperation::UpdateClips { clips: vec![clip] });
+    pub(crate) fn update_clip(&self, clip: VideoClip) {
+        self.operate(VideoOperation::UpdateClips { clips: vec![clip] });
     }
 
-    fn insert_clip(
+    pub(crate) fn insert_clip(
         &mut self,
-        editors: &mut EditorAccess<'_>,
         video: &Video,
         block_id: Uuid,
         attachment: Option<Uuid>,
         frame: u64,
         insertion_index: Option<usize>,
     ) {
+        let Some(client) = self
+            .editing
+            .as_ref()
+            .map(|editing| Arc::clone(&editing.client))
+        else {
+            return;
+        };
         let length = video.frame_rate().frames(DEFAULT_CLIP_SECONDS).max(1);
         let (attachment, index) = match attachment {
             Some(parent) => {
@@ -221,8 +184,7 @@ impl VideoEditor {
         };
         let clip_id = Uuid::new_v4();
         self.selected = Some(clip_id);
-        let client = editors.client_handle();
-        let referencing_id = self.block.id();
+        let referencing_id = self.block_id();
         self.pending_clips.push(
             &client,
             referencing_id,
@@ -262,23 +224,21 @@ impl VideoEditor {
 
         let index = video.sibling_index(selected).unwrap_or(0) + 1;
         self.selected = Some(second.id);
-        self.block
-            .operate(VideoOperation::UpdateClips { clips: vec![first] });
-        self.block.operate(VideoOperation::InsertClip {
+        self.operate(VideoOperation::UpdateClips { clips: vec![first] });
+        self.operate(VideoOperation::InsertClip {
             clip: second,
             index,
         });
     }
 
     fn remove_clip(&mut self, clip_id: Uuid) {
-        self.block
-            .operate(VideoOperation::RemoveClips { ids: vec![clip_id] });
+        self.operate(VideoOperation::RemoveClips { ids: vec![clip_id] });
         if self.selected == Some(clip_id) {
             self.selected = None;
         }
     }
 
-    fn seek(&mut self, frame: u64, duration: u64) {
+    pub(crate) fn seek(&mut self, frame: u64, duration: u64) {
         self.playhead = frame.min(duration);
         self.play_origin = None;
     }
@@ -320,14 +280,14 @@ impl VideoEditor {
         {
             self.seek(0, duration);
         }
-        let (icon, hover) = if self.playing {
-            (ICON_PAUSE, "Pause")
-        } else {
-            (ICON_PLAY_ARROW, "Play")
+        let (icon, hover) = match self.playing {
+            true => (ICON_PAUSE, "Pause"),
+            false => (ICON_PLAY_ARROW, "Play"),
         };
         if ui
             .add_enabled(duration > 0, egui::Button::new(icon))
             .on_hover_text(hover)
+            .test_id("video.play")
             .clicked()
         {
             self.toggle_playback(duration);
@@ -347,14 +307,18 @@ impl VideoEditor {
         .on_hover_text(format!("Frame {} of {duration}", self.playhead));
     }
 
-    fn clip_menu(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>, video: &Video) {
+    fn clip_menu(&mut self, ui: &mut egui::Ui, video: &Video) {
+        let Some(host) = self.editing.as_ref().map(|editing| editing.host.clone()) else {
+            return;
+        };
         if ui
             .button(format!("{} Add clip", ICON_ADD.codepoint))
             .on_hover_text("Add a clip to the end of the base track")
+            .test_id("video.add-clip")
             .clicked()
         {
             self.picker_attachment = None;
-            self.picker.open([self.block.id()]);
+            self.picker.open(&host, BlockFilter::default());
         }
 
         let selected = self.selected;
@@ -368,7 +332,7 @@ impl VideoEditor {
                 .clicked()
             {
                 self.picker_attachment = selected;
-                self.picker.open([self.block.id()]);
+                self.picker.open(&host, BlockFilter::default());
             }
         });
         if ui
@@ -418,7 +382,7 @@ impl VideoEditor {
     fn frame_rate_control(&mut self, ui: &mut egui::Ui, video: &Video) {
         let current = video.frame_rate();
         let mut chosen = current;
-        egui::ComboBox::from_id_salt(("video-frame-rate", self.block.id()))
+        egui::ComboBox::from_id_salt(("video-frame-rate", self.block_id()))
             .selected_text(frame_rate_label(current))
             .width(96.0)
             .show_ui(ui, |ui| {
@@ -429,8 +393,7 @@ impl VideoEditor {
             .response
             .on_hover_text("Frames per second");
         if chosen != current {
-            self.block
-                .operate(VideoOperation::SetFrameRate { frame_rate: chosen });
+            self.operate(VideoOperation::SetFrameRate { frame_rate: chosen });
         }
     }
 }
@@ -452,106 +415,128 @@ fn frame_rate_label(frame_rate: VideoFrameRate) -> String {
     format!("{:.2} fps", frame_rate.frames_per_second())
 }
 
-impl BlockEditor for VideoEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+pub(crate) fn fit_rect(available: egui::Rect, ratio: f32) -> egui::Rect {
+    let ratio = ratio.max(0.01);
+    let available_ratio = available.width() / available.height().max(1.0);
+    let size = match available_ratio > ratio {
+        true => egui::Vec2::new(available.height() * ratio, available.height()),
+        false => egui::Vec2::new(available.width(), available.width() / ratio),
+    };
+    egui::Rect::from_center_size(available.center(), size)
+}
+
+pub(crate) fn place_preview(
+    ui: &mut egui::Ui,
+    host: &EditorHost,
+    rect: egui::Rect,
+    block_id: Uuid,
+    block_type: Uuid,
+) -> ChildHandle {
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("video-preview", block_id, rect.min.x.to_bits()))
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+    let handle = host.child_sized(&mut child, rect.size(), block_id, block_type);
+    handle.set_mode(ChildMode::Preview);
+    handle
+}
+
+impl block_editor_plugin::App for VideoApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        self.pixels_per_frame = DEFAULT_PIXELS_PER_FRAME;
+        self.editing = Some(Editing {
+            host,
+            block: client.get_block(block_id),
+            dependencies: client.watch_references(BlockReferenceList::References(block_id)),
+            client,
+        });
     }
 
-    fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
-        let Some(video) = self.video() else {
-            return false;
-        };
-        let dependencies = self.dependency_map();
-        let resolved = self.resolve_clips(editors, &video);
-        Self::ensure_clip_editors(&video, &resolved, &dependencies, editors);
-        let visible = video.visible_at(self.playhead);
-        if visible.is_empty() {
-            return false;
-        }
-
-        for (index, clip_id) in visible.iter().enumerate() {
-            let Some(clip) = video.clip(*clip_id) else {
-                continue;
-            };
-            let Some(resolved_id) = resolved.get(&clip.block_id).copied().flatten() else {
-                continue;
-            };
-            let rendered = editors.render(
-                resolved_id,
-                BlockRenderContext {
-                    painter: context.painter,
-                    corners: context.corners,
-                    opacity: context.opacity,
-                },
-            );
-            if !rendered && index == 0 {
-                super::paint_block_fallback(
-                    context.painter,
-                    egui::Rect::from_min_max(context.corners[0], context.corners[2]),
-                    dependencies.get(&resolved_id),
-                    editors,
-                );
-            }
-        }
-        true
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
+        self.creation = Some(client);
     }
 
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: false,
-        }
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(Video::new()).id())
     }
 
-    fn direct_editor_resize(&self) -> DirectEditorResize {
-        DirectEditorResize::Both
-    }
-
-    fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         Some(DEFAULT_EDITOR_SIZE)
     }
 
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let video = self.video()?;
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(video) = self.video() else {
+            return;
+        };
         self.synchronize(&video);
         ui.horizontal_wrapped(|ui| {
             self.frame_rate_control(ui, &video);
         });
-        None
     }
 
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+    fn preview_ui(&mut self, ui: &mut egui::Ui) {
+        let (Some(host), Some(types)) = (
+            self.editing.as_ref().map(|editing| editing.host.clone()),
+            self.editing
+                .as_ref()
+                .map(|editing| editing.host.block_types()),
+        ) else {
+            return;
+        };
+        let Some(video) = self.video() else {
+            return;
+        };
+        self.synchronize(&video);
+        let dependencies = self.dependency_map();
+        let resolved = self.resolve_clips(&video);
+        self.advance_playback(ui.ctx(), &video);
+        let rect = ui.max_rect();
+        self.player_ui(
+            ui,
+            rect,
+            &video,
+            &resolved,
+            &dependencies,
+            &host,
+            types.as_ref(),
+        );
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
         self.poll();
+        let (Some(host), Some(types)) = (
+            self.editing.as_ref().map(|editing| editing.host.clone()),
+            self.editing
+                .as_ref()
+                .map(|editing| editing.host.block_types()),
+        ) else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return;
+        };
         let Some(video) = self.video() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
-            return None;
+            return;
         };
         self.synchronize(&video);
         let dependencies = self.dependency_map();
-        let resolved = self.resolve_clips(editors, &video);
-        Self::ensure_clip_editors(&video, &resolved, &dependencies, editors);
+        let resolved = self.resolve_clips(&video);
         self.advance_playback(ui.ctx(), &video);
 
-        if let Some(result) =
-            self.picker
-                .handle(ui.ctx(), editors, BlockParent::Uuid(self.block.id()))
-        {
+        if let Some(Ok((picked, _))) = self.picker.poll(&host) {
             let attachment = self.picker_attachment.take();
-            self.insert_clip(editors, &video, result.id, attachment, self.playhead, None);
+            self.set_child_parent(picked);
+            self.insert_clip(&video, picked, attachment, self.playhead, None);
         }
 
         let rect = ui.available_rect_before_wrap();
@@ -576,7 +561,7 @@ impl BlockEditor for VideoEditor {
         ui.painter()
             .hline(timeline_toolbar.x_range(), timeline.top(), stroke);
 
-        let block_id = self.block.id();
+        let block_id = self.block_id();
         let region = |ui: &mut egui::Ui, salt: &'static str, rect: egui::Rect| {
             ui.new_child(
                 egui::UiBuilder::new()
@@ -588,7 +573,13 @@ impl BlockEditor for VideoEditor {
 
         let mut effects_ui = region(ui, "video-effects", effects);
         effects_ui.set_clip_rect(effects.intersect(ui.clip_rect()));
-        self.effects_ui(&mut effects_ui, &video, &resolved, &dependencies, editors);
+        self.effects_ui(
+            &mut effects_ui,
+            &video,
+            &resolved,
+            &dependencies,
+            types.as_ref(),
+        );
 
         let player_rect = player.shrink(PANEL_GAP);
         let mut player_ui = region(ui, "video-player", player);
@@ -599,7 +590,8 @@ impl BlockEditor for VideoEditor {
             &video,
             &resolved,
             &dependencies,
-            editors,
+            &host,
+            types.as_ref(),
         );
 
         let mut playback_bar_ui = region(ui, "video-playback-bar", playback_bar);
@@ -609,37 +601,20 @@ impl BlockEditor for VideoEditor {
         let mut timeline_toolbar_ui = region(ui, "video-timeline-toolbar", timeline_toolbar);
         timeline_toolbar_ui.set_clip_rect(timeline_toolbar.intersect(ui.clip_rect()));
         timeline_toolbar_ui.horizontal(|ui| {
-            self.clip_menu(ui, editors, &video);
+            self.clip_menu(ui, &video);
             ui.separator();
             self.zoom_controls(ui);
         });
 
         let mut timeline_ui = region(ui, "video-timeline-panel", timeline);
         timeline_ui.set_clip_rect(timeline.intersect(ui.clip_rect()));
-        self.timeline_ui(&mut timeline_ui, &video, &resolved, &dependencies, editors);
-        None
-    }
-
-    fn embedded_direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let rect = ui.available_rect_before_wrap();
-        let Some(video) = self.video() else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        };
-        self.synchronize(&video);
-        let dependencies = self.dependency_map();
-        let resolved = self.resolve_clips(editors, &video);
-        Self::ensure_clip_editors(&video, &resolved, &dependencies, editors);
-        self.advance_playback(ui.ctx(), &video);
-        self.player_ui(ui, rect, &video, &resolved, &dependencies, editors);
-        None
+        self.timeline_ui(
+            &mut timeline_ui,
+            &video,
+            &resolved,
+            &dependencies,
+            &host,
+            types.as_ref(),
+        );
     }
 }
