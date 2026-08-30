@@ -24,12 +24,12 @@ struct Hit {
     normal: Point,
 }
 
-pub(super) struct RayTraceResult {
+pub(crate) struct RayTraceResult {
     pub pixels: Vec<[u8; 4]>,
     pub debug_positions: Vec<Point>,
 }
 
-pub(super) fn trace_lighting(
+pub(crate) fn trace_lighting(
     pixels: &[u8],
     entities: &[RayEntity],
     settings: RaySettings,
@@ -123,7 +123,7 @@ pub(super) fn trace_lighting(
         .collect()
 }
 
-pub(super) fn trace_rays(
+pub(crate) fn trace_rays(
     source: &[[u8; 4]],
     entities: &[RayEntity],
     origin: Point,

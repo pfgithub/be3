@@ -6849,6 +6849,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pixel_ray_tracer"
+version = "0.1.0"
+dependencies = [
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "uuid",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -3,7 +3,6 @@ mod clipboard;
 pub(crate) mod deterministic_game;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
-mod pixel_ray_tracer;
 pub(crate) mod plugin;
 mod scene_3d;
 mod text;
@@ -1268,7 +1267,6 @@ impl EditorRegistry {
         registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
-        registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register_creatable::<text::TextEditor>();
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();

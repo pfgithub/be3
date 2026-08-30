@@ -2,6 +2,7 @@ use block_plugin_api::ClipboardImage;
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 const PASTED_NAME: &str = "Pasted Image.png";
 
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]

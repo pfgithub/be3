@@ -1,15 +1,10 @@
-mod raytracer;
-
 use std::{
     sync::mpsc::{self, Receiver, TryRecvError},
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
 
-use super::{
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorViewport, EditorAction, EditorKind,
-};
 use block_client::{
     blocks::pixel_ray_tracer::{
         PixelRayTracer, PixelRayTracerOperation, PixelUpdate, Point, RayEntity, RaySettings,
@@ -17,10 +12,14 @@ use block_client::{
     },
     BlockClient, BlockHandle,
 };
-use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
-use egui_material_icons::{icons::ICON_FLARE, MaterialIcon};
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::egui::{
+    self, Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2,
+};
+use block_editor_plugin::{EditorHost, PerformanceReporter};
+use uuid::Uuid;
 
-use crate::performance;
+use crate::raytracer;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LightingCacheKey {
@@ -38,23 +37,6 @@ type RayJobResult = (
     bool,
     Duration,
 );
-
-impl EditorKind for PixelRayTracerEditor {
-    type Block = PixelRayTracer;
-
-    const DISPLAY_NAME: &'static str = "Pixel Ray Tracer";
-    const ICON: MaterialIcon = ICON_FLARE;
-
-    fn open(_client: &BlockClient, block: BlockHandle<PixelRayTracer>) -> Self {
-        Self::new(block)
-    }
-}
-
-impl CreatableEditor for PixelRayTracerEditor {
-    fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(PixelRayTracer::new()))
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tool {
@@ -114,7 +96,9 @@ enum ActiveInteraction {
     },
 }
 
-pub(super) struct PixelRayTracerEditor {
+struct Editor {
+    host: EditorHost,
+    performance: PerformanceReporter,
     block: BlockHandle<PixelRayTracer>,
     tool: Tool,
     color_index: u8,
@@ -136,9 +120,12 @@ pub(super) struct PixelRayTracerEditor {
     ray_job: Option<Receiver<RayJobResult>>,
 }
 
-impl PixelRayTracerEditor {
-    fn new(block: BlockHandle<PixelRayTracer>) -> Self {
+impl Editor {
+    fn new(host: EditorHost, block: BlockHandle<PixelRayTracer>) -> Self {
+        let performance = host.performance(format!("Pixel ray tracer ({})", block.id()));
         Self {
+            host,
+            performance,
             block,
             tool: Tool::Pencil,
             color_index: 0,
@@ -161,12 +148,7 @@ impl PixelRayTracerEditor {
         }
     }
 
-    fn performance_group(&self) -> String {
-        format!("Pixel ray tracer ({})", self.block.id())
-    }
-
     fn ensure_texture(&mut self, context: &egui::Context) -> bool {
-        let _performance_group = performance::GroupGuard::new(self.performance_group());
         let Some(scene) = self.block.read() else {
             return false;
         };
@@ -187,7 +169,7 @@ impl PixelRayTracerEditor {
         if let Some(completed) = completed {
             self.lighting_job = None;
             if let Ok((completed_revision, pixels, duration)) = completed {
-                performance::record_duration("Lighting trace", duration);
+                self.performance.record_duration("Lighting trace", duration);
                 self.rendered = pixels;
                 self.ray_overlay = None;
                 self.ray_texture = None;
@@ -205,7 +187,7 @@ impl PixelRayTracerEditor {
             }
         }
         if self.texture_revision == Some(revision) {
-            performance::increment("Lighting cache hits");
+            self.performance.record_count("Lighting cache hits", 1);
             return true;
         }
         if self.lighting_job.is_none() {
@@ -223,7 +205,7 @@ impl PixelRayTracerEditor {
                 })
                 .collect::<Vec<_>>();
             let settings = scene.lighting_ray_settings();
-            let repaint = context.clone();
+            let waker = self.host.waker();
             let (sender, receiver) = mpsc::channel();
             thread::Builder::new()
                 .name("pixel-ray-tracer-lighting".into())
@@ -231,35 +213,24 @@ impl PixelRayTracerEditor {
                     let start = Instant::now();
                     let result = raytracer::trace_lighting(&pixels, &entities, settings);
                     let _ = sender.send((revision, result, start.elapsed()));
-                    repaint.request_repaint();
+                    waker.wake();
                 })
                 .expect("failed to start pixel ray tracer lighting job");
             self.lighting_job = Some(receiver);
-            performance::increment("Lighting cache misses");
+            self.performance.record_count("Lighting cache misses", 1);
         }
         drop(scene);
         self.texture.is_some()
     }
 
-    fn paint_block_texture(&self, context: BlockRenderContext<'_>) {
+    fn paint_block_texture(&self, painter: &egui::Painter, rect: Rect) {
         let Some(texture) = &self.texture else { return };
-        let tint =
-            Color32::from_white_alpha((context.opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
-        let mut mesh = egui::Mesh::with_texture(texture.id());
-        for (position, uv) in context.corners.into_iter().zip([
-            Pos2::ZERO,
-            Pos2::new(1.0, 0.0),
-            Pos2::new(1.0, 1.0),
-            Pos2::new(0.0, 1.0),
-        ]) {
-            mesh.vertices.push(egui::epaint::Vertex {
-                pos: position,
-                uv,
-                color: tint,
-            });
-        }
-        mesh.indices.extend([0, 1, 2, 0, 2, 3]);
-        context.painter.add(mesh);
+        painter.image(
+            texture.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
     }
 
     fn tools(&mut self, ui: &mut egui::Ui) {
@@ -465,7 +436,7 @@ impl PixelRayTracerEditor {
         }
     }
 
-    fn canvas(&mut self, ui: &mut egui::Ui, viewport_controls: &mut DirectEditorViewport) {
+    fn canvas(&mut self, ui: &mut egui::Ui) {
         if !self.ensure_texture(ui.ctx()) {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -492,14 +463,15 @@ impl PixelRayTracerEditor {
                     && input.pointer.button_down(PointerButton::Primary))
         });
         if panning && response.hovered() {
-            viewport_controls.pan(response.ctx.input(|input| input.pointer.delta()));
+            self.host
+                .pan_view(response.ctx.input(|input| input.pointer.delta()));
             self.interaction = None;
         }
         if response.hovered() {
             if let Some(pointer) = response.ctx.pointer_hover_pos() {
                 let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
                 if scroll != 0.0 {
-                    viewport_controls.change_zoom((scroll * 0.002).exp(), Some(pointer));
+                    self.host.zoom_view((scroll * 0.002).exp(), Some(pointer));
                 }
             }
         }
@@ -925,7 +897,7 @@ impl PixelRayTracerEditor {
             if let Ok((origin, pixels, debug, revision, settings, include_debug, duration)) =
                 completed
             {
-                performance::record_duration("View-ray trace", duration);
+                self.performance.record_duration("View-ray trace", duration);
                 let image = color_image(&pixels);
                 if let Some(texture) = &mut self.ray_texture {
                     texture.set(image, egui::TextureOptions::NEAREST);
@@ -959,12 +931,12 @@ impl PixelRayTracerEditor {
                 },
             );
         if cache_hit {
-            performance::increment("View-ray cache hits");
+            self.performance.record_count("View-ray cache hits", 1);
         } else if lighting_ready && self.ray_job.is_none() {
             let source = self.rendered.clone();
             let entities = scene.entities().to_vec();
             let include_debug = self.debug_overlay;
-            let repaint = painter.ctx().clone();
+            let waker = self.host.waker();
             let (sender, receiver) = mpsc::channel();
             thread::Builder::new()
                 .name("pixel-ray-tracer-view-rays".into())
@@ -981,11 +953,11 @@ impl PixelRayTracerEditor {
                         include_debug,
                         start.elapsed(),
                     ));
-                    repaint.request_repaint();
+                    waker.wake();
                 })
                 .expect("failed to start pixel ray tracer view-ray job");
             self.ray_job = Some(receiver);
-            performance::increment("View-ray cache misses");
+            self.performance.record_count("View-ray cache misses", 1);
         }
         drop(scene);
         if let (Some((_, _, debug, ..)), Some(texture)) = (&self.ray_overlay, &self.ray_texture) {
@@ -1008,93 +980,92 @@ impl PixelRayTracerEditor {
     }
 }
 
-impl BlockEditor for PixelRayTracerEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+#[derive(Default)]
+pub struct PixelRayTracerApp {
+    editor: Option<Editor>,
+    creation: Option<Arc<BlockClient>>,
+}
+
+impl block_editor_plugin::App for PixelRayTracerApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        self.editor = Some(Editor::new(host, client.get_block(block_id)));
     }
-    fn render(
-        &mut self,
-        context: BlockRenderContext<'_>,
-        _editors: &mut super::EditorAccess<'_>,
-    ) -> bool {
-        if !self.ensure_texture(context.painter.ctx()) {
-            return false;
-        }
-        self.paint_block_texture(context);
-        true
+
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
+        self.creation = Some(client);
     }
-    fn render_aspect_ratio(&self) -> Option<f32> {
+
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(PixelRayTracer::new()).id())
+    }
+
+    fn aspect_ratio(&mut self) -> Option<f32> {
         Some(1.0)
     }
-    fn default_preserve_aspect_ratio(&self) -> bool {
-        true
-    }
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: true,
-            supports_pan_and_zoom: true,
-        }
-    }
-    fn direct_editor_intrinsic_size(
-        &mut self,
-        _editors: &mut super::EditorAccess<'_>,
-    ) -> Option<Vec2> {
+
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         Some(Vec2::splat(384.0))
     }
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut super::EditorAccess<'_>,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+
+    fn preview_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(editor) = &mut self.editor else {
+            return;
+        };
+        let rect = ui.max_rect();
+        if !rect.is_positive() || !editor.ensure_texture(ui.ctx()) {
+            return;
+        }
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        editor.paint_block_texture(&painter, rect);
+    }
+
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(editor) = &mut self.editor else {
+            return;
+        };
         ui.horizontal_wrapped(|ui| {
             ui.strong("Pixel Ray Tracer");
             ui.weak("128 × 128");
             ui.separator();
             if ui.button("Fit view").clicked() {
-                viewport.fit();
+                editor.host.fit_view();
             }
-            if ui.button("Reset artwork").clicked() {
-                self.block.operate(PixelRayTracerOperation::Reset);
-                self.selected_entity = None;
+            if ui
+                .button("Reset artwork")
+                .test_id("pixel_ray_tracer.reset")
+                .clicked()
+            {
+                editor.block.operate(PixelRayTracerOperation::Reset);
+                editor.selected_entity = None;
             }
         });
-        None
     }
-    fn direct_editor_has_left_sidebar(&self, _editors: &mut super::EditorAccess<'_>) -> bool {
-        true
+
+    fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(editor) = &mut self.editor {
+            editor.tools(ui);
+        }
     }
-    fn direct_editor_left_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut super::EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        self.tools(ui);
-        None
+
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(editor) = &mut self.editor {
+            editor.properties(ui);
+        }
     }
-    fn direct_editor_has_right_sidebar(&self, _editors: &mut super::EditorAccess<'_>) -> bool {
-        true
-    }
-    fn direct_editor_right_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut super::EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        self.properties(ui);
-        None
-    }
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut super::EditorAccess<'_>,
-        _scale: f32,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let _performance_group = performance::GroupGuard::new(self.performance_group());
-        let _frame_measurement = performance::MeasurementGuard::new("Editor frame");
-        self.canvas(ui, viewport);
-        None
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let Some(editor) = &mut self.editor else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return;
+        };
+        let _frame = editor.performance.measure("Editor frame");
+        editor.canvas(ui);
     }
 }
 

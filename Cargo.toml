@@ -36,6 +36,7 @@ members = [
     "crates/editors/paint_review",
     "crates/editors/pdf",
     "crates/editors/pixel_art",
+    "crates/editors/pixel_ray_tracer",
     "crates/editors/presentation",
     "crates/editors/settings",
     "crates/editors/ui_settings",

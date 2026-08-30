@@ -46,13 +46,8 @@ struct PerformanceState {
     groups: BTreeMap<String, Group>,
 }
 
-enum ActiveEntry {
-    Group(String),
-    Measurement { id: String, start: Instant },
-}
-
 thread_local! {
-    static ACTIVE: RefCell<Vec<ActiveEntry>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 fn state() -> MutexGuard<'static, PerformanceState> {
@@ -133,13 +128,13 @@ pub fn start_group(id: impl Into<String>) {
     let frame = state.frame;
     state.groups.entry(id.clone()).or_default().seen_frame = frame;
     drop(state);
-    ACTIVE.with(|active| active.borrow_mut().push(ActiveEntry::Group(id)));
+    ACTIVE.with(|active| active.borrow_mut().push(id));
 }
 
 pub fn stop_group(id: &str) {
     ACTIVE.with(|active| {
         let mut active = active.borrow_mut();
-        let Some(ActiveEntry::Group(active_id)) = active.pop() else {
+        let Some(active_id) = active.pop() else {
             debug_assert!(false, "performance group {id:?} was not active");
             return;
         };
@@ -147,63 +142,11 @@ pub fn stop_group(id: &str) {
     });
 }
 
-pub fn start(id: impl Into<String>) {
-    ACTIVE.with(|active| {
-        active.borrow_mut().push(ActiveEntry::Measurement {
-            id: id.into(),
-            start: Instant::now(),
-        });
-    });
-}
-
-pub fn stop(id: &str) {
-    let completed = ACTIVE.with(|active| {
-        let mut active = active.borrow_mut();
-        let Some(ActiveEntry::Measurement {
-            id: active_id,
-            start,
-        }) = active.pop()
-        else {
-            debug_assert!(false, "performance measurement {id:?} was not active");
-            return None;
-        };
-        debug_assert_eq!(active_id, id);
-        let group = active.iter().rev().find_map(|entry| match entry {
-            ActiveEntry::Group(group) => Some(group.clone()),
-            ActiveEntry::Measurement { .. } => None,
-        })?;
-        Some((group, start.elapsed()))
-    });
-    if let Some((group, elapsed)) = completed {
-        record_duration_in(&group, id, elapsed);
-    }
-}
-
 pub fn record_duration(id: impl Into<String>, duration: Duration) {
     let Some(group) = active_group() else {
         return;
     };
     record_duration_in(&group, &id.into(), duration);
-}
-
-pub fn increment(id: impl Into<String>) {
-    let Some(group) = active_group() else {
-        return;
-    };
-    let id = id.into();
-    let mut state = state();
-    let measurement = state
-        .groups
-        .entry(group)
-        .or_default()
-        .measurements
-        .entry(id)
-        .or_default();
-    let count = match measurement.value {
-        Some(Value::Count(count)) => count + 1,
-        _ => 1,
-    };
-    measurement.value = Some(Value::Count(count));
 }
 
 pub fn record_count(id: impl Into<String>, count: u64) {
@@ -239,31 +182,8 @@ impl Drop for GroupGuard {
     }
 }
 
-pub struct MeasurementGuard {
-    id: String,
-}
-
-impl MeasurementGuard {
-    pub fn new(id: impl Into<String>) -> Self {
-        let id = id.into();
-        start(id.clone());
-        Self { id }
-    }
-}
-
-impl Drop for MeasurementGuard {
-    fn drop(&mut self) {
-        stop(&self.id);
-    }
-}
-
 fn active_group() -> Option<String> {
-    ACTIVE.with(|active| {
-        active.borrow().iter().rev().find_map(|entry| match entry {
-            ActiveEntry::Group(group) => Some(group.clone()),
-            ActiveEntry::Measurement { .. } => None,
-        })
-    })
+    ACTIVE.with(|active| active.borrow().last().cloned())
 }
 
 fn record_duration_in(group: &str, id: &str, duration: Duration) {
