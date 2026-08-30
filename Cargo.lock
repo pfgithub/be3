@@ -5373,6 +5373,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "logic_game"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "logicgame",
+ "uuid",
+]
+
+[[package]]
 name = "logicgame"
 version = "0.1.0"
 dependencies = [

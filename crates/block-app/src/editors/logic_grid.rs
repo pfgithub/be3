@@ -13,6 +13,7 @@ use std::{
 };
 
 use block::Block;
+use block_client::root_settings::RootSetting;
 use block_client::{
     block_ref::BlockRef,
     blocks::{
@@ -43,9 +44,8 @@ use self::renderer::{
     WireValue,
 };
 use super::{
-    settings::RootSetting, BlockEditor, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorViewport, DirectEditorViewportInput, DynamicArtifactSupport, EditorAccess,
-    EditorAction, EditorKind,
+    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport,
+    DirectEditorViewportInput, DynamicArtifactSupport, EditorAccess, EditorAction, EditorKind,
 };
 
 use geometry::*;

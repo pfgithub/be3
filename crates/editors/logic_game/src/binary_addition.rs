@@ -1,14 +1,13 @@
-use block_client::{
-    blocks::logic_game::{LogicGame, LogicGameOperation, QuizRow},
-    BlockHandle,
-};
-use eframe::egui;
+use block_client::blocks::logic_game::{LogicGame, LogicGameOperation, QuizRow};
+use block_client::BlockHandle;
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::egui;
 
 const CELL_WIDTH: f32 = 24.0;
 const CELL_HEIGHT: f32 = 24.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct BinaryAdditionProblem {
+pub(crate) struct BinaryAdditionProblem {
     operands: Vec<String>,
     carry_bits: Vec<bool>,
     sum_bits: Vec<bool>,
@@ -60,7 +59,7 @@ impl BinaryAdditionProblem {
     }
 }
 
-pub(super) struct BinaryAdditionQuiz {
+pub(crate) struct BinaryAdditionQuiz {
     problems: Vec<BinaryAdditionProblem>,
     current_problem: usize,
     checked: bool,
@@ -81,12 +80,12 @@ impl Default for BinaryAdditionQuiz {
 }
 
 impl BinaryAdditionQuiz {
-    pub(super) fn height(&self) -> f32 {
+    pub(crate) fn height(&self) -> f32 {
         let rows = self.problems[self.current_problem].operands.len() + 5;
         CELL_HEIGHT * rows as f32 + 120.0
     }
 
-    pub(super) fn ui(&mut self, ui: &mut egui::Ui, block: &BlockHandle<LogicGame>) {
+    pub(crate) fn ui(&mut self, ui: &mut egui::Ui, block: &BlockHandle<LogicGame>, editable: bool) {
         let problem = self.current_problem;
         let (mut carries, mut sums) = self.answers(block, problem);
 
@@ -96,11 +95,11 @@ impl BinaryAdditionQuiz {
             self.problems.len()
         ));
         ui.add_space(8.0);
-        self.problem_ui(ui, problem, &mut carries, &mut sums, block);
+        self.problem_ui(ui, problem, &mut carries, &mut sums, block, editable);
         ui.add_space(12.0);
 
         ui.horizontal(|ui| {
-            if ui.button("Check").clicked() {
+            if ui.button("Check").test_id("quiz.check").clicked() {
                 self.checked = true;
             }
             if ui.button("Reset page").clicked() {
@@ -191,6 +190,7 @@ impl BinaryAdditionQuiz {
         carries: &mut [Option<bool>],
         sums: &mut [Option<bool>],
         block: &BlockHandle<LogicGame>,
+        editable: bool,
     ) {
         let problem = &self.problems[problem_index];
         ui.group(|ui| {
@@ -199,7 +199,7 @@ impl BinaryAdditionQuiz {
                 .spacing([4.0, 6.0])
                 .show(ui, |ui| {
                     ui.label("carry");
-                    if bit_buttons(ui, carries, &problem.carry_bits, self.checked) {
+                    if bit_buttons(ui, carries, &problem.carry_bits, self.checked, editable) {
                         self.write_row(block, problem_index, QuizRow::Carries, carries.to_vec());
                     }
                     ui.add_sized([CELL_WIDTH, CELL_HEIGHT], egui::Label::new(""));
@@ -224,7 +224,7 @@ impl BinaryAdditionQuiz {
                     ui.end_row();
 
                     ui.label("sum");
-                    if bit_buttons(ui, sums, &problem.sum_bits, self.checked) {
+                    if bit_buttons(ui, sums, &problem.sum_bits, self.checked, editable) {
                         self.write_row(block, problem_index, QuizRow::Sums, sums.to_vec());
                     }
                     ui.end_row();
@@ -239,15 +239,20 @@ fn bit_buttons(
     answers: &mut [Option<bool>],
     expected: &[bool],
     checked: bool,
+    editable: bool,
 ) -> bool {
     let mut changed = false;
     for (answer, expected) in answers.iter_mut().zip(expected) {
         let correct = *answer == Some(*expected);
         let label = answer.map_or_else(|| " ".to_owned(), |bit| u8::from(bit).to_string());
-        let response = ui.add_sized(
-            [CELL_WIDTH, CELL_HEIGHT],
-            egui::Button::new(egui::RichText::new(label).monospace()),
-        );
+        let response = ui
+            .add_enabled_ui(editable, |ui| {
+                ui.add_sized(
+                    [CELL_WIDTH, CELL_HEIGHT],
+                    egui::Button::new(egui::RichText::new(label).monospace()),
+                )
+            })
+            .inner;
         if response.clicked() {
             *answer = next_answer(*answer);
             changed = true;

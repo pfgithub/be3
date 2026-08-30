@@ -33,6 +33,7 @@ mod crypto;
 pub mod presence;
 pub mod properties;
 pub mod references;
+pub mod root_settings;
 mod transport;
 
 #[cfg(all(target_arch = "wasm32", feature = "hosted"))]

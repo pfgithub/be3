@@ -25,6 +25,7 @@ use block::{
     Block, BlockAccess, BlockParent, BlockReference, BlockReferenceList, ManagementErrorCode,
     Workspace, WorkspaceInvitation, WorkspaceRole,
 };
+use block_client::root_settings::RootSettings;
 use block_client::{
     blocks::{ui_settings::UiSettings, workspace_index::BlockEntry},
     presence::{pick_free_color, PresenceColor, UserActive},
@@ -34,8 +35,8 @@ use block_client::{
 };
 use block_picker::{BlockPicker, BlockPickerResult};
 use editors::{
-    direct_editor_tab_ui, settings::RootSettings, ArtifactSession, ArtifactStatus, BlockEditor,
-    BlockLabel, EditorAccess, EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
+    direct_editor_tab_ui, ArtifactSession, ArtifactStatus, BlockEditor, BlockLabel, EditorAccess,
+    EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
 };
 use eframe::egui;
 use egui_dock::{widgets::tab_viewer::OnCloseResponse, DockArea, DockState, TabViewer};

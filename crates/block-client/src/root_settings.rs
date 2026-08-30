@@ -1,25 +1,24 @@
 use block::{Block, BlockParent, BlockReferenceList};
-use block_client::{
-    block_ref::BlockRef,
-    blocks::settings::{ActivationCondition, Settings, SettingsOperation},
-    BlockClient, BlockHandle, ReferenceList,
-};
 use uuid::Uuid;
 
-pub(crate) struct RootSettings {
+use crate::block_ref::BlockRef;
+use crate::blocks::settings::{ActivationCondition, Settings, SettingsOperation};
+use crate::{BlockClient, BlockHandle, ReferenceList};
+
+pub struct RootSettings {
     roots: ReferenceList,
     block: Option<BlockHandle<Settings>>,
 }
 
 impl RootSettings {
-    pub(crate) fn new(client: &BlockClient) -> Self {
+    pub fn new(client: &BlockClient) -> Self {
         Self {
             roots: client.watch_references(BlockReferenceList::Roots),
             block: None,
         }
     }
 
-    pub(crate) fn find(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
+    pub fn find(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
         if self.block.is_none() {
             let found = self
                 .roots
@@ -31,7 +30,7 @@ impl RootSettings {
         self.block.as_ref()
     }
 
-    pub(crate) fn ensure(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
+    pub fn ensure(&mut self, client: &BlockClient) -> Option<&BlockHandle<Settings>> {
         if self.find(client).is_none() && self.roots.is_loaded() {
             let settings = client.create_block(Settings::new());
             settings.set_parent(BlockParent::Root);
@@ -41,28 +40,24 @@ impl RootSettings {
     }
 }
 
-pub(super) struct RootSetting<T: Block> {
+pub struct RootSetting<T: Block> {
     settings: RootSettings,
     block: Option<BlockHandle<T>>,
 }
 
 impl<T: Block + Default> RootSetting<T> {
-    pub(super) fn new(client: &BlockClient) -> Self {
+    pub fn new(client: &BlockClient) -> Self {
         Self {
             settings: RootSettings::new(client),
             block: None,
         }
     }
 
-    pub(super) fn block(&self) -> Option<&BlockHandle<T>> {
+    pub fn block(&self) -> Option<&BlockHandle<T>> {
         self.block.as_ref()
     }
 
-    pub(super) fn find(
-        &mut self,
-        client: &BlockClient,
-        client_id: Uuid,
-    ) -> Option<&BlockHandle<T>> {
+    pub fn find(&mut self, client: &BlockClient, client_id: Uuid) -> Option<&BlockHandle<T>> {
         if self.block.is_none() {
             let id = {
                 let settings = self.settings.find(client)?.read()?;
@@ -73,11 +68,7 @@ impl<T: Block + Default> RootSetting<T> {
         self.block.as_ref()
     }
 
-    pub(super) fn ensure(
-        &mut self,
-        client: &BlockClient,
-        client_id: Uuid,
-    ) -> Option<&BlockHandle<T>> {
+    pub fn ensure(&mut self, client: &BlockClient, client_id: Uuid) -> Option<&BlockHandle<T>> {
         if self.find(client, client_id).is_some() {
             return self.block.as_ref();
         }
