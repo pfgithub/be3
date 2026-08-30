@@ -13,7 +13,6 @@ mod scene_3d;
 pub(crate) mod settings;
 mod text;
 mod unsupported;
-mod version_control_data;
 mod version_control_worktree;
 mod video;
 
@@ -1293,7 +1292,6 @@ impl EditorRegistry {
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register_creatable::<text::TextEditor>();
-        registry.register_creatable::<version_control_data::VersionControlDataEditor>();
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<video::VideoEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();

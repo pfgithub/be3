@@ -1,29 +1,23 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use block::Block;
-use block_client::{
-    blocks::version_control_data::{
-        Commit, CommitId, VersionControlData, VersionControlDataOperation, MAIN_BRANCH,
-    },
-    blocks::version_control_worktree::VersionControlWorktree,
-    BlockClient, BlockHandle,
+use block_client::blocks::version_control_data::{
+    Commit, CommitId, VersionControlData, VersionControlDataOperation, MAIN_BRANCH,
 };
-use eframe::egui;
-use egui_material_icons::{
-    icons::{ICON_ACCOUNT_TREE, ICON_ADD, ICON_ALT_ROUTE, ICON_COMMIT, ICON_PERSON, ICON_SCHEDULE},
-    MaterialIcon,
+use block_client::blocks::version_control_worktree::VersionControlWorktree;
+use block_client::{BlockClient, BlockHandle};
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::egui_material_icons::icons::{
+    ICON_ADD, ICON_ALT_ROUTE, ICON_COMMIT, ICON_PERSON, ICON_SCHEDULE,
 };
+use block_editor_plugin::{egui, EditorHost};
+use uuid::Uuid;
 
-use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess,
-    EditorAction, EditorKind,
-};
-
-const DIRECT_EDITOR_WIDTH: f32 = 640.0;
+const INTRINSIC_WIDTH: f32 = 640.0;
 const BRANCH_ROW_HEIGHT: f32 = 26.0;
 const COMMIT_ROW_HEIGHT: f32 = 44.0;
 const CHROME_HEIGHT: f32 = 192.0;
-const SHORT_ID_LEN: usize = 8;
 const SECONDS_PER_DAY: i64 = 86_400;
 
 struct BranchRow {
@@ -37,42 +31,31 @@ struct CommitRow {
     commit: Commit,
 }
 
-impl EditorKind for VersionControlDataEditor {
-    type Block = VersionControlData;
-
-    const DISPLAY_NAME: &'static str = "Repository";
-    const ICON: MaterialIcon = ICON_ACCOUNT_TREE;
-
-    fn open(_client: &BlockClient, block: BlockHandle<VersionControlData>) -> Self {
-        Self::new(block)
-    }
-}
-
-impl CreatableEditor for VersionControlDataEditor {
-    fn create(client: &BlockClient) -> Self {
-        let author = client.account_id();
-        let time = unix_seconds_now();
-        Self::new(client.create_block(VersionControlData::new(author, time)))
-    }
-}
-
-pub(super) struct VersionControlDataEditor {
-    block: BlockHandle<VersionControlData>,
+pub struct VersionControlDataApp {
+    host: Option<EditorHost>,
+    client: Option<Arc<BlockClient>>,
+    creation: Option<Arc<BlockClient>>,
+    block: Option<BlockHandle<VersionControlData>>,
     selected_branch: String,
     new_branch_name: String,
 }
 
-impl VersionControlDataEditor {
-    fn new(block: BlockHandle<VersionControlData>) -> Self {
+impl Default for VersionControlDataApp {
+    fn default() -> Self {
         Self {
-            block,
+            host: None,
+            client: None,
+            creation: None,
+            block: None,
             selected_branch: MAIN_BRANCH.to_owned(),
             new_branch_name: String::new(),
         }
     }
+}
 
+impl VersionControlDataApp {
     fn read_view(&self) -> Option<(Vec<BranchRow>, Vec<CommitRow>)> {
-        let data = self.block.read()?;
+        let data = self.block.as_ref()?.read()?;
         let branches: Vec<BranchRow> = data
             .branches()
             .iter()
@@ -106,25 +89,31 @@ impl VersionControlDataEditor {
                 "{} {}   {}   {summary}",
                 ICON_ALT_ROUTE.codepoint,
                 branch.name,
-                short_commit_id(&branch.head),
+                branch.head.short(),
             );
-            if ui.selectable_label(selected, label).clicked() {
-                self.selected_branch = branch.name.clone();
+            if ui
+                .selectable_label(selected, label)
+                .test_id(&format!("repository.branch.{}", branch.name))
+                .clicked()
+            {
+                self.selected_branch.clone_from(&branch.name);
             }
         }
     }
 
-    fn new_branch_row(&mut self, ui: &mut egui::Ui, branches: &[BranchRow]) {
+    fn new_branch_row(&mut self, ui: &mut egui::Ui, branches: &[BranchRow], editable: bool) {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_branch_name).hint_text("New branch name"),
-            );
+            )
+            .test_id("repository.new-branch-name");
             let trimmed = self.new_branch_name.trim();
             let current_head = branches
                 .iter()
                 .find(|branch| branch.name == self.selected_branch)
                 .map(|branch| branch.head.clone());
-            let can_create = !trimmed.is_empty()
+            let can_create = editable
+                && !trimmed.is_empty()
                 && current_head.is_some()
                 && !branches.iter().any(|branch| branch.name == trimmed);
             if ui
@@ -132,10 +121,11 @@ impl VersionControlDataEditor {
                     can_create,
                     egui::Button::new(format!("{} Create branch", ICON_ADD.codepoint)),
                 )
+                .test_id("repository.create-branch")
                 .clicked()
             {
-                if let Some(commit) = current_head {
-                    self.block.operate(VersionControlDataOperation::SetBranch {
+                if let (Some(commit), Some(block)) = (current_head, self.block.as_ref()) {
+                    block.operate(VersionControlDataOperation::SetBranch {
                         name: trimmed.to_owned(),
                         expected: None,
                         commit,
@@ -146,27 +136,31 @@ impl VersionControlDataEditor {
         });
     }
 
-    fn new_worktree_button(
-        &self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
+    fn new_worktree_button(&self, ui: &mut egui::Ui, editable: bool) {
         if !ui
-            .button(format!("{} New worktree", ICON_ADD.codepoint))
+            .add_enabled(
+                editable,
+                egui::Button::new(format!("{} New worktree", ICON_ADD.codepoint)),
+            )
             .on_hover_text("Create a worktree checked out against this repository")
+            .test_id("repository.new-worktree")
             .clicked()
         {
-            return None;
+            return;
         }
-        let client = editors.client();
-        let data_state = self.block.read()?;
-        let worktree =
-            client.create_block(VersionControlWorktree::new(self.block.id(), &data_state));
-        drop(data_state);
-        Some(EditorAction::OpenBlock {
-            id: worktree.id(),
-            block_type: VersionControlWorktree::TYPE_ID,
-        })
+        let (Some(host), Some(client), Some(block)) = (
+            self.host.as_ref(),
+            self.client.as_ref(),
+            self.block.as_ref(),
+        ) else {
+            return;
+        };
+        let Some(data) = block.read() else {
+            return;
+        };
+        let worktree = client.create_block(VersionControlWorktree::new(block.id(), &data));
+        drop(data);
+        host.open_block(worktree.id(), VersionControlWorktree::TYPE_ID);
     }
 
     fn commit_history(&self, ui: &mut egui::Ui, history: &[CommitRow]) {
@@ -180,7 +174,7 @@ impl VersionControlDataEditor {
                 ui.strong(&row.commit.message);
             });
             ui.horizontal(|ui| {
-                ui.monospace(short_commit_id(&row.id));
+                ui.monospace(row.id.short());
                 ui.weak(format!(
                     "{} {}",
                     ICON_PERSON.codepoint,
@@ -197,59 +191,53 @@ impl VersionControlDataEditor {
     }
 }
 
-impl BlockEditor for VersionControlDataEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+impl block_editor_plugin::App for VersionControlDataApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        self.block = Some(client.get_block(block_id));
+        self.client = Some(client);
+        self.host = Some(host);
     }
 
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: false,
-        }
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
+        self.creation = Some(client);
     }
 
-    fn direct_editor_intrinsic_size(
-        &mut self,
-        _editors: &mut EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        let author = client.account_id();
+        let data = VersionControlData::new(author, unix_seconds_now());
+        Ok(client.create_block(data).id())
+    }
+
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         let (branches, history) = self.read_view()?;
         let height = CHROME_HEIGHT
             + BRANCH_ROW_HEIGHT * branches.len().max(1) as f32
             + COMMIT_ROW_HEIGHT * history.len().max(1) as f32;
-        Some(egui::vec2(DIRECT_EDITOR_WIDTH, height))
+        Some(egui::vec2(INTRINSIC_WIDTH, height))
     }
 
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+    fn ui(&mut self, ui: &mut egui::Ui) {
         let Some((branches, history)) = self.read_view() else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
-            return None;
+            return;
         };
+        let editable = self.host.as_ref().is_none_or(EditorHost::editable);
 
         ui.heading("Branches");
         self.branch_list(ui, &branches);
-        self.new_branch_row(ui, &branches);
-        let action = self.new_worktree_button(ui, editors);
+        self.new_branch_row(ui, &branches, editable);
+        self.new_worktree_button(ui, editable);
 
         ui.add_space(8.0);
         ui.heading(format!("History  ({})", self.selected_branch));
         self.commit_history(ui, &history);
-
-        action
     }
-}
-
-pub(super) fn short_commit_id(id: &CommitId) -> String {
-    id.as_str().chars().take(SHORT_ID_LEN).collect()
 }
 
 fn unix_seconds_now() -> i64 {
@@ -259,16 +247,16 @@ fn unix_seconds_now() -> i64 {
         .unwrap_or(0)
 }
 
-fn short_author(author: uuid::Uuid) -> String {
+pub(crate) fn short_author(author: Uuid) -> String {
     author
         .simple()
         .to_string()
         .chars()
-        .take(SHORT_ID_LEN)
+        .take(CommitId::SHORT_LEN)
         .collect()
 }
 
-fn format_commit_time(seconds: i64) -> String {
+pub(crate) fn format_commit_time(seconds: i64) -> String {
     let days = seconds.div_euclid(SECONDS_PER_DAY);
     let time_of_day = seconds.rem_euclid(SECONDS_PER_DAY);
     let (year, month, day) = civil_from_days(days);
@@ -291,6 +279,3 @@ fn civil_from_days(days_since_epoch: i64) -> (i32, u8, u8) {
     year += i32::from(month <= 2);
     (year, month as u8, day as u8)
 }
-
-#[cfg(test)]
-mod tests;

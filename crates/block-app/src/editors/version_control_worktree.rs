@@ -22,7 +22,6 @@ use uuid::Uuid;
 
 use crate::platform;
 
-use super::version_control_data::short_commit_id;
 use super::{
     BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
     EditorKind,
@@ -280,7 +279,7 @@ impl VersionControlWorktreeEditor {
         for (name, head) in &branches {
             ui.horizontal(|ui| {
                 ui.label(format!("{} {name}", ICON_ALT_ROUTE.codepoint));
-                ui.monospace(short_commit_id(head));
+                ui.monospace(head.short());
                 if checked_out.as_ref() == Some(head) {
                     ui.weak("checked out");
                 } else if ui

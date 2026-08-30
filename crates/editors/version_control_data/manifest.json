@@ -1,0 +1,13 @@
+{
+  "id": "be3.version-control-data",
+  "name": "Repository",
+  "version": "0.1.0",
+  "block_type": "7663732d-6461-7461-2d62-6c6f636b3030",
+  "display_name": "Repository",
+  "icon": "",
+  "creation": "Immediate",
+  "regions": [
+    "Main"
+  ],
+  "entry_point": "version_control_data.wasm"
+}

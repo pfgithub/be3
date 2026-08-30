@@ -35,6 +35,7 @@ members = [
     "crates/editors/presentation",
     "crates/editors/settings",
     "crates/editors/ui_settings",
+    "crates/editors/version_control_data",
     "crates/editors/workspace_index",
     "crates/block-editor-plugin",
     "crates/block-gpu-abi",

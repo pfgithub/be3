@@ -12,8 +12,14 @@ pub const MAIN_BRANCH: &str = "main";
 pub struct CommitId(ObjectHash);
 
 impl CommitId {
+    pub const SHORT_LEN: usize = 8;
+
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    pub fn short(&self) -> String {
+        self.as_str().chars().take(Self::SHORT_LEN).collect()
     }
 }
 
