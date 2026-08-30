@@ -26,7 +26,7 @@ pub fn assert_snapshot(name: &str, snapshot: &Snapshot) {
     };
 
     panic!(
-        "the painting changed: {}\nto accept it:\n  UPDATE_SNAPSHOTS=1 cargo nextest run --workspace\nthen {REVIEW}",
+        "the painting changed: {}\nto accept it:\n  ./scripts/verify, or UPDATE_SNAPSHOTS=1 cargo nextest run --workspace\nthen {REVIEW}",
         difference.description
     );
 }

@@ -96,29 +96,24 @@ as the last costs the triangles that draw it and nothing more. Keep recordings t
 frames that say something: every frame is compared, so a frame nobody looks at is one more
 way for the test to fail.
 
-- Accept a new or changed painting with UPDATE_SNAPSHOTS=1 cargo nextest run --workspace.
-  A test that fails without it says what changed — which frame, and what moved in it — and
-  leaves the accepted file as it was.
-- Look at them in a Paint review block, which is what a person reviews them with. It asks
-  GitHub for that one folder on the repository's dev branch - a single request that lists
-  the paintings rather than the whole tree - and downloads each of them, so a painting is
-  reviewed once it has been pushed rather than from the machine that made it, and works the
-  same in the browser as on the desktop. It sorts them into the ones it has never seen, the
-  ones whose contents changed since they were approved, and the ones that have gone.
-  Choosing one renders every frame of it, and every frame of the one it was approved as,
-  before you ask for them, so stepping through a recording or flicking between the two never
-  waits on a rasteriser. Approving it keeps a copy of the painting - a block of its own - and
-  the hash. A recording is shown a frame at a time: step through it, play it, drag the
-  slider, or jump straight to the frame that changed. A changed painting is shown four ways:
-  the painting that was approved, the one on the branch, the difference - the pixels that
-  moved or changed colour, in red, over a ghost of the ones that did not, counted and
-  bounded - and the two side by side. The view is the host's, as it is for any editor that
-  pans and zooms: scroll or pinch to zoom and drag to pan, or ask for a zoom, 1:1 or a fit
-  from the toolbar; past 1:1 it is drawn a pixel at a time rather than smoothed, so a single
-  pixel is something you can look at.
-- Approving is not git, and a reviewer is not the tests: a painting nobody approved is new
-  again the next time the block is opened, and one nobody had approved before it vanished
-  is not reported at all.
+- ./scripts/verify accepts whatever the tests paint: it runs them with UPDATE_SNAPSHOTS=1, so
+  a new or changed painting is written into snapshots/ rather than failing the run. Commit
+  those files with the change that caused them. CI runs ./scripts/verify --check, which sets
+  nothing, so a painting that was never committed fails there.
+- A changed painting is for a person to review, not for you. They review it in a Paint
+  review block, which reads the folder from the repository's dev branch, so a painting is
+  reviewed once it has been pushed rather than from the machine that made it. Approving is
+  not git and a reviewer is not the tests: a painting nobody approved is new again the next
+  time the block is opened, and one nobody had approved before it vanished is not reported
+  at all.
+- Regenerating them is cheap and mechanical - an egui upgrade rewrites every one - so a
+  changed painting is not by itself a failure to explain, and there is nothing in it for you
+  to look at. Say in your handoff which paintings changed and why, and leave the images
+  alone.
+- The exception is a painting you cannot account for: if you do not know why one changed,
+  restore the committed file and run the test without UPDATE_SNAPSHOTS - git restore
+  snapshots/ && cargo nextest run --workspace - and the failure says which frame changed and
+  what moved in it, which is what you needed rather than the image.
 
 A snapshot never holds the font atlas. Each triangle carries the piece of texture it
 samples, cut out of the atlas and keyed by what is in it, so where a glyph happened to land
@@ -127,12 +122,9 @@ name, a uuid, the time - repacks the atlas without moving anything in the snapsh
 that varies in the frame the test captures is of course a different painting, and still
 has to be kept out of it.
 
-Regenerating them is cheap and mechanical - an egui upgrade rewrites every one - so a
-changed snapshot is not by itself a failure to explain. You should not look at the image,
-images are for a human to review later. What the review block renders is close to what the
-app draws rather than identical: it blends in sRGB where the GPU blends in linear light, and a
-region drawn by a paint callback (a plugin's surface, a 3D scene) is a magenta outline,
-since its contents never reach the painter.
+Nor does a snapshot hold what a paint callback draws - a plugin's surface, a 3D scene -
+since those contents never reach the painter: the snapshot keeps the region and nothing
+inside it, so a test of one asserts on the block instead.
 
 5. Running them
 

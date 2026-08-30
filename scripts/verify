@@ -6,9 +6,10 @@
 # workspace. This is the one command to run after making changes.
 #
 # By default source layout and comments are fixed, clippy applies the fixes it
-# can and rustfmt rewrites the sources. With --check nothing is written and each
-# tool only reports, which is what CI wants. Either way the run fails if a Rust
-# source violation or clippy warning survives.
+# can, rustfmt rewrites the sources and the tests accept whatever painting they
+# produce. With --check nothing is written and each tool only reports, which is
+# what CI wants. Either way the run fails if a Rust source violation or clippy
+# warning survives.
 #
 # Usage:
 #   ./scripts/verify
@@ -65,7 +66,9 @@ echo 'cargo nextest run...'
 if $check; then
     t cargo nextest run --profile ci
 else
-    t cargo nextest run --cargo-quiet --show-progress=none
+    # A changed painting is not a failure to fix here: the accepted files are
+    # rewritten, and it is the diff a person reviews.
+    t env UPDATE_SNAPSHOTS=1 cargo nextest run --cargo-quiet --show-progress=none
 fi
 
 echo ''
