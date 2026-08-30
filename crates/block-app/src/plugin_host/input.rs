@@ -1,5 +1,5 @@
 use block_plugin_api::{
-    InputBatch, InputEvent, Message, Modifiers, PhysicalKey, PointerButton, ScreenId,
+    DroppedFile, InputBatch, InputEvent, Message, Modifiers, PhysicalKey, PointerButton, ScreenId,
     ViewportMetrics, WheelUnit,
 };
 use eframe::egui;
@@ -32,6 +32,54 @@ pub(super) fn block_drag(response: &egui::Response) -> Option<BlockDragEvent> {
     })
 }
 
+pub(super) struct FileDropEvent {
+    pub(super) position: egui::Vec2,
+    pub(super) files: Vec<DroppedFile>,
+    pub(super) dropped: bool,
+}
+
+pub(super) fn file_drop(response: &egui::Response) -> Option<FileDropEvent> {
+    let (hovering, dropped) = response.ctx.input(|input| {
+        (
+            !input.raw.hovered_files.is_empty(),
+            input.raw.dropped_files.clone(),
+        )
+    });
+    let pointer = response
+        .ctx
+        .pointer_latest_pos()
+        .filter(|position| response.rect.contains(*position))?;
+    if !dropped.is_empty() {
+        return Some(FileDropEvent {
+            position: pointer - response.rect.min,
+            files: dropped.into_iter().filter_map(read_dropped).collect(),
+            dropped: true,
+        });
+    }
+    hovering.then(|| FileDropEvent {
+        position: pointer - response.rect.min,
+        files: Vec::new(),
+        dropped: false,
+    })
+}
+
+fn read_dropped(file: egui::DroppedFile) -> Option<DroppedFile> {
+    let name = file
+        .path
+        .as_ref()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .or_else(|| (!file.name.is_empty()).then(|| file.name.clone()))
+        .unwrap_or_else(|| "File".to_owned());
+    let data = match file.bytes {
+        Some(bytes) => bytes.to_vec(),
+        None => std::fs::read(file.path.as_ref()?).ok()?,
+    };
+    Some(DroppedFile { name, data })
+}
+
 #[derive(Default)]
 pub(super) struct InputAdapter {
     captured: bool,
@@ -39,6 +87,7 @@ pub(super) struct InputAdapter {
     focused: bool,
     modifiers: Modifiers,
     over_hole: bool,
+    paste_shortcut_down: bool,
 }
 
 impl InputAdapter {
@@ -66,6 +115,13 @@ impl InputAdapter {
             for event in events {
                 self.normalize_event(event, rect, hovered, focused, holes, &mut normalized);
             }
+        }
+
+        let shortcut_down = super::clipboard::paste_shortcut_down();
+        let shortcut_pressed = shortcut_down && !self.paste_shortcut_down;
+        self.paste_shortcut_down = shortcut_down;
+        if focused && shortcut_pressed {
+            normalized.push(InputEvent::Paste(String::new()));
         }
 
         if normalized.is_empty() {
@@ -162,8 +218,11 @@ impl InputAdapter {
                     repeat,
                 });
             }
-            egui::Event::Text(text) | egui::Event::Paste(text) if focused => {
+            egui::Event::Text(text) if focused => {
                 output.push(InputEvent::Text(text));
+            }
+            egui::Event::Paste(text) if focused => {
+                output.push(InputEvent::Paste(text));
             }
             egui::Event::WindowFocused(window_focused) if !window_focused && self.focused => {
                 self.focused = false;

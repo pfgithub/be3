@@ -133,11 +133,14 @@ impl ClientSession {
                 Message::Editor(
                     block_plugin_api::EditorMessage::DragOver { instance, .. }
                     | block_plugin_api::EditorMessage::DragLeft { instance }
+                    | block_plugin_api::EditorMessage::FileDrop { instance, .. }
+                    | block_plugin_api::EditorMessage::FileDropLeft { instance }
                     | block_plugin_api::EditorMessage::CommitCreation { instance }
                     | block_plugin_api::EditorMessage::FilePicked { instance, .. }
                     | block_plugin_api::EditorMessage::BlockPicked { instance, .. }
                     | block_plugin_api::EditorMessage::Fetched { instance, .. }
                     | block_plugin_api::EditorMessage::AudioStatus { instance, .. }
+                    | block_plugin_api::EditorMessage::ImagePasted { instance, .. }
                     | block_plugin_api::EditorMessage::ArtifactSettings { instance, .. }
                     | block_plugin_api::EditorMessage::RegenerateArtifact { instance, .. },
                 ),

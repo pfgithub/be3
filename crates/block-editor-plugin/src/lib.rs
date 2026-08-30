@@ -19,13 +19,14 @@ pub mod session;
 mod wasm;
 
 pub use block_plugin_api::{
-    AudioStatus, BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, EditorRegion,
-    FetchResult, ViewChange,
+    AudioStatus, BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, ClipboardImage,
+    EditorRegion, FetchResult, ViewChange,
 };
 pub use block_ui;
 pub use host::{
-    Artifact, ArtifactDescription, BlockDrag, BlockPicker, ChildHandle, EditorHost, FileFilter,
-    FilePicker, PerformanceMeasurementGuard, PerformanceReporter, PickedFile, Waker,
+    Artifact, ArtifactDescription, BlockDrag, BlockPicker, ChildHandle, EditorHost, FileDrop,
+    FileFilter, FilePicker, ImagePaster, PastedImage, PerformanceMeasurementGuard,
+    PerformanceReporter, PickedFile, Waker,
 };
 
 pub trait App: Default + 'static {

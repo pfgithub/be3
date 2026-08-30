@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 34;
+pub const PROTOCOL_VERSION: u16 = 36;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -439,6 +439,19 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
     },
 
+    FileDrop {
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        x: f32,
+        y: f32,
+        files: Vec<DroppedFile>,
+        dropped: bool,
+    },
+
+    FileDropLeft {
+        instance: EditorInstanceId,
+    },
+
     DragAccepted {
         instance: EditorInstanceId,
         accepted: bool,
@@ -462,6 +475,15 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         request_id: u64,
         pick: BlockPick,
+    },
+    PasteImage {
+        instance: EditorInstanceId,
+        request_id: u64,
+    },
+    ImagePasted {
+        instance: EditorInstanceId,
+        request_id: u64,
+        image: ClipboardImage,
     },
     PlayAudio {
         instance: EditorInstanceId,
@@ -641,6 +663,19 @@ pub enum FetchResult {
     Failed(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DroppedFile {
+    pub name: String,
+    pub data: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClipboardImage {
+    Pasted { name: String, data: Vec<u8> },
+    Empty,
+    Failed(String),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioCommand {
     Toggle,
@@ -791,6 +826,7 @@ pub enum InputEvent {
         repeat: bool,
     },
     Text(String),
+    Paste(String),
     Modifiers(Modifiers),
     Focus(bool),
 }
@@ -910,7 +946,10 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
         Message::Input(value) => {
             collection(value.events.len())?;
             for event in &value.events {
-                if let InputEvent::Key { logical, .. } | InputEvent::Text(logical) = event {
+                if let InputEvent::Key { logical, .. }
+                | InputEvent::Text(logical)
+                | InputEvent::Paste(logical) = event
+                {
                     string(logical)?;
                 }
             }
@@ -999,6 +1038,15 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
         | EditorMessage::ArtifactSettings { data, .. }
         | EditorMessage::ArtifactEdited { data, .. }
         | EditorMessage::RegenerateArtifact { data, .. } => descriptor(data),
+        EditorMessage::FileDrop { files, .. } => {
+            collection(files.len())?;
+            strings(files.iter().map(|file| &file.name))
+        }
+        EditorMessage::ImagePasted { image, .. } => match image {
+            ClipboardImage::Pasted { name, .. } => string(name),
+            ClipboardImage::Failed(message) => string(message),
+            ClipboardImage::Empty => Ok(()),
+        },
         EditorMessage::AudioStatus { status, .. } => match &status.error {
             Some(message) => string(message),
             None => Ok(()),

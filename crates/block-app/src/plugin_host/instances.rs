@@ -1,10 +1,10 @@
 use block_client::{blocks::audio::Audio, BlockClient, Tunnel};
 use block_plugin_api::{
     ArtifactDescription, AudioCommand, AudioStatus, BlockPick, BlockTypeDescriptor, ChildId,
-    ChildMode, ChildPlacement, ChildPlacements, ChildStatus, CreationOutcome, CursorIcon,
-    EditorInstanceId, EditorMessage, EditorRegion, FetchResult, FilePick, Message, Occluder,
-    PerformanceMeasurement, RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest,
-    ScreenSet, TunnelMessage, ViewChange,
+    ChildMode, ChildPlacement, ChildPlacements, ChildStatus, ClipboardImage, CreationOutcome,
+    CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult, FilePick, Message,
+    Occluder, PerformanceMeasurement, RegenerationOutcome, RegionSize, ScreenId, ScreenLayout,
+    ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{
@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use super::{
     audio::AudioPlayer,
-    input::{viewport_metrics, BlockDragEvent, InputAdapter},
+    input::{viewport_metrics, BlockDragEvent, FileDropEvent, InputAdapter},
     BlockPickRequest, EditorBlock, HostChild, HostChildStatus, InstanceRole, MAX_LIVE_CHILDREN,
 };
 use crate::{
@@ -59,6 +59,7 @@ struct Instance {
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
     fetches: Vec<PendingFetch>,
+    pastes: Vec<PendingPaste>,
     audio: Option<AudioPlayer>,
     reported_audio: AudioStatus,
     reported_size: Option<egui::Vec2>,
@@ -95,6 +96,7 @@ impl Instance {
             aspect_ratio: None,
             picks: Vec::new(),
             fetches: Vec::new(),
+            pastes: Vec::new(),
             audio: None,
             reported_audio: AudioStatus::default(),
             reported_size: None,
@@ -119,6 +121,11 @@ struct PendingFetch {
     fetch: Fetch,
 }
 
+struct PendingPaste {
+    request_id: u64,
+    image: ClipboardImage,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct Placement {
     pub(super) id: egui::Id,
@@ -134,6 +141,7 @@ struct Screen {
     last_seen: u64,
     used: Option<egui::Vec2>,
     dragging: bool,
+    file_dropping: bool,
     cursor: CursorIcon,
     children: ChildTable,
     reported_statuses: HashMap<ChildId, ChildStatus>,
@@ -240,6 +248,7 @@ impl Instances {
                 last_seen: pass,
                 used: None,
                 dragging: false,
+                file_dropping: false,
                 cursor: CursorIcon::Default,
                 children: ChildTable::default(),
                 reported_statuses: HashMap::new(),
@@ -544,6 +553,38 @@ impl Instances {
                 screen.dragging = false;
                 entry.drag_accepted = false;
                 vec![Message::Editor(EditorMessage::DragLeft { instance })]
+            }
+            None => Vec::new(),
+        }
+    }
+
+    pub(super) fn file_drop(
+        &mut self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        event: Option<FileDropEvent>,
+    ) -> Vec<Message> {
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return Vec::new();
+        };
+        let Some(screen) = entry.screens.get_mut(&region) else {
+            return Vec::new();
+        };
+        match event {
+            Some(event) => {
+                screen.file_dropping = !event.dropped;
+                vec![Message::Editor(EditorMessage::FileDrop {
+                    instance,
+                    region,
+                    x: event.position.x,
+                    y: event.position.y,
+                    files: event.files,
+                    dropped: event.dropped,
+                })]
+            }
+            None if screen.file_dropping => {
+                screen.file_dropping = false;
+                vec![Message::Editor(EditorMessage::FileDropLeft { instance })]
             }
             None => Vec::new(),
         }
@@ -1017,6 +1058,14 @@ impl Instances {
                 false
             });
             let entry = self.entries.get_mut(&instance).unwrap();
+            for pending in std::mem::take(&mut entry.pastes) {
+                messages.push(Message::Editor(EditorMessage::ImagePasted {
+                    instance,
+                    request_id: pending.request_id,
+                    image: pending.image,
+                }));
+            }
+            let entry = self.entries.get_mut(&instance).unwrap();
             if let Some(player) = &entry.audio {
                 let status = player.status();
                 if status.playing {
@@ -1068,6 +1117,19 @@ impl Instances {
                 let mut picker = FilePicker::default();
                 picker.open(&entry.context, &host_filter(filter));
                 entry.picks.push(PendingPick { request_id, picker });
+                true
+            }
+            EditorMessage::PasteImage {
+                instance,
+                request_id,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.pastes.push(PendingPaste {
+                    request_id,
+                    image: super::clipboard::read_clipboard_image(),
+                });
                 true
             }
             EditorMessage::PlayAudio {

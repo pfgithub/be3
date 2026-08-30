@@ -18,6 +18,7 @@ pub(crate) struct EguiSession {
     regions: HashMap<EditorRegion, RegionState>,
     host: EditorHost,
     drag: Option<(EditorRegion, BlockDrag)>,
+    files: Option<(EditorRegion, crate::host::FileDrop)>,
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     creating: bool,
@@ -180,6 +181,10 @@ impl EguiSession {
         self.host.set_block_types(catalog);
     }
 
+    pub(crate) fn set_pasted_image(&self, request: u64, image: block_plugin_api::ClipboardImage) {
+        self.host.set_pasted_image(request, image);
+    }
+
     pub(crate) fn set_audio(&self, status: block_plugin_api::AudioStatus) {
         self.host.set_audio(status);
     }
@@ -206,6 +211,10 @@ impl EguiSession {
 
     pub(crate) fn set_drag(&mut self, drag: Option<(EditorRegion, BlockDrag)>) {
         self.drag = drag;
+    }
+
+    pub(crate) fn set_files(&mut self, files: Option<(EditorRegion, crate::host::FileDrop)>) {
+        self.files = files;
     }
 
     pub(crate) fn connect(&mut self, client: Arc<BlockClient>, block_id: Uuid) {
@@ -377,6 +386,12 @@ impl EguiSession {
                 filter,
             }));
         }
+        for request_id in self.host.take_pastes() {
+            messages.push(Message::Editor(EditorMessage::PasteImage {
+                instance,
+                request_id,
+            }));
+        }
         for (block_id, command) in self.host.take_audio_commands() {
             messages.push(Message::Editor(EditorMessage::PlayAudio {
                 instance,
@@ -540,6 +555,14 @@ impl EguiSession {
             })
         });
         self.host.set_drag(drag);
+        let files = self.files.as_ref().and_then(|(dropped, files)| {
+            (*dropped == region).then(|| crate::host::FileDrop {
+                position: files.position + rect.min.to_vec2(),
+                ..files.clone()
+            })
+        });
+        let delivered_files = files.as_ref().is_some_and(|files| files.dropped);
+        self.host.set_files(files);
         let delivered_drop = drag.is_some_and(|drag| drag.dropped);
         let app = &mut self.app;
         let frame = if region == EditorRegion::Preview {
@@ -581,8 +604,12 @@ impl EguiSession {
             state.occluders = occluders;
         }
         self.host.set_drag(None);
+        self.host.set_files(None);
         if delivered_drop {
             self.drag = None;
+        }
+        if delivered_files {
+            self.files = None;
         }
         self.used(region, content);
         let cursor = cursor_icon(output.platform_output.cursor_icon);
@@ -684,6 +711,7 @@ impl EguiSession {
                 }
             }
             InputEvent::Text(text) => state.input.events.push(egui::Event::Text(text.clone())),
+            InputEvent::Paste(text) => state.input.events.push(egui::Event::Paste(text.clone())),
             InputEvent::Modifiers(modifiers) => {
                 state.input.modifiers = egui::Modifiers {
                     alt: modifiers.alt,

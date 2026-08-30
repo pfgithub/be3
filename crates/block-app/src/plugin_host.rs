@@ -10,6 +10,8 @@ use uuid::Uuid;
 
 mod audio;
 mod backend;
+mod clipboard;
+pub(crate) use clipboard::{paste_shortcut_down, read_clipboard_image};
 mod input;
 mod instances;
 mod presenter;

@@ -8,8 +8,8 @@ use std::{
 
 use block_plugin_api::{
     AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart,
-    ChildPlacement, ChildRect, ChildStatus, EditorRegion, FetchResult, FilePick, Occluder,
-    PerformanceMeasurement, ViewChange,
+    ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorRegion, FetchResult, FilePick,
+    Occluder, PerformanceMeasurement, ViewChange,
 };
 pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_ui::BlockCatalog;
@@ -24,6 +24,13 @@ pub struct BlockDrag {
     pub dropped: bool,
 }
 
+#[derive(Clone)]
+pub struct FileDrop {
+    pub position: egui::Pos2,
+    pub files: Vec<PickedFile>,
+    pub dropped: bool,
+}
+
 #[derive(Clone, Copy)]
 pub struct Artifact {
     pub block_id: Uuid,
@@ -35,6 +42,7 @@ pub struct ArtifactDescription {
     pub summary: String,
 }
 
+#[derive(Clone)]
 pub struct PickedFile {
     pub name: String,
     pub data: Vec<u8>,
@@ -224,6 +232,7 @@ pub struct EditorHost {
     opens: Rc<RefCell<Vec<(Uuid, Uuid)>>>,
     block_types: Rc<RefCell<Rc<BlockCatalog>>>,
     drag: Rc<Cell<Option<BlockDrag>>>,
+    files: Rc<RefCell<Option<FileDrop>>>,
     drag_accepted: Rc<Cell<Option<bool>>>,
     picks: Rc<RefCell<Vec<(u64, FileFilter)>>>,
     picked: Rc<RefCell<HashMap<u64, FilePick>>>,
@@ -243,6 +252,9 @@ pub struct EditorHost {
     next_block_pick: Rc<Cell<u64>>,
     audio_commands: Rc<RefCell<Vec<(Uuid, AudioCommand)>>>,
     audio_status: Rc<RefCell<AudioStatus>>,
+    pastes: Rc<RefCell<Vec<u64>>>,
+    pasted: Rc<RefCell<HashMap<u64, ClipboardImage>>>,
+    next_paste: Rc<Cell<u64>>,
     fetches: Rc<RefCell<Vec<(u64, String)>>>,
     fetched: Rc<RefCell<HashMap<u64, FetchResult>>>,
     next_fetch: Rc<Cell<u64>>,
@@ -313,6 +325,15 @@ impl EditorHost {
         self.drag.get()
     }
 
+    pub fn files(&self) -> Option<FileDrop> {
+        self.files.borrow().clone()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn set_files(&self, drop: Option<FileDrop>) {
+        *self.files.borrow_mut() = drop;
+    }
+
     pub fn accept_drag(&self, accepted: bool) {
         self.drag_accepted.set(Some(accepted));
     }
@@ -337,6 +358,26 @@ impl EditorHost {
 
     pub fn take_block_pick(&self, request: u64) -> Option<BlockPick> {
         self.blocks_picked.borrow_mut().remove(&request)
+    }
+
+    pub fn paste_image(&self) -> u64 {
+        let request = self.next_paste.get() + 1;
+        self.next_paste.set(request);
+        self.pastes.borrow_mut().push(request);
+        request
+    }
+
+    pub fn take_pasted_image(&self, request: u64) -> Option<ClipboardImage> {
+        self.pasted.borrow_mut().remove(&request)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn take_pastes(&self) -> Vec<u64> {
+        std::mem::take(&mut self.pastes.borrow_mut())
+    }
+
+    pub fn set_pasted_image(&self, request: u64, image: ClipboardImage) {
+        self.pasted.borrow_mut().insert(request, image);
     }
 
     pub fn play_audio(&self, block_id: Uuid) {
@@ -723,6 +764,54 @@ impl FilePicker {
             FilePick::Failed(error) => Some(Err(error)),
         }
     }
+}
+
+#[derive(Default)]
+pub struct ImagePaster {
+    request: Option<u64>,
+}
+
+impl ImagePaster {
+    pub fn poll(&mut self, ui: &egui::Ui, host: &EditorHost, enabled: bool) -> Option<PastedImage> {
+        if let Some(request) = self.request {
+            return match host.take_pasted_image(request)? {
+                ClipboardImage::Pasted { name, data } => {
+                    self.request = None;
+                    Some(PastedImage::Image { name, data })
+                }
+                ClipboardImage::Empty => {
+                    self.request = None;
+                    Some(PastedImage::Empty)
+                }
+                ClipboardImage::Failed(error) => {
+                    self.request = None;
+                    Some(PastedImage::Failed(error))
+                }
+            };
+        }
+        if !enabled || !pasted(ui) {
+            return None;
+        }
+        self.request = Some(host.paste_image());
+        None
+    }
+}
+
+pub enum PastedImage {
+    Image { name: String, data: Vec<u8> },
+    Empty,
+    Failed(String),
+}
+
+fn pasted(ui: &egui::Ui) -> bool {
+    ui.input(|input| {
+        input
+            .raw
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Paste(_)))
+            || (input.modifiers.command && input.key_pressed(egui::Key::V))
+    })
 }
 
 fn child_rect(rect: egui::Rect) -> ChildRect {

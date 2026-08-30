@@ -164,6 +164,15 @@ impl Screens {
                     session.resized(egui::vec2(*width, *height));
                 }
             }
+            Message::Editor(EditorMessage::ImagePasted {
+                instance,
+                request_id,
+                image,
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.set_pasted_image(*request_id, image.clone());
+                }
+            }
             Message::Editor(EditorMessage::AudioStatus { instance, status }) => {
                 if let Some(session) = self.sessions.get(instance) {
                     session.set_audio(status.clone());
@@ -314,6 +323,36 @@ impl Screens {
             Message::Editor(EditorMessage::DragLeft { instance }) => {
                 if let Some(session) = self.sessions.get_mut(instance) {
                     session.set_drag(None);
+                }
+            }
+            Message::Editor(EditorMessage::FileDrop {
+                instance,
+                region,
+                x,
+                y,
+                files,
+                dropped,
+            }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.set_files(Some((
+                        *region,
+                        crate::host::FileDrop {
+                            position: egui::pos2(*x, *y),
+                            files: files
+                                .iter()
+                                .map(|file| crate::PickedFile {
+                                    name: file.name.clone(),
+                                    data: file.data.clone(),
+                                })
+                                .collect(),
+                            dropped: *dropped,
+                        },
+                    )));
+                }
+            }
+            Message::Editor(EditorMessage::FileDropLeft { instance }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.set_files(None);
                 }
             }
             _ => return false,

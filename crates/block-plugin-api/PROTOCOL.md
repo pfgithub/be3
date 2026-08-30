@@ -105,6 +105,19 @@ which the manifest's resize mode allows - is told the size it was given, in
 its own points. Only an editor whose block records its size answers by
 writing it; the rest ignore it and keep reporting the size they want.
 
+Files the user drags onto a region reach the instance the way a dragged block
+does: while they are only hovering the instance is told where they are and
+nothing else, and on the drop it is told the same position along with each
+file's name and the bytes the host read. Only the host can read a file on
+every platform, so a plugin never sees a path.
+
+An editor instance may ask the host for the image on the clipboard, which
+only the host can read on any platform. A paste reaches the instance as a
+paste event of its own rather than as ordinary typed text, so an editor that
+takes images can tell one from the other; the request is answered exactly
+once, with the image the host read, with nothing when the clipboard holds no
+image, or with why it could not be read.
+
 An editor instance may ask the host to play the audio in one of its blocks,
 which only the host can do: a plugin has no sound device on any platform, and
 an audio file is far larger than a message may carry. The request names the

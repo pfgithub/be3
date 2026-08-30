@@ -444,6 +444,9 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
         let hovering = drag.as_ref().is_some_and(|drag| !drag.dropped);
         let messages = runtime.instances.drag(instance, region, drag);
         runtime.send(messages);
+        let files = input::file_drop(&response).filter(|_| !over_hole);
+        let messages = runtime.instances.file_drop(instance, region, files);
+        runtime.send(messages);
         if hovering && runtime.instances.drag_accepted(instance) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
         } else if response.hovered() && !over_hole {
