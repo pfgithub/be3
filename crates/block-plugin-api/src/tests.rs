@@ -55,6 +55,7 @@ fn region_screen(
 }
 
 mod artifact_messages_round_trip;
+mod audio_messages_round_trip;
 mod block_types_round_trip;
 mod child_placements_round_trip;
 mod child_statuses_round_trip;

@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 32;
+pub const PROTOCOL_VERSION: u16 = 33;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -458,6 +458,15 @@ pub enum EditorMessage {
         request_id: u64,
         pick: BlockPick,
     },
+    PlayAudio {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        command: AudioCommand,
+    },
+    AudioStatus {
+        instance: EditorInstanceId,
+        status: AudioStatus,
+    },
     Fetch {
         instance: EditorInstanceId,
         request_id: u64,
@@ -625,6 +634,20 @@ pub enum FilePick {
 pub enum FetchResult {
     Body(Vec<u8>),
     Failed(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AudioCommand {
+    Toggle,
+    Reset,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioStatus {
+    pub playing: bool,
+    pub position_micros: u64,
+    pub duration_micros: Option<u64>,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -971,6 +994,10 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
         | EditorMessage::ArtifactSettings { data, .. }
         | EditorMessage::ArtifactEdited { data, .. }
         | EditorMessage::RegenerateArtifact { data, .. } => descriptor(data),
+        EditorMessage::AudioStatus { status, .. } => match &status.error {
+            Some(message) => string(message),
+            None => Ok(()),
+        },
         EditorMessage::FilePicked { pick, .. } => match pick {
             FilePick::Chosen { name, .. } => string(name),
             FilePick::Failed(message) => string(message),

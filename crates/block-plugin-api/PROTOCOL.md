@@ -100,6 +100,14 @@ the picker offers and is answered exactly once, with the file the host read,
 the picker the user closed, or why the file could not be read. Requests are
 identified per instance and may be outstanding together.
 
+An editor instance may ask the host to play the audio in one of its blocks,
+which only the host can do: a plugin has no sound device on any platform, and
+an audio file is far larger than a message may carry. The request names the
+block rather than its bytes, which the host already holds through its own
+client. The host answers with what its player is doing - whether it is
+playing, where it is, how long the audio is once it knows, and why it could
+not play - and repeats that answer whenever any of it changes.
+
 An editor instance may ask the host to fetch a URL for it, which is the only
 network a plugin has: a plugin runs with no sockets of its own, and its block
 client already reaches the server through the host's connection. The request

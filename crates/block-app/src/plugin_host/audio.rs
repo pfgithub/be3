@@ -1,6 +1,18 @@
 use std::time::Duration;
 
 use block_client::blocks::audio::Audio;
+use block_plugin_api::AudioStatus;
+
+impl AudioPlayer {
+    pub(super) fn status(&self) -> AudioStatus {
+        AudioStatus {
+            playing: self.is_playing(),
+            position_micros: self.position().as_micros() as u64,
+            duration_micros: self.duration().map(|duration| duration.as_micros() as u64),
+            error: self.error().map(str::to_owned),
+        }
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) struct AudioPlayer {

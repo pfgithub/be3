@@ -6,11 +6,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_plugin_api::{
-    BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, ChildPlacement, ChildRect, ChildStatus,
-    EditorRegion, FetchResult, FilePick, Occluder, PerformanceMeasurement, ViewChange,
+    AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart,
+    ChildPlacement, ChildRect, ChildStatus, EditorRegion, FetchResult, FilePick, Occluder,
+    PerformanceMeasurement, ViewChange,
 };
+pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_ui::BlockCatalog;
 use eframe::egui;
 use uuid::Uuid;
@@ -240,6 +241,8 @@ pub struct EditorHost {
     block_picks: Rc<RefCell<Vec<(u64, BlockFilter)>>>,
     blocks_picked: Rc<RefCell<HashMap<u64, BlockPick>>>,
     next_block_pick: Rc<Cell<u64>>,
+    audio_commands: Rc<RefCell<Vec<(Uuid, AudioCommand)>>>,
+    audio_status: Rc<RefCell<AudioStatus>>,
     fetches: Rc<RefCell<Vec<(u64, String)>>>,
     fetched: Rc<RefCell<HashMap<u64, FetchResult>>>,
     next_fetch: Rc<Cell<u64>>,
@@ -334,6 +337,31 @@ impl EditorHost {
 
     pub fn take_block_pick(&self, request: u64) -> Option<BlockPick> {
         self.blocks_picked.borrow_mut().remove(&request)
+    }
+
+    pub fn play_audio(&self, block_id: Uuid) {
+        self.audio_commands
+            .borrow_mut()
+            .push((block_id, AudioCommand::Toggle));
+    }
+
+    pub fn reset_audio(&self, block_id: Uuid) {
+        self.audio_commands
+            .borrow_mut()
+            .push((block_id, AudioCommand::Reset));
+    }
+
+    pub fn audio(&self) -> AudioStatus {
+        self.audio_status.borrow().clone()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn take_audio_commands(&self) -> Vec<(Uuid, AudioCommand)> {
+        std::mem::take(&mut self.audio_commands.borrow_mut())
+    }
+
+    pub fn set_audio(&self, status: AudioStatus) {
+        *self.audio_status.borrow_mut() = status;
     }
 
     pub fn fetch(&self, url: impl Into<String>) -> u64 {

@@ -19,8 +19,8 @@ pub mod session;
 mod wasm;
 
 pub use block_plugin_api::{
-    BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, EditorRegion, FetchResult,
-    ViewChange,
+    AudioStatus, BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, EditorRegion,
+    FetchResult, ViewChange,
 };
 pub use block_ui;
 pub use host::{

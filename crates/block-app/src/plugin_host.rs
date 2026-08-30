@@ -8,6 +8,7 @@ use block_plugin_api::{
 use eframe::egui;
 use uuid::Uuid;
 
+mod audio;
 mod backend;
 mod input;
 mod instances;

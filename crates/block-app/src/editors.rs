@@ -1,4 +1,3 @@
-mod audio;
 mod browser_tab;
 mod clipboard;
 mod database_view;
@@ -1284,7 +1283,6 @@ impl EditorRegistry {
             new_block_actions: Vec::new(),
             plugin_block_types: Arc::default(),
         };
-        registry.register_configurable::<audio::AudioEditor>();
         registry.register_creatable::<database_view::DatabaseViewEditor>();
         registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();

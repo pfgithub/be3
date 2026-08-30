@@ -1,0 +1,14 @@
+{
+  "id": "be3.audio",
+  "name": "Audio",
+  "version": "0.1.0",
+  "block_type": "61756469-6f2d-626c-6f63-6b2d74797001",
+  "display_name": "Audio",
+  "icon": "",
+  "creation": "Dialog",
+  "regions": [
+    "Main",
+    "RightSidebar"
+  ],
+  "entry_point": "audio_block.wasm"
+}

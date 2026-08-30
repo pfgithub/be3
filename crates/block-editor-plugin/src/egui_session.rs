@@ -175,6 +175,10 @@ impl EguiSession {
         self.host.set_block_types(catalog);
     }
 
+    pub(crate) fn set_audio(&self, status: block_plugin_api::AudioStatus) {
+        self.host.set_audio(status);
+    }
+
     pub(crate) fn set_client_id(&self, client_id: Uuid) {
         self.host.set_client_id(client_id);
     }
@@ -362,6 +366,13 @@ impl EguiSession {
                 instance,
                 request_id,
                 filter,
+            }));
+        }
+        for (block_id, command) in self.host.take_audio_commands() {
+            messages.push(Message::Editor(EditorMessage::PlayAudio {
+                instance,
+                block_id: block_id.into_bytes(),
+                command,
             }));
         }
         for (request_id, url) in self.host.take_fetches() {

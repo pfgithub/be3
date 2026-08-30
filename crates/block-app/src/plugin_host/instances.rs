@@ -1,10 +1,10 @@
-use block_client::{BlockClient, Tunnel};
+use block_client::{blocks::audio::Audio, BlockClient, Tunnel};
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, BlockTypeDescriptor, ChildId, ChildMode, ChildPlacement,
-    ChildPlacements, ChildStatus, CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage,
-    EditorRegion, FetchResult, FilePick, Message, Occluder, PerformanceMeasurement,
-    RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet,
-    TunnelMessage, ViewChange,
+    ArtifactDescription, AudioCommand, AudioStatus, BlockPick, BlockTypeDescriptor, ChildId,
+    ChildMode, ChildPlacement, ChildPlacements, ChildStatus, CreationOutcome, CursorIcon,
+    EditorInstanceId, EditorMessage, EditorRegion, FetchResult, FilePick, Message, Occluder,
+    PerformanceMeasurement, RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest,
+    ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{
@@ -15,6 +15,7 @@ use std::{
 use uuid::Uuid;
 
 use super::{
+    audio::AudioPlayer,
     input::{viewport_metrics, BlockDragEvent, InputAdapter},
     BlockPickRequest, EditorBlock, HostChild, HostChildStatus, InstanceRole, MAX_LIVE_CHILDREN,
 };
@@ -58,6 +59,8 @@ struct Instance {
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
     fetches: Vec<PendingFetch>,
+    audio: Option<AudioPlayer>,
+    reported_audio: AudioStatus,
     block_picks: Vec<BlockPickRequest>,
     view: Option<egui::Rect>,
     reported_view: Option<egui::Rect>,
@@ -91,6 +94,8 @@ impl Instance {
             aspect_ratio: None,
             picks: Vec::new(),
             fetches: Vec::new(),
+            audio: None,
+            reported_audio: AudioStatus::default(),
             block_picks: Vec::new(),
             view: None,
             reported_view: None,
@@ -992,6 +997,20 @@ impl Instances {
                 }));
                 false
             });
+            let entry = self.entries.get_mut(&instance).unwrap();
+            if let Some(player) = &entry.audio {
+                let status = player.status();
+                if status.playing {
+                    context.request_repaint();
+                }
+                if status != entry.reported_audio {
+                    entry.reported_audio.clone_from(&status);
+                    messages.push(Message::Editor(EditorMessage::AudioStatus {
+                        instance,
+                        status,
+                    }));
+                }
+            }
         }
         messages
     }
@@ -1030,6 +1049,34 @@ impl Instances {
                 let mut picker = FilePicker::default();
                 picker.open(&entry.context, &host_filter(filter));
                 entry.picks.push(PendingPick { request_id, picker });
+                true
+            }
+            EditorMessage::PlayAudio {
+                instance,
+                block_id,
+                command,
+            } => {
+                let Some(client) = self
+                    .connection
+                    .as_ref()
+                    .map(|connection| Arc::clone(&connection.client))
+                else {
+                    return false;
+                };
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let player = entry.audio.get_or_insert_with(AudioPlayer::new);
+                match command {
+                    AudioCommand::Reset => player.reset(),
+                    AudioCommand::Toggle => {
+                        let block = client.get_block::<Audio>(Uuid::from_bytes(block_id));
+                        let audio = block.read().map(|audio| audio.clone());
+                        if let Some(audio) = audio {
+                            player.toggle(&audio);
+                        }
+                    }
+                }
                 true
             }
             EditorMessage::Fetch {

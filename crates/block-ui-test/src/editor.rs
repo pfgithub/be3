@@ -28,10 +28,17 @@ impl<A: App> EditorTest<'_, A> {
 
     fn build(app: A, mut viewport: Option<Viewport>) -> Self {
         let textures = Textures::default();
+        let mut installed = false;
         let mut harness = Harness::builder()
             .renderer(textures.clone())
             .build_ui_state(
                 move |ui, app: &mut A| {
+                    if !installed {
+                        installed = true;
+                        block_editor_plugin::egui_material_icons::initialize(ui.ctx());
+                        ui.ctx().request_discard("the icon font was just installed");
+                        return;
+                    }
                     ui.vertical(|ui| {
                         app.toolbar_ui(ui);
                         ui.separator();
@@ -56,7 +63,6 @@ impl<A: App> EditorTest<'_, A> {
                 },
                 app,
             );
-        block_editor_plugin::egui_material_icons::initialize(&harness.ctx);
         harness.step();
         Self {
             harness,
