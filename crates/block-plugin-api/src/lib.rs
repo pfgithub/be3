@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 31;
+pub const PROTOCOL_VERSION: u16 = 32;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -379,6 +379,7 @@ pub enum EditorMessage {
         block_type: [u8; 16],
         account_id: [u8; 16],
         workspace_id: [u8; 16],
+        client_id: [u8; 16],
         editable: bool,
     },
     EditabilityChanged {
@@ -471,6 +472,7 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         account_id: [u8; 16],
         workspace_id: [u8; 16],
+        client_id: [u8; 16],
     },
     CreationReady {
         instance: EditorInstanceId,
@@ -489,6 +491,7 @@ pub enum EditorMessage {
         block_type: [u8; 16],
         account_id: [u8; 16],
         workspace_id: [u8; 16],
+        client_id: [u8; 16],
         data: Vec<u8>,
     },
     ArtifactSettings {

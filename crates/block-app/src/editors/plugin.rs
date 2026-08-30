@@ -80,6 +80,7 @@ impl PluginCreation {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
                 client: editors.client_handle(),
+                client_id: editors.client_id(),
                 role: InstanceRole::Creation,
                 instance: self.instance,
                 region: EditorRegion::Main,
@@ -116,6 +117,7 @@ impl PendingCreation for PluginCreation {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
                 client: editors.client_handle(),
+                client_id: editors.client_id(),
                 instance: self.instance,
             },
         );
@@ -272,6 +274,7 @@ impl PluginEditor {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
                 client: editors.client_handle(),
+                client_id: editors.client_id(),
                 role: InstanceRole::Editor(EditorBlock {
                     id: self.block.id(),
                     block_type: self.block.block_type(),
@@ -544,6 +547,7 @@ impl BlockEditor for PluginEditor {
                 plugin: &self.plugin,
                 block_types: editors.registry().plugin_block_types(),
                 client: editors.client_handle(),
+                client_id: editors.client_id(),
                 block_id: self.block.id(),
                 block_type: self.block.block_type(),
                 instance: self.instance,
@@ -725,6 +729,7 @@ fn toolbar_height(ui: &egui::Ui) -> f32 {
 pub(super) struct PluginArtifact {
     plugin: Arc<PluginManifest>,
     block: EditorBlock,
+    client_id: Uuid,
     instance: EditorInstanceId,
     context: Option<egui::Context>,
     resync: bool,
@@ -733,9 +738,15 @@ pub(super) struct PluginArtifact {
 }
 
 impl PluginArtifact {
-    pub(super) fn new(plugin: Arc<PluginManifest>, target_id: Uuid, target_type: Uuid) -> Self {
+    pub(super) fn new(
+        plugin: Arc<PluginManifest>,
+        target_id: Uuid,
+        target_type: Uuid,
+        client_id: Uuid,
+    ) -> Self {
         Self {
             plugin,
+            client_id,
             block: EditorBlock {
                 id: target_id,
                 block_type: target_type,
@@ -772,6 +783,7 @@ impl ArtifactSession for PluginArtifact {
                 plugin: &self.plugin,
                 block_types: registry.plugin_block_types(),
                 client: Arc::clone(client),
+                client_id: self.client_id,
                 instance: self.instance,
                 block: self.block,
                 data,
@@ -813,6 +825,7 @@ impl ArtifactSession for PluginArtifact {
                 plugin: &self.plugin,
                 block_types: registry.plugin_block_types(),
                 client: Arc::clone(client),
+                client_id: self.client_id,
                 role: InstanceRole::Artifact(self.block),
                 instance: self.instance,
                 region: EditorRegion::ArtifactSettings,

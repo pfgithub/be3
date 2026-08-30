@@ -228,6 +228,7 @@ pub struct EditorHost {
     picked: Rc<RefCell<HashMap<u64, FilePick>>>,
     next_pick: Rc<Cell<u64>>,
     editable: Rc<Cell<bool>>,
+    client_id: Rc<Cell<Uuid>>,
     view: Rc<Cell<Option<egui::Rect>>>,
     view_changes: Rc<RefCell<Vec<ViewChange>>>,
     creation_ready: Rc<Cell<bool>>,
@@ -277,6 +278,10 @@ impl EditorHost {
 
     pub fn editable(&self) -> bool {
         self.editable.get()
+    }
+
+    pub fn client_id(&self) -> Uuid {
+        self.client_id.get()
     }
 
     pub fn view(&self) -> Option<egui::Rect> {
@@ -533,6 +538,10 @@ impl EditorHost {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_block_types(&self, catalog: Rc<BlockCatalog>) {
         *self.block_types.borrow_mut() = catalog;
+    }
+
+    pub fn set_client_id(&self, client_id: Uuid) {
+        self.client_id.set(client_id);
     }
 
     pub fn set_editable(&self, editable: bool) {

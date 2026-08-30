@@ -20,6 +20,7 @@ fn open(session: &mut ClientSession, instance: EditorInstanceId) {
         block_type: [2; 16],
         account_id: [3; 16],
         workspace_id: [4; 16],
+        client_id: [5; 16],
         editable: true,
     }));
 }

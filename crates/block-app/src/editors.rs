@@ -1300,7 +1300,6 @@ impl EditorRegistry {
         registry.register_creatable::<map::MapEditor>();
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
-        registry.register::<settings::SettingsEditor>();
         registry.register_creatable::<text::TextEditor>();
         registry.register_creatable::<version_control_data::VersionControlDataEditor>();
         registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
@@ -1453,6 +1452,7 @@ impl EditorRegistry {
         source_type: Uuid,
         target_id: Uuid,
         target_type: Uuid,
+        client_id: Uuid,
     ) -> Result<Box<dyn ArtifactSession>, String> {
         let registration = self
             .registrations
@@ -1470,6 +1470,7 @@ impl EditorRegistry {
                 Arc::clone(manifest),
                 target_id,
                 target_type,
+                client_id,
             ))),
             None => Err(format!(
                 "{} blocks do not generate dynamic artifacts",

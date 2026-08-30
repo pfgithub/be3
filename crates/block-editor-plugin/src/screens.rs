@@ -94,6 +94,7 @@ impl Screens {
                 block_id,
                 account_id,
                 workspace_id,
+                client_id,
                 editable,
                 ..
             }) => {
@@ -106,6 +107,7 @@ impl Screens {
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
                 session.set_block_types(Rc::clone(&self.block_types));
+                session.set_client_id(Uuid::from_bytes(*client_id));
                 session.set_editable(*editable);
                 session.connect(client, Uuid::from_bytes(*block_id));
             }
@@ -113,6 +115,7 @@ impl Screens {
                 instance,
                 account_id,
                 workspace_id,
+                client_id,
             }) => {
                 let client = self.client(
                     Uuid::from_bytes(*account_id),
@@ -123,6 +126,7 @@ impl Screens {
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
                 session.set_block_types(Rc::clone(&self.block_types));
+                session.set_client_id(Uuid::from_bytes(*client_id));
                 session.connect_creation(client);
             }
             Message::Editor(EditorMessage::OpenArtifact {
@@ -131,6 +135,7 @@ impl Screens {
                 block_type,
                 account_id,
                 workspace_id,
+                client_id,
                 data,
             }) => {
                 let client = self.client(
@@ -142,6 +147,7 @@ impl Screens {
                     .entry(*instance)
                     .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
                 session.set_block_types(Rc::clone(&self.block_types));
+                session.set_client_id(Uuid::from_bytes(*client_id));
                 session.connect_artifact(
                     client,
                     Uuid::from_bytes(*block_id),

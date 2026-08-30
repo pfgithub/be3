@@ -133,6 +133,7 @@ pub(crate) struct PreviewSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
     pub(crate) client: Arc<BlockClient>,
+    pub(crate) client_id: Uuid,
     pub(crate) block_id: Uuid,
     pub(crate) block_type: Uuid,
     pub(crate) instance: EditorInstanceId,
@@ -157,6 +158,7 @@ pub(crate) struct CreationSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
     pub(crate) client: Arc<BlockClient>,
+    pub(crate) client_id: Uuid,
     pub(crate) instance: EditorInstanceId,
 }
 
@@ -170,6 +172,7 @@ pub(crate) struct EditorSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
     pub(crate) client: Arc<BlockClient>,
+    pub(crate) client_id: Uuid,
     pub(crate) role: InstanceRole,
     pub(crate) instance: EditorInstanceId,
     pub(crate) region: EditorRegion,
@@ -203,6 +206,7 @@ pub(crate) struct ArtifactSlot<'a> {
     pub(crate) plugin: &'a PluginManifest,
     pub(crate) block_types: &'a Arc<Vec<BlockTypeDescriptor>>,
     pub(crate) client: Arc<BlockClient>,
+    pub(crate) client_id: Uuid,
     pub(crate) instance: EditorInstanceId,
     pub(crate) block: EditorBlock,
     pub(crate) data: &'a [u8],

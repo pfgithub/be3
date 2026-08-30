@@ -26,6 +26,7 @@ fn placed() -> (Instances, egui::Context, egui::Id) {
         REGION,
         &context,
         &client,
+        Uuid::nil(),
         role,
         &block_types,
         SIZE,

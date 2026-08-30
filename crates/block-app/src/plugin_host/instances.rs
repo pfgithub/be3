@@ -40,6 +40,7 @@ pub(super) struct Instances {
 
 struct Connection {
     client: Arc<BlockClient>,
+    client_id: Uuid,
     tunnel: Tunnel,
 }
 
@@ -176,7 +177,7 @@ impl Instances {
         self.entries.remove(&instance).is_some()
     }
 
-    fn connect(&mut self, context: &egui::Context, client: &Arc<BlockClient>) {
+    fn connect(&mut self, context: &egui::Context, client: &Arc<BlockClient>, client_id: Uuid) {
         if self
             .connection
             .as_ref()
@@ -190,6 +191,7 @@ impl Instances {
         });
         self.connection = Some(Connection {
             client: Arc::clone(client),
+            client_id,
             tunnel,
         });
     }
@@ -200,6 +202,7 @@ impl Instances {
         region: EditorRegion,
         context: &egui::Context,
         client: &Arc<BlockClient>,
+        client_id: Uuid,
         role: InstanceRole,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
         size: egui::Vec2,
@@ -207,7 +210,7 @@ impl Instances {
         scale_factor: f32,
         pass: u64,
     ) -> ScreenId {
-        self.connect(context, client);
+        self.connect(context, client, client_id);
         if self.block_types.is_none() {
             self.block_types = Some(Arc::clone(block_types));
         }
@@ -280,9 +283,10 @@ impl Instances {
         instance: EditorInstanceId,
         context: &egui::Context,
         client: &Arc<BlockClient>,
+        client_id: Uuid,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
     ) -> bool {
-        self.connect(context, client);
+        self.connect(context, client, client_id);
         if self.block_types.is_none() {
             self.block_types = Some(Arc::clone(block_types));
         }
@@ -297,12 +301,13 @@ impl Instances {
         instance: EditorInstanceId,
         context: &egui::Context,
         client: &Arc<BlockClient>,
+        client_id: Uuid,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
         block: EditorBlock,
         data: &[u8],
         resync: bool,
     ) -> Vec<Message> {
-        self.connect(context, client);
+        self.connect(context, client, client_id);
         if self.block_types.is_none() {
             self.block_types = Some(Arc::clone(block_types));
         }
@@ -377,7 +382,7 @@ impl Instances {
         let client = self
             .connection
             .as_ref()
-            .map(|connection| Arc::clone(&connection.client));
+            .map(|connection| (Arc::clone(&connection.client), connection.client_id));
         let mut instances: Vec<_> = self.entries.keys().copied().collect();
         instances.sort_by_key(|instance| instance.0);
         let mut opened = Vec::new();
@@ -406,9 +411,10 @@ impl Instances {
                 continue;
             }
             regions.sort_by_key(|request| request.screen.0);
-            let Some(client) = &client else {
+            let Some((client, client_id)) = &client else {
                 continue;
             };
+            let client_id = client_id.into_bytes();
             if !entry.opened {
                 entry.opened = true;
                 let account_id = client.account_id().into_bytes();
@@ -420,12 +426,14 @@ impl Instances {
                         block_type: block.block_type.into_bytes(),
                         account_id,
                         workspace_id,
+                        client_id,
                         editable: client.block_access(block.id) == block::BlockAccess::Edit,
                     }),
                     InstanceRole::Creation => Message::Editor(EditorMessage::OpenCreation {
                         instance,
                         account_id,
                         workspace_id,
+                        client_id,
                     }),
                     InstanceRole::Artifact(block) => Message::Editor(EditorMessage::OpenArtifact {
                         instance,
@@ -433,6 +441,7 @@ impl Instances {
                         block_type: block.block_type.into_bytes(),
                         account_id,
                         workspace_id,
+                        client_id,
                         data: entry.artifact.data.clone(),
                     }),
                 });

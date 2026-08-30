@@ -1,23 +1,10 @@
 use block::{Block, BlockParent, BlockReferenceList};
 use block_client::{
     block_ref::BlockRef,
-    blocks::{
-        settings::{ActivationCondition, Settings, SettingsOperation},
-        ui_settings::UiSettings,
-    },
+    blocks::settings::{ActivationCondition, Settings, SettingsOperation},
     BlockClient, BlockHandle, ReferenceList,
 };
-use eframe::egui;
-use egui_material_icons::{icons::ICON_SETTINGS, MaterialIcon};
 use uuid::Uuid;
-
-use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind,
-};
-
-const DIRECT_EDITOR_WIDTH: f32 = 360.0;
-const DIRECT_EDITOR_HEIGHT: f32 = 120.0;
 
 pub(crate) struct RootSettings {
     roots: ReferenceList,
@@ -57,79 +44,6 @@ impl RootSettings {
 pub(super) struct RootSetting<T: Block> {
     settings: RootSettings,
     block: Option<BlockHandle<T>>,
-}
-
-pub(super) struct SettingsEditor {
-    block: BlockHandle<Settings>,
-}
-
-impl EditorKind for SettingsEditor {
-    type Block = Settings;
-
-    const DISPLAY_NAME: &'static str = "Settings";
-    const ICON: MaterialIcon = ICON_SETTINGS;
-
-    fn open(_client: &BlockClient, block: BlockHandle<Settings>) -> Self {
-        Self { block }
-    }
-}
-
-impl BlockEditor for SettingsEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
-    }
-
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: false,
-        }
-    }
-
-    fn direct_editor_intrinsic_size(
-        &mut self,
-        _editors: &mut EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
-        Some(egui::vec2(DIRECT_EDITOR_WIDTH, DIRECT_EDITOR_HEIGHT))
-    }
-
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let Some(settings) = self.block.read() else {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        };
-        let ui_settings = settings
-            .resolve(UiSettings::TYPE_ID, editors.client_id())
-            .and_then(|reference| reference.as_direct());
-        drop(settings);
-
-        if ui.button("UI settings").clicked() {
-            let id = ui_settings.unwrap_or_else(|| {
-                let block = editors.client().create_block(UiSettings::new());
-                self.block.operate(SettingsOperation::SetEntry {
-                    block_type: UiSettings::TYPE_ID,
-                    activation: ActivationCondition::Fallback,
-                    block: BlockRef::Direct(block.id()),
-                });
-                block.set_parent(BlockParent::Uuid(self.block.id()));
-                block.id()
-            });
-            return Some(EditorAction::OpenBlock {
-                id,
-                block_type: UiSettings::TYPE_ID,
-            });
-        }
-        None
-    }
 }
 
 impl<T: Block + Default> RootSetting<T> {

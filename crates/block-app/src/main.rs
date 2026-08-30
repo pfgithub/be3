@@ -2246,10 +2246,12 @@ impl BlockApp {
         let mut session = self.dynamic_artifact_sessions.remove(&id);
         let mut unsupported = None;
         if session.is_none() {
-            match self
-                .registry
-                .artifact_session(descriptor.source_type, id, block_type)
-            {
+            match self.registry.artifact_session(
+                descriptor.source_type,
+                id,
+                block_type,
+                self.client_id,
+            ) {
                 Ok(started) => session = Some(started),
                 Err(error) => unsupported = Some(error),
             }

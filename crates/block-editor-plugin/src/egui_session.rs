@@ -175,6 +175,10 @@ impl EguiSession {
         self.host.set_block_types(catalog);
     }
 
+    pub(crate) fn set_client_id(&self, client_id: Uuid) {
+        self.host.set_client_id(client_id);
+    }
+
     pub(crate) fn set_editable(&self, editable: bool) {
         self.host.set_editable(editable);
     }

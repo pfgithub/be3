@@ -8257,6 +8257,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "uuid",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

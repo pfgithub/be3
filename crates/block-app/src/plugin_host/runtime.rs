@@ -377,6 +377,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
         plugin,
         block_types,
         client,
+        client_id,
         role,
         instance,
         region,
@@ -410,6 +411,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
             region,
             ui.ctx(),
             &client,
+            client_id,
             role,
             block_types,
             response.rect.size(),
@@ -511,6 +513,7 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
         plugin,
         block_types,
         client,
+        client_id,
         instance,
     } = slot;
     HOST.with(|host| {
@@ -524,7 +527,7 @@ pub(crate) fn creation(context: &egui::Context, slot: CreationSlot<'_>) -> Creat
         }
         match runtime
             .instances
-            .report_creation(instance, context, &client, block_types)
+            .report_creation(instance, context, &client, client_id, block_types)
         {
             true => CreationState::Ready,
             false => CreationState::Starting,
@@ -537,6 +540,7 @@ pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> Artif
         plugin,
         block_types,
         client,
+        client_id,
         instance,
         block,
         data,
@@ -555,6 +559,7 @@ pub(crate) fn artifact(context: &egui::Context, slot: ArtifactSlot<'_>) -> Artif
             instance,
             context,
             &client,
+            client_id,
             block_types,
             block,
             data,
@@ -577,6 +582,7 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> Preview
         plugin,
         block_types,
         client,
+        client_id,
         block_id,
         block_type,
         instance,
@@ -610,6 +616,7 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> Preview
             EditorRegion::Preview,
             &context,
             &client,
+            client_id,
             InstanceRole::Editor(EditorBlock {
                 id: block_id,
                 block_type,

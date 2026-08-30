@@ -7,6 +7,7 @@ fn creation_messages_round_trip() {
             instance: EditorInstanceId(2),
             account_id: [3; 16],
             workspace_id: [4; 16],
+            client_id: [5; 16],
         }),
         Message::Editor(EditorMessage::CreationReady {
             instance: EditorInstanceId(2),

@@ -53,6 +53,12 @@ much of its own frame left to spend, so a plugin answering promptly is drawn
 into the frame that delivered the input rather than the one after it. A region
 the host did not draw last frame is sent nothing.
 
+Opening an instance carries the account and workspace its block client speaks
+for, and the id of the app client the host itself is: a per-installation
+identity a block that stores one setting per client - the settings block -
+resolves against, which the instance's own tunnelled client cannot supply
+because the host opens a fresh one for every runtime.
+
 Client messages tunnel the block protocol between an editor instance's own
 block client and the host's server connection. Their payloads are opaque JSON
 of any length: the host forwards them in both directions without interpreting
