@@ -29,6 +29,7 @@ members = [
     "crates/editors/pdf",
     "crates/editors/pixel_art",
     "crates/editors/presentation",
+    "crates/editors/ui_settings",
     "crates/editors/workspace_index",
     "crates/block-editor-plugin",
     "crates/block-gpu-abi",

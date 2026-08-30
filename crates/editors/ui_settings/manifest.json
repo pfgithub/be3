@@ -1,0 +1,13 @@
+{
+  "id": "be3.ui-settings",
+  "name": "UI Settings",
+  "version": "0.1.0",
+  "block_type": "75692d73-6574-7469-6e67-732d626c6b31",
+  "display_name": "UI Settings",
+  "icon": "",
+  "creation": "None",
+  "regions": [
+    "Main"
+  ],
+  "entry_point": "ui_settings.wasm"
+}
