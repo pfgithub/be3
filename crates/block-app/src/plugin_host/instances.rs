@@ -61,6 +61,7 @@ struct Instance {
     fetches: Vec<PendingFetch>,
     audio: Option<AudioPlayer>,
     reported_audio: AudioStatus,
+    reported_size: Option<egui::Vec2>,
     block_picks: Vec<BlockPickRequest>,
     view: Option<egui::Rect>,
     reported_view: Option<egui::Rect>,
@@ -96,6 +97,7 @@ impl Instance {
             fetches: Vec::new(),
             audio: None,
             reported_audio: AudioStatus::default(),
+            reported_size: None,
             block_picks: Vec::new(),
             view: None,
             reported_view: None,
@@ -274,6 +276,23 @@ impl Instances {
         let changed = entry.presenting != presenting;
         entry.presenting = presenting;
         changed
+    }
+
+    pub(super) fn resized(&mut self, instance: EditorInstanceId, size: egui::Vec2) -> Vec<Message> {
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return Vec::new();
+        };
+        if entry.reported_size.is_some_and(|reported| {
+            (reported.x - size.x).abs() < 0.01 && (reported.y - size.y).abs() < 0.01
+        }) {
+            return Vec::new();
+        }
+        entry.reported_size = Some(size);
+        vec![Message::Editor(EditorMessage::Resized {
+            instance,
+            width: size.x,
+            height: size.y,
+        })]
     }
 
     pub(super) fn take_view_changes(&mut self, instance: EditorInstanceId) -> Vec<ViewChange> {

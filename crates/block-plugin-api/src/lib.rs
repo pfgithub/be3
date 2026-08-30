@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 33;
+pub const PROTOCOL_VERSION: u16 = 34;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -404,6 +404,11 @@ pub enum EditorMessage {
     PresentingChanged {
         instance: EditorInstanceId,
         presenting: bool,
+    },
+    Resized {
+        instance: EditorInstanceId,
+        width: f32,
+        height: f32,
     },
     ShowRegion {
         instance: EditorInstanceId,

@@ -79,6 +79,7 @@ mod rejects_malformed_payload;
 mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
 mod rejects_unordered_occluders;
+mod resize_messages_round_trip;
 mod show_region_messages_round_trip;
 mod stacked_layout_keeps_each_region;
 mod stacked_layout_stacks_screens;

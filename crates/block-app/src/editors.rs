@@ -2,7 +2,6 @@ mod browser_tab;
 mod clipboard;
 mod database_view;
 pub(crate) mod deterministic_game;
-mod gui_builder;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
 mod map;
@@ -1282,7 +1281,6 @@ impl EditorRegistry {
         };
         registry.register_creatable::<database_view::DatabaseViewEditor>();
         registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
-        registry.register_creatable::<gui_builder::GuiBuilderEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();

@@ -27,6 +27,7 @@ members = [
     "crates/editors/counter",
     "crates/editors/database",
     "crates/editors/database_schema",
+    "crates/editors/gui_builder",
     "crates/editors/hotbar",
     "crates/editors/image_block",
     "crates/editors/logic_game",

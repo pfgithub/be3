@@ -1,16 +1,10 @@
 use block::Block;
-use block_client::{
-    blocks::{
-        gui_builder::GuiBuilder,
-        text::{TextDocument, TextLanguage},
-    },
-    BlockClient, BlockHandle, DynamicArtifactDescriptor,
-};
-use eframe::egui;
+use block_client::blocks::gui_builder::GuiBuilder;
+use block_client::blocks::text::{TextDocument, TextLanguage};
+use block_client::{BlockClient, BlockHandle, DynamicArtifactDescriptor};
+use block_editor_plugin::{egui, ArtifactDescription};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use super::super::{DynamicArtifactRegeneration, DynamicArtifactSupport};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct CodeArtifact {
@@ -45,14 +39,15 @@ impl CodeArtifact {
     }
 }
 
-pub(in crate::editors) const SUPPORT: DynamicArtifactSupport = DynamicArtifactSupport {
-    source: |data| CodeArtifact::decode(data).map(|artifact| artifact.source),
-    summary,
-    settings_ui,
-    regenerate,
-};
+pub fn describe(data: &[u8]) -> Result<ArtifactDescription, String> {
+    let artifact = CodeArtifact::decode(data)?;
+    Ok(ArtifactDescription {
+        source: artifact.source,
+        summary: summary(&artifact.settings),
+    })
+}
 
-pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
+pub fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
     DynamicArtifactDescriptor {
         source_type: GuiBuilder::TYPE_ID,
         data: CodeArtifact {
@@ -63,7 +58,7 @@ pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
     }
 }
 
-pub(super) fn generate_initial(builder: &GuiBuilder) -> TextDocument {
+pub fn generate_initial(builder: &GuiBuilder) -> TextDocument {
     generate(builder, &CodeSettings::default())
 }
 
@@ -72,25 +67,22 @@ fn generate(builder: &GuiBuilder, settings: &CodeSettings) -> TextDocument {
         .with_language(TextLanguage::Rust)
 }
 
-pub(super) fn artifact_name(source_name: &str) -> String {
+pub fn artifact_name(source_name: &str) -> String {
     format!("{source_name} Code")
 }
 
-fn summary(data: &[u8]) -> String {
-    let Ok(artifact) = CodeArtifact::decode(data) else {
-        return "Rust code".to_owned();
-    };
-    if artifact.settings.struct_name.trim().is_empty() {
+fn summary(settings: &CodeSettings) -> String {
+    if settings.struct_name.trim().is_empty() {
         "Rust code named after the design".to_owned()
     } else {
-        format!("Rust code for `{}`", artifact.settings.struct_name.trim())
+        format!("Rust code for `{}`", settings.struct_name.trim())
     }
 }
 
-fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) -> bool {
+pub fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) {
     let Ok(mut artifact) = CodeArtifact::decode(data) else {
         ui.label("These settings cannot be read.");
-        return false;
+        return;
     };
     let mut changed = false;
     ui.horizontal(|ui| {
@@ -108,39 +100,40 @@ fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) -> bool {
             "Rename with the design",
         )
         .changed();
+    ui.add_space(12.0);
+    ui.weak(summary(&artifact.settings));
     if changed {
         *data = artifact.encode();
     }
-    changed
 }
 
-fn regenerate(
-    client: &BlockClient,
-    target_id: Uuid,
-    target_type: Uuid,
-    data: &[u8],
-) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
-    if target_type != TextDocument::TYPE_ID {
-        return Err(format!(
-            "GUI builder code generation expected a Text target, found {target_type}"
-        ));
-    }
-    let artifact = CodeArtifact::decode(data)?;
-    Ok(Box::new(GuiBuilderRegeneration {
-        source: client.get_block::<GuiBuilder>(artifact.source),
-        target: client.get_block::<TextDocument>(target_id),
-        settings: artifact.settings,
-    }))
-}
-
-struct GuiBuilderRegeneration {
+pub struct Regeneration {
     source: BlockHandle<GuiBuilder>,
     target: BlockHandle<TextDocument>,
     settings: CodeSettings,
 }
 
-impl DynamicArtifactRegeneration for GuiBuilderRegeneration {
-    fn poll(&mut self) -> Option<Result<(), String>> {
+impl Regeneration {
+    pub fn start(
+        client: &BlockClient,
+        target_id: Uuid,
+        target_type: Uuid,
+        data: &[u8],
+    ) -> Result<Self, String> {
+        if target_type != TextDocument::TYPE_ID {
+            return Err(format!(
+                "GUI builder code generation expected a Text target, found {target_type}"
+            ));
+        }
+        let artifact = CodeArtifact::decode(data)?;
+        Ok(Self {
+            source: client.get_block::<GuiBuilder>(artifact.source),
+            target: client.get_block::<TextDocument>(target_id),
+            settings: artifact.settings,
+        })
+    }
+
+    pub fn poll(&mut self) -> Option<Result<(), String>> {
         let source = self.source.read()?;
 
         self.target.read()?;

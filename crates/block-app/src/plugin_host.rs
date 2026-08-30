@@ -22,7 +22,7 @@ mod web;
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
     creation_ready, editor_ui, flush, install, intrinsic_size, kill, poll, present, presenting,
-    preview, regenerate_artifact, region_shown, region_size, report_children, running,
+    preview, regenerate_artifact, region_shown, region_size, report_children, resized, running,
     take_artifact_outcome, take_block_pick, take_created, take_view_changes,
 };
 

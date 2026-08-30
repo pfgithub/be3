@@ -61,6 +61,7 @@ pub trait App: Default + 'static {
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
         None
     }
+    fn set_intrinsic_size(&mut self, _size: egui::Vec2) {}
     fn aspect_ratio(&mut self) -> Option<f32> {
         None
     }

@@ -4320,6 +4320,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui_builder"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -627,6 +627,15 @@ impl BlockEditor for PluginEditor {
         )
     }
 
+    fn set_direct_editor_intrinsic_size(
+        &mut self,
+        size: egui::Vec2,
+        _editors: &mut EditorAccess<'_>,
+    ) -> bool {
+        crate::plugin_host::resized(&self.plugin.identity.id, self.instance, size);
+        false
+    }
+
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,

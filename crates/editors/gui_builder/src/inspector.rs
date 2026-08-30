@@ -2,14 +2,15 @@ use block_client::blocks::gui_builder::{
     GuiBuilder, GuiBuilderOperation, GuiLayout, GuiLocation, GuiWidget, GuiWidgetKind,
     MAX_CANVAS_SIZE, MAX_SPACE_HEIGHT, MIN_CANVAS_SIZE,
 };
-use eframe::egui;
-use egui_material_icons::icons::{
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::egui;
+use block_editor_plugin::egui_material_icons::icons::{
     ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_DELETE, ICON_FORMAT_INDENT_DECREASE,
     ICON_FORMAT_INDENT_INCREASE,
 };
 use uuid::Uuid;
 
-use super::{insertion_location, widget_icon};
+use crate::app::{insertion_location, widget_icon};
 
 const OUTLINE_INDENT: f32 = 12.0;
 
@@ -76,7 +77,7 @@ fn palette() -> Vec<(&'static str, GuiWidgetKind)> {
     ]
 }
 
-pub(super) fn left_sidebar(
+pub(crate) fn left_sidebar(
     ui: &mut egui::Ui,
     builder: &GuiBuilder,
     selected: &mut Option<Uuid>,
@@ -91,6 +92,7 @@ pub(super) fn left_sidebar(
                 egui::Button::new(format!("{} {label}", icon.codepoint))
                     .min_size(egui::vec2(ui.available_width(), 0.0)),
             )
+            .test_id(&format!("gui-builder.palette.{label}"))
             .clicked()
         {
             let widget = GuiWidget::new(kind);
@@ -236,7 +238,7 @@ fn arrange(
     operations
 }
 
-pub(super) fn right_sidebar(
+pub(crate) fn right_sidebar(
     ui: &mut egui::Ui,
     builder: &GuiBuilder,
     selected: Option<Uuid>,

@@ -1,23 +1,23 @@
 use std::collections::HashMap;
 
 use block_client::blocks::gui_builder::{GuiLayout, GuiWidget, GuiWidgetKind};
-use eframe::egui;
+use block_editor_plugin::egui;
 use uuid::Uuid;
 
-use super::widget_icon;
+use crate::app::widget_icon;
 
 const SELECTION_PADDING: f32 = 1.0;
 const MIN_PLACEHOLDER_HEIGHT: f32 = 6.0;
 
 #[derive(Default)]
-pub(super) struct PreviewState {
+pub(crate) struct PreviewState {
     texts: HashMap<Uuid, String>,
     flags: HashMap<Uuid, bool>,
     numbers: HashMap<Uuid, f32>,
 }
 
 impl PreviewState {
-    pub(super) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.texts.clear();
         self.flags.clear();
         self.numbers.clear();
@@ -36,14 +36,14 @@ impl PreviewState {
     }
 }
 
-pub(super) struct Surface<'a> {
-    pub(super) design: bool,
-    pub(super) state: &'a mut PreviewState,
-    pub(super) selected: &'a mut Option<Uuid>,
+pub(crate) struct Surface<'a> {
+    pub(crate) design: bool,
+    pub(crate) state: &'a mut PreviewState,
+    pub(crate) selected: &'a mut Option<Uuid>,
 }
 
 impl Surface<'_> {
-    pub(super) fn show(&mut self, ui: &mut egui::Ui, widgets: &[GuiWidget]) {
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, widgets: &[GuiWidget]) {
         for widget in widgets {
             self.show_widget(ui, widget);
         }

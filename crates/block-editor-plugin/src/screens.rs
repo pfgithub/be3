@@ -155,6 +155,15 @@ impl Screens {
                     data.clone(),
                 );
             }
+            Message::Editor(EditorMessage::Resized {
+                instance,
+                width,
+                height,
+            }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.resized(egui::vec2(*width, *height));
+                }
+            }
             Message::Editor(EditorMessage::AudioStatus { instance, status }) => {
                 if let Some(session) = self.sessions.get(instance) {
                     session.set_audio(status.clone());

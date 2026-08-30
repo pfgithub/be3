@@ -786,6 +786,13 @@ pub(crate) fn present(
     });
 }
 
+pub(crate) fn resized(plugin_id: &str, instance: EditorInstanceId, size: egui::Vec2) {
+    with(plugin_id, |runtime| {
+        let messages = runtime.instances.resized(instance, size);
+        runtime.send(messages);
+    });
+}
+
 pub(crate) fn take_view_changes(plugin_id: &str, instance: EditorInstanceId) -> Vec<ViewChange> {
     with(plugin_id, |runtime| {
         runtime.instances.take_view_changes(instance)

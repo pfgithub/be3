@@ -100,6 +100,11 @@ the picker offers and is answered exactly once, with the file the host read,
 the picker the user closed, or why the file could not be read. Requests are
 identified per instance and may be outstanding together.
 
+An instance the host resizes - one embedded where the user drags its corner,
+which the manifest's resize mode allows - is told the size it was given, in
+its own points. Only an editor whose block records its size answers by
+writing it; the rest ignore it and keep reporting the size they want.
+
 An editor instance may ask the host to play the audio in one of its blocks,
 which only the host can do: a plugin has no sound device on any platform, and
 an audio file is far larger than a message may carry. The request names the

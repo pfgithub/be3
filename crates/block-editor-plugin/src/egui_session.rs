@@ -191,6 +191,10 @@ impl EguiSession {
         self.host.set_view(view);
     }
 
+    pub(crate) fn resized(&mut self, size: egui::Vec2) {
+        self.app.set_intrinsic_size(size);
+    }
+
     pub(crate) fn set_presenting(&self, presenting: bool) {
         self.host.set_presenting(presenting);
     }
