@@ -594,18 +594,24 @@ impl PaintReviewApp {
         frame: usize,
     ) -> Shown {
         match showing {
-            Showing::Approved | Showing::Current => self.single(path, showing, frame),
-            Showing::SideBySide => self.side_by_side(path, frame),
+            Showing::Approved | Showing::Current => self.single(context, path, showing, frame),
+            Showing::SideBySide => self.side_by_side(context, path, frame),
             Showing::Difference => self.difference(context, path, frame),
         }
     }
 
-    fn single(&mut self, path: &str, showing: Showing, frame: usize) -> Shown {
+    fn single(
+        &mut self,
+        context: &egui::Context,
+        path: &str,
+        showing: Showing,
+        frame: usize,
+    ) -> Shown {
         let hash = match self.hash(path, showing) {
             Ok(hash) => hash,
             Err(error) => return Shown::Waiting(error),
         };
-        match self.paintings.rendered(&hash, frame) {
+        match self.paintings.rendered(context, &hash, frame) {
             Some(Ok(rendered)) => {
                 let description = rendered.description.clone();
                 Shown::Ready(vec![rendered], description)
@@ -615,14 +621,19 @@ impl PaintReviewApp {
         }
     }
 
-    fn pair(&mut self, path: &str, frame: usize) -> Result<(Rendered, Rendered), Shown> {
+    fn pair(
+        &mut self,
+        context: &egui::Context,
+        path: &str,
+        frame: usize,
+    ) -> Result<(Rendered, Rendered), Shown> {
         let mut sides = Vec::new();
         for wanted in [Showing::Approved, Showing::Current] {
             let hash = match self.hash(path, wanted) {
                 Ok(hash) => hash,
                 Err(error) => return Err(Shown::Waiting(error)),
             };
-            match self.paintings.rendered(&hash, frame) {
+            match self.paintings.rendered(context, &hash, frame) {
                 Some(Ok(rendered)) => sides.push(rendered),
                 Some(Err(error)) => return Err(Shown::Failed(error)),
                 None => return Err(Shown::Waiting(None)),
@@ -633,8 +644,8 @@ impl PaintReviewApp {
         Ok((approved, current))
     }
 
-    fn side_by_side(&mut self, path: &str, frame: usize) -> Shown {
-        let (approved, current) = match self.pair(path, frame) {
+    fn side_by_side(&mut self, context: &egui::Context, path: &str, frame: usize) -> Shown {
+        let (approved, current) = match self.pair(context, path, frame) {
             Ok(pair) => pair,
             Err(shown) => return shown,
         };
@@ -649,7 +660,7 @@ impl PaintReviewApp {
     }
 
     fn difference(&mut self, context: &egui::Context, path: &str, frame: usize) -> Shown {
-        let (approved, current) = match self.pair(path, frame) {
+        let (approved, current) = match self.pair(context, path, frame) {
             Ok(pair) => pair,
             Err(shown) => return shown,
         };

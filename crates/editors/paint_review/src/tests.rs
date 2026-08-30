@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::app::{PaintReviewApp, Status};
 use crate::download::{Painting, Source};
 
+mod a_painting_belongs_to_the_screen_that_shows_it;
 mod a_painting_is_only_rastered_once;
 mod a_painting_that_changed_on_the_branch_is_modified;
 mod a_painting_that_vanished_is_removed;
