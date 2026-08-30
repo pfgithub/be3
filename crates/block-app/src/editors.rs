@@ -1,8 +1,6 @@
 mod audio;
 mod browser_tab;
 mod clipboard;
-mod database;
-mod database_schema;
 mod database_view;
 pub(crate) mod deterministic_game;
 mod gui_builder;
@@ -1287,8 +1285,6 @@ impl EditorRegistry {
             plugin_block_types: Arc::default(),
         };
         registry.register_configurable::<audio::AudioEditor>();
-        registry.register_creatable::<database::DatabaseEditor>();
-        registry.register_creatable::<database_schema::DatabaseSchemaEditor>();
         registry.register_creatable::<database_view::DatabaseViewEditor>();
         registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();

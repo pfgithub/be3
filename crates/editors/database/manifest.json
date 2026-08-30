@@ -1,0 +1,14 @@
+{
+  "id": "be3.database",
+  "name": "Database",
+  "version": "0.1.0",
+  "block_type": "00646174-6162-6173-652d-626c6f636b01",
+  "display_name": "Database",
+  "icon": "",
+  "creation": "Immediate",
+  "regions": [
+    "Main",
+    "RightSidebar"
+  ],
+  "entry_point": "database.wasm"
+}

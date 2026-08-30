@@ -24,6 +24,8 @@ members = [
     "crates/editors/checklist",
     "crates/editors/compiled_logic",
     "crates/editors/counter",
+    "crates/editors/database",
+    "crates/editors/database_schema",
     "crates/editors/hotbar",
     "crates/editors/image_block",
     "crates/editors/paint_review",
