@@ -6,11 +6,11 @@ use block_client::{
     },
     BlockHandle,
 };
-use eframe::egui;
-use egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD};
+use block_editor_plugin::egui;
+use block_editor_plugin::egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD};
 use uuid::Uuid;
 
-use super::{
+use crate::app::{
     cell_text, database_value_text, field_type_label, paint_preview_cell, parse_cell_value,
     preview_color, BlockRenderContext,
 };
@@ -29,7 +29,7 @@ struct CellAddress {
 }
 
 #[derive(Default)]
-pub(super) struct SpreadsheetView {
+pub(crate) struct SpreadsheetView {
     selected: Option<CellAddress>,
     editing: Option<CellAddress>,
     edit_buffer: String,
@@ -38,16 +38,16 @@ pub(super) struct SpreadsheetView {
 }
 
 impl SpreadsheetView {
-    pub(super) fn selected_row(&self) -> Option<usize> {
+    pub(crate) fn selected_row(&self) -> Option<usize> {
         self.selected.map(|address| address.row_index)
     }
 
-    pub(super) fn deselect(&mut self) {
+    pub(crate) fn deselect(&mut self) {
         self.finish_edit();
         self.selected = None;
     }
 
-    pub(super) fn intrinsic_size(&self, row_count: usize, fields: &[DatabaseField]) -> egui::Vec2 {
+    pub(crate) fn intrinsic_size(&self, row_count: usize, fields: &[DatabaseField]) -> egui::Vec2 {
         let total_rows = display_row_total(row_count, self.selected);
         egui::vec2(
             ROW_HEADER_WIDTH
@@ -226,7 +226,7 @@ impl SpreadsheetView {
         }
     }
 
-    pub(super) fn formula_bar(
+    pub(crate) fn formula_bar(
         &mut self,
         ui: &mut egui::Ui,
         view: &BlockHandle<DatabaseView>,
@@ -352,7 +352,7 @@ impl SpreadsheetView {
         }
     }
 
-    pub(super) fn grid(
+    pub(crate) fn grid(
         &mut self,
         ui: &mut egui::Ui,
         view: &BlockHandle<DatabaseView>,
@@ -459,7 +459,7 @@ fn compare_sorted_rows(
     }
 }
 
-pub(super) fn sort_rows(
+pub(crate) fn sort_rows(
     rows: &mut [DatabaseRow],
     sort: DatabaseViewSort,
     fields: &[DatabaseField],
@@ -643,7 +643,7 @@ fn paint_cell_text(
     );
 }
 
-pub(super) fn paint_preview(
+pub(crate) fn paint_preview(
     context: BlockRenderContext<'_>,
     rows: &[DatabaseRow],
     fields: &[DatabaseField],

@@ -1,38 +1,33 @@
-mod kanban;
-mod scatter;
-mod spreadsheet;
+use std::sync::Arc;
 
 use block::{Block, BlockParent};
-use block_client::{
-    block_ref::BlockRef,
-    blocks::{
-        database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue},
-        database_schema::{
-            DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
-        },
-        database_view::{DatabaseView, DatabaseViewKind, DatabaseViewOperation, DatabaseViewSort},
-    },
-    BlockClient, BlockHandle,
+use block_client::block_ref::BlockRef;
+use block_client::blocks::database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue};
+use block_client::blocks::database_schema::{
+    DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
 };
-use eframe::egui;
-use egui_material_icons::{
-    icons::{
-        ICON_DESELECT, ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_TABLE_VIEW,
-        ICON_VIEW_KANBAN,
-    },
-    MaterialIcon,
-};
-use uuid::Uuid;
-
-use self::kanban::KanbanView;
-use self::scatter::ScatterView;
-use self::spreadsheet::SpreadsheetView;
-
-use super::{
-    BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorViewport, EditorAccess, EditorAction, EditorKind,
+use block_client::blocks::database_view::{
+    DatabaseView, DatabaseViewKind, DatabaseViewOperation, DatabaseViewSort,
 };
 use block_client::references::ReferenceResolutionCache;
+use block_client::{BlockClient, BlockHandle};
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::egui_material_icons::icons::{
+    ICON_DESELECT, ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_VIEW_KANBAN,
+};
+use block_editor_plugin::{egui, EditorHost};
+use uuid::Uuid;
+
+use crate::kanban::KanbanView;
+use crate::scatter::ScatterView;
+use crate::spreadsheet::SpreadsheetView;
+use crate::{kanban, scatter, spreadsheet};
+
+pub(crate) struct BlockRenderContext<'a> {
+    pub(crate) painter: &'a egui::Painter,
+    pub(crate) corners: [egui::Pos2; 4],
+    pub(crate) opacity: f32,
+}
 
 struct DatabaseViewData {
     schema_id: Uuid,
@@ -45,38 +40,12 @@ struct DatabaseViewData {
     scatter_y_field_id: Option<Uuid>,
 }
 
-impl EditorKind for DatabaseViewEditor {
-    type Block = DatabaseView;
-
-    const DISPLAY_NAME: &'static str = "Database View";
-    const ICON: MaterialIcon = ICON_TABLE_VIEW;
-
-    fn open(_client: &BlockClient, block: BlockHandle<DatabaseView>) -> Self {
-        Self::new(block, None, None)
-    }
-}
-
-impl CreatableEditor for DatabaseViewEditor {
-    fn create(client: &BlockClient) -> Self {
-        let schema = client.create_block(DatabaseSchema::new());
-        schema.operate(DatabaseSchemaOperation::AddField {
-            field: DatabaseField {
-                id: Uuid::new_v4(),
-                name: "Name".into(),
-                field_type: DatabaseFieldType::String,
-                options: Vec::new(),
-            },
-        });
-        let database = client.create_block(Database::new(BlockRef::Direct(schema.id())));
-        schema.set_parent(BlockParent::Uuid(database.id()));
-        let view = client.create_block(DatabaseView::new(BlockRef::Direct(database.id())));
-        database.set_parent(BlockParent::Uuid(view.id()));
-        Self::new(view, Some(database), Some(schema))
-    }
-}
-
-pub(super) struct DatabaseViewEditor {
-    block: BlockHandle<DatabaseView>,
+#[derive(Default)]
+pub struct DatabaseViewApp {
+    host: Option<EditorHost>,
+    client: Option<Arc<BlockClient>>,
+    creation: Option<Arc<BlockClient>>,
+    block: Option<BlockHandle<DatabaseView>>,
     database: Option<BlockHandle<Database>>,
     schema: Option<BlockHandle<DatabaseSchema>>,
     spreadsheet: SpreadsheetView,
@@ -86,49 +55,25 @@ pub(super) struct DatabaseViewEditor {
     reference_cache: ReferenceResolutionCache,
 }
 
-impl DatabaseViewEditor {
-    fn new(
-        block: BlockHandle<DatabaseView>,
-        database: Option<BlockHandle<Database>>,
-        schema: Option<BlockHandle<DatabaseSchema>>,
-    ) -> Self {
-        Self {
-            block,
-            database,
-            schema,
-            spreadsheet: SpreadsheetView::default(),
-            kanban: KanbanView::default(),
-            scatter: ScatterView::default(),
-            row_editor: RowEditor::default(),
-            reference_cache: ReferenceResolutionCache::default(),
-        }
-    }
-
-    fn ensure_database(
-        &mut self,
-        editors: &mut EditorAccess<'_>,
-        database_ref: BlockRef,
-    ) -> Option<()> {
-        let client = editors.client_handle();
+impl DatabaseViewApp {
+    fn ensure_database(&mut self, database_ref: BlockRef) -> Option<()> {
+        let client = self.client.clone()?;
+        let referencing_id = self.block.as_ref()?.id();
         let database_id = self
             .reference_cache
-            .resolve(&client, self.block.id(), database_ref)?;
+            .resolve(&client, referencing_id, database_ref)?;
         if self
             .database
             .as_ref()
             .is_none_or(|database| database.id() != database_id)
         {
-            self.database = Some(editors.client().get_block::<Database>(database_id));
+            self.database = Some(client.get_block::<Database>(database_id));
         }
         Some(())
     }
 
-    fn ensure_schema(
-        &mut self,
-        editors: &mut EditorAccess<'_>,
-        schema_ref: BlockRef,
-    ) -> Option<()> {
-        let client = editors.client_handle();
+    fn ensure_schema(&mut self, schema_ref: BlockRef) -> Option<()> {
+        let client = self.client.clone()?;
         let referencing_id = self.database.as_ref()?.id();
         let schema_id = self
             .reference_cache
@@ -138,14 +83,14 @@ impl DatabaseViewEditor {
             .as_ref()
             .is_none_or(|schema| schema.id() != schema_id)
         {
-            self.schema = Some(editors.client().get_block::<DatabaseSchema>(schema_id));
+            self.schema = Some(client.get_block::<DatabaseSchema>(schema_id));
         }
         Some(())
     }
 
-    fn data(&mut self, editors: &mut EditorAccess<'_>) -> Option<DatabaseViewData> {
+    fn data(&mut self) -> Option<DatabaseViewData> {
         self.reference_cache.poll();
-        let view = self.block.read()?;
+        let view = self.block.as_ref()?.read()?;
         let database_ref = view.database_id();
         let sort = view.sort();
         let kind = view.kind();
@@ -153,12 +98,12 @@ impl DatabaseViewEditor {
         let scatter_x_field_id = view.scatter_x_field_id();
         let scatter_y_field_id = view.scatter_y_field_id();
         drop(view);
-        self.ensure_database(editors, database_ref)?;
+        self.ensure_database(database_ref)?;
         let database = self.database.as_ref()?.read()?;
         let schema_ref = database.schema_id();
         let rows = database.rows().to_vec();
         drop(database);
-        self.ensure_schema(editors, schema_ref)?;
+        self.ensure_schema(schema_ref)?;
         let fields = self.schema.as_ref()?.read()?.fields().to_vec();
         let schema_id = self.schema.as_ref()?.id();
         Some(DatabaseViewData {
@@ -199,56 +144,87 @@ impl DatabaseViewEditor {
     }
 
     fn view_switch(&self, ui: &mut egui::Ui, kind: DatabaseViewKind) {
+        let Some(block) = self.block.as_ref() else {
+            return;
+        };
         ui.horizontal(|ui| {
-            if ui
-                .selectable_label(
-                    kind == DatabaseViewKind::Spreadsheet,
-                    format!("{} Spreadsheet", ICON_GRID_ON.codepoint),
-                )
-                .clicked()
-                && kind != DatabaseViewKind::Spreadsheet
-            {
-                self.block.operate(DatabaseViewOperation::SetKind {
-                    kind: DatabaseViewKind::Spreadsheet,
-                });
-            }
-            if ui
-                .selectable_label(
-                    kind == DatabaseViewKind::Kanban,
-                    format!("{} Kanban", ICON_VIEW_KANBAN.codepoint),
-                )
-                .clicked()
-                && kind != DatabaseViewKind::Kanban
-            {
-                self.block.operate(DatabaseViewOperation::SetKind {
-                    kind: DatabaseViewKind::Kanban,
-                });
-            }
-            if ui
-                .selectable_label(
-                    kind == DatabaseViewKind::Scatter,
-                    format!("{} Scatter", ICON_SCATTER_PLOT.codepoint),
-                )
-                .clicked()
-                && kind != DatabaseViewKind::Scatter
-            {
-                self.block.operate(DatabaseViewOperation::SetKind {
-                    kind: DatabaseViewKind::Scatter,
-                });
+            for (label, icon, wanted) in [
+                (
+                    "Spreadsheet",
+                    ICON_GRID_ON.codepoint,
+                    DatabaseViewKind::Spreadsheet,
+                ),
+                (
+                    "Kanban",
+                    ICON_VIEW_KANBAN.codepoint,
+                    DatabaseViewKind::Kanban,
+                ),
+                (
+                    "Scatter",
+                    ICON_SCATTER_PLOT.codepoint,
+                    DatabaseViewKind::Scatter,
+                ),
+            ] {
+                if ui
+                    .selectable_label(kind == wanted, format!("{icon} {label}"))
+                    .test_id(&format!("database-view.kind.{label}"))
+                    .clicked()
+                    && kind != wanted
+                {
+                    block.operate(DatabaseViewOperation::SetKind { kind: wanted });
+                }
             }
         });
     }
 }
 
-impl BlockEditor for DatabaseViewEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+impl block_editor_plugin::App for DatabaseViewApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        self.block = Some(client.get_block(block_id));
+        self.client = Some(client);
+        self.host = Some(host);
     }
 
-    fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
+        self.creation = Some(client);
+    }
+
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        let schema = client.create_block(DatabaseSchema::new());
+        schema.operate(DatabaseSchemaOperation::AddField {
+            field: DatabaseField {
+                id: Uuid::new_v4(),
+                name: "Name".into(),
+                field_type: DatabaseFieldType::String,
+                options: Vec::new(),
+            },
+        });
+        let database = client.create_block(Database::new(BlockRef::Direct(schema.id())));
+        schema.set_parent(BlockParent::Uuid(database.id()));
+        let view = client.create_block(DatabaseView::new(BlockRef::Direct(database.id())));
+        database.set_parent(BlockParent::Uuid(view.id()));
+        Ok(view.id())
+    }
+
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
+        let data = self.data()?;
+        match data.kind {
+            DatabaseViewKind::Spreadsheet => Some(
+                self.spreadsheet
+                    .intrinsic_size(data.rows.len(), &data.fields),
+            ),
+            DatabaseViewKind::Kanban | DatabaseViewKind::Scatter => None,
+        }
+    }
+
+    fn preview_ui(&mut self, ui: &mut egui::Ui) {
         self.reference_cache.poll();
-        let Some(view) = self.block.read() else {
-            return false;
+        let Some(view) = self.block.as_ref().and_then(BlockHandle::read) else {
+            return;
         };
         let database_ref = view.database_id();
         let sort = view.sort();
@@ -257,17 +233,17 @@ impl BlockEditor for DatabaseViewEditor {
         let scatter_x_field_id = view.scatter_x_field_id();
         let scatter_y_field_id = view.scatter_y_field_id();
         drop(view);
-        if self.ensure_database(editors, database_ref).is_none() {
-            return false;
+        if self.ensure_database(database_ref).is_none() {
+            return;
         }
         let Some(database) = self.database.as_ref().and_then(|database| database.read()) else {
-            return false;
+            return;
         };
         let schema_ref = database.schema_id();
         let mut rows = database.rows().to_vec();
         drop(database);
-        if self.ensure_schema(editors, schema_ref).is_none() {
-            return false;
+        if self.ensure_schema(schema_ref).is_none() {
+            return;
         }
         let Some(fields) = self
             .schema
@@ -275,7 +251,18 @@ impl BlockEditor for DatabaseViewEditor {
             .and_then(|schema| schema.read())
             .map(|schema| schema.fields().to_vec())
         else {
-            return false;
+            return;
+        };
+        let rect = ui.max_rect();
+        let context = BlockRenderContext {
+            painter: ui.painter(),
+            corners: [
+                rect.left_top(),
+                rect.right_top(),
+                rect.right_bottom(),
+                rect.left_bottom(),
+            ],
+            opacity: 1.0,
         };
         match kind {
             DatabaseViewKind::Spreadsheet => {
@@ -297,80 +284,46 @@ impl BlockEditor for DatabaseViewEditor {
                 );
             }
         }
-        true
     }
 
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: true,
-            supports_pan_and_zoom: false,
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(data) = self.data() else {
+            return;
+        };
+        let Some(block) = self.block.clone() else {
+            return;
+        };
+        if data.kind != DatabaseViewKind::Spreadsheet {
+            return;
         }
+        let mut operations = Vec::new();
+        self.spreadsheet.formula_bar(
+            ui,
+            &block,
+            &data.rows,
+            &data.fields,
+            data.sort,
+            &mut operations,
+        );
+        self.operate_database(operations);
     }
 
-    fn direct_editor_interaction(&self) -> DirectEditorInteraction {
-        DirectEditorInteraction::Live
-    }
-
-    fn direct_editor_intrinsic_size(
-        &mut self,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
-        let data = self.data(editors)?;
-        match data.kind {
-            DatabaseViewKind::Spreadsheet => Some(
-                self.spreadsheet
-                    .intrinsic_size(data.rows.len(), &data.fields),
-            ),
-            DatabaseViewKind::Kanban | DatabaseViewKind::Scatter => None,
-        }
-    }
-
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let data = self.data(editors)?;
-        if data.kind == DatabaseViewKind::Spreadsheet {
-            let mut operations = Vec::new();
-            self.spreadsheet.formula_bar(
-                ui,
-                &self.block,
-                &data.rows,
-                &data.fields,
-                data.sort,
-                &mut operations,
-            );
-            self.operate_database(operations);
-        }
-        None
-    }
-
-    fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        true
-    }
-
-    fn direct_editor_right_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        let data = self.data(editors)?;
-        let mut action = None;
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        let (Some(host), Some(block), Some(data)) =
+            (self.host.clone(), self.block.clone(), self.data())
+        else {
+            return;
+        };
         egui::CollapsingHeader::new("Column settings")
             .default_open(false)
             .show(ui, |ui| {
                 if ui
                     .button(format!("{} Columns", ICON_SCHEMA.codepoint))
                     .on_hover_text("Edit columns and data types")
+                    .test_id("database-view.columns")
                     .clicked()
                 {
-                    action = Some(EditorAction::OpenBlock {
-                        id: data.schema_id,
-                        block_type: DatabaseSchema::TYPE_ID,
-                    });
+                    host.open_block(data.schema_id, DatabaseSchema::TYPE_ID);
                 }
             });
         ui.separator();
@@ -382,17 +335,12 @@ impl BlockEditor for DatabaseViewEditor {
                 match data.kind {
                     DatabaseViewKind::Spreadsheet => {}
                     DatabaseViewKind::Kanban => {
-                        kanban::status_field_picker(
-                            ui,
-                            &self.block,
-                            &data.fields,
-                            data.kanban_field_id,
-                        );
+                        kanban::status_field_picker(ui, &block, &data.fields, data.kanban_field_id);
                     }
                     DatabaseViewKind::Scatter => {
                         scatter::axis_field_pickers(
                             ui,
-                            &self.block,
+                            &block,
                             &data.fields,
                             data.scatter_x_field_id,
                             data.scatter_y_field_id,
@@ -418,17 +366,15 @@ impl BlockEditor for DatabaseViewEditor {
                     .ui(ui, &data.rows, &data.fields, selected_row);
             });
         self.operate_database(operations);
-        action
     }
 
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let data = self.data(editors)?;
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let (Some(block), Some(data)) = (self.block.clone(), self.data()) else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return;
+        };
         let mut operations = Vec::new();
         match data.kind {
             DatabaseViewKind::Spreadsheet => {
@@ -436,15 +382,15 @@ impl BlockEditor for DatabaseViewEditor {
                     let rect = ui.available_rect_before_wrap();
                     ui.painter()
                         .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
-                    return None;
+                    return;
                 }
                 self.spreadsheet.grid(
                     ui,
-                    &self.block,
+                    &block,
                     &data.rows,
                     &data.fields,
                     data.sort,
-                    scale,
+                    1.0,
                     &mut operations,
                 );
             }
@@ -456,11 +402,11 @@ impl BlockEditor for DatabaseViewEditor {
                     ui.centered_and_justified(|ui| {
                         ui.weak("Choose a status field above to use the kanban view.");
                     });
-                    return None;
+                    return;
                 };
                 self.kanban.board(
                     ui,
-                    &self.block,
+                    &block,
                     &data.rows,
                     &data.fields,
                     &status_field,
@@ -479,18 +425,17 @@ impl BlockEditor for DatabaseViewEditor {
                     ui.centered_and_justified(|ui| {
                         ui.weak("Choose X and Y fields above to use the scatter view.");
                     });
-                    return None;
+                    return;
                 };
                 self.scatter.plot(ui, &data.rows, &x_field, &y_field);
             }
         }
         self.operate_database(operations);
-        None
     }
 }
 
 #[derive(Default)]
-struct RowEditor {
+pub(crate) struct RowEditor {
     row_index: Option<usize>,
     buffers: std::collections::BTreeMap<Uuid, String>,
 }
@@ -599,14 +544,14 @@ impl RowEditor {
     }
 }
 
-fn cell_text(row: &DatabaseRow, field: &DatabaseField) -> String {
+pub(crate) fn cell_text(row: &DatabaseRow, field: &DatabaseField) -> String {
     match row.value(field.id) {
         Some(value) => database_value_text(value, field),
         None => String::new(),
     }
 }
 
-fn database_value_text(value: &DatabaseValue, field: &DatabaseField) -> String {
+pub(crate) fn database_value_text(value: &DatabaseValue, field: &DatabaseField) -> String {
     match value {
         DatabaseValue::String(value) => value.clone(),
         DatabaseValue::Number(value) => value.to_string(),
@@ -618,7 +563,7 @@ fn database_value_text(value: &DatabaseValue, field: &DatabaseField) -> String {
     }
 }
 
-fn parse_cell_value(value: &str, field: &DatabaseField) -> Option<DatabaseValue> {
+pub(crate) fn parse_cell_value(value: &str, field: &DatabaseField) -> Option<DatabaseValue> {
     match field.field_type {
         DatabaseFieldType::String => Some(DatabaseValue::String(value.to_owned())),
         DatabaseFieldType::Number => value.parse().ok().map(DatabaseValue::Number),
@@ -630,7 +575,7 @@ fn parse_cell_value(value: &str, field: &DatabaseField) -> Option<DatabaseValue>
     }
 }
 
-fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
+pub(crate) fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
     match field_type {
         DatabaseFieldType::String => "Text",
         DatabaseFieldType::Number => "Number",
@@ -638,7 +583,7 @@ fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
     }
 }
 
-fn paint_preview_cell(
+pub(crate) fn paint_preview_cell(
     painter: &egui::Painter,
     rect: egui::Rect,
     fill: egui::Color32,
@@ -660,7 +605,7 @@ fn paint_preview_cell(
         .text(position, alignment, text, font, text_color);
 }
 
-fn preview_color(color: egui::Color32, opacity: f32) -> egui::Color32 {
+pub(crate) fn preview_color(color: egui::Color32, opacity: f32) -> egui::Color32 {
     let [red, green, blue, alpha] = color.to_srgba_unmultiplied();
     egui::Color32::from_rgba_unmultiplied(
         red,

@@ -1,6 +1,5 @@
 mod browser_tab;
 mod clipboard;
-mod database_view;
 pub(crate) mod deterministic_game;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
@@ -1279,7 +1278,6 @@ impl EditorRegistry {
             new_block_actions: Vec::new(),
             plugin_block_types: Arc::default(),
         };
-        registry.register_creatable::<database_view::DatabaseViewEditor>();
         registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();

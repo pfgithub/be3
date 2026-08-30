@@ -1,0 +1,20 @@
+[package]
+name = "database_view"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+block = { path = "../../block" }
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+block-ui-test = { path = "../../block-ui-test" }
+
+[lints]
+workspace = true

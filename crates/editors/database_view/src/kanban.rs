@@ -6,11 +6,11 @@ use block_client::{
     },
     BlockHandle,
 };
-use eframe::egui;
-use egui_material_icons::icons::ICON_ADD;
+use block_editor_plugin::egui;
+use block_editor_plugin::egui_material_icons::icons::ICON_ADD;
 use uuid::Uuid;
 
-use super::{cell_text, paint_preview_cell, preview_color, BlockRenderContext};
+use crate::app::{cell_text, paint_preview_cell, preview_color, BlockRenderContext};
 
 const COLUMN_WIDTH: f32 = 240.0;
 const CARD_SPACING: f32 = 6.0;
@@ -19,21 +19,21 @@ const PREVIEW_CARD_HEIGHT: f32 = 16.0;
 const PREVIEW_CARD_GAP: f32 = 4.0;
 
 #[derive(Default)]
-pub(super) struct KanbanView {
+pub(crate) struct KanbanView {
     selected: Option<usize>,
     dragging: Option<usize>,
 }
 
 impl KanbanView {
-    pub(super) fn selected_row(&self) -> Option<usize> {
+    pub(crate) fn selected_row(&self) -> Option<usize> {
         self.selected
     }
 
-    pub(super) fn deselect(&mut self) {
+    pub(crate) fn deselect(&mut self) {
         self.selected = None;
     }
 
-    pub(super) fn board(
+    pub(crate) fn board(
         &mut self,
         ui: &mut egui::Ui,
         view: &BlockHandle<DatabaseView>,
@@ -209,7 +209,7 @@ impl KanbanView {
     }
 }
 
-pub(super) fn status_field_picker(
+pub(crate) fn status_field_picker(
     ui: &mut egui::Ui,
     view: &BlockHandle<DatabaseView>,
     fields: &[DatabaseField],
@@ -244,7 +244,7 @@ pub(super) fn status_field_picker(
     });
 }
 
-pub(super) fn paint_preview(
+pub(crate) fn paint_preview(
     context: BlockRenderContext<'_>,
     rows: &[DatabaseRow],
     fields: &[DatabaseField],

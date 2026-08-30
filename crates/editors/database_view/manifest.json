@@ -1,0 +1,22 @@
+{
+  "id": "be3.database-view",
+  "name": "Database View",
+  "version": "0.1.0",
+  "block_type": "00006461-7461-6261-7365-2d7669657701",
+  "display_name": "Database View",
+  "icon": "",
+  "creation": "Immediate",
+  "interaction": "Live",
+  "capabilities": {
+    "rotation": false,
+    "preserve_aspect_ratio": true,
+    "pan_and_zoom": false
+  },
+  "regions": [
+    "Main",
+    "Toolbar",
+    "RightSidebar",
+    "Preview"
+  ],
+  "entry_point": "database_view.wasm"
+}

@@ -6,10 +6,10 @@ use block_client::{
     },
     BlockHandle,
 };
-use eframe::egui;
+use block_editor_plugin::egui;
 use uuid::Uuid;
 
-use super::{preview_color, BlockRenderContext};
+use crate::app::{preview_color, BlockRenderContext};
 
 const POINT_RADIUS: f32 = 4.0;
 const SELECTED_POINT_RADIUS: f32 = 6.0;
@@ -20,20 +20,20 @@ const AXIS_MARGIN_TOP: f32 = 8.0;
 const AXIS_MARGIN_RIGHT: f32 = 8.0;
 
 #[derive(Default)]
-pub(super) struct ScatterView {
+pub(crate) struct ScatterView {
     selected: Option<usize>,
 }
 
 impl ScatterView {
-    pub(super) fn selected_row(&self) -> Option<usize> {
+    pub(crate) fn selected_row(&self) -> Option<usize> {
         self.selected
     }
 
-    pub(super) fn deselect(&mut self) {
+    pub(crate) fn deselect(&mut self) {
         self.selected = None;
     }
 
-    pub(super) fn plot(
+    pub(crate) fn plot(
         &mut self,
         ui: &mut egui::Ui,
         rows: &[DatabaseRow],
@@ -209,7 +209,7 @@ fn format_axis_value(value: f64) -> String {
     }
 }
 
-pub(super) fn axis_field_pickers(
+pub(crate) fn axis_field_pickers(
     ui: &mut egui::Ui,
     view: &BlockHandle<DatabaseView>,
     fields: &[DatabaseField],
@@ -272,7 +272,7 @@ fn axis_field_picker(
         });
 }
 
-pub(super) fn paint_preview(
+pub(crate) fn paint_preview(
     context: BlockRenderContext<'_>,
     rows: &[DatabaseRow],
     fields: &[DatabaseField],
