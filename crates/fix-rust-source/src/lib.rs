@@ -806,7 +806,9 @@ fn collect_rust_files(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), 
         let path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
-            if matches!(entry.file_name().to_str(), Some(".git" | "target")) {
+            let name = entry.file_name();
+            let name = name.to_str().unwrap_or_default();
+            if name.starts_with('.') || name == "target" {
                 continue;
             }
             collect_rust_files(&path, paths)?;

@@ -11,4 +11,5 @@ fn temporary_directory() -> PathBuf {
 mod fix_repository_check_reports_without_changes;
 mod fix_repository_enforces_rust_layout;
 mod fix_repository_removes_test_path_attributes;
+mod fix_repository_skips_hidden_directories;
 mod strip_comments;

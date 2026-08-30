@@ -35,7 +35,7 @@ jobs:
 
       # Each game's build script builds the same crate again as a wasm module
       # the host loads, so the test build needs the wasm target as well.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
         with:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
@@ -72,9 +72,9 @@ jobs:
           sudo apt-get install --no-install-recommends -y clang-20 llvm-20
           echo /usr/lib/llvm-20/bin >> "$GITHUB_PATH"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
         with:
-          targets: wasm32-wasip1
+          targets: wasm32-unknown-unknown, wasm32-wasip1-threads
 
       # CC_wasm32_wasip1 names the compiler as plain "clang", resolved through
       # PATH, so a cached target/ from a run with a different LLVM on PATH
@@ -160,7 +160,7 @@ jobs:
           sudo apt-get install --no-install-recommends -y clang-20 llvm-20
           echo /usr/lib/llvm-20/bin >> "$GITHUB_PATH"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
         with:
           targets: aarch64-linux-android, wasm32-wasip1-threads, wasm32-unknown-unknown
 
@@ -285,13 +285,50 @@ jobs:
             echo AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
           } >> "$GITHUB_ENV"
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The client carries every plugin as a WASI module, whose C dependencies
+      # are compiled by clang rather than by rustc, so it needs a local LLVM of
+      # at least version 19 for the same reason the web job does: only from 19
+      # onwards do FreeType's setjmp/longjmp calls lower to imports that
+      # resolve inside the module. Apple's clang cannot emit wasm at all, and
+      # neither toolchain ships llvm-ar. The Windows runners come with an LLVM
+      # on PATH already.
+      - name: Install LLVM
+        id: llvm
+        if: matrix.client && runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew install llvm
+            bin="$(brew --prefix llvm)/bin"
+          else
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y clang-20 llvm-20
+            bin=/usr/lib/llvm-20/bin
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+          echo "version=$("$bin/llvm-config" --version)" >> "$GITHUB_OUTPUT"
+
+      # That LLVM goes on the front of PATH, where it also becomes the "clang"
+      # the cc crate picks for the host target. Name Apple's explicitly for
+      # the macOS builds so only the wasm modules change compiler.
+      - name: Use Apple clang for the macOS target
+        if: runner.os == 'macOS'
+        run: |
+          {
+            echo "CC_${{ matrix.target }}=/usr/bin/clang"
+            echo "CXX_${{ matrix.target }}=/usr/bin/clang++"
+          } >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/rust-toolchain
         with:
           targets: ${{ matrix.target }}
 
+      # Keyed to the LLVM version for the same reason as the web job: the C
+      # objects in target/ are built by whichever "clang" PATH resolves to,
+      # which cargo cannot see a change in.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-llvm-${{ steps.llvm.outputs.version }}
 
       # libghostty-vt-sys builds libghostty-vt from source via Zig. The client
       # excludes it on Windows because it is not supported there, and on macOS
