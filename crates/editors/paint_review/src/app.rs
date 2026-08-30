@@ -16,8 +16,7 @@ use block_editor_plugin::{
     egui_material_icons::icons::{
         ICON_CHECK, ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT, ICON_COMPARE, ICON_DELETE,
         ICON_DIFFERENCE, ICON_DONE_ALL, ICON_FIBER_NEW, ICON_FIT_SCREEN, ICON_PAUSE,
-        ICON_PHOTO_SIZE_SELECT_ACTUAL, ICON_PLAY_ARROW, ICON_REFRESH, ICON_VERTICAL_SPLIT,
-        ICON_ZOOM_IN, ICON_ZOOM_OUT,
+        ICON_PLAY_ARROW, ICON_REFRESH, ICON_VERTICAL_SPLIT, ICON_ZOOM_IN, ICON_ZOOM_OUT,
     },
     EditorHost, Waker,
 };
@@ -25,10 +24,11 @@ use uuid::Uuid;
 
 use crate::download::{Download, Painting, Source, BRANCH};
 use crate::render::{Change, Paintings, Rendered};
-use crate::view::{Panel, Viewport};
+use crate::view::Panel;
 
 const INTRINSIC_SIZE: egui::Vec2 = egui::vec2(960.0, 640.0);
 const FRAME_SECONDS: f64 = 0.25;
+const ZOOM_STEP: f32 = 1.25;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum Showing {
@@ -127,7 +127,7 @@ pub struct PaintReviewApp {
     selected: Option<String>,
     showing: Showing,
     paintings: Paintings,
-    view: Viewport,
+    scale: Option<f32>,
     change: Option<(String, Change)>,
     pending: Option<String>,
     frame: usize,
@@ -154,7 +154,7 @@ impl PaintReviewApp {
 
     #[cfg(test)]
     pub fn zoom(&self) -> f32 {
-        self.view.scale()
+        self.scale.unwrap_or_default()
     }
 
     pub fn entries(&self) -> Option<Vec<Entry>> {
@@ -265,7 +265,7 @@ impl PaintReviewApp {
         self.frame = 0;
         self.playing = false;
         self.advanced = None;
-        self.view.fit();
+        self.fit_view();
     }
 
     fn approve(&mut self, path: &str) {
@@ -436,100 +436,161 @@ impl PaintReviewApp {
             .map(|(_, change)| (change.description.clone(), change.frame))
     }
 
+    fn changed_frame(&mut self, path: &str, status: Status) -> Option<usize> {
+        self.changed(path, status)?.1
+    }
+
+    fn loading(&self) -> Option<(usize, usize)> {
+        let path = self.selected.clone()?;
+        let entries = self.entries()?;
+        let status = self.status(&entries, &path)?;
+        let hash = self.hash(&path, self.showing(status)).ok()?;
+        self.paintings.loading(&hash)
+    }
+
+    fn caption(
+        &mut self,
+        path: &str,
+        status: Status,
+        showing: Showing,
+        description: String,
+    ) -> Vec<String> {
+        let mut lines = vec![showing.label()];
+        if showing != Showing::Difference {
+            if let Some((change, _)) = self.changed(path, status) {
+                lines.push(change);
+            }
+        }
+        lines.push(description);
+        lines
+    }
+
+    fn changed(&mut self, path: &str, status: Status) -> Option<(String, Option<usize>)> {
+        if status != Status::Modified {
+            return None;
+        }
+        self.change(path)
+    }
+
     fn frames_ui(&mut self, ui: &mut egui::Ui, count: usize, changed: Option<usize>) {
-        ui.horizontal(|ui| {
-            let step = |ui: &mut egui::Ui, icon: &str, id: &str, enabled: bool| {
-                ui.add_enabled(enabled, egui::Button::new(icon))
-                    .test_id(id)
-                    .clicked()
-            };
-            if step(
-                ui,
-                ICON_CHEVRON_LEFT.codepoint,
-                "paint_review.frame.previous",
-                self.frame > 0,
-            ) {
-                self.frame -= 1;
+        let step = |ui: &mut egui::Ui, icon: &str, id: &str, enabled: bool| {
+            ui.add_enabled(enabled, egui::Button::new(icon))
+                .test_id(id)
+                .clicked()
+        };
+        if step(
+            ui,
+            ICON_CHEVRON_LEFT.codepoint,
+            "paint_review.frame.previous",
+            self.frame > 0,
+        ) {
+            self.frame -= 1;
+            self.playing = false;
+        }
+        let playing = self.playing;
+        let icon = if playing { ICON_PAUSE } else { ICON_PLAY_ARROW };
+        if step(ui, icon.codepoint, "paint_review.frame.play", true) {
+            self.playing = !playing;
+            self.advanced = None;
+        }
+        if step(
+            ui,
+            ICON_CHEVRON_RIGHT.codepoint,
+            "paint_review.frame.next",
+            self.frame + 1 < count,
+        ) {
+            self.frame += 1;
+            self.playing = false;
+        }
+        let slider = ui
+            .add(egui::Slider::new(&mut self.frame, 0..=count - 1).show_value(false))
+            .test_id("paint_review.frame.at");
+        if slider.changed() {
+            self.playing = false;
+        }
+        ui.weak(format!("Frame {} of {count}", self.frame + 1));
+        if let Some(changed) = changed.filter(|changed| *changed != self.frame) {
+            if ui
+                .button(format!("{} Changed frame", ICON_DIFFERENCE.codepoint))
+                .test_id("paint_review.frame.changed")
+                .clicked()
+            {
+                self.frame = changed;
                 self.playing = false;
             }
-            let playing = self.playing;
-            let icon = if playing { ICON_PAUSE } else { ICON_PLAY_ARROW };
-            if step(ui, icon.codepoint, "paint_review.frame.play", true) {
-                self.playing = !playing;
-                self.advanced = None;
+        }
+    }
+
+    fn view(&self, region: egui::Rect) -> egui::Rect {
+        self.editing
+            .as_ref()
+            .and_then(|editing| editing.host.view())
+            .map(|view| view.translate(region.min.to_vec2()))
+            .unwrap_or(region)
+    }
+
+    fn zoom_view(&self, factor: f32) {
+        if let Some(editing) = &self.editing {
+            editing.host.zoom_view(factor, None);
+        }
+    }
+
+    fn fit_view(&self) {
+        if let Some(editing) = &self.editing {
+            editing.host.fit_view();
+        }
+    }
+
+    fn pan_view(&self, response: &egui::Response) {
+        if let Some(editing) = &self.editing {
+            if response.dragged() {
+                editing.host.pan_view(response.drag_delta());
             }
-            if step(
-                ui,
-                ICON_CHEVRON_RIGHT.codepoint,
-                "paint_review.frame.next",
-                self.frame + 1 < count,
-            ) {
-                self.frame += 1;
-                self.playing = false;
-            }
-            let slider = ui
-                .add(egui::Slider::new(&mut self.frame, 0..=count - 1).show_value(false))
-                .test_id("paint_review.frame.at");
-            if slider.changed() {
-                self.playing = false;
-            }
-            ui.weak(format!("Frame {} of {count}", self.frame + 1));
-            if let Some(changed) = changed.filter(|changed| *changed != self.frame) {
-                if ui
-                    .button(format!("{} Changed frame", ICON_DIFFERENCE.codepoint))
-                    .test_id("paint_review.frame.changed")
-                    .clicked()
-                {
-                    self.frame = changed;
-                    self.playing = false;
-                }
-            }
-        });
+        }
     }
 
     fn zoom_ui(&mut self, ui: &mut egui::Ui, loading: Option<(usize, usize)>) {
-        ui.horizontal(|ui| {
-            if ui
-                .button(ICON_ZOOM_OUT.codepoint)
-                .test_id("paint_review.zoom.out")
-                .clicked()
-            {
-                self.view.zoom_out();
-            }
-            if ui
-                .button(ICON_ZOOM_IN.codepoint)
-                .test_id("paint_review.zoom.in")
-                .clicked()
-            {
-                self.view.zoom_in();
-            }
-            if ui
-                .selectable_label(
-                    self.view.fitting(),
-                    format!("{} Fit", ICON_FIT_SCREEN.codepoint),
-                )
-                .test_id("paint_review.zoom.fit")
-                .clicked()
-            {
-                self.view.fit();
-            }
-            if ui
-                .selectable_label(
-                    !self.view.fitting() && (self.view.scale() - 1.0).abs() < f32::EPSILON,
-                    format!("{} 1:1", ICON_PHOTO_SIZE_SELECT_ACTUAL.codepoint),
-                )
-                .test_id("paint_review.zoom.actual")
-                .clicked()
-            {
-                self.view.set(1.0);
-            }
-            ui.weak(format!("{:.0}%", self.view.scale() * 100.0));
-            if let Some((done, total)) = loading {
-                ui.separator();
-                ui.weak(format!("Rastering frame {} of {total}", done + 1));
-                ui.spinner();
-            }
-        });
+        let Some(scale) = self.scale else {
+            return;
+        };
+        ui.separator();
+        if ui
+            .button(ICON_ZOOM_OUT.codepoint)
+            .on_hover_text("Zoom out")
+            .test_id("paint_review.zoom.out")
+            .clicked()
+        {
+            self.zoom_view(1.0 / ZOOM_STEP);
+        }
+        if ui
+            .button(format!("{:.0}%", scale * 100.0))
+            .on_hover_text("Show every pixel once")
+            .test_id("paint_review.zoom.actual")
+            .clicked()
+        {
+            self.zoom_view(1.0 / scale);
+        }
+        if ui
+            .button(ICON_ZOOM_IN.codepoint)
+            .on_hover_text("Zoom in")
+            .test_id("paint_review.zoom.in")
+            .clicked()
+        {
+            self.zoom_view(ZOOM_STEP);
+        }
+        if ui
+            .button(format!("{} Fit", ICON_FIT_SCREEN.codepoint))
+            .on_hover_text("Fit the painting to the panel")
+            .test_id("paint_review.zoom.fit")
+            .clicked()
+        {
+            self.fit_view();
+        }
+        if let Some((done, total)) = loading {
+            ui.separator();
+            ui.weak(format!("Rastering frame {} of {total}", done + 1));
+            ui.spinner();
+        }
     }
 
     fn advance(&mut self, ui: &egui::Ui, count: usize, rendered: bool) {
@@ -689,7 +750,12 @@ impl block_editor_plugin::App for PaintReviewApp {
             .entries()
             .zip(selected.as_ref())
             .and_then(|(entries, path)| self.status(&entries, path));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            if let (Some(path), Some(status)) = (&selected, status) {
+                ui.label(egui::RichText::new(path.clone()).strong());
+                ui.weak(status.label());
+                ui.separator();
+            }
             if ui
                 .add_enabled(
                     self.download.is_none(),
@@ -756,7 +822,23 @@ impl block_editor_plugin::App for PaintReviewApp {
                 )
                 .test_id("paint_review.view.side_by_side");
             }
+            let loading = self.loading();
+            self.zoom_ui(ui, loading);
         });
+        let Some((path, status)) = selected.zip(status) else {
+            return;
+        };
+        let showing = self.showing(status);
+        let count = self.count(&path, showing);
+        self.frame = self.frame.min(count - 1);
+        if count > 1 {
+            let changed = self
+                .changed_frame(&path, status)
+                .filter(|frame| *frame < count);
+            ui.horizontal_wrapped(|ui| {
+                self.frames_ui(ui, count, changed);
+            });
+        }
     }
 
     fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
@@ -811,66 +893,53 @@ impl block_editor_plugin::App for PaintReviewApp {
 
     fn ui(&mut self, ui: &mut egui::Ui) {
         self.poll(ui.ctx());
+        let available = ui.available_size().max(egui::Vec2::splat(1.0));
+        let (region, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
+        self.pan_view(&response);
         let Some(entries) = self.entries() else {
-            ui.spinner();
-            return;
+            return waiting(ui, region, None);
         };
         let Some(path) = self.selected.clone() else {
-            ui.centered_and_justified(|ui| {
+            self.scale = None;
+            return centered(ui, region, |ui| {
                 ui.weak("Choose a painting to review it");
             });
-            return;
         };
         let Some(status) = self.status(&entries, &path) else {
             self.selected = None;
             return;
         };
         let showing = self.showing(status);
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(path.clone()).strong());
-            ui.weak(status.label());
-            ui.weak(showing.label());
-        });
-
         self.request(&path);
         self.raster(ui.ctx());
-
-        let mut changed = None;
         if self.pending.is_some() {
-            ui.weak("Waiting for the painting you approved before to arrive");
-        } else if status == Status::Modified {
-            if let Some((description, frame)) = self.change(&path) {
-                if showing != Showing::Difference {
-                    ui.weak(description);
-                }
-                changed = frame;
-            }
+            return centered(ui, region, |ui| {
+                ui.weak("Waiting for the painting you approved before to arrive");
+            });
         }
 
         let count = self.count(&path, showing);
         self.frame = self.frame.min(count - 1);
-        if count > 1 {
-            self.frames_ui(ui, count, changed.filter(|frame| *frame < count));
-        }
-        let loading = self
-            .hash(&path, showing)
-            .ok()
-            .and_then(|hash| self.paintings.loading(&hash));
-        self.zoom_ui(ui, loading);
-
         let shown = self.shown(ui.ctx(), &path, showing, self.frame);
         let ready = match shown {
             Shown::Ready(panels, description) => {
-                ui.weak(description);
-                self.view.show(ui, &panels);
+                let view = self.view(region);
+                self.scale = Some(crate::view::show(ui, region, view, &panels));
+                crate::view::caption(
+                    ui,
+                    region,
+                    &self.caption(&path, status, showing, description),
+                );
                 true
             }
             Shown::Failed(error) => {
-                ui.colored_label(ui.visuals().error_fg_color, error);
+                centered(ui, region, |ui| {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                });
                 true
             }
             Shown::Waiting(error) => {
-                waiting(ui, error);
+                waiting(ui, region, error);
                 false
             }
         };
@@ -882,13 +951,19 @@ impl block_editor_plugin::App for PaintReviewApp {
     }
 }
 
-fn waiting(ui: &mut egui::Ui, error: Option<String>) {
-    ui.centered_and_justified(|ui| match error {
+fn waiting(ui: &mut egui::Ui, region: egui::Rect, error: Option<String>) {
+    centered(ui, region, |ui| match error {
         Some(error) => {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
         None => {
             ui.spinner();
         }
+    });
+}
+
+fn centered(ui: &mut egui::Ui, region: egui::Rect, contents: impl FnOnce(&mut egui::Ui)) {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(region), |ui| {
+        ui.centered_and_justified(contents);
     });
 }

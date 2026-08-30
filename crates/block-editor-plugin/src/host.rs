@@ -539,13 +539,11 @@ impl EditorHost {
         self.editable.set(editable);
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn set_view(&self, view: egui::Rect) {
+    pub fn set_view(&self, view: egui::Rect) {
         self.view.set(Some(view));
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn take_view_changes(&self) -> Vec<ViewChange> {
+    pub fn take_view_changes(&self) -> Vec<ViewChange> {
         std::mem::take(&mut self.view_changes.borrow_mut())
     }
 

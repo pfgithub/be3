@@ -64,6 +64,14 @@ run() paints until the editor asks for no more immediate repaints, so an editor 
 animating — a recording playing, a spinner turning — never lets it return. Drive those a
 frame at a time with step(), which paints once however much the editor wanted.
 
+An editor whose manifest claims pan_and_zoom draws into a view the host owns, so its test
+is built with EditorTest::viewport(app, host) — the host it was connected to — instead of
+EditorTest::new(app). The harness then does what the host does around the main region: it
+holds a zoom and an offset, hands the editor host.view() over its region, and answers the
+pan, zoom and fit the editor asks for, fitting the content until the first of them arrives.
+An editor given EditorTest::new is told nothing about a view and fills its region, which is
+what an editor without that capability does anyway.
+
 4. Snapshots of the painting
 
 editor.snapshot(name) writes everything the editor painted into
@@ -104,9 +112,10 @@ way for the test to fail.
   slider, or jump straight to the frame that changed. A changed painting is shown four ways:
   the painting that was approved, the one on the branch, the difference - the pixels that
   moved or changed colour, in red, over a ghost of the ones that did not, counted and
-  bounded - and the two side by side. Scroll to zoom and drag to pan, or fit it to the
-  panel; past 1:1 it is drawn a pixel at a time rather than smoothed, so a single pixel is
-  something you can look at.
+  bounded - and the two side by side. The view is the host's, as it is for any editor that
+  pans and zooms: scroll or pinch to zoom and drag to pan, or ask for a zoom, 1:1 or a fit
+  from the toolbar; past 1:1 it is drawn a pixel at a time rather than smoothed, so a single
+  pixel is something you can look at.
 - Approving is not git, and a reviewer is not the tests: a painting nobody approved is new
   again the next time the block is opened, and one nobody had approved before it vanished
   is not reported at all.

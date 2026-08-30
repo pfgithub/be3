@@ -7,6 +7,11 @@
   "icon": "",
   "creation": "Immediate",
   "interaction": "Live",
+  "capabilities": {
+    "rotation": false,
+    "preserve_aspect_ratio": false,
+    "pan_and_zoom": true
+  },
   "regions": [
     "Main",
     "Toolbar",

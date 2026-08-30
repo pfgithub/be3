@@ -44,7 +44,7 @@ impl Review {
         let host = EditorHost::default();
         host.set_editable(true);
         let mut app = PaintReviewApp::default();
-        app.connect(host, Arc::clone(&client), block.id());
+        app.connect(host.clone(), Arc::clone(&client), block.id());
         app.review(Source::Fixed(Arc::clone(&branch)));
         let review = Self {
             branch,
@@ -52,7 +52,7 @@ impl Review {
             block,
         };
         review.write(PATH, &painting(30));
-        let mut editor = EditorTest::new(app);
+        let mut editor = EditorTest::viewport(app, host);
         editor.run();
         (review, editor)
     }
