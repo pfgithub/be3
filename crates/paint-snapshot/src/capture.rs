@@ -95,7 +95,7 @@ impl Crops<'_> {
         let source = key(mesh.texture_id);
         let size = self.store.image(source)?.size;
         let mut triangles = Vec::with_capacity(mesh.indices.len() / 3);
-        for indices in mesh.indices.chunks_exact(3) {
+        for indices in mesh.indices.as_chunks::<3>().0 {
             let corners = [0, 1, 2].map(|corner| mesh.vertices[indices[corner] as usize]);
             let uv = corners.map(|corner| [corner.uv.x, corner.uv.y]);
             let rect = footprint(uv, size);

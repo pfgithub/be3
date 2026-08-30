@@ -278,8 +278,8 @@ impl PixelArt {
         let from = from.rgba();
         let to = to.rgba();
         let mut changed = false;
-        for pixel in self.pixels.chunks_exact_mut(4) {
-            if pixel == from {
+        for pixel in self.pixels.as_chunks_mut::<4>().0 {
+            if *pixel == from {
                 pixel.copy_from_slice(&to);
                 changed = true;
             }

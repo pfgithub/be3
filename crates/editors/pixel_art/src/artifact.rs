@@ -79,7 +79,7 @@ fn magnified(art: &PixelArt, scale: u32) -> Vec<u8> {
     let mut magnified = Vec::with_capacity(pixels.len() * scale * scale);
     for row in pixels.chunks_exact(width * 4) {
         let start = magnified.len();
-        for pixel in row.chunks_exact(4) {
+        for pixel in row.as_chunks::<4>().0 {
             for _ in 0..scale {
                 magnified.extend_from_slice(pixel);
             }

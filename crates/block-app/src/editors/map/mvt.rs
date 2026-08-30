@@ -148,8 +148,10 @@ fn decode_feature(data: &[u8]) -> Result<Option<Feature>, String> {
         kind,
         paths: decode_geometry(&geometry, kind),
         tags: tags
-            .chunks_exact(2)
-            .map(|pair| (pair[0], pair[1]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[key, value]| (key, value))
             .collect(),
     }))
 }

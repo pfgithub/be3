@@ -61,6 +61,10 @@ pub(crate) fn show(ctx: &egui::Context) {
     OPEN.with(|open| *open.borrow_mut() = still_open);
 }
 
+#[cfg(not(debug_assertions))]
+pub(crate) fn debug_on_hover_toggle(_ui: &mut egui::Ui) {}
+
+#[cfg(debug_assertions)]
 pub(crate) fn debug_on_hover_toggle(ui: &mut egui::Ui) {
     let mut debug_on_hover = ui.ctx().debug_on_hover();
     if ui

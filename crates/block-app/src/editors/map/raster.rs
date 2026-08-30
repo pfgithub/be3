@@ -338,7 +338,7 @@ impl Canvas {
                 }
             }
             crossings.sort_unstable_by(f32::total_cmp);
-            for span in crossings.chunks_exact(2) {
+            for span in crossings.as_chunks::<2>().0 {
                 let clamp = |edge: f32| ((edge - 0.5).ceil().max(0.0) as usize).min(CANVAS);
                 let start = clamp(span[0]);
                 let end = clamp(span[1]);

@@ -33,9 +33,12 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
 
+      # Each game's build script builds the same crate again as a wasm module
+      # the host loads, so the test build needs the wasm target as well.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
 
@@ -146,11 +149,33 @@ jobs:
             "build-tools;35.0.0" \
             "ndk;29.0.14206865"
 
+      # The APK carries every plugin as a WASI module and every game as a wasm
+      # one, so this job builds for the wasm targets too. The LLVM the plugin
+      # build needs is the web job's, for the same reason: FreeType's
+      # setjmp/longjmp calls only lower to imports that resolve inside the
+      # module from LLVM 19 onwards.
+      - name: Install LLVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang-20 llvm-20
+          echo /usr/lib/llvm-20/bin >> "$GITHUB_PATH"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android, wasm32-wasip1-threads, wasm32-unknown-unknown
 
+      # Keyed to the LLVM version for the same reason as the web job: the C
+      # objects in target/ are built by whichever "clang" PATH resolves to,
+      # which cargo cannot see a change in.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: llvm-20
+
+      - name: Cache the WASI sysroot
+        uses: actions/cache@v6
+        with:
+          path: target/tools
+          key: wasi-sysroot-33
 
       - uses: gradle/actions/setup-gradle@v4
         with:

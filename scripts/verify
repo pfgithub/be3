@@ -11,6 +11,11 @@
 # what CI wants. Either way the run fails if a Rust source violation or clippy
 # warning survives.
 #
+# CI builds with the current stable toolchain, so a local toolchain behind it
+# runs a clippy that has never heard of the lints CI fails on. The run warns
+# about that rather than failing, so an update can wait for a moment that is
+# not mid-change.
+#
 # Usage:
 #   ./scripts/verify
 #   ./scripts/verify --check
@@ -26,6 +31,13 @@ repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository"
 
 failed=false
+
+if rustup check 2>/dev/null | grep -q '^stable-.*Update available'; then
+    echo 'The stable toolchain is out of date. CI lints with the current one:'
+    rustup check | grep '^stable-'
+    echo 'Run `rustup update stable` to lint against what CI will.'
+    echo ''
+fi
 
 t() {
     if ! /usr/bin/time -f "Took %E" "$@"; then
@@ -61,6 +73,13 @@ else
     # again to make any warnings that remain fail verification.
     t cargo clippy --quiet "${clippy_targets[@]}" -- -D warnings
 fi
+
+# egui hides its debug-only API behind cfg(debug_assertions), and the release
+# builds CI makes are the only place code using it fails to compile. The
+# release-check profile is a dev build with the assertions turned off, so it
+# type checks what a release build would see without paying for optimisation.
+echo 'cargo check (release assertions)...'
+t cargo check --quiet --profile release-check "${clippy_targets[@]}"
 
 echo 'cargo nextest run...'
 if $check; then

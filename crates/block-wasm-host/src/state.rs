@@ -56,8 +56,11 @@ impl State {
     pub(crate) fn read_words(&self, pointer: u32, count: u32) -> Result<Vec<u32>, String> {
         let bytes = self.read(pointer, count.saturating_mul(4))?;
         Ok(bytes
-            .chunks_exact(4)
-            .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .copied()
+            .map(u32::from_le_bytes)
             .collect())
     }
 

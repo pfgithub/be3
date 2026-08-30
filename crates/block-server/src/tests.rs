@@ -211,14 +211,17 @@ mod support {
             &self,
             token: &str,
             workspace_id: Uuid,
-        ) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
+        ) -> Result<Socket, Box<tokio_tungstenite::tungstenite::Error>> {
             let request = format!(
                 "{}/api?token={token}&workspace={workspace_id}",
                 websocket_url(&self.url)
             )
             .into_client_request()
             .unwrap();
-            connect_async(request).await.map(|(socket, _)| socket)
+            connect_async(request)
+                .await
+                .map(|(socket, _)| socket)
+                .map_err(Box::new)
         }
 
         pub async fn stop(self) -> PathBuf {
