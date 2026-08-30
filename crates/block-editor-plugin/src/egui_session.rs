@@ -168,6 +168,7 @@ impl EguiSession {
             regions: HashMap::new(),
             host: EditorHost::new(waker),
             drag: None,
+            files: None,
             intrinsic: None,
             aspect_ratio: None,
             creating: false,
