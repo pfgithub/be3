@@ -1,7 +1,6 @@
 mod audio;
 mod browser_tab;
 mod clipboard;
-mod compiled_logic;
 mod database;
 mod database_schema;
 mod database_view;
@@ -1294,7 +1293,6 @@ impl EditorRegistry {
         registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<gui_builder::GuiBuilderEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
-        registry.register::<compiled_logic::CompiledLogicEditor>();
         registry.register_creatable::<logic_game::LogicGameEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<map::MapEditor>();

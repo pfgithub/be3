@@ -22,6 +22,7 @@ members = [
     "crates/cvl2",
     "crates/editors/calendar",
     "crates/editors/checklist",
+    "crates/editors/compiled_logic",
     "crates/editors/counter",
     "crates/editors/hotbar",
     "crates/editors/image_block",

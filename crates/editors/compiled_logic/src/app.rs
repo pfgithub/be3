@@ -1,89 +1,63 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use block::Block;
-use block_client::{
-    blocks::{compiled_logic::CompiledLogic, logic_grid::LogicGrid},
-    BlockClient, BlockHandle,
-};
-use eframe::egui;
-use egui_material_icons::{icons::ICON_MEMORY, MaterialIcon};
-use logicgame::{execution::Instruction, grid::ConnectionDirection};
+use block_client::blocks::compiled_logic::CompiledLogic;
+use block_client::blocks::logic_grid::LogicGrid;
+use block_client::{BlockClient, BlockHandle};
+use block_editor_plugin::block_ui::BlockLabel;
+use block_editor_plugin::{egui, EditorHost};
+use logicgame::execution::Instruction;
+use logicgame::grid::ConnectionDirection;
 use uuid::Uuid;
 
-use super::{
-    BlockEditor, DirectEditorCapabilities, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind,
-};
+const INTRINSIC_WIDTH: f32 = 640.0;
+const ROW_HEIGHT: f32 = 20.0;
+const CHROME_HEIGHT: f32 = 220.0;
 
-const DIRECT_EDITOR_WIDTH: f32 = 640.0;
-const DIRECT_EDITOR_ROW_HEIGHT: f32 = 20.0;
-
-const DIRECT_EDITOR_CHROME_HEIGHT: f32 = 220.0;
-
-pub(super) struct CompiledLogicEditor {
-    block: BlockHandle<CompiledLogic>,
-
+#[derive(Default)]
+pub struct CompiledLogicApp {
+    host: Option<EditorHost>,
+    client: Option<Arc<BlockClient>>,
+    block: Option<BlockHandle<CompiledLogic>>,
     source: Option<BlockHandle<LogicGrid>>,
     calls: HashMap<Uuid, BlockHandle<CompiledLogic>>,
 }
 
-impl EditorKind for CompiledLogicEditor {
-    type Block = CompiledLogic;
-
-    const DISPLAY_NAME: &'static str = "Compiled Logic";
-    const ICON: MaterialIcon = ICON_MEMORY;
-
-    fn open(_client: &BlockClient, block: BlockHandle<CompiledLogic>) -> Self {
-        Self {
-            block,
-            source: None,
-            calls: HashMap::new(),
-        }
-    }
-}
-
-impl BlockEditor for CompiledLogicEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+impl block_editor_plugin::App for CompiledLogicApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        self.block = Some(client.get_block(block_id));
+        self.client = Some(client);
+        self.host = Some(host);
     }
 
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: false,
-        }
-    }
-
-    fn direct_editor_intrinsic_size(
-        &mut self,
-        _editors: &mut EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
-        let compiled = self.block.read()?;
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
+        let compiled = self.block.as_ref()?.read()?;
         let rows =
             compiled.program().instructions.len() + compiled.ports().len() + compiled.calls().len();
         Some(egui::vec2(
-            DIRECT_EDITOR_WIDTH,
-            DIRECT_EDITOR_CHROME_HEIGHT + DIRECT_EDITOR_ROW_HEIGHT * rows as f32,
+            INTRINSIC_WIDTH,
+            CHROME_HEIGHT + ROW_HEIGHT * rows as f32,
         ))
     }
 
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let Some(compiled) = self.block.read() else {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let (Some(host), Some(client), Some(block)) =
+            (self.host.clone(), self.client.clone(), self.block.clone())
+        else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
-            return None;
+            return;
+        };
+        let Some(compiled) = block.read() else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return;
         };
         let source_id = compiled.source();
         let calls = compiled.calls().to_vec();
-        let client = editors.client();
         if self
             .source
             .as_ref()
@@ -97,23 +71,19 @@ impl BlockEditor for CompiledLogicEditor {
                 .entry(*called)
                 .or_insert_with(|| client.get_block::<CompiledLogic>(*called));
         }
-        let mut action = None;
+        let types = host.block_types();
 
         ui.horizontal(|ui| {
             ui.strong("Compiled from");
             let label = self
                 .source
                 .as_ref()
-                .map(|source| super::BlockLabel::for_handle(editors.registry(), source));
-            let name = label.as_ref().map_or_else(
-                || egui::RichText::new("Loading…"),
-                super::BlockLabel::rich_text,
-            );
+                .map(|source| BlockLabel::for_handle(types.as_ref(), source));
+            let name = label
+                .as_ref()
+                .map_or_else(|| egui::RichText::new("Loading…"), BlockLabel::rich_text);
             if ui.link(name).clicked() {
-                action = Some(EditorAction::OpenBlock {
-                    id: source_id,
-                    block_type: LogicGrid::TYPE_ID,
-                });
+                host.open_block(source_id, LogicGrid::TYPE_ID);
             }
         });
         ui.horizontal(|ui| {
@@ -155,16 +125,12 @@ impl BlockEditor for CompiledLogicEditor {
             let label = self
                 .calls
                 .get(called)
-                .map(|handle| super::BlockLabel::for_handle(editors.registry(), handle));
-            let name = label.as_ref().map_or_else(
-                || egui::RichText::new("Loading…"),
-                super::BlockLabel::rich_text,
-            );
+                .map(|handle| BlockLabel::for_handle(types.as_ref(), handle));
+            let name = label
+                .as_ref()
+                .map_or_else(|| egui::RichText::new("Loading…"), BlockLabel::rich_text);
             if ui.link(name).clicked() {
-                action = Some(EditorAction::OpenBlock {
-                    id: *called,
-                    block_type: CompiledLogic::TYPE_ID,
-                });
+                host.open_block(*called, CompiledLogic::TYPE_ID);
             }
         }
 
@@ -173,12 +139,10 @@ impl BlockEditor for CompiledLogicEditor {
         for (index, instruction) in compiled.program().instructions.iter().enumerate() {
             ui.monospace(format!("{index:>4}  {}", format_instruction(instruction)));
         }
-
-        action
     }
 }
 
-pub(super) fn format_instruction(instruction: &Instruction) -> String {
+pub fn format_instruction(instruction: &Instruction) -> String {
     match instruction {
         Instruction::Call {
             component,
@@ -199,6 +163,3 @@ pub(super) fn format_instruction(instruction: &Instruction) -> String {
         Instruction::SaveStorage { storage, input } => format!("SAVE m{input} -> s{storage}"),
     }
 }
-
-#[cfg(test)]
-mod tests;

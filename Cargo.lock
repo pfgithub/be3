@@ -1674,6 +1674,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "compiled_logic"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "logicgame",
+ "uuid",
+]
+
+[[package]]
 name = "compression-codecs"
 version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
