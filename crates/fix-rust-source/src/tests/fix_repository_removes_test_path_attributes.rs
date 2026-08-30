@@ -5,7 +5,7 @@ use std::fs;
 #[test]
 fn fix_repository_removes_test_path_attributes() {
     let root = temporary_directory();
-    let source = root.join("src");
+    let source = root.join("crates/widget/src");
     fs::create_dir_all(&source).unwrap();
     fs::write(
         source.join("lib.rs"),

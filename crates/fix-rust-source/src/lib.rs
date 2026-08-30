@@ -257,7 +257,7 @@ fn text(source: &[u8], range: Range<usize>) -> &str {
 
 fn find_files_with_comments(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     let mut violations = Vec::new();
     for path in paths {
         let source = fs::read(&path)?;
@@ -270,7 +270,7 @@ fn find_files_with_comments(root: &Path) -> Result<Vec<String>, Box<dyn Error>> 
 
 fn strip_repository_comments(root: &Path) -> Result<(), Box<dyn Error>> {
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     for path in paths {
         let source = fs::read(&path)?;
         let stripped = strip_comments(&source)?;
@@ -283,7 +283,7 @@ fn strip_repository_comments(root: &Path) -> Result<(), Box<dyn Error>> {
 
 fn find_layout_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     let mut violations = Vec::new();
 
     for path in &paths {
@@ -365,7 +365,7 @@ fn find_layout_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
 
 fn rename_module_files(root: &Path) -> Result<(), Box<dyn Error>> {
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     paths.sort_unstable_by_key(|path| std::cmp::Reverse(path.components().count()));
     for path in paths {
         if !path.file_name().is_some_and(|name| name == "mod.rs") {
@@ -387,14 +387,14 @@ fn fix_test_layout(root: &Path) -> Result<(), Box<dyn Error>> {
     fix_test_path_modules(root)?;
 
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     paths.sort_unstable();
     for path in paths {
         fix_inline_tests(&path)?;
     }
 
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     paths.sort_unstable();
     for path in paths {
         fix_top_level_tests(&path)?;
@@ -405,7 +405,7 @@ fn fix_test_layout(root: &Path) -> Result<(), Box<dyn Error>> {
 
 fn fix_test_path_modules(root: &Path) -> Result<(), Box<dyn Error>> {
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     paths.sort_unstable();
     for path in paths {
         if !path.exists() {
@@ -660,7 +660,7 @@ fn test_module_name(path: &Path) -> &str {
 
 fn synchronize_test_modules(root: &Path) -> Result<(), Box<dyn Error>> {
     let mut paths = Vec::new();
-    collect_rust_files(root, &mut paths)?;
+    collect_crate_files(root, &mut paths)?;
     let test_files = paths
         .into_iter()
         .filter(|path| is_individual_test_file(path))
@@ -798,6 +798,14 @@ fn relative(root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
+}
+
+fn collect_crate_files(root: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+    let crates = root.join("crates");
+    if !crates.is_dir() {
+        return Ok(());
+    }
+    collect_rust_files(&crates, paths)
 }
 
 fn collect_rust_files(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Box<dyn Error>> {

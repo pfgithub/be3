@@ -5,7 +5,7 @@ use std::fs;
 #[test]
 fn fix_repository_enforces_rust_layout() {
     let root = temporary_directory();
-    let module = root.join("src/widget");
+    let module = root.join("crates/widget/src/widget");
     fs::create_dir_all(&module).unwrap();
     fs::write(
         module.join("mod.rs"),
@@ -15,9 +15,10 @@ fn fix_repository_enforces_rust_layout() {
 
     fix(&root, false).unwrap();
 
-    let production = fs::read_to_string(root.join("src/widget.rs")).unwrap();
-    let aggregator = fs::read_to_string(root.join("src/widget/tests.rs")).unwrap();
-    let test = fs::read_to_string(root.join("src/widget/tests/value_is_one.rs")).unwrap();
+    let production = fs::read_to_string(root.join("crates/widget/src/widget.rs")).unwrap();
+    let aggregator = fs::read_to_string(root.join("crates/widget/src/widget/tests.rs")).unwrap();
+    let test =
+        fs::read_to_string(root.join("crates/widget/src/widget/tests/value_is_one.rs")).unwrap();
     assert!(!module.join("mod.rs").exists());
     assert!(production.contains("mod tests;"));
     assert!(!production.contains("remove"));
