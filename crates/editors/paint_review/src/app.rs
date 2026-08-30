@@ -383,10 +383,12 @@ impl PaintReviewApp {
     }
 
     fn request(&mut self, path: &str) {
+        let mut kept = vec![self.difference_key(path)];
         for wanted in self.showing.wanted() {
             let Ok(hash) = self.hash(path, wanted) else {
                 continue;
             };
+            kept.push(hash.clone());
             if self.paintings.holds(&hash) {
                 continue;
             }
@@ -395,6 +397,15 @@ impl PaintReviewApp {
             };
             self.paintings.want(&hash, data);
         }
+        self.paintings.keep(kept);
+    }
+
+    fn difference_key(&self, path: &str) -> String {
+        format!(
+            "\u{1}difference\u{1}{}\u{1}{}",
+            self.hash(path, Showing::Approved).unwrap_or_default(),
+            self.hash(path, Showing::Current).unwrap_or_default(),
+        )
     }
 
     fn count(&self, path: &str, showing: Showing) -> usize {
@@ -664,11 +675,7 @@ impl PaintReviewApp {
             Ok(pair) => pair,
             Err(shown) => return shown,
         };
-        let key = format!(
-            "\u{1}difference\u{1}{}\u{1}{}",
-            self.hash(path, Showing::Approved).unwrap_or_default(),
-            self.hash(path, Showing::Current).unwrap_or_default(),
-        );
+        let key = self.difference_key(path);
         let count = self.count(path, Showing::Difference);
         let painted = || Ok(crate::render::difference(&approved.image, &current.image));
         match self
@@ -873,6 +880,7 @@ impl block_editor_plugin::App for PaintReviewApp {
         let Some(path) = self.selected.clone() else {
             self.scale = None;
             self.description = None;
+            self.paintings.keep(Vec::new());
             return centered(ui, region, |ui| {
                 ui.weak("Choose a painting to review it");
             });

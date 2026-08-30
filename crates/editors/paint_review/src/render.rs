@@ -97,6 +97,7 @@ pub struct Paintings {
     active: Option<Job>,
     queue: VecDeque<(String, Vec<u8>)>,
     screen: Option<egui::Context>,
+    kept: Vec<String>,
     #[cfg(test)]
     rasters: usize,
 }
@@ -108,6 +109,11 @@ impl Paintings {
             return;
         }
         self.queue.push_back((hash.to_owned(), data));
+    }
+
+    pub fn keep(&mut self, hashes: Vec<String>) {
+        self.kept = hashes;
+        self.evict();
     }
 
     pub fn holds(&self, hash: &str) -> bool {
@@ -173,9 +179,11 @@ impl Paintings {
         reel.frames.resize_with(count.max(frame + 1), || None);
         reel.frames[frame] = Some(painted.map(Held::new));
         reel.bytes = held_bytes(reel);
+        let rendered = self
+            .rendered(context, hash, frame)
+            .expect("the frame was just painted");
         self.evict();
-        self.rendered(context, hash, frame)
-            .expect("the frame was just painted")
+        rendered
     }
 
     #[cfg(test)]
@@ -278,11 +286,16 @@ impl Paintings {
 
     fn evict(&mut self) {
         let active = self.active.as_ref().map(|job| job.hash.clone());
-        while self.cached.len() > 1 && self.bytes() > BUDGET {
-            if Some(&self.cached[0].0) == active.as_ref() {
+        while self.bytes() > BUDGET {
+            let kept = &self.kept;
+            let Some(index) = self
+                .cached
+                .iter()
+                .position(|(hash, _)| Some(hash) != active.as_ref() && !kept.contains(hash))
+            else {
                 break;
-            }
-            self.cached.remove(0);
+            };
+            self.cached.remove(index);
         }
     }
 
