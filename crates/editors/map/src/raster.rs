@@ -1,6 +1,6 @@
-use super::mvt::{Feature, GeometryKind, Layer, TagValue, Tile};
+use crate::mvt::{Feature, GeometryKind, Layer, TagValue, Tile};
 
-pub(super) const TILE_PIXELS: usize = 512;
+pub(crate) const TILE_PIXELS: usize = 512;
 const SUPERSAMPLE: usize = 2;
 const CANVAS: usize = TILE_PIXELS * SUPERSAMPLE;
 
@@ -15,7 +15,7 @@ const BOUNDARY_LABEL_COLOR: [u8; 3] = [110, 100, 125];
 const MAX_LABELS: usize = 80;
 
 #[derive(Clone, Debug)]
-pub(super) struct TileLabel {
+pub(crate) struct TileLabel {
     pub text: String,
 
     pub position: [f32; 2],
@@ -23,12 +23,12 @@ pub(super) struct TileLabel {
     pub color: [u8; 3],
 }
 
-pub(super) struct TileRaster {
+pub(crate) struct TileRaster {
     pub pixels: Vec<u8>,
     pub labels: Vec<TileLabel>,
 }
 
-pub(super) fn rasterize(tile: &Tile, zoom: u8) -> TileRaster {
+pub(crate) fn rasterize(tile: &Tile, zoom: u8) -> TileRaster {
     let mut canvas = Canvas::new();
     let line_scale = line_width_scale(zoom);
 

@@ -5517,6 +5517,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "map"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "flate2",
+ "uuid",
+]
+
+[[package]]
 name = "markup5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,12 +1,12 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum GeometryKind {
+pub(crate) enum GeometryKind {
     Point,
     Line,
     Polygon,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum TagValue {
+pub(crate) enum TagValue {
     String(String),
     Float(f64),
     Int(i64),
@@ -14,14 +14,14 @@ pub(super) enum TagValue {
 }
 
 impl TagValue {
-    pub(super) fn as_str(&self) -> Option<&str> {
+    pub(crate) fn as_str(&self) -> Option<&str> {
         match self {
             TagValue::String(value) => Some(value),
             _ => None,
         }
     }
 
-    pub(super) fn as_i64(&self) -> Option<i64> {
+    pub(crate) fn as_i64(&self) -> Option<i64> {
         match self {
             TagValue::Int(value) => Some(*value),
             TagValue::Float(value) => Some(*value as i64),
@@ -31,7 +31,7 @@ impl TagValue {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Feature {
+pub(crate) struct Feature {
     pub kind: GeometryKind,
 
     pub paths: Vec<Vec<[f32; 2]>>,
@@ -40,7 +40,7 @@ pub(super) struct Feature {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Layer {
+pub(crate) struct Layer {
     pub name: String,
     pub extent: u32,
     pub keys: Vec<String>,
@@ -49,7 +49,7 @@ pub(super) struct Layer {
 }
 
 impl Layer {
-    pub(super) fn tag<'a>(&'a self, feature: &Feature, key: &str) -> Option<&'a TagValue> {
+    pub(crate) fn tag<'a>(&'a self, feature: &Feature, key: &str) -> Option<&'a TagValue> {
         let key_index = self.keys.iter().position(|candidate| candidate == key)? as u32;
         feature
             .tags
@@ -60,17 +60,17 @@ impl Layer {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Tile {
+pub(crate) struct Tile {
     pub layers: Vec<Layer>,
 }
 
 impl Tile {
-    pub(super) fn layer(&self, name: &str) -> Option<&Layer> {
+    pub(crate) fn layer(&self, name: &str) -> Option<&Layer> {
         self.layers.iter().find(|layer| layer.name == name)
     }
 }
 
-pub(super) fn decode(data: &[u8]) -> Result<Tile, String> {
+pub(crate) fn decode(data: &[u8]) -> Result<Tile, String> {
     let mut reader = Reader::new(data);
     let mut layers = Vec::new();
     while let Some((field, wire)) = reader.field()? {

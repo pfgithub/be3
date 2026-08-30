@@ -1,0 +1,29 @@
+{
+  "id": "be3.map",
+  "name": "Map",
+  "version": "0.1.0",
+  "block_type": "6d617076-6965-7762-6c6f-636b00000001",
+  "display_name": "Map",
+  "icon": "",
+  "creation": "Immediate",
+  "children": {
+    "add": true,
+    "delete": true,
+    "replace": true
+  },
+  "capabilities": {
+    "rotation": false,
+    "preserve_aspect_ratio": true,
+    "pan_and_zoom": true
+  },
+  "regions": [
+    "Main",
+    "Toolbar",
+    "RightSidebar",
+    "Preview"
+  ],
+  "entry_point": "map.wasm",
+  "network": [
+    "vector.openstreetmap.org"
+  ]
+}

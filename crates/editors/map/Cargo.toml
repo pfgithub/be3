@@ -1,0 +1,21 @@
+[package]
+name = "map"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+block = { path = "../../block" }
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
+flate2 = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+block-ui-test = { path = "../../block-ui-test" }
+
+[lints]
+workspace = true

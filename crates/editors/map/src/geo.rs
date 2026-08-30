@@ -1,23 +1,23 @@
 use std::f64::consts::PI;
 
 use block_client::blocks::map::{MapCoordinate, MapRegion, MAX_LATITUDE};
-use eframe::egui::{Pos2, Rect, Vec2};
+use block_editor_plugin::egui::{Pos2, Rect, Vec2};
 
 #[derive(Clone, Copy)]
-pub(super) struct MapView {
+pub(crate) struct MapView {
     origin: [f64; 2],
     size: f64,
 }
 
 impl MapView {
-    pub(super) fn from_world_rect(world: Rect) -> Self {
+    pub(crate) fn from_world_rect(world: Rect) -> Self {
         Self {
             origin: [f64::from(world.left()), f64::from(world.top())],
             size: f64::from(world.width().max(1.0)),
         }
     }
 
-    pub(super) fn covering(region: MapRegion, rect: Rect, max_size: f64) -> Self {
+    pub(crate) fn covering(region: MapRegion, rect: Rect, max_size: f64) -> Self {
         let normalized = normalized_rect(region);
         let size = (f64::from(rect.width()) / normalized.width())
             .max(f64::from(rect.height()) / normalized.height())
@@ -32,35 +32,35 @@ impl MapView {
         }
     }
 
-    pub(super) fn world_rect(self) -> Rect {
+    pub(crate) fn world_rect(self) -> Rect {
         Rect::from_min_size(
             Pos2::new(self.origin[0] as f32, self.origin[1] as f32),
             Vec2::splat(self.size as f32),
         )
     }
 
-    pub(super) fn position(self, coordinate: MapCoordinate) -> Pos2 {
+    pub(crate) fn position(self, coordinate: MapCoordinate) -> Pos2 {
         Pos2::new(
             (self.origin[0] + normalized_x(coordinate.longitude) * self.size) as f32,
             (self.origin[1] + normalized_y(coordinate.latitude) * self.size) as f32,
         )
     }
 
-    pub(super) fn coordinate(self, position: Pos2) -> MapCoordinate {
+    pub(crate) fn coordinate(self, position: Pos2) -> MapCoordinate {
         MapCoordinate::new(
             longitude_from_normalized((f64::from(position.x) - self.origin[0]) / self.size),
             latitude_from_normalized((f64::from(position.y) - self.origin[1]) / self.size),
         )
     }
 
-    pub(super) fn region_rect(self, region: MapRegion) -> Rect {
+    pub(crate) fn region_rect(self, region: MapRegion) -> Rect {
         Rect::from_min_max(
             self.position(MapCoordinate::new(region.west, region.north)),
             self.position(MapCoordinate::new(region.east, region.south)),
         )
     }
 
-    pub(super) fn region(self, rect: Rect) -> MapRegion {
+    pub(crate) fn region(self, rect: Rect) -> MapRegion {
         let top_left = self.coordinate(rect.left_top());
         let bottom_right = self.coordinate(rect.right_bottom());
         MapRegion::new(
@@ -101,7 +101,7 @@ fn normalized_rect(region: MapRegion) -> NormalizedRect {
     }
 }
 
-pub(super) fn region_aspect_ratio(region: MapRegion) -> f32 {
+pub(crate) fn region_aspect_ratio(region: MapRegion) -> f32 {
     let normalized = normalized_rect(region);
     (normalized.width() / normalized.height()) as f32
 }

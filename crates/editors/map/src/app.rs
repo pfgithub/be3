@@ -1,83 +1,41 @@
-mod geo;
-
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-mod mvt;
-mod points;
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-mod raster;
-mod sidebar;
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-mod tiles;
-
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use block::{BlockParent, BlockReferenceList};
-use block_client::{
-    block_ref::BlockRef,
-    blocks::{
-        image::Image as ImageBlock,
-        map::{Map, MapColor, MapCoordinate, MapOperation, MapPoint, MapRegion, MAX_LATITUDE},
-    },
-    BlockClient, BlockHandle, ReferenceList,
+use block_client::block_ref::BlockRef;
+use block_client::blocks::image::Image as ImageBlock;
+use block_client::blocks::map::{Map, MapColor, MapCoordinate, MapOperation, MapPoint, MapRegion};
+use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
+use block_client::{BlockClient, BlockHandle, ReferenceList};
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::block_ui::{BlockCatalog, BlockLabel};
+use block_editor_plugin::egui::{
+    self, Color32, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2,
 };
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
-use egui_material_icons::{
-    icons::{
-        ICON_ADD, ICON_ARROW_BACK, ICON_CROP_FREE, ICON_DELETE, ICON_MAP, ICON_MY_LOCATION,
-        ICON_REFRESH, ICON_ZOOM_IN, ICON_ZOOM_OUT,
-    },
-    MaterialIcon,
+use block_editor_plugin::egui_material_icons::icons::{
+    ICON_ADD, ICON_CROP_FREE, ICON_REFRESH, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+};
+use block_editor_plugin::{
+    BlockFilter, BlockPicker, ChildMode, EditorHost, ImagePaster, PastedImage,
 };
 use uuid::Uuid;
 
-use crate::block_picker::BlockPicker;
-
-use self::geo::MapView;
-use self::raster::{TileLabel, TILE_PIXELS};
-use self::tiles::{TileId, TileWorker, SOURCE_MAX_ZOOM};
-
-use super::{
-    clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    create_image_block, BlockEditor, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorViewport, DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind,
-    SidebarDragPayload,
-};
-use block_client::references::{ReferenceClassificationQueue, ReferenceResolutionCache};
+use crate::geo::MapView;
+use crate::points;
+use crate::raster::{TileLabel, TILE_PIXELS};
+use crate::tiles::{TileId, TileWorker, SOURCE_MAX_ZOOM};
 
 const WORLD_POINTS: f32 = 1024.0;
-
 const TILE_POINTS: f32 = 256.0;
-
 const MAX_VIEWPORT_ZOOM: f32 = 4096.0;
-
 const MAX_PREVIEW_WORLD: f64 = (WORLD_POINTS * MAX_VIEWPORT_ZOOM) as f64;
 const ZOOM_STEP: f32 = 1.25;
 const BACKGROUND: Color32 = Color32::from_rgb(242, 239, 233);
-const REGION_COLOR: Color32 = Color32::from_rgb(245, 180, 60);
+pub(crate) const REGION_COLOR: Color32 = Color32::from_rgb(245, 180, 60);
 const ATTRIBUTION: &str = "© OpenStreetMap contributors";
 
-impl EditorKind for MapEditor {
-    type Block = Map;
-
-    const DISPLAY_NAME: &'static str = "Map";
-    const ICON: MaterialIcon = ICON_MAP;
-    const CAN_ADD_CHILD: bool = true;
-    const CAN_DELETE_CHILD: bool = true;
-    const CAN_REPLACE_CHILD: bool = true;
-
-    fn open(client: &BlockClient, block: BlockHandle<Map>) -> Self {
-        Self::new(block, client)
-    }
-}
-
-impl CreatableEditor for MapEditor {
-    fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(Map::new()), client)
-    }
-}
-
-enum TileState {
+pub(crate) enum TileState {
     Loading,
     Ready {
         texture: TextureHandle,
@@ -95,96 +53,129 @@ impl TileState {
     }
 }
 
-pub(super) struct MapEditor {
+struct Editing {
+    host: EditorHost,
+    client: Arc<BlockClient>,
     block: BlockHandle<Map>,
+    dependencies: ReferenceList,
+}
+
+pub struct MapApp {
+    editing: Option<Editing>,
+    creation: Option<Arc<BlockClient>>,
     worker: Option<TileWorker>,
     tiles: HashMap<TileId, TileState>,
-    last_error: Option<String>,
-    dependencies: ReferenceList,
+    pub(crate) last_error: Option<String>,
     picker: BlockPicker,
-    selected: Option<Uuid>,
-
+    pub(crate) selected: Option<Uuid>,
     dragged: Option<(Uuid, Vec2)>,
-
     pending_position: Option<MapCoordinate>,
     pending_file_drop: Option<MapCoordinate>,
-    clipboard_image_paste: ClipboardImagePaste,
-    import_error: Option<String>,
-    fit_region_requested: bool,
-    center_requested: Option<MapCoordinate>,
+    paster: ImagePaster,
+    pub(crate) import_error: Option<String>,
+    pub(crate) fit_region_requested: bool,
+    pub(crate) center_requested: Option<MapCoordinate>,
     grouped_edit_active: bool,
-
-    visible_region: MapRegion,
-
+    pub(crate) visible_region: MapRegion,
     view_center: Cell<MapCoordinate>,
     reference_cache: ReferenceResolutionCache,
     pending_points: ReferenceClassificationQueue<(Uuid, MapCoordinate)>,
 }
 
-impl MapEditor {
-    pub(super) fn new(block: BlockHandle<Map>, client: &BlockClient) -> Self {
-        let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
+impl Default for MapApp {
+    fn default() -> Self {
         Self {
-            block,
+            editing: None,
+            creation: None,
             worker: None,
             tiles: HashMap::new(),
             last_error: None,
-            dependencies,
             picker: BlockPicker::default(),
             selected: None,
             dragged: None,
             pending_position: None,
             pending_file_drop: None,
-            clipboard_image_paste: ClipboardImagePaste::default(),
+            paster: ImagePaster::default(),
             import_error: None,
             fit_region_requested: true,
             center_requested: None,
             grouped_edit_active: false,
             visible_region: MapRegion::WORLD,
-            view_center: Cell::new(MapCoordinate::default()),
+            view_center: Cell::new(MapRegion::WORLD.center()),
             reference_cache: ReferenceResolutionCache::default(),
             pending_points: ReferenceClassificationQueue::default(),
         }
     }
+}
 
-    fn points(&self) -> Vec<MapPoint> {
-        self.block
-            .read()
+impl MapApp {
+    pub(crate) fn host_handle(&self) -> Option<EditorHost> {
+        self.host().cloned()
+    }
+
+    pub(crate) fn host_block_types(&self) -> Option<std::rc::Rc<BlockCatalog>> {
+        self.host().map(EditorHost::block_types)
+    }
+
+    pub(crate) fn block(&self) -> Option<&BlockHandle<Map>> {
+        self.editing.as_ref().map(|editing| &editing.block)
+    }
+
+    pub(crate) fn block_id(&self) -> Uuid {
+        self.block().map_or_else(Uuid::nil, BlockHandle::id)
+    }
+
+    fn host(&self) -> Option<&EditorHost> {
+        self.editing.as_ref().map(|editing| &editing.host)
+    }
+
+    fn client(&self) -> Option<Arc<BlockClient>> {
+        self.editing
+            .as_ref()
+            .map(|editing| Arc::clone(&editing.client))
+    }
+    pub(crate) fn points(&self) -> Vec<MapPoint> {
+        self.block()
+            .and_then(BlockHandle::read)
             .map(|map| map.points().to_vec())
             .unwrap_or_default()
     }
 
-    fn preview_region(&self) -> Option<MapRegion> {
-        self.block.read().and_then(|map| map.preview_region())
+    pub(crate) fn preview_region(&self) -> Option<MapRegion> {
+        self.block()
+            .and_then(BlockHandle::read)
+            .and_then(|map| map.preview_region())
     }
 
-    fn displayed_region(&self) -> MapRegion {
-        self.block
-            .read()
+    pub(crate) fn displayed_region(&self) -> MapRegion {
+        self.block()
+            .and_then(BlockHandle::read)
             .map_or(MapRegion::WORLD, |map| map.displayed_region())
     }
 
-    fn dependency_labels(&self, editors: &EditorAccess<'_>) -> HashMap<Uuid, super::BlockLabel> {
-        self.dependencies
-            .read()
+    pub(crate) fn dependencies(&self) -> Vec<block::BlockReference> {
+        self.editing
+            .as_ref()
+            .map(|editing| editing.dependencies.read())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn dependency_labels(&self, types: &BlockCatalog) -> HashMap<Uuid, BlockLabel> {
+        self.dependencies()
             .into_iter()
-            .map(|reference| {
-                (
-                    reference.id,
-                    super::BlockLabel::for_reference(editors.registry(), &reference),
-                )
-            })
+            .map(|reference| (reference.id, BlockLabel::for_reference(types, &reference)))
             .collect()
     }
 
-    fn resolve_points(
+    pub(crate) fn resolve_points(
         &mut self,
-        editors: &EditorAccess<'_>,
         points: &[MapPoint],
     ) -> HashMap<BlockRef, Option<Uuid>> {
         self.reference_cache.poll();
-        let client = editors.client_handle();
-        let referencing_id = self.block.id();
+        let Some(client) = self.client() else {
+            return HashMap::new();
+        };
+        let referencing_id = self.block_id();
         points
             .iter()
             .map(|point| {
@@ -197,31 +188,21 @@ impl MapEditor {
             .collect()
     }
 
-    fn ensure_point_editors(
-        &self,
-        points: &[MapPoint],
-        resolved: &HashMap<BlockRef, Option<Uuid>>,
-        editors: &mut EditorAccess<'_>,
-    ) {
-        for reference in self.dependencies.read() {
-            let referenced = points.iter().any(|point| {
-                resolved.get(&point.block_id).copied().flatten() == Some(reference.id)
-            });
-            if referenced {
-                editors.ensure(reference.id, reference.block_type);
-            }
+    pub(crate) fn record(&mut self, operation: MapOperation) {
+        self.grouped_edit_active = false;
+        if let Some(block) = self.block() {
+            block.finish_history_group();
+        }
+        if let Some(block) = self.block() {
+            block.operate(operation);
         }
     }
 
-    fn record(&mut self, operation: MapOperation) {
-        self.grouped_edit_active = false;
-        self.block.finish_history_group();
-        self.block.operate(operation);
-    }
-
-    fn record_grouped(&mut self, operation: MapOperation) {
+    pub(crate) fn record_grouped(&mut self, operation: MapOperation) {
         self.grouped_edit_active = true;
-        self.block.operate_grouped([operation]);
+        if let Some(block) = self.block() {
+            block.operate_grouped([operation]);
+        }
     }
 
     fn poll_pending_points(&mut self) {
@@ -236,21 +217,18 @@ impl MapEditor {
         }
     }
 
-    fn add_point(
-        &mut self,
-        editors: &mut EditorAccess<'_>,
-        block_id: Uuid,
-        position: MapCoordinate,
-    ) {
+    pub(crate) fn add_point(&mut self, block_id: Uuid, position: MapCoordinate) {
+        let Some(client) = self.client() else {
+            return;
+        };
         let point_id = Uuid::new_v4();
-        let client = editors.client_handle();
-        let referencing_id = self.block.id();
+        let referencing_id = self.block_id();
         self.pending_points
             .push(&client, referencing_id, block_id, (point_id, position));
         self.selected = Some(point_id);
     }
 
-    fn remove_point(&mut self, id: Uuid) {
+    pub(crate) fn remove_point(&mut self, id: Uuid) {
         if self.selected == Some(id) {
             self.selected = None;
         }
@@ -259,16 +237,19 @@ impl MapEditor {
 
     fn poll(&mut self, context: &egui::Context) {
         self.poll_pending_points();
+        let Some(host) = self.host().cloned() else {
+            return;
+        };
         let worker = self
             .worker
-            .get_or_insert_with(|| TileWorker::spawn(context.clone()));
-        while let Some(result) = worker.try_result() {
+            .get_or_insert_with(|| TileWorker::spawn(host.waker()));
+        for result in worker.poll(&host) {
             let state = match result.result {
                 Ok(raster) => TileState::Ready {
                     texture: context.load_texture(
                         format!(
                             "map-tile-{}-{}-{}-{}",
-                            self.block.id(),
+                            self.block_id(),
                             result.id.zoom,
                             result.id.x,
                             result.id.y
@@ -294,7 +275,7 @@ impl MapEditor {
         let state = self.tiles.entry(id).or_insert(TileState::Loading);
 
         if matches!(state, TileState::Loading) {
-            if let Some(worker) = &self.worker {
+            if let Some(worker) = &mut self.worker {
                 worker.request(id);
             }
         }
@@ -409,158 +390,98 @@ impl MapEditor {
         painter.rect_filled(rect, 0.0, BACKGROUND.gamma_multiply(opacity));
     }
 
-    fn drop_position(&self, response: &egui::Response, view: MapView) -> MapCoordinate {
-        response
-            .ctx
-            .pointer_latest_pos()
-            .filter(|position| response.rect.contains(*position))
-            .map_or_else(
-                || self.view_center.get(),
-                |position| view.coordinate(position),
-            )
-    }
-
-    fn import_dropped_images(
-        &mut self,
-        response: &egui::Response,
-        view: MapView,
-        editors: &mut EditorAccess<'_>,
-    ) {
-        let (hovering_file, dropped) = response.ctx.input(|input| {
-            (
-                !input.raw.hovered_files.is_empty(),
-                input.raw.dropped_files.clone(),
-            )
-        });
-        if hovering_file {
-            if let Some(position) = response
-                .ctx
-                .pointer_hover_pos()
-                .filter(|position| response.rect.contains(*position))
-            {
-                self.pending_file_drop = Some(view.coordinate(position));
-            }
-        }
-        if dropped.is_empty() {
-            if !hovering_file {
-                self.pending_file_drop = None;
-            }
+    fn import_dropped_images(&mut self, view: MapView) {
+        let Some(drop) = self.host().and_then(EditorHost::files) else {
+            self.pending_file_drop = None;
+            return;
+        };
+        if !drop.dropped {
+            self.pending_file_drop = Some(view.coordinate(drop.position));
             return;
         }
         self.import_error = None;
         let base = self
             .pending_file_drop
             .take()
-            .unwrap_or_else(|| self.drop_position(response, view));
-
+            .unwrap_or_else(|| view.coordinate(drop.position));
         let step = (self.visible_region.east - self.visible_region.west) * 0.03;
-        for (index, file) in dropped.into_iter().enumerate() {
+        for (index, file) in drop.files.into_iter().enumerate() {
             let position = MapCoordinate::new(
                 base.longitude + step * index as f64,
                 base.latitude - step * index as f64,
             );
-            let source_name = file
-                .path
-                .as_ref()
-                .and_then(|path| path.file_name())
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .map(str::to_owned)
-                .or_else(|| (!file.name.is_empty()).then_some(file.name))
-                .unwrap_or_else(|| "Image".into());
-            let bytes = match file.bytes {
-                Some(bytes) => bytes.to_vec(),
-                None => match file.path.as_ref().map(std::fs::read) {
-                    Some(Ok(bytes)) => bytes,
-                    Some(Err(error)) => {
-                        self.import_error = Some(format!("Could not read {source_name}: {error}"));
-                        continue;
-                    }
-                    None => {
-                        self.import_error =
-                            Some(format!("No image data was available for {source_name}"));
-                        continue;
-                    }
-                },
-            };
-            self.add_imported_image(
-                editors,
-                ImageBlock::new(source_name.clone(), bytes),
-                position,
-            );
+            self.add_imported_image(ImageBlock::new(file.name, file.data), position);
         }
     }
 
-    fn import_clipboard_image(
-        &mut self,
-        response: &egui::Response,
-        view: MapView,
-        editors: &mut EditorAccess<'_>,
-    ) {
-        let enabled = !response.ctx.egui_wants_keyboard_input();
-        let Some(result) = self.clipboard_image_paste.poll(&response.ctx, enabled) else {
+    fn import_clipboard_image(&mut self, ui: &egui::Ui) {
+        let Some(host) = self.host().cloned() else {
             return;
         };
-        let ClipboardImagePasteResult::Image(image) = result else {
-            if let ClipboardImagePasteResult::Error(error) = result {
-                self.import_error = Some(error);
+        let enabled = !ui.ctx().egui_wants_keyboard_input();
+        let Some(pasted) = self.paster.poll(ui, &host, enabled) else {
+            return;
+        };
+        match pasted {
+            PastedImage::Image { name, data } => {
+                self.import_error = None;
+                let position = self.view_center.get();
+                self.add_imported_image(ImageBlock::new(name, data), position);
             }
-            return;
-        };
-        self.import_error = None;
-        let position = self.drop_position(response, view);
-        self.add_imported_image(editors, image, position);
+            PastedImage::Failed(error) => self.import_error = Some(error),
+            PastedImage::Empty => {}
+        }
     }
 
-    fn add_imported_image(
-        &mut self,
-        editors: &mut EditorAccess<'_>,
-        image: ImageBlock,
-        position: MapCoordinate,
-    ) {
-        let id = create_image_block(editors, image, self.block.id());
-        self.add_point(editors, id, position);
-    }
-
-    fn handle_picker(&mut self, context: &egui::Context, editors: &mut EditorAccess<'_>) {
-        let Some(result) = self
-            .picker
-            .handle(context, editors, BlockParent::Uuid(self.block.id()))
-        else {
+    fn add_imported_image(&mut self, image: ImageBlock, position: MapCoordinate) {
+        let Some(client) = self.client() else {
             return;
         };
-        if !result.linked {
-            editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
+        let created = client.create_block(image);
+        created.set_parent(BlockParent::Uuid(self.block_id()));
+        self.add_point(created.id(), position);
+    }
+
+    fn handle_picker(&mut self) {
+        let Some(host) = self.host().cloned() else {
+            return;
+        };
+        let Some(Ok((id, _))) = self.picker.poll(&host) else {
+            return;
+        };
+        if let Some(client) = self.client() {
+            client.set_block_parent(id, BlockParent::Uuid(self.block_id()));
         }
         let position = self
             .pending_position
             .take()
             .unwrap_or_else(|| self.view_center.get());
-        self.add_point(editors, result.id, position);
+        self.add_point(id, position);
     }
 
     fn handle_input(
         &mut self,
+        ui: &egui::Ui,
         response: &egui::Response,
         view: MapView,
         points: &[MapPoint],
-        editors: &mut EditorAccess<'_>,
-        viewport: &mut DirectEditorViewport,
     ) {
-        if let Some(dragged) = response.dnd_hover_payload::<SidebarDragPayload>() {
-            if dragged.reference.id != self.block.id() {
-                response.ctx.set_cursor_icon(egui::CursorIcon::Alias);
+        let host = self.host().cloned();
+        if let (Some(host), Some(dragged)) = (&host, host.as_ref().and_then(EditorHost::drag)) {
+            if dragged.block_id != self.block_id() {
+                host.accept_drag(true);
+                if dragged.dropped {
+                    let position = view.coordinate(dragged.position);
+                    if let Some(client) = self.client() {
+                        client
+                            .set_block_parent(dragged.block_id, BlockParent::Uuid(self.block_id()));
+                    }
+                    self.add_point(dragged.block_id, position);
+                }
             }
         }
-        if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
-            if dragged.reference.id != self.block.id() {
-                let position = self.drop_position(response, view);
-                self.add_point(editors, dragged.reference.id, position);
-                editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
-            }
-        }
-        self.import_dropped_images(response, view, editors);
-        self.import_clipboard_image(response, view, editors);
+        self.import_dropped_images(view);
+        self.import_clipboard_image(ui);
 
         if response.drag_started() {
             self.dragged = response
@@ -589,10 +510,14 @@ impl MapEditor {
             if response.drag_stopped() {
                 self.dragged = None;
                 self.grouped_edit_active = false;
-                self.block.finish_history_group();
+                if let Some(block) = self.block() {
+                    block.finish_history_group();
+                }
             }
         } else if response.dragged() {
-            viewport.pan(response.drag_delta());
+            if let Some(host) = self.host() {
+                host.pan_view(response.drag_delta());
+            }
         }
         if response.clicked() {
             self.selected = response
@@ -609,14 +534,13 @@ impl MapEditor {
         }
         let selected = self.selected;
         let mut remove = None;
-        let block_id = self.block.id();
-        let picker = &mut self.picker;
+        let mut add_here = false;
         response.context_menu(|ui| {
             if ui
                 .button(format!("{} Add here", ICON_ADD.codepoint))
                 .clicked()
             {
-                picker.open([block_id]);
+                add_here = true;
                 ui.close();
             }
             if ui
@@ -630,27 +554,13 @@ impl MapEditor {
                 ui.close();
             }
         });
+        if add_here {
+            if let Some(host) = self.host().cloned() {
+                self.picker.open(&host, BlockFilter::default());
+            }
+        }
         if let Some(id) = remove {
             self.remove_point(id);
-        }
-
-        if response.hovered() {
-            if let Some(pointer) = response.ctx.pointer_hover_pos() {
-                let (scroll, zoom_delta, command) = response.ctx.input(|input| {
-                    (
-                        input.smooth_scroll_delta,
-                        input.zoom_delta(),
-                        input.modifiers.command,
-                    )
-                });
-                if (zoom_delta - 1.0).abs() > f32::EPSILON {
-                    viewport.change_zoom(zoom_delta, Some(pointer));
-                } else if command && scroll.y != 0.0 {
-                    viewport.change_zoom((scroll.y * 0.002).exp(), Some(pointer));
-                } else if scroll != Vec2::ZERO {
-                    viewport.pan(scroll);
-                }
-            }
         }
     }
 
@@ -658,16 +568,15 @@ impl MapEditor {
         &mut self,
         painter: &egui::Painter,
         rect: Rect,
-        editors: &mut EditorAccess<'_>,
+        types: &BlockCatalog,
         opacity: f32,
     ) {
         self.poll(&painter.ctx().clone());
         painter.rect_filled(rect, 0.0, BACKGROUND.gamma_multiply(opacity));
         let view = MapView::covering(self.displayed_region(), rect, MAX_PREVIEW_WORLD);
         let points = self.points();
-        let labels = self.dependency_labels(editors);
-        let resolved = self.resolve_points(editors, &points);
-        self.ensure_point_editors(&points, &resolved, editors);
+        let labels = self.dependency_labels(types);
+        let resolved = self.resolve_points(&points);
         self.draw_map(painter, view.world_rect(), rect, opacity);
         points::draw_points(
             painter,
@@ -687,19 +596,16 @@ impl MapEditor {
         );
     }
 
-    fn fit_preview_region(
-        &self,
-        viewport: &mut DirectEditorViewport,
-        view: MapView,
-        clip: Rect,
-        region: MapRegion,
-    ) {
+    fn fit_preview_region(&self, view: MapView, clip: Rect, region: MapRegion) {
+        let Some(host) = self.host() else {
+            return;
+        };
         let region_rect = view.region_rect(region);
         let available = (clip.size() - Vec2::splat(24.0)).max(Vec2::splat(1.0));
         let factor = (available.x / region_rect.width().max(0.01))
             .min(available.y / region_rect.height().max(0.01));
-        viewport.change_zoom(factor, Some(region_rect.center()));
-        viewport.pan(clip.center() - region_rect.center());
+        host.zoom_view(factor, Some(region_rect.center()));
+        host.pan_view(clip.center() - region_rect.center());
     }
 }
 
@@ -760,105 +666,77 @@ fn draw_region_outline(painter: &egui::Painter, rect: Rect) {
     );
 }
 
-impl BlockEditor for MapEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+impl block_editor_plugin::App for MapApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        self.fit_region_requested = true;
+        self.visible_region = MapRegion::WORLD;
+        self.editing = Some(Editing {
+            host,
+            block: client.get_block(block_id),
+            dependencies: client.watch_references(BlockReferenceList::References(block_id)),
+            client,
+        });
     }
 
-    fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
-        let rect = Rect::from_points(&context.corners);
-        if !rect.is_positive() {
-            return false;
-        }
-        let painter = context
-            .painter
-            .with_clip_rect(rect.intersect(context.painter.clip_rect()));
-        self.draw_preview_region_view(&painter, rect, editors, context.opacity.clamp(0.0, 1.0));
-        true
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
+        self.creation = Some(client);
     }
 
-    fn render_aspect_ratio(&self) -> Option<f32> {
-        Some(geo::region_aspect_ratio(self.displayed_region()))
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(Map::new()).id())
     }
 
-    fn default_preserve_aspect_ratio(&self) -> bool {
-        true
+    fn aspect_ratio(&mut self) -> Option<f32> {
+        Some(crate::geo::region_aspect_ratio(self.displayed_region()))
     }
 
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: true,
-            supports_pan_and_zoom: true,
-        }
-    }
-
-    fn direct_editor_fills_viewport(&self) -> bool {
-        true
-    }
-
-    fn direct_editor_max_zoom(&self) -> f32 {
-        MAX_VIEWPORT_ZOOM
-    }
-
-    fn direct_editor_viewport_input(
-        &self,
-        _editors: &EditorAccess<'_>,
-    ) -> DirectEditorViewportInput {
-        DirectEditorViewportInput::Editor
-    }
-
-    fn direct_editor_intrinsic_size(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Vec2> {
-        let aspect = geo::region_aspect_ratio(self.displayed_region());
-        Some(if aspect >= 1.0 {
-            Vec2::new(WORLD_POINTS, WORLD_POINTS / aspect)
-        } else {
-            Vec2::new(WORLD_POINTS * aspect, WORLD_POINTS)
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
+        let aspect = crate::geo::region_aspect_ratio(self.displayed_region());
+        Some(match aspect >= 1.0 {
+            true => Vec2::new(WORLD_POINTS, WORLD_POINTS / aspect),
+            false => Vec2::new(WORLD_POINTS * aspect, WORLD_POINTS),
         })
     }
 
-    fn embedded_direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        let (response, painter) = ui.allocate_painter(
-            ui.available_size().max(Vec2::splat(1.0)),
-            Sense::click_and_drag(),
-        );
-        let rect = response.rect;
-        let painter = painter.with_clip_rect(rect.intersect(ui.clip_rect()));
-        self.draw_preview_region_view(&painter, rect, editors, 1.0);
-        draw_attribution(&painter, rect);
-        None
+    fn preview_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(types) = self.host().map(EditorHost::block_types) else {
+            return;
+        };
+        let rect = ui.max_rect();
+        if !rect.is_positive() {
+            return;
+        }
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        self.draw_preview_region_view(&painter, rect, types.as_ref(), 1.0);
     }
 
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        _editors: &mut EditorAccess<'_>,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(host) = self.host().cloned() else {
+            return;
+        };
         ui.horizontal(|ui| {
             if ui
                 .button(ICON_ADD)
                 .on_hover_text("Add a point of interest at the centre of the view")
+                .test_id("map.add-point")
                 .clicked()
             {
                 self.pending_position = None;
-                self.picker.open([self.block.id()]);
+                self.picker.open(&host, BlockFilter::default());
             }
             ui.separator();
             if ui.button(ICON_ZOOM_OUT).on_hover_text("Zoom out").clicked() {
-                viewport.change_zoom(1.0 / ZOOM_STEP, None);
+                host.zoom_view(1.0 / ZOOM_STEP, None);
             }
             if ui.button(ICON_ZOOM_IN).on_hover_text("Zoom in").clicked() {
-                viewport.change_zoom(ZOOM_STEP, None);
+                host.zoom_view(ZOOM_STEP, None);
             }
             if ui.button("Whole world").clicked() {
-                viewport.fit();
+                host.fit_view();
             }
             if ui
                 .add_enabled(
@@ -884,28 +762,22 @@ impl BlockEditor for MapEditor {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
         });
-        None
     }
 
-    fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        true
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        self.show_sidebar(ui);
     }
 
-    fn direct_editor_right_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        self.show_sidebar(ui, editors)
-    }
-
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let (Some(host), Some(types)) = (
+            self.host().cloned(),
+            self.host().map(EditorHost::block_types),
+        ) else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return;
+        };
         let (response, painter) = ui.allocate_painter(
             ui.available_size().max(Vec2::splat(1.0)),
             Sense::click_and_drag(),
@@ -914,7 +786,7 @@ impl BlockEditor for MapEditor {
         let painter = painter.with_clip_rect(clip);
         painter.rect_filled(clip, 0.0, ui.visuals().extreme_bg_color);
 
-        let content_rect = viewport.content_rect().unwrap_or(response.rect);
+        let content_rect = host.view().unwrap_or(response.rect);
         let world_rect = Rect::from_center_size(
             content_rect.center(),
             Vec2::splat(content_rect.width().min(content_rect.height())),
@@ -928,9 +800,8 @@ impl BlockEditor for MapEditor {
         draw_attribution(&painter, clip);
 
         let points = self.points();
-        let labels = self.dependency_labels(editors);
-        let resolved = self.resolve_points(editors, &points);
-        self.ensure_point_editors(&points, &resolved, editors);
+        let labels = self.dependency_labels(types.as_ref());
+        let resolved = self.resolve_points(&points);
         if let Some(region) = self.preview_region() {
             draw_region_outline(&painter, view.region_rect(region));
         }
@@ -951,22 +822,42 @@ impl BlockEditor for MapEditor {
             1.0,
         );
 
-        if self.fit_region_requested && self.block.read().is_some() {
+        if self.fit_region_requested && self.block().and_then(BlockHandle::read).is_some() {
             self.fit_region_requested = false;
             if let Some(region) = self.preview_region() {
-                self.fit_preview_region(viewport, view, clip, region);
+                self.fit_preview_region(view, clip, region);
             }
         }
         if let Some(coordinate) = self.center_requested.take() {
-            viewport.pan(clip.center() - view.position(coordinate));
+            host.pan_view(clip.center() - view.position(coordinate));
         }
 
-        self.handle_input(&response, view, &points, editors, viewport);
-        self.handle_picker(ui.ctx(), editors);
+        self.handle_input(ui, &response, view, &points);
+        self.handle_picker();
         if self.grouped_edit_active && ui.ctx().input(|input| input.pointer.any_released()) {
             self.grouped_edit_active = false;
-            self.block.finish_history_group();
+            if let Some(block) = self.block() {
+                block.finish_history_group();
+            }
         }
-        None
     }
+}
+
+pub(crate) fn place_preview(
+    ui: &mut egui::Ui,
+    host: &EditorHost,
+    rect: Rect,
+    block_id: Uuid,
+    block_type: Uuid,
+) -> block_editor_plugin::ChildHandle {
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("map-preview", block_id))
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+    let handle = host.child_sized(&mut child, rect.size(), block_id, block_type);
+    handle.set_mode(ChildMode::Preview);
+    handle
 }

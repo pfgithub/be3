@@ -1,9 +1,21 @@
 use std::ops::RangeInclusive;
 
-use block_client::blocks::map::MapColor;
+use std::collections::HashMap;
 
-use super::*;
-use crate::editors::{paint_name, BlockLabel};
+use block_client::block_ref::BlockRef;
+use block_client::blocks::map::{MapColor, MapOperation, MapPoint, MAX_LATITUDE};
+use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::block_ui::{paint_name, BlockCatalog, BlockLabel, BlockTypes};
+use block_editor_plugin::egui::{self, FontId, Sense, Vec2};
+use block_editor_plugin::egui_material_icons;
+use block_editor_plugin::egui_material_icons::icons::{
+    ICON_ARROW_BACK, ICON_DELETE, ICON_MY_LOCATION,
+};
+use block_editor_plugin::EditorHost;
+use uuid::Uuid;
+
+use crate::app::MapApp;
+use crate::points;
 
 const COLOR_PRESETS: [(&str, MapColor); 5] = [
     ("Default", MapColor::Default),
@@ -43,17 +55,13 @@ const COLOR_PRESETS: [(&str, MapColor); 5] = [
 
 const PREVIEW_HEIGHT: f32 = 130.0;
 
-impl MapEditor {
-    pub(super) fn show_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
+impl MapApp {
+    pub(crate) fn show_sidebar(&mut self, ui: &mut egui::Ui) {
         ui.heading("Map");
         ui.separator();
         self.show_region_inspector(ui);
         ui.separator();
-        let action = self.show_points(ui, editors);
+        self.show_points(ui);
         if let Some(error) = self.import_error.clone() {
             ui.separator();
             ui.colored_label(ui.visuals().error_fg_color, error);
@@ -61,7 +69,6 @@ impl MapEditor {
                 self.import_error = None;
             }
         }
-        action
     }
 
     fn show_region_inspector(&mut self, ui: &mut egui::Ui) {
@@ -72,6 +79,7 @@ impl MapEditor {
                 let mut enabled = region.is_some();
                 if ui
                     .checkbox(&mut enabled, "Show a fixed region")
+                    .test_id("map.preview-region")
                     .on_hover_text(
                         "Tabs and slides open zoomed to this region, and canvases clip to it.",
                     )
@@ -121,24 +129,23 @@ impl MapEditor {
             });
     }
 
-    fn show_points(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
+    fn show_points(&mut self, ui: &mut egui::Ui) {
+        let Some(types) = self.host_block_types() else {
+            return;
+        };
         let points = self.points();
-        let labels = self.dependency_labels(editors);
-        let resolved = self.resolve_points(editors, &points);
-        self.ensure_point_editors(&points, &resolved, editors);
+        let labels = self.dependency_labels(types.as_ref());
+        let resolved = self.resolve_points(&points);
         let selected = self
             .selected
             .and_then(|id| points.iter().copied().find(|point| point.id == id));
         let Some(point) = selected else {
-            return self.show_point_list(ui, &points, &labels, &resolved);
+            self.show_point_list(ui, &points, &labels, &resolved);
+            return;
         };
         let resolved_id = resolved.get(&point.block_id).copied().flatten();
         let label = resolved_id.and_then(|id| labels.get(&id));
-        self.show_point_details(ui, editors, point, resolved_id, label)
+        self.show_point_details(ui, point, resolved_id, label, types.as_ref());
     }
 
     fn show_point_list(
@@ -147,14 +154,14 @@ impl MapEditor {
         points: &[MapPoint],
         labels: &HashMap<Uuid, BlockLabel>,
         resolved: &HashMap<BlockRef, Option<Uuid>>,
-    ) -> Option<EditorAction> {
+    ) {
         ui.strong("Points of interest");
         if points.is_empty() {
             ui.add_space(4.0);
             ui.weak(
                 "Add blocks with the + button, by dragging them in from Files, or by pasting an image.",
             );
-            return None;
+            return;
         }
         ui.weak("Select a marker to edit it.");
         ui.add_space(4.0);
@@ -193,18 +200,16 @@ impl MapEditor {
             self.selected = Some(point.id);
             self.center_requested = Some(point.position);
         }
-        None
     }
 
     fn show_point_details(
         &mut self,
         ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
         point: MapPoint,
         resolved_id: Option<Uuid>,
         label: Option<&BlockLabel>,
-    ) -> Option<EditorAction> {
-        let mut action = None;
+        types: &BlockCatalog,
+    ) {
         ui.horizontal(|ui| {
             if ui
                 .button(ICON_ARROW_BACK)
@@ -228,7 +233,9 @@ impl MapEditor {
         });
         ui.add_space(6.0);
         if let Some(id) = resolved_id {
-            show_block_preview(ui, editors, id, label);
+            if let Some(host) = self.host_handle() {
+                show_block_preview(ui, &host, id, label, types);
+            }
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -237,11 +244,10 @@ impl MapEditor {
                 .on_disabled_hover_text("Waiting for block metadata")
                 .clicked()
             {
-                if let (Some(id), Some(label)) = (resolved_id, label) {
-                    action = Some(EditorAction::OpenBlock {
-                        id,
-                        block_type: label.block_type,
-                    });
+                if let (Some(host), Some(id), Some(label)) =
+                    (self.host_handle(), resolved_id, label)
+                {
+                    host.open_block(id, label.block_type);
                 }
             }
             if ui
@@ -313,15 +319,15 @@ impl MapEditor {
                 points: vec![updated],
             });
         }
-        action
     }
 }
 
 fn show_block_preview(
     ui: &mut egui::Ui,
-    editors: &mut EditorAccess<'_>,
+    host: &EditorHost,
     block_id: Uuid,
     label: Option<&BlockLabel>,
+    types: &BlockCatalog,
 ) {
     let (response, painter) = ui.allocate_painter(
         Vec2::new(ui.available_width(), PREVIEW_HEIGHT),
@@ -329,30 +335,14 @@ fn show_block_preview(
     );
     let frame = response.rect;
     painter.rect_filled(frame, 4.0, ui.visuals().extreme_bg_color);
-    let aspect = editors.preview_aspect_ratio(block_id).unwrap_or(1.0);
-    let inner = fit_aspect_ratio(frame.shrink(4.0), aspect);
-    let rendered = editors.render(
-        block_id,
-        BlockRenderContext {
-            painter: &painter,
-            corners: [
-                inner.left_top(),
-                inner.right_top(),
-                inner.right_bottom(),
-                inner.left_bottom(),
-            ],
-            opacity: 1.0,
-        },
-    );
+    let inner = frame.shrink(4.0);
+    let rendered = label.is_some_and(|label| {
+        crate::app::place_preview(ui, host, inner, block_id, label.block_type).available()
+    });
     if !rendered {
         let (text, automatic) = label.map_or_else(
             || ("Loading…".to_owned(), false),
-            |label| {
-                (
-                    editors.registry().icon_label(label.block_type, &label.name),
-                    label.automatic,
-                )
-            },
+            |label| (icon_label(types, label), label.automatic),
         );
         paint_name(
             &painter,
@@ -372,18 +362,11 @@ fn show_block_preview(
     );
 }
 
-fn fit_aspect_ratio(rect: Rect, aspect: f32) -> Rect {
-    let aspect = if aspect.is_finite() && aspect > 0.0 {
-        aspect
-    } else {
-        1.0
-    };
-    let size = if rect.width() / rect.height() > aspect {
-        Vec2::new(rect.height() * aspect, rect.height())
-    } else {
-        Vec2::new(rect.width(), rect.width() / aspect)
-    };
-    Rect::from_center_size(rect.center(), size)
+fn icon_label(types: &BlockCatalog, label: &BlockLabel) -> String {
+    match types.icon(label.block_type) {
+        Some(icon) => format!("{} {}", icon.codepoint, label.name),
+        None => label.name.clone(),
+    }
 }
 
 fn latitude_drag(ui: &mut egui::Ui, value: &mut f64) -> bool {

@@ -2,11 +2,13 @@ use block_client::{
     block_ref::BlockRef,
     blocks::map::{MapColor, MapPoint},
 };
-use eframe::egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2};
+use block_editor_plugin::egui::{
+    Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2,
+};
 use uuid::Uuid;
 
-use super::geo::MapView;
-use crate::editors::name_galley;
+use crate::geo::MapView;
+use block_editor_plugin::block_ui::name_galley;
 
 const HEAD_RADIUS: f32 = 7.0;
 const HEIGHT: f32 = 18.0;
@@ -14,7 +16,7 @@ const HIT_RADIUS: f32 = 14.0;
 const LABEL_SIZE: f32 = 11.0;
 const DEFAULT_COLOR: Color32 = Color32::from_rgb(224, 49, 49);
 
-pub(super) fn marker_color(color: MapColor) -> Color32 {
+pub(crate) fn marker_color(color: MapColor) -> Color32 {
     match color {
         MapColor::Default => DEFAULT_COLOR,
         MapColor::Rgb { red, green, blue } => Color32::from_rgb(red, green, blue),
@@ -28,7 +30,7 @@ fn marker_rect(tip: Pos2) -> Rect {
     )
 }
 
-pub(super) fn draw_points(
+pub(crate) fn draw_points(
     painter: &Painter,
     view: MapView,
     clip: Rect,
@@ -102,7 +104,7 @@ fn draw_label(painter: &Painter, tip: Pos2, label: &str, automatic: bool, opacit
     painter.galley(anchor.min, text_galley, text_color);
 }
 
-pub(super) fn point_at(points: &[MapPoint], view: MapView, position: Pos2) -> Option<Uuid> {
+pub(crate) fn point_at(points: &[MapPoint], view: MapView, position: Pos2) -> Option<Uuid> {
     points
         .iter()
         .rev()

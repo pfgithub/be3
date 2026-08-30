@@ -3,7 +3,6 @@ mod clipboard;
 pub(crate) mod deterministic_game;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
-mod map;
 mod pixel_ray_tracer;
 pub(crate) mod plugin;
 mod scene_3d;
@@ -1269,7 +1268,6 @@ impl EditorRegistry {
         registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
-        registry.register_creatable::<map::MapEditor>();
         registry.register_creatable::<pixel_ray_tracer::PixelRayTracerEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register_creatable::<text::TextEditor>();
@@ -1390,13 +1388,6 @@ impl EditorRegistry {
         self.registrations
             .get(&block_type)
             .map(|registration| registration.icon)
-    }
-
-    pub fn icon_label(&self, block_type: Uuid, label: &str) -> String {
-        self.icon(block_type).map_or_else(
-            || label.to_owned(),
-            |icon| format!("{} {label}", icon.codepoint),
-        )
     }
 
     pub fn can_add_child(&self, block_type: Uuid) -> bool {

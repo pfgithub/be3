@@ -32,6 +32,7 @@ members = [
     "crates/editors/hotbar",
     "crates/editors/image_block",
     "crates/editors/logic_game",
+    "crates/editors/map",
     "crates/editors/paint_review",
     "crates/editors/pdf",
     "crates/editors/pixel_art",
