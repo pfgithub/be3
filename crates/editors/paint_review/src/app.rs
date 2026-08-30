@@ -24,7 +24,6 @@ use uuid::Uuid;
 
 use crate::download::{Download, Painting, Source, BRANCH};
 use crate::render::{Change, Paintings, Rendered};
-use crate::view::Panel;
 
 const INTRINSIC_SIZE: egui::Vec2 = egui::vec2(960.0, 640.0);
 const FRAME_SECONDS: f64 = 0.25;
@@ -45,14 +44,7 @@ impl Showing {
             Self::Approved => "the painting you approved".to_owned(),
             Self::Current => format!("the painting on the {BRANCH} branch"),
             Self::Difference => "the pixels that changed".to_owned(),
-            Self::SideBySide => "approved beside current".to_owned(),
-        }
-    }
-
-    fn short(self) -> String {
-        match self {
-            Self::Approved => "Approved".to_owned(),
-            _ => format!("On {BRANCH}"),
+            Self::SideBySide => format!("the painting you approved, beside the one on {BRANCH}"),
         }
     }
 
@@ -104,7 +96,7 @@ pub struct Entry {
 }
 
 enum Shown {
-    Ready(Vec<Panel>, String),
+    Ready(Vec<Rendered>, String),
     Failed(String),
     Waiting(Option<String>),
 }
@@ -128,6 +120,7 @@ pub struct PaintReviewApp {
     showing: Showing,
     paintings: Paintings,
     scale: Option<f32>,
+    description: Option<String>,
     change: Option<(String, Change)>,
     pending: Option<String>,
     frame: usize,
@@ -448,23 +441,6 @@ impl PaintReviewApp {
         self.paintings.loading(&hash)
     }
 
-    fn caption(
-        &mut self,
-        path: &str,
-        status: Status,
-        showing: Showing,
-        description: String,
-    ) -> Vec<String> {
-        let mut lines = vec![showing.label()];
-        if showing != Showing::Difference {
-            if let Some((change, _)) = self.changed(path, status) {
-                lines.push(change);
-            }
-        }
-        lines.push(description);
-        lines
-    }
-
     fn changed(&mut self, path: &str, status: Status) -> Option<(String, Option<usize>)> {
         if status != Status::Modified {
             return None;
@@ -632,13 +608,7 @@ impl PaintReviewApp {
         match self.paintings.rendered(&hash, frame) {
             Some(Ok(rendered)) => {
                 let description = rendered.description.clone();
-                Shown::Ready(
-                    vec![Panel {
-                        label: showing.short(),
-                        rendered,
-                    }],
-                    description,
-                )
+                Shown::Ready(vec![rendered], description)
             }
             Some(Err(error)) => Shown::Failed(error),
             None => Shown::Waiting(None),
@@ -675,19 +645,7 @@ impl PaintReviewApp {
                 approved.description, current.description
             ),
         };
-        Shown::Ready(
-            vec![
-                Panel {
-                    label: Showing::Approved.short(),
-                    rendered: approved,
-                },
-                Panel {
-                    label: Showing::Current.short(),
-                    rendered: current,
-                },
-            ],
-            description,
-        )
+        Shown::Ready(vec![approved, current], description)
     }
 
     fn difference(&mut self, context: &egui::Context, path: &str, frame: usize) -> Shown {
@@ -708,13 +666,7 @@ impl PaintReviewApp {
         {
             Ok(rendered) => {
                 let description = rendered.description.clone();
-                Shown::Ready(
-                    vec![Panel {
-                        label: "Difference".to_owned(),
-                        rendered,
-                    }],
-                    description,
-                )
+                Shown::Ready(vec![rendered], description)
             }
             Err(error) => Shown::Failed(error),
         }
@@ -751,11 +703,6 @@ impl block_editor_plugin::App for PaintReviewApp {
             .zip(selected.as_ref())
             .and_then(|(entries, path)| self.status(&entries, path));
         ui.horizontal_wrapped(|ui| {
-            if let (Some(path), Some(status)) = (&selected, status) {
-                ui.label(egui::RichText::new(path.clone()).strong());
-                ui.weak(status.label());
-                ui.separator();
-            }
             if ui
                 .add_enabled(
                     self.download.is_none(),
@@ -829,6 +776,19 @@ impl block_editor_plugin::App for PaintReviewApp {
             return;
         };
         let showing = self.showing(status);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(path.clone()).strong());
+            ui.weak(status.label());
+            ui.weak(showing.label());
+            if showing != Showing::Difference {
+                if let Some((change, _)) = self.changed(&path, status) {
+                    ui.weak(change);
+                }
+            }
+            if let Some(description) = self.description.clone() {
+                ui.weak(description);
+            }
+        });
         let count = self.count(&path, showing);
         self.frame = self.frame.min(count - 1);
         if count > 1 {
@@ -901,6 +861,7 @@ impl block_editor_plugin::App for PaintReviewApp {
         };
         let Some(path) = self.selected.clone() else {
             self.scale = None;
+            self.description = None;
             return centered(ui, region, |ui| {
                 ui.weak("Choose a painting to review it");
             });
@@ -913,6 +874,7 @@ impl block_editor_plugin::App for PaintReviewApp {
         self.request(&path);
         self.raster(ui.ctx());
         if self.pending.is_some() {
+            self.description = None;
             return centered(ui, region, |ui| {
                 ui.weak("Waiting for the painting you approved before to arrive");
             });
@@ -925,20 +887,18 @@ impl block_editor_plugin::App for PaintReviewApp {
             Shown::Ready(panels, description) => {
                 let view = self.view(region);
                 self.scale = Some(crate::view::show(ui, region, view, &panels));
-                crate::view::caption(
-                    ui,
-                    region,
-                    &self.caption(&path, status, showing, description),
-                );
+                self.description = Some(description);
                 true
             }
             Shown::Failed(error) => {
+                self.description = None;
                 centered(ui, region, |ui| {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 });
                 true
             }
             Shown::Waiting(error) => {
+                self.description = None;
                 waiting(ui, region, error);
                 false
             }
