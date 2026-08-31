@@ -479,6 +479,10 @@ impl PaintReviewApp {
         if step(ui, icon.codepoint, "paint_review.frame.play", true) {
             self.playing = !playing;
             self.advanced = None;
+            if self.playing {
+                ui.ctx()
+                    .request_repaint_after(Duration::from_secs_f64(FRAME_SECONDS));
+            }
         }
         if step(
             ui,
