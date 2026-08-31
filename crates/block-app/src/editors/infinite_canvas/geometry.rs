@@ -792,5 +792,6 @@ pub(super) fn pen_entity(points: Vec<CanvasPoint>, style: CanvasEntityStyle) -> 
         style,
         group_id: None,
         locked: false,
+        components: Vec::new(),
     }
 }

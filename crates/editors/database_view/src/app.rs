@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use block::{Block, BlockParent};
 use block_client::block_ref::BlockRef;
-use block_client::blocks::database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue};
+use block_client::blocks::database::{Database, DatabaseOperation, DatabaseRow};
 use block_client::blocks::database_schema::{
     DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
 };
@@ -11,6 +11,7 @@ use block_client::blocks::database_view::{
 };
 use block_client::references::ReferenceResolutionCache;
 use block_client::{BlockClient, BlockHandle};
+use block_editor_plugin::block_ui::database::DatabaseValueEditor;
 use block_editor_plugin::block_ui::test_id::TestId;
 use block_editor_plugin::egui_material_icons::icons::{
     ICON_DESELECT, ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_VIEW_KANBAN,
@@ -437,24 +438,10 @@ impl block_editor_plugin::App for DatabaseViewApp {
 #[derive(Default)]
 pub(crate) struct RowEditor {
     row_index: Option<usize>,
-    buffers: std::collections::BTreeMap<Uuid, String>,
+    value_editor: DatabaseValueEditor,
 }
 
 impl RowEditor {
-    fn sync(&mut self, row_index: usize, row: &DatabaseRow, fields: &[DatabaseField]) {
-        if self.row_index != Some(row_index) {
-            self.row_index = Some(row_index);
-            self.buffers.clear();
-        }
-        self.buffers
-            .retain(|field_id, _| fields.iter().any(|field| field.id == *field_id));
-        for field in fields {
-            self.buffers
-                .entry(field.id)
-                .or_insert_with(|| cell_text(row, field));
-        }
-    }
-
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -462,124 +449,32 @@ impl RowEditor {
         fields: &[DatabaseField],
         row_index: Option<usize>,
     ) -> Vec<DatabaseOperation> {
-        let mut operations = Vec::new();
         let Some(row_index) = row_index else {
             ui.weak("Select a row to edit it here.");
-            return operations;
+            return Vec::new();
         };
+        if self.row_index != Some(row_index) {
+            self.row_index = Some(row_index);
+            self.value_editor.reset();
+        }
         let empty = DatabaseRow::default();
         let row = rows.get(row_index).unwrap_or(&empty);
-        self.sync(row_index, row, fields);
 
         ui.heading(format!("Row {}", row_index + 1));
         ui.separator();
         if fields.is_empty() {
             ui.weak("This database has no columns yet.");
-            return operations;
+            return Vec::new();
         }
-        for field in fields {
-            ui.label(format!(
-                "{} ({})",
-                field.name,
-                field_type_label(field.field_type)
-            ));
-            match field.field_type {
-                DatabaseFieldType::String | DatabaseFieldType::Number => {
-                    let buffer = self.buffers.entry(field.id).or_default();
-                    let response =
-                        ui.add(egui::TextEdit::singleline(buffer).desired_width(f32::INFINITY));
-                    if response.changed() {
-                        let value = if field.field_type == DatabaseFieldType::Number
-                            && buffer.trim().is_empty()
-                        {
-                            Some(None)
-                        } else {
-                            parse_cell_value(buffer, field).map(Some)
-                        };
-                        if let Some(value) = value {
-                            operations.push(DatabaseOperation::SetCell {
-                                row_index,
-                                field_id: field.id,
-                                value,
-                            });
-                        }
-                    }
-                }
-                DatabaseFieldType::Enum => {
-                    let current = row.value(field.id).and_then(|value| match value {
-                        DatabaseValue::Enum(id) => Some(*id),
-                        _ => None,
-                    });
-                    let current_name = current
-                        .and_then(|id| field.options.iter().find(|option| option.id == id))
-                        .map_or("None", |option| option.name.as_str());
-                    egui::ComboBox::new(("database-row-editor-enum", row_index, field.id), "")
-                        .selected_text(current_name)
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_label(current.is_none(), "None").clicked() {
-                                operations.push(DatabaseOperation::SetCell {
-                                    row_index,
-                                    field_id: field.id,
-                                    value: None,
-                                });
-                            }
-                            for option in &field.options {
-                                if ui
-                                    .selectable_label(current == Some(option.id), &option.name)
-                                    .clicked()
-                                {
-                                    operations.push(DatabaseOperation::SetCell {
-                                        row_index,
-                                        field_id: field.id,
-                                        value: Some(DatabaseValue::Enum(option.id)),
-                                    });
-                                }
-                            }
-                        });
-                }
-            }
-            ui.add_space(8.0);
-        }
-        operations
-    }
-}
-
-pub(crate) fn cell_text(row: &DatabaseRow, field: &DatabaseField) -> String {
-    match row.value(field.id) {
-        Some(value) => database_value_text(value, field),
-        None => String::new(),
-    }
-}
-
-pub(crate) fn database_value_text(value: &DatabaseValue, field: &DatabaseField) -> String {
-    match value {
-        DatabaseValue::String(value) => value.clone(),
-        DatabaseValue::Number(value) => value.to_string(),
-        DatabaseValue::Enum(id) => field
-            .options
-            .iter()
-            .find(|option| option.id == *id)
-            .map_or_else(String::new, |option| option.name.clone()),
-    }
-}
-
-pub(crate) fn parse_cell_value(value: &str, field: &DatabaseField) -> Option<DatabaseValue> {
-    match field.field_type {
-        DatabaseFieldType::String => Some(DatabaseValue::String(value.to_owned())),
-        DatabaseFieldType::Number => value.parse().ok().map(DatabaseValue::Number),
-        DatabaseFieldType::Enum => field
-            .options
-            .iter()
-            .find(|option| option.name == value)
-            .map(|option| DatabaseValue::Enum(option.id)),
-    }
-}
-
-pub(crate) fn field_type_label(field_type: DatabaseFieldType) -> &'static str {
-    match field_type {
-        DatabaseFieldType::String => "Text",
-        DatabaseFieldType::Number => "Number",
-        DatabaseFieldType::Enum => "Enum",
+        self.value_editor
+            .ui(ui, fields, &[row.values()], "database-view.selected-item")
+            .into_iter()
+            .map(|change| DatabaseOperation::SetCell {
+                row_index,
+                field_id: change.field_id,
+                value: change.value,
+            })
+            .collect()
     }
 }
 

@@ -6,14 +6,12 @@ use block::Block;
 use uuid::Uuid;
 
 fn entity(id: Uuid) -> CanvasEntity {
-    CanvasEntity {
-        id,
-        transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
-        kind: CanvasEntityKind::Rectangle,
-        style: CanvasEntityStyle::default(),
-        group_id: None,
-        locked: false,
-    }
+    CanvasEntity { id,
+    transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
+    kind: CanvasEntityKind::Rectangle,
+    style: CanvasEntityStyle::default(),
+    group_id: None,
+    locked: false, components: Vec::new() }
 }
 
 fn canvas(ids: &[Uuid]) -> InfiniteCanvas {

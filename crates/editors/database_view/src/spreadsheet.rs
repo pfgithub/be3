@@ -6,14 +6,15 @@ use block_client::{
     },
     BlockHandle,
 };
+use block_editor_plugin::block_ui::database::{
+    cell_text, database_value_text, field_type_label, parse_cell_value,
+};
+use block_editor_plugin::block_ui::test_id::TestId;
 use block_editor_plugin::egui;
 use block_editor_plugin::egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD};
 use uuid::Uuid;
 
-use crate::app::{
-    cell_text, database_value_text, field_type_label, paint_preview_cell, parse_cell_value,
-    preview_color, BlockRenderContext,
-};
+use crate::app::{paint_preview_cell, preview_color, BlockRenderContext};
 
 const ROW_HEADER_WIDTH: f32 = 44.0;
 const ROW_HEIGHT: f32 = 28.0;
@@ -341,6 +342,7 @@ impl SpreadsheetView {
         let selected = self.selected == Some(address);
         let size = egui::vec2(column_width(field.field_type), ROW_HEIGHT) * scale;
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+        let response = response.test_id(&format!("database-view.cell.{row_index}.{}", field.id));
         paint_cell_background(ui, rect, selected);
         paint_cell_text(ui, rect, &cell_text(row, field), field.field_type, scale);
         if response.clicked() {

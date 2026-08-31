@@ -6,18 +6,16 @@ use block::Block;
 use uuid::Uuid;
 
 fn entity(id: Uuid, x: f32) -> CanvasEntity {
-    CanvasEntity {
-        id,
-        transform: CanvasTransform::new(
-            CanvasPoint::new(x, 0.0),
-            CanvasPoint::new(10.0, 10.0),
-            0.0,
-        ),
-        kind: CanvasEntityKind::Rectangle,
-        style: CanvasEntityStyle::default(),
-        group_id: None,
-        locked: false,
-    }
+    CanvasEntity { id,
+    transform: CanvasTransform::new(
+        CanvasPoint::new(x, 0.0),
+        CanvasPoint::new(10.0, 10.0),
+        0.0,
+    ),
+    kind: CanvasEntityKind::Rectangle,
+    style: CanvasEntityStyle::default(),
+    group_id: None,
+    locked: false, components: Vec::new() }
 }
 
 #[test]

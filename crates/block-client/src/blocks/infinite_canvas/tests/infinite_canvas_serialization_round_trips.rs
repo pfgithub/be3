@@ -1,11 +1,27 @@
-use super::{
-    CanvasColor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTextAlign,
-    CanvasTextStyle, CanvasTextWeight, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
-};
+use std::collections::BTreeMap;
+
+use block::Block;
 use uuid::Uuid;
+
+use super::{
+    CanvasComponent, CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint,
+    CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
+};
+use crate::block_ref::BlockRef;
+use crate::blocks::database::DatabaseValue;
 
 #[test]
 fn infinite_canvas_serialization_round_trips() {
+    let [schema_id, string_field, number_field, enum_field, option_id] =
+        std::array::from_fn(|_| Uuid::new_v4());
+    let values = BTreeMap::from([
+        (
+            string_field,
+            DatabaseValue::String("component value".to_owned()),
+        ),
+        (number_field, DatabaseValue::Number(12.5)),
+        (enum_field, DatabaseValue::Enum(option_id)),
+    ]);
     let entity = CanvasEntity {
         id: Uuid::new_v4(),
         transform: CanvasTransform::new(
@@ -13,42 +29,25 @@ fn infinite_canvas_serialization_round_trips() {
             CanvasPoint::new(120.0, 80.0),
             0.25,
         ),
-        kind: CanvasEntityKind::Text {
-            text: "Two\nlines".into(),
-            text_style: CanvasTextStyle {
-                font_size: 24.0,
-                weight: CanvasTextWeight::Bold,
-                alignment: CanvasTextAlign::Right,
-                line_height: 1.5,
-                wrap: true,
-            },
-            placeholder: "Placeholder".into(),
-        },
-        style: CanvasEntityStyle {
-            foreground: CanvasColor::Rgba {
-                red: 10,
-                green: 20,
-                blue: 30,
-                alpha: 35,
-            },
-            line_width: 6.5,
-            dashed: true,
-            fill: Some(CanvasColor::Rgba {
-                red: 40,
-                green: 50,
-                blue: 60,
-                alpha: 65,
-            }),
-            arrow_start: true,
-            arrow_end: true,
-            corner_radius: 14.0,
-            opacity: 0.35,
-        },
+        kind: CanvasEntityKind::Rectangle,
+        style: CanvasEntityStyle::default(),
         group_id: Some(Uuid::new_v4()),
         locked: true,
+        components: vec![CanvasComponent {
+            schema_id: BlockRef::Direct(schema_id),
+            values,
+        }],
     };
-    let canvas = InfiniteCanvas::new();
-    let operation = InfiniteCanvasOperation::Add { entity };
+    let mut canvas = InfiniteCanvas::new();
+    InfiniteCanvas::apply_operation(
+        &mut canvas,
+        &InfiniteCanvasOperation::Add {
+            entity: entity.clone(),
+        },
+    );
+    let operation = InfiniteCanvasOperation::Update {
+        entities: vec![entity],
+    };
 
     let canvas_json = serde_json::to_vec(&canvas).unwrap();
     let operation_json = serde_json::to_vec(&operation).unwrap();

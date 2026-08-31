@@ -14,6 +14,8 @@ impl InfiniteCanvasEditor {
             gesture: None,
             two_finger_touch: None,
             picker: BlockPicker::default(),
+            component_picker: BlockPicker::default(),
+            pending_component_entities: None,
             pending_block_center: None,
             context_menu_position: None,
             context_menu_for_selection: false,
@@ -37,6 +39,9 @@ impl InfiniteCanvasEditor {
             last_fill: CanvasEntityStyle::default().fill,
             reference_cache: references::ReferenceResolutionCache::default(),
             pending_entities: references::ReferenceClassificationQueue::default(),
+            pending_components: references::ReferenceClassificationQueue::default(),
+            component_editors: HashMap::new(),
+            component_editor_selection: Vec::new(),
         }
     }
 
@@ -67,8 +72,25 @@ impl InfiniteCanvasEditor {
                 style: CanvasEntityStyle::default(),
                 group_id: None,
                 locked: false,
+                components: Vec::new(),
             };
             self.record_action(InfiniteCanvasOperation::Add { entity });
+        }
+        for (reference, entity_ids) in self.pending_components.poll() {
+            let selected = entity_ids.into_iter().collect::<HashSet<_>>();
+            let Some(canvas) = self.block.read() else {
+                continue;
+            };
+            let before = canvas
+                .entities()
+                .iter()
+                .filter(|entity| selected.contains(&entity.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            drop(canvas);
+            let mut after = before.clone();
+            super::inspector::attach_component(&mut after, &selected, reference);
+            self.record_update(before, after, false);
         }
     }
 

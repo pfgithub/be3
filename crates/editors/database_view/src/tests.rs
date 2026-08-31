@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use block_client::block_ref::BlockRef;
-use block_client::blocks::database::Database;
+use block_client::blocks::database::{Database, DatabaseValue};
 use block_client::blocks::database_schema::{
     DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
 };
@@ -14,17 +14,21 @@ use uuid::Uuid;
 use crate::app::DatabaseViewApp;
 
 mod a_new_view_starts_as_a_spreadsheet;
+mod selected_row_string_edit_updates_the_database;
 mod switching_to_kanban_stores_the_kind;
 
 fn editor() -> (
     EditorTest<'static, DatabaseViewApp>,
     BlockHandle<DatabaseView>,
+    BlockHandle<Database>,
+    Uuid,
 ) {
     let client = Arc::new(BlockClient::new(Uuid::new_v4(), Uuid::new_v4()));
     let schema = client.create_block(DatabaseSchema::new());
+    let field_id = Uuid::new_v4();
     schema.operate(DatabaseSchemaOperation::AddField {
         field: DatabaseField {
-            id: Uuid::new_v4(),
+            id: field_id,
             name: "Name".into(),
             field_type: DatabaseFieldType::String,
             options: Vec::new(),
@@ -38,5 +42,5 @@ fn editor() -> (
     app.connect(host, client, block.id());
     let mut editor = EditorTest::new(app);
     editor.run();
-    (editor, block)
+    (editor, block, database, field_id)
 }

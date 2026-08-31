@@ -6,11 +6,12 @@ use block_client::{
     },
     BlockHandle,
 };
+use block_editor_plugin::block_ui::database::cell_text;
 use block_editor_plugin::egui;
 use block_editor_plugin::egui_material_icons::icons::ICON_ADD;
 use uuid::Uuid;
 
-use crate::app::{cell_text, paint_preview_cell, preview_color, BlockRenderContext};
+use crate::app::{paint_preview_cell, preview_color, BlockRenderContext};
 
 const COLUMN_WIDTH: f32 = 240.0;
 const CARD_SPACING: f32 = 6.0;

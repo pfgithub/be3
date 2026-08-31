@@ -10,18 +10,16 @@ use crate::BlockClient;
 fn infinite_canvas_history_undoes_and_redoes_add() {
     let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
     let block = client.create_block(InfiniteCanvas::new());
-    let entity = CanvasEntity {
-        id: Uuid::new_v4(),
-        transform: CanvasTransform::new(
-            CanvasPoint::new(1.0, 2.0),
-            CanvasPoint::new(10.0, 20.0),
-            0.0,
-        ),
-        kind: CanvasEntityKind::Rectangle,
-        style: CanvasEntityStyle::default(),
-        group_id: None,
-        locked: false,
-    };
+    let entity = CanvasEntity { id: Uuid::new_v4(),
+    transform: CanvasTransform::new(
+        CanvasPoint::new(1.0, 2.0),
+        CanvasPoint::new(10.0, 20.0),
+        0.0,
+    ),
+    kind: CanvasEntityKind::Rectangle,
+    style: CanvasEntityStyle::default(),
+    group_id: None,
+    locked: false, components: Vec::new() };
     block.operate(InfiniteCanvasOperation::Add {
         entity: entity.clone(),
     });

@@ -1,37 +1,4 @@
-use super::{
-    CanvasEntity, CanvasEntityKind, CanvasEntityStyle, CanvasPoint, CanvasTransform,
-    InfiniteCanvas, InfiniteCanvasOperation,
-};
-use crate::block_ref::BlockRef;
-use block::Block;
-use uuid::Uuid;
-
-fn block_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
-    CanvasEntity {
-        id,
-        transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
-        kind: CanvasEntityKind::Block {
-            block_id: BlockRef::Direct(block_id),
-        },
-        style: CanvasEntityStyle::default(),
-        group_id: None,
-        locked: false,
-    }
-}
-
-fn direct_editor_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
-    CanvasEntity {
-        id,
-        transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
-        kind: CanvasEntityKind::DirectEditor {
-            block_id: BlockRef::Direct(block_id),
-            scale: 1.0,
-        },
-        style: CanvasEntityStyle::default(),
-        group_id: None,
-        locked: false,
-    }
-}
+use super::*;
 
 #[test]
 fn infinite_canvas_tracks_block_references() {
@@ -39,7 +6,12 @@ fn infinite_canvas_tracks_block_references() {
     let [a, b, direct] = std::array::from_fn(|_| Uuid::new_v4());
     let mut canvas = InfiniteCanvas::new();
 
-    for entity in [block_entity(a, first), block_entity(b, first)] {
+    let mut first_entity = block_entity(a, BlockRef::Direct(first));
+    first_entity.components.push(CanvasComponent {
+        schema_id: BlockRef::Direct(first),
+        values: BTreeMap::new(),
+    });
+    for entity in [first_entity, block_entity(b, BlockRef::Direct(first))] {
         InfiniteCanvas::apply_operation(&mut canvas, &InfiniteCanvasOperation::Add { entity });
     }
     assert_eq!(canvas.references(), vec![first]);
@@ -55,7 +27,7 @@ fn infinite_canvas_tracks_block_references() {
     InfiniteCanvas::apply_operation(
         &mut canvas,
         &InfiniteCanvasOperation::Update {
-            entities: vec![block_entity(a, second)],
+            entities: vec![block_entity(a, BlockRef::Direct(second))],
         },
     );
     assert_eq!(canvas.references(), vec![second, first]);

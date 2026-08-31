@@ -62,6 +62,7 @@ fn template_text_entity(
         style: CanvasEntityStyle::default(),
         group_id: None,
         locked: false,
+        components: Vec::new(),
     }
 }
 

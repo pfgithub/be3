@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use block::{Block, BlockParent};
 use tokio::net::TcpListener;
@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::block_ref::WorktreeMembership;
+use crate::blocks::database::DatabaseValue;
 use crate::blocks::version_control_data::VersionControlData;
 use crate::blocks::version_control_worktree::{
     VersionControlWorktree, VersionControlWorktreeMembership,
@@ -29,14 +30,12 @@ mod infinite_canvas_tracks_block_references;
 mod rebase_entity_preserves_conflicting_remote_fields;
 
 fn block_entity(id: Uuid, block_id: BlockRef) -> CanvasEntity {
-    CanvasEntity {
-        id,
-        transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
-        kind: CanvasEntityKind::Block { block_id },
-        style: CanvasEntityStyle::default(),
-        group_id: None,
-        locked: false,
-    }
+    CanvasEntity { id,
+    transform: CanvasTransform::new(CanvasPoint::default(), CanvasPoint::new(1.0, 1.0), 0.0),
+    kind: CanvasEntityKind::Block { block_id },
+    style: CanvasEntityStyle::default(),
+    group_id: None,
+    locked: false, components: Vec::new() }
 }
 
 struct TestServer {
@@ -83,3 +82,24 @@ async fn identity(url: &str) -> (Uuid, String, Uuid) {
         .unwrap();
     (session.account.id, session.token, workspace.id)
 }
+
+
+fn direct_editor_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
+    CanvasEntity {
+        id,
+        transform: CanvasTransform::new(
+            CanvasPoint::default(),
+            CanvasPoint::new(1.0, 1.0),
+            0.0,
+        ),
+        kind: CanvasEntityKind::DirectEditor {
+            block_id: BlockRef::Direct(block_id),
+            scale: 1.0,
+        },
+        style: CanvasEntityStyle::default(),
+        group_id: None,
+        locked: false,
+        components: Vec::new(),
+    }
+}
+mod replacing_a_component_schema_merges_into_an_existing_target;

@@ -4,6 +4,8 @@ mod geometry;
 mod inspector;
 mod interaction;
 mod painting;
+#[cfg(test)]
+mod tests;
 
 use geometry::*;
 use painting::*;
@@ -14,16 +16,20 @@ use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
     block_ref::BlockRef,
     blocks::{
+        database::DatabaseValue,
+        database_schema::DatabaseSchema,
         image::Image as ImageBlock,
         infinite_canvas::{
-            CanvasColor, CanvasCursor, CanvasEntity, CanvasEntityKind, CanvasEntityStyle,
-            CanvasLayerMove, CanvasPoint, CanvasPreviewRegion, CanvasTextAlign, CanvasTextStyle,
-            CanvasTextWeight, CanvasTransform, InfiniteCanvas, InfiniteCanvasOperation,
+            CanvasColor, CanvasComponent, CanvasCursor, CanvasEntity, CanvasEntityKind,
+            CanvasEntityStyle, CanvasLayerMove, CanvasPoint, CanvasPreviewRegion, CanvasTextAlign,
+            CanvasTextStyle, CanvasTextWeight, CanvasTransform, InfiniteCanvas,
+            InfiniteCanvasOperation,
         },
     },
     presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,
 };
+use block_ui::database::DatabaseValueEditor;
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::{
     icons::{
@@ -314,6 +320,8 @@ pub(super) struct InfiniteCanvasEditor {
     gesture: Option<Gesture>,
     two_finger_touch: Option<TwoFingerTouch>,
     picker: BlockPicker,
+    component_picker: BlockPicker,
+    pending_component_entities: Option<Vec<Uuid>>,
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
     context_menu_for_selection: bool,
@@ -338,4 +346,7 @@ pub(super) struct InfiniteCanvasEditor {
     last_fill: Option<CanvasColor>,
     reference_cache: references::ReferenceResolutionCache,
     pending_entities: references::ReferenceClassificationQueue<(Uuid, CanvasTransform)>,
+    pending_components: references::ReferenceClassificationQueue<Vec<Uuid>>,
+    component_editors: HashMap<BlockRef, DatabaseValueEditor>,
+    component_editor_selection: Vec<Uuid>,
 }

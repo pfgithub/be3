@@ -1,3 +1,4 @@
+pub mod database;
 pub mod test_id;
 
 use std::collections::{BTreeMap, HashMap};

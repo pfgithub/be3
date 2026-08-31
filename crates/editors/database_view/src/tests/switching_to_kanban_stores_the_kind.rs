@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn switching_to_kanban_stores_the_kind() {
-    let (mut editor, block) = editor();
+    let (mut editor, block, _, _) = editor();
 
     editor.find("database-view.kind.Kanban").click();
     editor.run();

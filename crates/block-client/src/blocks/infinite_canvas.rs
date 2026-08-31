@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::block_ref::BlockRef;
+use crate::blocks::database::DatabaseValue;
 
 mod presence;
 
@@ -157,6 +158,12 @@ impl Default for CanvasEntityStyle {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CanvasComponent {
+    pub schema_id: BlockRef,
+    pub values: BTreeMap<Uuid, DatabaseValue>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CanvasEntity {
     pub id: Uuid,
     pub transform: CanvasTransform,
@@ -164,6 +171,7 @@ pub struct CanvasEntity {
     pub style: CanvasEntityStyle,
     pub group_id: Option<Uuid>,
     pub locked: bool,
+    pub components: Vec<CanvasComponent>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -350,15 +358,24 @@ impl Block for InfiniteCanvas {
     }
 
     fn references(&self) -> Vec<Uuid> {
-        let mut references: Vec<_> = self
-            .entities
-            .iter()
-            .filter_map(|entity| match entity.kind {
+        let mut references = Vec::new();
+        for entity in &self.entities {
+            match entity.kind {
                 CanvasEntityKind::Block { block_id }
-                | CanvasEntityKind::DirectEditor { block_id, .. } => block_id.as_direct(),
-                _ => None,
-            })
-            .collect();
+                | CanvasEntityKind::DirectEditor { block_id, .. } => {
+                    if let Some(reference) = block_id.as_direct() {
+                        references.push(reference);
+                    }
+                }
+                _ => {}
+            }
+            references.extend(
+                entity
+                    .components
+                    .iter()
+                    .filter_map(|component| component.schema_id.as_direct()),
+            );
+        }
         let mut seen = HashSet::new();
         references.retain(|reference| seen.insert(*reference));
         references
@@ -370,22 +387,44 @@ impl Block for InfiniteCanvas {
         let entities = self
             .entities
             .iter()
-            .filter_map(|entity| match &entity.kind {
-                CanvasEntityKind::Block { block_id }
-                | CanvasEntityKind::DirectEditor { block_id, .. }
-                    if *block_id == old =>
-                {
-                    let mut entity = entity.clone();
-                    match &mut entity.kind {
-                        CanvasEntityKind::Block { block_id }
-                        | CanvasEntityKind::DirectEditor { block_id, .. } => {
-                            *block_id = new_reference;
-                        }
-                        _ => unreachable!(),
+            .filter_map(|entity| {
+                let mut entity = entity.clone();
+                let mut changed = false;
+                match &mut entity.kind {
+                    CanvasEntityKind::Block { block_id }
+                    | CanvasEntityKind::DirectEditor { block_id, .. }
+                        if *block_id == old =>
+                    {
+                        *block_id = new_reference;
+                        changed = true;
                     }
-                    Some(entity)
+                    _ => {}
                 }
-                _ => None,
+                if let Some(old_index) = entity
+                    .components
+                    .iter()
+                    .position(|component| component.schema_id == old)
+                {
+                    changed = true;
+                    if entity
+                        .components
+                        .iter()
+                        .any(|component| component.schema_id == new_reference)
+                    {
+                        let replaced = entity.components.remove(old_index);
+                        let existing = entity
+                            .components
+                            .iter_mut()
+                            .find(|component| component.schema_id == new_reference)
+                            .unwrap();
+                        for (field_id, value) in replaced.values {
+                            existing.values.entry(field_id).or_insert(value);
+                        }
+                    } else {
+                        entity.components[old_index].schema_id = new_reference;
+                    }
+                }
+                changed.then_some(entity)
             })
             .collect::<Vec<_>>();
         if entities.is_empty() {
@@ -732,6 +771,70 @@ fn rebase_entity(
         expected.style.opacity,
         desired.style.opacity,
     );
+    result.components = rebase_components(
+        &result.components,
+        &expected.components,
+        &desired.components,
+    );
+    result
+}
+
+fn rebase_components(
+    current: &[CanvasComponent],
+    expected: &[CanvasComponent],
+    desired: &[CanvasComponent],
+) -> Vec<CanvasComponent> {
+    let mut result = current.to_vec();
+    for expected_component in expected {
+        let desired_component = desired
+            .iter()
+            .find(|component| component.schema_id == expected_component.schema_id);
+        let Some(desired_component) = desired_component else {
+            if let Some(index) = result.iter().position(|component| {
+                component.schema_id == expected_component.schema_id
+                    && component == expected_component
+            }) {
+                result.remove(index);
+            }
+            continue;
+        };
+        let Some(current_component) = result
+            .iter_mut()
+            .find(|component| component.schema_id == expected_component.schema_id)
+        else {
+            continue;
+        };
+        let field_ids = expected_component
+            .values
+            .keys()
+            .chain(desired_component.values.keys())
+            .copied()
+            .collect::<HashSet<_>>();
+        for field_id in field_ids {
+            let expected_value = expected_component.values.get(&field_id);
+            let desired_value = desired_component.values.get(&field_id);
+            if expected_value != desired_value
+                && current_component.values.get(&field_id) == expected_value
+            {
+                if let Some(value) = desired_value {
+                    current_component.values.insert(field_id, value.clone());
+                } else {
+                    current_component.values.remove(&field_id);
+                }
+            }
+        }
+    }
+    for desired_component in desired {
+        if !expected
+            .iter()
+            .any(|component| component.schema_id == desired_component.schema_id)
+            && !result
+                .iter()
+                .any(|component| component.schema_id == desired_component.schema_id)
+        {
+            result.push(desired_component.clone());
+        }
+    }
     result
 }
 

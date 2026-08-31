@@ -20,6 +20,15 @@ impl InfiniteCanvasEditor {
             }
             self.tool = Tool::Select;
         }
+        if let Some(block) =
+            self.component_picker
+                .handle(context, editors, BlockParent::Uuid(self.block.id()))
+        {
+            let entity_ids = self.pending_component_entities.take().unwrap_or_default();
+            let client = editors.client_handle();
+            self.pending_components
+                .push(&client, self.block.id(), block.id, entity_ids);
+        }
     }
 
     pub(super) fn import_picked_image(
@@ -307,6 +316,7 @@ impl InfiniteCanvasEditor {
         } else if escape_pressed {
             self.gesture = None;
             self.picker.close();
+            self.component_picker.close();
             self.tool = Tool::Select;
         }
         let keyboard_available = !response.ctx.egui_wants_keyboard_input();
@@ -569,6 +579,7 @@ impl InfiniteCanvasEditor {
                                 style: self.default_entity_style(),
                                 group_id: None,
                                 locked: false,
+                                components: Vec::new(),
                             });
                         }
                         self.tool = Tool::Select;
@@ -587,6 +598,7 @@ impl InfiniteCanvasEditor {
                                 style: self.default_entity_style(),
                                 group_id: None,
                                 locked: false,
+                                components: Vec::new(),
                             });
                         }
                         self.tool = Tool::Select;
@@ -609,6 +621,7 @@ impl InfiniteCanvasEditor {
                                 style: self.default_entity_style(),
                                 group_id: None,
                                 locked: false,
+                                components: Vec::new(),
                             });
                         }
                         self.tool = Tool::Select;
@@ -912,6 +925,7 @@ impl InfiniteCanvasEditor {
                             style: self.default_entity_style(),
                             group_id: None,
                             locked: false,
+                            components: Vec::new(),
                         })
                     }
                     Tool::Rectangle => {
@@ -930,6 +944,7 @@ impl InfiniteCanvasEditor {
                             style: self.default_entity_style(),
                             group_id: None,
                             locked: false,
+                            components: Vec::new(),
                         })
                     }
                     Tool::Text => {
@@ -958,6 +973,7 @@ impl InfiniteCanvasEditor {
                             style: self.default_entity_style(),
                             group_id: None,
                             locked: false,
+                            components: Vec::new(),
                         })
                     }
                     _ => None,

@@ -231,7 +231,8 @@ impl BlockEditor for InfiniteCanvasEditor {
             let id = self.resolve_block_id(editors, block_id)?;
             return editors.direct_editor_right_sidebar(id, ui);
         }
-        if let Some(movement) = self.show_inspector(ui, &entities, editors, true) {
+        let (movement, action) = self.show_inspector(ui, &entities, editors, true);
+        if let Some(movement) = movement {
             self.record_action(InfiniteCanvasOperation::Reorder {
                 ids: entities
                     .iter()
@@ -241,7 +242,7 @@ impl BlockEditor for InfiniteCanvasEditor {
                 movement,
             });
         }
-        None
+        action
     }
 
     fn embedded_direct_editor_ui(

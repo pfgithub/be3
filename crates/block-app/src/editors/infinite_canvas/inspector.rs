@@ -65,16 +65,162 @@ impl InfiniteCanvasEditor {
             });
     }
 
+    fn show_components_inspector(
+        &mut self,
+        ui: &mut egui::Ui,
+        selected: &[&CanvasEntity],
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<EditorAction> {
+        let selected_ids = self.selection.clone();
+        let mut schemas = Vec::new();
+        let mut seen = HashSet::new();
+        for entity in selected {
+            for component in &entity.components {
+                if seen.insert(component.schema_id) {
+                    schemas.push(component.schema_id);
+                }
+            }
+        }
+
+        let mut action = None;
+        egui::CollapsingHeader::new("Components")
+            .default_open(true)
+            .show(ui, |ui| {
+                for schema_id in schemas {
+                    let attached_count = selected
+                        .iter()
+                        .filter(|entity| {
+                            entity
+                                .components
+                                .iter()
+                                .any(|component| component.schema_id == schema_id)
+                        })
+                        .count();
+                    let resolved_id = self.resolve_block_id(editors, schema_id);
+                    let schema =
+                        resolved_id.map(|id| editors.client().get_block::<DatabaseSchema>(id));
+                    let fields = schema
+                        .as_ref()
+                        .and_then(BlockHandle::read)
+                        .map(|schema| schema.fields().to_vec());
+
+                    if let (Some(schema), Some(_)) = (schema.as_ref(), fields.as_ref()) {
+                        ui.label(
+                            BlockLabel::for_handle(editors.registry(), schema)
+                                .widget_text(ui.style()),
+                        );
+                    } else {
+                        ui.strong("Loading schema...");
+                    }
+                    if attached_count != selected.len() {
+                        ui.weak(format!(
+                            "Attached to {attached_count} of {}",
+                            selected.len()
+                        ));
+                    }
+
+                    let mut add_to_all = false;
+                    let mut remove = false;
+                    ui.horizontal_wrapped(|ui| {
+                        if attached_count != selected.len() && ui.button("Add to all").clicked() {
+                            add_to_all = true;
+                        }
+                        if ui
+                            .add_enabled(resolved_id.is_some(), egui::Button::new("Open schema"))
+                            .clicked()
+                        {
+                            action = resolved_id.map(|id| EditorAction::OpenBlock {
+                                id,
+                                block_type: <DatabaseSchema as block::Block>::TYPE_ID,
+                            });
+                        }
+                        if ui.button("Remove").clicked() {
+                            remove = true;
+                        }
+                    });
+
+                    let changes = if attached_count == selected.len() {
+                        if let (Some(fields), Some(schema_uuid)) = (fields.as_deref(), resolved_id)
+                        {
+                            let values = selected
+                                .iter()
+                                .map(|entity| {
+                                    &entity
+                                        .components
+                                        .iter()
+                                        .find(|component| component.schema_id == schema_id)
+                                        .unwrap()
+                                        .values
+                                })
+                                .collect::<Vec<_>>();
+                            self.component_editors.entry(schema_id).or_default().ui(
+                                ui,
+                                fields,
+                                &values,
+                                &format!("infinite-canvas.component.{schema_uuid}"),
+                            )
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
+                    let before = selected
+                        .iter()
+                        .map(|entity| (*entity).clone())
+                        .collect::<Vec<_>>();
+                    if remove {
+                        let mut after = before.clone();
+                        remove_component(&mut after, &selected_ids, schema_id);
+                        self.record_update(before, after, false);
+                    } else if add_to_all {
+                        let mut after = before.clone();
+                        attach_component(&mut after, &selected_ids, schema_id);
+                        self.record_update(before, after, false);
+                    } else if !changes.is_empty() {
+                        let group = changes.iter().all(|change| change.continuous);
+                        let mut after = before.clone();
+                        for change in changes {
+                            set_component_value(
+                                &mut after,
+                                &selected_ids,
+                                schema_id,
+                                change.field_id,
+                                change.value,
+                            );
+                        }
+                        self.record_update(before, after, group);
+                    }
+                    ui.add_space(8.0);
+                }
+
+                if ui.button("Add component...").clicked() {
+                    self.pending_component_entities =
+                        Some(selected.iter().map(|entity| entity.id).collect());
+                    self.component_picker
+                        .open_for_types([], [<DatabaseSchema as block::Block>::TYPE_ID]);
+                }
+            });
+        action
+    }
+
     pub(super) fn show_inspector(
         &mut self,
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
         editors: &mut EditorAccess<'_>,
         show_heading: bool,
-    ) -> Option<CanvasLayerMove> {
+    ) -> (Option<CanvasLayerMove>, Option<EditorAction>) {
         if show_heading {
             ui.heading("Inspector");
             ui.separator();
+        }
+        let mut component_selection = self.selection.iter().copied().collect::<Vec<_>>();
+        component_selection.sort_unstable();
+        if self.component_editor_selection != component_selection {
+            self.component_editor_selection = component_selection;
+            self.component_editors.clear();
         }
         let selected = entities
             .iter()
@@ -84,7 +230,7 @@ impl InfiniteCanvasEditor {
         ui.separator();
         if selected.is_empty() {
             ui.weak("Select an object to edit its appearance.");
-            return None;
+            return (None, None);
         }
 
         let selection_label = match selected.as_slice() {
@@ -275,6 +421,8 @@ impl InfiniteCanvasEditor {
                     });
             }
         }
+
+        let editor_action = self.show_components_inspector(ui, &selected, editors);
 
         egui::CollapsingHeader::new("Appearance")
             .default_open(true)
@@ -709,7 +857,7 @@ impl InfiniteCanvasEditor {
                     self.execute_command(CanvasCommand::Delete, entities);
                 }
             });
-        movement
+        (movement, editor_action)
     }
 
     pub(super) fn show_toolbar(
@@ -890,5 +1038,65 @@ impl InfiniteCanvasEditor {
             .on_hover_text("Canvas help and shortcuts");
         });
         ui.separator();
+    }
+}
+
+pub(super) fn attach_component(
+    entities: &mut [CanvasEntity],
+    selected: &HashSet<Uuid>,
+    schema_id: BlockRef,
+) {
+    for entity in entities {
+        if selected.contains(&entity.id)
+            && !entity
+                .components
+                .iter()
+                .any(|component| component.schema_id == schema_id)
+        {
+            entity.components.push(CanvasComponent {
+                schema_id,
+                values: std::collections::BTreeMap::new(),
+            });
+        }
+    }
+}
+
+pub(super) fn set_component_value(
+    entities: &mut [CanvasEntity],
+    selected: &HashSet<Uuid>,
+    schema_id: BlockRef,
+    field_id: Uuid,
+    value: Option<DatabaseValue>,
+) {
+    for entity in entities {
+        if !selected.contains(&entity.id) {
+            continue;
+        }
+        let Some(component) = entity
+            .components
+            .iter_mut()
+            .find(|component| component.schema_id == schema_id)
+        else {
+            continue;
+        };
+        if let Some(value) = value.clone() {
+            component.values.insert(field_id, value);
+        } else {
+            component.values.remove(&field_id);
+        }
+    }
+}
+
+pub(super) fn remove_component(
+    entities: &mut [CanvasEntity],
+    selected: &HashSet<Uuid>,
+    schema_id: BlockRef,
+) {
+    for entity in entities {
+        if selected.contains(&entity.id) {
+            entity
+                .components
+                .retain(|component| component.schema_id != schema_id);
+        }
     }
 }
