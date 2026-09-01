@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn a_new_scene_paints_nothing_until_the_lighting_lands() {
-    let (mut editor, block) = editor();
+    let (mut editor, block, _host) = editor();
 
     let scene = block.read().unwrap();
     assert!(scene

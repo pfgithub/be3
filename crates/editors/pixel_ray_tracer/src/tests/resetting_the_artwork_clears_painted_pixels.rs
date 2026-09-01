@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn resetting_the_artwork_clears_painted_pixels() {
-    let (mut editor, block) = editor();
+    let (mut editor, block, _host) = editor();
     block.operate(PixelRayTracerOperation::Paint {
         pixels: vec![PixelUpdate {
             x: 4,

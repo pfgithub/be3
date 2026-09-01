@@ -251,7 +251,7 @@ impl Editor {
             }
         }
         ui.separator();
-        ui.weak("Wheel: zoom\nMiddle drag: pan\nDelete: remove entity");
+        ui.weak("Scroll: pan\nCtrl scroll: zoom\nMiddle drag: pan\nDelete: remove entity");
     }
 
     fn properties(&mut self, ui: &mut egui::Ui) {
@@ -447,8 +447,9 @@ impl Editor {
         let (viewport, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
         let painter = ui.painter_at(viewport);
         painter.rect_filled(viewport, 0.0, ui.visuals().extreme_bg_color);
-        let canvas_size = Vec2::splat(viewport.width().min(viewport.height()));
-        let canvas = Rect::from_center_size(viewport.center(), canvas_size);
+        let view = self.host.view().unwrap_or(viewport);
+        let canvas_size = Vec2::splat(view.width().min(view.height()));
+        let canvas = Rect::from_center_size(view.center(), canvas_size);
         if let Some(texture) = &self.texture {
             painter.image(
                 texture.id(),
@@ -463,22 +464,12 @@ impl Editor {
                     && input.pointer.button_down(PointerButton::Primary))
         });
         if panning && response.hovered() {
-            self.host
-                .pan_view(response.ctx.input(|input| input.pointer.delta()));
             self.interaction = None;
-        }
-        if response.hovered() {
-            if let Some(pointer) = response.ctx.pointer_hover_pos() {
-                let scroll = response.ctx.input(|input| input.smooth_scroll_delta.y);
-                if scroll != 0.0 {
-                    self.host.zoom_view((scroll * 0.002).exp(), Some(pointer));
-                }
-            }
         }
         let pointer = response
             .ctx
             .pointer_hover_pos()
-            .filter(|position| canvas.contains(*position));
+            .filter(|position| viewport.contains(*position) && canvas.contains(*position));
         let world = pointer.map(|position| screen_to_world(position, canvas));
         if response.hovered() && !panning {
             response.ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
