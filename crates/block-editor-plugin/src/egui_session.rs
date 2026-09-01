@@ -542,6 +542,7 @@ impl EguiSession {
         state.input.screen_rect = Some(rect);
         state.input.time = Some(time);
         let mut input = std::mem::take(&mut state.input);
+        input.viewport_id = viewport_id(region);
         input
             .viewports
             .entry(input.viewport_id)
@@ -725,6 +726,10 @@ impl EguiSession {
             InputEvent::Focus(focused) => state.input.focused = *focused,
         }
     }
+}
+
+pub(crate) fn viewport_id(region: EditorRegion) -> egui::ViewportId {
+    egui::ViewportId(egui::Id::new(("plugin editor region", region)))
 }
 
 fn bounded(

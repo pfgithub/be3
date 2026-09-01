@@ -146,19 +146,35 @@ fn open() -> Message {
 fn screens() -> Message {
     Message::Screens(ScreenSet {
         request_id: 1,
-        screens: vec![ScreenRequest {
-            screen: ScreenId(1),
-            instance: EditorInstanceId(1),
-            region: EditorRegion::Main,
-            metrics: ViewportMetrics {
-                logical_width: WIDTH as f32,
-                logical_height: HEIGHT as f32,
-                visible_x: 0.0,
-                visible_y: 0.0,
-                pixel_width: WIDTH,
-                pixel_height: HEIGHT,
-                scale_factor: 1.0,
+        screens: vec![
+            ScreenRequest {
+                screen: ScreenId(1),
+                instance: EditorInstanceId(1),
+                region: EditorRegion::Main,
+                metrics: ViewportMetrics {
+                    logical_width: WIDTH as f32,
+                    logical_height: HEIGHT as f32,
+                    visible_x: 0.0,
+                    visible_y: 0.0,
+                    pixel_width: WIDTH,
+                    pixel_height: HEIGHT,
+                    scale_factor: 1.0,
+                },
             },
-        }],
+            ScreenRequest {
+                screen: ScreenId(2),
+                instance: EditorInstanceId(1),
+                region: EditorRegion::Toolbar,
+                metrics: ViewportMetrics {
+                    logical_width: WIDTH as f32,
+                    logical_height: 40.0,
+                    visible_x: 0.0,
+                    visible_y: 0.0,
+                    pixel_width: WIDTH,
+                    pixel_height: 40,
+                    scale_factor: 1.0,
+                },
+            },
+        ],
     })
 }

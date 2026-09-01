@@ -1,7 +1,7 @@
-use block_plugin_api::{EditorInstanceId, ScreenId, ScreenLayout};
+use block_plugin_api::{EditorInstanceId, ScreenLayout};
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
@@ -9,10 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{screens::Screens, Waker};
+use crate::{egui_session, screens::Screens, Waker};
 
 struct Pane {
-    instance: EditorInstanceId,
     context: egui::Context,
     renderer: egui_wgpu::Renderer,
     freed: Vec<egui::TextureId>,
@@ -23,11 +22,11 @@ impl Pane {
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         theme: egui::Theme,
-        instance: EditorInstanceId,
         waker: Waker,
         painting: Arc<AtomicBool>,
     ) -> Self {
         let context = egui::Context::default();
+        context.request_repaint_after_for(Duration::MAX, egui::ViewportId::ROOT);
         context.set_request_repaint_callback(move |_| {
             if !painting.load(Ordering::Relaxed) {
                 waker.wake();
@@ -41,7 +40,6 @@ impl Pane {
             .callback_resources
             .insert(PunchResources::new(device, format));
         Self {
-            instance,
             context,
             renderer,
             freed: Vec::new(),
@@ -226,7 +224,7 @@ impl egui_wgpu::CallbackTrait for Punch {
 
 pub(crate) struct Panes {
     format: wgpu::TextureFormat,
-    panes: HashMap<ScreenId, Pane>,
+    panes: HashMap<EditorInstanceId, Pane>,
     painting: Arc<AtomicBool>,
 }
 
@@ -255,6 +253,7 @@ impl Panes {
         time: f64,
     ) -> Painted {
         let mut commands = Vec::new();
+        let mut started = HashSet::new();
         let mut cleared = false;
         let mut repaint = Duration::MAX;
         let placements = layout.screens.clone();
@@ -268,21 +267,27 @@ impl Panes {
             let format = self.format;
             let waker = waker.clone();
             let painting = Arc::clone(&self.painting);
-            let pane = self.panes.entry(placement.screen).or_insert_with(|| {
-                Pane::new(device, format, theme, placement.instance, waker, painting)
-            });
-            for id in std::mem::take(&mut pane.freed) {
-                pane.renderer.free_texture(&id);
-            }
-            if let Some(punch) = pane.renderer.callback_resources.get_mut::<PunchResources>() {
-                punch.next = 0;
+            let pane = self
+                .panes
+                .entry(placement.instance)
+                .or_insert_with(|| Pane::new(device, format, theme, waker, painting));
+            if started.insert(placement.instance) {
+                for id in std::mem::take(&mut pane.freed) {
+                    pane.renderer.free_texture(&id);
+                }
+                if let Some(punch) = pane.renderer.callback_resources.get_mut::<PunchResources>() {
+                    punch.next = 0;
+                }
             }
             let pane_started = Instant::now();
             let session_started = Instant::now();
             let output = session.run(placement.region, &pane.context, time, layout.generation);
             let session_elapsed = session_started.elapsed();
             let updated_textures = output.textures_delta.set.len();
-            repaint = repaint.min(repaint_delay(&output));
+            repaint = repaint.min(repaint_delay(
+                &output,
+                egui_session::viewport_id(placement.region),
+            ));
             let scale = session.scale_factor(placement.region);
             let tessellate_started = Instant::now();
             let paint_jobs = pane.context.tessellate(output.shapes, scale);
@@ -341,10 +346,10 @@ impl Panes {
                     pane_started.elapsed()
                 );
             }
-            pane.freed = output.textures_delta.free;
+            pane.freed.extend(output.textures_delta.free);
         }
         self.painting.store(false, Ordering::Relaxed);
-        self.panes.retain(|_, pane| screens.is_open(pane.instance));
+        self.panes.retain(|instance, _| screens.is_open(*instance));
         Painted {
             commands,
             repaint: (repaint < Duration::MAX).then_some(repaint),
@@ -352,9 +357,9 @@ impl Panes {
     }
 }
 
-fn repaint_delay(output: &egui::FullOutput) -> Duration {
+fn repaint_delay(output: &egui::FullOutput, viewport: egui::ViewportId) -> Duration {
     output
         .viewport_output
-        .get(&egui::ViewportId::ROOT)
+        .get(&viewport)
         .map_or(Duration::MAX, |viewport| viewport.repaint_delay)
 }
