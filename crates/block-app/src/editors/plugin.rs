@@ -302,6 +302,23 @@ impl PluginEditor {
             action = action.or(next);
         }
         presentation.present(ui);
+        if region == EditorRegion::Main {
+            if let Some(rect) = presentation.loading_rect {
+                let rect = rect.intersect(ui.clip_rect());
+                let mut loading = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt(("plugin-loading", self.instance.0))
+                        .max_rect(rect),
+                );
+                loading.set_clip_rect(rect);
+                loading.centered_and_justified(|ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.spinner();
+                        ui.weak("Loading plugin…");
+                    });
+                });
+            }
+        }
         for child in presentation
             .children
             .iter()

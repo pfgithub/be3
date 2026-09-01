@@ -330,11 +330,20 @@ pub(crate) fn install(creation_context: &eframe::CreationContext<'_>) {
     });
 }
 
+fn plugin_loading_rect(
+    layout: &ScreenLayout,
+    screen: ScreenId,
+    rect: egui::Rect,
+) -> Option<egui::Rect> {
+    layout.placement(screen).is_none().then_some(rect)
+}
+
 pub(crate) struct EditorPresentation {
     plugin_id: String,
     instance: EditorInstanceId,
     region: EditorRegion,
     pub(crate) id: Option<egui::Id>,
+    pub(crate) loading_rect: Option<egui::Rect>,
     screen: Option<ScreenId>,
     quad: Option<Quad>,
     clip: egui::Rect,
@@ -349,6 +358,7 @@ impl EditorPresentation {
             instance,
             region,
             id: None,
+            loading_rect: None,
             screen: None,
             quad: None,
             clip: egui::Rect::ZERO,
@@ -459,6 +469,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
             instance,
             region,
             id: Some(response.id),
+            loading_rect: plugin_loading_rect(&runtime.layout, screen, response.rect),
             screen: Some(screen),
             quad: cropped.map(|(quad, _)| quad),
             clip: ui.clip_rect(),
@@ -846,3 +857,8 @@ pub(crate) fn running() -> Vec<RuntimeStatus> {
 pub(super) fn with<R>(plugin_id: &str, act: impl FnOnce(&mut Runtime) -> R) -> Option<R> {
     HOST.with(|host| Some(act(host.borrow_mut().runtimes.get_mut(plugin_id)?)))
 }
+
+
+
+#[cfg(test)]
+mod tests;
