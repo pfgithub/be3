@@ -29,11 +29,11 @@ failed=false
 
 t() {
     if which time >/dev/null 2>&1; then
-        if ! TIME="Took %E" "$@"; then
+        if ! TIME="Took %E" time "$@"; then
             failed=true
         fi
     else
-        # git bash
+        # git bash only has the builtin, no executable
         if ! time "$@"; then
             failed=true
         fi
