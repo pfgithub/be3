@@ -212,16 +212,17 @@ pub(super) fn paint_entity(
                 || (resolved_id.and_then(|id| editors.direct_editor_interaction(id))
                     == Some(DirectEditorInteraction::Preview)
                     && editor.focused_editor != Some(entity.id));
-            let rendered = resolved_id.is_some_and(|id| {
-                editors.render(
-                    id,
-                    BlockRenderContext {
-                        painter,
-                        corners: content_corners,
-                        opacity,
-                    },
-                )
-            });
+            let rendered = preview
+                && resolved_id.is_some_and(|id| {
+                    editors.render(
+                        id,
+                        BlockRenderContext {
+                            painter,
+                            corners: content_corners,
+                            opacity,
+                        },
+                    )
+                });
             if preview && !rendered {
                 painter.rect_filled(content, 0.0, with_opacity(Color32::from_gray(35), opacity));
             }
