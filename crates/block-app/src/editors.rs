@@ -28,7 +28,6 @@ use uuid::Uuid;
 use self::unsupported::UnsupportedEditor;
 use crate::platform::{FileFilter, PickedFile};
 
-const COMPACT_DIRECT_EDITOR_WIDTH: f32 = 760.0;
 const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
 const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
 pub(super) const EMBEDDED_EDITOR_PADDING: f32 = 12.0;
@@ -178,20 +177,6 @@ pub fn editor_access_ceiling(client: &BlockClient, id: Uuid) -> BlockAccess {
     } else {
         access
     }
-}
-
-fn editor_scope<R>(
-    ui: &mut egui::Ui,
-    read_only: bool,
-    contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    if !read_only {
-        return contents(ui);
-    }
-    let mut style = (**ui.style()).clone();
-    style.visuals.disabled_alpha = 1.0;
-    ui.scope_builder(egui::UiBuilder::new().style(style).disabled(), contents)
-        .inner
 }
 
 fn no_access_notice(ui: &mut egui::Ui) {
@@ -382,7 +367,7 @@ impl<'a> EditorAccess<'a> {
             no_access_notice(ui);
             return None;
         }
-        editor_scope(ui, !access.can_edit(), |ui| {
+        block_ui::frame::read_only_scope(ui, !access.can_edit(), |ui| {
             self.with_editor(id, |editor, editors| callback(editor, editors, ui))
         })
     }
@@ -691,127 +676,115 @@ pub fn direct_editor_tab_ui(
     editors: &mut EditorAccess<'_>,
 ) -> Option<EditorAction> {
     let id = editor.id();
-    let compact = ui.available_width() < COMPACT_DIRECT_EDITOR_WIDTH;
     let read_only = !editors.access().can_edit();
-    let mut action = None;
-    let capabilities = editor.direct_editor_capabilities();
-    let max_zoom = editor.direct_editor_max_zoom();
-    let min_zoom = editor.direct_editor_min_zoom();
     let viewport_id = egui::Id::new(("direct-editor-tab-viewport", id));
-    let mut viewport_state = ui
+    let viewport_state = ui
         .ctx()
         .data_mut(|data| data.get_temp::<DirectEditorTabViewport>(viewport_id))
         .unwrap_or_default();
-    let mut viewport = DirectEditorViewport::new(viewport_state.zoom);
+    let has_left_sidebar = editor.direct_editor_has_left_sidebar(editors);
+    let has_right_sidebar = editor.direct_editor_has_right_sidebar(editors);
+    let mut bands = DirectEditorTabBands {
+        id,
+        viewport_id,
+        capabilities: editor.direct_editor_capabilities(),
+        max_zoom: editor.direct_editor_max_zoom(),
+        min_zoom: editor.direct_editor_min_zoom(),
+        read_only,
+        viewport: DirectEditorViewport::new(viewport_state.zoom),
+        viewport_state,
+        editor,
+        editors,
+        action: None,
+    };
+    block_ui::frame::Frame::new(egui::Id::new(("direct-editor-tab", id)))
+        .toolbar(true)
+        .left_sidebar(has_left_sidebar)
+        .right_sidebar(has_right_sidebar)
+        .read_only(read_only)
+        .show(ui, &mut bands);
+    bands.action
+}
 
-    egui::Panel::top(egui::Id::new(("direct-editor-tab-toolbar", id)))
-        .show_separator_line(true)
-        .show_inside(ui, |ui| {
-            let next_action = editor_scope(ui, read_only, |ui| {
-                editor.direct_editor_top_bar(ui, editors, &mut viewport)
-            });
-            if action.is_none() {
-                action = next_action;
-            }
-        });
+struct DirectEditorTabBands<'a, 'b> {
+    id: Uuid,
+    viewport_id: egui::Id,
+    capabilities: DirectEditorCapabilities,
+    max_zoom: f32,
+    min_zoom: f32,
+    read_only: bool,
+    viewport: DirectEditorViewport,
+    viewport_state: DirectEditorTabViewport,
+    editor: &'a mut dyn BlockEditor,
+    editors: &'a mut EditorAccess<'b>,
+    action: Option<EditorAction>,
+}
 
-    if compact {
-        let available = ui.available_rect_before_wrap();
-        if editor.direct_editor_has_left_sidebar(editors) {
-            egui::Window::new("Left sidebar")
-                .id(egui::Id::new(("direct-editor-tab-left-window", id)))
-                .default_width(240.0)
-                .resizable(true)
-                .default_pos(available.left_top() + egui::vec2(16.0, 16.0))
-                .show(ui.ctx(), |ui| {
-                    egui::ScrollArea::both()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let next_action = editor_scope(ui, read_only, |ui| {
-                                editor.direct_editor_left_sidebar(ui, editors)
-                            });
-                            if action.is_none() {
-                                action = next_action;
-                            }
-                        });
-                });
-        }
-        if editor.direct_editor_has_right_sidebar(editors) {
-            egui::Window::new("Right sidebar")
-                .id(egui::Id::new(("direct-editor-tab-right-window", id)))
-                .pivot(egui::Align2::RIGHT_TOP)
-                .default_width(240.0)
-                .resizable(true)
-                .default_pos(available.right_top() + egui::vec2(-16.0, 16.0))
-                .show(ui.ctx(), |ui| {
-                    egui::ScrollArea::both()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let next_action = editor_scope(ui, read_only, |ui| {
-                                editor.direct_editor_right_sidebar(ui, editors)
-                            });
-                            if action.is_none() {
-                                action = next_action;
-                            }
-                        });
-                });
-        }
-    } else {
-        if editor.direct_editor_has_left_sidebar(editors) {
-            egui::Panel::left(egui::Id::new(("direct-editor-tab-left", id)))
-                .default_size(240.0)
-                .min_size(200.0)
-                .max_size(340.0)
-                .resizable(true)
-                .show_inside(ui, |ui| {
-                    let next_action = editor_scope(ui, read_only, |ui| {
-                        editor.direct_editor_left_sidebar(ui, editors)
-                    });
-                    if action.is_none() {
-                        action = next_action;
-                    }
-                });
-        }
-        if editor.direct_editor_has_right_sidebar(editors) {
-            egui::Panel::right(egui::Id::new(("direct-editor-tab-right", id)))
-                .default_size(240.0)
-                .min_size(200.0)
-                .max_size(340.0)
-                .resizable(true)
-                .show_inside(ui, |ui| {
-                    let next_action = editor_scope(ui, read_only, |ui| {
-                        editor.direct_editor_right_sidebar(ui, editors)
-                    });
-                    if action.is_none() {
-                        action = next_action;
-                    }
-                });
+impl DirectEditorTabBands<'_, '_> {
+    fn record(&mut self, action: Option<EditorAction>) {
+        if self.action.is_none() {
+            self.action = action;
         }
     }
+}
 
-    let viewport_size = ui.available_size().max(egui::Vec2::splat(1.0));
-    let intrinsic_size = editor
-        .direct_editor_intrinsic_size(editors)
-        .unwrap_or_default();
-    let content_size = egui::vec2(
-        viewport_size.x.max(intrinsic_size.x),
-        viewport_size.y.max(intrinsic_size.y),
-    );
-    if capabilities.supports_pan_and_zoom {
-        let (viewport_rect, _) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
-        if let Some(previous_center) = viewport_state.center.replace(viewport_rect.center()) {
-            viewport_state.pan += previous_center - viewport_rect.center();
+impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        let action = self
+            .editor
+            .direct_editor_top_bar(ui, self.editors, &mut self.viewport);
+        self.record(action);
+    }
+
+    fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        let action = self.editor.direct_editor_left_sidebar(ui, self.editors);
+        self.record(action);
+    }
+
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        let action = self.editor.direct_editor_right_sidebar(ui, self.editors);
+        self.record(action);
+    }
+
+    fn content_ui(&mut self, ui: &mut egui::Ui) {
+        let id = self.id;
+        let viewport_size = ui.available_size().max(egui::Vec2::splat(1.0));
+        let intrinsic_size = self
+            .editor
+            .direct_editor_intrinsic_size(self.editors)
+            .unwrap_or_default();
+        let content_size = egui::vec2(
+            viewport_size.x.max(intrinsic_size.x),
+            viewport_size.y.max(intrinsic_size.y),
+        );
+        if !self.capabilities.supports_pan_and_zoom {
+            let action = egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_min_size(content_size);
+                    block_ui::frame::read_only_scope(ui, self.read_only, |ui| {
+                        self.editor
+                            .direct_editor_ui(ui, self.editors, 1.0, &mut self.viewport)
+                    })
+                })
+                .inner;
+            self.record(action);
+            return;
         }
-        let transformed_size = content_size * viewport_state.zoom;
+        let (viewport_rect, _) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
+        if let Some(previous_center) = self.viewport_state.center.replace(viewport_rect.center()) {
+            self.viewport_state.pan += previous_center - viewport_rect.center();
+        }
+        let transformed_size = content_size * self.viewport_state.zoom;
         let content_rect = egui::Rect::from_center_size(
-            viewport_rect.center() + viewport_state.pan,
+            viewport_rect.center() + self.viewport_state.pan,
             transformed_size,
         );
-        viewport.replace_content_rect(Some(content_rect));
-        let fills_viewport = editor.direct_editor_fills_viewport();
+        self.viewport.replace_content_rect(Some(content_rect));
+        let fills_viewport = self.editor.direct_editor_fills_viewport();
 
-        let mut viewport_input = editor.direct_editor_viewport_input(editors);
-        if read_only && viewport_input == DirectEditorViewportInput::Editor {
+        let mut viewport_input = self.editor.direct_editor_viewport_input(self.editors);
+        if self.read_only && viewport_input == DirectEditorViewportInput::Editor {
             viewport_input = DirectEditorViewportInput::Background;
         }
         let editor_rect = if fills_viewport {
@@ -819,7 +792,8 @@ pub fn direct_editor_tab_ui(
         } else {
             content_rect
         };
-        let next_action = ui
+        let zoom = self.viewport_state.zoom;
+        let action = ui
             .new_child(
                 egui::UiBuilder::new()
                     .id_salt(("direct-editor-tab-content", id))
@@ -829,63 +803,63 @@ pub fn direct_editor_tab_ui(
             .scope(|ui| {
                 ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
                 ui.set_min_size(editor_rect.size());
-                editor_scope(ui, read_only, |ui| {
-                    editor.direct_editor_ui(ui, editors, viewport_state.zoom, &mut viewport)
+                block_ui::frame::read_only_scope(ui, self.read_only, |ui| {
+                    self.editor
+                        .direct_editor_ui(ui, self.editors, zoom, &mut self.viewport)
                 })
             })
             .inner;
-        if action.is_none() {
-            action = next_action;
-        }
+        self.record(action);
 
         match viewport_input {
             DirectEditorViewportInput::Editor => {}
             DirectEditorViewportInput::Background => viewport_gesture_input(
                 ui.ctx(),
                 viewport_rect,
-                (!read_only).then_some(content_rect),
-                &mut viewport,
+                (!self.read_only).then_some(content_rect),
+                &mut self.viewport,
             ),
             DirectEditorViewportInput::Viewport => {
-                viewport_gesture_input(ui.ctx(), viewport_rect, None, &mut viewport)
+                viewport_gesture_input(ui.ctx(), viewport_rect, None, &mut self.viewport)
             }
         }
 
-        for command in viewport.drain() {
+        let commands: Vec<_> = self.viewport.drain().collect();
+        for command in commands {
             match command {
                 DirectEditorViewportCommand::Pan(delta) => {
-                    viewport_state.pan += delta;
-                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                    self.viewport_state.pan += delta;
+                    if let Some(auto_fit) = &mut self.viewport_state.auto_fit {
                         auto_fit.enabled = false;
                     }
                 }
                 DirectEditorViewportCommand::Zoom { factor, anchor } => {
-                    let old_zoom = viewport_state.zoom;
-                    let new_zoom = (old_zoom * factor).clamp(min_zoom, max_zoom);
+                    let old_zoom = self.viewport_state.zoom;
+                    let new_zoom = (old_zoom * factor).clamp(self.min_zoom, self.max_zoom);
                     if new_zoom != old_zoom {
                         let anchor = anchor.unwrap_or_else(|| viewport_rect.center());
-                        viewport_state.pan = (anchor - viewport_rect.center())
-                            - ((anchor - viewport_rect.center()) - viewport_state.pan)
+                        self.viewport_state.pan = (anchor - viewport_rect.center())
+                            - ((anchor - viewport_rect.center()) - self.viewport_state.pan)
                                 * (new_zoom / old_zoom);
-                        viewport_state.zoom = new_zoom;
+                        self.viewport_state.zoom = new_zoom;
                     }
-                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                    if let Some(auto_fit) = &mut self.viewport_state.auto_fit {
                         auto_fit.enabled = false;
                     }
                 }
                 DirectEditorViewportCommand::Fit => {
                     fit_direct_editor_viewport(
-                        &mut viewport_state,
+                        &mut self.viewport_state,
                         viewport_size,
                         content_size,
-                        min_zoom,
+                        self.min_zoom,
                     );
-                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                    if let Some(auto_fit) = &mut self.viewport_state.auto_fit {
                         auto_fit.enabled = false;
                     }
                 }
                 DirectEditorViewportCommand::AutoFit(target) => {
-                    let auto_fit = viewport_state.auto_fit.get_or_insert(AutoFitState {
+                    let auto_fit = self.viewport_state.auto_fit.get_or_insert(AutoFitState {
                         target,
                         enabled: true,
                     });
@@ -897,43 +871,30 @@ pub fn direct_editor_tab_ui(
                     }
                     if auto_fit.enabled {
                         fit_direct_editor_viewport(
-                            &mut viewport_state,
+                            &mut self.viewport_state,
                             viewport_size,
                             content_size,
-                            min_zoom,
+                            self.min_zoom,
                         );
                     }
                 }
                 DirectEditorViewportCommand::ResumeAutoFit => {
-                    if let Some(auto_fit) = &mut viewport_state.auto_fit {
+                    if let Some(auto_fit) = &mut self.viewport_state.auto_fit {
                         auto_fit.enabled = true;
                         fit_direct_editor_viewport(
-                            &mut viewport_state,
+                            &mut self.viewport_state,
                             viewport_size,
                             content_size,
-                            min_zoom,
+                            self.min_zoom,
                         );
                     }
                 }
             }
         }
+        let state = self.viewport_state;
         ui.ctx()
-            .data_mut(|data| data.insert_temp(viewport_id, viewport_state));
-    } else {
-        egui::ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_min_size(content_size);
-                let next_action = editor_scope(ui, read_only, |ui| {
-                    editor.direct_editor_ui(ui, editors, 1.0, &mut viewport)
-                });
-                if action.is_none() {
-                    action = next_action;
-                }
-            });
+            .data_mut(|data| data.insert_temp(self.viewport_id, state));
     }
-
-    action
 }
 
 fn viewport_gesture_input(

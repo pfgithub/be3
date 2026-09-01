@@ -1,5 +1,6 @@
 pub mod database;
 pub mod datetime;
+pub mod frame;
 pub mod test_id;
 
 use std::collections::{BTreeMap, HashMap};
