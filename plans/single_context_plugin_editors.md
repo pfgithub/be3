@@ -1,210 +1,220 @@
-# Task: one egui context per plugin editor instance
+# Task: plugin editors own their whole frame
 
-Today every region of a plugin editor (main, toolbar, left sidebar, right sidebar, preview)
-is drawn by an `egui::Context` of its own. Collapse that to one context per *instance*, so an
-instance has one egui state, one font atlas, one texture registry and one paint order across
-all of its regions — without giving up the property that the host places the regions, which is
-what lets a spreadsheet edited inside an infinite canvas get a full-height sidebar instead of
-one squeezed into the block's rect on the canvas.
+Today a plugin editor is cut into regions — main, toolbar, left sidebar, right sidebar — that the
+**host** lays out and draws separately, each in an `egui::Context` of its own. Replace that with:
+**one context, one surface, one pass per instance, covering the whole frame, laid out by the
+plugin.** A plugin editor draws its own toolbar and sidebars inside the frame it was given.
 
-Everything below the "Findings" heading was verified by reading the code; trust it, but re-check
-anything that looks stale before relying on it.
+When a sub-editor is selected — a block being edited inside an infinite canvas or inside a text
+block — **the sub-editor takes over the frame**. It gets its own full-size chrome in the frame,
+draws its content where its content lives, and leaves everything else transparent so the layer
+behind still renders there. That transparency is the hole: the framework, not the plugin, decides
+where it is, so a plugin cannot paint over its parent or over the app.
+
+Taking over means **replacing** the parent's chrome, not nesting inside it. The bands keep
+exactly the geometry they had; only their contents change. That is the point: the canvas viewport
+does not shrink when you select a block, so nothing moves and the zoom does not shift. Nesting a
+child's chrome inside the parent's would squeeze the canvas into a smaller viewport and break its
+view every time you select or deselect.
+
+This is what keeps the property the region split was protecting: a spreadsheet edited inside a
+canvas gets a full-height sidebar at the edge of the frame, not one squeezed into the block's
+rect.
+
+Everything under "Findings" was verified by reading the code. Trust it, but re-check anything
+that looks stale.
 
 ## Findings you don't need to re-derive
 
-- `crates/block-editor-plugin/src/panes.rs` keys `Pane` (context + `egui_wgpu::Renderer` +
-  punch resources) by `ScreenId`. That is the thing to change.
-- `crates/block-editor-plugin/src/egui_session.rs` — `EguiSession` is already per instance and
-  already holds every region's state in `regions: HashMap<EditorRegion, RegionState>`. `run()`
-  takes a region and a context, and is called once per screen by the paint loop.
-- `crates/block-editor-plugin/src/screens.rs` owns the sessions and calls
-  `ScreenLayout::stacked` on every relayout.
+- **Host-side frame layout lives in `crates/block-app/src/editors.rs:690`** and is what moves
+  into the plugin. It owns: a top `egui::Panel` toolbar, resizable left/right panels (240 default,
+  200–340 range), a **compact mode** under `COMPACT_DIRECT_EDITOR_WIDTH` that turns sidebars into
+  floating `egui::Window`s, `editor_scope` read-only greying, and the pan/zoom viewport for the
+  content. All of that behaviour has to survive.
+- `crates/block-app/src/plugin_host/runtime.rs:375` (`editor_ui`) is called once per region;
+  `crates/block-app/src/plugin_host/instances.rs:214` (`report`) keys screens by
+  `(instance, region)`; `crates/block-app/src/editors/plugin.rs` implements
+  `direct_editor_top_bar` / `_left_sidebar` / `_right_sidebar` / `_ui` by forwarding each to a
+  region. All of that goes away for plugins.
+- `crates/block-editor-plugin/src/panes.rs` keys `Pane` (context + `egui_wgpu::Renderer` + punch
+  resources) by `ScreenId`. `crates/block-editor-plugin/src/egui_session.rs` (`EguiSession`) is
+  already per instance and already holds every region's state; its `run()` takes a region.
+  `crates/block-editor-plugin/src/screens.rs` owns the sessions and calls `ScreenLayout::stacked`.
 - **The plugin owns the surface packing.** `ScreenLayout::stacked`
-  (`crates/block-plugin-api/src/lib.rs:72`) runs plugin-side and is sent up as `Message::Layout`
-  (`crates/block-editor-plugin/src/runtime.rs`, `replace_surface`). The host samples whatever
-  rects it is told. Changing how regions are packed needs no protocol negotiation.
-- The host draws each region separately and routes input per region:
-  `crates/block-app/src/plugin_host/runtime.rs:375` (`editor_ui`),
-  `crates/block-app/src/plugin_host/instances.rs:214` (`report`, screens keyed by
-  `(instance, region)`), `crates/block-app/src/editors/plugin.rs` (`region_ui` and the
-  `direct_editor_*` impls).
-- **Every region of an instance already shares one scale factor** — the host passes its single
-  `ui.ctx().pixels_per_point()` for all of them (`plugin_host/runtime.rs:419`).
-- **Rotation only happens on the preview path.** The editor path is always axis-aligned
-  (`Quad::upright(response.rect)`, `plugin_host/runtime.rs:415`); arbitrary corners occur only in
-  `PluginEditor::render` (`editors/plugin.rs`, `context.corners`).
-- The infinite canvas already delegates the tab's chrome slots to its focused child editor:
-  `crates/block-app/src/editors/infinite_canvas/block_editor.rs:142` (`direct_editor_top_bar`),
-  `:199` (left sidebar), `:222` (right sidebar).
-- The presentation editor is the hard case. `crates/editors/presentation/src/app.rs` places the
-  *same* slide block in four places in one frame: every slide as a `ChildMode::Preview` child in
-  the filmstrip (`filmstrip_tile`, :452), the selected slide as a `keep_active` child on the
-  stage with the slide's own left sidebar carved 240px out of the stage (`slide_sidebar`, :210),
-  the slide's `child_part(Toolbar)` inline in its toolbar row (:639), and its right sidebar as a
-  pure pass-through of the slide's `child_part(RightSidebar)` (`right_sidebar_ui`, :658).
+  (`crates/block-plugin-api/src/lib.rs:72`) runs plugin-side and is published as `Message::Layout`
+  (`block-editor-plugin/src/runtime.rs`, `replace_surface`); the host samples the rects it is
+  told. Repacking needs no negotiation.
+- **All regions of an instance already share one scale factor** — the host passes its single
+  `ui.ctx().pixels_per_point()` (`plugin_host/runtime.rs:419`).
+- **Rotation only exists on the preview path.** The editor path is always axis-aligned
+  (`Quad::upright`, `plugin_host/runtime.rs:415`); arbitrary corners only in `PluginEditor::render`
+  (`editors/plugin.rs`, `context.corners`).
+- The infinite canvas is a **host** editor, not a plugin, and already forwards the tab's chrome to
+  its focused child: `crates/block-app/src/editors/infinite_canvas/block_editor.rs:142`, `:199`,
+  `:222`. It must become a frame owner under the new model, using the same shared layout.
+- The presentation editor is the case that constrains everything.
+  `crates/editors/presentation/src/app.rs` places the *same* slide block four ways in one frame:
+  every slide as a `ChildMode::Preview` child in the filmstrip (`filmstrip_tile`, :452); the
+  selected slide as a `keep_active` child on the stage with the slide's own left sidebar carved
+  240px out of the stage (`slide_sidebar`, :210); the slide's `child_part(Toolbar)` inline in its
+  toolbar row (:639); and a right sidebar that is nothing but the slide's
+  `child_part(RightSidebar)` (:658).
 - egui is 0.34.3 from crates.io (not vendored). **egui prunes non-ROOT viewports that were not
-  "used" when their parent viewport runs** (`egui-0.34.3/src/context.rs:2673`). A viewport whose
-  parent is ROOT survives as long as ROOT itself is never run. So: give every viewport a stable
-  non-ROOT `ViewportId` and never run `ViewportId::ROOT`.
-- `floating_rects` in `egui_session.rs` already collects layers at `Order >= Middle` — that is
-  the set of things allowed to escape a region.
-- Editors currently duplicate uploads per region because contexts are per region: see
-  `crates/editors/image_block/src/app.rs` (`self.panes` keyed by `Pane`, decoding the same image
-  once per region) and `crates/editors/pixel_art/src/canvas.rs` (`Pane` with its own
-  `TextureHandle`). Also check `map`, `pdf`, `paint_review`, `pixel_ray_tracer`.
+  "used" when their parent runs** (`egui-0.34.3/src/context.rs:2673`); a viewport parented to ROOT
+  survives as long as ROOT is never run. Give every viewport a stable non-ROOT `ViewportId` and
+  never run `ViewportId::ROOT`.
+- `floating_rects` in `egui_session.rs` already collects layers at `Order >= Middle`.
+- Per-region contexts force editors to duplicate uploads: `crates/editors/image_block/src/app.rs`
+  (`self.panes`, decoding the same image once per region) and
+  `crates/editors/pixel_art/src/canvas.rs` (`Pane` with its own `TextureHandle`). Also check
+  `map`, `pdf`, `paint_review`, `pixel_ray_tracer`.
 
-## Target design
+## The model
 
-An instance's regions split into two groups.
+**Frame owners.** A tab has a stack of frame owners. At the bottom, the tab's own editor. On top,
+each successively selected sub-editor. Each frame owner is handed a **frame rect** and renders
+**one surface** for it, in **one egui pass**, in **one context**.
 
-**The editing set** — main, toolbar, left sidebar, right sidebar, artifact settings, creation.
-These are drawn by **one egui pass into one viewport** whose coordinate space is the tab
-(the host's viewport that ultimately contains them). The host tells the plugin where each region
-sits inside that space. The plugin allocates **one surface slot** for the instance and draws
-every region at its tab-space position inside that slot. Region screens stay separate
-`ScreenId`s, but their `ScreenPlacement`s become **sub-rects of the one shared slot**. The host's
-per-region blitting and input routing therefore do not change at all — it still asks for
-region N and gets region N's pixels.
+**Chrome is laid out by a shared module, not by the plugin and not by the host.** Put it in
+`crates/block-ui` so host editors and plugins produce identical frames. Given a frame rect it
+yields the bands — toolbar row, left sidebar, right sidebar, content — and carries the behaviour
+that lives in `editors.rs:690` today: resizable sidebars, compact mode, read-only greying. The
+band geometry is a function of the frame alone, never of how many owners are in the stack.
 
-Area of the slot that no region covers is simply never blitted, so the host's own content (the
-canvas, the parent editor, other blocks) shows through. That is the "hole" in the informal
-description of this design; it costs nothing to implement because it is just unblitted memory.
+**Each band belongs to exactly one owner per frame.** The parent declares how it hands over when
+a child is selected:
 
-**Preview placements** keep their own screens, each in **its own viewport of the same context**.
-This is not optional: the presentation editor thumbnails a slide in the filmstrip while the same
-instance is being edited on the stage, and previews can be drawn on rotated quads.
+- **Replace** (the default, and the only thing that works for the infinite canvas and text): the
+  child owns every chrome band; the parent is told its chrome is hidden this frame and skips
+  drawing it, keeping only its content band, unchanged. Nothing in the frame moves.
+- **Nest**: the parent keeps its bands and the child's are placed inside them. Only the
+  presentation editor uses this, and only until its filmstrip can move into its content area and
+  it can switch to Replace too.
 
-**Child surfaces stay below parent surfaces and parents keep punching holes.** Do not invert
-z-order. The hole is punched at a point in the parent's paint order, which is what makes
-"anything the editor draws after the child covers it" work; that must keep working.
+Plugins keep writing `toolbar_ui`, `left_sidebar_ui`, `right_sidebar_ui`, `ui`; the plugin-side
+framework calls them into whichever bands that instance owns this frame, and skips the ones it
+does not. A plugin cannot address the frame directly and cannot tell which mode it is in.
 
-## Invariants that must not break
+Under Replace the toolbar is entirely the child's, so **the framework — not the plugin — draws a
+breadcrumb and an exit at a fixed spot in the toolbar band** ("Canvas › Spreadsheet ✕", Escape to
+leave). A plugin must not be able to drop the only way back out.
 
-1. The host places regions. A sub-editor's sidebar is sized by the host, never by the parent's
-   available space.
-2. `child` / `child_part` / `child_above` semantics as documented in
-   `guides/adding_a_plugin_editor.md`, including a parent covering a child by drawing after it.
-3. Preview rendering onto arbitrary (rotated) quads.
-4. Per-region `RegionSize` reporting, cursors, drag/file-drop targeting, occluders and child
-   placements — all still per region.
-5. `present()`, `show_region()`, `editable()`, `view()`/pan-and-zoom behaviour.
+**Content.** For the tab's own editor, content is the content band. For a sub-editor, content is
+the rect its parent placed it at — the block's rect on the canvas, the run of text it sits in —
+clipped to what is visible. The parent reports that rect through the existing child placement
+mechanism; the framework hands it to the child as its content rect. A replaced parent's content
+band is bit-for-bit the rect it had before the selection.
+
+**Holes.** A frame surface is transparent wherever its owner does not paint: outside its bands,
+and inside the content band outside its content rect. The layer beneath shows through there, so
+the canvas keeps drawing its background, its other blocks and its previews around the block being
+edited. Nothing else is needed to make a hole — the surface is already cleared transparent. The
+existing `punch` shader stays for holes *inside* painted areas (embedded children).
+
+**Compositing and z.** The host blits, bottom-up through the stack, each frame's painted area, and
+blits each frame's **floating rects on a second pass above the frames beneath it**, as
+rect-disjoint pieces (base pieces = painted area minus floating rects) so nothing is blended
+twice. That is what lets the deck's "Add slide" dropdown fall over the stage while the slide owns
+the frame above it. Floating rects are the `Order >= Middle` set the plugin already computes.
+
+**Input.** Each frame owner reports its live rects — its bands, its content rect, its floating
+rects. The host routes a pointer event to the topmost frame whose live rects contain it, and lets
+it fall through to the layer beneath otherwise. Keyboard goes to the topmost frame owner.
+
+**Previews stay separate.** A block is thumbnailed while it is being edited (the filmstrip proves
+it), and previews are drawn on rotated quads. Preview placements keep their own screens, each in
+**its own viewport of the same context**.
+
+**Embedded live children** (a video playing inside a canvas, `interaction: Live`) that are not
+frame owners keep a screen of their own at their rect, with no chrome. So an instance is exactly
+one of: a frame owner, an embedded live screen, or one or more preview screens.
+
+## What this deletes
+
+- Every chrome variant of `EditorRegion`, and per-region screens for the editing set.
+- `ChildPart` and `child_part` / `child_part_sized` entirely — nesting is the frame stack now.
+- `PluginEditor`'s `direct_editor_top_bar` / `_left_sidebar` / `_right_sidebar` forwarding, and
+  the infinite canvas's forwarding of the same (`block_editor.rs:142/199/222`).
+- `ChildMode::Passive` / `Active` promotion, if selection into the frame stack subsumes it —
+  check `keep_active` and `activate()` callers before removing.
+- Presentation's `right_sidebar_ui` pass-through, `self.sidebars`, `self.slide_toolbar`.
+- Per-region texture caches in the editors listed under Findings.
 
 ## Stages
 
 Commit each stage separately, run `./scripts/verify` before each commit, and push.
 
-### Stage 1 — one context per instance, one viewport per region
+**1. One context per instance.** Key `Panes` by `EditorInstanceId`: one context, one
+`egui_wgpu::Renderer`, one set of punch resources. Give each region a stable non-ROOT `ViewportId`
+and set `input.viewport_id`; never run ROOT. Reset `PunchResources::next` once per instance per
+frame and check `punch::SLOTS`. Take the repaint delay from the viewport that ran. Behaviour
+unchanged, no protocol change, no host change — a safe base for everything after.
 
-Behaviour-preserving refactor. No protocol change, no `block-app` change.
+**2. Shared frame layout in `block-ui`.** Lift the layout from `editors.rs:690` into a module that
+takes a frame rect and produces bands, including compact mode, resizable sidebars and read-only
+scoping, plus the breadcrumb/exit affordance. Convert the host's direct-editor tab to use it,
+unchanged visually. Nothing about plugins yet.
 
-- Key `Panes` by `EditorInstanceId` instead of `ScreenId`: one `egui::Context`, one
-  `egui_wgpu::Renderer`, one set of punch resources per instance. Reset `PunchResources::next`
-  once per instance per frame, not once per screen, and check `punch::SLOTS` is still large
-  enough for every region's children combined.
-- Give each region a stable non-ROOT `ViewportId` and set `input.viewport_id` in
-  `EguiSession::run`. Never run ROOT (see Findings).
-- Keep each viewport's `screen_rect` at its current slot-derived rect — nothing else moves.
-- Take the repaint delay from the viewport that was run, not `ViewportId::ROOT`
-  (`repaint_delay` in `panes.rs`).
-- Verify with the headless harness (below) that a plugin still hands over a surface.
+**3. Frame protocol.** Replace the chrome regions with a single frame screen. The host sends the
+frame rect, which bands this instance owns this frame, the content rect and the
+read-only/compact flags; the plugin publishes one screen per frame owner plus its live rects and
+floating rects. Bump
+`PROTOCOL_VERSION`, document the rule in `crates/block-plugin-api/PROTOCOL.md`, extend `validate`
+coverage and the round-trip tests. No compatibility shims — this project does not keep them.
 
-Expected win on its own: one font atlas and one texture registry per instance instead of one per
-region, plus shared `ctx.data`, caches, animations and drag payload.
+**4. Plugin-side frame pass.** `EguiSession` renders one pass per frame owner: the framework
+builds the frame `Ui` from the shared layout and calls `toolbar_ui`, `left_sidebar_ui`,
+`right_sidebar_ui` and `ui` into the bands, wrapped in the existing `begin_region`/`end_region`
+so children, occluders, drag and file-drop stay attributed. Clip each band's `Ui` to its rect so a
+plugin cannot paint outside. Report `RegionSize` per band from each band's `Ui::min_rect`, and
+attribute the single `cursor_icon` to the band under the pointer. Preview screens run as separate
+viewports in the same context. Repack the surface: one slot per frame owner sized to its frame,
+plus slots for previews, packed in 2D — the current vertical stack will exceed the maximum texture
+dimension once slots are frame-sized.
 
-### Stage 2 — one viewport for the editing set, in tab space
+**5. Host compositing, input and the stack.** Maintain the frame stack per tab; blit base pieces
+and floating pieces as described; route input top-down with fall-through. Keep `host.view()` and
+the host's pan/zoom gestures as they are — the host still owns the view, and the framework must
+not swallow wheel or pinch over the content rect of a `pan_and_zoom` plugin. Make the infinite
+canvas and the text editor frame owners that hand over with **Replace**, and delete the canvas's
+chrome forwarding. The invariant to test here: selecting or deselecting a child must not change
+the parent's content rect, its zoom or its pan by a single pixel.
 
-- **Protocol:** add the region's rect within the instance's tab space, and the tab size, to
-  `ScreenRequest`/`ViewportMetrics` in `crates/block-plugin-api`. Bump `PROTOCOL_VERSION`,
-  describe the rule in `crates/block-plugin-api/PROTOCOL.md`, extend `validate` coverage and the
-  round-trip tests. Do not keep any compatibility shim for older clients.
-- **Host:** `editor_ui` (`plugin_host/runtime.rs:375`) already has the region's rect and
-  `ui.ctx()`; report the rect relative to the tab viewport's origin and the tab's size along with
-  the existing metrics.
-- **Plugin:** replace `ScreenLayout::stacked` with a packer that gives each instance one slot —
-  the tab rect for an instance with an editing set, the union of its region rects otherwise —
-  and places each editing-set screen as a sub-rect of that slot at its tab-space offset.
-  Preview screens keep slots of their own. Pack slots in 2D (shelf packing is fine); the current
-  vertical stack plus tab-sized slots will exceed the maximum texture dimension on mobile and
-  web.
-- **Plugin:** `EguiSession::run` becomes one pass per instance that draws every editing-set
-  region into its own child `Ui`, clipped to that region's rect, wrapped in the existing
-  `begin_region`/`end_region` so children, occluders, drag and file-drop stay region-scoped.
-  Region order should be deterministic and documented; main before chrome is the useful order
-  because containers compute chrome contents while drawing main.
-- Per-region `used` sizes now come from each region's own `Ui::min_rect`.
-- There is now one `platform_output.cursor_icon` per instance: attribute it to the region the
-  pointer is in and report `Default` for the others.
-- Assert that all editing-set screens of an instance share a scale factor; if they ever differ,
-  use the largest and log it.
-- Input needs no host change: events still arrive per screen in region-local coordinates and
-  `EguiSession::input` already offsets them by the region's origin — that origin is now the
-  tab-space one.
+**6. Presentation and cleanups.** The deck is the outer frame owner (its buttons in its toolbar,
+the filmstrip in its left sidebar); the selected slide is the inner frame owner whose content rect
+is the stage, handed over with **Nest** so the filmstrip survives. `child_part` disappears; the
+slide's sidebars are its own, placed inside the deck's. Leave a note that the better end state is
+the filmstrip moving into the deck's content area so presentation can use Replace like everything
+else. Delete the per-region texture caches. Rewrite the parts of
+`guides/adding_a_plugin_editor.md` that describe per-region contexts, per-region textures and
+`child_part` — it is currently the main written record of the old model. Do not edit `README.md`;
+mention it in the handoff if it is stale.
 
-### Stage 3 — overlay screen for spill
+## Decisions (defaults if nothing says otherwise)
 
-Without this, a menu opened in a toolbar is still trapped in the toolbar strip, and a nested
-editor's menu cannot cover its parent (child surfaces are below parent surfaces).
-
-- Add `EditorRegion::Overlay`: a screen whose metrics are the whole tab and whose placement is
-  the instance's own slot, so it samples the same pixels the editing pass already drew.
-- The plugin reports the floating layers' rects (reuse `floating_rects`) as the overlay's live
-  rects, minus the parts that fall inside a region rect — those pixels are already blitted by
-  that region. The difference is a handful of axis-aligned pieces; a rect-subtract helper is
-  enough. There must be no overlapping blit, or translucent shadows will blend twice.
-- The host blits those pieces above the whole instance chain, ordered by focus depth (innermost
-  on top), and routes pointer events over them to the overlay screen.
-- Allocate the overlay screen lazily — only while the instance has a floating layer.
-
-### Stage 4 — cleanups the single context enables
-
-- Delete per-region texture/decode caches in the editors listed under Findings; one upload per
-  instance now suffices.
-- Rewrite the parts of `guides/adding_a_plugin_editor.md` that describe per-region contexts and
-  per-region textures ("Every region is drawn by an egui context of its own…"), plus anything
-  about regions being independent passes. Do not edit `README.md`; say in the handoff if it is
-  out of date.
-
-### Stage 5 — presentation and container chrome (UX change)
-
-The single-pass model makes chrome an assignment of rects rather than pixels proxied through the
-parent, so the presentation editor can lose machinery:
-
-- Drop `right_sidebar_ui`'s pass-through (:658) — the host can assign the tab's right-sidebar
-  rect to the slide instance directly.
-- `self.sidebars` and `self.slide_toolbar` become ordinary within-frame data now that region
-  order inside a frame is deterministic. (The host still learns `show_region` a frame later;
-  that is the process round trip, not the context split. Do not claim otherwise.)
-
-Then make container chrome consistent, because presentation currently uses three different
-conventions and the infinite canvas answers the same question separately: **the focused child's
-chrome nests inside the parent's, in a recessed band labelled with the child's block name.** The
-deck's own toolbar buttons sit outside, the slide's segment inside a subtly inset group; the
-right sidebar gets a header naming the child instead of silently becoming the child's sidebar;
-the same treatment marks the slide's left sidebar inside the stage. Editing a spreadsheet inside
-a canvas and editing a slide inside a deck should then look and behave identically. Put the
-shared drawing helpers in `crates/block-ui` so the host and plugins agree.
-
-## Decisions to make (recommendations)
-
-- **May a container hand a child's chrome an arbitrary rect, or only host-offered slots?**
-  Recommend arbitrary — `slide_sidebar` already does it and the canvas needs it.
-- **Slot size for an instance with an editing set.** Recommend the whole tab, so stage 3 has
-  somewhere to put spill. Measure the memory (a 2560×1440 DPR2 tab is ~15 MB) and reconsider on
-  mobile if it hurts.
-- If stage 3 turns out to be more than a day's work, land stages 1, 2 and 4 first — they stand on
-  their own — and report what stage 3 needs.
+- **Replace is the default; Nest is presentation's temporary exception.** Do not reach for Nest
+  anywhere else, and do not let the two modes diverge in appearance — a child's chrome should look
+  the same in either.
+- **The sub-editor's content stays where the block is** on the canvas rather than being pulled
+  into the content band. That keeps canvas editing spatial. Offer a zoom-to-fit affordance instead.
+- **`present()`** becomes "frame owner takes the whole frame with no bands", which should simplify
+  the presenter path.
+- Mark the child's frame visually (a recessed band, the child's block label in its sidebar header)
+  so it is always clear which editor a control belongs to. Editing a spreadsheet in a canvas and a
+  slide in a deck should look identical.
 
 ## Verification
 
-`./scripts/verify` before every commit (it runs clippy --fix and cargo fmt, strips code comments
-and enforces the folder/test layout — write no comments). Then `./scripts/build --target web`,
-since this changes the plugin/guest boundary and the browser runs the same modules in a worker.
-Drive a plugin headlessly with
+`./scripts/verify` before every commit (it runs clippy --fix and cargo fmt, strips code comments —
+write none — and enforces the folder/test layout). Then `./scripts/build --target web`, since this
+changes the plugin/guest boundary and the browser runs the same modules in a worker. Drive a
+plugin headlessly with
 `cargo run --example instantiate -p block-wasm-host -- target/wasm32-wasip1-threads/plugin/<name>.wasm`,
 which fails unless the plugin presented a surface. Add tests under the existing per-file
-convention for the packer, the rect-subtract helper and the protocol round trip. Check
-`crates/block-ui-test` and `crates/block-e2e` for tests this invalidates.
+convention for the band layout, the surface packer, the rect-piece splitting used for
+compositing, and the protocol round trip. Check `crates/block-ui-test` and `crates/block-e2e`
+for tests this invalidates.
 
-Do not run the GUI app or do any manual GUI verification; push even if GUI verification is still
-outstanding, and say so in the handoff. Commit as `type: message` with a
-`Co-Authored-By:` trailer.
+Do not run the GUI app and do no manual GUI verification. Push even with GUI verification
+outstanding, and say so in the handoff. Commit as `type: message` with a `Co-Authored-By:`
+trailer.
