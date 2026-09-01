@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "00006461-7461-6261-7365-2d7669657701",
   "display_name": "Database View",
-  "icon": "",
+  "icon": "\uf1be",
   "creation": "Immediate",
   "interaction": "Live",
   "capabilities": {
@@ -13,10 +13,12 @@
     "pan_and_zoom": false
   },
   "regions": [
-    "Main",
-    "Toolbar",
-    "RightSidebar",
+    "Frame",
     "Preview"
+  ],
+  "chrome": [
+    "Toolbar",
+    "RightSidebar"
   ],
   "entry_point": "database_view.wasm"
 }

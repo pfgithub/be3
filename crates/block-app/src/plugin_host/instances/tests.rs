@@ -3,7 +3,7 @@ use crate::plugin_host::EditorBlock;
 use block_plugin_api::InputEvent;
 
 const INSTANCE: EditorInstanceId = EditorInstanceId(1);
-const REGION: EditorRegion = EditorRegion::Main;
+const REGION: EditorRegion = EditorRegion::Frame;
 const PASS: u64 = 1;
 const SIZE: egui::Vec2 = egui::vec2(100.0, 100.0);
 
@@ -29,6 +29,7 @@ fn placed() -> (Instances, egui::Context, egui::Id) {
         Uuid::nil(),
         role,
         &block_types,
+        Some(block_plugin_api::FrameSpec::default()),
         SIZE,
         egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE),
         1.0,

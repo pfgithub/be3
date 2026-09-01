@@ -1,4 +1,4 @@
-use block_plugin_api::Message;
+use block_plugin_api::{EditorBand, Message};
 
 use crate::{
     screens::Screens,
@@ -21,10 +21,16 @@ pub(crate) struct Runtime {
 }
 
 impl Runtime {
-    pub(crate) fn new<A: crate::App>(id: &str, name: &str, version: &str, waker: Waker) -> Self {
+    pub(crate) fn new<A: crate::App>(
+        id: &str,
+        name: &str,
+        version: &str,
+        chrome: Vec<EditorBand>,
+        waker: Waker,
+    ) -> Self {
         Self {
             session: ClientSession::new(id, name, version),
-            screens: Screens::new::<A>(waker),
+            screens: Screens::new::<A>(chrome, waker),
             surface: None,
             generation: 0,
             asked: false,

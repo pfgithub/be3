@@ -11,7 +11,7 @@ use block_client::references::ReferenceResolutionCache;
 use block_client::{BlockClient, BlockHandle, ReferenceList};
 use block_editor_plugin::block_ui::test_id::TestId;
 use block_editor_plugin::block_ui::BlockLabel;
-use block_editor_plugin::{egui, EditorHost, EditorRegion};
+use block_editor_plugin::{egui, EditorHost};
 use uuid::Uuid;
 
 const INTRINSIC_WIDTH: f32 = 400.0;
@@ -97,7 +97,6 @@ impl block_editor_plugin::App for DatabaseApp {
             ui.spinner();
             return;
         };
-        host.show_region(EditorRegion::RightSidebar, true);
         host.child(ui, schema, DatabaseSchema::TYPE_ID)
             .keep_active();
     }

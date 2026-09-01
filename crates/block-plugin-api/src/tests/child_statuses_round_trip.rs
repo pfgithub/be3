@@ -5,7 +5,7 @@ fn child_statuses_round_trip() {
     let message = Message::ChildStatuses(vec![
         ChildStatus {
             instance: EditorInstanceId(4),
-            region: EditorRegion::Main,
+            region: EditorRegion::Frame,
             child: ChildId(1),
             available: true,
             intrinsic_width: 320.0,
@@ -13,13 +13,11 @@ fn child_statuses_round_trip() {
             aspect_ratio: 16.0 / 9.0,
             hovered: true,
             active: false,
-            has_left_sidebar: true,
-            has_right_sidebar: true,
             error: None,
         },
         ChildStatus {
             instance: EditorInstanceId(4),
-            region: EditorRegion::Main,
+            region: EditorRegion::Frame,
             child: ChildId(2),
             available: false,
             intrinsic_width: 0.0,
@@ -27,8 +25,6 @@ fn child_statuses_round_trip() {
             aspect_ratio: 0.0,
             hovered: false,
             active: false,
-            has_left_sidebar: false,
-            has_right_sidebar: false,
             error: Some("the block is already open above this editor".into()),
         },
     ]);
@@ -39,7 +35,7 @@ fn child_statuses_round_trip() {
 
     let oversized = Message::ChildStatuses(vec![ChildStatus {
         instance: EditorInstanceId(4),
-        region: EditorRegion::Main,
+        region: EditorRegion::Frame,
         child: ChildId(3),
         available: false,
         intrinsic_width: 0.0,
@@ -47,8 +43,6 @@ fn child_statuses_round_trip() {
         aspect_ratio: 0.0,
         hovered: false,
         active: false,
-        has_left_sidebar: false,
-        has_right_sidebar: false,
         error: Some("x".repeat(MAX_STRING_BYTES + 1)),
     }]);
     assert_eq!(

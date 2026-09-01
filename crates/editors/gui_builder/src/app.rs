@@ -13,7 +13,7 @@ use block_editor_plugin::egui_material_icons::icons::{
     ICON_VIEW_COLUMN, ICON_VIEW_STREAM,
 };
 use block_editor_plugin::egui_material_icons::MaterialIcon;
-use block_editor_plugin::{egui, Artifact, ArtifactDescription, EditorHost, EditorRegion};
+use block_editor_plugin::{egui, Artifact, ArtifactDescription, EditorBand, EditorHost};
 use uuid::Uuid;
 
 use crate::artifact;
@@ -305,12 +305,10 @@ impl block_editor_plugin::App for GuiBuilderApp {
             self.export_code();
         }
         if let Some(editing) = &self.editing {
+            editing.host.show_band(EditorBand::LeftSidebar, self.design);
             editing
                 .host
-                .show_region(EditorRegion::LeftSidebar, self.design);
-            editing
-                .host
-                .show_region(EditorRegion::RightSidebar, self.design);
+                .show_band(EditorBand::RightSidebar, self.design);
         }
     }
 

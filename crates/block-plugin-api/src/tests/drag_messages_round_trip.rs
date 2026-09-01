@@ -5,7 +5,7 @@ fn drag_messages_round_trip() {
     for message in [
         Message::Editor(EditorMessage::DragOver {
             instance: EditorInstanceId(4),
-            region: EditorRegion::Main,
+            region: EditorRegion::Frame,
             x: 12.5,
             y: 30.0,
             block_id: [1; 16],

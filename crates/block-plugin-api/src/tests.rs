@@ -21,7 +21,7 @@ fn screen(
     scale_factor: f32,
 ) -> ScreenRequest {
     region_screen(
-        EditorRegion::Main,
+        EditorRegion::Frame,
         screen,
         instance,
         pixel_width,
@@ -42,6 +42,7 @@ fn region_screen(
         screen: ScreenId(screen),
         instance: EditorInstanceId(instance),
         region,
+        frame: None,
         metrics: ViewportMetrics {
             logical_width: pixel_width as f32 / scale_factor,
             logical_height: pixel_height as f32 / scale_factor,
@@ -67,10 +68,13 @@ mod fetch_messages_round_trip;
 mod file_drop_messages_round_trip;
 mod file_pick_messages_round_trip;
 mod frame_round_trips;
+mod frame_screens_and_reports_round_trip;
 mod manifest_validation;
 mod multiplexed_messages_round_trip;
 mod open_block_request_round_trips;
 mod open_messages_round_trip;
+mod packed_layout_keeps_each_region;
+mod packed_layout_packs_screens_within_a_row;
 mod performance_messages_round_trip;
 mod pick_block_messages_round_trip;
 mod present_messages_round_trip;
@@ -82,8 +86,5 @@ mod rejects_truncated_frame;
 mod rejects_unknown_message_kind;
 mod rejects_unordered_occluders;
 mod resize_messages_round_trip;
-mod show_region_messages_round_trip;
-mod stacked_layout_keeps_each_region;
-mod stacked_layout_stacks_screens;
 mod view_messages_round_trip;
 mod zoom_gesture_round_trips;

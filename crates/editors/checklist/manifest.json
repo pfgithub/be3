@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "block_type": "63686563-6b6c-6973-742d-626c6f636b31",
   "display_name": "Checklist",
-  "icon": "",
+  "icon": "\ue6b1",
   "creation": "Immediate",
   "regions": [
-    "Main",
+    "Frame"
+  ],
+  "chrome": [
     "Toolbar",
     "LeftSidebar",
     "RightSidebar"

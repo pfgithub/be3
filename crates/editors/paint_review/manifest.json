@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "7061696e-742d-7265-7669-65772d620001",
   "display_name": "Paint review",
-  "icon": "",
+  "icon": "\ueb7d",
   "creation": "Immediate",
   "interaction": "Live",
   "capabilities": {
@@ -13,7 +13,9 @@
     "pan_and_zoom": true
   },
   "regions": [
-    "Main",
+    "Frame"
+  ],
+  "chrome": [
     "Toolbar",
     "LeftSidebar"
   ],

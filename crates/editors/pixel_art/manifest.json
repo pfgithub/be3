@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "70697865-6c2d-6172-742d-626c6f636b01",
   "display_name": "Pixel Art",
-  "icon": "",
+  "icon": "\ue3ec",
   "creation": "Immediate",
   "interaction": "Preview",
   "resize": "None",
@@ -14,12 +14,14 @@
     "pan_and_zoom": true
   },
   "regions": [
-    "Main",
-    "Toolbar",
-    "LeftSidebar",
-    "RightSidebar",
+    "Frame",
     "Preview",
     "ArtifactSettings"
+  ],
+  "chrome": [
+    "Toolbar",
+    "LeftSidebar",
+    "RightSidebar"
   ],
   "entry_point": "pixel_art.wasm"
 }

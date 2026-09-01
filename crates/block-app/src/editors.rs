@@ -622,6 +622,12 @@ pub trait BlockEditor {
     ) -> bool {
         false
     }
+    fn direct_editor_owns_frame(&self) -> bool {
+        false
+    }
+    fn direct_editor_viewport_rect(&self, frame: egui::Rect) -> egui::Rect {
+        frame
+    }
     fn direct_editor_top_bar(
         &mut self,
         _ui: &mut egui::Ui,
@@ -682,10 +688,12 @@ pub fn direct_editor_tab_ui(
         .ctx()
         .data_mut(|data| data.get_temp::<DirectEditorTabViewport>(viewport_id))
         .unwrap_or_default();
-    let has_left_sidebar = editor.direct_editor_has_left_sidebar(editors);
-    let has_right_sidebar = editor.direct_editor_has_right_sidebar(editors);
+    let owns_frame = editor.direct_editor_owns_frame();
+    let has_left_sidebar = !owns_frame && editor.direct_editor_has_left_sidebar(editors);
+    let has_right_sidebar = !owns_frame && editor.direct_editor_has_right_sidebar(editors);
     let mut bands = DirectEditorTabBands {
         id,
+        owns_frame,
         viewport_id,
         capabilities: editor.direct_editor_capabilities(),
         max_zoom: editor.direct_editor_max_zoom(),
@@ -698,7 +706,7 @@ pub fn direct_editor_tab_ui(
         action: None,
     };
     block_ui::frame::Frame::new(egui::Id::new(("direct-editor-tab", id)))
-        .toolbar(true)
+        .toolbar(!owns_frame)
         .left_sidebar(has_left_sidebar)
         .right_sidebar(has_right_sidebar)
         .read_only(read_only)
@@ -708,6 +716,7 @@ pub fn direct_editor_tab_ui(
 
 struct DirectEditorTabBands<'a, 'b> {
     id: Uuid,
+    owns_frame: bool,
     viewport_id: egui::Id,
     capabilities: DirectEditorCapabilities,
     max_zoom: f32,
@@ -748,7 +757,12 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
 
     fn content_ui(&mut self, ui: &mut egui::Ui) {
         let id = self.id;
-        let viewport_size = ui.available_size().max(egui::Vec2::splat(1.0));
+        let band = ui.available_rect_before_wrap();
+        let viewport_size = self
+            .editor
+            .direct_editor_viewport_rect(band)
+            .size()
+            .max(egui::Vec2::splat(1.0));
         let intrinsic_size = self
             .editor
             .direct_editor_intrinsic_size(self.editors)
@@ -758,20 +772,33 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
             viewport_size.y.max(intrinsic_size.y),
         );
         if !self.capabilities.supports_pan_and_zoom {
-            let action = egui::ScrollArea::both()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_min_size(content_size);
-                    block_ui::frame::read_only_scope(ui, self.read_only, |ui| {
-                        self.editor
-                            .direct_editor_ui(ui, self.editors, 1.0, &mut self.viewport)
-                    })
-                })
-                .inner;
+            let action = match self.owns_frame {
+                true => block_ui::frame::read_only_scope(ui, self.read_only, |ui| {
+                    self.editor
+                        .direct_editor_ui(ui, self.editors, 1.0, &mut self.viewport)
+                }),
+                false => {
+                    egui::ScrollArea::both()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_size(content_size);
+                            block_ui::frame::read_only_scope(ui, self.read_only, |ui| {
+                                self.editor.direct_editor_ui(
+                                    ui,
+                                    self.editors,
+                                    1.0,
+                                    &mut self.viewport,
+                                )
+                            })
+                        })
+                        .inner
+                }
+            };
             self.record(action);
             return;
         }
-        let (viewport_rect, _) = ui.allocate_exact_size(viewport_size, egui::Sense::hover());
+        let (allocated, _) = ui.allocate_exact_size(band.size(), egui::Sense::hover());
+        let viewport_rect = self.editor.direct_editor_viewport_rect(allocated);
         if let Some(previous_center) = self.viewport_state.center.replace(viewport_rect.center()) {
             self.viewport_state.pan += previous_center - viewport_rect.center();
         }
@@ -787,10 +814,10 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
         if self.read_only && viewport_input == DirectEditorViewportInput::Editor {
             viewport_input = DirectEditorViewportInput::Background;
         }
-        let editor_rect = if fills_viewport {
-            viewport_rect
-        } else {
-            content_rect
+        let editor_rect = match (self.owns_frame, fills_viewport) {
+            (true, _) => allocated,
+            (false, true) => viewport_rect,
+            (false, false) => content_rect,
         };
         let zoom = self.viewport_state.zoom;
         let action = ui
@@ -801,7 +828,7 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             )
             .scope(|ui| {
-                ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
+                ui.set_clip_rect(editor_rect.intersect(ui.clip_rect()));
                 ui.set_min_size(editor_rect.size());
                 block_ui::frame::read_only_scope(ui, self.read_only, |ui| {
                     self.editor

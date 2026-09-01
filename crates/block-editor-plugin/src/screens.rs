@@ -1,7 +1,7 @@
 use block_client::{BlockClient, TunnelCarrier};
 use block_plugin_api::{
-    BlockTypeDescriptor, ChildStatus, EditorInstanceId, EditorMessage, EditorRegion, Message,
-    ScreenId, ScreenLayout, ScreenRequest, TunnelMessage,
+    BlockTypeDescriptor, ChildStatus, EditorBand, EditorInstanceId, EditorMessage, EditorRegion,
+    Message, ScreenId, ScreenLayout, ScreenRequest, TunnelMessage,
 };
 use block_ui::{BlockCatalog, BlockTypeEntry};
 use eframe::egui;
@@ -19,7 +19,8 @@ struct Client {
 
 pub(crate) struct Screens {
     sessions: HashMap<EditorInstanceId, EguiSession>,
-    open: fn(EditorInstanceId, Waker) -> EguiSession,
+    chrome: Rc<Vec<EditorBand>>,
+    open: fn(Rc<Vec<EditorBand>>, EditorInstanceId, Waker) -> EguiSession,
     waker: Waker,
     requests: Vec<ScreenRequest>,
     layout: ScreenLayout,
@@ -29,9 +30,10 @@ pub(crate) struct Screens {
 }
 
 impl Screens {
-    pub(crate) fn new<A: crate::App>(waker: Waker) -> Self {
+    pub(crate) fn new<A: crate::App>(chrome: Vec<EditorBand>, waker: Waker) -> Self {
         Self {
             sessions: HashMap::new(),
+            chrome: Rc::new(chrome),
             open: EguiSession::new::<A>,
             waker,
             requests: Vec::new(),
@@ -102,10 +104,9 @@ impl Screens {
                     Uuid::from_bytes(*account_id),
                     Uuid::from_bytes(*workspace_id),
                 );
-                let session = self
-                    .sessions
-                    .entry(*instance)
-                    .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
+                let session = self.sessions.entry(*instance).or_insert_with(|| {
+                    (self.open)(Rc::clone(&self.chrome), *instance, self.waker.clone())
+                });
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.set_client_id(Uuid::from_bytes(*client_id));
                 session.set_editable(*editable);
@@ -121,10 +122,9 @@ impl Screens {
                     Uuid::from_bytes(*account_id),
                     Uuid::from_bytes(*workspace_id),
                 );
-                let session = self
-                    .sessions
-                    .entry(*instance)
-                    .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
+                let session = self.sessions.entry(*instance).or_insert_with(|| {
+                    (self.open)(Rc::clone(&self.chrome), *instance, self.waker.clone())
+                });
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.set_client_id(Uuid::from_bytes(*client_id));
                 session.connect_creation(client);
@@ -142,10 +142,9 @@ impl Screens {
                     Uuid::from_bytes(*account_id),
                     Uuid::from_bytes(*workspace_id),
                 );
-                let session = self
-                    .sessions
-                    .entry(*instance)
-                    .or_insert_with(|| (self.open)(*instance, self.waker.clone()));
+                let session = self.sessions.entry(*instance).or_insert_with(|| {
+                    (self.open)(Rc::clone(&self.chrome), *instance, self.waker.clone())
+                });
                 session.set_block_types(Rc::clone(&self.block_types));
                 session.set_client_id(Uuid::from_bytes(*client_id));
                 session.connect_artifact(
@@ -390,7 +389,7 @@ impl Screens {
 
     fn relayout(&mut self) {
         let generation = self.layout.generation;
-        self.layout = ScreenLayout::stacked(&self.requests);
+        self.layout = ScreenLayout::packed(&self.requests);
         self.layout.generation = generation;
         let mut placements: HashMap<EditorInstanceId, Vec<_>> = HashMap::new();
         for placement in &self.layout.screens {

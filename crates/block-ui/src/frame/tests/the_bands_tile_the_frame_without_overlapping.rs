@@ -21,10 +21,10 @@ fn the_bands_tile_the_frame_without_overlapping() {
     assert_eq!(right.top(), toolbar.bottom());
     assert_eq!(left.left(), rects.frame.left());
     assert_eq!(right.right(), rects.frame.right());
-    assert_eq!(rects.content.top(), toolbar.bottom());
-    assert_eq!(rects.content.left(), left.right());
-    assert_eq!(rects.content.right(), right.left());
-    assert_eq!(rects.content.bottom(), rects.frame.bottom());
+    assert_eq!(rects.content_band.top(), toolbar.bottom());
+    assert_eq!(rects.content_band.left(), left.right());
+    assert_eq!(rects.content_band.right(), right.left());
+    assert_eq!(rects.content_band.bottom(), rects.frame.bottom());
     let bands: Vec<_> = rects.bands().collect();
     for (index, band) in bands.iter().enumerate() {
         for other in &bands[index + 1..] {

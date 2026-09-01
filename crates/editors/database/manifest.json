@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "block_type": "00646174-6162-6173-652d-626c6f636b01",
   "display_name": "Database",
-  "icon": "",
+  "icon": "\uf20e",
   "creation": "Immediate",
   "regions": [
-    "Main",
+    "Frame"
+  ],
+  "chrome": [
     "RightSidebar"
   ],
   "entry_point": "database.wasm"

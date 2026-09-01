@@ -7,12 +7,13 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 36;
+pub const PROTOCOL_VERSION: u16 = 37;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
 pub const MAX_QUEUED_MESSAGES: usize = 256;
 pub const MAX_CHILDREN: usize = 256;
+pub const MAX_SURFACE_SIDE: u32 = 8192;
 pub const REQUEST_TIMEOUT_MILLISECONDS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +28,22 @@ pub struct ScreenRequest {
     pub instance: EditorInstanceId,
     pub region: EditorRegion,
     pub metrics: ViewportMetrics,
+    pub frame: Option<FrameSpec>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FrameSpec {
+    pub chrome: bool,
+    pub content: Option<ChildRect>,
+    pub trail: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FrameReport {
+    pub screen: ScreenId,
+    pub content: ChildRect,
+    pub painted: Vec<ChildRect>,
+    pub floating: Vec<ChildRect>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -69,25 +86,57 @@ impl ScreenPlacement {
 }
 
 impl ScreenLayout {
-    pub fn stacked(screens: &[ScreenRequest]) -> Self {
+    pub fn packed(screens: &[ScreenRequest]) -> Self {
+        let mut slots: Vec<&ScreenRequest> = screens
+            .iter()
+            .filter(|request| request.metrics.pixel_width > 0 && request.metrics.pixel_height > 0)
+            .collect();
+        slots.sort_by_key(|request| {
+            (
+                std::cmp::Reverse(request.metrics.pixel_height),
+                request.screen.0,
+            )
+        });
+        let widest = slots
+            .iter()
+            .map(|request| request.metrics.pixel_width)
+            .max()
+            .unwrap_or(0);
+        let area: u64 = slots
+            .iter()
+            .map(|request| {
+                u64::from(request.metrics.pixel_width) * u64::from(request.metrics.pixel_height)
+            })
+            .sum();
+        let shelf_width = widest
+            .max((area as f64).sqrt().ceil() as u32)
+            .min(MAX_SURFACE_SIDE)
+            .max(widest);
         let mut layout = Self::default();
-        for request in screens {
+        let mut x = 0;
+        let mut shelf_top = 0;
+        let mut shelf_height = 0;
+        for request in slots {
             let metrics = &request.metrics;
-            if metrics.pixel_width == 0 || metrics.pixel_height == 0 {
-                continue;
+            if x > 0 && x + metrics.pixel_width > shelf_width {
+                shelf_top += shelf_height;
+                shelf_height = 0;
+                x = 0;
             }
             layout.screens.push(ScreenPlacement {
                 screen: request.screen,
                 instance: request.instance,
                 region: request.region,
-                x: 0,
-                y: layout.height,
+                x,
+                y: shelf_top,
                 width: metrics.pixel_width,
                 height: metrics.pixel_height,
                 scale_factor_millis: (metrics.scale_factor * 1000.0).round().max(1.0) as u32,
             });
-            layout.width = layout.width.max(metrics.pixel_width);
-            layout.height += metrics.pixel_height;
+            x += metrics.pixel_width;
+            shelf_height = shelf_height.max(metrics.pixel_height);
+            layout.width = layout.width.max(x);
+            layout.height = layout.height.max(shelf_top + shelf_height);
         }
         layout
     }
@@ -126,21 +175,6 @@ pub enum ChildMode {
     Live,
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ChildPart {
-    #[default]
-    Main,
-    Toolbar,
-    LeftSidebar,
-    RightSidebar,
-}
-
-impl ChildPart {
-    pub fn is_main(&self) -> bool {
-        matches!(self, Self::Main)
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ChildRect {
     pub x: f32,
@@ -159,7 +193,6 @@ pub struct ChildPlacement {
     pub corner_radius: f32,
     pub layer: ChildLayer,
     pub mode: ChildMode,
-    pub part: ChildPart,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -207,8 +240,6 @@ pub struct ChildStatus {
     pub aspect_ratio: f32,
     pub hovered: bool,
     pub active: bool,
-    pub has_left_sidebar: bool,
-    pub has_right_sidebar: bool,
     pub error: Option<String>,
 }
 
@@ -225,6 +256,7 @@ pub struct PluginManifest {
     pub capabilities: EditorCapabilities,
     pub resize: ResizeMode,
     pub regions: Vec<EditorRegion>,
+    pub chrome: Vec<EditorBand>,
     pub entry_point: String,
     pub network: Vec<String>,
 }
@@ -277,23 +309,24 @@ pub enum CreationMode {
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EditorRegion {
-    Main,
-    Toolbar,
-    LeftSidebar,
-    RightSidebar,
+    Frame,
     Preview,
     ArtifactSettings,
 }
 
 impl EditorRegion {
-    pub const ALL: [Self; 6] = [
-        Self::Main,
-        Self::Toolbar,
-        Self::LeftSidebar,
-        Self::RightSidebar,
-        Self::Preview,
-        Self::ArtifactSettings,
-    ];
+    pub const ALL: [Self; 3] = [Self::Frame, Self::Preview, Self::ArtifactSettings];
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EditorBand {
+    Toolbar,
+    LeftSidebar,
+    RightSidebar,
+}
+
+impl EditorBand {
+    pub const ALL: [Self; 3] = [Self::Toolbar, Self::LeftSidebar, Self::RightSidebar];
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -304,6 +337,7 @@ pub enum ManifestError {
     InvalidIdentity,
     InvalidBlockType,
     InvalidRegions,
+    InvalidChrome,
     InvalidNetworkHost,
 }
 
@@ -316,8 +350,9 @@ impl fmt::Display for ManifestError {
             Self::InvalidIdentity => formatter.write_str("the plugin id is not a plain identifier"),
             Self::InvalidBlockType => formatter.write_str("the block type is not a uuid"),
             Self::InvalidRegions => {
-                formatter.write_str("the regions must include the main one exactly once")
+                formatter.write_str("the regions must include the frame exactly once")
             }
+            Self::InvalidChrome => formatter.write_str("a chrome band is declared twice"),
             Self::InvalidNetworkHost => {
                 formatter.write_str("a network host is not a plain host name")
             }
@@ -340,12 +375,18 @@ impl PluginManifest {
         {
             return Err(ManifestError::InvalidIdentity);
         }
-        if !self.regions.contains(&EditorRegion::Main)
+        if !self.regions.contains(&EditorRegion::Frame)
             || EditorRegion::ALL
                 .iter()
                 .any(|region| self.regions.iter().filter(|it| *it == region).count() > 1)
         {
             return Err(ManifestError::InvalidRegions);
+        }
+        if EditorBand::ALL
+            .iter()
+            .any(|band| self.chrome.iter().filter(|it| *it == band).count() > 1)
+        {
+            return Err(ManifestError::InvalidChrome);
         }
         manifest_string("entry point", &self.entry_point)?;
         for host in &self.network {
@@ -409,11 +450,6 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         width: f32,
         height: f32,
-    },
-    ShowRegion {
-        instance: EditorInstanceId,
-        region: EditorRegion,
-        shown: bool,
     },
     Close {
         instance: EditorInstanceId,
@@ -705,6 +741,7 @@ pub enum Message {
     Screens(ScreenSet),
     Layout(ScreenLayout),
     RegionSizes(Vec<RegionSize>),
+    Frames(Vec<FrameReport>),
     Input(InputBatch),
     DrawFrame,
     FrameNeeded,
@@ -955,7 +992,24 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             }
             Ok(())
         }
-        Message::Screens(value) => collection(value.screens.len()),
+        Message::Screens(value) => {
+            collection(value.screens.len())?;
+            for request in &value.screens {
+                if let Some(frame) = &request.frame {
+                    collection(frame.trail.len())?;
+                    strings(&frame.trail)?;
+                }
+            }
+            Ok(())
+        }
+        Message::Frames(value) => {
+            collection(value.len())?;
+            for report in value {
+                collection(report.painted.len())?;
+                collection(report.floating.len())?;
+            }
+            Ok(())
+        }
         Message::Layout(value) => collection(value.screens.len()),
         Message::RegionSizes(value) => collection(value.len()),
         Message::Editor(value) => validate_editor(value),

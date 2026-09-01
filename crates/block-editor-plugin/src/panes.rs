@@ -289,8 +289,12 @@ impl Panes {
                 egui_session::viewport_id(placement.region),
             ));
             let scale = session.scale_factor(placement.region);
+            let visible = session.visible_rect(placement.region);
             let tessellate_started = Instant::now();
-            let paint_jobs = pane.context.tessellate(output.shapes, scale);
+            let mut paint_jobs = pane.context.tessellate(output.shapes, scale);
+            for job in &mut paint_jobs {
+                job.clip_rect = job.clip_rect.intersect(visible);
+            }
             let tessellate_elapsed = tessellate_started.elapsed();
             let texture_started = Instant::now();
             for (id, delta) in &output.textures_delta.set {

@@ -8,7 +8,8 @@ pub(super) const DOCUMENT: &str = r#"{
     "display_name": "Counter",
     "icon": "\ueb8d",
     "creation": "Immediate",
-    "regions": ["Main", "Toolbar"],
+    "regions": ["Frame"],
+    "chrome": ["Toolbar"],
     "entry_point": "counter.wasm"
 }"#;
 

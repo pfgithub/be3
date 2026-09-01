@@ -17,19 +17,24 @@ fn manifest_validation() {
         interaction: InteractionMode::Live,
         capabilities: EditorCapabilities::default(),
         resize: ResizeMode::Both,
-        regions: vec![EditorRegion::Main, EditorRegion::Toolbar],
+        regions: vec![EditorRegion::Frame, EditorRegion::Preview],
+        chrome: vec![EditorBand::Toolbar],
         entry_point: "counter.wasm".into(),
         network: vec!["api.github.com".into()],
     };
     assert_eq!(manifest.validate(), Ok(()));
 
     let mut invalid = manifest.clone();
-    invalid.regions.push(EditorRegion::Toolbar);
+    invalid.regions.push(EditorRegion::Preview);
     assert_eq!(invalid.validate(), Err(ManifestError::InvalidRegions));
 
     let mut invalid = manifest.clone();
-    invalid.regions = vec![EditorRegion::LeftSidebar];
+    invalid.regions = vec![EditorRegion::Preview];
     assert_eq!(invalid.validate(), Err(ManifestError::InvalidRegions));
+
+    let mut invalid = manifest.clone();
+    invalid.chrome.push(EditorBand::Toolbar);
+    assert_eq!(invalid.validate(), Err(ManifestError::InvalidChrome));
 
     let mut invalid = manifest.clone();
     invalid.entry_point = String::new();

@@ -19,8 +19,8 @@ pub mod session;
 mod wasm;
 
 pub use block_plugin_api::{
-    AudioStatus, BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart, ClipboardImage,
-    EditorRegion, FetchResult, ViewChange,
+    AudioStatus, BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode, ClipboardImage,
+    EditorBand, EditorRegion, FetchResult, ViewChange,
 };
 pub use block_ui;
 pub use host::{
@@ -80,9 +80,14 @@ pub mod __private {
 
     #[cfg(target_arch = "wasm32")]
     pub fn start_wasm<A: crate::App>(manifest: &str) {
-        let identity = identity(manifest);
-        if let Err(error) = crate::wasm::start::<A>(&identity.id, &identity.name, &identity.version)
-        {
+        let document = document(manifest);
+        let identity = document.identity();
+        if let Err(error) = crate::wasm::start::<A>(
+            &identity.id,
+            &identity.name,
+            &identity.version,
+            document.chrome,
+        ) {
             panic!("{} could not start: {error}", identity.name);
         }
     }
@@ -99,10 +104,13 @@ pub mod __private {
         crate::wasm::shutdown();
     }
 
-    pub fn identity(manifest: &str) -> block_plugin_api::PluginIdentity {
+    pub fn document(manifest: &str) -> block_plugin_api::ManifestDocument {
         block_plugin_api::ManifestDocument::parse(manifest)
             .unwrap_or_else(|error| panic!("this plugin's manifest is invalid: {error}"))
-            .identity()
+    }
+
+    pub fn identity(manifest: &str) -> block_plugin_api::PluginIdentity {
+        document(manifest).identity()
     }
 }
 

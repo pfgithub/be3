@@ -4,7 +4,7 @@ use block_plugin_api::{ChildId, ChildStatus};
 fn status(instance: EditorInstanceId) -> ChildStatus {
     ChildStatus {
         instance,
-        region: EditorRegion::Main,
+        region: EditorRegion::Frame,
         child: ChildId(1),
         available: true,
         intrinsic_width: 320.0,
@@ -12,8 +12,6 @@ fn status(instance: EditorInstanceId) -> ChildStatus {
         aspect_ratio: 0.0,
         hovered: false,
         active: false,
-        has_left_sidebar: false,
-        has_right_sidebar: false,
         error: None,
     }
 }

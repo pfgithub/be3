@@ -12,12 +12,11 @@ use block_editor_plugin::{
     egui_material_icons::icons::{
         ICON_ADD, ICON_ARROW_BACK, ICON_ARROW_FORWARD, ICON_CLOSE, ICON_DELETE, ICON_FULLSCREEN,
     },
-    BlockFilter, BlockPicker, ChildHandle, ChildMode, ChildPart, EditorHost, EditorRegion,
+    BlockFilter, BlockPicker, ChildHandle, ChildMode, EditorHost,
 };
 use uuid::Uuid;
 
 const FILMSTRIP_WIDTH: f32 = 210.0;
-const SLIDE_SIDEBAR_WIDTH: f32 = 240.0;
 const THUMBNAIL_SIZE: egui::Vec2 = egui::vec2(176.0, 104.0);
 const DEFAULT_SLIDE_SIZE: egui::Vec2 = egui::vec2(960.0, 540.0);
 const PLAYBACK_CONTROLS_HEIGHT: f32 = 48.0;
@@ -46,8 +45,6 @@ pub struct PresentationApp {
     picker_index: Option<usize>,
     controls_visible_until: f64,
     shapes: HashMap<Uuid, f32>,
-    sidebars: HashMap<Uuid, (bool, bool)>,
-    slide_toolbar: f32,
     reference_cache: ReferenceResolutionCache,
     pending_slides: ReferenceClassificationQueue<(Uuid, usize)>,
 }
@@ -195,51 +192,7 @@ impl PresentationApp {
         if let Some(ratio) = ratio {
             self.shapes.insert(reference.id, ratio);
         }
-        self.sidebars.insert(
-            reference.id,
-            (child.has_left_sidebar(), child.has_right_sidebar()),
-        );
         Some(child)
-    }
-
-    fn selected_reference(&mut self) -> Option<BlockReference> {
-        let slides = self.slides()?;
-        let index = self.selected_index(&slides)?;
-        slides[index].reference.clone()
-    }
-
-    fn slide_sidebar(&mut self, ui: &mut egui::Ui, slide: &Slide) -> egui::Rect {
-        let available = ui.available_rect_before_wrap();
-        let (Some(host), Some(reference)) = (self.host(), slide.reference.as_ref()) else {
-            return available;
-        };
-        if !self
-            .sidebars
-            .get(&reference.id)
-            .is_some_and(|(left, _)| *left)
-        {
-            return available;
-        }
-        let width = SLIDE_SIDEBAR_WIDTH.min(available.width() * 0.5);
-        let (sidebar, rest) = (
-            egui::Rect::from_min_size(available.min, egui::vec2(width, available.height())),
-            available.with_min_x(available.left() + width + 1.0),
-        );
-        ui.scope_builder(egui::UiBuilder::new().max_rect(sidebar), |ui| {
-            host.child_part_sized(
-                ui,
-                ChildPart::LeftSidebar,
-                sidebar.size(),
-                reference.id,
-                reference.block_type,
-            );
-        });
-        ui.painter().vline(
-            rest.left() - 0.5,
-            available.y_range(),
-            ui.visuals().widgets.noninteractive.bg_stroke,
-        );
-        rest
     }
 
     fn slide_ratio(&self, slide: &Slide) -> f32 {
@@ -275,13 +228,13 @@ impl PresentationApp {
         }
     }
 
-    fn editing_ui(&mut self, ui: &mut egui::Ui, slides: &[Slide], editable: bool) -> bool {
+    fn editing_ui(&mut self, ui: &mut egui::Ui, slides: &[Slide], editable: bool) {
         let Some(index) = self.selected_index(slides) else {
             self.empty_ui(ui, editable);
-            return false;
+            return;
         };
         let slide = &slides[index];
-        let stage = self.slide_sidebar(ui, slide);
+        let stage = ui.available_rect_before_wrap();
         let child = ui
             .scope_builder(egui::UiBuilder::new().max_rect(stage), |ui| {
                 self.place_slide(ui, slide, Some(stage.size()))
@@ -289,7 +242,7 @@ impl PresentationApp {
             .inner;
         let Some(child) = child else {
             Self::missing_slide(ui, slide);
-            return false;
+            return;
         };
         match child.error() {
             Some(error) => {
@@ -303,7 +256,6 @@ impl PresentationApp {
             }
             None => child.keep_active(),
         }
-        child.has_right_sidebar()
     }
 
     fn playback_keys(&mut self, ui: &egui::Ui, slides: &[Slide]) {
@@ -517,7 +469,6 @@ impl PresentationApp {
 
 impl block_editor_plugin::App for PresentationApp {
     fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
-        host.show_region(EditorRegion::RightSidebar, false);
         let block = client.get_block(block_id);
         let dependencies = client.watch_references(BlockReferenceList::References(block_id));
         self.editor = Some(Editor {
@@ -552,17 +503,14 @@ impl block_editor_plugin::App for PresentationApp {
         let Some(host) = self.host() else {
             return;
         };
-        let right_sidebar = if host.presenting() {
+        if host.presenting() {
             self.playback_keys(ui, &slides);
             self.playback_ui(ui, &slides);
-            false
         } else if slides.is_empty() {
             self.empty_ui(ui, host.editable());
-            false
         } else {
-            self.editing_ui(ui, &slides, host.editable())
-        };
-        host.show_region(EditorRegion::RightSidebar, right_sidebar);
+            self.editing_ui(ui, &slides, host.editable());
+        }
     }
 
     fn preview_ui(&mut self, ui: &mut egui::Ui) {
@@ -614,7 +562,6 @@ impl block_editor_plugin::App for PresentationApp {
             .map_or(0, |presentation| presentation.slides().len());
         let mut add = false;
         let mut present = false;
-        let slide = self.selected_reference();
         ui.horizontal(|ui| {
             add = ui
                 .add_enabled(
@@ -630,22 +577,6 @@ impl block_editor_plugin::App for PresentationApp {
                 )
                 .on_hover_text("Present")
                 .clicked();
-            let Some(reference) = slide else {
-                return;
-            };
-            ui.separator();
-            let height = self.slide_toolbar.max(ui.spacing().interact_size.y);
-            let size = egui::vec2(ui.available_width(), height);
-            let child = host.child_part_sized(
-                ui,
-                ChildPart::Toolbar,
-                size,
-                reference.id,
-                reference.block_type,
-            );
-            if let Some(used) = child.intrinsic_size() {
-                self.slide_toolbar = used.y;
-            }
         });
         if add {
             self.open_picker(count);
@@ -653,20 +584,6 @@ impl block_editor_plugin::App for PresentationApp {
         if present {
             host.present(true);
         }
-    }
-
-    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
-        self.poll();
-        let (Some(host), Some(reference)) = (self.host(), self.selected_reference()) else {
-            return;
-        };
-        host.child_part_sized(
-            ui,
-            ChildPart::RightSidebar,
-            ui.available_size_before_wrap(),
-            reference.id,
-            reference.block_type,
-        );
     }
 
     fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {

@@ -4,12 +4,14 @@
   "version": "0.1.0",
   "block_type": "63616c65-6e64-6172-2d62-6c6f636b0001",
   "display_name": "Calendar",
-  "icon": "",
+  "icon": "\uebcc",
   "creation": "Immediate",
   "interaction": "Preview",
   "resize": "None",
   "regions": [
-    "Main",
+    "Frame"
+  ],
+  "chrome": [
     "Toolbar"
   ],
   "entry_point": "calendar.wasm"

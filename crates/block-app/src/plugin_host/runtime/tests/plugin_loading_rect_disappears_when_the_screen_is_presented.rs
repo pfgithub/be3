@@ -11,7 +11,7 @@ fn plugin_loading_rect_disappears_when_the_screen_is_presented() {
     layout.screens.push(ScreenPlacement {
         screen,
         instance: EditorInstanceId(1),
-        region: EditorRegion::Main,
+        region: EditorRegion::Frame,
         x: 0,
         y: 0,
         width: 30,

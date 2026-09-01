@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "block_type": "73657474-696e-6773-2d62-6c6f636b3031",
   "display_name": "Settings",
-  "icon": "",
+  "icon": "\ue8b8",
   "creation": "None",
   "regions": [
-    "Main"
+    "Frame"
   ],
   "entry_point": "settings.wasm"
 }

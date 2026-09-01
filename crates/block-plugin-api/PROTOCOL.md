@@ -41,16 +41,16 @@ message belongs to: a block a plugin wrote and the editor message that
 depends on it cannot swap places on the way.
 
 Input events carry pointer, wheel, key, text, focus and zoom-gesture input in
-the region's own logical coordinates. A pinch or trackpad zoom is its own
+the screen's own logical coordinates. A pinch or trackpad zoom is its own
 event, carrying the factor the view is asked to grow by; a wheel turned with
 the zoom modifier held stays a wheel event, which the receiver reads as a zoom
 of its own. Consecutive zoom gestures coalesce by multiplying their factors.
 
-A region's input goes out at the start of the host frame that received it,
-before the host lays anything out, and it is routed against where the region
-sat and what covered it the last time the region was drawn. The host has that
+A screen's input goes out at the start of the host frame that received it,
+before the host lays anything out, and it is routed against where the screen
+sat and what covered it the last time the screen was drawn. The host has that
 much of its own frame left to spend, so a plugin answering promptly is drawn
-into the frame that delivered the input rather than the one after it. A region
+into the frame that delivered the input rather than the one after it. A screen
 the host did not draw last frame is sent nothing.
 
 Opening an instance carries the account and workspace its block client speaks
@@ -67,7 +67,7 @@ connection.
 
 An editor whose block cannot be made until something has been filled in is
 opened as a creation dialog instead of on a block: it has a client of its own
-but no block, and draws in its main region only. It reports whether the dialog
+but no block, and is given a frame with no chrome bands. It reports whether the dialog
 has been filled in, which is what lets the user accept it. On acceptance the
 host asks the instance to commit, and the instance creates the block through
 its own client and answers with the block's id, or with why it could not be
@@ -141,41 +141,59 @@ blocks it only holds a reference to. Each description carries the block type,
 its display name, and the codepoint of the host's icon font.
 
 The host reports a block dragged over an editor instance's region in that
-region's own logical coordinates, once per frame while it hovers, once more
+screen's own logical coordinates, once per frame while it hovers, once more
 when it is let go, and reports that the drag has moved off the instance again.
 An instance answers with whether it would take the block, which only decides
 the cursor the host shows; a drop is delivered whether or not it was accepted.
 
-An editor may be given a preview region as well as the regions it is edited
-in. The host maps that region onto whatever quad it paints the block on, so
-the editor fills the region and lets the host place, rotate and fade it. An
-instance may also report the shape of its block, which the host holds its
-preview to; it is a request in the same sense as the embedded size below.
+An instance is shown through screens of three kinds: a frame, a preview, and
+an artifact-settings region. A frame is the whole rectangle an editor is
+edited in, and an instance has at most one; the plugin lays its own toolbar
+row, sidebars and content out inside it, in one pass of one context. The host
+says, per frame, whether the instance owns the chrome bands this frame, where
+its content goes inside the frame, and the trail of editors it sits under. An
+instance told it owns no chrome draws its content alone: that is an editor
+embedded in another one, a creation dialog, or an instance presenting. An
+instance told it owns the chrome and given no content rectangle fills its own
+content band, which is what a tab of its own means.
+
+A frame surface is transparent wherever its owner does not paint, so whatever
+the host draws beneath shows through there. The plugin publishes, once per
+frame, the content band it laid out, the rectangles it painted and the
+rectangles its floating layers took, all in the frame's own logical
+coordinates. The host works out the view it hands a pan-and-zoom editor
+against the content band it was told about, routes input against the painted
+and floating rectangles, and composites the frames of one tab in the order it
+stacked them.
+
+An editor may be given a preview screen as well as the frame it is edited in.
+The host maps that screen onto whatever quad it paints the block on, so the
+editor fills it and lets the host place, rotate and fade it. An instance may
+also report the shape of its block, which the host holds its preview to; it is
+a request in the same sense as the embedded size below.
 
 The host owns pan and zoom. Wherever an editor's content has a view of its
 own, the host works out the rectangle that content goes in and tells the
-instance, in the logical coordinates of its main region; the editor draws its
+instance, in the logical coordinates of its frame; the editor draws its
 content there and keeps no zoom or offset of its own. An instance moves the
 view only by asking - pan by a distance, zoom by a factor about a point, or
 fit - and the host answers by moving whatever viewport the instance is being
 shown in, which may be a tab of its own or a canvas the block sits in. An
-instance never told where its view is fills the region it is given.
+instance never told where its view is fills the content it is given.
 
 An editor instance may report the size it would like to be given wherever the
 host embeds it. It is a request, not a constraint: the host may embed the
 instance at any size, and falls back to its own default until an instance
 reports one.
 
-An editor instance may embed other blocks' editors inside one of its regions.
-Once per frame the instance publishes, for that region, the frame generation
+An editor instance may embed other blocks' editors inside one of its screens.
+Once per frame the instance publishes, for that screen, the frame generation
 it drew, an ordered list of the children it placed and the occluder rectangles
-declared between them, all in the region's own logical coordinates. A child
+declared between them, all in the screen's own logical coordinates. A child
 carries its own identifier, the block and block type it shows, the rectangle
 and clip it was placed at, the corner radius of the hole cut for it, whether
-it composites below or above the instance's own pixels, whether the host
-should draw it as a preview, a passive editor, an active one, or a live one,
-and which part of that child's editor belongs in the rectangle: the block
-itself, or the toolbar or one of the sidebars its editor draws around it.
+it composites below or above the instance's own pixels, and whether the host
+should draw it as a preview, a passive editor, an active one, or a live one.
 Occluders are ordered against the children: a child's interactive area is
 its rectangle minus every occluder declared after it, which is the same
 subtraction that decides what the host draws over it.
@@ -189,18 +207,18 @@ then the children above it, at the placements belonging to the generation it
 is presenting; a placement published for a generation the host is not
 presenting is stretched into the region it is showing rather than dropped.
 
-A child placed for a part other than the block itself is that child's own
-chrome: the host draws the toolbar or the sidebar that editor would be given
-in a tab of its own, in the rectangle it was placed at, and reports back the
-size it took as the size that child asks for, so an instance editing a block
-can put the block's own chrome in its regions and lay the rest out around it.
-Chrome is live from the moment it is placed, is never drawn as a preview, and
-is not drawn in a preview region, where a block has no chrome at all.
+A child the user has selected, or one an instance declares as the whole of
+what it shows, becomes a frame owner of its own: it is handed the same frame
+as the instance that placed it, takes over every chrome band, and draws its
+content at the rectangle the placement gave it. Its parent is told for that
+frame that it owns no chrome, and keeps its content exactly where it was, so
+selecting a child moves nothing. Handover is always a replacement: a child's
+chrome is never nested inside its parent's, and the framework, not the plugin,
+draws the trail back out.
 
 The host answers with a status per child: whether the block could be opened
-at all, the size and shape its editor asks for, whether its editor offers a
-left or a right sidebar, whether the pointer is over it, whether it is being
-given input, and why it is unavailable when it is. A block already open
+at all, the size and shape its editor asks for, whether the pointer is over
+it, whether it is being given input, and why it is unavailable when it is. A block already open
 above the instance is refused, so an editor cannot be nested inside itself.
 The host bounds how many children of one region it will run as editors and
 falls back to preview rendering for the rest.
@@ -229,19 +247,13 @@ host offers, and is answered exactly once, with the block the user chose or
 created, the picker the user closed, or why the block could not be made.
 Requests are identified per instance and may be outstanding together.
 
-An editor instance may ask the host to present it: to give its main region the
-whole window and show nothing else of the app, which is what a slideshow or a
-video played back full screen wants. The host owns the answer and reports the
-state it settled on, since it may refuse, and takes presenting away again when
-the instance is no longer the one on screen. An instance draws its main region
-the same way either way; only the size it is given changes.
-
-An editor instance may tell the host that one of the regions its manifest
-declares has nothing in it at the moment - a sidebar that is only ever its
-child's sidebar, when that child has none - and the host then shows that
-region no more than a region the plugin never declared. Every declared region
-is shown until the instance says otherwise, and the manifest still bounds
-which regions an instance may ever be given.
+An editor instance may ask the host to present it: to give it the whole window
+and show nothing else of the app, which is what a slideshow or a video played
+back full screen wants. The host owns the answer and reports the state it
+settled on, since it may refuse, and takes presenting away again when the
+instance is no longer the one on screen. A presenting instance is a frame owner
+with no chrome bands, so it draws its content the same way either way; only the
+size it is given changes.
 
 An editor instance may report named duration and count measurements under a
 named performance group. Durations are measured by the plugin and sent as
@@ -274,6 +286,12 @@ building its own frame. Which part of the surface each region takes is settled
 then as well, against the layout that arrived with the frame being shown, so a
 plugin that republishes its layout mid-frame is never drawn through the
 placements of the one before it.
+
+Every screen an instance is given is packed into one surface for the whole
+plugin runtime, in two dimensions rather than in a single column, since a
+frame-sized slot would otherwise run past the largest texture the device
+allows. Which part of the surface a screen takes is the layout the plugin
+publishes and the host samples.
 
 A plugin never learns where its pixels live. It asks its host for a render
 target and draws into an opaque texture, which is the host's own under

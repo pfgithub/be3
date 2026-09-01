@@ -20,7 +20,9 @@ pub struct FrameRects {
     pub toolbar: Option<egui::Rect>,
     pub left_sidebar: Option<egui::Rect>,
     pub right_sidebar: Option<egui::Rect>,
+    pub content_band: egui::Rect,
     pub content: egui::Rect,
+    pub compact: bool,
 }
 
 impl Default for FrameRects {
@@ -30,7 +32,9 @@ impl Default for FrameRects {
             toolbar: None,
             left_sidebar: None,
             right_sidebar: None,
+            content_band: egui::Rect::ZERO,
             content: egui::Rect::ZERO,
+            compact: false,
         }
     }
 }
@@ -39,6 +43,18 @@ impl FrameRects {
     pub fn bands(&self) -> impl Iterator<Item = egui::Rect> + '_ {
         [self.toolbar, self.left_sidebar, self.right_sidebar]
             .into_iter()
+            .flatten()
+            .chain([self.content_band])
+    }
+
+    pub fn painted(&self) -> impl Iterator<Item = egui::Rect> + '_ {
+        let sidebars = match self.compact {
+            true => [None, None],
+            false => [self.left_sidebar, self.right_sidebar],
+        };
+        [self.toolbar]
+            .into_iter()
+            .chain(sidebars)
             .flatten()
             .chain([self.content])
     }
@@ -111,6 +127,7 @@ impl Frame {
         let mut outcome = FrameOutcome {
             rects: FrameRects {
                 frame,
+                compact,
                 ..FrameRects::default()
             },
             exit: false,
@@ -167,8 +184,9 @@ impl Frame {
             }
         }
         let band = ui.available_rect_before_wrap();
-        outcome.rects.content = band;
+        outcome.rects.content_band = band;
         let content = self.content.map_or(band, |rect| rect.intersect(band));
+        outcome.rects.content = content;
         let mut inner = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt(self.id.with("content"))

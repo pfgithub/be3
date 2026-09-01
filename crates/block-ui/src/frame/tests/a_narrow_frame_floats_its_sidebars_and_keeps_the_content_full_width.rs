@@ -6,9 +6,9 @@ fn a_narrow_frame_floats_its_sidebars_and_keeps_the_content_full_width() {
     let outcome = show(size, frame, Vec::new());
     let rects = outcome.rects;
     let toolbar = rects.toolbar.expect("the toolbar band is shown");
-    assert_eq!(rects.content.left(), rects.frame.left());
-    assert_eq!(rects.content.right(), rects.frame.right());
-    assert_eq!(rects.content.top(), toolbar.bottom());
+    assert_eq!(rects.content_band.left(), rects.frame.left());
+    assert_eq!(rects.content_band.right(), rects.frame.right());
+    assert_eq!(rects.content_band.top(), toolbar.bottom());
     let left = rects.left_sidebar.expect("the left sidebar floats");
     let right = rects.right_sidebar.expect("the right sidebar floats");
     assert!(left.width() > 0.0);

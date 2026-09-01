@@ -14,9 +14,7 @@ fn manifest_from_json_reads_a_document() {
     );
     assert_eq!(manifest.icon, "\u{eb8d}");
     assert_eq!(manifest.creation, CreationMode::Immediate);
-    assert_eq!(
-        manifest.regions,
-        vec![EditorRegion::Main, EditorRegion::Toolbar]
-    );
+    assert_eq!(manifest.regions, vec![EditorRegion::Frame]);
+    assert_eq!(manifest.chrome, vec![EditorBand::Toolbar]);
     assert_eq!(manifest.entry_point, "counter.wasm");
 }

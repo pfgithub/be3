@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    ChildOperations, CreationMode, EditorCapabilities, EditorRegion, InteractionMode,
+    ChildOperations, CreationMode, EditorBand, EditorCapabilities, EditorRegion, InteractionMode,
     ManifestError, PluginIdentity, PluginManifest, ResizeMode,
 };
 
@@ -30,6 +30,8 @@ pub struct ManifestDocument {
     #[serde(default)]
     pub resize: ResizeMode,
     pub regions: Vec<EditorRegion>,
+    #[serde(default)]
+    pub chrome: Vec<EditorBand>,
     pub entry_point: String,
     #[serde(default)]
     pub network: Vec<String>,
@@ -67,6 +69,7 @@ impl ManifestDocument {
             capabilities: self.capabilities,
             resize: self.resize,
             regions: self.regions,
+            chrome: self.chrome,
             entry_point: self.entry_point,
             network: self.network,
         };

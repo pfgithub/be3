@@ -29,7 +29,8 @@ fn screen(screen: ScreenId, instance: EditorInstanceId) -> ScreenRequest {
     ScreenRequest {
         screen,
         instance,
-        region: EditorRegion::Main,
+        region: EditorRegion::Frame,
+        frame: None,
         metrics: ViewportMetrics {
             logical_width: 100.0,
             logical_height: 100.0,

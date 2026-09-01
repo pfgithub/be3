@@ -1,9 +1,10 @@
 use block_client::BlockClient;
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, ChildId, ChildPlacement, ChildPlacements, ChildStatus,
-    CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult,
-    FilePick, InputEvent, Message, Occluder, PointerButton, RegionSize, ScreenPlacement,
-    ScreenRequest, ViewportMetrics, WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
+    ArtifactDescription, BlockPick, ChildId, ChildPlacement, ChildPlacements, ChildRect,
+    ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId, EditorMessage,
+    EditorRegion, FetchResult, FilePick, FrameReport, FrameSpec, InputEvent, Message, Occluder,
+    PointerButton, RegionSize, ScreenPlacement, ScreenRequest, ViewportMetrics, WheelUnit,
+    MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -14,6 +15,7 @@ use crate::{host::BlockDrag, EditorHost, Waker};
 
 pub(crate) struct EguiSession {
     app: Box<dyn AppUi>,
+    chrome: Rc<Vec<EditorBand>>,
     instance: EditorInstanceId,
     regions: HashMap<EditorRegion, RegionState>,
     host: EditorHost,
@@ -58,8 +60,11 @@ struct RegionState {
     input: egui::RawInput,
     placement: Option<ScreenPlacement>,
     metrics: Option<ViewportMetrics>,
+    frame: Option<FrameSpec>,
     used: Option<egui::Vec2>,
     reported: Option<egui::Vec2>,
+    report: Option<FrameReport>,
+    reported_frame: Option<FrameReport>,
     cursor: CursorIcon,
     reported_cursor: Option<CursorIcon>,
     children: Vec<ChildPlacement>,
@@ -82,7 +87,11 @@ trait AppUi {
     fn artifact_settings_ui(&mut self, ui: &mut egui::Ui, data: &mut Vec<u8>);
     fn regenerate_artifact(&mut self, data: &[u8]);
     fn poll_artifact(&mut self) -> Option<Result<(), String>>;
-    fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion);
+    fn main_ui(&mut self, ui: &mut egui::Ui);
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui);
+    fn left_sidebar_ui(&mut self, ui: &mut egui::Ui);
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui);
+    fn preview_ui(&mut self, ui: &mut egui::Ui);
     fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
     fn set_intrinsic_size(&mut self, size: egui::Vec2);
     fn aspect_ratio(&mut self) -> Option<f32>;
@@ -136,15 +145,24 @@ impl<A: crate::App> AppUi for A {
         crate::App::poll_artifact(self)
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, region: EditorRegion) {
-        match region {
-            EditorRegion::Main => crate::App::ui(self, ui),
-            EditorRegion::Toolbar => crate::App::toolbar_ui(self, ui),
-            EditorRegion::LeftSidebar => crate::App::left_sidebar_ui(self, ui),
-            EditorRegion::RightSidebar => crate::App::right_sidebar_ui(self, ui),
-            EditorRegion::Preview => crate::App::preview_ui(self, ui),
-            EditorRegion::ArtifactSettings => {}
-        }
+    fn main_ui(&mut self, ui: &mut egui::Ui) {
+        crate::App::ui(self, ui);
+    }
+
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        crate::App::toolbar_ui(self, ui);
+    }
+
+    fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        crate::App::left_sidebar_ui(self, ui);
+    }
+
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        crate::App::right_sidebar_ui(self, ui);
+    }
+
+    fn preview_ui(&mut self, ui: &mut egui::Ui) {
+        crate::App::preview_ui(self, ui);
     }
 
     fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
@@ -161,9 +179,14 @@ impl<A: crate::App> AppUi for A {
 }
 
 impl EguiSession {
-    pub(crate) fn new<A: crate::App>(instance: EditorInstanceId, waker: Waker) -> Self {
+    pub(crate) fn new<A: crate::App>(
+        chrome: Rc<Vec<EditorBand>>,
+        instance: EditorInstanceId,
+        waker: Waker,
+    ) -> Self {
         Self {
             app: Box::new(A::default()),
+            chrome,
             instance,
             regions: HashMap::new(),
             host: EditorHost::new(waker),
@@ -281,6 +304,7 @@ impl EguiSession {
             let state = self.regions.entry(placement.region).or_default();
             state.placement = Some(*placement);
             state.metrics = Some(request.metrics.clone());
+            state.frame = request.frame.clone();
         }
     }
 
@@ -289,6 +313,10 @@ impl EguiSession {
         let sizes = self.region_sizes();
         if !sizes.is_empty() {
             messages.push(Message::RegionSizes(sizes));
+        }
+        let frames = self.frame_reports();
+        if !frames.is_empty() {
+            messages.push(Message::Frames(frames));
         }
         let instance = self.instance;
         for (group, measurements) in self.host.take_performance() {
@@ -417,13 +445,6 @@ impl EguiSession {
                 presenting,
             }));
         }
-        for (region, shown) in self.host.take_region_changes() {
-            messages.push(Message::Editor(EditorMessage::ShowRegion {
-                instance,
-                region,
-                shown,
-            }));
-        }
         for change in self.host.take_view_changes() {
             messages.push(Message::Editor(EditorMessage::ChangeView {
                 instance,
@@ -450,6 +471,21 @@ impl EguiSession {
             cursors.push((*region, state.cursor));
         }
         cursors
+    }
+
+    fn frame_reports(&mut self) -> Vec<FrameReport> {
+        let mut reports = Vec::new();
+        for state in self.regions.values_mut() {
+            let Some(report) = &state.report else {
+                continue;
+            };
+            if state.reported_frame.as_ref() == Some(report) {
+                continue;
+            }
+            state.reported_frame = Some(report.clone());
+            reports.push(report.clone());
+        }
+        reports
     }
 
     fn region_sizes(&mut self) -> Vec<RegionSize> {
@@ -567,43 +603,92 @@ impl EguiSession {
         self.host.set_files(files);
         let delivered_drop = drag.is_some_and(|drag| drag.dropped);
         let app = &mut self.app;
-        let frame = if region == EditorRegion::Preview {
-            egui::Frame::NONE
-        } else {
-            egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO)
-        };
+        let plain =
+            egui::Frame::central_panel(&context.global_style()).inner_margin(egui::Margin::ZERO);
         let creating = self.creating;
         let artifact = &mut self.artifact;
         let mut draft = artifact
             .as_mut()
             .filter(|_| region == EditorRegion::ArtifactSettings)
             .map(|artifact| artifact.draft.clone());
+        let spec = self
+            .regions
+            .get(&region)
+            .and_then(|state| state.frame.clone())
+            .unwrap_or_default();
+        let chrome = Rc::clone(&self.chrome);
+        let host = self.host.clone();
         self.host.begin_region(region, rect.min.to_vec2());
         let mut content = rect;
+        let mut painted = Vec::new();
+        let mut content_band = rect;
         let output = context.run_ui(input, |ui| {
-            egui::CentralPanel::default().frame(frame).show_inside(ui, {
-                |ui| {
-                    ui.set_clip_rect(ui.clip_rect().intersect(visible_rect));
-                    match (&mut draft, creating) {
-                        (Some(draft), _) => app.artifact_settings_ui(ui, draft),
-                        (None, true) => app.creation_ui(ui),
-                        (None, false) => app.ui(ui, region),
-                    }
+            ui.set_clip_rect(ui.clip_rect().intersect(visible_rect));
+            match (&mut draft, creating, region) {
+                (Some(draft), _, _) => {
+                    egui::CentralPanel::default()
+                        .frame(plain)
+                        .show_inside(ui, |ui| app.artifact_settings_ui(ui, draft));
                 }
-            });
+                (None, true, _) => {
+                    egui::CentralPanel::default()
+                        .frame(plain)
+                        .show_inside(ui, |ui| app.creation_ui(ui));
+                }
+                (None, false, EditorRegion::Frame) => {
+                    let band = |band| chrome.contains(&band) && host.band_shown(band);
+                    let mut bands = AppBands {
+                        app,
+                        background: plain.fill,
+                    };
+                    let outcome = block_ui::frame::Frame::new(egui::Id::new("plugin frame"))
+                        .toolbar(spec.chrome && band(EditorBand::Toolbar))
+                        .left_sidebar(spec.chrome && band(EditorBand::LeftSidebar))
+                        .right_sidebar(spec.chrome && band(EditorBand::RightSidebar))
+                        .content(
+                            spec.content
+                                .map(|content| host_rect(content, rect.min.to_vec2())),
+                        )
+                        .trail(spec.trail.clone())
+                        .show(ui, &mut bands);
+                    content_band = outcome.rects.content_band;
+                    painted = outcome.rects.painted().collect();
+                }
+                (None, false, EditorRegion::Preview) => {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show_inside(ui, |ui| app.preview_ui(ui));
+                }
+                (None, false, EditorRegion::ArtifactSettings) => {}
+            }
             content = ui.min_rect();
         });
         if let (Some(artifact), Some(draft)) = (artifact.as_mut(), draft) {
             artifact.edited |= artifact.draft != draft;
             artifact.draft = draft;
         }
-        for occluder in floating_rects(context, visible_rect) {
-            self.host.occlude(occluder);
+        let floating = floating_rects(context, visible_rect);
+        for occluder in &floating {
+            self.host.occlude(*occluder);
         }
         let (children, occluders) = self.host.end_region(region);
-        if let Some(state) = self.regions.get_mut(&region) {
+        let origin = rect.min.to_vec2();
+        let screen = self.placement(region).map(|placement| placement.screen);
+        if let (Some(state), Some(screen)) = (self.regions.get_mut(&region), screen) {
             state.children = children;
             state.occluders = occluders;
+            state.report = (region == EditorRegion::Frame).then(|| FrameReport {
+                screen,
+                content: plugin_rect(content_band, origin),
+                painted: painted
+                    .iter()
+                    .map(|rect| plugin_rect(*rect, origin))
+                    .collect(),
+                floating: floating
+                    .iter()
+                    .map(|rect| plugin_rect(*rect, origin))
+                    .collect(),
+            });
         }
         self.host.set_drag(None);
         self.host.set_files(None);
@@ -632,7 +717,7 @@ impl EguiSession {
             .and_then(|state| state.placement.as_ref())
     }
 
-    fn visible_rect(&self, region: EditorRegion) -> egui::Rect {
+    pub(crate) fn visible_rect(&self, region: EditorRegion) -> egui::Rect {
         let Some(placement) = self.placement(region) else {
             return egui::Rect::ZERO;
         };
@@ -725,6 +810,48 @@ impl EguiSession {
             }
             InputEvent::Focus(focused) => state.input.focused = *focused,
         }
+    }
+}
+
+struct AppBands<'a> {
+    app: &'a mut Box<dyn AppUi>,
+    background: egui::Color32,
+}
+
+impl block_ui::frame::FrameBands for AppBands<'_> {
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        self.app.toolbar_ui(ui);
+    }
+
+    fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        self.app.left_sidebar_ui(ui);
+    }
+
+    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        self.app.right_sidebar_ui(ui);
+    }
+
+    fn content_ui(&mut self, ui: &mut egui::Ui) {
+        let rect = ui.max_rect();
+        ui.painter().rect_filled(rect, 0.0, self.background);
+        self.app.main_ui(ui);
+    }
+}
+
+fn host_rect(rect: ChildRect, origin: egui::Vec2) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(rect.x, rect.y) + origin,
+        egui::vec2(rect.width, rect.height),
+    )
+}
+
+fn plugin_rect(rect: egui::Rect, origin: egui::Vec2) -> ChildRect {
+    let rect = rect.translate(-origin);
+    ChildRect {
+        x: rect.min.x,
+        y: rect.min.y,
+        width: rect.width(),
+        height: rect.height(),
     }
 }
 

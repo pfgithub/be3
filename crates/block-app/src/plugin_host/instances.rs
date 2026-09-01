@@ -2,9 +2,9 @@ use block_client::{blocks::audio::Audio, BlockClient, Tunnel};
 use block_plugin_api::{
     ArtifactDescription, AudioCommand, AudioStatus, BlockPick, BlockTypeDescriptor, ChildId,
     ChildMode, ChildPlacement, ChildPlacements, ChildStatus, ClipboardImage, CreationOutcome,
-    CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult, FilePick, Message,
-    Occluder, PerformanceMeasurement, RegenerationOutcome, RegionSize, ScreenId, ScreenLayout,
-    ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
+    CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult, FilePick, FrameReport,
+    FrameSpec, Message, Occluder, PerformanceMeasurement, RegenerationOutcome, RegionSize,
+    ScreenId, ScreenLayout, ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{
@@ -69,7 +69,6 @@ struct Instance {
     view_changes: Vec<ViewChange>,
     presenting: bool,
     reported_presenting: bool,
-    hidden_regions: HashSet<EditorRegion>,
 }
 
 #[derive(Default)]
@@ -106,7 +105,6 @@ impl Instance {
             view_changes: Vec::new(),
             presenting: false,
             reported_presenting: false,
-            hidden_regions: HashSet::new(),
         }
     }
 }
@@ -140,6 +138,7 @@ struct Screen {
     request: ScreenRequest,
     last_seen: u64,
     used: Option<egui::Vec2>,
+    report: Option<FrameReport>,
     dragging: bool,
     file_dropping: bool,
     cursor: CursorIcon,
@@ -220,6 +219,7 @@ impl Instances {
         client_id: Uuid,
         role: InstanceRole,
         block_types: &Arc<Vec<BlockTypeDescriptor>>,
+        frame: Option<FrameSpec>,
         size: egui::Vec2,
         visible: egui::Rect,
         scale_factor: f32,
@@ -244,9 +244,11 @@ impl Instances {
                     instance,
                     region,
                     metrics: viewport_metrics(size, visible, scale_factor),
+                    frame: frame.clone(),
                 },
                 last_seen: pass,
                 used: None,
+                report: None,
                 dragging: false,
                 file_dropping: false,
                 cursor: CursorIcon::Default,
@@ -256,6 +258,7 @@ impl Instances {
             }
         });
         screen.request.metrics = viewport_metrics(size, visible, scale_factor);
+        screen.request.frame = frame;
         screen.last_seen = pass;
         screen.request.screen
     }
@@ -264,12 +267,6 @@ impl Instances {
         if let Some(entry) = self.entries.get_mut(&instance) {
             entry.view = Some(view);
         }
-    }
-
-    pub(super) fn region_shown(&self, instance: EditorInstanceId, region: EditorRegion) -> bool {
-        self.entries
-            .get(&instance)
-            .is_none_or(|entry| !entry.hidden_regions.contains(&region))
     }
 
     pub(super) fn presenting(&self, instance: EditorInstanceId) -> bool {
@@ -654,7 +651,7 @@ impl Instances {
         let mut holes = Holes::default();
         let mut live = 0;
         for (index, child) in table.children.iter().enumerate() {
-            if child.rect.is_empty() || (!child.part.is_main() && region == EditorRegion::Preview) {
+            if child.rect.is_empty() {
                 continue;
             }
             let requested = match (region, child.mode) {
@@ -664,16 +661,15 @@ impl Instances {
                 }
                 (_, mode) => mode,
             };
-            let mode = match (child.part.is_main(), requested) {
-                (true, ChildMode::Preview) => ChildMode::Preview,
-                (true, mode) => {
+            let mode = match requested {
+                ChildMode::Preview => ChildMode::Preview,
+                mode => {
                     live += 1;
                     match live > MAX_LIVE_CHILDREN {
                         true => ChildMode::Preview,
                         false => mode,
                     }
                 }
-                (false, _) => ChildMode::Live,
             };
             let child_rect = host_rect(child.rect, origin, stretch);
             let child_clip = host_rect(child.clip, origin, stretch).intersect(clip);
@@ -699,7 +695,6 @@ impl Instances {
                 clip: child_clip,
                 layer: child.layer,
                 mode,
-                part: child.part,
             });
         }
         (children, holes)
@@ -746,8 +741,6 @@ impl Instances {
                 aspect_ratio: status.aspect_ratio.unwrap_or_default(),
                 hovered: status.hovered,
                 active: status.active,
-                has_left_sidebar: status.has_left_sidebar,
-                has_right_sidebar: status.has_right_sidebar,
                 error: status.error,
             };
             if screen.reported_statuses.get(&status.child) == Some(&status) {
@@ -896,6 +889,32 @@ impl Instances {
         region: EditorRegion,
     ) -> Option<egui::Vec2> {
         self.entries.get(&instance)?.screens.get(&region)?.used
+    }
+
+    pub(super) fn set_frame_reports(&mut self, reports: Vec<FrameReport>) -> bool {
+        let mut changed = false;
+        for report in reports {
+            for entry in self.entries.values_mut() {
+                if let Some(screen) = entry
+                    .screens
+                    .values_mut()
+                    .find(|screen| screen.request.screen == report.screen)
+                {
+                    changed |= screen.report.as_ref() != Some(&report);
+                    screen.report = Some(report.clone());
+                }
+            }
+        }
+        changed
+    }
+
+    pub(super) fn frame_report(&self, instance: EditorInstanceId) -> Option<&FrameReport> {
+        self.entries
+            .get(&instance)?
+            .screens
+            .get(&EditorRegion::Frame)?
+            .report
+            .as_ref()
     }
 
     pub(super) fn cursor(
@@ -1260,19 +1279,6 @@ impl Instances {
                 instance,
                 presenting,
             } => self.set_presenting(instance, presenting),
-            EditorMessage::ShowRegion {
-                instance,
-                region,
-                shown,
-            } => {
-                let Some(entry) = self.entries.get_mut(&instance) else {
-                    return false;
-                };
-                match shown {
-                    true => entry.hidden_regions.remove(&region),
-                    false => entry.hidden_regions.insert(region),
-                }
-            }
             EditorMessage::ChangeView { instance, change } => {
                 let Some(entry) = self.entries.get_mut(&instance) else {
                     return false;

@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "block_type": "636f6d70-696c-6564-2d6c-6f6769630101",
   "display_name": "Compiled Logic",
-  "icon": "",
+  "icon": "\ue322",
   "creation": "None",
   "regions": [
-    "Main"
+    "Frame"
   ],
   "entry_point": "compiled_logic.wasm"
 }

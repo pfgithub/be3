@@ -10,9 +10,14 @@ thread_local! {
     static STARTED: Cell<f64> = const { Cell::new(0.0) };
 }
 
-pub(crate) fn start<A: crate::App>(id: &str, name: &str, version: &str) -> Result<(), String> {
+pub(crate) fn start<A: crate::App>(
+    id: &str,
+    name: &str,
+    version: &str,
+    chrome: Vec<block_plugin_api::EditorBand>,
+) -> Result<(), String> {
     surface::initialize()?;
-    let runtime = Runtime::new::<A>(id, name, version, waker());
+    let runtime = Runtime::new::<A>(id, name, version, chrome, waker());
     post(vec![runtime.hello()])?;
     STARTED.with(|started| started.set(host::now()));
     PLUGIN.with(|plugin| *plugin.borrow_mut() = Some(runtime));

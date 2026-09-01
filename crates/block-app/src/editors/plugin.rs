@@ -1,6 +1,6 @@
 use block_client::{blocks, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
-    BlockPick, BlockTypeDescriptor, ChildPart, CreationMode, EditorInstanceId, EditorRegion,
+    BlockPick, BlockTypeDescriptor, CreationMode, EditorInstanceId, EditorRegion, FrameSpec,
     InteractionMode, PluginManifest, ResizeMode, ViewChange,
 };
 use eframe::egui;
@@ -71,7 +71,7 @@ impl PluginCreation {
         let height = crate::plugin_host::region_size(
             &self.plugin.identity.id,
             self.instance,
-            EditorRegion::Main,
+            EditorRegion::Frame,
         )
         .map_or(CREATION_DIALOG_HEIGHT, |size| size.y.max(1.0));
         crate::plugin_host::editor_ui(
@@ -83,7 +83,8 @@ impl PluginCreation {
                 client_id: editors.client_id(),
                 role: InstanceRole::Creation,
                 instance: self.instance,
-                region: EditorRegion::Main,
+                region: EditorRegion::Frame,
+                frame: Some(FrameSpec::default()),
                 size: egui::vec2(ui.available_width(), height),
                 view: None,
             },
@@ -236,7 +237,7 @@ impl PluginEditor {
             .show(ui.ctx(), |ui| {
                 ui.set_min_size(screen.size());
                 ui.painter().rect_filled(screen, 0.0, egui::Color32::BLACK);
-                action = self.region_ui(ui, editors, EditorRegion::Main, screen.size(), None);
+                action = self.frame_ui(ui, editors, FrameSpec::default(), screen.size(), None);
                 if entered {
                     if let Some(id) = self.main_region_id {
                         ui.ctx().memory_mut(|memory| memory.request_focus(id));
@@ -250,10 +251,48 @@ impl PluginEditor {
         self.plugin.regions.contains(&region)
     }
 
-    fn shows_region(&self, region: EditorRegion) -> bool {
-        self.has_region(region)
-            && !self.presenting()
-            && crate::plugin_host::region_shown(&self.plugin.identity.id, self.instance, region)
+    fn frame_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        viewport: &mut DirectEditorViewport,
+        chrome: bool,
+    ) -> Option<EditorAction> {
+        self.active_this_frame = true;
+        self.context = Some(ui.ctx().clone());
+        if self.presenting() {
+            return self.presenting_ui(ui, editors);
+        }
+        self.stop_presenting();
+        let rect = ui.available_rect_before_wrap();
+        if self.plugin.capabilities.pan_and_zoom {
+            viewport.auto_fit(self.block.id());
+        }
+        let view = self.plugin.capabilities.pan_and_zoom.then(|| {
+            viewport
+                .content_rect()
+                .unwrap_or(rect)
+                .translate(-rect.min.to_vec2())
+        });
+        let frame = FrameSpec {
+            chrome,
+            content: None,
+            trail: Vec::new(),
+        };
+        let action = self.frame_ui(ui, editors, frame, rect.size(), view);
+        self.take_view_changes(rect, viewport);
+        action
+    }
+
+    fn frame_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        frame: FrameSpec,
+        size: egui::Vec2,
+        view: Option<egui::Rect>,
+    ) -> Option<EditorAction> {
+        self.region_ui(ui, editors, EditorRegion::Frame, Some(frame), size, view)
     }
 
     fn region_ui(
@@ -261,6 +300,7 @@ impl PluginEditor {
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
         region: EditorRegion,
+        frame: Option<FrameSpec>,
         size: egui::Vec2,
         view: Option<egui::Rect>,
     ) -> Option<EditorAction> {
@@ -281,11 +321,12 @@ impl PluginEditor {
                 }),
                 instance: self.instance,
                 region,
+                frame,
                 size,
                 view,
             },
         );
-        if region == EditorRegion::Main {
+        if region == EditorRegion::Frame {
             self.main_region_id = presentation.id;
         }
         let mut action = presentation
@@ -302,7 +343,7 @@ impl PluginEditor {
             action = action.or(next);
         }
         presentation.present(ui);
-        if region == EditorRegion::Main {
+        if region == EditorRegion::Frame {
             if let Some(rect) = presentation.loading_rect {
                 let rect = rect.intersect(ui.clip_rect());
                 let mut loading = ui.new_child(
@@ -328,7 +369,7 @@ impl PluginEditor {
             action = action.or(next);
         }
         presentation.report(statuses);
-        if region == EditorRegion::Main {
+        if region == EditorRegion::Frame {
             self.block_pick_ui(ui, editors);
         }
         action
@@ -349,13 +390,8 @@ impl PluginEditor {
             .pointer_latest_pos()
             .is_some_and(|position| child.rect.contains(position) && child.clip.contains(position));
         let mut action = None;
-        let mut used = None;
-        if available && !child.part.is_main() {
-            let (next, size) = self.chrome_ui(ui, editors, child, viewport);
-            viewport.drain().for_each(drop);
-            action = next;
-            used = Some(size);
-        } else if available && child.is_preview() {
+        let used: Option<egui::Vec2> = None;
+        if available && child.is_preview() {
             let painter = ui.painter().with_clip_rect(child.clip);
             let rendered = editors.render(
                 child.block_id,
@@ -393,44 +429,9 @@ impl PluginEditor {
             aspect_ratio: editors.preview_aspect_ratio(child.block_id),
             hovered,
             active: available && child.is_active(),
-            has_left_sidebar: available && editors.direct_editor_has_left_sidebar(child.block_id),
-            has_right_sidebar: available && editors.direct_editor_has_right_sidebar(child.block_id),
             error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
         });
         action
-    }
-
-    fn chrome_ui(
-        &self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        child: &HostChild,
-        viewport: &mut DirectEditorViewport,
-    ) -> (Option<EditorAction>, egui::Vec2) {
-        let clip = child.clip.intersect(ui.clip_rect());
-        ui.painter()
-            .with_clip_rect(clip)
-            .rect_filled(child.rect, 0.0, ui.visuals().panel_fill);
-        let mut chrome = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt(("plugin-chrome", self.instance.0, child.child.0))
-                .max_rect(child.rect)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
-        chrome.set_clip_rect(clip);
-        let action = match child.part {
-            ChildPart::Toolbar => {
-                editors.direct_editor_top_bar(child.block_id, &mut chrome, viewport)
-            }
-            ChildPart::LeftSidebar => {
-                editors.direct_editor_left_sidebar(child.block_id, &mut chrome)
-            }
-            ChildPart::RightSidebar => {
-                editors.direct_editor_right_sidebar(child.block_id, &mut chrome)
-            }
-            ChildPart::Main => None,
-        };
-        (action, chrome.min_rect().size())
     }
 
     fn preview_children_ui(
@@ -468,8 +469,6 @@ impl PluginEditor {
                 aspect_ratio: editors.preview_aspect_ratio(child.block_id),
                 hovered: false,
                 active: false,
-                has_left_sidebar: false,
-                has_right_sidebar: false,
                 error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
             });
         }
@@ -653,49 +652,15 @@ impl BlockEditor for PluginEditor {
         false
     }
 
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        if !self.shows_region(EditorRegion::Toolbar) {
-            return None;
-        }
-        let height = crate::plugin_host::region_size(
-            &self.plugin.identity.id,
-            self.instance,
-            EditorRegion::Toolbar,
-        )
-        .map_or_else(|| toolbar_height(ui), |size| size.y.max(1.0));
-        let size = egui::vec2(ui.available_width(), height);
-        self.region_ui(ui, editors, EditorRegion::Toolbar, size, None)
+    fn direct_editor_owns_frame(&self) -> bool {
+        true
     }
 
-    fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        self.shows_region(EditorRegion::LeftSidebar)
-    }
-
-    fn direct_editor_left_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::LeftSidebar, size, None)
-    }
-
-    fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        self.shows_region(EditorRegion::RightSidebar)
-    }
-
-    fn direct_editor_right_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        let size = ui.available_size();
-        self.region_ui(ui, editors, EditorRegion::RightSidebar, size, None)
+    fn direct_editor_viewport_rect(&self, frame: egui::Rect) -> egui::Rect {
+        crate::plugin_host::frame_rects(&self.plugin.identity.id, self.instance)
+            .map(|rects| rects.content.translate(frame.min.to_vec2()))
+            .filter(|content| content.is_positive())
+            .unwrap_or(frame)
     }
 
     fn direct_editor_ui(
@@ -705,25 +670,17 @@ impl BlockEditor for PluginEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.active_this_frame = true;
-        self.context = Some(ui.ctx().clone());
-        if self.presenting() {
-            return self.presenting_ui(ui, editors);
-        }
-        self.stop_presenting();
-        let rect = ui.available_rect_before_wrap();
-        if self.plugin.capabilities.pan_and_zoom {
-            viewport.auto_fit(self.block.id());
-        }
-        let view = self.plugin.capabilities.pan_and_zoom.then(|| {
-            viewport
-                .content_rect()
-                .unwrap_or(rect)
-                .translate(-rect.min.to_vec2())
-        });
-        let action = self.region_ui(ui, editors, EditorRegion::Main, rect.size(), view);
-        self.take_view_changes(rect, viewport);
-        action
+        self.frame_editor_ui(ui, editors, viewport, true)
+    }
+
+    fn embedded_direct_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        _scale: f32,
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        self.frame_editor_ui(ui, editors, viewport, false)
     }
 
     fn set_tab_active(&mut self, active: bool) {
@@ -742,14 +699,6 @@ impl BlockEditor for PluginEditor {
         self.stop_presenting();
         self.close();
     }
-}
-
-fn toolbar_height(ui: &egui::Ui) -> f32 {
-    let spacing = ui.spacing();
-    spacing
-        .interact_size
-        .y
-        .max(ui.text_style_height(&egui::TextStyle::Body) + 2.0 * spacing.button_padding.y)
 }
 
 pub(super) struct PluginArtifact {
@@ -855,6 +804,7 @@ impl ArtifactSession for PluginArtifact {
                 role: InstanceRole::Artifact(self.block),
                 instance: self.instance,
                 region: EditorRegion::ArtifactSettings,
+                frame: None,
                 size: egui::vec2(ui.available_width(), height),
                 view: None,
             },

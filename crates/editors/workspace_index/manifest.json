@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "626c6f63-6b2d-6170-702d-696e64657802",
   "display_name": "Folder",
-  "icon": "",
+  "icon": "\ue2c7",
   "creation": "Immediate",
   "children": {
     "add": true,
@@ -15,7 +15,9 @@
   "interaction": "Preview",
   "resize": "None",
   "regions": [
-    "Main",
+    "Frame"
+  ],
+  "chrome": [
     "Toolbar"
   ],
   "entry_point": "workspace_index.wasm"

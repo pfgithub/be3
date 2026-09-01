@@ -3,7 +3,7 @@ use super::*;
 fn placements(occluders: Vec<Occluder>) -> Message {
     Message::Children(ChildPlacements {
         instance: EditorInstanceId(1),
-        region: EditorRegion::Main,
+        region: EditorRegion::Frame,
         generation: 1,
         children: vec![ChildPlacement {
             child: ChildId(1),
@@ -14,7 +14,6 @@ fn placements(occluders: Vec<Occluder>) -> Message {
             corner_radius: 0.0,
             layer: ChildLayer::Below,
             mode: ChildMode::Preview,
-            part: ChildPart::Main,
         }],
         occluders,
     })

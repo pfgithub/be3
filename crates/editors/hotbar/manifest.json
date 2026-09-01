@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "block_type": "6c6f6769-632d-686f-7462-617201010101",
   "display_name": "Hotbar",
-  "icon": "",
+  "icon": "\ue1bd",
   "creation": "None",
   "regions": [
-    "Main"
+    "Frame"
   ],
   "entry_point": "hotbar.wasm"
 }

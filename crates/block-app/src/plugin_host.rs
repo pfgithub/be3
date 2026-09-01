@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use block_client::BlockClient;
 use block_plugin_api::{
-    BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, ChildPart, EditorInstanceId, EditorRegion,
+    BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, EditorInstanceId, EditorRegion, FrameSpec,
     PluginManifest, ScreenId,
 };
 use eframe::egui;
@@ -23,8 +23,8 @@ mod web;
 
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
-    creation_ready, editor_ui, flush, install, intrinsic_size, kill, poll, present, presenting,
-    preview, regenerate_artifact, region_shown, region_size, report_children, resized, running,
+    creation_ready, editor_ui, flush, frame_rects, install, intrinsic_size, kill, poll, present,
+    presenting, preview, regenerate_artifact, region_size, report_children, resized, running,
     take_artifact_outcome, take_block_pick, take_created, take_view_changes,
 };
 
@@ -43,7 +43,6 @@ pub(crate) struct HostChild {
     pub(crate) clip: egui::Rect,
     pub(crate) layer: ChildLayer,
     pub(crate) mode: ChildMode,
-    pub(crate) part: ChildPart,
 }
 
 impl HostChild {
@@ -73,8 +72,6 @@ pub(crate) struct HostChildStatus {
     pub(crate) aspect_ratio: Option<f32>,
     pub(crate) hovered: bool,
     pub(crate) active: bool,
-    pub(crate) has_left_sidebar: bool,
-    pub(crate) has_right_sidebar: bool,
     pub(crate) error: Option<String>,
 }
 
@@ -179,6 +176,7 @@ pub(crate) struct EditorSlot<'a> {
     pub(crate) role: InstanceRole,
     pub(crate) instance: EditorInstanceId,
     pub(crate) region: EditorRegion,
+    pub(crate) frame: Option<FrameSpec>,
     pub(crate) size: egui::Vec2,
     pub(crate) view: Option<egui::Rect>,
 }

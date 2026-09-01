@@ -1,14 +1,14 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use block_plugin_api::{
-    AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode, ChildPart,
-    ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorRegion, FetchResult, FilePick,
+    AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode, ChildPlacement,
+    ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorRegion, FetchResult, FilePick,
     Occluder, PerformanceMeasurement, ViewChange,
 };
 pub use block_plugin_api::{BlockFilter, FileFilter};
@@ -128,13 +128,13 @@ struct Region {
     origin: egui::Vec2,
 }
 
-type ChildKey = (EditorRegion, ChildPart, Uuid, u32);
+type ChildKey = (EditorRegion, Uuid, u32);
 
 #[derive(Default)]
 struct Children {
     placements: Vec<ChildPlacement>,
     occluders: Vec<Occluder>,
-    ordinals: HashMap<(ChildPart, Uuid), u32>,
+    ordinals: HashMap<Uuid, u32>,
     identities: HashMap<ChildKey, ChildId>,
     used: Vec<ChildKey>,
     next: u64,
@@ -185,18 +185,6 @@ impl ChildHandle {
     pub fn aspect_ratio(&self) -> Option<f32> {
         let status = self.status.as_ref()?;
         (status.aspect_ratio > 0.0).then_some(status.aspect_ratio)
-    }
-
-    pub fn has_left_sidebar(&self) -> bool {
-        self.status
-            .as_ref()
-            .is_some_and(|status| status.has_left_sidebar)
-    }
-
-    pub fn has_right_sidebar(&self) -> bool {
-        self.status
-            .as_ref()
-            .is_some_and(|status| status.has_right_sidebar)
     }
 
     pub fn set_mode(&self, mode: ChildMode) {
@@ -260,8 +248,7 @@ pub struct EditorHost {
     next_fetch: Rc<Cell<u64>>,
     presenting: Rc<Cell<bool>>,
     present_requests: Rc<RefCell<Vec<bool>>>,
-    shown_regions: Rc<RefCell<HashMap<EditorRegion, bool>>>,
-    region_changes: Rc<RefCell<Vec<(EditorRegion, bool)>>>,
+    hidden_bands: Rc<RefCell<HashSet<EditorBand>>>,
 }
 
 impl EditorHost {
@@ -426,14 +413,7 @@ impl EditorHost {
 
     pub fn child(&self, ui: &mut egui::Ui, block_id: Uuid, block_type: Uuid) -> ChildHandle {
         let size = ui.available_size_before_wrap();
-        self.place_child(
-            ui,
-            size,
-            block_id,
-            block_type,
-            ChildLayer::Below,
-            ChildPart::Main,
-        )
+        self.place_child(ui, size, block_id, block_type, ChildLayer::Below)
     }
 
     pub fn child_sized(
@@ -443,56 +423,24 @@ impl EditorHost {
         block_id: Uuid,
         block_type: Uuid,
     ) -> ChildHandle {
-        self.place_child(
-            ui,
-            size,
-            block_id,
-            block_type,
-            ChildLayer::Below,
-            ChildPart::Main,
-        )
+        self.place_child(ui, size, block_id, block_type, ChildLayer::Below)
     }
 
     pub fn child_above(&self, ui: &mut egui::Ui, block_id: Uuid, block_type: Uuid) -> ChildHandle {
         let size = ui.available_size_before_wrap();
-        self.place_child(
-            ui,
-            size,
-            block_id,
-            block_type,
-            ChildLayer::Above,
-            ChildPart::Main,
-        )
+        self.place_child(ui, size, block_id, block_type, ChildLayer::Above)
     }
 
-    pub fn child_part(
-        &self,
-        ui: &mut egui::Ui,
-        part: ChildPart,
-        block_id: Uuid,
-        block_type: Uuid,
-    ) -> ChildHandle {
-        let size = ui.available_size_before_wrap();
-        self.place_child(ui, size, block_id, block_type, ChildLayer::Below, part)
+    pub fn show_band(&self, band: EditorBand, shown: bool) {
+        let mut hidden = self.hidden_bands.borrow_mut();
+        match shown {
+            true => hidden.remove(&band),
+            false => hidden.insert(band),
+        };
     }
 
-    pub fn child_part_sized(
-        &self,
-        ui: &mut egui::Ui,
-        part: ChildPart,
-        size: egui::Vec2,
-        block_id: Uuid,
-        block_type: Uuid,
-    ) -> ChildHandle {
-        self.place_child(ui, size, block_id, block_type, ChildLayer::Below, part)
-    }
-
-    pub fn show_region(&self, region: EditorRegion, shown: bool) {
-        let mut regions = self.shown_regions.borrow_mut();
-        if regions.insert(region, shown) == Some(shown) {
-            return;
-        }
-        self.region_changes.borrow_mut().push((region, shown));
+    pub fn band_shown(&self, band: EditorBand) -> bool {
+        !self.hidden_bands.borrow().contains(&band)
     }
 
     pub fn presenting(&self) -> bool {
@@ -523,20 +471,19 @@ impl EditorHost {
         block_id: Uuid,
         block_type: Uuid,
         layer: ChildLayer,
-        part: ChildPart,
     ) -> ChildHandle {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let painter = ui.painter().clone();
         let state = self.region.get();
-        let region = state.region.unwrap_or(EditorRegion::Main);
+        let region = state.region.unwrap_or(EditorRegion::Frame);
         let mut children = self.children.borrow_mut();
         let ordinal = {
-            let ordinal = children.ordinals.entry((part, block_id)).or_default();
+            let ordinal = children.ordinals.entry(block_id).or_default();
             let current = *ordinal;
             *ordinal += 1;
             current
         };
-        let key = (region, part, block_id, ordinal);
+        let key = (region, block_id, ordinal);
         let child = match children.identities.get(&key) {
             Some(child) => *child,
             None => {
@@ -557,11 +504,7 @@ impl EditorHost {
             clip: child_rect(ui.clip_rect().intersect(rect).translate(-state.origin)),
             corner_radius: 0.0,
             layer,
-            mode: match part {
-                ChildPart::Main => ChildMode::Passive,
-                _ => ChildMode::Live,
-            },
-            part,
+            mode: ChildMode::Passive,
         });
         drop(children);
         ChildHandle {
@@ -705,11 +648,6 @@ impl EditorHost {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn take_present_requests(&self) -> Vec<bool> {
         std::mem::take(&mut self.present_requests.borrow_mut())
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn take_region_changes(&self) -> Vec<(EditorRegion, bool)> {
-        std::mem::take(&mut self.region_changes.borrow_mut())
     }
 
     #[cfg(target_arch = "wasm32")]

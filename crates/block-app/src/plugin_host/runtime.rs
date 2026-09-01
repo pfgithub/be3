@@ -253,6 +253,7 @@ impl Runtime {
                     false
                 }
                 Message::RegionSizes(sizes) => self.instances.set_region_sizes(sizes),
+                Message::Frames(reports) => self.instances.set_frame_reports(reports),
                 Message::Children(placements) => {
                     let (answered, changed) = self.instances.set_children(placements);
                     answers.extend(answered);
@@ -338,6 +339,10 @@ fn plugin_loading_rect(
     layout.placement(screen).is_none().then_some(rect)
 }
 
+pub(crate) struct HostFrame {
+    pub(crate) content: egui::Rect,
+}
+
 pub(crate) struct EditorPresentation {
     plugin_id: String,
     instance: EditorInstanceId,
@@ -391,6 +396,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
         role,
         instance,
         region,
+        frame,
         size,
         view,
     } = slot;
@@ -424,6 +430,7 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
             client_id,
             role,
             block_types,
+            frame,
             response.rect.size(),
             visible,
             ui.ctx().pixels_per_point(),
@@ -636,6 +643,7 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> Preview
                 block_type,
             }),
             block_types,
+            None,
             size,
             visible,
             scale_factor,
@@ -772,15 +780,21 @@ pub(crate) fn take_created(
     .flatten()
 }
 
-pub(crate) fn region_shown(
-    plugin_id: &str,
-    instance: EditorInstanceId,
-    region: EditorRegion,
-) -> bool {
+pub(crate) fn frame_rects(plugin_id: &str, instance: EditorInstanceId) -> Option<HostFrame> {
     with(plugin_id, |runtime| {
-        runtime.instances.region_shown(instance, region)
+        runtime.instances.frame_report(instance).map(|report| {
+            let rect = |rect: &block_plugin_api::ChildRect| {
+                egui::Rect::from_min_size(
+                    egui::pos2(rect.x, rect.y),
+                    egui::vec2(rect.width, rect.height),
+                )
+            };
+            HostFrame {
+                content: rect(&report.content),
+            }
+        })
     })
-    .unwrap_or(true)
+    .flatten()
 }
 
 pub(crate) fn presenting(plugin_id: &str, instance: EditorInstanceId) -> bool {

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "block_type": "696d6167-652d-626c-6f63-6b2d74797001",
   "display_name": "Image",
-  "icon": "",
+  "icon": "\ue3f4",
   "creation": "Dialog",
   "interaction": "Preview",
   "capabilities": {
@@ -14,9 +14,11 @@
   },
   "resize": "None",
   "regions": [
-    "Main",
-    "RightSidebar",
+    "Frame",
     "Preview"
+  ],
+  "chrome": [
+    "RightSidebar"
   ],
   "entry_point": "image_block.wasm"
 }
