@@ -81,21 +81,17 @@ yields the bands — toolbar row, left sidebar, right sidebar, content — and c
 that lives in `editors.rs:690` today: resizable sidebars, compact mode, read-only greying. The
 band geometry is a function of the frame alone, never of how many owners are in the stack.
 
-**Each band belongs to exactly one owner per frame.** The parent declares how it hands over when
-a child is selected:
-
-- **Replace** (the default, and the only thing that works for the infinite canvas and text): the
-  child owns every chrome band; the parent is told its chrome is hidden this frame and skips
-  drawing it, keeping only its content band, unchanged. Nothing in the frame moves.
-- **Nest**: the parent keeps its bands and the child's are placed inside them. Only the
-  presentation editor uses this, and only until its filmstrip can move into its content area and
-  it can switch to Replace too.
+**Each band belongs to exactly one owner per frame, and handover is always a replacement.** When
+a child is selected the child owns every chrome band; the parent is told its chrome is hidden this
+frame and skips drawing it, keeping only its content band, unchanged. Nothing in the frame moves.
+There is no nesting mode: a child's chrome is never placed inside the parent's.
 
 Plugins keep writing `toolbar_ui`, `left_sidebar_ui`, `right_sidebar_ui`, `ui`; the plugin-side
 framework calls them into whichever bands that instance owns this frame, and skips the ones it
-does not. A plugin cannot address the frame directly and cannot tell which mode it is in.
+does not. A plugin cannot address the frame directly and cannot tell whether it is the outermost
+owner or a child that took over.
 
-Under Replace the toolbar is entirely the child's, so **the framework — not the plugin — draws a
+On handover the toolbar is entirely the child's, so **the framework — not the plugin — draws a
 breadcrumb and an exit at a fixed spot in the toolbar band** ("Canvas › Spreadsheet ✕", Escape to
 leave). A plugin must not be able to drop the only way back out.
 
@@ -176,25 +172,27 @@ dimension once slots are frame-sized.
 and floating pieces as described; route input top-down with fall-through. Keep `host.view()` and
 the host's pan/zoom gestures as they are — the host still owns the view, and the framework must
 not swallow wheel or pinch over the content rect of a `pan_and_zoom` plugin. Make the infinite
-canvas and the text editor frame owners that hand over with **Replace**, and delete the canvas's
-chrome forwarding. The invariant to test here: selecting or deselecting a child must not change
-the parent's content rect, its zoom or its pan by a single pixel.
+canvas and the text editor frame owners, and delete the canvas's chrome forwarding. The invariant
+to test here: selecting or deselecting a child must not change the parent's content rect, its zoom
+or its pan by a single pixel.
 
 **6. Presentation and cleanups.** The deck is the outer frame owner (its buttons in its toolbar,
 the filmstrip in its left sidebar); the selected slide is the inner frame owner whose content rect
-is the stage, handed over with **Nest** so the filmstrip survives. `child_part` disappears; the
-slide's sidebars are its own, placed inside the deck's. Leave a note that the better end state is
-the filmstrip moving into the deck's content area so presentation can use Replace like everything
-else. Delete the per-region texture caches. Rewrite the parts of
+is the stage. It takes over the frame like every other child, so **the filmstrip is hidden while a
+slide is being edited** and comes back on Escape. That is an accepted regression for now — the
+deck's chrome is gone from the frame, not squeezed. The end state that undoes it is the filmstrip
+moving into the deck's content area, alongside the stage, where the slide taking the chrome bands
+does not hide it; leave a note saying so. `child_part` disappears; the slide's sidebars are its
+own, at the edges of the frame. Delete the per-region texture caches. Rewrite the parts of
 `guides/adding_a_plugin_editor.md` that describe per-region contexts, per-region textures and
 `child_part` — it is currently the main written record of the old model. Do not edit `README.md`;
 mention it in the handoff if it is stale.
 
 ## Decisions (defaults if nothing says otherwise)
 
-- **Replace is the default; Nest is presentation's temporary exception.** Do not reach for Nest
-  anywhere else, and do not let the two modes diverge in appearance — a child's chrome should look
-  the same in either.
+- **Replacement is the only handover.** There is no second mode and no per-parent choice; do not
+  add one. A parent that wants something of its own on screen while a child is being edited has to
+  put it in its content area, not in a chrome band.
 - **The sub-editor's content stays where the block is** on the canvas rather than being pulled
   into the content band. That keeps canvas editing spatial. Offer a zoom-to-fit affordance instead.
 - **`present()`** becomes "frame owner takes the whole frame with no bands", which should simplify
