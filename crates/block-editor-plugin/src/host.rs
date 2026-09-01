@@ -287,7 +287,8 @@ impl EditorHost {
     }
 
     pub fn view(&self) -> Option<egui::Rect> {
-        self.view.get()
+        let origin = self.region.get().origin;
+        self.view.get().map(|view| view.translate(origin))
     }
 
     pub fn pan_view(&self, delta: egui::Vec2) {
@@ -298,9 +299,10 @@ impl EditorHost {
     }
 
     pub fn zoom_view(&self, factor: f32, anchor: Option<egui::Pos2>) {
+        let origin = self.region.get().origin;
         self.view_changes.borrow_mut().push(ViewChange::Zoom {
             factor,
-            anchor: anchor.map(|anchor| (anchor.x, anchor.y)),
+            anchor: anchor.map(|anchor| (anchor.x - origin.x, anchor.y - origin.y)),
         });
     }
 
@@ -598,7 +600,7 @@ impl EditorHost {
         self.blocks_picked.borrow_mut().insert(request, pick);
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) fn begin_region(&self, region: EditorRegion, origin: egui::Vec2) {
         self.region.set(Region {
             region: Some(region),
@@ -803,3 +805,6 @@ impl BlockPicker {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

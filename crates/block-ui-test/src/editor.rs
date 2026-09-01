@@ -148,7 +148,7 @@ impl Viewport {
             self.pan = egui::Vec2::ZERO;
         }
         let view = egui::Rect::from_center_size(region.center() + self.pan, content * self.zoom);
-        self.host.set_view(view.translate(-region.min.to_vec2()));
+        self.host.set_view(view);
     }
 
     fn settle(&mut self, region: egui::Rect) {
@@ -158,9 +158,8 @@ impl Viewport {
                 ViewChange::Pan { x, y } => self.pan += egui::vec2(x, y),
                 ViewChange::Zoom { factor, anchor } => {
                     let zoom = (self.zoom * factor).clamp(MINIMUM_ZOOM, MAXIMUM_ZOOM);
-                    let anchor = anchor
-                        .map_or(region.center(), |(x, y)| region.min + egui::vec2(x, y))
-                        - region.center();
+                    let anchor =
+                        anchor.map_or(region.center(), |(x, y)| egui::pos2(x, y)) - region.center();
                     self.pan = anchor - (anchor - self.pan) * (zoom / self.zoom);
                     self.zoom = zoom;
                 }

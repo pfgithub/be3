@@ -241,7 +241,6 @@ impl PdfApp {
         self.editing
             .as_ref()
             .and_then(|editing| editing.host.view())
-            .map(|view| view.translate(region.min.to_vec2()))
             .unwrap_or(region)
     }
 
