@@ -1,7 +1,7 @@
 use block_client::{blocks, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
-    BlockPick, BlockTypeDescriptor, CreationMode, EditorInstanceId, EditorRegion, FrameSpec,
-    InteractionMode, PluginManifest, ResizeMode, ViewChange,
+    BlockPick, BlockTypeDescriptor, ChildRect, CreationMode, EditorInstanceId, EditorRegion,
+    FrameChrome, FrameSpec, InteractionMode, PluginManifest, ResizeMode, ViewChange,
 };
 use eframe::egui;
 use std::sync::{
@@ -13,10 +13,10 @@ use uuid::Uuid;
 pub(crate) mod discovery;
 
 use super::{
-    embedded_editor_ui, paint_block_fallback, rect_corners, ArtifactSession, ArtifactStatus,
-    BlockEditor, BlockRenderContext, CreationStep, DirectEditorCapabilities,
+    embedded_editor_ui, frame_child_ui, paint_block_fallback, rect_corners, ArtifactSession,
+    ArtifactStatus, BlockEditor, BlockRenderContext, CreationStep, DirectEditorCapabilities,
     DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, DirectEditorViewportInput,
-    EditorAccess, EditorAction, EditorRegistry, PendingCreation,
+    EditorAccess, EditorAction, EditorRegistry, FrameSlot, PendingCreation,
 };
 use crate::{
     block_picker::BlockPicker,
@@ -275,7 +275,10 @@ impl PluginEditor {
                 .translate(-rect.min.to_vec2())
         });
         let frame = FrameSpec {
-            chrome,
+            chrome: match chrome {
+                true => FrameChrome::Drawn,
+                false => FrameChrome::None,
+            },
             content: None,
             trail: Vec::new(),
         };
@@ -337,7 +340,7 @@ impl PluginEditor {
         for child in presentation
             .children
             .iter()
-            .filter(|child| child.is_below())
+            .filter(|child| child.is_below() && !child.frame_owner)
         {
             let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
             action = action.or(next);
@@ -363,11 +366,12 @@ impl PluginEditor {
         for child in presentation
             .children
             .iter()
-            .filter(|child| !child.is_below())
+            .filter(|child| !child.is_below() || child.frame_owner)
         {
             let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
             action = action.or(next);
         }
+        presentation.present_floating(ui);
         presentation.report(statuses);
         if region == EditorRegion::Frame {
             self.block_pick_ui(ui, editors);
@@ -404,6 +408,18 @@ impl PluginEditor {
             if !rendered {
                 paint_block_fallback(&painter, child.rect, None, editors);
             }
+        } else if available && child.frame_owner && editors.is_frame_child(ui.ctx(), child.block_id)
+        {
+            action = frame_child_ui(
+                ui,
+                editors,
+                child.block_id,
+                ("plugin-frame-child", self.instance.0, child.child.0),
+                child.rect,
+                child.clip,
+                viewport,
+            );
+            viewport.drain().for_each(drop);
         } else if available {
             action = embedded_editor_ui(
                 ui,
@@ -656,6 +672,63 @@ impl BlockEditor for PluginEditor {
         true
     }
 
+    fn direct_editor_frame_child(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Uuid> {
+        crate::plugin_host::frame_child(&self.plugin.identity.id, self.instance)
+    }
+
+    fn clear_direct_editor_frame_child(&mut self, _editors: &mut EditorAccess<'_>) {
+        crate::plugin_host::revoke_frame_child(&self.plugin.identity.id, self.instance);
+    }
+
+    fn take_direct_editor_frame_exit(&mut self) -> bool {
+        crate::plugin_host::take_leaving(&self.plugin.identity.id, self.instance)
+    }
+
+    fn direct_editor_frame_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        editors: &mut EditorAccess<'_>,
+        slot: &FrameSlot,
+        viewport: &mut DirectEditorViewport,
+    ) -> Option<EditorAction> {
+        self.active_this_frame = true;
+        self.context = Some(ui.ctx().clone());
+        if self.presenting() {
+            return self.presenting_ui(ui, editors);
+        }
+        self.stop_presenting();
+        let rect = slot.frame;
+        if self.plugin.capabilities.pan_and_zoom {
+            viewport.auto_fit(self.block.id());
+        }
+        let view = self.plugin.capabilities.pan_and_zoom.then(|| {
+            viewport
+                .content_rect()
+                .unwrap_or(rect)
+                .translate(-rect.min.to_vec2())
+        });
+        let frame = FrameSpec {
+            chrome: match slot.chrome {
+                block_ui::frame::Chrome::Drawn => FrameChrome::Drawn,
+                block_ui::frame::Chrome::Reserved => FrameChrome::Reserved,
+                block_ui::frame::Chrome::None => FrameChrome::None,
+            },
+            content: slot.content.map(|content| {
+                let content = content.translate(-rect.min.to_vec2());
+                ChildRect {
+                    x: content.min.x,
+                    y: content.min.y,
+                    width: content.width(),
+                    height: content.height(),
+                }
+            }),
+            trail: slot.trail.clone(),
+        };
+        let action = self.frame_ui(ui, editors, frame, rect.size(), view);
+        self.take_view_changes(rect, viewport);
+        action
+    }
+
     fn direct_editor_viewport_rect(&self, frame: egui::Rect) -> egui::Rect {
         crate::plugin_host::frame_rects(&self.plugin.identity.id, self.instance)
             .map(|rects| rects.content.translate(frame.min.to_vec2()))
@@ -670,7 +743,7 @@ impl BlockEditor for PluginEditor {
         _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.frame_editor_ui(ui, editors, viewport, true)
+        self.frame_editor_ui(ui, editors, viewport, false)
     }
 
     fn embedded_direct_editor_ui(

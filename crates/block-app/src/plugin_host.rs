@@ -14,6 +14,7 @@ mod clipboard;
 pub(crate) use clipboard::{paste_shortcut_down, read_clipboard_image};
 mod input;
 mod instances;
+mod pieces;
 mod presenter;
 mod runtime;
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,9 +24,10 @@ mod web;
 
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
-    creation_ready, editor_ui, flush, frame_rects, install, intrinsic_size, kill, poll, present,
-    presenting, preview, regenerate_artifact, region_size, report_children, resized, running,
-    take_artifact_outcome, take_block_pick, take_created, take_view_changes,
+    creation_ready, editor_ui, flush, frame_child, frame_rects, install, intrinsic_size, kill,
+    poll, present, presenting, preview, regenerate_artifact, region_size, report_children, resized,
+    revoke_frame_child, running, take_artifact_outcome, take_block_pick, take_created,
+    take_leaving, take_view_changes,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -37,6 +39,7 @@ pub(crate) const MAX_LIVE_CHILDREN: usize = 16;
 
 pub(crate) struct HostChild {
     pub(crate) child: ChildId,
+    pub(crate) frame_owner: bool,
     pub(crate) block_id: Uuid,
     pub(crate) block_type: Uuid,
     pub(crate) rect: egui::Rect,

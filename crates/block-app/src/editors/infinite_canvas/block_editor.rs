@@ -139,6 +139,18 @@ impl BlockEditor for InfiniteCanvasEditor {
         true
     }
 
+    fn direct_editor_frame_child(&mut self, editors: &mut EditorAccess<'_>) -> Option<Uuid> {
+        let canvas = self.block.read()?;
+        let entities = canvas.entities().to_vec();
+        drop(canvas);
+        let (_, block_id, _) = focused_direct_editor(self.focused_editor, &entities)?;
+        self.resolve_block_id(editors, block_id)
+    }
+
+    fn clear_direct_editor_frame_child(&mut self, _editors: &mut EditorAccess<'_>) {
+        self.focused_editor = None;
+    }
+
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
@@ -148,31 +160,7 @@ impl BlockEditor for InfiniteCanvasEditor {
         let canvas = self.block.read()?;
         let entities = canvas.entities().to_vec();
         drop(canvas);
-        let focused = focused_direct_editor(self.focused_editor, &entities);
-        if self.focused_editor.is_some() && focused.is_none() {
-            self.focused_editor = None;
-        }
-
-        let mut action = None;
-        if let Some((_, block_id, _)) = focused {
-            ui.horizontal(|ui| {
-                if ui
-                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
-                    .clicked()
-                {
-                    self.focused_editor = None;
-                }
-            });
-            if let Some(entity_id) = self.focused_editor {
-                if let Some(id) = self.resolve_block_id(editors, block_id) {
-                    let mut nested = DirectEditorViewport::new(viewport.zoom());
-                    action = editors.direct_editor_top_bar(id, ui, &mut nested);
-                    self.forward_viewport(entity_id, nested, viewport);
-                }
-            }
-        } else {
-            self.show_toolbar(ui, &entities, editors, viewport);
-        }
+        self.show_toolbar(ui, &entities, editors, viewport);
         if let Some(error) = self.image_import_error.clone() {
             ui.horizontal(|ui| {
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -181,42 +169,11 @@ impl BlockEditor for InfiniteCanvasEditor {
                 }
             });
         }
-        action
+        None
     }
 
-    fn direct_editor_has_left_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
-        let Some(canvas) = self.block.read() else {
-            return false;
-        };
-        focused_direct_editor(self.focused_editor, canvas.entities()).is_some_and(
-            |(_, block_id, _)| {
-                self.peek_block_id(block_id)
-                    .is_some_and(|id| editors.direct_editor_has_left_sidebar(id))
-            },
-        )
-    }
-
-    fn direct_editor_left_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        let canvas = self.block.read()?;
-        let focused = focused_direct_editor(self.focused_editor, canvas.entities());
-        drop(canvas);
-        let block_id = focused?.1;
-        let id = self.resolve_block_id(editors, block_id)?;
-        editors.direct_editor_left_sidebar(id, ui)
-    }
-
-    fn direct_editor_has_right_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
-        let Some(canvas) = self.block.read() else {
-            return false;
-        };
-        focused_direct_editor(self.focused_editor, canvas.entities()).is_none_or(|focused| {
-            self.peek_block_id(focused.1)
-                .is_none_or(|id| editors.direct_editor_has_right_sidebar(id))
-        })
+    fn direct_editor_has_right_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
+        true
     }
 
     fn direct_editor_right_sidebar(
@@ -227,10 +184,6 @@ impl BlockEditor for InfiniteCanvasEditor {
         let canvas = self.block.read()?;
         let entities = canvas.entities().to_vec();
         drop(canvas);
-        if let Some((_, block_id, _)) = focused_direct_editor(self.focused_editor, &entities) {
-            let id = self.resolve_block_id(editors, block_id)?;
-            return editors.direct_editor_right_sidebar(id, ui);
-        }
         let (movement, action) = self.show_inspector(ui, &entities, editors, true);
         if let Some(movement) = movement {
             self.record_action(InfiniteCanvasOperation::Reorder {
@@ -417,16 +370,27 @@ impl BlockEditor for InfiniteCanvasEditor {
                 self.focused_editor = Some(entity.id);
             }
             let mut nested = DirectEditorViewport::new(viewport.zoom());
-            let embedded = embedded_editor_ui(
-                ui,
-                editors,
-                block_id,
-                ("canvas-direct-editor", entity.id),
-                screen,
-                visible_screen,
-                scale * self.render_scale,
-                &mut nested,
-            );
+            let embedded = match is_focused && editors.is_frame_child(ui.ctx(), block_id) {
+                true => frame_child_ui(
+                    ui,
+                    editors,
+                    block_id,
+                    ("canvas-frame-child", entity.id),
+                    screen,
+                    visible_screen,
+                    &mut nested,
+                ),
+                false => embedded_editor_ui(
+                    ui,
+                    editors,
+                    block_id,
+                    ("canvas-direct-editor", entity.id),
+                    screen,
+                    visible_screen,
+                    scale * self.render_scale,
+                    &mut nested,
+                ),
+            };
             self.forward_viewport(entity.id, nested, viewport);
             action = action.or(embedded);
         }

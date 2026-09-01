@@ -27,11 +27,11 @@ use eframe::egui::{
 };
 use egui_material_icons::{
     icons::{
-        ICON_ARROW_BACK, ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DATA_ARRAY,
-        ICON_DESCRIPTION, ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC,
-        ICON_FORMAT_LIST_BULLETED, ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH,
-        ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP,
-        ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH, ICON_TITLE,
+        ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DATA_ARRAY, ICON_DESCRIPTION,
+        ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED,
+        ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN,
+        ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP, ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH,
+        ICON_TITLE,
     },
     MaterialIcon,
 };
@@ -1579,16 +1579,27 @@ impl TextEditor {
                 }
 
                 if embed.available && show_editor {
-                    let embedded = embedded_editor_ui(
-                        ui,
-                        editors,
-                        embed.id,
-                        ("text-direct-editor", self.block.id(), embed.range.start),
-                        content,
-                        content.intersect(ui.clip_rect()),
-                        1.0,
-                        viewport,
-                    );
+                    let embedded = match focused && editors.is_frame_child(ui.ctx(), embed.id) {
+                        true => crate::editors::frame_child_ui(
+                            ui,
+                            editors,
+                            embed.id,
+                            ("text-frame-child", self.block.id(), embed.range.start),
+                            content,
+                            content.intersect(ui.clip_rect()),
+                            viewport,
+                        ),
+                        false => embedded_editor_ui(
+                            ui,
+                            editors,
+                            embed.id,
+                            ("text-direct-editor", self.block.id(), embed.range.start),
+                            content,
+                            content.intersect(ui.clip_rect()),
+                            1.0,
+                            viewport,
+                        ),
+                    };
                     action = action.or(embedded);
                 } else if embed.available {
                     let rendered = editors.render(
@@ -1844,25 +1855,20 @@ impl BlockEditor for TextEditor {
         self.direct_editor_size(editors, width)
     }
 
+    fn direct_editor_frame_child(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Uuid> {
+        self.focused_embed.map(|focused| focused.id)
+    }
+
+    fn clear_direct_editor_frame_child(&mut self, _editors: &mut EditorAccess<'_>) {
+        self.focused_embed = None;
+    }
+
     fn direct_editor_top_bar(
         &mut self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        viewport: &mut DirectEditorViewport,
+        _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        if let Some(focused) = self.focused_embed {
-            ui.horizontal(|ui| {
-                if ui
-                    .button(format!("{} Back", ICON_ARROW_BACK.codepoint))
-                    .clicked()
-                {
-                    self.focused_embed = None;
-                }
-            });
-            return self
-                .focused_embed
-                .and_then(|_| editors.direct_editor_top_bar(focused.id, ui, viewport));
-        }
         let toolbar_start = Instant::now();
         self.toolbar(ui, editors);
         if self.find.is_some() {
@@ -1878,34 +1884,6 @@ impl BlockEditor for TextEditor {
         }
         self.toolbar_profile = toolbar_start.elapsed();
         None
-    }
-
-    fn direct_editor_has_left_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
-        self.focused_embed
-            .is_some_and(|focused| editors.direct_editor_has_left_sidebar(focused.id))
-    }
-
-    fn direct_editor_left_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        self.focused_embed
-            .and_then(|focused| editors.direct_editor_left_sidebar(focused.id, ui))
-    }
-
-    fn direct_editor_has_right_sidebar(&self, editors: &mut EditorAccess<'_>) -> bool {
-        self.focused_embed
-            .is_some_and(|focused| editors.direct_editor_has_right_sidebar(focused.id))
-    }
-
-    fn direct_editor_right_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        self.focused_embed
-            .and_then(|focused| editors.direct_editor_right_sidebar(focused.id, ui))
     }
 
     fn direct_editor_ui(

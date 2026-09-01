@@ -2,9 +2,9 @@ use block_client::BlockClient;
 use block_plugin_api::{
     ArtifactDescription, BlockPick, ChildId, ChildPlacement, ChildPlacements, ChildRect,
     ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId, EditorMessage,
-    EditorRegion, FetchResult, FilePick, FrameReport, FrameSpec, InputEvent, Message, Occluder,
-    PointerButton, RegionSize, ScreenPlacement, ScreenRequest, ViewportMetrics, WheelUnit,
-    MAX_CHILDREN, MAX_COLLECTION_ITEMS,
+    EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec, InputEvent, Message,
+    Occluder, PointerButton, RegionSize, ScreenPlacement, ScreenRequest, ViewportMetrics,
+    WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -24,6 +24,7 @@ pub(crate) struct EguiSession {
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
     creating: bool,
+    leaving: bool,
     created: Option<CreationOutcome>,
     artifact: Option<ArtifactState>,
     generation: u64,
@@ -195,6 +196,7 @@ impl EguiSession {
             intrinsic: None,
             aspect_ratio: None,
             creating: false,
+            leaving: false,
             created: None,
             artifact: None,
             generation: 0,
@@ -394,6 +396,9 @@ impl EguiSession {
                     }));
                 }
             }
+        }
+        if std::mem::take(&mut self.leaving) {
+            messages.push(Message::Editor(EditorMessage::LeaveFrame { instance }));
         }
         if let Some(outcome) = self.created.take() {
             messages.push(Message::Editor(EditorMessage::CreationBlock {
@@ -621,6 +626,7 @@ impl EguiSession {
         self.host.begin_region(region, rect.min.to_vec2());
         let mut content = rect;
         let mut painted = Vec::new();
+        let mut leaving = false;
         let mut content_band = rect;
         let output = context.run_ui(input, |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(visible_rect));
@@ -642,16 +648,22 @@ impl EguiSession {
                         background: plain.fill,
                     };
                     let outcome = block_ui::frame::Frame::new(egui::Id::new("plugin frame"))
-                        .toolbar(spec.chrome && band(EditorBand::Toolbar))
-                        .left_sidebar(spec.chrome && band(EditorBand::LeftSidebar))
-                        .right_sidebar(spec.chrome && band(EditorBand::RightSidebar))
+                        .chrome(match spec.chrome {
+                            FrameChrome::Drawn => block_ui::frame::Chrome::Drawn,
+                            FrameChrome::Reserved => block_ui::frame::Chrome::Reserved,
+                            FrameChrome::None => block_ui::frame::Chrome::None,
+                        })
+                        .toolbar(band(EditorBand::Toolbar))
+                        .left_sidebar(band(EditorBand::LeftSidebar))
+                        .right_sidebar(band(EditorBand::RightSidebar))
                         .content(
                             spec.content
                                 .map(|content| host_rect(content, rect.min.to_vec2())),
                         )
                         .trail(spec.trail.clone())
                         .show(ui, &mut bands);
-                    content_band = outcome.rects.content_band;
+                    leaving |= outcome.exit;
+                    content_band = outcome.rects.content;
                     painted = outcome.rects.painted().collect();
                 }
                 (None, false, EditorRegion::Preview) => {
@@ -698,6 +710,7 @@ impl EguiSession {
         if delivered_files {
             self.files = None;
         }
+        self.leaving |= leaving;
         self.used(region, content);
         let cursor = cursor_icon(output.platform_output.cursor_icon);
         if let Some(state) = self.regions.get_mut(&region) {

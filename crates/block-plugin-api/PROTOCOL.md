@@ -159,12 +159,21 @@ content band, which is what a tab of its own means.
 
 A frame surface is transparent wherever its owner does not paint, so whatever
 the host draws beneath shows through there. The plugin publishes, once per
-frame, the content band it laid out, the rectangles it painted and the
+frame, the content rectangle it laid out, the rectangles it painted and the
 rectangles its floating layers took, all in the frame's own logical
 coordinates. The host works out the view it hands a pan-and-zoom editor
-against the content band it was told about, routes input against the painted
-and floating rectangles, and composites the frames of one tab in the order it
-stacked them.
+against the content it was told about, delivers no pointer input over the
+parts of the frame the instance did not paint, and composites the frames of
+one tab bottom-up: every frame's painted area first, then every frame's
+floating rectangles, so a menu opened by an editor underneath still falls over
+the frame above it. The two passes are cut into disjoint rectangles, so no
+pixel is blended twice.
+
+An instance whose chrome is only reserved keeps the bands exactly where they
+were and paints nothing in them, so selecting or leaving a child moves neither
+its content nor the view it holds. The instance that draws the chrome also
+draws the trail back out of it, and reports that the user asked to leave; the
+host then hands the frame back to the parent.
 
 An editor may be given a preview screen as well as the frame it is edited in.
 The host maps that screen onto whatever quad it paints the block on, so the

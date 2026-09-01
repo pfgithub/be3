@@ -33,9 +33,9 @@ use block_ui::database::{DatabaseValueEditor, DatabaseValueEditorOutput};
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::{
     icons::{
-        ICON_ARROW_BACK, ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW,
-        ICON_FORMAT_COLOR_RESET, ICON_KEYBOARD_ARROW_DOWN, ICON_RECTANGLE, ICON_SELECT,
-        ICON_TEXT_FIELDS, ICON_ZOOM_IN, ICON_ZOOM_OUT,
+        ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW, ICON_FORMAT_COLOR_RESET,
+        ICON_KEYBOARD_ARROW_DOWN, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_ZOOM_IN,
+        ICON_ZOOM_OUT,
     },
     MaterialIcon,
 };
@@ -48,11 +48,12 @@ use block_client::references;
 
 use super::{
     clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    create_image_block, embedded_editor_ui, image_filter, imported_image, name_galley, paint_name,
-    BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, DirectEditorViewportCommand,
-    DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind, SidebarDragPayload,
-    EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
+    create_image_block, embedded_editor_ui, frame_child_ui, image_filter, imported_image,
+    name_galley, paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
+    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
+    DirectEditorViewportCommand, DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind,
+    SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+    EMBEDDED_EDITOR_TITLE_HEIGHT,
 };
 
 impl EditorKind for InfiniteCanvasEditor {

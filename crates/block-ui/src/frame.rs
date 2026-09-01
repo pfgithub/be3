@@ -66,8 +66,24 @@ pub struct FrameOutcome {
     pub exit: bool,
 }
 
+#[derive(Clone, Copy, Default)]
+struct RememberedBands {
+    toolbar: f32,
+    left: f32,
+    right: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Chrome {
+    #[default]
+    Drawn,
+    Reserved,
+    None,
+}
+
 pub struct Frame {
     id: egui::Id,
+    chrome: Chrome,
     toolbar: bool,
     left_sidebar: bool,
     right_sidebar: bool,
@@ -81,6 +97,7 @@ impl Frame {
     pub fn new(id: egui::Id) -> Self {
         Self {
             id,
+            chrome: Chrome::Drawn,
             toolbar: false,
             left_sidebar: false,
             right_sidebar: false,
@@ -89,6 +106,11 @@ impl Frame {
             content: None,
             trail: Vec::new(),
         }
+    }
+
+    pub fn chrome(mut self, chrome: Chrome) -> Self {
+        self.chrome = chrome;
+        self
     }
 
     pub fn toolbar(mut self, shown: bool) -> Self {
@@ -132,6 +154,9 @@ impl Frame {
             },
             exit: false,
         };
+        if self.chrome != Chrome::Drawn {
+            return self.reserved(ui, bands, outcome);
+        }
         if self.toolbar || !self.trail.is_empty() {
             let shown = egui::Panel::top(self.id.with("toolbar"))
                 .show_separator_line(true)
@@ -182,6 +207,74 @@ impl Frame {
                     });
                 outcome.rects.right_sidebar = Some(shown.response.rect);
             }
+        }
+        let band = ui.available_rect_before_wrap();
+        outcome.rects.content_band = band;
+        let content = self.content.map_or(band, |rect| rect.intersect(band));
+        outcome.rects.content = content;
+        let mut inner = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(self.id.with("content"))
+                .max_rect(content)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        inner.set_clip_rect(content.intersect(ui.clip_rect()));
+        bands.content_ui(&mut inner);
+        ui.advance_cursor_after_rect(band);
+        let remembered = RememberedBands {
+            toolbar: outcome.rects.toolbar.map_or(0.0, |rect| rect.height()),
+            left: match compact {
+                true => 0.0,
+                false => outcome.rects.left_sidebar.map_or(0.0, |rect| rect.width()),
+            },
+            right: match compact {
+                true => 0.0,
+                false => outcome.rects.right_sidebar.map_or(0.0, |rect| rect.width()),
+            },
+        };
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(self.id.with("bands"), remembered));
+        outcome
+    }
+
+    fn reserved(
+        self,
+        ui: &mut egui::Ui,
+        bands: &mut dyn FrameBands,
+        mut outcome: FrameOutcome,
+    ) -> FrameOutcome {
+        let remembered = match self.chrome {
+            Chrome::Reserved => ui
+                .ctx()
+                .data(|data| data.get_temp::<RememberedBands>(self.id.with("bands")))
+                .unwrap_or_default(),
+            _ => RememberedBands::default(),
+        };
+        if remembered.toolbar > 0.0 {
+            let shown = egui::Panel::top(self.id.with("reserved-toolbar"))
+                .show_separator_line(false)
+                .frame(egui::Frame::NONE)
+                .exact_size(remembered.toolbar)
+                .show_inside(ui, |_| {});
+            outcome.rects.toolbar = Some(shown.response.rect);
+        }
+        if remembered.left > 0.0 {
+            let shown = egui::Panel::left(self.id.with("reserved-left"))
+                .show_separator_line(false)
+                .frame(egui::Frame::NONE)
+                .resizable(false)
+                .exact_size(remembered.left)
+                .show_inside(ui, |_| {});
+            outcome.rects.left_sidebar = Some(shown.response.rect);
+        }
+        if remembered.right > 0.0 {
+            let shown = egui::Panel::right(self.id.with("reserved-right"))
+                .show_separator_line(false)
+                .frame(egui::Frame::NONE)
+                .resizable(false)
+                .exact_size(remembered.right)
+                .show_inside(ui, |_| {});
+            outcome.rects.right_sidebar = Some(shown.response.rect);
         }
         let band = ui.available_rect_before_wrap();
         outcome.rects.content_band = band;

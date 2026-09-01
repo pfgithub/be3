@@ -17,8 +17,7 @@ use super::{
     input,
     instances::{Instances, Placement},
     presenter::{
-        self, PresenterCallback, PresenterState, PresenterStatus, Quad, Region, Shared,
-        MAX_SURFACES,
+        self, PresenterCallback, PresenterState, PresenterStatus, Quad, Shared, MAX_SURFACES,
     },
     preview_size, ArtifactSlot, ArtifactState, BlockPickRequest, CreationSlot, CreationState,
     EditorBlock, EditorSlot, HostChild, HostChildStatus, InstanceRole, PreviewPresentation,
@@ -26,6 +25,7 @@ use super::{
 };
 
 const CROWDED: &str = "Too many plugin runtimes are already presenting.";
+const UNIT: egui::Rect = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
 const FRAME_TIMEOUT_SECONDS: f64 = 1.0;
 
 thread_local! {
@@ -111,6 +111,7 @@ pub(super) struct Runtime {
     sent: Vec<ScreenRequest>,
     error: Option<String>,
     needed: bool,
+    next_slot: u32,
     paint_at: Option<f64>,
     requested_at: Option<f64>,
 }
@@ -134,6 +135,7 @@ impl Runtime {
             sent: Vec::new(),
             error: None,
             needed: false,
+            next_slot: 0,
             paint_at: None,
             requested_at: None,
         }
@@ -158,6 +160,7 @@ impl Runtime {
         }
         let previous = self.pass;
         self.pass = pass;
+        self.next_slot = 0;
         let next = self.instances.next_screens(previous);
         let mut messages = next.opened;
         if self.sent != next.screens {
@@ -290,8 +293,11 @@ impl Runtime {
         rect: egui::Rect,
         screen: ScreenId,
         quad: Quad,
+        source: egui::Rect,
     ) -> egui::epaint::PaintCallback {
         self.presented = true;
+        let slot = self.next_slot;
+        self.next_slot = (self.next_slot + 1).min(presenter::MAX_REGIONS - 1);
         eframe::egui_wgpu::Callback::new_paint_callback(
             rect,
             PresenterCallback::present(
@@ -300,6 +306,8 @@ impl Runtime {
                 Arc::clone(&self.shared),
                 screen,
                 quad,
+                source,
+                slot,
             ),
         )
     }
@@ -352,6 +360,7 @@ pub(crate) struct EditorPresentation {
     screen: Option<ScreenId>,
     quad: Option<Quad>,
     clip: egui::Rect,
+    floating: Vec<egui::Rect>,
     pub(crate) open: Option<(Uuid, Uuid)>,
     pub(crate) children: Vec<HostChild>,
 }
@@ -367,19 +376,59 @@ impl EditorPresentation {
             screen: None,
             quad: None,
             clip: egui::Rect::ZERO,
+            floating: Vec::new(),
             open: None,
             children: Vec::new(),
         }
     }
 
-    pub(crate) fn present(&self, ui: &mut egui::Ui) {
+    fn blit(&self, ui: &mut egui::Ui, rects: &[egui::Rect]) {
         let (Some(screen), Some(quad)) = (self.screen, self.quad) else {
             return;
         };
+        let base = quad.rect;
+        if !base.is_positive() {
+            return;
+        }
         with(&self.plugin_id, |runtime| {
-            let callback = runtime.present(quad.rect.intersect(self.clip), screen, quad);
-            ui.painter().with_clip_rect(self.clip).add(callback);
+            for rect in rects {
+                let piece = rect.intersect(base).intersect(self.clip);
+                if !piece.is_positive() {
+                    continue;
+                }
+                let source = egui::Rect::from_min_max(
+                    egui::pos2(
+                        (piece.min.x - base.min.x) / base.width(),
+                        (piece.min.y - base.min.y) / base.height(),
+                    ),
+                    egui::pos2(
+                        (piece.max.x - base.min.x) / base.width(),
+                        (piece.max.y - base.min.y) / base.height(),
+                    ),
+                );
+                let callback = runtime.present(piece, screen, Quad::upright(piece), source);
+                ui.painter().with_clip_rect(self.clip).add(callback);
+            }
         });
+    }
+
+    pub(crate) fn present(&self, ui: &mut egui::Ui) {
+        let Some(quad) = self.quad else {
+            return;
+        };
+        let base = match self.floating.is_empty() {
+            true => vec![quad.rect],
+            false => super::pieces::subtract(quad.rect, &self.floating),
+        };
+        self.blit(ui, &base);
+    }
+
+    pub(crate) fn present_floating(&self, ui: &mut egui::Ui) {
+        if self.floating.is_empty() {
+            return;
+        }
+        let floating = self.floating.clone();
+        self.blit(ui, &floating);
     }
 
     pub(crate) fn report(&self, statuses: Vec<HostChildStatus>) {
@@ -480,6 +529,22 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
             screen: Some(screen),
             quad: cropped.map(|(quad, _)| quad),
             clip: ui.clip_rect(),
+            floating: runtime
+                .instances
+                .frame_report(instance)
+                .map(|report| {
+                    report
+                        .floating
+                        .iter()
+                        .map(|rect| {
+                            egui::Rect::from_min_size(
+                                egui::pos2(rect.x, rect.y) + response.rect.min.to_vec2(),
+                                egui::vec2(rect.width, rect.height),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             open: runtime.instances.take_open(instance),
             children,
         }
@@ -662,9 +727,14 @@ pub(crate) fn preview(painter: &egui::Painter, slot: PreviewSlot<'_>) -> Preview
                 children,
             };
         };
-        let placed = Region::of(&runtime.layout, runtime.surface, screen, quad).is_some();
+        let placed = runtime.layout.placement(screen).is_some();
         if placed {
-            painter.add(runtime.present(quad.rect.intersect(painter.clip_rect()), screen, quad));
+            painter.add(runtime.present(
+                quad.rect.intersect(painter.clip_rect()),
+                screen,
+                quad,
+                UNIT,
+            ));
         }
         PreviewPresentation {
             drawn: placed,
@@ -778,6 +848,23 @@ pub(crate) fn take_created(
         runtime.instances.take_created(instance)
     })
     .flatten()
+}
+
+pub(crate) fn frame_child(plugin_id: &str, instance: EditorInstanceId) -> Option<Uuid> {
+    with(plugin_id, |runtime| runtime.instances.frame_child(instance)).flatten()
+}
+
+pub(crate) fn revoke_frame_child(plugin_id: &str, instance: EditorInstanceId) {
+    with(plugin_id, |runtime| {
+        runtime.instances.revoke_frame_child(instance);
+    });
+}
+
+pub(crate) fn take_leaving(plugin_id: &str, instance: EditorInstanceId) -> bool {
+    with(plugin_id, |runtime| {
+        runtime.instances.take_leaving(instance)
+    })
+    .unwrap_or_default()
 }
 
 pub(crate) fn frame_rects(plugin_id: &str, instance: EditorInstanceId) -> Option<HostFrame> {

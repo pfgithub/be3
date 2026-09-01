@@ -60,3 +60,4 @@ fn frame() -> Frame {
 mod a_narrow_frame_floats_its_sidebars_and_keeps_the_content_full_width;
 mod escape_only_leaves_a_frame_that_has_a_trail;
 mod the_bands_tile_the_frame_without_overlapping;
+mod the_content_band_survives_handing_the_chrome_over;

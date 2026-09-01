@@ -166,28 +166,24 @@ impl Region {
         surface: u32,
         screen: ScreenId,
         quad: Quad,
+        source: egui::Rect,
+        slot: u32,
     ) -> Option<Self> {
-        if layout.is_empty() || surface >= MAX_SURFACES {
+        if layout.is_empty() || surface >= MAX_SURFACES || slot >= MAX_REGIONS {
             return None;
         }
-        let index = layout
-            .screens
-            .iter()
-            .position(|placement| placement.screen == screen)?;
-        if index >= MAX_REGIONS as usize {
-            return None;
-        }
-        let slot = surface * MAX_REGIONS + index as u32;
-        let placement = &layout.screens[index];
+        let placement = layout.placement(screen)?;
         let width = layout.width as f32;
         let height = layout.height as f32;
+        let left = placement.x as f32 + placement.width as f32 * source.min.x;
+        let top = placement.y as f32 + placement.height as f32 * source.min.y;
         Some(Self {
             surface,
-            slot,
-            offset: [placement.x as f32 / width, placement.y as f32 / height],
+            slot: surface * MAX_REGIONS + slot,
+            offset: [left / width, top / height],
             scale: [
-                placement.width as f32 / width,
-                placement.height as f32 / height,
+                placement.width as f32 * source.width() / width,
+                placement.height as f32 * source.height() / height,
             ],
             quad,
         })
@@ -292,6 +288,8 @@ pub(super) enum PresenterCommand {
         shared: Arc<Mutex<Shared>>,
         screen: ScreenId,
         quad: Quad,
+        source: egui::Rect,
+        slot: u32,
     },
     Release,
 }
@@ -310,12 +308,16 @@ impl PresenterCallback {
         shared: Arc<Mutex<Shared>>,
         screen: ScreenId,
         quad: Quad,
+        source: egui::Rect,
+        slot: u32,
     ) -> Self {
         Self {
             command: PresenterCommand::Present {
                 shared,
                 screen,
                 quad,
+                source,
+                slot,
             },
             status,
             surface,
@@ -353,13 +355,15 @@ impl egui_wgpu::CallbackTrait for PresenterCallback {
                 shared,
                 screen,
                 quad,
+                source,
+                slot,
             } => {
                 let (frames, region) = {
                     let mut shared = shared.lock().unwrap();
                     let frames = std::mem::take(&mut shared.frames);
                     (
                         frames,
-                        Region::of(&shared.layout, self.surface, *screen, *quad),
+                        Region::of(&shared.layout, self.surface, *screen, *quad, *source, *slot),
                     )
                 };
                 let mut failure = None;

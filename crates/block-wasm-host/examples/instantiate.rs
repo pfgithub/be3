@@ -1,7 +1,7 @@
 use block_plugin_api::{
     decode_frame, encode_frame, EditorInstanceId, EditorMessage, EditorRegion, FetchResult,
-    FrameSpec, HelloAccepted, Message, ScreenId, ScreenRequest, ScreenSet, ViewportMetrics,
-    PROTOCOL_VERSION,
+    FrameChrome, FrameSpec, HelloAccepted, Message, ScreenId, ScreenRequest, ScreenSet,
+    ViewportMetrics, PROTOCOL_VERSION,
 };
 use block_wasm_host::{Host, Plugin};
 
@@ -153,7 +153,7 @@ fn screens() -> Message {
                 instance: EditorInstanceId(1),
                 region: EditorRegion::Frame,
                 frame: Some(FrameSpec {
-                    chrome: true,
+                    chrome: FrameChrome::Drawn,
                     content: None,
                     trail: Vec::new(),
                 }),

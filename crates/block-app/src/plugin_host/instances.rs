@@ -17,7 +17,8 @@ use uuid::Uuid;
 use super::{
     audio::AudioPlayer,
     input::{viewport_metrics, BlockDragEvent, FileDropEvent, InputAdapter},
-    BlockPickRequest, EditorBlock, HostChild, HostChildStatus, InstanceRole, MAX_LIVE_CHILDREN,
+    pieces, BlockPickRequest, EditorBlock, HostChild, HostChildStatus, InstanceRole,
+    MAX_LIVE_CHILDREN,
 };
 use crate::{
     performance,
@@ -69,6 +70,7 @@ struct Instance {
     view_changes: Vec<ViewChange>,
     presenting: bool,
     reported_presenting: bool,
+    leaving: bool,
 }
 
 #[derive(Default)]
@@ -105,6 +107,7 @@ impl Instance {
             view_changes: Vec::new(),
             presenting: false,
             reported_presenting: false,
+            leaving: false,
         }
     }
 }
@@ -145,6 +148,7 @@ struct Screen {
     children: ChildTable,
     reported_statuses: HashMap<ChildId, ChildStatus>,
     revoked: HashSet<ChildId>,
+    frame_revoked: HashSet<ChildId>,
 }
 
 #[derive(Default, PartialEq)]
@@ -255,6 +259,7 @@ impl Instances {
                 children: ChildTable::default(),
                 reported_statuses: HashMap::new(),
                 revoked: HashSet::new(),
+                frame_revoked: HashSet::new(),
             }
         });
         screen.request.metrics = viewport_metrics(size, visible, scale_factor);
@@ -613,6 +618,12 @@ impl Instances {
                 .iter()
                 .any(|placement| placement.child == *child && placement.mode == ChildMode::Active)
         });
+        screen.frame_revoked.retain(|child| {
+            children.iter().any(|placement| {
+                placement.child == *child
+                    && matches!(placement.mode, ChildMode::Active | ChildMode::Live)
+            })
+        });
         let table = ChildTable {
             generation,
             size: egui::vec2(
@@ -650,6 +661,21 @@ impl Instances {
         let mut children = Vec::new();
         let mut holes = Holes::default();
         let mut live = 0;
+        if let Some(report) = &screen.report {
+            let painted: Vec<egui::Rect> = report
+                .painted
+                .iter()
+                .map(|painted| host_rect(*painted, origin, stretch))
+                .collect();
+            if !painted.is_empty() {
+                for piece in pieces::subtract(rect.intersect(clip), &painted) {
+                    holes.holes.push(Hole {
+                        rect: piece,
+                        occluders: Vec::new(),
+                    });
+                }
+            }
+        }
         for (index, child) in table.children.iter().enumerate() {
             if child.rect.is_empty() {
                 continue;
@@ -689,6 +715,8 @@ impl Instances {
             }
             children.push(HostChild {
                 child: child.child,
+                frame_owner: matches!(mode, ChildMode::Active | ChildMode::Live)
+                    && !screen.frame_revoked.contains(&child.child),
                 block_id: Uuid::from_bytes(child.block_id),
                 block_type: Uuid::from_bytes(child.block_type),
                 rect: child_rect,
@@ -711,6 +739,45 @@ impl Instances {
         for child in &screen.children.children {
             if child.mode == ChildMode::Active {
                 screen.revoked.insert(child.child);
+            }
+        }
+    }
+
+    pub(super) fn take_leaving(&mut self, instance: EditorInstanceId) -> bool {
+        self.entries
+            .get_mut(&instance)
+            .is_some_and(|entry| std::mem::take(&mut entry.leaving))
+    }
+
+    pub(super) fn frame_child(&self, instance: EditorInstanceId) -> Option<Uuid> {
+        let screen = self
+            .entries
+            .get(&instance)?
+            .screens
+            .get(&EditorRegion::Frame)?;
+        screen
+            .children
+            .children
+            .iter()
+            .find(|child| {
+                matches!(child.mode, ChildMode::Active | ChildMode::Live)
+                    && !screen.frame_revoked.contains(&child.child)
+                    && !child.rect.is_empty()
+            })
+            .map(|child| Uuid::from_bytes(child.block_id))
+    }
+
+    pub(super) fn revoke_frame_child(&mut self, instance: EditorInstanceId) {
+        let Some(screen) = self
+            .entries
+            .get_mut(&instance)
+            .and_then(|entry| entry.screens.get_mut(&EditorRegion::Frame))
+        else {
+            return;
+        };
+        for child in &screen.children.children {
+            if matches!(child.mode, ChildMode::Active | ChildMode::Live) {
+                screen.frame_revoked.insert(child.child);
             }
         }
     }
@@ -1279,6 +1346,13 @@ impl Instances {
                 instance,
                 presenting,
             } => self.set_presenting(instance, presenting),
+            EditorMessage::LeaveFrame { instance } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.leaving = true;
+                true
+            }
             EditorMessage::ChangeView { instance, change } => {
                 let Some(entry) = self.entries.get_mut(&instance) else {
                     return false;

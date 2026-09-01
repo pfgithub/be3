@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 37;
+pub const PROTOCOL_VERSION: u16 = 38;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -31,9 +31,17 @@ pub struct ScreenRequest {
     pub frame: Option<FrameSpec>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FrameChrome {
+    Drawn,
+    Reserved,
+    #[default]
+    None,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FrameSpec {
-    pub chrome: bool,
+    pub chrome: FrameChrome,
     pub content: Option<ChildRect>,
     pub trail: Vec<String>,
 }
@@ -450,6 +458,9 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         width: f32,
         height: f32,
+    },
+    LeaveFrame {
+        instance: EditorInstanceId,
     },
     Close {
         instance: EditorInstanceId,

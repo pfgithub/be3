@@ -4,7 +4,7 @@ use super::*;
 fn frame_screens_and_reports_round_trip() {
     let mut request = region_screen(EditorRegion::Frame, 1, 2, 640, 480, 1.0);
     request.frame = Some(FrameSpec {
-        chrome: true,
+        chrome: FrameChrome::Drawn,
         content: Some(ChildRect {
             x: 10.0,
             y: 20.0,
