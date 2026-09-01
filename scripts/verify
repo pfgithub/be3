@@ -71,6 +71,14 @@ else
     t env UPDATE_SNAPSHOTS=1 cargo nextest run --cargo-quiet --show-progress=none
 fi
 
+# in case one of the previous commands leaves stuff unformatted
+echo 'format one more time...'
+if $check; then
+    t cargo fmt --all --check
+else
+    t cargo fmt --all
+fi
+
 echo ''
 if $failed; then
     echo 'Verification failed.'
