@@ -27,8 +27,8 @@ cd "$repository"
 
 failed=false
 
+export TIME="Took %E"
 t() {
-    TIME="Took %E"
     if ! time "$@"; then
         failed=true
     fi
