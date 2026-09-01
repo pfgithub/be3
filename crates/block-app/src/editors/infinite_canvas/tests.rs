@@ -17,4 +17,5 @@ fn entity(id: Uuid) -> CanvasEntity {
 
 mod attaching_component_fills_only_missing_selected_entities;
 mod removing_component_deletes_its_values_from_all_selected_entities;
+mod resizing_an_editor_that_cannot_resize_scales_it;
 mod setting_component_value_writes_the_same_value_to_all_selected_entities;

@@ -68,22 +68,14 @@ impl Surface {
         }
         let texture = block_gpu_guest::acquire_surface_texture(SCREENS_SURFACE)?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .gpu
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let painted = self.panes.paint(
             &self.gpu.device,
             &self.gpu.queue,
-            &mut encoder,
             &view,
             &self.layout,
             screens,
             phase,
         );
-        self.gpu
-            .queue
-            .submit(painted.commands.into_iter().chain([encoder.finish()]));
         block_gpu_guest::present_surface(SCREENS_SURFACE);
         Ok(vec![Message::FrameReady(FrameReady {
             generation: self.generation,

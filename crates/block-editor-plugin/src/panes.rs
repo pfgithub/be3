@@ -1,12 +1,12 @@
 use block_plugin_api::{EditorInstanceId, ScreenLayout};
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::{egui_session, screens::Screens, Waker};
@@ -229,7 +229,6 @@ pub(crate) struct Panes {
 }
 
 pub(crate) struct Painted {
-    pub(crate) commands: Vec<wgpu::CommandBuffer>,
     pub(crate) repaint: Option<Duration>,
 }
 
@@ -246,22 +245,25 @@ impl Panes {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         layout: &ScreenLayout,
         screens: &mut Screens,
         time: f64,
     ) -> Painted {
-        let mut commands = Vec::new();
-        let mut started = HashSet::new();
         let mut cleared = false;
         let mut repaint = Duration::MAX;
         let placements = layout.screens.clone();
+        let mut instances = Vec::new();
+        for placement in &placements {
+            if !instances.contains(&placement.instance) {
+                instances.push(placement.instance);
+            }
+        }
         let waker = screens.waker();
         let theme = screens.theme();
         self.painting.store(true, Ordering::Relaxed);
-        for placement in &placements {
-            let Some(session) = screens.session(placement.instance) else {
+        for instance in instances {
+            let Some(session) = screens.session(instance) else {
                 continue;
             };
             let format = self.format;
@@ -269,93 +271,81 @@ impl Panes {
             let painting = Arc::clone(&self.painting);
             let pane = self
                 .panes
-                .entry(placement.instance)
+                .entry(instance)
                 .or_insert_with(|| Pane::new(device, format, theme, waker, painting));
-            if started.insert(placement.instance) {
-                for id in std::mem::take(&mut pane.freed) {
-                    pane.renderer.free_texture(&id);
-                }
-                if let Some(punch) = pane.renderer.callback_resources.get_mut::<PunchResources>() {
-                    punch.next = 0;
-                }
+            for id in std::mem::take(&mut pane.freed) {
+                pane.renderer.free_texture(&id);
             }
-            let pane_started = Instant::now();
-            let session_started = Instant::now();
-            let output = session.run(placement.region, &pane.context, time, layout.generation);
-            let session_elapsed = session_started.elapsed();
-            let updated_textures = output.textures_delta.set.len();
-            repaint = repaint.min(repaint_delay(
-                &output,
-                egui_session::viewport_id(placement.region),
-            ));
-            let scale = session.scale_factor(placement.region);
-            let visible = session.visible_rect(placement.region);
-            let tessellate_started = Instant::now();
-            let mut paint_jobs = pane.context.tessellate(output.shapes, scale);
-            for job in &mut paint_jobs {
-                job.clip_rect = job.clip_rect.intersect(visible);
+            if let Some(punch) = pane.renderer.callback_resources.get_mut::<PunchResources>() {
+                punch.next = 0;
             }
-            let tessellate_elapsed = tessellate_started.elapsed();
-            let texture_started = Instant::now();
-            for (id, delta) in &output.textures_delta.set {
-                pane.renderer.update_texture(device, queue, *id, delta);
-            }
-            let texture_elapsed = texture_started.elapsed();
-            let screen = egui_wgpu::ScreenDescriptor {
-                size_in_pixels: [layout.width, layout.height],
-                pixels_per_point: scale,
-            };
-            let buffers_started = Instant::now();
-            commands.extend(pane.renderer.update_buffers(
-                device,
-                queue,
-                encoder,
-                &paint_jobs,
-                &screen,
-            ));
-            let buffers_elapsed = buffers_started.elapsed();
-            let render_started = Instant::now();
+            let mut batches: Vec<(f32, Vec<egui::ClippedPrimitive>)> = Vec::new();
+            for placement in placements
+                .iter()
+                .filter(|placement| placement.instance == instance)
             {
-                let load = if cleared {
-                    wgpu::LoadOp::Load
-                } else {
-                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                let output = session.run(placement.region, &pane.context, time, layout.generation);
+                repaint = repaint.min(repaint_delay(
+                    &output,
+                    egui_session::viewport_id(placement.region),
+                ));
+                let scale = session.scale_factor(placement.region);
+                let visible = session.visible_rect(placement.region);
+                let mut paint_jobs = pane.context.tessellate(output.shapes, scale);
+                for job in &mut paint_jobs {
+                    job.clip_rect = job.clip_rect.intersect(visible);
+                }
+                for (id, delta) in &output.textures_delta.set {
+                    pane.renderer.update_texture(device, queue, *id, delta);
+                }
+                pane.freed.extend(output.textures_delta.free);
+                match batches.last_mut() {
+                    Some((batched, jobs)) if *batched == scale => jobs.extend(paint_jobs),
+                    _ => batches.push((scale, paint_jobs)),
+                }
+            }
+            for (scale, paint_jobs) in batches {
+                let screen = egui_wgpu::ScreenDescriptor {
+                    size_in_pixels: [layout.width, layout.height],
+                    pixels_per_point: scale,
                 };
-                cleared = true;
-                let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("plugin pane"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pane.renderer
-                    .render(&mut pass.forget_lifetime(), &paint_jobs, &screen);
+                let mut encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+                let commands =
+                    pane.renderer
+                        .update_buffers(device, queue, &mut encoder, &paint_jobs, &screen);
+                {
+                    let load = if cleared {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                    };
+                    cleared = true;
+                    let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("plugin pane"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    pane.renderer
+                        .render(&mut pass.forget_lifetime(), &paint_jobs, &screen);
+                }
+                queue.submit(commands.into_iter().chain([encoder.finish()]));
             }
-            let render_elapsed = render_started.elapsed();
-            if updated_textures > 0 {
-                eprintln!(
-                    "plugin timing screen={:?} textures={} session_run={session_elapsed:?} tessellate={tessellate_elapsed:?} update_texture={texture_elapsed:?} update_buffers={buffers_elapsed:?} render_encode={render_elapsed:?} pane_total={:?}",
-                    placement.screen,
-                    updated_textures,
-                    pane_started.elapsed()
-                );
-            }
-            pane.freed.extend(output.textures_delta.free);
         }
         self.painting.store(false, Ordering::Relaxed);
         self.panes.retain(|instance, _| screens.is_open(*instance));
         Painted {
-            commands,
             repaint: (repaint < Duration::MAX).then_some(repaint),
         }
     }

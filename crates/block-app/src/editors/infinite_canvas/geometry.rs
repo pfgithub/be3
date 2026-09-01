@@ -529,6 +529,7 @@ pub(super) fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
             originals,
             preserve_aspect_ratio,
             scale_text,
+            scale_editors,
             ..
         } => resize_entities(
             *handle,
@@ -537,6 +538,7 @@ pub(super) fn preview_entities(gesture: &Gesture) -> Vec<CanvasEntity> {
             originals,
             *preserve_aspect_ratio,
             *scale_text,
+            *scale_editors,
         ),
         Gesture::Rotate {
             frame,
@@ -593,6 +595,7 @@ pub(super) fn resize_entities(
     originals: &[CanvasEntity],
     preserve_aspect_ratio: bool,
     scale_text: bool,
+    scale_editors: bool,
 ) -> Vec<CanvasEntity> {
     let current = rotate(
         CanvasPoint::new(current.x - frame.center.x, current.y - frame.center.y),
@@ -620,6 +623,7 @@ pub(super) fn resize_entities(
         &local_originals,
         preserve_aspect_ratio,
         scale_text,
+        scale_editors,
     )
     .into_iter()
     .map(|mut entity| {
@@ -639,6 +643,7 @@ pub(super) fn resize_entities_axis(
     originals: &[CanvasEntity],
     preserve_aspect_ratio: bool,
     scale_text: bool,
+    scale_editors: bool,
 ) -> Vec<CanvasEntity> {
     let original_size = bounds.size();
     let mut resized = bounds;
@@ -716,6 +721,12 @@ pub(super) fn resize_entities_axis(
             );
             entity.transform.size.x = (entity.transform.size.x * scale_x).max(MIN_SIZE);
             entity.transform.size.y = (entity.transform.size.y * scale_y).max(MIN_SIZE);
+            if let CanvasEntityKind::DirectEditor { scale, .. } = &mut entity.kind {
+                if scale_editors {
+                    let factor = if handle.x == 0 { scale_y } else { scale_x };
+                    *scale = (*scale * factor).max(f32::EPSILON);
+                }
+            }
             if let CanvasEntityKind::Text { text_style, .. } = &mut entity.kind {
                 if scale_text {
                     let factor = if handle.x == 0 { scale_y } else { scale_x };

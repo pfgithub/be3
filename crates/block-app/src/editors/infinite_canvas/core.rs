@@ -783,6 +783,20 @@ impl InfiniteCanvasEditor {
             })
     }
 
+    pub(super) fn selection_handles(
+        &self,
+        entities: &[CanvasEntity],
+        editors: &EditorAccess<'_>,
+    ) -> (DirectEditorResize, bool) {
+        let selected = entities
+            .iter()
+            .any(|entity| self.selection.contains(&entity.id) && !entity.locked);
+        match self.selection_resize(entities, editors) {
+            DirectEditorResize::None if selected => (DirectEditorResize::Both, true),
+            resize => (resize, false),
+        }
+    }
+
     pub(super) fn selection_resize(
         &self,
         entities: &[CanvasEntity],

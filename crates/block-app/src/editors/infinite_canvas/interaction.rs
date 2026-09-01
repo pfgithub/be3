@@ -270,7 +270,7 @@ impl InfiniteCanvasEditor {
             Tool::Text => egui::CursorIcon::Text,
             Tool::Select => {
                 let frame = self.selected_frame(entities);
-                let resize = self.selection_resize(entities, editors);
+                let (resize, _) = self.selection_handles(entities, editors);
                 if self.selection_has_unlocked(entities)
                     && self.selection_allows_rotation(entities, editors)
                     && frame.is_some_and(|frame| {
@@ -703,7 +703,7 @@ impl InfiniteCanvasEditor {
                 Tool::Select => {
                     let selected_frame = self.selected_frame(entities);
                     let has_unlocked = self.selection_has_unlocked(entities);
-                    let resize = self.selection_resize(entities, editors);
+                    let (resize, scale_editors) = self.selection_handles(entities, editors);
                     let handle =
                         has_unlocked
                             .then_some(selected_frame)
@@ -734,6 +734,8 @@ impl InfiniteCanvasEditor {
                         let force_preserve_aspect_ratio =
                             self.selection_forces_proportional(entities, editors);
                         let scale_text = response.ctx.input(|input| input.modifiers.alt);
+                        let force_preserve_aspect_ratio =
+                            force_preserve_aspect_ratio || scale_editors;
                         let preserve_aspect_ratio = scale_text
                             || force_preserve_aspect_ratio
                             || default_preserve_aspect_ratio
@@ -747,6 +749,7 @@ impl InfiniteCanvasEditor {
                             force_preserve_aspect_ratio,
                             preserve_aspect_ratio,
                             scale_text,
+                            scale_editors,
                         });
                     } else if let Some(id) = self.entity_at(entities, world) {
                         let entity = entities.iter().find(|entity| entity.id == id).unwrap();
@@ -1195,7 +1198,7 @@ impl InfiniteCanvasEditor {
                 painter,
                 rect,
                 frame,
-                self.selection_resize(entities, editors),
+                self.selection_handles(entities, editors).0,
                 self.selection_has_unlocked(entities)
                     && self.selection_allows_rotation(entities, editors),
             );

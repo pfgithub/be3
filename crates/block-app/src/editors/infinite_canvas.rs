@@ -295,6 +295,7 @@ enum Gesture {
         force_preserve_aspect_ratio: bool,
         preserve_aspect_ratio: bool,
         scale_text: bool,
+        scale_editors: bool,
     },
     Rotate {
         frame: SelectionFrame,

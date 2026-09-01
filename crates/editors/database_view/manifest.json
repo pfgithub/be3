@@ -7,6 +7,7 @@
   "icon": "\uf1be",
   "creation": "Immediate",
   "interaction": "Live",
+  "resize": "None",
   "capabilities": {
     "rotation": false,
     "preserve_aspect_ratio": true,
