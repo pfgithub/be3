@@ -28,7 +28,8 @@ cd "$repository"
 failed=false
 
 t() {
-    if ! /usr/bin/time -f "Took %E" "$@"; then
+    TIME="Took %E"
+    if ! time "$@"; then
         failed=true
     fi
 }

@@ -858,7 +858,5 @@ pub(super) fn with<R>(plugin_id: &str, act: impl FnOnce(&mut Runtime) -> R) -> O
     HOST.with(|host| Some(act(host.borrow_mut().runtimes.get_mut(plugin_id)?)))
 }
 
-
-
 #[cfg(test)]
 mod tests;
