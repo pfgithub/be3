@@ -7,7 +7,6 @@ pub(crate) mod plugin;
 mod scene_3d;
 mod text;
 mod unsupported;
-mod version_control_worktree;
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -1477,7 +1476,6 @@ impl EditorRegistry {
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register_creatable::<text::TextEditor>();
-        registry.register::<version_control_worktree::VersionControlWorktreeEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         for manifest in plugin::discovery::manifests() {
             registry.register_plugin(manifest);
@@ -1507,10 +1505,6 @@ impl EditorRegistry {
 
     pub(super) fn plugin_block_types(&self) -> &Arc<Vec<block_plugin_api::BlockTypeDescriptor>> {
         &self.plugin_block_types
-    }
-
-    fn register<E: EditorKind>(&mut self) {
-        self.insert(EditorRegistration::of::<E>());
     }
 
     fn register_creatable<E: CreatableEditor>(&mut self) {

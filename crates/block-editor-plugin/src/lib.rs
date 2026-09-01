@@ -26,7 +26,7 @@ pub use block_ui;
 pub use host::{
     Artifact, ArtifactDescription, BlockDrag, BlockPicker, ChildHandle, EditorHost, FileDrop,
     FileFilter, FilePicker, ImagePaster, PastedImage, PerformanceMeasurementGuard,
-    PerformanceReporter, PickedFile, Waker,
+    PerformanceReporter, PickedFile, Task, Waker,
 };
 
 pub trait App: Default + 'static {

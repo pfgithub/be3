@@ -84,6 +84,11 @@ impl<A: App> EditorTest<'_, A> {
             .get(by().predicate(move |node| node.author_id() == Some(test_id)))
     }
 
+    pub fn try_find<'t>(&'t self, test_id: &'t str) -> Option<Node<'t>> {
+        self.harness
+            .query(by().predicate(move |node| node.author_id() == Some(test_id)))
+    }
+
     pub fn key_press(&self, key: egui::Key) {
         self.harness.key_press(key);
     }

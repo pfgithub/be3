@@ -1,0 +1,20 @@
+{
+  "id": "be3.version-control-worktree",
+  "name": "Worktree",
+  "version": "0.1.0",
+  "block_type": "7663732d-776f-726b-7472-65652d626c6b",
+  "display_name": "Worktree",
+  "icon": "\ue2c8",
+  "creation": "None",
+  "children": {
+    "add": true,
+    "delete": true
+  },
+  "regions": [
+    "Frame"
+  ],
+  "chrome": [
+    "RightSidebar"
+  ],
+  "entry_point": "version_control_worktree.wasm"
+}

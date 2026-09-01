@@ -41,6 +41,7 @@ members = [
     "crates/editors/settings",
     "crates/editors/ui_settings",
     "crates/editors/version_control_data",
+    "crates/editors/version_control_worktree",
     "crates/editors/video_block",
     "crates/editors/workspace_index",
     "crates/block-editor-plugin",

@@ -2,7 +2,10 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{
+        mpsc::{self, Receiver, TryRecvError},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -63,6 +66,53 @@ impl Waker {
         Self(Some(Arc::new(wake)))
     }
 }
+pub struct Task<T> {
+    receiver: Receiver<T>,
+    result: Option<T>,
+    done: bool,
+}
+
+impl<T: Send + 'static> Task<T> {
+    fn spawn(waker: &Waker, future: impl std::future::Future<Output = T> + Send + 'static) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        let waker = waker.clone();
+        block_client::spawn(async move {
+            let _ = sender.send(future.await);
+            waker.wake();
+        });
+        Self {
+            receiver,
+            result: None,
+            done: false,
+        }
+    }
+}
+
+impl<T> Task<T> {
+    pub fn poll(&mut self) -> Option<&T> {
+        if !self.done {
+            match self.receiver.try_recv() {
+                Ok(result) => {
+                    self.result = Some(result);
+                    self.done = true;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => self.done = true,
+            }
+        }
+        self.result.as_ref()
+    }
+
+    pub fn take(&mut self) -> Option<T> {
+        self.poll();
+        self.result.take()
+    }
+
+    pub fn finished(&self) -> bool {
+        self.done
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 struct PerformanceRecord {
     group: Arc<str>,
@@ -262,6 +312,13 @@ impl EditorHost {
 
     pub fn waker(&self) -> Waker {
         self.waker.clone()
+    }
+
+    pub fn spawn<T: Send + 'static>(
+        &self,
+        future: impl std::future::Future<Output = T> + Send + 'static,
+    ) -> Task<T> {
+        Task::spawn(&self.waker, future)
     }
     pub fn performance(&self, group: impl Into<String>) -> PerformanceReporter {
         PerformanceReporter {

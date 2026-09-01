@@ -39,6 +39,11 @@ mod transport;
 #[cfg(all(target_arch = "wasm32", feature = "hosted"))]
 pub use transport::pump;
 pub mod version_control_checkout;
+
+pub fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    transport::spawn_worker(future);
+}
+
 pub mod version_control_commit;
 
 type PresenceStore = HashMap<Uuid, HashMap<(ClientId, Uuid), Vec<u8>>>;
