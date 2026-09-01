@@ -63,3 +63,13 @@ per-slide metadata exists yet.
 Start with speaker notes, duplicate slide, and follow-presenter mode — they
 close the biggest functional gaps and follow-presenter leans directly on
 infra that already exists.
+
+## Filmstrip while a slide is being edited
+
+Frame ownership replaces the chrome the deck used to carve out of its own
+regions: while a slide is selected the slide owns the toolbar row and both
+sidebars, so the deck's filmstrip is hidden until Escape hands the frame back.
+That is an accepted regression for now. The end state that undoes it is the
+filmstrip moving out of the deck's left sidebar and into the deck's content
+area, alongside the stage, where a slide taking the chrome bands cannot hide
+it.

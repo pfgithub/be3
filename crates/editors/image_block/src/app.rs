@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use block_client::{
     blocks::image::{Image, ImageMetadata, ImageOperation},
@@ -10,12 +10,6 @@ use uuid::Uuid;
 const LOADING_FILL: egui::Color32 = egui::Color32::from_gray(35);
 const INTRINSIC_LONG_SIDE: f32 = 1024.0;
 const INTRINSIC_SHORT_SIDE: f32 = 24.0;
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum Pane {
-    Main,
-    Preview,
-}
 
 #[derive(Default)]
 struct Decoded {
@@ -42,7 +36,7 @@ pub struct ImageApp {
     creation: Option<Creating>,
     picker: FilePicker,
     error: Option<String>,
-    panes: HashMap<Pane, Decoded>,
+    decoded: Decoded,
 }
 
 impl block_editor_plugin::App for ImageApp {
@@ -107,7 +101,7 @@ impl block_editor_plugin::App for ImageApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        let texture = match self.texture(Pane::Main, ui.ctx()) {
+        let texture = match self.texture(ui.ctx()) {
             Ok(texture) => texture,
             Err(error) => {
                 ui.centered_and_justified(|ui| match error {
@@ -142,7 +136,7 @@ impl block_editor_plugin::App for ImageApp {
     fn preview_ui(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         ui.allocate_rect(rect, egui::Sense::hover());
-        match self.texture(Pane::Preview, ui.ctx()) {
+        match self.texture(ui.ctx()) {
             Ok(texture) => paint(ui.painter(), &texture, rect),
             Err(_) => {
                 ui.painter().rect_filled(rect, 0.0, LOADING_FILL);
@@ -201,16 +195,12 @@ impl ImageApp {
         (width != 0 && height != 0).then(|| egui::vec2(width as f32, height as f32))
     }
 
-    fn texture(
-        &mut self,
-        pane: Pane,
-        context: &egui::Context,
-    ) -> Result<egui::TextureHandle, Option<String>> {
+    fn texture(&mut self, context: &egui::Context) -> Result<egui::TextureHandle, Option<String>> {
         let Some(editing) = &self.editing else {
             return Err(None);
         };
         let revision = editing.block.revision();
-        let decoded = self.panes.entry(pane).or_default();
+        let decoded = &mut self.decoded;
         if decoded.revision != Some(revision) {
             *decoded = Decoded {
                 revision: Some(revision),

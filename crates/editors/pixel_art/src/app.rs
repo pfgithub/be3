@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use block::Block;
 use block_client::{
@@ -21,12 +21,6 @@ use crate::{
 const MAX_RECENT_COLORS: usize = 12;
 const EMBEDDED_LONG_SIDE: f32 = 256.0;
 const EMBEDDED_SHORT_SIDE: f32 = 24.0;
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PaneKey {
-    Main,
-    Preview,
-}
 
 pub struct Editing {
     pub host: EditorHost,
@@ -61,7 +55,7 @@ pub struct PixelArtApp {
     pub(crate) active_drawing: Option<ActiveDrawing>,
     pub(crate) committed_preview: Option<CommittedPreview>,
     pub(crate) zoom: f32,
-    panes: HashMap<PaneKey, Pane>,
+    pane: Pane,
     pub(crate) resize_open: bool,
     pub(crate) resize_width: u16,
     pub(crate) resize_height: u16,
@@ -91,7 +85,7 @@ impl Default for PixelArtApp {
             active_drawing: None,
             committed_preview: None,
             zoom: 1.0,
-            panes: HashMap::new(),
+            pane: Pane::default(),
             resize_open: false,
             resize_width: 32,
             resize_height: 32,
@@ -135,11 +129,8 @@ impl block_editor_plugin::App for PixelArtApp {
         let rect = ui.available_rect_before_wrap();
         ui.allocate_rect(rect, egui::Sense::hover());
         let dark_mode = ui.visuals().dark_mode;
-        if self
-            .refresh_pane(ui.ctx(), PaneKey::Preview, dark_mode)
-            .is_some()
-        {
-            self.paint_pane(PaneKey::Preview, ui.painter(), rect);
+        if self.refresh_pane(ui.ctx(), dark_mode).is_some() {
+            self.paint_pane(ui.painter(), rect);
         }
     }
 
@@ -273,33 +264,20 @@ impl PixelArtApp {
     pub(crate) fn refresh_pane(
         &mut self,
         context: &egui::Context,
-        key: PaneKey,
         dark_mode: bool,
     ) -> Option<(u16, u16)> {
         let art = self.editing.as_ref()?.block.read()?;
         let size = (art.width(), art.height());
-        self.panes
-            .entry(key)
-            .or_default()
-            .ensure(context, &art, dark_mode);
+        self.pane.ensure(context, &art, dark_mode);
         Some(size)
     }
 
-    pub(crate) fn preview_pixels(
-        &mut self,
-        key: PaneKey,
-        pixels: &[(u16, u16)],
-        color: PixelColor,
-    ) {
-        if let Some(pane) = self.panes.get_mut(&key) {
-            pane.set_preview(pixels, color);
-        }
+    pub(crate) fn preview_pixels(&mut self, pixels: &[(u16, u16)], color: PixelColor) {
+        self.pane.set_preview(pixels, color);
     }
 
-    pub(crate) fn paint_pane(&self, key: PaneKey, painter: &egui::Painter, rect: egui::Rect) {
-        if let Some(pane) = self.panes.get(&key) {
-            pane.paint(painter, rect);
-        }
+    pub(crate) fn paint_pane(&self, painter: &egui::Painter, rect: egui::Rect) {
+        self.pane.paint(painter, rect);
     }
 
     pub(crate) fn brush(&self, constrained: bool) -> Brush {

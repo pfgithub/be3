@@ -138,6 +138,8 @@ fn direct_editor_ui(
 
 Use `direct_editor_top_bar`, `direct_editor_left_sidebar`, and `direct_editor_right_sidebar` for controls that belong outside the main content. The corresponding `direct_editor_has_*_sidebar` method must return `true` before a sidebar is shown. Return `EditorAction` for app-level navigation or parenting requests.
 
+`crates/block-ui/src/frame.rs` lays those bands out, not the editor: it decides where the toolbar row, the sidebars and the content go inside the frame the tab hands over, floats the sidebars when the frame is narrow, greys everything when the block is read-only, and draws the trail back out of a frame a sub-editor has taken over. An editor that lets the user select a block inside it — the infinite canvas, the text editor — reports that selection through `direct_editor_frame_child` and draws it with `frame_child_ui` instead of `embedded_editor_ui`. The selected editor is then given the whole frame and every chrome band, and the editor that placed it is told its own chrome is only reserved: the bands keep the geometry they had, nothing is drawn in them, and its content, zoom and pan do not move. `clear_direct_editor_frame_child` is how it lets go again, which the framework calls when the user presses Escape or clicks the exit.
+
 Do not retain a `BlockReadGuard` while operating on the same block or calling into another editor. Copy the required data and drop the guard first.
 
 ## 4. Support previews and nested blocks

@@ -6,7 +6,7 @@ use block_editor_plugin::{
 use std::collections::BTreeSet;
 
 use crate::{
-    app::{PaneKey, PixelArtApp},
+    app::PixelArtApp,
     color::{checkerboard_colors, checkerboard_image, composite_pixel, format_hex_color},
     drawing::{rasterize_drawing, ActiveDrawing, CommittedPreview, PixelTool, MAX_BRUSH_SIZE},
 };
@@ -125,7 +125,7 @@ impl PixelArtApp {
         painter.rect_filled(region, 0.0, ui.visuals().extreme_bg_color);
 
         let dark_mode = ui.visuals().dark_mode;
-        let Some((width, height)) = self.refresh_pane(ui.ctx(), PaneKey::Main, dark_mode) else {
+        let Some((width, height)) = self.refresh_pane(ui.ctx(), dark_mode) else {
             ui.scope_builder(egui::UiBuilder::new().max_rect(region), |ui| {
                 ui.centered_and_justified(|ui| {
                     ui.spinner();
@@ -177,16 +177,16 @@ impl PixelArtApp {
         if !editable || panning {
             self.active_drawing = None;
             self.committed_preview = None;
-            self.preview_pixels(PaneKey::Main, &[], self.color);
-            self.paint_pane(PaneKey::Main, &painter, canvas);
+            self.preview_pixels(&[], self.color);
+            self.paint_pane(&painter, canvas);
             return;
         }
 
         self.handle_tool_input(ui, &response, hovered_pixel, width, height);
 
         let (pending, preview_color) = self.pending_pixels(hovered_pixel, width, height, ui);
-        self.preview_pixels(PaneKey::Main, &pending, preview_color);
-        self.paint_pane(PaneKey::Main, &painter, canvas);
+        self.preview_pixels(&pending, preview_color);
+        self.paint_pane(&painter, canvas);
         if self.show_grid {
             paint_grid(&painter, canvas, width, height);
         } else {
