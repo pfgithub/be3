@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
         database::{DatabaseOperation, DatabaseRow, DatabaseValue},
         database_schema::{DatabaseField, DatabaseFieldType},
@@ -6,7 +9,7 @@ use block_client::{
     },
     BlockHandle,
 };
-use block_editor_plugin::block_ui::database::cell_text;
+use block_editor_plugin::block_ui::{database::cell_text, BlockLabel};
 use block_editor_plugin::egui;
 use block_editor_plugin::egui_material_icons::icons::ICON_ADD;
 use uuid::Uuid;
@@ -23,11 +26,15 @@ const PREVIEW_CARD_GAP: f32 = 4.0;
 pub(crate) struct KanbanView {
     selected: Option<usize>,
     dragging: Option<usize>,
+    block_labels: HashMap<BlockRef, BlockLabel>,
 }
 
 impl KanbanView {
     pub(crate) fn selected_row(&self) -> Option<usize> {
         self.selected
+    }
+    pub(crate) fn set_block_labels(&mut self, labels: HashMap<BlockRef, BlockLabel>) {
+        self.block_labels = labels;
     }
 
     pub(crate) fn deselect(&mut self) {
@@ -53,7 +60,7 @@ impl KanbanView {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
-                    for option in &status_field.options {
+                    for option in &status_field.enum_options {
                         self.column(
                             ui,
                             view,
@@ -188,7 +195,7 @@ impl KanbanView {
                     if field.id == status_field_id {
                         continue;
                     }
-                    let text = cell_text(row, field);
+                    let text = cell_text(row, field, &self.block_labels);
                     if text.is_empty() {
                         continue;
                     }
@@ -254,7 +261,7 @@ pub(crate) fn paint_preview(
     let rect = egui::Rect::from_min_max(context.corners[0], context.corners[2]);
     let Some(status_field) = kanban_field_id
         .and_then(|id| fields.iter().find(|field| field.id == id))
-        .filter(|field| !field.options.is_empty())
+        .filter(|field| !field.enum_options.is_empty())
     else {
         return;
     };
@@ -270,14 +277,14 @@ pub(crate) fn paint_preview(
     let card_fill = preview_color(visuals.extreme_bg_color, context.opacity);
     let strong_text = preview_color(visuals.strong_text_color(), context.opacity);
 
-    let column_count = status_field.options.len();
+    let column_count = status_field.enum_options.len();
     let column_width = (rect.width()
         - PREVIEW_COLUMN_GAP * (column_count.saturating_sub(1)) as f32)
         / column_count.max(1) as f32;
     let header_height = (rect.height() * 0.18).clamp(10.0, 22.0);
     let font = egui::FontId::proportional((11.0_f32).min(column_width * 0.3).max(4.0));
 
-    for (index, option) in status_field.options.iter().enumerate() {
+    for (index, option) in status_field.enum_options.iter().enumerate() {
         let x = rect.left() + (column_width + PREVIEW_COLUMN_GAP) * index as f32;
         let column_rect = egui::Rect::from_min_size(
             egui::pos2(x, rect.top()),

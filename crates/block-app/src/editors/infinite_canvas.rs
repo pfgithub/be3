@@ -29,7 +29,7 @@ use block_client::{
     presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,
 };
-use block_ui::database::DatabaseValueEditor;
+use block_ui::database::{DatabaseValueEditor, DatabaseValueEditorOutput};
 use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
 use egui_material_icons::{
     icons::{
@@ -311,6 +311,12 @@ struct TwoFingerTouch {
     last_center: Pos2,
     max_touches: usize,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingComponentValuePick {
+    schema_id: BlockRef,
+    field_id: Uuid,
+    entity_ids: Vec<Uuid>,
+}
 
 pub(super) struct InfiniteCanvasEditor {
     block: BlockHandle<InfiniteCanvas>,
@@ -321,6 +327,8 @@ pub(super) struct InfiniteCanvasEditor {
     two_finger_touch: Option<TwoFingerTouch>,
     picker: BlockPicker,
     component_picker: BlockPicker,
+    value_picker: BlockPicker,
+    pending_value_target: Option<PendingComponentValuePick>,
     pending_component_entities: Option<Vec<Uuid>>,
     pending_block_center: Option<CanvasPoint>,
     context_menu_position: Option<CanvasPoint>,
@@ -347,6 +355,7 @@ pub(super) struct InfiniteCanvasEditor {
     reference_cache: references::ReferenceResolutionCache,
     pending_entities: references::ReferenceClassificationQueue<(Uuid, CanvasTransform)>,
     pending_components: references::ReferenceClassificationQueue<Vec<Uuid>>,
+    pending_values: references::ReferenceClassificationQueue<PendingComponentValuePick>,
     component_editors: HashMap<BlockRef, DatabaseValueEditor>,
     component_editor_selection: Vec<Uuid>,
 }

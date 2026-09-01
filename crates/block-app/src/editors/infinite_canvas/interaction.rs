@@ -29,6 +29,16 @@ impl InfiniteCanvasEditor {
             self.pending_components
                 .push(&client, self.block.id(), block.id, entity_ids);
         }
+        if let Some(block) =
+            self.value_picker
+                .handle(context, editors, BlockParent::Uuid(self.block.id()))
+        {
+            if let Some(target) = self.pending_value_target.clone() {
+                let client = editors.client_handle();
+                self.pending_values
+                    .push(&client, self.block.id(), block.id, target);
+            }
+        }
     }
 
     pub(super) fn import_picked_image(
@@ -317,6 +327,7 @@ impl InfiniteCanvasEditor {
             self.gesture = None;
             self.picker.close();
             self.component_picker.close();
+            self.value_picker.close();
             self.tool = Tool::Select;
         }
         let keyboard_available = !response.ctx.egui_wants_keyboard_input();

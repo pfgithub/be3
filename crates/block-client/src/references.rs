@@ -138,16 +138,21 @@ impl<T> ReferenceClassificationQueue<T> {
     }
 
     pub fn poll(&mut self) -> Vec<(BlockRef, T)> {
+        self.poll_with_failures().0
+    }
+
+    pub fn poll_with_failures(&mut self) -> (Vec<(BlockRef, T)>, Vec<T>) {
         let mut finished = Vec::new();
+        let mut failed = Vec::new();
         let mut still_pending = Vec::new();
         for item in self.pending.drain(..) {
             match item.receiver.try_recv() {
                 Ok(reference) => finished.push((reference, item.payload)),
                 Err(std::sync::mpsc::TryRecvError::Empty) => still_pending.push(item),
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => failed.push(item.payload),
             }
         }
         self.pending = still_pending;
-        finished
+        (finished, failed)
     }
 }

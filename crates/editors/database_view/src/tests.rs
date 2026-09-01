@@ -1,19 +1,26 @@
-use std::sync::Arc;
+use std::{cmp::Ordering, collections::HashMap, sync::Arc};
 
 use block_client::block_ref::BlockRef;
-use block_client::blocks::database::{Database, DatabaseValue};
+use block_client::blocks::database::{Database, DatabaseColor, DatabaseValue};
 use block_client::blocks::database_schema::{
     DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
 };
 use block_client::blocks::database_view::{DatabaseView, DatabaseViewKind};
 use block_client::{BlockClient, BlockHandle};
-use block_editor_plugin::{App as _, EditorHost};
+use block_editor_plugin::{
+    block_ui::{database::DatabaseBlockPickRequest, BlockLabel},
+    App as _, EditorHost,
+};
 use block_ui_test::EditorTest;
 use uuid::Uuid;
 
-use crate::app::DatabaseViewApp;
+use crate::{
+    app::{value_block_filter, DatabaseViewApp},
+    spreadsheet::compare_database_values,
+};
 
 mod a_new_view_starts_as_a_spreadsheet;
+mod new_type_cells_render_and_boolean_toggles;
 mod selected_row_string_edit_updates_the_database;
 mod switching_to_kanban_stores_the_kind;
 
@@ -31,7 +38,9 @@ fn editor() -> (
             id: field_id,
             name: "Name".into(),
             field_type: DatabaseFieldType::String,
-            options: Vec::new(),
+            enum_options: Vec::new(),
+            number_options: Default::default(),
+            block_options: Default::default(),
         },
     });
     let database = client.create_block(Database::new(BlockRef::Direct(schema.id())));
@@ -44,3 +53,17 @@ fn editor() -> (
     editor.run();
     (editor, block, database, field_id)
 }
+
+fn field(field_type: DatabaseFieldType) -> DatabaseField {
+    DatabaseField {
+        id: Uuid::new_v4(),
+        name: "Field".into(),
+        field_type,
+        enum_options: Vec::new(),
+        number_options: Default::default(),
+        block_options: Default::default(),
+    }
+}
+mod block_values_sort_by_resolved_label_then_reference;
+mod new_values_sort_by_their_typed_order;
+mod value_picker_filter_is_exact_and_never_includes_templates;

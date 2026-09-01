@@ -75,7 +75,9 @@ impl block_editor_plugin::App for DatabaseApp {
                 id: Uuid::new_v4(),
                 name: "Name".into(),
                 field_type: DatabaseFieldType::String,
-                options: Vec::new(),
+                enum_options: Vec::new(),
+                number_options: Default::default(),
+                block_options: Default::default(),
             },
         });
         let database = client.create_block(Database::new(BlockRef::Direct(schema.id())));

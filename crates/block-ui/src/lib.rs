@@ -1,4 +1,5 @@
 pub mod database;
+pub mod datetime;
 pub mod test_id;
 
 use std::collections::{BTreeMap, HashMap};
@@ -29,6 +30,9 @@ impl BlockCatalog {
             types: types.into_iter().collect(),
         }
     }
+    pub fn iter(&self) -> impl Iterator<Item = (&Uuid, &BlockTypeEntry)> {
+        self.types.iter()
+    }
 }
 
 impl BlockTypes for BlockCatalog {
@@ -42,6 +46,7 @@ impl BlockTypes for BlockCatalog {
         self.types.get(&block_type).and_then(|entry| entry.icon)
     }
 }
+#[derive(Clone)]
 
 pub struct BlockLabel {
     pub block_type: Uuid,

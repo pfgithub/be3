@@ -15,6 +15,8 @@ impl InfiniteCanvasEditor {
             two_finger_touch: None,
             picker: BlockPicker::default(),
             component_picker: BlockPicker::default(),
+            value_picker: BlockPicker::default(),
+            pending_value_target: None,
             pending_component_entities: None,
             pending_block_center: None,
             context_menu_position: None,
@@ -40,6 +42,7 @@ impl InfiniteCanvasEditor {
             reference_cache: references::ReferenceResolutionCache::default(),
             pending_entities: references::ReferenceClassificationQueue::default(),
             pending_components: references::ReferenceClassificationQueue::default(),
+            pending_values: references::ReferenceClassificationQueue::default(),
             component_editors: HashMap::new(),
             component_editor_selection: Vec::new(),
         }
@@ -91,6 +94,32 @@ impl InfiniteCanvasEditor {
             let mut after = before.clone();
             super::inspector::attach_component(&mut after, &selected, reference);
             self.record_update(before, after, false);
+        }
+        for (reference, target) in self.pending_values.poll() {
+            if self.pending_value_target.as_ref() != Some(&target) {
+                continue;
+            }
+            let selected = target.entity_ids.iter().copied().collect::<HashSet<_>>();
+            let Some(canvas) = self.block.read() else {
+                continue;
+            };
+            let before = canvas
+                .entities()
+                .iter()
+                .filter(|entity| selected.contains(&entity.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            drop(canvas);
+            let mut after = before.clone();
+            super::inspector::set_component_value(
+                &mut after,
+                &selected,
+                target.schema_id,
+                target.field_id,
+                Some(DatabaseValue::Block(reference)),
+            );
+            self.record_update(before, after, false);
+            self.pending_value_target = None;
         }
     }
 

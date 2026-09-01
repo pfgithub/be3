@@ -8,31 +8,84 @@ pub enum DatabaseFieldType {
     String,
     Number,
     Enum,
+    Block,
+    Boolean,
+    Color,
+    Datetime,
 }
 
-                                                                          
-                                                                         
-                         
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseNumberScale {
+    #[default]
+    Linear,
+    Logarithmic,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct DatabaseNumberOptions {
+    pub minimum: Option<f64>,
+    pub maximum: Option<f64>,
+    pub step: Option<f64>,
+    pub scale: DatabaseNumberScale,
+}
+
+impl DatabaseNumberOptions {
+    pub fn effective_step(self) -> f64 {
+        self.step.unwrap_or(match self.scale {
+            DatabaseNumberScale::Linear => 1.0,
+            DatabaseNumberScale::Logarithmic => 1.01,
+        })
+    }
+    pub fn normalized(mut self) -> Self {
+        self.minimum = self.minimum.filter(|value| value.is_finite());
+        self.maximum = self.maximum.filter(|value| value.is_finite());
+        self.step = self.step.filter(|value| value.is_finite());
+        if self.scale == DatabaseNumberScale::Logarithmic {
+            self.minimum = self.minimum.filter(|value| *value > 0.0);
+            self.maximum = self.maximum.filter(|value| *value > 0.0);
+        }
+        if let (Some(minimum), Some(maximum)) = (self.minimum, self.maximum) {
+            if minimum > maximum {
+                self.minimum = Some(maximum);
+                self.maximum = Some(minimum);
+            }
+        }
+        self.step = match self.scale {
+            DatabaseNumberScale::Linear => self.step.filter(|value| *value > 0.0),
+            DatabaseNumberScale::Logarithmic => self.step.filter(|value| *value > 1.0),
+        };
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub struct DatabaseBlockOptions {
+    pub block_type: Option<Uuid>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DatabaseEnumOption {
     pub id: Uuid,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DatabaseField {
     pub id: Uuid,
     pub name: String,
     pub field_type: DatabaseFieldType,
-    pub options: Vec<DatabaseEnumOption>,
+    pub enum_options: Vec<DatabaseEnumOption>,
+    pub number_options: DatabaseNumberOptions,
+    pub block_options: DatabaseBlockOptions,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct DatabaseSchema {
     fields: Vec<DatabaseField>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum DatabaseSchemaOperation {
     AddField {
@@ -48,6 +101,14 @@ pub enum DatabaseSchemaOperation {
     SetFieldType {
         field_id: Uuid,
         field_type: DatabaseFieldType,
+    },
+    SetNumberOptions {
+        field_id: Uuid,
+        options: DatabaseNumberOptions,
+    },
+    SetBlockOptions {
+        field_id: Uuid,
+        options: DatabaseBlockOptions,
     },
     AddEnumOption {
         field_id: Uuid,
@@ -85,7 +146,9 @@ impl Block for DatabaseSchema {
         match operation {
             DatabaseSchemaOperation::AddField { field } => {
                 if !schema.fields.iter().any(|existing| existing.id == field.id) {
-                    schema.fields.push(field.clone());
+                    let mut field = field.clone();
+                    field.number_options = field.number_options.normalized();
+                    schema.fields.push(field);
                 }
             }
             DatabaseSchemaOperation::RemoveField { field_id } => {
@@ -104,14 +167,24 @@ impl Block for DatabaseSchema {
                     field.field_type = *field_type;
                 }
             }
+            DatabaseSchemaOperation::SetNumberOptions { field_id, options } => {
+                if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
+                    field.number_options = options.normalized();
+                }
+            }
+            DatabaseSchemaOperation::SetBlockOptions { field_id, options } => {
+                if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
+                    field.block_options = *options;
+                }
+            }
             DatabaseSchemaOperation::AddEnumOption { field_id, option } => {
                 if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
                     if !field
-                        .options
+                        .enum_options
                         .iter()
                         .any(|existing| existing.id == option.id)
                     {
-                        field.options.push(option.clone());
+                        field.enum_options.push(option.clone());
                     }
                 }
             }
@@ -120,7 +193,7 @@ impl Block for DatabaseSchema {
                 option_id,
             } => {
                 if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
-                    field.options.retain(|option| option.id != *option_id);
+                    field.enum_options.retain(|option| option.id != *option_id);
                 }
             }
             DatabaseSchemaOperation::RenameEnumOption {
@@ -130,7 +203,7 @@ impl Block for DatabaseSchema {
             } => {
                 if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *field_id) {
                     if let Some(option) = field
-                        .options
+                        .enum_options
                         .iter_mut()
                         .find(|option| option.id == *option_id)
                     {

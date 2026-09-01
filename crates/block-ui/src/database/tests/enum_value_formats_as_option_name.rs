@@ -7,9 +7,9 @@ fn enum_value_formats_as_option_name() {
         name: "Alpha".to_owned(),
     };
     let mut field = field(DatabaseFieldType::Enum);
-    field.options.push(option.clone());
+    field.enum_options.push(option.clone());
     assert_eq!(
-        database_value_text(&DatabaseValue::Enum(option.id), &field),
+        database_value_text(&DatabaseValue::Enum(option.id), &field, &HashMap::new()),
         option.name
     );
 }

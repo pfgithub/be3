@@ -369,17 +369,65 @@ impl Block for InfiniteCanvas {
                 }
                 _ => {}
             }
-            references.extend(
-                entity
-                    .components
-                    .iter()
-                    .filter_map(|component| component.schema_id.as_direct()),
-            );
+            for component in &entity.components {
+                if let Some(reference) = component.schema_id.as_direct() {
+                    references.push(reference);
+                }
+                references.extend(component.values.values().filter_map(|value| match value {
+                    DatabaseValue::Block(reference) => reference.as_direct(),
+                    _ => None,
+                }));
+            }
         }
         let mut seen = HashSet::new();
         references.retain(|reference| seen.insert(*reference));
         references
     }
+    fn delete_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
+        let reference = BlockRef::Direct(block_id);
+        let removed = self
+            .entities
+            .iter()
+            .filter_map(|entity| match entity.kind {
+                CanvasEntityKind::Block { block_id }
+                | CanvasEntityKind::DirectEditor { block_id, .. }
+                    if block_id == reference =>
+                {
+                    Some(entity.id)
+                }
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        let entities = self
+            .entities
+            .iter()
+            .filter(|entity| !removed.contains(&entity.id))
+            .filter_map(|entity| {
+                let mut entity = entity.clone();
+                let before = entity.components.clone();
+                entity
+                    .components
+                    .retain(|component| component.schema_id != reference);
+                for component in &mut entity.components {
+                    component
+                        .values
+                        .retain(|_, value| value != &DatabaseValue::Block(reference));
+                }
+                (entity.components != before).then_some(entity)
+            })
+            .collect::<Vec<_>>();
+        let mut operations = Vec::new();
+        if !removed.is_empty() {
+            operations.push(InfiniteCanvasOperation::Remove {
+                ids: removed.into_iter().collect(),
+            });
+        }
+        if !entities.is_empty() {
+            operations.push(InfiniteCanvasOperation::Update { entities });
+        }
+        Some(operations)
+    }
+
 
     fn replace_child(&self, old: Uuid, new: Uuid) -> Option<Vec<Self::Operation>> {
         let old = BlockRef::Direct(old);
@@ -422,6 +470,14 @@ impl Block for InfiniteCanvas {
                         }
                     } else {
                         entity.components[old_index].schema_id = new_reference;
+                    }
+                }
+                for component in &mut entity.components {
+                    for value in component.values.values_mut() {
+                        if value == &DatabaseValue::Block(old) {
+                            *value = DatabaseValue::Block(new_reference);
+                            changed = true;
+                        }
                     }
                 }
                 changed.then_some(entity)

@@ -1,22 +1,30 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use block::{Block, BlockParent};
-use block_client::block_ref::BlockRef;
-use block_client::blocks::database::{Database, DatabaseOperation, DatabaseRow};
-use block_client::blocks::database_schema::{
-    DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
+use block::{Block, BlockParent, BlockReferenceList};
+use block_client::{
+    block_ref::BlockRef,
+    blocks::{
+        database::{Database, DatabaseOperation, DatabaseRow, DatabaseValue},
+        database_schema::{
+            DatabaseField, DatabaseFieldType, DatabaseSchema, DatabaseSchemaOperation,
+        },
+        database_view::{DatabaseView, DatabaseViewKind, DatabaseViewOperation, DatabaseViewSort},
+    },
+    references::{ReferenceClassificationQueue, ReferenceResolutionCache},
+    BlockClient, BlockHandle, ReferenceList,
 };
-use block_client::blocks::database_view::{
-    DatabaseView, DatabaseViewKind, DatabaseViewOperation, DatabaseViewSort,
+use block_editor_plugin::{
+    block_ui::{
+        database::{DatabaseBlockPickRequest, DatabaseValueEditor, DatabaseValueEditorOutput},
+        test_id::TestId,
+        BlockLabel,
+    },
+    egui,
+    egui_material_icons::icons::{
+        ICON_DESELECT, ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_VIEW_KANBAN,
+    },
+    BlockFilter, BlockPicker, EditorHost,
 };
-use block_client::references::ReferenceResolutionCache;
-use block_client::{BlockClient, BlockHandle};
-use block_editor_plugin::block_ui::database::DatabaseValueEditor;
-use block_editor_plugin::block_ui::test_id::TestId;
-use block_editor_plugin::egui_material_icons::icons::{
-    ICON_DESELECT, ICON_GRID_ON, ICON_SCATTER_PLOT, ICON_SCHEMA, ICON_VIEW_KANBAN,
-};
-use block_editor_plugin::{egui, EditorHost};
 use uuid::Uuid;
 
 use crate::kanban::KanbanView;
@@ -33,6 +41,7 @@ pub(crate) struct BlockRenderContext<'a> {
 struct DatabaseViewData {
     schema_id: Uuid,
     rows: Vec<DatabaseRow>,
+    block_labels: HashMap<BlockRef, BlockLabel>,
     fields: Vec<DatabaseField>,
     sort: Option<DatabaseViewSort>,
     kind: DatabaseViewKind,
@@ -49,10 +58,15 @@ pub struct DatabaseViewApp {
     block: Option<BlockHandle<DatabaseView>>,
     database: Option<BlockHandle<Database>>,
     schema: Option<BlockHandle<DatabaseSchema>>,
+    dependencies: Option<ReferenceList>,
     spreadsheet: SpreadsheetView,
     kanban: KanbanView,
     scatter: ScatterView,
     row_editor: RowEditor,
+    picker: BlockPicker,
+    pending_value_target: Option<(usize, Uuid)>,
+    pending_values: ReferenceClassificationQueue<(usize, Uuid)>,
+    picker_error: Option<String>,
     reference_cache: ReferenceResolutionCache,
 }
 
@@ -69,6 +83,8 @@ impl DatabaseViewApp {
             .is_none_or(|database| database.id() != database_id)
         {
             self.database = Some(client.get_block::<Database>(database_id));
+            self.dependencies =
+                Some(client.watch_references(BlockReferenceList::References(database_id)));
         }
         Some(())
     }
@@ -90,6 +106,7 @@ impl DatabaseViewApp {
     }
 
     fn data(&mut self) -> Option<DatabaseViewData> {
+        self.poll_value_picker();
         self.reference_cache.poll();
         let view = self.block.as_ref()?.read()?;
         let database_ref = view.database_id();
@@ -107,10 +124,12 @@ impl DatabaseViewApp {
         self.ensure_schema(schema_ref)?;
         let fields = self.schema.as_ref()?.read()?.fields().to_vec();
         let schema_id = self.schema.as_ref()?.id();
+        let block_labels = self.block_labels(&rows);
         Some(DatabaseViewData {
             schema_id,
             rows,
             fields,
+            block_labels,
             sort,
             kind,
             kanban_field_id,
@@ -125,6 +144,122 @@ impl DatabaseViewApp {
         };
         for operation in operations {
             database.operate(operation);
+        }
+    }
+    fn block_labels(&mut self, rows: &[DatabaseRow]) -> HashMap<BlockRef, BlockLabel> {
+        let (Some(host), Some(client), Some(database), Some(dependencies)) = (
+            self.host.as_ref(),
+            self.client.as_ref(),
+            self.database.as_ref(),
+            self.dependencies.as_ref(),
+        ) else {
+            return HashMap::new();
+        };
+        let types = host.block_types();
+        let labels = dependencies
+            .read()
+            .into_iter()
+            .map(|reference| {
+                (
+                    reference.id,
+                    BlockLabel::for_reference(types.as_ref(), &reference),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let referencing_id = database.id();
+        rows.iter()
+            .flat_map(|row| row.values().values())
+            .filter_map(|value| match value {
+                DatabaseValue::Block(reference) => Some(*reference),
+                _ => None,
+            })
+            .filter_map(|reference| {
+                self.reference_cache
+                    .resolve(client, referencing_id, reference)
+                    .and_then(|id| labels.get(&id).cloned())
+                    .map(|label| (reference, label))
+            })
+            .collect()
+    }
+
+    fn value_target_selected(&self, target: (usize, Uuid)) -> bool {
+        let Some(kind) = self
+            .block
+            .as_ref()
+            .and_then(BlockHandle::read)
+            .map(|view| view.kind())
+        else {
+            return false;
+        };
+        match kind {
+            DatabaseViewKind::Spreadsheet => self.spreadsheet.selected_target() == Some(target),
+            DatabaseViewKind::Kanban => self.kanban.selected_row() == Some(target.0),
+            DatabaseViewKind::Scatter => self.scatter.selected_row() == Some(target.0),
+        }
+    }
+
+    fn open_value_picker(
+        &mut self,
+        target: (usize, Uuid),
+        field_name: &str,
+        request: DatabaseBlockPickRequest,
+    ) {
+        let Some(host) = self.host.as_ref() else {
+            return;
+        };
+        self.pending_value_target = Some(target);
+        self.picker
+            .open(host, value_block_filter(field_name, request));
+    }
+
+    fn poll_value_picker(&mut self) {
+        let (Some(host), Some(client), Some(database)) = (
+            self.host.as_ref(),
+            self.client.as_ref(),
+            self.database.as_ref(),
+        ) else {
+            return;
+        };
+        if self
+            .pending_value_target
+            .is_some_and(|target| !self.value_target_selected(target))
+        {
+            self.pending_value_target = None;
+        }
+        let was_open = self.picker.is_open();
+        match self.picker.poll(host) {
+            Some(Ok((block_id, _))) => {
+                if let Some(target) = self.pending_value_target {
+                    self.pending_values
+                        .push(client, database.id(), block_id, target);
+                }
+            }
+            Some(Err(error)) => {
+                self.picker_error = Some(error);
+                self.pending_value_target = None;
+            }
+            None if was_open && !self.picker.is_open() => {
+                self.pending_value_target = None;
+            }
+            None => {}
+        }
+        let (finished, failed) = self.pending_values.poll_with_failures();
+        for (reference, target) in finished {
+            if self.pending_value_target == Some(target) {
+                database.operate(DatabaseOperation::SetCell {
+                    row_index: target.0,
+                    field_id: target.1,
+                    value: Some(DatabaseValue::Block(reference)),
+                });
+                self.pending_value_target = None;
+            }
+        }
+        if failed
+            .into_iter()
+            .any(|target| self.pending_value_target == Some(target))
+        {
+            self.picker_error = Some("Could not classify the selected block reference".to_owned());
+            self.pending_value_target = None;
         }
     }
 
@@ -179,6 +314,21 @@ impl DatabaseViewApp {
     }
 }
 
+pub(crate) fn value_block_filter(
+    field_name: &str,
+    request: DatabaseBlockPickRequest,
+) -> BlockFilter {
+    BlockFilter {
+        name: field_name.to_owned(),
+        block_types: request
+            .block_type
+            .into_iter()
+            .map(Uuid::into_bytes)
+            .collect(),
+        templates: false,
+    }
+}
+
 impl block_editor_plugin::App for DatabaseViewApp {
     fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
         self.block = Some(client.get_block(block_id));
@@ -201,7 +351,9 @@ impl block_editor_plugin::App for DatabaseViewApp {
                 id: Uuid::new_v4(),
                 name: "Name".into(),
                 field_type: DatabaseFieldType::String,
-                options: Vec::new(),
+                enum_options: Vec::new(),
+                number_options: Default::default(),
+                block_options: Default::default(),
             },
         });
         let database = client.create_block(Database::new(BlockRef::Direct(schema.id())));
@@ -254,6 +406,7 @@ impl block_editor_plugin::App for DatabaseViewApp {
         else {
             return;
         };
+        let block_labels = self.block_labels(&rows);
         let rect = ui.max_rect();
         let context = BlockRenderContext {
             painter: ui.painter(),
@@ -268,9 +421,9 @@ impl block_editor_plugin::App for DatabaseViewApp {
         match kind {
             DatabaseViewKind::Spreadsheet => {
                 if let Some(sort) = sort {
-                    spreadsheet::sort_rows(&mut rows, sort, &fields);
+                    spreadsheet::sort_rows(&mut rows, sort, &fields, &block_labels);
                 }
-                spreadsheet::paint_preview(context, &rows, &fields);
+                spreadsheet::paint_preview(context, &rows, &fields, &block_labels);
             }
             DatabaseViewKind::Kanban => {
                 kanban::paint_preview(context, &rows, &fields, kanban_field_id);
@@ -297,8 +450,9 @@ impl block_editor_plugin::App for DatabaseViewApp {
         if data.kind != DatabaseViewKind::Spreadsheet {
             return;
         }
+        self.spreadsheet.set_block_labels(data.block_labels.clone());
         let mut operations = Vec::new();
-        self.spreadsheet.formula_bar(
+        let block_pick = self.spreadsheet.formula_bar(
             ui,
             &block,
             &data.rows,
@@ -307,6 +461,17 @@ impl block_editor_plugin::App for DatabaseViewApp {
             &mut operations,
         );
         self.operate_database(operations);
+        if let (Some(request), Some(target)) = (block_pick, self.spreadsheet.selected_target()) {
+            if target.1 == request.field_id {
+                if let Some(field) = data
+                    .fields
+                    .iter()
+                    .find(|field| field.id == request.field_id)
+                {
+                    self.open_value_picker(target, &field.name, request);
+                }
+            }
+        }
     }
 
     fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
@@ -315,6 +480,13 @@ impl block_editor_plugin::App for DatabaseViewApp {
         else {
             return;
         };
+        if let Some(error) = self.picker_error.clone() {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+            if ui.small_button("Dismiss").clicked() {
+                self.picker_error = None;
+            }
+            ui.separator();
+        }
         egui::CollapsingHeader::new("Column settings")
             .default_open(false)
             .show(ui, |ui| {
@@ -350,6 +522,7 @@ impl block_editor_plugin::App for DatabaseViewApp {
                 }
             });
         ui.separator();
+        let mut block_pick = None;
         egui::CollapsingHeader::new("Selected item")
             .default_open(true)
             .show(ui, |ui| {
@@ -362,11 +535,36 @@ impl block_editor_plugin::App for DatabaseViewApp {
                     self.deselect(data.kind);
                     selected_row = None;
                 }
-                operations = self
-                    .row_editor
-                    .ui(ui, &data.rows, &data.fields, selected_row);
+                let output = self.row_editor.ui(
+                    ui,
+                    &data.rows,
+                    &data.fields,
+                    &data.block_labels,
+                    selected_row,
+                );
+                operations = output
+                    .changes
+                    .into_iter()
+                    .map(|change| DatabaseOperation::SetCell {
+                        row_index: selected_row.unwrap_or_default(),
+                        field_id: change.field_id,
+                        value: change.value,
+                    })
+                    .collect();
+                block_pick = output
+                    .block_pick
+                    .map(|request| (selected_row.unwrap_or_default(), request));
             });
         self.operate_database(operations);
+        if let Some((row_index, request)) = block_pick {
+            if let Some(field) = data
+                .fields
+                .iter()
+                .find(|field| field.id == request.field_id)
+            {
+                self.open_value_picker((row_index, request.field_id), &field.name, request);
+            }
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
@@ -377,6 +575,8 @@ impl block_editor_plugin::App for DatabaseViewApp {
             return;
         };
         let mut operations = Vec::new();
+        self.spreadsheet.set_block_labels(data.block_labels.clone());
+        self.kanban.set_block_labels(data.block_labels.clone());
         match data.kind {
             DatabaseViewKind::Spreadsheet => {
                 if data.fields.is_empty() {
@@ -447,11 +647,12 @@ impl RowEditor {
         ui: &mut egui::Ui,
         rows: &[DatabaseRow],
         fields: &[DatabaseField],
+        block_labels: &HashMap<BlockRef, BlockLabel>,
         row_index: Option<usize>,
-    ) -> Vec<DatabaseOperation> {
+    ) -> DatabaseValueEditorOutput {
         let Some(row_index) = row_index else {
             ui.weak("Select a row to edit it here.");
-            return Vec::new();
+            return DatabaseValueEditorOutput::default();
         };
         if self.row_index != Some(row_index) {
             self.row_index = Some(row_index);
@@ -464,17 +665,15 @@ impl RowEditor {
         ui.separator();
         if fields.is_empty() {
             ui.weak("This database has no columns yet.");
-            return Vec::new();
+            return DatabaseValueEditorOutput::default();
         }
-        self.value_editor
-            .ui(ui, fields, &[row.values()], "database-view.selected-item")
-            .into_iter()
-            .map(|change| DatabaseOperation::SetCell {
-                row_index,
-                field_id: change.field_id,
-                value: change.value,
-            })
-            .collect()
+        self.value_editor.ui(
+            ui,
+            fields,
+            &[row.values()],
+            block_labels,
+            "database-view.selected-item",
+        )
     }
 }
 

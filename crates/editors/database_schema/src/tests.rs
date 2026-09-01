@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::app::DatabaseSchemaApp;
 
 mod adding_a_field_appends_a_string_field;
+mod configured_fields_paint_on_separate_lines;
 
 fn editor() -> (
     EditorTest<'static, DatabaseSchemaApp>,

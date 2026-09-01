@@ -11,7 +11,9 @@ fn renaming_field_preserves_its_uuid() {
                 id,
                 name: "Old name".into(),
                 field_type: DatabaseFieldType::String,
-                options: Vec::new(),
+                enum_options: Vec::new(),
+                number_options: Default::default(),
+                block_options: Default::default(),
             },
         },
     );

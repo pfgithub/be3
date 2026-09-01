@@ -8,12 +8,7 @@ fn renaming_enum_option_preserves_its_uuid() {
     DatabaseSchema::apply_operation(
         &mut schema,
         &DatabaseSchemaOperation::AddField {
-            field: DatabaseField {
-                id: field_id,
-                name: "Status".into(),
-                field_type: DatabaseFieldType::Enum,
-                options: Vec::new(),
-            },
+            field: DatabaseField { id: field_id, name: "Status".into(), field_type: DatabaseFieldType::Enum, enum_options: Vec::new(), number_options: Default::default(), block_options: Default::default() },
         },
     );
     DatabaseSchema::apply_operation(
@@ -35,6 +30,6 @@ fn renaming_enum_option_preserves_its_uuid() {
         },
     );
 
-    assert_eq!(schema.fields()[0].options[0].id, option_id);
-    assert_eq!(schema.fields()[0].options[0].name, "New name");
+    assert_eq!(schema.fields()[0].enum_options[0].id, option_id);
+    assert_eq!(schema.fields()[0].enum_options[0].name, "New name");
 }

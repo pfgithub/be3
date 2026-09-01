@@ -15,12 +15,7 @@ fn enum_options_are_added_and_removed_by_uuid() {
     DatabaseSchema::apply_operation(
         &mut schema,
         &DatabaseSchemaOperation::AddField {
-            field: DatabaseField {
-                id: field_id,
-                name: "Status".into(),
-                field_type: DatabaseFieldType::Enum,
-                options: Vec::new(),
-            },
+            field: DatabaseField { id: field_id, name: "Status".into(), field_type: DatabaseFieldType::Enum, enum_options: Vec::new(), number_options: Default::default(), block_options: Default::default() },
         },
     );
     for option in [retained.clone(), removed.clone()] {
@@ -37,5 +32,5 @@ fn enum_options_are_added_and_removed_by_uuid() {
         },
     );
 
-    assert_eq!(schema.fields()[0].options, vec![retained]);
+    assert_eq!(schema.fields()[0].enum_options, vec![retained]);
 }

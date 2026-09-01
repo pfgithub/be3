@@ -81,6 +81,34 @@ impl InfiniteCanvasEditor {
                 }
             }
         }
+        let dependency_labels = self
+            .dependencies
+            .read()
+            .into_iter()
+            .map(|reference| {
+                (
+                    reference.id,
+                    BlockLabel::for_reference(editors.registry(), &reference),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let component_references = selected
+            .iter()
+            .flat_map(|entity| &entity.components)
+            .flat_map(|component| component.values.values())
+            .filter_map(|value| match value {
+                DatabaseValue::Block(reference) => Some(*reference),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        let block_labels = component_references
+            .into_iter()
+            .filter_map(|reference| {
+                self.resolve_block_id(editors, reference)
+                    .and_then(|id| dependency_labels.get(&id).cloned())
+                    .map(|label| (reference, label))
+            })
+            .collect::<HashMap<_, _>>();
 
         let mut action = None;
         egui::CollapsingHeader::new("Components")
@@ -139,7 +167,7 @@ impl InfiniteCanvasEditor {
                         }
                     });
 
-                    let changes = if attached_count == selected.len() {
+                    let output = if attached_count == selected.len() {
                         if let (Some(fields), Some(schema_uuid)) = (fields.as_deref(), resolved_id)
                         {
                             let values = selected
@@ -157,13 +185,14 @@ impl InfiniteCanvasEditor {
                                 ui,
                                 fields,
                                 &values,
+                                &block_labels,
                                 &format!("infinite-canvas.component.{schema_uuid}"),
                             )
                         } else {
-                            Vec::new()
+                            DatabaseValueEditorOutput::default()
                         }
                     } else {
-                        Vec::new()
+                        DatabaseValueEditorOutput::default()
                     };
 
                     let before = selected
@@ -178,10 +207,10 @@ impl InfiniteCanvasEditor {
                         let mut after = before.clone();
                         attach_component(&mut after, &selected_ids, schema_id);
                         self.record_update(before, after, false);
-                    } else if !changes.is_empty() {
-                        let group = changes.iter().all(|change| change.continuous);
+                    } else if !output.changes.is_empty() {
+                        let group = output.changes.iter().all(|change| change.continuous);
                         let mut after = before.clone();
-                        for change in changes {
+                        for change in output.changes {
                             set_component_value(
                                 &mut after,
                                 &selected_ids,
@@ -191,6 +220,20 @@ impl InfiniteCanvasEditor {
                             );
                         }
                         self.record_update(before, after, group);
+                    }
+                    if let Some(request) = output.block_pick {
+                        let mut entity_ids = selected_ids.iter().copied().collect::<Vec<_>>();
+                        entity_ids.sort_unstable();
+                        self.pending_value_target = Some(PendingComponentValuePick {
+                            schema_id,
+                            field_id: request.field_id,
+                            entity_ids,
+                        });
+                        if let Some(block_type) = request.block_type {
+                            self.value_picker.open_for_types([], [block_type]);
+                        } else {
+                            self.value_picker.open([]);
+                        }
                     }
                     ui.add_space(8.0);
                 }

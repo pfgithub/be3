@@ -1,15 +1,23 @@
+use std::collections::HashMap;
+
 use block_client::{
+    block_ref::BlockRef,
     blocks::{
-        database::{DatabaseOperation, DatabaseRow, DatabaseValue},
-        database_schema::{DatabaseField, DatabaseFieldType},
+        database::{DatabaseColor, DatabaseOperation, DatabaseRow, DatabaseValue},
+        database_schema::{DatabaseField, DatabaseFieldType, DatabaseNumberScale},
         database_view::{DatabaseView, DatabaseViewOperation, DatabaseViewSort, SortDirection},
     },
     BlockHandle,
 };
-use block_editor_plugin::block_ui::database::{
-    cell_text, database_value_text, field_type_label, parse_cell_value,
-};
 use block_editor_plugin::block_ui::test_id::TestId;
+use block_editor_plugin::block_ui::{
+    database::{
+        block_reference_text, cell_text, database_value_text, field_type_label, number_drag_value,
+        parse_cell_value, DatabaseBlockPickRequest,
+    },
+    datetime::datetime_editor,
+    BlockLabel,
+};
 use block_editor_plugin::egui;
 use block_editor_plugin::egui_material_icons::icons::{ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD};
 use uuid::Uuid;
@@ -36,11 +44,19 @@ pub(crate) struct SpreadsheetView {
     edit_buffer: String,
     edit_original: Option<DatabaseValue>,
     request_edit_focus: bool,
+    block_labels: HashMap<BlockRef, BlockLabel>,
 }
 
 impl SpreadsheetView {
     pub(crate) fn selected_row(&self) -> Option<usize> {
         self.selected.map(|address| address.row_index)
+    }
+    pub(crate) fn selected_target(&self) -> Option<(usize, Uuid)> {
+        self.selected
+            .map(|address| (address.row_index, address.field_id))
+    }
+    pub(crate) fn set_block_labels(&mut self, labels: HashMap<BlockRef, BlockLabel>) {
+        self.block_labels = labels;
     }
 
     pub(crate) fn deselect(&mut self) {
@@ -74,7 +90,7 @@ impl SpreadsheetView {
         self.selected = Some(address);
         self.editing = Some(address);
         self.edit_original = row.value(field.id).cloned();
-        self.edit_buffer = replacement.unwrap_or_else(|| cell_text(row, field));
+        self.edit_buffer = replacement.unwrap_or_else(|| cell_text(row, field, &self.block_labels));
         self.request_edit_focus = true;
     }
 
@@ -90,7 +106,7 @@ impl SpreadsheetView {
             row_index,
             field_id: field.id,
         });
-        self.edit_buffer = cell_text(row, field);
+        self.edit_buffer = cell_text(row, field, &self.block_labels);
     }
 
     fn move_selection(
@@ -106,7 +122,7 @@ impl SpreadsheetView {
                     row_index: *row_index,
                     field_id: field.id,
                 });
-                self.edit_buffer = cell_text(row, field);
+                self.edit_buffer = cell_text(row, field, &self.block_labels);
             }
             return;
         };
@@ -216,14 +232,16 @@ impl SpreadsheetView {
                 value: None,
             });
         } else if let Some(text) = take_typed_text(ui) {
-            if let Some(value) = parse_cell_value(&text, field) {
-                operations.push(DatabaseOperation::SetCell {
-                    row_index: selected.row_index,
-                    field_id: field.id,
-                    value: Some(value),
-                });
+            if field.field_type != DatabaseFieldType::Block {
+                if let Some(value) = parse_cell_value(&text, field) {
+                    operations.push(DatabaseOperation::SetCell {
+                        row_index: selected.row_index,
+                        field_id: field.id,
+                        value: Some(value),
+                    });
+                }
+                self.begin_edit(selected.row_index, row, field, Some(text));
             }
-            self.begin_edit(selected.row_index, row, field, Some(text));
         }
     }
 
@@ -235,8 +253,8 @@ impl SpreadsheetView {
         fields: &[DatabaseField],
         sort: Option<DatabaseViewSort>,
         operations: &mut Vec<DatabaseOperation>,
-    ) {
-        let display = display_rows(rows, self.selected, sort, fields);
+    ) -> Option<DatabaseBlockPickRequest> {
+        let display = display_rows(rows, self.selected, sort, fields, &self.block_labels);
         let selection = self.selected.and_then(|selected| {
             let display_position = display
                 .iter()
@@ -255,45 +273,153 @@ impl SpreadsheetView {
             ui.memory_mut(|memory| memory.request_focus(formula_id));
             self.request_edit_focus = false;
         }
+        let mut block_pick = None;
 
         ui.horizontal(|ui| {
             ui.add_sized(
                 [ROW_HEADER_WIDTH, ROW_HEIGHT],
                 egui::Label::new(egui::RichText::new(cell_label).strong()),
             );
-            let response = ui.add_enabled(
-                selection.is_some(),
-                egui::TextEdit::singleline(&mut self.edit_buffer)
-                    .id(formula_id)
-                    .lock_focus(true)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("Select a cell"),
-            );
-
             let Some((address, display_position, field_index)) = selection else {
+                ui.add_enabled(
+                    false,
+                    egui::TextEdit::singleline(&mut String::new()).hint_text("Select a cell"),
+                );
                 return;
             };
             let (row_index, row) = &display[display_position];
             let field = &fields[field_index];
-            if response.gained_focus() && self.editing.is_none() {
-                self.editing = Some(address);
-                self.edit_original = row.value(field.id).cloned();
-            }
-            if response.changed() {
-                let value = if field.field_type == DatabaseFieldType::Number
-                    && self.edit_buffer.trim().is_empty()
-                {
-                    Some(None)
-                } else {
-                    parse_cell_value(&self.edit_buffer, field).map(Some)
-                };
-                if let Some(value) = value {
-                    operations.push(DatabaseOperation::SetCell {
-                        row_index: *row_index,
-                        field_id: field.id,
-                        value,
-                    });
+            let current = row.value(field.id);
+            let mut changed = None;
+            match field.field_type {
+                DatabaseFieldType::String => {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.edit_buffer)
+                            .id(formula_id)
+                            .lock_focus(true)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if response.gained_focus() && self.editing.is_none() {
+                        self.editing = Some(address);
+                        self.edit_original = current.cloned();
+                    }
+                    if response.changed() {
+                        changed = Some(DatabaseValue::String(self.edit_buffer.clone()));
+                    }
                 }
+                DatabaseFieldType::Number => {
+                    let mut value = match current {
+                        Some(DatabaseValue::Number(value)) => *value,
+                        _ if field.number_options.scale == DatabaseNumberScale::Logarithmic => {
+                            field.number_options.minimum.unwrap_or(1.0)
+                        }
+                        _ => 0.0,
+                    };
+                    if number_drag_value(ui, &mut value, field.number_options).changed() {
+                        changed = Some(DatabaseValue::Number(value));
+                    }
+                }
+                DatabaseFieldType::Enum => {
+                    let current = match current {
+                        Some(DatabaseValue::Enum(id)) => Some(*id),
+                        _ => None,
+                    };
+                    let selected = current
+                        .and_then(|id| field.enum_options.iter().find(|option| option.id == id))
+                        .map_or("None", |option| option.name.as_str());
+                    egui::ComboBox::from_id_salt((formula_id, field.id))
+                        .selected_text(selected)
+                        .show_ui(ui, |ui| {
+                            for option in &field.enum_options {
+                                if ui
+                                    .selectable_label(current == Some(option.id), &option.name)
+                                    .clicked()
+                                {
+                                    changed = Some(DatabaseValue::Enum(option.id));
+                                }
+                            }
+                        });
+                }
+                DatabaseFieldType::Boolean => {
+                    let mut value = matches!(current, Some(DatabaseValue::Boolean(true)));
+                    if ui.checkbox(&mut value, "").changed() {
+                        changed = Some(DatabaseValue::Boolean(value));
+                    }
+                }
+                DatabaseFieldType::Color => {
+                    let mut color = match current {
+                        Some(DatabaseValue::Color(color)) => {
+                            [color.red, color.green, color.blue, color.alpha]
+                        }
+                        _ => [255, 255, 255, 255],
+                    };
+                    if ui
+                        .color_edit_button_srgba_unmultiplied(&mut color)
+                        .changed()
+                    {
+                        changed = Some(DatabaseValue::Color(DatabaseColor {
+                            red: color[0],
+                            green: color[1],
+                            blue: color[2],
+                            alpha: color[3],
+                        }));
+                    }
+                }
+                DatabaseFieldType::Datetime => {
+                    if let Some(DatabaseValue::Datetime(current)) = current {
+                        let mut value = *current;
+                        if datetime_editor(ui, &mut value) {
+                            changed = Some(DatabaseValue::Datetime(value));
+                        }
+                    } else if ui.button("Set").clicked() {
+                        let seconds = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |duration| duration.as_secs() as i64);
+                        changed = Some(DatabaseValue::Datetime(seconds - seconds.rem_euclid(60)));
+                    }
+                }
+                DatabaseFieldType::Block => {
+                    let label = match current {
+                        Some(DatabaseValue::Block(reference)) => {
+                            format!(
+                                "Change: {}",
+                                block_reference_text(reference, &self.block_labels)
+                            )
+                        }
+                        _ => "Choose block".to_owned(),
+                    };
+                    if ui.button(label).clicked() {
+                        block_pick = Some(DatabaseBlockPickRequest {
+                            field_id: field.id,
+                            block_type: field.block_options.block_type,
+                        });
+                    }
+                }
+            }
+            if let Some(value) = changed {
+                if self.editing.is_none() {
+                    self.editing = Some(address);
+                    self.edit_original = current.cloned();
+                }
+                self.edit_buffer = database_value_text(&value, field, &self.block_labels);
+                operations.push(DatabaseOperation::SetCell {
+                    row_index: *row_index,
+                    field_id: field.id,
+                    value: Some(value),
+                });
+            }
+            if field.field_type != DatabaseFieldType::String
+                && ui.input_mut(|input| {
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                        || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+                })
+            {
+                operations.push(DatabaseOperation::SetCell {
+                    row_index: *row_index,
+                    field_id: field.id,
+                    value: None,
+                });
+                self.edit_buffer.clear();
             }
             if self.editing == Some(address)
                 && ui.input(|input| input.key_pressed(egui::Key::Escape))
@@ -306,7 +432,9 @@ impl SpreadsheetView {
                 self.edit_buffer = self
                     .edit_original
                     .as_ref()
-                    .map_or_else(String::new, |value| database_value_text(value, field));
+                    .map_or_else(String::new, |value| {
+                        database_value_text(value, field, &self.block_labels)
+                    });
                 self.finish_edit();
                 ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
             } else if self.editing == Some(address)
@@ -324,6 +452,7 @@ impl SpreadsheetView {
                 ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
             }
         });
+        block_pick
     }
 
     fn cell_editor(
@@ -334,6 +463,7 @@ impl SpreadsheetView {
         row: &DatabaseRow,
         field: &DatabaseField,
         scale: f32,
+        operations: &mut Vec<DatabaseOperation>,
     ) {
         let address = CellAddress {
             row_index,
@@ -344,8 +474,35 @@ impl SpreadsheetView {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
         let response = response.test_id(&format!("database-view.cell.{row_index}.{}", field.id));
         paint_cell_background(ui, rect, selected);
-        paint_cell_text(ui, rect, &cell_text(row, field), field.field_type, scale);
-        if response.clicked() {
+        let checkbox_clicked = if field.field_type == DatabaseFieldType::Boolean {
+            let checked = matches!(row.value(field.id), Some(DatabaseValue::Boolean(true)));
+            paint_boolean_cell(ui, rect, checked, scale, response.id)
+        } else {
+            false
+        };
+        if field.field_type == DatabaseFieldType::Color {
+            if let Some(DatabaseValue::Color(color)) = row.value(field.id) {
+                paint_color_cell(ui, rect, *color, scale);
+            }
+        } else if field.field_type != DatabaseFieldType::Boolean {
+            paint_cell_text(
+                ui,
+                rect,
+                &cell_text(row, field, &self.block_labels),
+                field.field_type,
+                scale,
+            );
+        }
+        if checkbox_clicked {
+            let value = !matches!(row.value(field.id), Some(DatabaseValue::Boolean(true)));
+            self.select_cell(row_index, row, field);
+            operations.push(DatabaseOperation::SetCell {
+                row_index,
+                field_id: field.id,
+                value: Some(DatabaseValue::Boolean(value)),
+            });
+            ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
+        } else if response.clicked() {
             self.select_cell(row_index, row, field);
             ui.memory_mut(|memory| memory.request_focus(grid_focus_id(view.id())));
         }
@@ -364,7 +521,7 @@ impl SpreadsheetView {
         scale: f32,
         operations: &mut Vec<DatabaseOperation>,
     ) {
-        let display = display_rows(rows, self.selected, sort, fields);
+        let display = display_rows(rows, self.selected, sort, fields, &self.block_labels);
         self.handle_keyboard(ui, view, &display, fields, operations);
         let background = ui.interact(
             ui.available_rect_before_wrap(),
@@ -413,7 +570,7 @@ impl SpreadsheetView {
                         .is_some_and(|cell| cell.row_index == *row_index);
                     spreadsheet_row_header(ui, display_position + 1, selected, scale);
                     for field in fields {
-                        self.cell_editor(ui, view, *row_index, row, field, scale);
+                        self.cell_editor(ui, view, *row_index, row, field, scale, operations);
                     }
                     ui.end_row();
                 }
@@ -448,9 +605,10 @@ fn compare_sorted_rows(
     b: &DatabaseRow,
     sort: DatabaseViewSort,
     field: &DatabaseField,
+    block_labels: &HashMap<BlockRef, BlockLabel>,
 ) -> std::cmp::Ordering {
     let ordering = match (a.value(sort.field_id), b.value(sort.field_id)) {
-        (Some(a), Some(b)) => compare_database_values(a, b, field),
+        (Some(a), Some(b)) => compare_database_values(a, b, field, block_labels),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
@@ -465,24 +623,31 @@ pub(crate) fn sort_rows(
     rows: &mut [DatabaseRow],
     sort: DatabaseViewSort,
     fields: &[DatabaseField],
+    block_labels: &HashMap<BlockRef, BlockLabel>,
 ) {
     let Some(field) = fields.iter().find(|field| field.id == sort.field_id) else {
         return;
     };
-    rows.sort_by(|a, b| compare_sorted_rows(a, b, sort, field));
+    rows.sort_by(|a, b| compare_sorted_rows(a, b, sort, field, block_labels));
 }
 
-fn sort_row_pairs(rows: &mut DisplayRows, sort: DatabaseViewSort, fields: &[DatabaseField]) {
+fn sort_row_pairs(
+    rows: &mut DisplayRows,
+    sort: DatabaseViewSort,
+    fields: &[DatabaseField],
+    block_labels: &HashMap<BlockRef, BlockLabel>,
+) {
     let Some(field) = fields.iter().find(|field| field.id == sort.field_id) else {
         return;
     };
-    rows.sort_by(|(_, a), (_, b)| compare_sorted_rows(a, b, sort, field));
+    rows.sort_by(|(_, a), (_, b)| compare_sorted_rows(a, b, sort, field, block_labels));
 }
 
-fn compare_database_values(
+pub(crate) fn compare_database_values(
     a: &DatabaseValue,
     b: &DatabaseValue,
     field: &DatabaseField,
+    block_labels: &HashMap<BlockRef, BlockLabel>,
 ) -> std::cmp::Ordering {
     match (a, b) {
         (DatabaseValue::String(a), DatabaseValue::String(b)) => a.cmp(b),
@@ -490,7 +655,7 @@ fn compare_database_values(
             a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
         }
         (DatabaseValue::Enum(a), DatabaseValue::Enum(b)) => {
-            let index = |id: Uuid| field.options.iter().position(|option| option.id == id);
+            let index = |id: Uuid| field.enum_options.iter().position(|option| option.id == id);
             match (index(*a), index(*b)) {
                 (Some(a), Some(b)) => a.cmp(&b),
                 (Some(_), None) => std::cmp::Ordering::Less,
@@ -498,7 +663,21 @@ fn compare_database_values(
                 (None, None) => std::cmp::Ordering::Equal,
             }
         }
+        (DatabaseValue::Boolean(a), DatabaseValue::Boolean(b)) => a.cmp(b),
+        (DatabaseValue::Color(a), DatabaseValue::Color(b)) => {
+            [a.red, a.green, a.blue, a.alpha].cmp(&[b.red, b.green, b.blue, b.alpha])
+        }
+        (DatabaseValue::Datetime(a), DatabaseValue::Datetime(b)) => a.cmp(b),
+        (DatabaseValue::Block(a), DatabaseValue::Block(b)) => block_reference_text(a, block_labels)
+            .cmp(&block_reference_text(b, block_labels))
+            .then_with(|| block_reference_fallback(a).cmp(&block_reference_fallback(b))),
         _ => std::cmp::Ordering::Equal,
+    }
+}
+fn block_reference_fallback(reference: &BlockRef) -> Uuid {
+    match reference {
+        BlockRef::Direct(id) => *id,
+        BlockRef::RepoRelative { eternal_id, .. } => *eternal_id,
     }
 }
 
@@ -521,11 +700,12 @@ fn display_rows(
     selected: Option<CellAddress>,
     sort: Option<DatabaseViewSort>,
     fields: &[DatabaseField],
+    block_labels: &HashMap<BlockRef, BlockLabel>,
 ) -> DisplayRows {
     let extra = extra_row_count(rows.len(), selected);
     let mut display: DisplayRows = rows.iter().cloned().enumerate().collect();
     if let Some(sort) = sort {
-        sort_row_pairs(&mut display, sort, fields);
+        sort_row_pairs(&mut display, sort, fields, block_labels);
     }
     display.extend(
         std::iter::repeat_with(DatabaseRow::default)
@@ -619,6 +799,82 @@ fn paint_cell_background(ui: &egui::Ui, rect: egui::Rect, selected: bool) {
     }
 }
 
+fn paint_boolean_cell(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    checked: bool,
+    scale: f32,
+    id: egui::Id,
+) -> bool {
+    let side = 16.0 * scale;
+    let checkbox = egui::Rect::from_center_size(rect.center(), egui::vec2(side, side));
+    let response = ui.interact(checkbox, id.with("boolean"), egui::Sense::click());
+    let stroke = egui::Stroke::new(
+        scale.max(1.0),
+        ui.visuals().widgets.inactive.fg_stroke.color,
+    );
+    paint_boolean_mark(ui.painter(), checkbox, checked, scale, stroke);
+    response.clicked()
+}
+
+fn paint_boolean_mark(
+    painter: &egui::Painter,
+    checkbox: egui::Rect,
+    checked: bool,
+    scale: f32,
+    stroke: egui::Stroke,
+) {
+    let side = checkbox.width();
+    painter.rect_stroke(checkbox, 2.0 * scale, stroke, egui::StrokeKind::Inside);
+    if checked {
+        let left = checkbox.left() + side * 0.2;
+        let middle = checkbox.left() + side * 0.43;
+        let right = checkbox.right() - side * 0.16;
+        painter.line_segment(
+            [
+                egui::pos2(left, checkbox.center().y),
+                egui::pos2(middle, checkbox.bottom() - side * 0.24),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                egui::pos2(middle, checkbox.bottom() - side * 0.24),
+                egui::pos2(right, checkbox.top() + side * 0.23),
+            ],
+            stroke,
+        );
+    }
+}
+
+fn paint_color_cell(ui: &egui::Ui, rect: egui::Rect, color: DatabaseColor, scale: f32) {
+    let text = format!(
+        "#{:02X}{:02X}{:02X}{:02X}",
+        color.red, color.green, color.blue, color.alpha
+    );
+    let swatch = egui::Rect::from_min_size(
+        rect.left_center() + egui::vec2(6.0 * scale, -7.0 * scale),
+        egui::vec2(18.0 * scale, 14.0 * scale),
+    );
+    ui.painter().rect(
+        swatch,
+        2.0 * scale,
+        egui::Color32::from_rgba_unmultiplied(color.red, color.green, color.blue, color.alpha),
+        egui::Stroke::new(
+            scale.max(0.5),
+            ui.visuals().widgets.noninteractive.bg_stroke.color,
+        ),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().with_clip_rect(rect.shrink(2.0)).text(
+        swatch.right_center() + egui::vec2(6.0 * scale, 0.0),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional((14.0 * scale).max(6.0)),
+        ui.visuals().text_color(),
+    );
+}
+
 fn paint_cell_text(
     ui: &egui::Ui,
     rect: egui::Rect,
@@ -627,7 +883,11 @@ fn paint_cell_text(
     scale: f32,
 ) {
     let (position, alignment) = match field_type {
-        DatabaseFieldType::String | DatabaseFieldType::Enum => (
+        DatabaseFieldType::String
+        | DatabaseFieldType::Enum
+        | DatabaseFieldType::Block
+        | DatabaseFieldType::Color
+        | DatabaseFieldType::Datetime => (
             rect.left_center() + egui::vec2(6.0 * scale, 0.0),
             egui::Align2::LEFT_CENTER,
         ),
@@ -635,6 +895,7 @@ fn paint_cell_text(
             rect.right_center() - egui::vec2(6.0 * scale, 0.0),
             egui::Align2::RIGHT_CENTER,
         ),
+        DatabaseFieldType::Boolean => (rect.center(), egui::Align2::CENTER_CENTER),
     };
     ui.painter().with_clip_rect(rect.shrink(2.0)).text(
         position,
@@ -649,6 +910,7 @@ pub(crate) fn paint_preview(
     context: BlockRenderContext<'_>,
     rows: &[DatabaseRow],
     fields: &[DatabaseField],
+    block_labels: &HashMap<BlockRef, BlockLabel>,
 ) {
     let rect = egui::Rect::from_min_max(context.corners[0], context.corners[2]);
     let intrinsic_width = ROW_HEADER_WIDTH
@@ -725,21 +987,61 @@ pub(crate) fn paint_preview(
         let mut x = rect.left() + row_header_width;
         for field in fields {
             let width = column_width(field.field_type) * scale;
+            let cell_rect =
+                egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(width, row_height));
             let alignment = match field.field_type {
-                DatabaseFieldType::String | DatabaseFieldType::Enum => egui::Align2::LEFT_CENTER,
+                DatabaseFieldType::String
+                | DatabaseFieldType::Enum
+                | DatabaseFieldType::Block
+                | DatabaseFieldType::Color
+                | DatabaseFieldType::Datetime => egui::Align2::LEFT_CENTER,
                 DatabaseFieldType::Number => egui::Align2::RIGHT_CENTER,
+                DatabaseFieldType::Boolean => egui::Align2::CENTER_CENTER,
+            };
+            let text = if field.field_type == DatabaseFieldType::Boolean {
+                String::new()
+            } else {
+                cell_text(row, field, block_labels)
             };
             paint_preview_cell(
                 context.painter,
-                egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(width, row_height)),
+                cell_rect,
                 cell_fill,
                 stroke,
-                &cell_text(row, field),
+                &text,
                 alignment,
                 text_color,
                 font.clone(),
-                6.0 * scale,
+                if field.field_type == DatabaseFieldType::Color {
+                    30.0 * scale
+                } else {
+                    6.0 * scale
+                },
             );
+            if let Some(DatabaseValue::Boolean(checked)) = row.value(field.id) {
+                let side = 16.0 * scale;
+                let checkbox =
+                    egui::Rect::from_center_size(cell_rect.center(), egui::vec2(side, side));
+                paint_boolean_mark(context.painter, checkbox, *checked, scale, stroke);
+            }
+            if let Some(DatabaseValue::Color(color)) = row.value(field.id) {
+                let swatch = egui::Rect::from_min_size(
+                    cell_rect.left_center() + egui::vec2(6.0 * scale, -7.0 * scale),
+                    egui::vec2(18.0 * scale, 14.0 * scale),
+                );
+                context.painter.rect(
+                    swatch,
+                    2.0 * scale,
+                    egui::Color32::from_rgba_unmultiplied(
+                        color.red,
+                        color.green,
+                        color.blue,
+                        color.alpha,
+                    ),
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+            }
             x += width;
         }
     }
@@ -760,8 +1062,13 @@ fn take_typed_text(ui: &mut egui::Ui) -> Option<String> {
 
 fn column_width(field_type: DatabaseFieldType) -> f32 {
     match field_type {
-        DatabaseFieldType::String | DatabaseFieldType::Enum => STRING_COLUMN_WIDTH,
+        DatabaseFieldType::String
+        | DatabaseFieldType::Enum
+        | DatabaseFieldType::Block
+        | DatabaseFieldType::Datetime => STRING_COLUMN_WIDTH,
         DatabaseFieldType::Number => NUMBER_COLUMN_WIDTH,
+        DatabaseFieldType::Boolean => 90.0,
+        DatabaseFieldType::Color => 140.0,
     }
 }
 

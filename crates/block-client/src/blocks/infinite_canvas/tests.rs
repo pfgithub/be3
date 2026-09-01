@@ -103,3 +103,4 @@ fn direct_editor_entity(id: Uuid, block_id: Uuid) -> CanvasEntity {
     }
 }
 mod replacing_a_component_schema_merges_into_an_existing_target;
+mod component_block_values_deduplicate_and_rewrite_direct_references;

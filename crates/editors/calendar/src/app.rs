@@ -15,6 +15,9 @@ use block_editor_plugin::{
     },
     EditorHost,
 };
+use block_ui::datetime::{
+    civil_from_days, date_time_fields_row as date_time_row, days_from_civil, DateTimeFields,
+};
 use uuid::Uuid;
 
 const SECONDS_PER_DAY: i64 = 86_400;
@@ -60,38 +63,6 @@ enum CalendarView {
     Week,
     #[default]
     Month,
-}
-
-#[derive(Clone, Copy)]
-struct DateTimeFields {
-    year: i32,
-    month: u8,
-    day: u8,
-    hour: u8,
-    minute: u8,
-}
-
-impl DateTimeFields {
-    fn from_unix(seconds: i64) -> Self {
-        let days = seconds.div_euclid(SECONDS_PER_DAY);
-        let time_of_day = seconds.rem_euclid(SECONDS_PER_DAY);
-        let (year, month, day) = civil_from_days(days);
-        Self {
-            year,
-            month,
-            day,
-            hour: (time_of_day / 3600) as u8,
-            minute: ((time_of_day % 3600) / 60) as u8,
-        }
-    }
-
-    fn to_unix(self) -> i64 {
-        let month = self.month.clamp(1, 12);
-        let day = self.day.clamp(1, days_in_month(self.year, month));
-        days_from_civil(self.year, month, day) * SECONDS_PER_DAY
-            + self.hour as i64 * 3600
-            + self.minute as i64 * 60
-    }
 }
 
 struct EventForm {
@@ -602,29 +573,6 @@ impl CalendarApp {
     }
 }
 
-fn date_time_row(ui: &mut egui::Ui, fields: &mut DateTimeFields) {
-    ui.horizontal(|ui| {
-        ui.add(egui::DragValue::new(&mut fields.year).range(1..=9999));
-        ui.add(egui::DragValue::new(&mut fields.month).range(1..=12));
-        ui.label(MONTH_NAMES[(fields.month.clamp(1, 12) - 1) as usize]);
-        let max_day = days_in_month(fields.year, fields.month.clamp(1, 12));
-        fields.day = fields.day.clamp(1, max_day);
-        ui.add(egui::DragValue::new(&mut fields.day).range(1..=max_day));
-        ui.label("at");
-        ui.add(
-            egui::DragValue::new(&mut fields.hour)
-                .range(0..=23)
-                .custom_formatter(|value, _| format!("{value:02.0}")),
-        );
-        ui.label(":");
-        ui.add(
-            egui::DragValue::new(&mut fields.minute)
-                .range(0..=59)
-                .custom_formatter(|value, _| format!("{value:02.0}")),
-        );
-    });
-}
-
 fn assign_lanes(events: &[&CalendarEvent]) -> (Vec<usize>, usize) {
     let mut lane_ends: Vec<i64> = Vec::new();
     let mut lanes = Vec::with_capacity(events.len());
@@ -664,48 +612,8 @@ fn today_days_since_epoch() -> i64 {
         .unwrap_or(0)
 }
 
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
-fn days_in_month(year: i32, month: u8) -> u8 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 30,
-    }
-}
-
 fn weekday_from_days(days_since_epoch: i64) -> u32 {
     (days_since_epoch + 4).rem_euclid(7) as u32
-}
-
-fn days_from_civil(year: i32, month: u8, day: u8) -> i64 {
-    let year = year - i32::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month = month as i32;
-    let day = day as i32;
-    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    (era * 146_097 + day_of_era - 719_468) as i64
-}
-
-fn civil_from_days(days_since_epoch: i64) -> (i32, u8, u8) {
-    let days = days_since_epoch + 719_468;
-    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
-    let day_of_era = days - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let mut year = year_of_era as i32 + era as i32 * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_prime = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
-    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
-    year += i32::from(month <= 2);
-    (year, month as u8, day as u8)
 }
 
 impl block_editor_plugin::App for CalendarApp {

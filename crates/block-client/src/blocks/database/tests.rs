@@ -62,3 +62,8 @@ async fn identity(url: &str) -> (Uuid, String, Uuid) {
         .unwrap();
     (session.account.id, session.token, workspace.id)
 }
+
+mod block_values_deduplicate_and_rewrite_direct_references;
+
+use crate::blocks::database::DatabaseColor;
+mod new_value_types_survive_set_cell_and_none_clears;
