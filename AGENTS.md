@@ -5,7 +5,6 @@ You are inside of an ubuntu VM. You may install / remove programs as needed. If 
 Guides:
 - guides/adding_a_block.md
 - guides/adding_a_game.md
-- guides/adding_an_editor.md
 - guides/adding_a_plugin_editor.md
 - guides/testing_a_gui.md
 

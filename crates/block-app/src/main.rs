@@ -81,7 +81,6 @@ fn run_native(options: eframe::NativeOptions, storage_root: Option<PathBuf>) -> 
         options,
         Box::new(move |creation_context| {
             egui_material_icons::initialize(&creation_context.egui_ctx);
-            editors::install_render_resources(creation_context);
             plugin_host::install(creation_context);
             BlockApp::new(storage_root).map(|app| Box::new(app) as Box<dyn eframe::App>)
         }),
@@ -117,7 +116,6 @@ pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
             eframe::WebOptions::default(),
             Box::new(|creation_context| {
                 egui_material_icons::initialize(&creation_context.egui_ctx);
-                editors::install_render_resources(creation_context);
                 plugin_host::install(creation_context);
                 BlockApp::new()
                     .map(|app| Box::new(app) as Box<dyn eframe::App>)

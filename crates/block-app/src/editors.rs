@@ -1,4 +1,3 @@
-pub(crate) mod logic_grid;
 pub(crate) mod plugin;
 mod unsupported;
 
@@ -6,10 +5,10 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use block::{Block, BlockAccess, BlockParent, BlockReference};
+use block::{BlockAccess, BlockParent, BlockReference};
 use block_client::{
     blocks::{self, workspace_index::BlockEntry},
-    BlockClient, BlockHandle, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
+    BlockClient, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
 };
 use block_plugin_api::PluginManifest;
 pub(super) use block_ui::{paint_name, BlockLabel};
@@ -22,10 +21,6 @@ use self::unsupported::UnsupportedEditor;
 
 const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
 const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
-pub fn install_render_resources(creation_context: &eframe::CreationContext<'_>) {
-    logic_grid::renderer::install(creation_context);
-}
-
 pub enum EditorAction {
     OpenBlock { id: Uuid, block_type: Uuid },
 }
@@ -1137,30 +1132,10 @@ impl Default for DirectEditorTabViewport {
     }
 }
 
-type CreateEditor = Box<dyn Fn(&BlockClient) -> Box<dyn BlockEditor>>;
 type OpenEditor = Box<dyn Fn(&BlockClient, Uuid) -> Box<dyn BlockEditor>>;
 type CreateOptions = Box<dyn Fn() -> Box<dyn PendingCreation>>;
-type RegenerateDynamicArtifact =
-    fn(&BlockClient, Uuid, Uuid, &[u8]) -> Result<Box<dyn DynamicArtifactRegeneration>, String>;
 
-pub trait DynamicArtifactRegeneration {
-    fn poll(&mut self) -> Option<Result<(), String>>;
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct DynamicArtifactSupport {
-    pub source: fn(&[u8]) -> Result<Uuid, String>,
-
-    pub summary: fn(&[u8]) -> String,
-
-    pub settings_ui: fn(&mut egui::Ui, &mut Vec<u8>) -> bool,
-    pub regenerate: RegenerateDynamicArtifact,
-}
-
-enum ArtifactProvider {
-    Native(DynamicArtifactSupport),
-    Plugin(Arc<PluginManifest>),
-}
+struct ArtifactProvider(Arc<PluginManifest>);
 
 pub(super) trait ArtifactSession {
     fn poll(
@@ -1190,93 +1165,6 @@ pub(super) enum ArtifactStatus {
     Failed(String),
 }
 
-struct NativeArtifactSession {
-    support: DynamicArtifactSupport,
-    target_id: Uuid,
-    target_type: Uuid,
-    regeneration: Option<Box<dyn DynamicArtifactRegeneration>>,
-    outcome: Option<Result<(), String>>,
-}
-
-impl ArtifactSession for NativeArtifactSession {
-    fn poll(
-        &mut self,
-        _ctx: &egui::Context,
-        _registry: &EditorRegistry,
-        _client: &Arc<BlockClient>,
-        data: &[u8],
-    ) -> ArtifactStatus {
-        if let Some(regeneration) = &mut self.regeneration {
-            if let Some(result) = regeneration.poll() {
-                self.regeneration = None;
-                self.outcome = Some(result);
-            }
-        }
-        match (self.support.source)(data) {
-            Ok(source) => ArtifactStatus::Described {
-                source,
-                summary: (self.support.summary)(data),
-            },
-            Err(error) => ArtifactStatus::Failed(error),
-        }
-    }
-
-    fn settings_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        _registry: &EditorRegistry,
-        _client: &Arc<BlockClient>,
-        draft: &mut Vec<u8>,
-    ) {
-        (self.support.settings_ui)(ui, draft);
-    }
-
-    fn summary(&self, draft: &[u8]) -> Option<String> {
-        Some((self.support.summary)(draft))
-    }
-
-    fn cancel_settings(&mut self) {}
-
-    fn regenerate(&mut self, client: &Arc<BlockClient>, data: &[u8]) {
-        self.outcome = None;
-        match (self.support.regenerate)(client, self.target_id, self.target_type, data) {
-            Ok(regeneration) => self.regeneration = Some(regeneration),
-            Err(error) => self.outcome = Some(Err(error)),
-        }
-    }
-
-    fn take_outcome(&mut self) -> Option<Result<(), String>> {
-        self.outcome.take()
-    }
-
-    fn regenerating(&self) -> bool {
-        self.regeneration.is_some()
-    }
-}
-
-pub(super) trait EditorKind: BlockEditor + Sized + 'static {
-    type Block: Block;
-
-    const DISPLAY_NAME: &'static str;
-    const ICON: MaterialIcon;
-
-    const CAN_ADD_CHILD: bool = false;
-    const CAN_DELETE_CHILD: bool = false;
-    const CAN_REPLACE_CHILD: bool = false;
-
-    const DEFAULT_IMPORTANT: bool = false;
-
-    fn open(client: &BlockClient, block: BlockHandle<Self::Block>) -> Self;
-
-    fn dynamic_artifact() -> Option<DynamicArtifactSupport> {
-        None
-    }
-}
-
-pub(super) trait CreatableEditor: EditorKind {
-    fn create(client: &BlockClient) -> Self;
-}
-
 pub(super) trait PendingCreation {
     fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> CreationStep;
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String>;
@@ -1287,16 +1175,7 @@ pub(super) enum CreationStep {
     Working,
 }
 
-pub(super) enum BlockCreation {
-    Created(Box<dyn BlockEditor>),
-    Options(Box<dyn PendingCreation>),
-}
-
-enum CreateBlock {
-    Immediate(CreateEditor),
-
-    Configured(CreateOptions),
-}
+struct CreateBlock(CreateOptions);
 
 struct EditorRegistration {
     block_type: Uuid,
@@ -1309,25 +1188,6 @@ struct EditorRegistration {
     can_replace_child: bool,
     default_important: bool,
     dynamic_artifact: Option<ArtifactProvider>,
-}
-
-impl EditorRegistration {
-    fn of<E: EditorKind>() -> Self {
-        Self {
-            block_type: E::Block::TYPE_ID,
-            display_name: E::DISPLAY_NAME,
-            icon: E::ICON,
-            create: None,
-            open: Box::new(|client, id| {
-                Box::new(E::open(client, client.get_block::<E::Block>(id)))
-            }),
-            can_add_child: E::CAN_ADD_CHILD,
-            can_delete_child: E::CAN_DELETE_CHILD,
-            can_replace_child: E::CAN_REPLACE_CHILD,
-            default_important: E::DEFAULT_IMPORTANT,
-            dynamic_artifact: E::dynamic_artifact().map(ArtifactProvider::Native),
-        }
-    }
 }
 
 pub struct EditorRegistry {
@@ -1343,7 +1203,6 @@ impl EditorRegistry {
             new_block_actions: Vec::new(),
             plugin_block_types: Arc::default(),
         };
-        registry.register_creatable::<logic_grid::LogicGridEditor>();
         for manifest in plugin::discovery::manifests() {
             registry.register_plugin(manifest);
         }
@@ -1374,14 +1233,6 @@ impl EditorRegistry {
         &self.plugin_block_types
     }
 
-    fn register_creatable<E: CreatableEditor>(&mut self) {
-        let mut registration = EditorRegistration::of::<E>();
-        registration.create = Some(CreateBlock::Immediate(Box::new(|client| {
-            Box::new(E::create(client))
-        })));
-        self.insert(registration);
-    }
-
     fn insert(&mut self, registration: EditorRegistration) {
         if registration.create.is_some() {
             self.new_block_actions.push((
@@ -1406,7 +1257,7 @@ impl EditorRegistry {
                 block_plugin_api::CreationMode::Immediate
                 | block_plugin_api::CreationMode::Dialog => {
                     let manifest = Arc::clone(&manifest);
-                    Some(CreateBlock::Configured(Box::new(move || {
+                    Some(CreateBlock(Box::new(move || {
                         Box::new(plugin::PluginCreation::new(Arc::clone(&manifest)))
                     })))
                 }
@@ -1427,7 +1278,7 @@ impl EditorRegistry {
             dynamic_artifact: manifest
                 .regions
                 .contains(&block_plugin_api::EditorRegion::ArtifactSettings)
-                .then(|| ArtifactProvider::Plugin(Arc::clone(&manifest))),
+                .then(|| ArtifactProvider(Arc::clone(&manifest))),
         });
     }
 
@@ -1477,14 +1328,7 @@ impl EditorRegistry {
             .get(&source_type)
             .ok_or_else(|| format!("unsupported dynamic artifact source type {source_type}"))?;
         match &registration.dynamic_artifact {
-            Some(ArtifactProvider::Native(support)) => Ok(Box::new(NativeArtifactSession {
-                support: *support,
-                target_id,
-                target_type,
-                regeneration: None,
-                outcome: None,
-            })),
-            Some(ArtifactProvider::Plugin(manifest)) => Ok(Box::new(plugin::PluginArtifact::new(
+            Some(ArtifactProvider(manifest)) => Ok(Box::new(plugin::PluginArtifact::new(
                 Arc::clone(manifest),
                 target_id,
                 target_type,
@@ -1497,11 +1341,9 @@ impl EditorRegistry {
         }
     }
 
-    pub(super) fn create(&self, client: &BlockClient, block_type: Uuid) -> Option<BlockCreation> {
-        match self.registrations.get(&block_type)?.create.as_ref()? {
-            CreateBlock::Immediate(create) => Some(BlockCreation::Created(create(client))),
-            CreateBlock::Configured(options) => Some(BlockCreation::Options(options())),
-        }
+    pub(super) fn create(&self, block_type: Uuid) -> Option<Box<dyn PendingCreation>> {
+        let CreateBlock(options) = self.registrations.get(&block_type)?.create.as_ref()?;
+        Some(options())
     }
 
     pub fn open(&self, client: &BlockClient, id: Uuid, block_type: Uuid) -> Box<dyn BlockEditor> {

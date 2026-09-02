@@ -1,11 +1,13 @@
+mod app_impl;
 mod canvas;
 mod challenge;
-pub(super) mod dynamic_artifact;
+mod dynamic_artifact;
 mod geometry;
 mod hotbar;
 mod render;
-pub(super) mod renderer;
 mod simulation;
+
+pub use app_impl::LogicGridApp;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -23,10 +25,10 @@ use block_client::{
     },
     BlockClient, BlockHandle,
 };
-use eframe::egui::{self, PointerButton};
-use egui_material_icons::{
-    icons::{ICON_BUILD, ICON_MEDIATION},
-    MaterialIcon,
+use block_editor_plugin::{
+    egui::{self, PointerButton},
+    egui_material_icons::icons::ICON_BUILD,
+    EditorHost,
 };
 use logicgame::{
     challenges::{generate_challenge, Challenge, ChallengeId},
@@ -39,14 +41,10 @@ use logicgame::{
 };
 use uuid::Uuid;
 
-use self::renderer::{
-    DrawRay, DrawStub, DrawTriangle, DrawValueTriangle, DrawWire, GridCallback, RenderFrame,
-    WireValue,
+use crate::frame::{
+    DrawRay, DrawStub, DrawTriangle, DrawValueTriangle, DrawWire, RenderFrame, WireValue,
 };
-use super::{
-    BlockEditor, CreatableEditor, DirectEditorCapabilities, DirectEditorViewport,
-    DirectEditorViewportInput, DynamicArtifactSupport, EditorAccess, EditorAction, EditorKind,
-};
+use std::sync::Arc;
 
 use geometry::*;
 use hotbar::*;
@@ -563,26 +561,7 @@ pub(super) struct LogicGridEditor {
     test_client: Option<BlockClient>,
 }
 
-impl EditorKind for LogicGridEditor {
-    type Block = LogicGrid;
-
-    const DISPLAY_NAME: &'static str = "Logic Grid";
-    const ICON: MaterialIcon = ICON_MEDIATION;
-
-    fn open(_client: &BlockClient, block: BlockHandle<LogicGrid>) -> Self {
-        Self::new(block)
-    }
-
-    fn dynamic_artifact() -> Option<DynamicArtifactSupport> {
-        Some(dynamic_artifact::SUPPORT)
-    }
-}
-
-impl CreatableEditor for LogicGridEditor {
-    fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(LogicGrid::new()))
-    }
-}
+const DISPLAY_NAME: &str = "Logic Grid";
 
 impl LogicGridEditor {
     fn new(block: BlockHandle<LogicGrid>) -> Self {
@@ -720,7 +699,7 @@ impl LogicGridEditor {
             .ok()
     }
 
-    fn compile(&mut self, client: &BlockClient) -> Option<EditorAction> {
+    fn compile(&mut self, client: &BlockClient) -> Option<(Uuid, Uuid)> {
         let compiled = self
             .block
             .read()
@@ -731,10 +710,7 @@ impl LogicGridEditor {
                     compiled,
                     dynamic_artifact::descriptor(self.block.id()),
                 );
-                let source_name = self
-                    .block
-                    .name()
-                    .unwrap_or_else(|| Self::DISPLAY_NAME.to_owned());
+                let source_name = self.block.name().unwrap_or_else(|| DISPLAY_NAME.to_owned());
                 let name = dynamic_artifact::artifact_name(&source_name);
                 child.set_name(name.clone());
                 let id = child.id();
@@ -742,10 +718,7 @@ impl LogicGridEditor {
                 self.compiled.insert(id, child);
                 self.pin_component(name, id);
                 self.compile_error = None;
-                Some(EditorAction::OpenBlock {
-                    id,
-                    block_type: CompiledLogic::TYPE_ID,
-                })
+                Some((id, CompiledLogic::TYPE_ID))
             }
             Err(error) => {
                 self.compile_error = Some(error);
@@ -776,10 +749,7 @@ impl LogicGridEditor {
         let hovered_entity = self.show_grid_debugger(&context, hovered_square);
         let graph_hover = self.show_generated_graph(&context);
         let frame = self.render_frame(response.rect, pointer_world, hovered_entity, &graph_hover);
-        painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
-            response.rect,
-            GridCallback { frame },
-        ));
+        crate::paint::paint(&painter, response.rect, frame);
         self.draw_component_labels(&painter, response.rect);
         if let (Some(pointer), Some(Gesture::SelectBox { start, .. })) =
             (pointer_world, self.gesture.as_ref())
@@ -812,115 +782,6 @@ impl LogicGridEditor {
         }
 
         context.request_repaint();
-    }
-}
-
-impl BlockEditor for LogicGridEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
-    }
-
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: true,
-        }
-    }
-
-    fn direct_editor_fills_viewport(&self) -> bool {
-        true
-    }
-
-    fn direct_editor_viewport_input(
-        &self,
-        _editors: &EditorAccess<'_>,
-    ) -> DirectEditorViewportInput {
-        DirectEditorViewportInput::Editor
-    }
-
-    fn direct_editor_has_left_sidebar(&self, _editors: &mut EditorAccess<'_>) -> bool {
-        true
-    }
-
-    fn direct_editor_left_sidebar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<EditorAction> {
-        self.sync(Some(editors.client()), editors.client_id());
-        ui.set_min_width(HOTBAR_WIDTH);
-        let settings_height = 190.0;
-        let hotbar_height = (ui.available_height() - settings_height).max(160.0);
-        ui.allocate_ui(egui::vec2(ui.available_width(), hotbar_height), |ui| {
-            self.show_hotbar(ui);
-        });
-        ui.separator();
-        egui::ScrollArea::vertical()
-            .id_salt("logic-tool-settings")
-            .max_height(settings_height)
-            .show(ui, |ui| {
-                self.show_tool_settings(ui);
-            });
-        None
-    }
-
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        self.sync(Some(editors.client()), editors.client_id());
-        let mut action = None;
-        ui.horizontal(|ui| {
-            if ui
-                .button(format!("{} Compile", ICON_BUILD.codepoint))
-                .on_hover_text("Build a component other grids can call")
-                .clicked()
-            {
-                action = self.compile(editors.client());
-            }
-            if let Some(challenge) = &self.challenge {
-                ui.separator();
-                ui.strong(challenge.id.name());
-            }
-            let errors = self.grid.validate().len();
-            if errors > 0 {
-                ui.separator();
-                ui.colored_label(
-                    ui.visuals().error_fg_color,
-                    format!("{errors} placement problems"),
-                );
-            }
-            if let Some(error) = &self.compile_error {
-                ui.separator();
-                ui.colored_label(ui.visuals().error_fg_color, error);
-            }
-        });
-        action
-    }
-
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
-        self.sync(Some(editors.client()), editors.client_id());
-
-        if self.take_challenge_passed() {
-            self.edit(LogicGridOperation::SetCompleted { completed: true });
-        }
-        if self.block.read().is_none() {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-            });
-            return None;
-        }
-        self.canvas_ui(ui);
-        None
     }
 }
 

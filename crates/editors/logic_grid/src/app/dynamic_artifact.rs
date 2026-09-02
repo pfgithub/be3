@@ -3,11 +3,9 @@ use block_client::{
     blocks::{compiled_logic::CompiledLogic, logic_grid::LogicGrid},
     BlockClient, BlockHandle, DynamicArtifactDescriptor,
 };
-use eframe::egui;
+use block_editor_plugin::egui;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use super::super::{DynamicArtifactRegeneration, DynamicArtifactSupport};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct ComponentArtifact {
@@ -39,12 +37,9 @@ impl ComponentArtifact {
     }
 }
 
-pub(in crate::editors) const SUPPORT: DynamicArtifactSupport = DynamicArtifactSupport {
-    source: |data| ComponentArtifact::decode(data).map(|artifact| artifact.source),
-    summary,
-    settings_ui,
-    regenerate,
-};
+pub(super) fn source(data: &[u8]) -> Result<Uuid, String> {
+    ComponentArtifact::decode(data).map(|artifact| artifact.source)
+}
 
 pub(super) fn descriptor(source_id: Uuid) -> DynamicArtifactDescriptor {
     DynamicArtifactDescriptor {
@@ -65,7 +60,7 @@ pub(super) fn artifact_name(source_name: &str) -> String {
     format!("{source_name} Component")
 }
 
-fn summary(data: &[u8]) -> String {
+pub(super) fn summary(data: &[u8]) -> String {
     let Ok(artifact) = ComponentArtifact::decode(data) else {
         return "Compiled component".to_owned();
     };
@@ -76,50 +71,49 @@ fn summary(data: &[u8]) -> String {
     }
 }
 
-fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) -> bool {
+pub(super) fn settings_ui(ui: &mut egui::Ui, data: &mut Vec<u8>) {
     let Ok(mut artifact) = ComponentArtifact::decode(data) else {
         ui.label("These settings cannot be read.");
-        return false;
+        return;
     };
-    let changed = ui
+    if ui
         .checkbox(
             &mut artifact.settings.rename_with_source,
             "Rename with the grid",
         )
-        .changed();
-    if changed {
+        .changed()
+    {
         *data = artifact.encode();
     }
-    changed
 }
 
-fn regenerate(
+pub(super) fn regenerate(
     client: &BlockClient,
     target_id: Uuid,
     target_type: Uuid,
     data: &[u8],
-) -> Result<Box<dyn DynamicArtifactRegeneration>, String> {
+) -> Result<CompileRegeneration, String> {
     if target_type != CompiledLogic::TYPE_ID {
         return Err(format!(
             "compiling a logic grid expected a Compiled Logic target, found {target_type}"
         ));
     }
     let artifact = ComponentArtifact::decode(data)?;
-    Ok(Box::new(CompileRegeneration {
+    Ok(CompileRegeneration {
         source: client.get_block::<LogicGrid>(artifact.source),
         target: client.get_block::<CompiledLogic>(target_id),
         settings: artifact.settings,
-    }))
+    })
 }
 
-struct CompileRegeneration {
+pub(super) struct CompileRegeneration {
     source: BlockHandle<LogicGrid>,
     target: BlockHandle<CompiledLogic>,
     settings: ComponentSettings,
 }
 
-impl DynamicArtifactRegeneration for CompileRegeneration {
-    fn poll(&mut self) -> Option<Result<(), String>> {
+impl CompileRegeneration {
+    pub(super) fn poll(&mut self) -> Option<Result<(), String>> {
         let source = self.source.read()?;
 
         self.target.read()?;

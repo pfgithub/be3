@@ -12,8 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     editors::{
-        BlockCreation, BlockEditor, BlockLabel, CreationStep, EditorAccess, EditorRegistry,
-        PendingCreation,
+        BlockEditor, BlockLabel, CreationStep, EditorAccess, EditorRegistry, PendingCreation,
     },
     slide_templates::SlideTemplate,
 };
@@ -194,7 +193,7 @@ impl BlockPicker {
             let (new_type, template, linked) =
                 self.show_modal(context, editors.client(), editors.registry());
             if let Some(block_type) = new_type {
-                result = self.create_registered_block(editors, block_type, created_parent);
+                result = self.create_registered_block(editors, block_type);
             } else if let Some(template) = template {
                 result = Some(Self::finish_template(editors, template, created_parent));
             } else if let Some(block) = linked {
@@ -216,14 +215,9 @@ impl BlockPicker {
         &mut self,
         editors: &mut EditorAccess<'_>,
         block_type: Uuid,
-        parent: BlockParent,
     ) -> Option<BlockPickerResult> {
-        match editors.registry().create(editors.client(), block_type) {
-            Some(BlockCreation::Created(editor)) => {
-                Some(Self::finish_creation(editors, editor, block_type, parent))
-            }
-
-            Some(BlockCreation::Options(creation)) => {
+        match editors.registry().create(block_type) {
+            Some(creation) => {
                 self.pending_block = Some(PendingBlock {
                     block_type,
                     creation,

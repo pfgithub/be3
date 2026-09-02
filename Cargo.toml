@@ -35,6 +35,7 @@ members = [
     "crates/editors/image_block",
     "crates/editors/infinite_canvas",
     "crates/editors/logic_game",
+    "crates/editors/logic_grid",
     "crates/editors/map",
     "crates/editors/paint_review",
     "crates/editors/pdf",

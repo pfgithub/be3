@@ -88,7 +88,7 @@ fn add_child(&self, block_id: Uuid) -> Option<Vec<Self::Operation>> {
 }
 ```
 
-`BlockHandleAccess` reads the block, calls the override, and applies the resulting operations, so the corresponding `BlockEditor` method never needs to be implemented - its default already forwards to `self.block()`.
+`BlockHandleAccess` reads the block, calls the override, and applies the resulting operations, so the host makes the edit itself and the editor is not asked about it. An editor whose references live inside its own content rather than in a list - the text editor's block URLs - answers `App::replace_child` instead.
 
 ## 3. Choose synchronization and history behavior
 
