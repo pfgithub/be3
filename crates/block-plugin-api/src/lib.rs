@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 38;
+pub const PROTOCOL_VERSION: u16 = 39;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -551,6 +551,16 @@ pub enum EditorMessage {
         request_id: u64,
         result: FetchResult,
     },
+    ReadAsset {
+        instance: EditorInstanceId,
+        request_id: u64,
+        name: String,
+    },
+    AssetRead {
+        instance: EditorInstanceId,
+        request_id: u64,
+        result: AssetResult,
+    },
     OpenCreation {
         instance: EditorInstanceId,
         account_id: [u8; 16],
@@ -706,6 +716,12 @@ pub enum FilePick {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FetchResult {
+    Body(Vec<u8>),
+    Failed(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssetResult {
     Body(Vec<u8>),
     Failed(String),
 }
@@ -1133,6 +1149,11 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
         EditorMessage::Fetched { result, .. } => match result {
             FetchResult::Failed(message) => string(message),
             FetchResult::Body(_) => Ok(()),
+        },
+        EditorMessage::ReadAsset { name, .. } => string(name),
+        EditorMessage::AssetRead { result, .. } => match result {
+            AssetResult::Failed(message) => string(message),
+            AssetResult::Body(_) => Ok(()),
         },
         _ => Ok(()),
     }

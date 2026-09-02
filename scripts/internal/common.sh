@@ -144,9 +144,9 @@ build_games() {
 }
 
 # The app reads games.json beside itself, whose entries are paths relative to
-# the index. A build that has to bundle the modules — the browser, an APK, a
-# packaged directory — copies them and points the index at the copies; a build
-# that runs out of target/ points it straight at what cargo compiled.
+# the index. Every build stages the modules beside the app it built, so the
+# index says the same thing wherever it is read and a plugin asking the host
+# for one of them names a path inside the app's own directory.
 write_games_index() {
     local file="$1" prefix="$2"
     local entries=() game

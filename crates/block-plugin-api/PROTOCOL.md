@@ -135,6 +135,18 @@ outstanding together. The host refuses a URL that is not https, or whose host
 name is not one the plugin's manifest names, and reports the refusal as an
 ordinary failure rather than as a protocol error.
 
+An editor instance may ask the host to read one of the app's own files for it,
+which is how a plugin reaches what was installed beside the app rather than
+built into it: the games the deterministic game editor runs are wasm modules
+the app ships alongside its own plugins. The request names a file and is
+answered exactly once, with its bytes or with why it could not be read. The
+host resolves the name against the directory it loads its plugins from - the
+executable's own directory, the bundle root in the browser, the asset root on
+Android - and refuses a name that is not a relative path inside it, reporting
+the refusal as an ordinary failure rather than as a protocol error. A plugin has
+no file system of its own on any platform, and nothing of the user's is
+reachable this way.
+
 The host describes its registered block types once per plugin runtime, before
 the first editor instance is opened, so an editor can name and illustrate
 blocks it only holds a reference to. Each description carries the block type,

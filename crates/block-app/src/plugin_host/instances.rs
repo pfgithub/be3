@@ -1,10 +1,11 @@
 use block_client::{blocks::audio::Audio, BlockClient, Tunnel};
 use block_plugin_api::{
-    ArtifactDescription, AudioCommand, AudioStatus, BlockPick, BlockTypeDescriptor, ChildId,
-    ChildMode, ChildPlacement, ChildPlacements, ChildStatus, ClipboardImage, CreationOutcome,
-    CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult, FilePick, FrameReport,
-    FrameSpec, Message, Occluder, PerformanceMeasurement, RegenerationOutcome, RegionSize,
-    ScreenId, ScreenLayout, ScreenRequest, ScreenSet, TunnelMessage, ViewChange,
+    ArtifactDescription, AssetResult, AudioCommand, AudioStatus, BlockPick, BlockTypeDescriptor,
+    ChildId, ChildMode, ChildPlacement, ChildPlacements, ChildStatus, ClipboardImage,
+    CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult,
+    FilePick, FrameReport, FrameSpec, Message, Occluder, PerformanceMeasurement,
+    RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet,
+    TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{
@@ -22,7 +23,7 @@ use super::{
 };
 use crate::{
     performance,
-    platform::{http::Fetch, FileFilter, FilePicker},
+    platform::{assets::Asset, http::Fetch, FileFilter, FilePicker},
 };
 
 const FETCH_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -60,6 +61,7 @@ struct Instance {
     aspect_ratio: Option<f32>,
     picks: Vec<PendingPick>,
     fetches: Vec<PendingFetch>,
+    assets: Vec<PendingAsset>,
     pastes: Vec<PendingPaste>,
     audio: Option<AudioPlayer>,
     reported_audio: AudioStatus,
@@ -97,6 +99,7 @@ impl Instance {
             aspect_ratio: None,
             picks: Vec::new(),
             fetches: Vec::new(),
+            assets: Vec::new(),
             pastes: Vec::new(),
             audio: None,
             reported_audio: AudioStatus::default(),
@@ -120,6 +123,11 @@ struct PendingPick {
 struct PendingFetch {
     request_id: u64,
     fetch: Fetch,
+}
+
+struct PendingAsset {
+    request_id: u64,
+    asset: Asset,
 }
 
 struct PendingPaste {
@@ -410,6 +418,7 @@ impl Instances {
             entry.reported_view = None;
             entry.reported_presenting = false;
             entry.fetches.clear();
+            entry.assets.clear();
         }
     }
 
@@ -1144,6 +1153,22 @@ impl Instances {
                 false
             });
             let entry = self.entries.get_mut(&instance).unwrap();
+            entry.assets.retain_mut(|pending| {
+                let Some(result) = pending.asset.poll() else {
+                    context.request_repaint_after(FETCH_POLL_INTERVAL);
+                    return true;
+                };
+                messages.push(Message::Editor(EditorMessage::AssetRead {
+                    instance,
+                    request_id: pending.request_id,
+                    result: match result {
+                        Ok(body) => AssetResult::Body(body),
+                        Err(error) => AssetResult::Failed(error),
+                    },
+                }));
+                false
+            });
+            let entry = self.entries.get_mut(&instance).unwrap();
             for pending in std::mem::take(&mut entry.pastes) {
                 messages.push(Message::Editor(EditorMessage::ImagePasted {
                     instance,
@@ -1259,6 +1284,20 @@ impl Instances {
                     false => Fetch::refused(format!("{REFUSED} {url}")),
                 };
                 entry.fetches.push(PendingFetch { request_id, fetch });
+                true
+            }
+            EditorMessage::ReadAsset {
+                instance,
+                request_id,
+                name,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.assets.push(PendingAsset {
+                    request_id,
+                    asset: Asset::read(&name),
+                });
                 true
             }
             EditorMessage::PickBlock {

@@ -1,0 +1,13 @@
+{
+  "id": "be3.deterministic-game",
+  "name": "Game",
+  "version": "0.1.0",
+  "block_type": "6465742d-6761-6d65-2d62-6c6f636b0001",
+  "display_name": "Game",
+  "icon": "\uf015",
+  "creation": "Dialog",
+  "regions": [
+    "Frame"
+  ],
+  "entry_point": "deterministic_game.wasm"
+}

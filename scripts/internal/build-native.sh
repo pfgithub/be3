@@ -52,17 +52,14 @@ target_triple="${triple:-$host_triple}"
 
 cargo_arguments=()
 artifact_directory="$repository/target"
-games_prefix='../wasm32-unknown-unknown'
 if [[ -n "$triple" ]]; then
     cargo_arguments+=(--target "$triple")
     artifact_directory+="/$triple"
-    games_prefix="../$games_prefix"
 fi
 if [[ "$profile" == 'release' ]]; then
     cargo_arguments+=(--release)
 fi
 artifact_directory+="/$profile"
-games_prefix+="/$profile/"
 
 extension=''
 case "$target_triple" in
@@ -123,7 +120,8 @@ if $client; then
     build_plugin_wasm "$profile" "$artifact_directory"
     stage_plugin_manifests "$artifact_directory"
     build_games "$profile"
-    write_games_index "$artifact_directory/games.json" "$games_prefix"
+    stage_games "$artifact_directory/games"
+    write_games_index "$artifact_directory/games.json" 'games/'
     "$internal/fetch-pdfium.sh" --triple "$target_triple" --output "$artifact_directory"
 fi
 

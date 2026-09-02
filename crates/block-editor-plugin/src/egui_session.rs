@@ -1,10 +1,10 @@
 use block_client::BlockClient;
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, ChildId, ChildPlacement, ChildPlacements, ChildRect,
-    ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId, EditorMessage,
-    EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec, InputEvent, Message,
-    Occluder, PointerButton, RegionSize, ScreenPlacement, ScreenRequest, ViewportMetrics,
-    WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
+    ArtifactDescription, AssetResult, BlockPick, ChildId, ChildPlacement, ChildPlacements,
+    ChildRect, ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId,
+    EditorMessage, EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec,
+    InputEvent, Message, Occluder, PointerButton, RegionSize, ScreenPlacement, ScreenRequest,
+    ViewportMetrics, WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -440,6 +440,13 @@ impl EguiSession {
                 url,
             }));
         }
+        for (request_id, name) in self.host.take_asset_reads() {
+            messages.push(Message::Editor(EditorMessage::ReadAsset {
+                instance,
+                request_id,
+                name,
+            }));
+        }
         for placements in self.children() {
             messages.push(Message::Children(placements));
         }
@@ -531,6 +538,10 @@ impl EguiSession {
 
     pub(crate) fn fetched(&self, request_id: u64, result: FetchResult) {
         self.host.set_fetched(request_id, result);
+    }
+
+    pub(crate) fn asset_read(&self, request_id: u64, result: AssetResult) {
+        self.host.set_asset(request_id, result);
     }
 
     pub(crate) fn set_child_statuses(&self, statuses: Vec<ChildStatus>) {

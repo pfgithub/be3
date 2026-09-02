@@ -28,6 +28,7 @@ members = [
     "crates/editors/database",
     "crates/editors/database_schema",
     "crates/editors/database_view",
+    "crates/editors/deterministic_game",
     "crates/editors/gui_builder",
     "crates/editors/hotbar",
     "crates/editors/image_block",

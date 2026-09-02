@@ -1,6 +1,5 @@
 mod browser_tab;
 mod clipboard;
-pub(crate) mod deterministic_game;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
 pub(crate) mod plugin;
@@ -1356,16 +1355,6 @@ pub(super) trait CreatableEditor: EditorKind {
     fn create(client: &BlockClient) -> Self;
 }
 
-pub(super) trait ConfigurableEditor: EditorKind {
-    type Options: CreationOptions;
-
-    fn create(client: &BlockClient, options: Self::Options) -> Result<Self, String>;
-}
-
-pub(super) trait CreationOptions: Default {
-    fn ui(&mut self, ui: &mut egui::Ui) -> bool;
-}
-
 pub(super) trait PendingCreation {
     fn ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) -> CreationStep;
     fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String>;
@@ -1374,21 +1363,6 @@ pub(super) trait PendingCreation {
 pub(super) enum CreationStep {
     Options(bool),
     Working,
-}
-
-struct EditorCreation<E: ConfigurableEditor> {
-    options: E::Options,
-}
-
-impl<E: ConfigurableEditor> PendingCreation for EditorCreation<E> {
-    fn ui(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) -> CreationStep {
-        CreationStep::Options(self.options.ui(ui))
-    }
-
-    fn create(&mut self, client: &BlockClient) -> Result<Option<Box<dyn BlockEditor>>, String> {
-        E::create(client, std::mem::take(&mut self.options))
-            .map(|editor| Some(Box::new(editor) as Box<dyn BlockEditor>))
-    }
 }
 
 pub(super) fn image_filter() -> FileFilter {
@@ -1471,7 +1445,6 @@ impl EditorRegistry {
             new_block_actions: Vec::new(),
             plugin_block_types: Arc::default(),
         };
-        registry.register_configurable::<deterministic_game::DeterministicGameEditor>();
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<scene_3d::Scene3DEditor>();
@@ -1511,16 +1484,6 @@ impl EditorRegistry {
         let mut registration = EditorRegistration::of::<E>();
         registration.create = Some(CreateBlock::Immediate(Box::new(|client| {
             Box::new(E::create(client))
-        })));
-        self.insert(registration);
-    }
-
-    fn register_configurable<E: ConfigurableEditor>(&mut self) {
-        let mut registration = EditorRegistration::of::<E>();
-        registration.create = Some(CreateBlock::Configured(Box::new(|| {
-            Box::new(EditorCreation::<E> {
-                options: E::Options::default(),
-            })
         })));
         self.insert(registration);
     }
