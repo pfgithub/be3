@@ -42,7 +42,7 @@ use egui_material_icons::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{block_picker::BlockPicker, platform::FilePicker, presence_color_rgb};
+use crate::{block_picker::BlockPicker, platform::FilePicker};
 
 use block_client::references;
 

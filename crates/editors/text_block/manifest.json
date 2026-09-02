@@ -1,0 +1,24 @@
+{
+  "id": "be3.text",
+  "name": "Text",
+  "version": "0.1.0",
+  "block_type": "6f4d8f85-7991-4cdf-ae41-b52630df014b",
+  "display_name": "Text",
+  "icon": "\ue873",
+  "creation": "Immediate",
+  "children": {
+    "add": false,
+    "delete": false,
+    "replace": true
+  },
+  "important": true,
+  "interaction": "Live",
+  "resize": "Horizontal",
+  "regions": [
+    "Frame"
+  ],
+  "chrome": [
+    "Toolbar"
+  ],
+  "entry_point": "text_block.wasm"
+}

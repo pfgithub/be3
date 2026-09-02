@@ -90,6 +90,36 @@ which only the host can put on the window. The request names what the cursor
 means rather than any one toolkit's spelling of it, is sent only when the
 cursor changes, and is honoured only while the pointer is over that region.
 
+An editor instance may report the area its text input occupies and where its
+caret sits inside it, in the region's own logical coordinates, which is what an
+operating system's input method needs to place its candidate window. Only the
+host can tell the window that, and it maps the area through the placement it
+last drew the region at. The host sends the composition back the other way, as
+input events of their own alongside the text it already delivers: an input
+method turning on, the text being composed, the text it settled on, and its
+turning off again.
+
+Presence belongs to whoever is looking, and what is looking is the host: a
+plugin's block client is carried over the host's connection but is a client of
+its own to the server, so anything it published would be attributed to someone
+else. The host therefore tells an editor instance whether its block is being
+viewed and hands over the presence the block currently carries - every entry's
+client, kind and opaque value - whenever any of that changes, and publishes on
+the instance's behalf whatever the instance asks it to, under its own client.
+An instance that wants no cursor of its own ignores both. The host also asks an
+instance to reveal one client's cursor, when the user picks that person out of
+the list of people viewing the block, which only the instance can do because
+only it knows where in its own content that cursor is; the client it names is
+one of the clients the presence it was handed came from.
+
+An editor instance may be asked to replace one of the blocks it references with
+another - a copy the host made of a block being edited in two places at once -
+which the host cannot do itself for a block type whose references live inside
+its own content. The request names the block to replace and the one to put in
+its place, and is answered exactly once with whether the instance made the
+change. An instance that answers that it did not leaves the host to make the
+replacement through the block's own structural edit.
+
 An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a
 request for a block the host cannot open is discarded.

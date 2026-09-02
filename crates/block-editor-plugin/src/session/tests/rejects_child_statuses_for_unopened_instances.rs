@@ -1,5 +1,5 @@
 use super::*;
-use block_plugin_api::{ChildId, ChildStatus};
+use block_plugin_api::{ChildId, ChildStatus, InteractionMode};
 
 fn status(instance: EditorInstanceId) -> ChildStatus {
     ChildStatus {
@@ -12,6 +12,7 @@ fn status(instance: EditorInstanceId) -> ChildStatus {
         aspect_ratio: 0.0,
         hovered: false,
         active: false,
+        interaction: InteractionMode::Live,
         error: None,
     }
 }

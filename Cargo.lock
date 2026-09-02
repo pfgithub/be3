@@ -898,9 +898,7 @@ dependencies = [
  "egui_dock",
  "egui_material_icons",
  "flate2",
- "freetype",
  "game-host",
- "harfbuzz_rs",
  "image",
  "jni 0.22.4",
  "js-sys",
@@ -914,9 +912,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "text-editor-core",
  "tokio",
- "unicode-script",
  "ureq",
  "uuid",
  "wasi-threads",
@@ -1002,6 +998,7 @@ dependencies = [
  "futures-util",
  "naga 29.0.3",
  "serde",
+ "serde_json",
  "uuid",
  "wasi-threads",
  "wgpu",
@@ -9274,6 +9271,21 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-zig",
  "unicode-segmentation",
+ "uuid",
+]
+
+[[package]]
+name = "text_block"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "freetype",
+ "harfbuzz_rs",
+ "text-editor-core",
+ "unicode-script",
  "uuid",
 ]
 

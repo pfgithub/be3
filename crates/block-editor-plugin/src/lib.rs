@@ -22,8 +22,8 @@ mod wasm;
 
 pub use block_plugin_api::{
     AssetResult, AudioStatus, BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode,
-    ClipboardImage, EditorBand, EditorRegion, FetchResult, ViewChange, WebViewCommand,
-    WebViewEvent,
+    ClipboardImage, EditorBand, EditorRegion, FetchResult, InteractionMode, ViewChange,
+    WebViewCommand, WebViewEvent,
 };
 pub use block_ui;
 pub use host::{
@@ -77,6 +77,11 @@ pub trait App: Default + 'static {
     fn toolbar_ui(&mut self, _ui: &mut egui::Ui) {}
     fn left_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
     fn right_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
+    fn presence_visible(&mut self, _visible: bool) {}
+    fn reveal_presence(&mut self, _client_id: u64) {}
+    fn replace_child(&mut self, _old: uuid::Uuid, _new: uuid::Uuid) -> bool {
+        false
+    }
 }
 
 #[doc(hidden)]

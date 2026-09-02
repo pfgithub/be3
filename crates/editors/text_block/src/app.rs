@@ -1,8 +1,5 @@
-mod font;
-mod hex;
 #[cfg(test)]
 mod tests;
-mod timings;
 use std::{
     collections::HashMap,
     ops::Range,
@@ -14,26 +11,34 @@ use block::{BlockParent, BlockReferenceList, ClientId};
 use block_client::{
     block_ref::BlockRef,
     block_ref_url,
+    blocks::image::Image,
     blocks::text::{TextDocument, TextIndentation, TextLanguage},
     blocks::version_control_worktree::VersionControlWorktreeMembership,
-    blocks::workspace_index::BlockEntry,
     parse_block_urls,
     presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,
 };
-use eframe::egui::{
-    self, output::IMEOutput, Color32, CornerRadius, Event, EventFilter, ImeEvent, Key, Modifiers,
-    PointerButton, Pos2, Rect, Sense, Vec2,
-};
-use egui_material_icons::{
-    icons::{
-        ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DATA_ARRAY, ICON_DESCRIPTION,
-        ICON_FIND_REPLACE, ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED,
-        ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE, ICON_KEYBOARD_ARROW_DOWN,
-        ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP, ICON_LINK, ICON_MATCH_CASE, ICON_SEARCH,
-        ICON_TITLE,
+use block_editor_plugin::{
+    block_ui::{
+        self, paint_name, test_id::TestId, BlockLabel, EMBEDDED_EDITOR_PADDING,
+        EMBEDDED_EDITOR_TITLE_GAP, EMBEDDED_EDITOR_TITLE_HEIGHT,
     },
-    MaterialIcon,
+    egui::{
+        self, output::IMEOutput, Color32, CornerRadius, Event, EventFilter, ImeEvent, Key,
+        Modifiers, PointerButton, Pos2, Rect, Sense, Vec2,
+    },
+    egui_material_icons::{
+        self,
+        icons::{
+            ICON_CHECK, ICON_CHECKLIST, ICON_CLOSE, ICON_CODE, ICON_DATA_ARRAY, ICON_FIND_REPLACE,
+            ICON_FORMAT_BOLD, ICON_FORMAT_ITALIC, ICON_FORMAT_LIST_BULLETED,
+            ICON_FORMAT_LIST_NUMBERED, ICON_FORMAT_STRIKETHROUGH, ICON_IMAGE,
+            ICON_KEYBOARD_ARROW_DOWN, ICON_KEYBOARD_ARROW_RIGHT, ICON_KEYBOARD_ARROW_UP, ICON_LINK,
+            ICON_MATCH_CASE, ICON_SEARCH, ICON_TITLE,
+        },
+    },
+    BlockPicker, ChildHandle, ChildMode, EditorHost, ImagePaster, InteractionMode, PastedImage,
+    PerformanceReporter, Task,
 };
 use text_editor_core::{
     markdown_checkbox_marker, CollapsibleSection, CopyMode, Core, CursorHorizontalPositionMetric,
@@ -43,18 +48,9 @@ use text_editor_core::{
 };
 use uuid::Uuid;
 
-use crate::{block_picker::BlockPicker, performance, platform, presence_color_rgb};
-
-use self::font::{BytePosition, DocumentLayout, LineLayout, ResolvedEmbed, TextRenderer};
-use self::timings::{FrameProfile, PaintTimings};
-use super::{
-    clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    create_image_block, embedded_editor_frame_size, embedded_editor_ui, paint_name, BlockEditor,
-    BlockLabel, BlockRenderContext, CreatableEditor, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, EditorAccess, EditorAction,
-    EditorKind, SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
-    EMBEDDED_EDITOR_TITLE_HEIGHT,
-};
+use crate::font::{self, BytePosition, DocumentLayout, LineLayout, ResolvedEmbed, TextRenderer};
+use crate::hex;
+use crate::timings::{FrameProfile, PaintTimings};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const DIRECT_EDITOR_WIDTH: f32 = 600.0;
@@ -89,29 +85,19 @@ enum SelectionHandle {
     End,
 }
 
-impl EditorKind for TextEditor {
-    type Block = TextDocument;
-
-    const DISPLAY_NAME: &'static str = "Text";
-    const ICON: MaterialIcon = ICON_DESCRIPTION;
-    const CAN_REPLACE_CHILD: bool = true;
-    const DEFAULT_IMPORTANT: bool = true;
-
-    fn open(client: &BlockClient, block: BlockHandle<TextDocument>) -> Self {
-        Self::new(block, client)
-    }
+#[derive(Default)]
+pub struct TextApp {
+    editor: Option<TextEditor>,
+    creation: Option<Arc<BlockClient>>,
 }
 
-impl CreatableEditor for TextEditor {
-    fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(TextDocument::new()), client)
-    }
-}
-
-pub(super) struct TextEditor {
-    block: BlockHandle<TextDocument>,
+pub(crate) struct TextEditor {
+    host: EditorHost,
+    client: Arc<BlockClient>,
+    performance: PerformanceReporter,
+    pub(crate) block: BlockHandle<TextDocument>,
     workspace_id: Uuid,
-    core: Core,
+    pub(crate) core: Core,
     renderer: Result<TextRenderer, String>,
     selecting: bool,
     click_count: u8,
@@ -125,9 +111,10 @@ pub(super) struct TextEditor {
     layout_cache: Option<CachedLayout>,
     picker: BlockPicker,
     dependencies: ReferenceList,
-    clipboard_image_paste: ClipboardImagePaste,
+    paster: ImagePaster,
     image_import_error: Option<String>,
     focused_embed: Option<FocusedEmbed>,
+    focus_confirmed: bool,
     find: Option<FindState>,
     find_reveal: bool,
     last_cursor_positions: Vec<CursorPosition>,
@@ -135,13 +122,18 @@ pub(super) struct TextEditor {
     reference_cache: EmbedReferenceCache,
     pending_embeds: Vec<PendingEmbed>,
     hex_view: bool,
-    hex_insert_mode: bool,
-    hex_pending_nibble: Option<u8>,
-    hex_selection_anchor: Option<usize>,
+    pub(crate) hex_insert_mode: bool,
+    pub(crate) hex_pending_nibble: Option<u8>,
+    pub(crate) hex_selection_anchor: Option<usize>,
+    embed_sizes: HashMap<Uuid, Vec2>,
+    intrinsic: Option<(IntrinsicKey, Vec2)>,
+    intrinsic_width: f32,
+    presence_visible: bool,
+    published_cursor: Option<TextCursor>,
 }
 
 struct PendingEmbed {
-    receiver: platform::RequestResult<BlockRef>,
+    task: Task<BlockRef>,
     source_name: String,
     markdown: bool,
 }
@@ -149,21 +141,22 @@ struct PendingEmbed {
 #[derive(Default)]
 struct EmbedReferenceCache {
     resolved: HashMap<BlockRef, Option<Uuid>>,
-    pending: Vec<(BlockRef, platform::RequestResult<Option<Uuid>>)>,
+    pending: Vec<(BlockRef, Task<Option<Uuid>>)>,
 }
 
 impl EmbedReferenceCache {
     fn poll(&mut self) {
         let mut finished = Vec::new();
-        self.pending
-            .retain(|(reference, receiver)| match receiver.try_recv() {
-                Ok(resolved) => {
-                    finished.push((*reference, resolved));
-                    false
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
-            });
+        self.pending.retain_mut(|(reference, task)| {
+            if !task.finished() {
+                task.poll();
+            }
+            if !task.finished() {
+                return true;
+            }
+            finished.push((*reference, task.take().flatten()));
+            false
+        });
         for (reference, resolved) in finished {
             self.resolved.insert(reference, resolved);
         }
@@ -171,6 +164,7 @@ impl EmbedReferenceCache {
 
     fn resolve(
         &mut self,
+        host: &EditorHost,
         client: &Arc<BlockClient>,
         referencing_id: Uuid,
         reference: BlockRef,
@@ -187,7 +181,7 @@ impl EmbedReferenceCache {
             .any(|(pending, _)| *pending == reference)
         {
             let client = Arc::clone(client);
-            let receiver = platform::spawn_request(async move {
+            let task = host.spawn(async move {
                 client
                     .resolve_reference(
                         referencing_id,
@@ -196,7 +190,7 @@ impl EmbedReferenceCache {
                     )
                     .await
             });
-            self.pending.push((reference, receiver));
+            self.pending.push((reference, task));
         }
         None
     }
@@ -228,6 +222,15 @@ struct FocusedEmbed {
     source_start: usize,
 }
 
+#[derive(PartialEq)]
+struct IntrinsicKey {
+    bytes: Vec<u8>,
+    width: f32,
+    hex_view: bool,
+    language: TextLanguage,
+    hidden: Vec<Range<usize>>,
+}
+
 struct CachedLayout {
     bytes: Vec<u8>,
     language: TextLanguage,
@@ -238,7 +241,8 @@ struct CachedLayout {
 }
 
 impl TextEditor {
-    fn new(block: BlockHandle<TextDocument>, client: &BlockClient) -> Self {
+    fn new(block: BlockHandle<TextDocument>, client: Arc<BlockClient>, host: EditorHost) -> Self {
+        let performance = host.performance(format!("Text editor ({})", block.id()));
         let mut core = Core::new(block.clone());
         let start = core.position(0);
         core.execute_command(EditorCommand::SetSelection {
@@ -247,8 +251,11 @@ impl TextEditor {
         });
         let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
         Self {
-            block,
+            host,
             workspace_id: client.workspace_id(),
+            client,
+            performance,
+            block,
             core,
             renderer: TextRenderer::new(),
             selecting: false,
@@ -263,9 +270,10 @@ impl TextEditor {
             layout_cache: None,
             picker: BlockPicker::default(),
             dependencies,
-            clipboard_image_paste: ClipboardImagePaste::default(),
+            paster: ImagePaster::default(),
             image_import_error: None,
             focused_embed: None,
+            focus_confirmed: false,
             find: None,
             find_reveal: false,
             last_cursor_positions: Vec::new(),
@@ -276,16 +284,22 @@ impl TextEditor {
             hex_insert_mode: false,
             hex_pending_nibble: None,
             hex_selection_anchor: None,
+            embed_sizes: HashMap::new(),
+            intrinsic: None,
+            intrinsic_width: DIRECT_EDITOR_WIDTH,
+            presence_visible: false,
+            published_cursor: None,
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, _editors: &mut EditorAccess<'_>) {
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
         let previous = self.core.language();
         let mut language = previous;
         let mut indentation = self.core.indentation();
         ui.horizontal_wrapped(|ui| {
-            if ui
-                .selectable_label(self.hex_view, ICON_DATA_ARRAY)
+            let hex = ui.selectable_label(self.hex_view, ICON_DATA_ARRAY);
+            let hex = hex.test_id("text.hex-view");
+            if hex
                 .on_hover_text(if self.hex_view {
                     "Switch to text view"
                 } else {
@@ -408,7 +422,14 @@ impl TextEditor {
                 }
             }
             if ui.button("Insert").clicked() {
-                self.picker.open([self.block.id()]);
+                self.picker.open(
+                    &self.host,
+                    block_editor_plugin::BlockFilter {
+                        name: "Insert".to_owned(),
+                        block_types: Vec::new(),
+                        templates: false,
+                    },
+                );
             }
             ui.separator();
             if ui
@@ -434,21 +455,22 @@ impl TextEditor {
         self.hex_pending_nibble = None;
         self.hex_selection_anchor = None;
         self.focused_embed = None;
+        self.focus_confirmed = false;
         if self.hex_view {
             self.close_find();
         }
     }
 
-    fn insert_image_embed(&mut self, editors: &mut EditorAccess<'_>, id: Uuid, source_name: &str) {
-        let client = editors.client_handle();
+    fn insert_image_embed(&mut self, id: Uuid, source_name: &str) {
+        let client = Arc::clone(&self.client);
         let referencing_id = self.block.id();
-        let receiver = platform::spawn_request(async move {
+        let task = self.host.spawn(async move {
             client
                 .classify_reference(referencing_id, id, &VersionControlWorktreeMembership)
                 .await
         });
         self.pending_embeds.push(PendingEmbed {
-            receiver,
+            task,
             source_name: source_name.to_owned(),
             markdown: self.core.language() == TextLanguage::Markdown,
         });
@@ -456,15 +478,13 @@ impl TextEditor {
 
     fn poll_pending_embeds(&mut self) {
         let mut finished = Vec::new();
-        self.pending_embeds
-            .retain(|pending| match pending.receiver.try_recv() {
-                Ok(reference) => {
-                    finished.push((reference, pending.source_name.clone(), pending.markdown));
-                    false
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
-            });
+        self.pending_embeds.retain_mut(|pending| {
+            let Some(reference) = pending.task.take() else {
+                return !pending.task.finished();
+            };
+            finished.push((reference, pending.source_name.clone(), pending.markdown));
+            false
+        });
         for (reference, source_name, markdown) in finished {
             let directive =
                 image_embed_directive(self.workspace_id, &reference, &source_name, markdown);
@@ -473,53 +493,49 @@ impl TextEditor {
         }
     }
 
-    fn paste_clipboard_image(
-        &mut self,
-        ui: &egui::Ui,
-        id: egui::Id,
-        editors: &mut EditorAccess<'_>,
-    ) -> bool {
+    fn paste_clipboard_image(&mut self, ui: &egui::Ui, id: egui::Id) -> bool {
         let focused = ui.memory(|memory| memory.has_focus(id));
-        let Some(result) = self.clipboard_image_paste.poll(ui.ctx(), focused) else {
+        let Some(result) = self.paster.poll(ui, &self.host, focused) else {
             return false;
         };
         match result {
-            ClipboardImagePasteResult::NoImage => false,
-            ClipboardImagePasteResult::Error(error) => {
+            PastedImage::Empty => false,
+            PastedImage::Failed(error) => {
                 self.image_import_error = Some(error);
                 false
             }
-            ClipboardImagePasteResult::Image(image) => {
+            PastedImage::Image { name, data } => {
+                let image = Image::new(name, data);
                 let source_name = image.source_name().to_owned();
-                let image_id = create_image_block(editors, image, self.block.id());
-                self.insert_image_embed(editors, image_id, &source_name);
+                let image_id = self.create_image_block(image);
+                self.insert_image_embed(image_id, &source_name);
                 self.image_import_error = None;
                 true
             }
         }
     }
 
-    fn handle_picker(&mut self, context: &egui::Context, editors: &mut EditorAccess<'_>) {
-        let Some(result) = self
-            .picker
-            .handle(context, editors, BlockParent::Uuid(self.block.id()))
-        else {
-            return;
-        };
-        if !result.linked {
-            editors.set_parent(result.id, BlockParent::Uuid(self.block.id()));
-        }
-        let name =
-            BlockLabel::for_properties(editors.registry(), result.block_type, &result.properties)
-                .name;
-        self.insert_image_embed(editors, result.id, &name);
+    fn create_image_block(&self, image: Image) -> Uuid {
+        let block = self.client.create_block(image);
+        block.set_parent(BlockParent::Uuid(self.block.id()));
+        block.id()
     }
 
-    fn resolve_embeds(
-        &mut self,
-        bytes: &[u8],
-        editors: &mut EditorAccess<'_>,
-    ) -> Vec<ResolvedEmbed> {
+    fn handle_picker(&mut self) {
+        let Some(Ok((id, block_type))) = self.picker.poll(&self.host) else {
+            return;
+        };
+        self.client
+            .set_block_parent(id, BlockParent::Uuid(self.block.id()));
+        let types = self.host.block_types();
+        let name = match self.client.cached_block(id) {
+            Some(cached) => BlockLabel::for_cached(types.as_ref(), &cached).name,
+            None => BlockLabel::new(types.as_ref(), block_type, None).name,
+        };
+        self.insert_image_embed(id, &name);
+    }
+
+    fn resolve_embeds(&mut self, bytes: &[u8]) -> Vec<ResolvedEmbed> {
         self.reference_cache.poll();
         let parsed = parse_embeds(
             bytes,
@@ -540,35 +556,33 @@ impl TextEditor {
             })
             .collect::<HashMap<_, _>>();
         let block_id = self.block.id();
-        let client = editors.client_handle();
+        let client = Arc::clone(&self.client);
+        let host = self.host.clone();
+        let types = host.block_types();
+        let embed_sizes = &self.embed_sizes;
         let reference_cache = &mut self.reference_cache;
         parsed
             .into_iter()
             .filter_map(|embed| {
                 let id = reference_cache
-                    .resolve(&client, block_id, embed.reference)
+                    .resolve(&host, &client, block_id, embed.reference)
                     .unwrap_or(Uuid::nil());
                 (id != block_id).then_some((embed, id))
             })
             .map(|(embed, id)| {
                 let metadata = referenced.get(&id).cloned().or_else(|| {
-                    editors.client().cached_block(id).map(|block| {
+                    client.cached_block(id).map(|block| {
                         (
                             block.block_type,
                             block_client::properties::read_name(&block.properties),
                         )
                     })
                 });
-                if embed.large {
-                    if let Some((block_type, _)) = &metadata {
-                        editors.ensure(id, *block_type);
-                    }
-                }
                 let frame_size = embed
                     .large
-                    .then(|| editors.direct_editor_intrinsic_size(id))
+                    .then(|| embed_sizes.get(&id).copied())
                     .flatten()
-                    .map(|intrinsic| embedded_editor_frame_size(intrinsic, 1.0));
+                    .map(|intrinsic| block_ui::embedded_editor_frame_size(intrinsic, 1.0));
                 let label = metadata.as_ref().map_or_else(
                     || BlockLabel {
                         block_type: Uuid::nil(),
@@ -577,12 +591,15 @@ impl TextEditor {
                         automatic: true,
                     },
                     |(block_type, name)| {
-                        BlockLabel::new(editors.registry(), *block_type, name.as_ref())
+                        BlockLabel::new(types.as_ref(), *block_type, name.as_ref())
                     },
                 );
                 ResolvedEmbed {
                     range: embed.range,
                     id,
+                    block_type: metadata
+                        .as_ref()
+                        .map_or_else(Uuid::nil, |(block_type, _)| *block_type),
                     label: label.name,
                     icon: label.icon.map(|icon| icon.codepoint),
                     automatic: label.automatic,
@@ -1388,19 +1405,14 @@ impl TextEditor {
         )
     }
 
-    fn paint_remote_cursors(
-        &self,
-        client: &BlockClient,
-        painter: &egui::Painter,
-        origin: Pos2,
-        layout: &DocumentLayout,
-    ) {
-        let colors: HashMap<ClientId, PresenceColor> = client
-            .presence::<UserActive>(self.block.id())
+    fn paint_remote_cursors(&self, painter: &egui::Painter, origin: Pos2, layout: &DocumentLayout) {
+        let colors: HashMap<ClientId, PresenceColor> = self
+            .host
+            .presence::<UserActive>()
             .into_iter()
             .map(|(client_id, user)| (client_id, user.color))
             .collect();
-        for (client_id, cursor) in client.presence::<TextCursor>(self.block.id()) {
+        for (client_id, cursor) in self.host.presence::<TextCursor>() {
             let Some(color) = colors.get(&client_id).copied() else {
                 continue;
             };
@@ -1413,7 +1425,7 @@ impl TextEditor {
             let Some(focus) = self.core.position_index(cursor.focus) else {
                 continue;
             };
-            let rgb = presence_color_rgb(color);
+            let rgb = block_ui::presence_color(color);
             let [red, green, blue, _] = rgb.to_srgba_unmultiplied();
             let fill = Color32::from_rgba_unmultiplied(red, green, blue, 70);
             for byte in start..end {
@@ -1464,13 +1476,13 @@ impl TextEditor {
 
     fn presence_cursor_rect(
         &self,
-        client: &BlockClient,
         client_id: ClientId,
         origin: Pos2,
         layout: &DocumentLayout,
     ) -> Option<Rect> {
-        let cursor = client
-            .presence::<TextCursor>(self.block.id())
+        let cursor = self
+            .host
+            .presence::<TextCursor>()
             .into_iter()
             .find(|(id, _)| *id == client_id)?
             .1;
@@ -1492,17 +1504,15 @@ impl TextEditor {
         painter: &egui::Painter,
         origin: Pos2,
         layout: &DocumentLayout,
-        editors: &mut EditorAccess<'_>,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+    ) {
         if self.focused_embed.is_some_and(|focused| {
             !layout.embeds.iter().any(|embed| {
                 embed.large && embed.id == focused.id && embed.range.start == focused.source_start
             })
         }) {
             self.focused_embed = None;
+            self.focus_confirmed = false;
         }
-        let mut action = None;
         for embed in &layout.embeds {
             let rect = embed.rect.translate(origin.to_vec2());
             if embed.large {
@@ -1553,72 +1563,7 @@ impl TextEditor {
                     source_start: embed.range.start,
                 };
                 let focused = self.focused_embed == Some(key);
-                let interaction = editors
-                    .direct_editor_interaction(embed.id)
-                    .unwrap_or(DirectEditorInteraction::Preview);
-                let show_editor = interaction != DirectEditorInteraction::Preview || focused;
-                if interaction == DirectEditorInteraction::Preview && !focused && embed.available {
-                    let button_rect = Rect::from_min_size(
-                        Pos2::new(title_bar.right() - 54.0, title_bar.top() + 2.0),
-                        Vec2::new(52.0, title_bar.height() - 4.0),
-                    );
-                    if ui.put(button_rect, egui::Button::new("Edit")).clicked() {
-                        self.focused_embed = Some(key);
-                    }
-                }
-                if interaction == DirectEditorInteraction::Live
-                    && ui.ctx().input(|input| {
-                        input.pointer.button_pressed(PointerButton::Primary)
-                            && input
-                                .pointer
-                                .interact_pos()
-                                .is_some_and(|pointer| content.contains(pointer))
-                    })
-                {
-                    self.focused_embed = Some(key);
-                }
-
-                if embed.available && show_editor {
-                    let embedded = match focused && editors.is_frame_child(ui.ctx(), embed.id) {
-                        true => crate::editors::frame_child_ui(
-                            ui,
-                            editors,
-                            embed.id,
-                            ("text-frame-child", self.block.id(), embed.range.start),
-                            content,
-                            content.intersect(ui.clip_rect()),
-                            viewport,
-                        ),
-                        false => embedded_editor_ui(
-                            ui,
-                            editors,
-                            embed.id,
-                            ("text-direct-editor", self.block.id(), embed.range.start),
-                            content,
-                            content.intersect(ui.clip_rect()),
-                            1.0,
-                            viewport,
-                        ),
-                    };
-                    action = action.or(embedded);
-                } else if embed.available {
-                    let rendered = editors.render(
-                        embed.id,
-                        BlockRenderContext {
-                            painter,
-                            corners: [
-                                content.left_top(),
-                                content.right_top(),
-                                content.right_bottom(),
-                                content.left_bottom(),
-                            ],
-                            opacity: 1.0,
-                        },
-                    );
-                    if !rendered {
-                        painter.rect_filled(content, 0.0, Color32::from_gray(35));
-                    }
-                } else {
+                if !embed.available {
                     let title = painter.layout_no_wrap(
                         "Block unavailable".to_owned(),
                         egui::FontId::proportional(13.0),
@@ -1629,6 +1574,47 @@ impl TextEditor {
                         title,
                         ui.visuals().weak_text_color(),
                     );
+                    continue;
+                }
+                let handle = self.place_embed(ui, embed, content);
+                if let Some(size) = handle.intrinsic_size() {
+                    self.embed_sizes.insert(embed.id, size);
+                }
+                let interaction = handle.interaction();
+                let show_editor = interaction != InteractionMode::Preview || focused;
+                if focused {
+                    self.focus_confirmed |= handle.active();
+                    if self.focus_confirmed && !handle.active() {
+                        self.focused_embed = None;
+                        self.focus_confirmed = false;
+                    }
+                }
+                match (show_editor, focused) {
+                    (_, true) => handle.activate(),
+                    (true, false) => handle.set_mode(ChildMode::Passive),
+                    (false, false) => handle.set_mode(ChildMode::Preview),
+                }
+                if interaction == InteractionMode::Preview && !focused {
+                    let button_rect = Rect::from_min_size(
+                        Pos2::new(title_bar.right() - 54.0, title_bar.top() + 2.0),
+                        Vec2::new(52.0, title_bar.height() - 4.0),
+                    );
+                    if ui.put(button_rect, egui::Button::new("Edit")).clicked() {
+                        self.focused_embed = Some(key);
+                        self.focus_confirmed = false;
+                    }
+                }
+                if interaction == InteractionMode::Live
+                    && ui.ctx().input(|input| {
+                        input.pointer.button_pressed(PointerButton::Primary)
+                            && input
+                                .pointer
+                                .interact_pos()
+                                .is_some_and(|pointer| content.contains(pointer))
+                    })
+                {
+                    self.focused_embed = Some(key);
+                    self.focus_confirmed = false;
                 }
                 continue;
             }
@@ -1662,7 +1648,23 @@ impl TextEditor {
                 );
             }
         }
-        action
+    }
+
+    fn place_embed(
+        &self,
+        ui: &mut egui::Ui,
+        embed: &font::EmbedLayout,
+        content: Rect,
+    ) -> ChildHandle {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("text-embed", self.block.id(), embed.range.start))
+                .max_rect(content)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        child.set_clip_rect(content.intersect(ui.clip_rect()));
+        self.host
+            .child_sized(&mut child, content.size(), embed.id, embed.block_type)
     }
 
     fn paint_checkboxes(
@@ -1719,12 +1721,12 @@ impl TextEditor {
         context: &egui::Context,
         origin: Pos2,
         layout: &DocumentLayout,
-        client: &BlockClient,
-    ) -> Option<EditorAction> {
-        let embed = self.selected_inline_embed(layout)?;
+    ) {
+        let Some(embed) = self.selected_inline_embed(layout) else {
+            return;
+        };
         let rect = embed.rect.translate(origin.to_vec2());
-        let cached = client.cached_block(embed.id);
-        let mut action = None;
+        let cached = self.client.cached_block(embed.id);
         egui::Area::new(egui::Id::new((
             "open-text-embed",
             self.block.id(),
@@ -1740,23 +1742,19 @@ impl TextEditor {
                 .clicked()
             {
                 let cached = cached.as_ref().unwrap();
-                action = Some(EditorAction::OpenBlock {
-                    id: cached.id,
-                    block_type: cached.block_type,
-                });
+                self.host.open_block(cached.id, cached.block_type);
             }
         });
-        action
     }
 
-    fn direct_editor_size(&mut self, editors: &mut EditorAccess<'_>, width: f32) -> Option<Vec2> {
+    fn document_size(&mut self, width: f32) -> Option<Vec2> {
         if self.hex_view {
             let len = self.block.read()?.len();
             return Some(hex::intrinsic_size(len, width));
         }
         let bytes = self.block.read()?.bytes().to_vec();
         let highlight = self.core.highlight();
-        let embeds = self.resolve_embeds(&bytes, editors);
+        let embeds = self.resolve_embeds(&bytes);
         let checkboxes = if self.core.language() == TextLanguage::Markdown {
             parse_markdown_checkboxes(&bytes)
                 .iter()
@@ -1795,82 +1793,68 @@ fn hidden_ranges_from_sections(sections: &[CollapsibleSection]) -> Vec<Range<usi
         .collect()
 }
 
-impl BlockEditor for TextEditor {
-    fn block(&self) -> &dyn block_client::BlockHandleAccess {
-        &self.block
+impl TextEditor {
+    fn replace_child(&mut self, old: Uuid, new: Uuid) -> bool {
+        self.core
+            .execute_command(EditorCommand::ReplaceBlockReference { old, new });
+        true
     }
 
-    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
-        let mut core = Core::new(self.block.clone());
-        core.execute_command(EditorCommand::ReplaceBlockReference { old, new: new.id });
-        Some(true)
-    }
-
-    fn sync_cursor_presence(&mut self, client: &BlockClient, visible: bool) {
+    fn presence_visible(&mut self, visible: bool) {
+        self.presence_visible = visible;
         if !visible {
-            client.set_presence::<TextCursor>(self.block.id(), None);
+            self.published_cursor = None;
+            self.host.set_presence::<TextCursor>(None);
+        }
+    }
+
+    fn publish_cursor_presence(&mut self) {
+        if !self.presence_visible {
             return;
         }
         let Some(cursor) = self.core.cursor_positions().first() else {
             return;
         };
-        client.set_presence(
-            self.block.id(),
-            Some(&TextCursor {
-                anchor: cursor.pos.anchor,
-                focus: cursor.pos.focus,
-            }),
-        );
+        let published = TextCursor {
+            anchor: cursor.pos.anchor,
+            focus: cursor.pos.focus,
+        };
+        if self.published_cursor == Some(published) {
+            return;
+        }
+        self.published_cursor = Some(published);
+        self.host.set_presence(Some(&published));
     }
 
     fn reveal_presence_cursor(&mut self, client_id: ClientId) {
         self.pending_presence_reveal = Some(client_id);
     }
 
-    fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
-        DirectEditorCapabilities {
-            allow_rotation: false,
-            preserve_aspect_ratio: false,
-            supports_pan_and_zoom: false,
+    fn intrinsic_size(&mut self) -> Option<Vec2> {
+        let key = IntrinsicKey {
+            bytes: self.block.read()?.bytes().to_vec(),
+            width: self.intrinsic_width,
+            hex_view: self.hex_view,
+            language: self.core.language(),
+            hidden: hidden_ranges_from_sections(&self.core.collapsible_sections()),
+        };
+        if let Some((cached, size)) = &self.intrinsic {
+            if *cached == key {
+                return Some(*size);
+            }
         }
+        let size = self.document_size(key.width)?;
+        self.intrinsic = Some((key, size));
+        Some(size)
     }
 
-    fn direct_editor_interaction(&self) -> DirectEditorInteraction {
-        DirectEditorInteraction::Live
+    fn set_intrinsic_size(&mut self, size: Vec2) {
+        self.intrinsic_width = size.x.max(1.0);
     }
 
-    fn direct_editor_resize(&self) -> DirectEditorResize {
-        DirectEditorResize::Horizontal
-    }
-
-    fn direct_editor_intrinsic_size(&mut self, editors: &mut EditorAccess<'_>) -> Option<Vec2> {
-        self.direct_editor_size(editors, DIRECT_EDITOR_WIDTH)
-    }
-
-    fn direct_editor_intrinsic_size_for_width(
-        &mut self,
-        width: f32,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<Vec2> {
-        self.direct_editor_size(editors, width)
-    }
-
-    fn direct_editor_frame_child(&mut self, _editors: &mut EditorAccess<'_>) -> Option<Uuid> {
-        self.focused_embed.map(|focused| focused.id)
-    }
-
-    fn clear_direct_editor_frame_child(&mut self, _editors: &mut EditorAccess<'_>) {
-        self.focused_embed = None;
-    }
-
-    fn direct_editor_top_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
         let toolbar_start = Instant::now();
-        self.toolbar(ui, editors);
+        self.toolbar(ui);
         if self.find.is_some() {
             self.find_bar(ui);
         }
@@ -1883,21 +1867,14 @@ impl BlockEditor for TextEditor {
             });
         }
         self.toolbar_profile = toolbar_start.elapsed();
-        None
     }
 
-    fn direct_editor_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        editors: &mut EditorAccess<'_>,
-        _scale: f32,
-        viewport: &mut DirectEditorViewport,
-    ) -> Option<EditorAction> {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        self.publish_cursor_presence();
         if self.hex_view {
-            return self.hex_direct_editor_ui(ui);
+            self.hex_ui(ui);
+            return;
         }
-        let _performance_group =
-            performance::GroupGuard::new(format!("Text editor ({})", self.block.id()));
         let frame_start = Instant::now();
         let mut profile = FrameProfile {
             toolbar: std::mem::take(&mut self.toolbar_profile),
@@ -1906,11 +1883,11 @@ impl BlockEditor for TextEditor {
         let id = egui::Id::new(("text-editor", self.block.id()));
         self.poll_pending_embeds();
         let keyboard_start = Instant::now();
-        let pasted_image = self.paste_clipboard_image(ui, id, editors);
+        let pasted_image = self.paste_clipboard_image(ui, id);
         let mut reveal_cursor = pasted_image || self.keyboard_input(ui, id, pasted_image);
         reveal_cursor |= std::mem::take(&mut self.find_reveal);
         profile.keyboard = keyboard_start.elapsed();
-        self.handle_picker(ui.ctx(), editors);
+        self.handle_picker();
         let document_start = Instant::now();
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
@@ -1918,8 +1895,8 @@ impl BlockEditor for TextEditor {
             });
             profile.document = document_start.elapsed();
             profile.total = frame_start.elapsed() + profile.toolbar;
-            record_profile(profile);
-            return None;
+            self.record_profile(profile);
+            return;
         };
         profile.document = document_start.elapsed();
         profile.document_bytes = bytes.len();
@@ -1943,7 +1920,7 @@ impl BlockEditor for TextEditor {
         let highlight = self.core.highlight();
         profile.highlight = highlight_start.elapsed();
         let layout_start = Instant::now();
-        let embeds = self.resolve_embeds(&bytes, editors);
+        let embeds = self.resolve_embeds(&bytes);
         let layout = if let Some(cached) = self.layout_cache.as_ref().filter(|cached| {
             cached.language == language
                 && cached.bytes == bytes
@@ -1972,8 +1949,8 @@ impl BlockEditor for TextEditor {
                     });
                     profile.layout = layout_start.elapsed();
                     profile.total = frame_start.elapsed() + profile.toolbar;
-                    record_profile(profile);
-                    return None;
+                    self.record_profile(profile);
+                    return;
                 }
             };
             self.layout_cache = Some(CachedLayout {
@@ -2008,7 +1985,7 @@ impl BlockEditor for TextEditor {
             &sections,
         );
         paint_revealed_backgrounds(&painter, response.rect, origin, &layout, &sections);
-        let edit_block = self.selected_embed_action(ui.ctx(), origin, &layout, editors.client());
+        self.selected_embed_action(ui.ctx(), origin, &layout);
         let pointer_start = Instant::now();
         let gutter_arrow_click = ui
             .input(|input| input.pointer.button_pressed(PointerButton::Primary))
@@ -2047,24 +2024,22 @@ impl BlockEditor for TextEditor {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
         }
-        let embedded_action = self.paint_embeds(ui, &painter, origin, &layout, editors, viewport);
-        let pointer = response
-            .interact_pointer_pos()
-            .or_else(|| response.ctx.pointer_hover_pos());
-        let drop_index = response
-            .dnd_hover_payload::<SidebarDragPayload>()
-            .filter(|dragged| dragged.reference.id != self.block.id())
-            .and(pointer)
-            .map(|pointer| hit_test(&layout, pointer - origin))
-            .and_then(|byte| {
-                self.core.position_index(
-                    self.core
-                        .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster),
-                )
-            });
-        if let Some(byte) = drop_index {
-            response.ctx.set_cursor_icon(egui::CursorIcon::Alias);
-            if let Some(position) = layout.positions.get(byte).and_then(|position| *position) {
+        self.paint_embeds(ui, &painter, origin, &layout);
+        let dragged = self
+            .host
+            .drag()
+            .filter(|drag| drag.block_id != self.block.id());
+        if let Some(drag) = dragged {
+            self.host.accept_drag(true);
+            let byte = hit_test(&layout, drag.position - origin);
+            let index = self.core.position_index(
+                self.core
+                    .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster),
+            );
+            if let Some(position) = index
+                .and_then(|byte| layout.positions.get(byte).copied().flatten())
+                .filter(|_| !drag.dropped)
+            {
                 let top = Pos2::new(
                     origin.x + position.x,
                     origin.y + layout.lines[position.line].y,
@@ -2075,22 +2050,21 @@ impl BlockEditor for TextEditor {
                     ui.visuals().selection.stroke.color,
                 );
             }
-        }
-        if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
-            if dragged.reference.id != self.block.id() {
-                if let Some(byte) = pointer.map(|pointer| hit_test(&layout, pointer - origin)) {
-                    let position = self
-                        .core
-                        .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
-                    self.core.execute_command(EditorCommand::SetSelection {
-                        anchor: position,
-                        focus: position,
-                    });
-                    let name =
-                        BlockLabel::for_reference(editors.registry(), &dragged.reference).name;
-                    self.insert_image_embed(editors, dragged.reference.id, &name);
-                    reveal_cursor = true;
-                }
+            if drag.dropped {
+                let position = self
+                    .core
+                    .cursor_stop(byte, CursorLeftRightStop::UnicodeGraphemeCluster);
+                self.core.execute_command(EditorCommand::SetSelection {
+                    anchor: position,
+                    focus: position,
+                });
+                let types = self.host.block_types();
+                let name = match self.client.cached_block(drag.block_id) {
+                    Some(cached) => BlockLabel::for_cached(types.as_ref(), &cached).name,
+                    None => BlockLabel::new(types.as_ref(), drag.block_type, None).name,
+                };
+                self.insert_image_embed(drag.block_id, &name);
+                reveal_cursor = true;
             }
         }
         let (cursor, caret_rects, paint) = self.paint(
@@ -2101,11 +2075,9 @@ impl BlockEditor for TextEditor {
             &highlight,
             response.has_focus(),
         );
-        self.paint_remote_cursors(editors.client(), &painter, origin, &layout);
+        self.paint_remote_cursors(&painter, origin, &layout);
         if let Some(client_id) = std::mem::take(&mut self.pending_presence_reveal) {
-            if let Some(rect) =
-                self.presence_cursor_rect(editors.client(), client_id, origin, &layout)
-            {
+            if let Some(rect) = self.presence_cursor_rect(client_id, origin, &layout) {
                 ui.scroll_to_rect(rect.expand2(Vec2::new(8.0, 3.0)), Some(egui::Align::Center));
             }
         }
@@ -2129,8 +2101,7 @@ impl BlockEditor for TextEditor {
         }
         self.last_cursor_positions = cursor_positions;
         profile.total = frame_start.elapsed() + profile.toolbar;
-        record_profile(profile);
-        edit_block.or(embedded_action)
+        self.record_profile(profile);
     }
 }
 
@@ -2148,38 +2119,45 @@ fn report_ime_area(ui: &egui::Ui, rect: Rect, cursor: Option<Rect>) {
     });
 }
 
-fn record_profile(profile: FrameProfile) {
-    for (id, duration) in [
-        ("Frame total", profile.total),
-        ("Keyboard input", profile.keyboard),
-        ("Toolbar", profile.toolbar),
-        ("Document read + copy", profile.document),
-        ("Syntax highlight", profile.highlight),
-        ("Layout total", profile.layout),
-        ("Pointer hit testing", profile.pointer),
-        ("Selection + cursor paint", profile.paint.selection),
-        ("Glyph paint", profile.paint.glyphs),
-    ] {
-        performance::record_duration(id, duration);
-    }
-    if let Some(layout) = profile.layout_detail {
+impl TextEditor {
+    fn record_profile(&self, profile: FrameProfile) {
         for (id, duration) in [
-            ("Display-line conversion", layout.display_lines),
-            ("Font/style run detection", layout.font_runs),
-            ("HarfBuzz shaping", layout.shape),
-            ("Line positions + metrics", layout.line_finalize),
-            ("Markdown table alignment", layout.tables),
+            ("Frame total", profile.total),
+            ("Keyboard input", profile.keyboard),
+            ("Toolbar", profile.toolbar),
+            ("Document read + copy", profile.document),
+            ("Syntax highlight", profile.highlight),
+            ("Layout total", profile.layout),
+            ("Pointer hit testing", profile.pointer),
+            ("Selection + cursor paint", profile.paint.selection),
+            ("Glyph paint", profile.paint.glyphs),
         ] {
-            performance::record_duration(id, duration);
+            self.performance.record_duration(id, duration);
         }
+        if let Some(layout) = profile.layout_detail {
+            for (id, duration) in [
+                ("Display-line conversion", layout.display_lines),
+                ("Font/style run detection", layout.font_runs),
+                ("HarfBuzz shaping", layout.shape),
+                ("Line positions + metrics", layout.line_finalize),
+                ("Markdown table alignment", layout.tables),
+            ] {
+                self.performance.record_duration(id, duration);
+            }
+        }
+        if profile.paint.cache_misses != 0 {
+            self.performance
+                .record_duration("Glyph rasterization", profile.paint.rasterize);
+        }
+        self.performance
+            .record_count("Document bytes", profile.document_bytes as u64);
+        self.performance
+            .record_count("Lines", profile.line_count as u64);
+        self.performance
+            .record_count("Glyphs visited", profile.paint.glyph_count as u64);
+        self.performance
+            .record_count("Glyph cache misses", profile.paint.cache_misses as u64);
     }
-    if profile.paint.cache_misses != 0 {
-        performance::record_duration("Glyph rasterization", profile.paint.rasterize);
-    }
-    performance::record_count("Document bytes", profile.document_bytes as u64);
-    performance::record_count("Lines", profile.line_count as u64);
-    performance::record_count("Glyphs visited", profile.paint.glyph_count as u64);
-    performance::record_count("Glyph cache misses", profile.paint.cache_misses as u64);
 }
 
 fn image_embed_directive(
@@ -2624,5 +2602,68 @@ fn syntax_hex(scope: SynHlColorScope) -> u32 {
         SynHlColorScope::MarkdownCode => 0x8bd49c,
         SynHlColorScope::Unstyled => 0xb7c5d3,
         SynHlColorScope::Invisible => 0x43515c,
+    }
+}
+
+impl block_editor_plugin::App for TextApp {
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        let block = client.get_block(block_id);
+        self.editor = Some(TextEditor::new(block, client, host));
+    }
+
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<BlockClient>) {
+        self.creation = Some(client);
+    }
+
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        let client = self
+            .creation
+            .as_ref()
+            .ok_or("this editor is not creating a block")?;
+        Ok(client.create_block(TextDocument::new()).id())
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let Some(editor) = &mut self.editor else {
+            ui.centered_and_justified(|ui| {
+                ui.spinner();
+            });
+            return;
+        };
+        editor.ui(ui);
+    }
+
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(editor) = &mut self.editor {
+            editor.toolbar_ui(ui);
+        }
+    }
+
+    fn intrinsic_size(&mut self) -> Option<Vec2> {
+        self.editor.as_mut()?.intrinsic_size()
+    }
+
+    fn set_intrinsic_size(&mut self, size: Vec2) {
+        if let Some(editor) = &mut self.editor {
+            editor.set_intrinsic_size(size);
+        }
+    }
+
+    fn presence_visible(&mut self, visible: bool) {
+        if let Some(editor) = &mut self.editor {
+            editor.presence_visible(visible);
+        }
+    }
+
+    fn reveal_presence(&mut self, client_id: u64) {
+        if let Some(editor) = &mut self.editor {
+            editor.reveal_presence_cursor(client_id);
+        }
+    }
+
+    fn replace_child(&mut self, old: Uuid, new: Uuid) -> bool {
+        self.editor
+            .as_mut()
+            .is_some_and(|editor| editor.replace_child(old, new))
     }
 }

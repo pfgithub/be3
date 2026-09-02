@@ -6,9 +6,37 @@ pub mod test_id;
 use std::collections::{BTreeMap, HashMap};
 
 use block::BlockReference;
-use block_client::{BlockHandleAccess, CachedBlock};
+use block_client::{presence::PresenceColor, BlockHandleAccess, CachedBlock};
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
+
+pub const EMBEDDED_EDITOR_PADDING: f32 = 12.0;
+pub const EMBEDDED_EDITOR_TITLE_HEIGHT: f32 = 28.0;
+pub const EMBEDDED_EDITOR_TITLE_GAP: f32 = 8.0;
+
+pub fn embedded_editor_frame_size(intrinsic: egui::Vec2, scale: f32) -> egui::Vec2 {
+    egui::vec2(
+        (intrinsic.x + EMBEDDED_EDITOR_PADDING * 2.0) * scale,
+        (intrinsic.y
+            + EMBEDDED_EDITOR_PADDING * 2.0
+            + EMBEDDED_EDITOR_TITLE_HEIGHT
+            + EMBEDDED_EDITOR_TITLE_GAP)
+            * scale,
+    )
+}
+
+pub fn presence_color(color: PresenceColor) -> egui::Color32 {
+    match color {
+        PresenceColor::Red => egui::Color32::from_rgb(224, 82, 82),
+        PresenceColor::Orange => egui::Color32::from_rgb(230, 140, 50),
+        PresenceColor::Yellow => egui::Color32::from_rgb(214, 179, 41),
+        PresenceColor::Green => egui::Color32::from_rgb(84, 171, 90),
+        PresenceColor::Teal => egui::Color32::from_rgb(46, 173, 168),
+        PresenceColor::Blue => egui::Color32::from_rgb(74, 134, 227),
+        PresenceColor::Purple => egui::Color32::from_rgb(150, 100, 214),
+        PresenceColor::Pink => egui::Color32::from_rgb(224, 104, 168),
+    }
+}
 
 pub trait BlockTypes {
     fn display_name(&self, block_type: Uuid) -> Option<&str>;

@@ -1140,6 +1140,24 @@ impl BlockClient {
         });
     }
 
+    pub fn set_presence_data(&self, id: Uuid, presence_id: Uuid, data: Option<Vec<u8>>) {
+        self.send(WorkerCommand::SetPresence {
+            id,
+            presence_id,
+            data,
+        });
+    }
+
+    pub fn presence_entries(&self, id: Uuid) -> Vec<(ClientId, Uuid, Vec<u8>)> {
+        self.presence
+            .read()
+            .get(&id)
+            .into_iter()
+            .flat_map(|entries| entries.iter())
+            .map(|((client_id, presence_id), data)| (*client_id, *presence_id, data.clone()))
+            .collect()
+    }
+
     pub fn presence<P: PresenceKind>(&self, id: Uuid) -> Vec<(ClientId, P)> {
         self.presence
             .read()

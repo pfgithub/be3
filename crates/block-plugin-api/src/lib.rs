@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 41;
+pub const PROTOCOL_VERSION: u16 = 43;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -248,6 +248,7 @@ pub struct ChildStatus {
     pub aspect_ratio: f32,
     pub hovered: bool,
     pub active: bool,
+    pub interaction: InteractionMode,
     pub error: Option<String>,
 }
 
@@ -629,6 +630,36 @@ pub enum EditorMessage {
         region: EditorRegion,
         cursor: CursorIcon,
     },
+    Ime {
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        area: Option<ImeArea>,
+    },
+    Presence {
+        instance: EditorInstanceId,
+        visible: bool,
+        entries: Vec<PresenceEntry>,
+    },
+    PublishPresence {
+        instance: EditorInstanceId,
+        presence_id: [u8; 16],
+        data: Option<Vec<u8>>,
+    },
+    RevealPresence {
+        instance: EditorInstanceId,
+        client_id: u64,
+    },
+    ReplaceChild {
+        instance: EditorInstanceId,
+        request_id: u64,
+        old: [u8; 16],
+        new: [u8; 16],
+    },
+    ChildReplaced {
+        instance: EditorInstanceId,
+        request_id: u64,
+        replaced: bool,
+    },
     AspectRatio {
         instance: EditorInstanceId,
         ratio: f32,
@@ -934,8 +965,30 @@ pub enum InputEvent {
     },
     Text(String),
     Paste(String),
+    Ime(ImeInput),
     Modifiers(Modifiers),
     Focus(bool),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImeInput {
+    Enabled,
+    Preedit(String),
+    Commit(String),
+    Disabled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PresenceEntry {
+    pub client_id: u64,
+    pub presence_id: [u8; 16],
+    pub data: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImeArea {
+    pub rect: ChildRect,
+    pub cursor: ChildRect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1055,7 +1108,8 @@ fn validate(message: &Message) -> Result<(), DecodeError> {
             for event in &value.events {
                 if let InputEvent::Key { logical, .. }
                 | InputEvent::Text(logical)
-                | InputEvent::Paste(logical) = event
+                | InputEvent::Paste(logical)
+                | InputEvent::Ime(ImeInput::Preedit(logical) | ImeInput::Commit(logical)) = event
                 {
                     string(logical)?;
                 }
@@ -1188,6 +1242,7 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             BlockPick::Failed(message) => string(message),
             BlockPick::Chosen { .. } | BlockPick::Cancelled => Ok(()),
         },
+        EditorMessage::Presence { entries, .. } => collection(entries.len()),
         EditorMessage::Fetch { url, .. } => string(url),
         EditorMessage::Fetched { result, .. } => match result {
             FetchResult::Failed(message) => string(message),

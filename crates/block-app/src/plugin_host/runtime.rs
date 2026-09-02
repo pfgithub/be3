@@ -7,7 +7,7 @@ use std::{
 
 use block_plugin_api::{
     ArtifactDescription, BlockPick, EditorInstanceId, EditorMessage, EditorRegion, Message,
-    PluginManifest, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
+    PluginManifest, PresenceEntry, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -526,6 +526,9 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
                 ui.ctx().set_cursor_icon(cursor);
             }
         }
+        if let Some(ime) = runtime.instances.ime(instance, region, response.rect) {
+            ui.ctx().output_mut(|output| output.ime = Some(ime));
+        }
         EditorPresentation {
             plugin_id: plugin.identity.id.clone(),
             instance,
@@ -918,6 +921,43 @@ pub(crate) fn present(
         if runtime.instances.set_presenting(instance, presenting) {
             context.request_repaint();
         }
+    });
+}
+
+pub(crate) fn presence(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    visible: bool,
+    entries: Vec<PresenceEntry>,
+) -> Vec<super::PresencePublication> {
+    with(plugin_id, |runtime| {
+        let messages = runtime.instances.presence(instance, visible, entries);
+        runtime.send(messages);
+        runtime.instances.take_presence_publications(instance)
+    })
+    .unwrap_or_default()
+}
+
+pub(crate) fn replace_child(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    old: Uuid,
+    new: Uuid,
+) -> Option<bool> {
+    with(plugin_id, |runtime| {
+        let (messages, replaced) = runtime.instances.replace_child(instance, old, new);
+        runtime.send(messages);
+        replaced
+    })
+    .flatten()
+}
+
+pub(crate) fn reveal_presence(plugin_id: &str, instance: EditorInstanceId, client_id: u64) {
+    with(plugin_id, |runtime| {
+        runtime.send(vec![Message::Editor(EditorMessage::RevealPresence {
+            instance,
+            client_id,
+        })]);
     });
 }
 

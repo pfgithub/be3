@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, VecDeque},
     sync::{Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant},
@@ -46,10 +45,6 @@ struct PerformanceState {
     groups: BTreeMap<String, Group>,
 }
 
-thread_local! {
-    static ACTIVE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-}
-
 fn state() -> MutexGuard<'static, PerformanceState> {
     static STATE: OnceLock<Mutex<PerformanceState>> = OnceLock::new();
     STATE
@@ -64,7 +59,6 @@ pub fn begin_frame(context: &egui::Context) {
     state.frame = state.frame.wrapping_add(1);
     state.frame_start = Some(Instant::now());
     state.frame_causes = causes;
-    ACTIVE.with(|active| active.borrow_mut().clear());
 }
 
 pub fn end_frame() {
@@ -78,8 +72,6 @@ pub fn end_frame() {
         });
         push_sample(&mut state.frame_times, elapsed);
     }
-    drop(state);
-    ACTIVE.with(|active| active.borrow_mut().clear());
 }
 
 pub fn last_frame() -> Option<LastFrame> {
@@ -122,68 +114,12 @@ pub fn open() {
     state().open = true;
 }
 
-pub fn start_group(id: impl Into<String>) {
-    let id = id.into();
-    let mut state = state();
-    let frame = state.frame;
-    state.groups.entry(id.clone()).or_default().seen_frame = frame;
-    drop(state);
-    ACTIVE.with(|active| active.borrow_mut().push(id));
-}
-
-pub fn stop_group(id: &str) {
-    ACTIVE.with(|active| {
-        let mut active = active.borrow_mut();
-        let Some(active_id) = active.pop() else {
-            debug_assert!(false, "performance group {id:?} was not active");
-            return;
-        };
-        debug_assert_eq!(active_id, id);
-    });
-}
-
-pub fn record_duration(id: impl Into<String>, duration: Duration) {
-    let Some(group) = active_group() else {
-        return;
-    };
-    record_duration_in(&group, &id.into(), duration);
-}
-
-pub fn record_count(id: impl Into<String>, count: u64) {
-    let Some(group) = active_group() else {
-        return;
-    };
-    record_count_in(&group, &id.into(), count);
-}
-
 pub fn record_group_duration(group: &str, id: &str, duration: Duration) {
     record_duration_in(group, id, duration);
 }
 
 pub fn record_group_count(group: &str, id: &str, count: u64) {
     record_count_in(group, id, count);
-}
-
-pub struct GroupGuard {
-    id: String,
-}
-
-impl GroupGuard {
-    pub fn new(id: impl Into<String>) -> Self {
-        let id = id.into();
-        start_group(id.clone());
-        Self { id }
-    }
-}
-
-impl Drop for GroupGuard {
-    fn drop(&mut self) {
-        stop_group(&self.id);
-    }
-}
-
-fn active_group() -> Option<String> {
-    ACTIVE.with(|active| active.borrow().last().cloned())
 }
 
 fn record_duration_in(group: &str, id: &str, duration: Duration) {

@@ -2,7 +2,6 @@ mod clipboard;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
 pub(crate) mod plugin;
-mod text;
 mod unsupported;
 
 use std::collections::HashMap;
@@ -15,7 +14,10 @@ use block_client::{
     BlockClient, BlockHandle, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
 };
 use block_plugin_api::PluginManifest;
-pub(super) use block_ui::{name_galley, paint_name, BlockLabel};
+pub(super) use block_ui::{
+    name_galley, paint_name, BlockLabel, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+    EMBEDDED_EDITOR_TITLE_HEIGHT,
+};
 use block_ui::{BlockTypeEntry, BlockTypes};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_LOCK, MaterialIcon};
@@ -26,21 +28,6 @@ use crate::platform::{FileFilter, PickedFile};
 
 const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
 const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
-pub(super) const EMBEDDED_EDITOR_PADDING: f32 = 12.0;
-pub(super) const EMBEDDED_EDITOR_TITLE_HEIGHT: f32 = 28.0;
-pub(super) const EMBEDDED_EDITOR_TITLE_GAP: f32 = 8.0;
-
-pub(super) fn embedded_editor_frame_size(intrinsic: egui::Vec2, scale: f32) -> egui::Vec2 {
-    egui::vec2(
-        (intrinsic.x + EMBEDDED_EDITOR_PADDING * 2.0) * scale,
-        (intrinsic.y
-            + EMBEDDED_EDITOR_PADDING * 2.0
-            + EMBEDDED_EDITOR_TITLE_HEIGHT
-            + EMBEDDED_EDITOR_TITLE_GAP)
-            * scale,
-    )
-}
-
 pub fn install_render_resources(creation_context: &eframe::CreationContext<'_>) {
     logic_grid::renderer::install(creation_context);
 }
@@ -1444,7 +1431,6 @@ impl EditorRegistry {
         };
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
-        registry.register_creatable::<text::TextEditor>();
         for manifest in plugin::discovery::manifests() {
             registry.register_plugin(manifest);
         }

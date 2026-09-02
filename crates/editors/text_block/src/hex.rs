@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use eframe::egui::{
+use block_editor_plugin::egui::{
     self, Color32, Event, EventFilter, Key, Modifiers, PointerButton, Pos2, Rect, Sense, Vec2,
 };
 use text_editor_core::{CursorLeftRightStop, EditorCommand, LRDirection};
 
-use super::{EditorAction, TextEditor};
+use crate::app::TextEditor;
 
 const BYTES_PER_ROW: usize = 16;
 const GROUP_SIZE: usize = 8;
@@ -14,7 +14,7 @@ const ROW_HEIGHT: f32 = TEXT_SIZE * 1.6;
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
 const PAGE_ROWS: usize = 16;
 
-pub(super) fn intrinsic_size(len: usize, width: f32) -> Vec2 {
+pub(crate) fn intrinsic_size(len: usize, width: f32) -> Vec2 {
     let rows = len.div_ceil(BYTES_PER_ROW).max(1);
     Vec2::new(width, rows as f32 * ROW_HEIGHT + PADDING.y * 2.0)
 }
@@ -387,13 +387,13 @@ impl TextEditor {
         }
     }
 
-    pub(super) fn hex_direct_editor_ui(&mut self, ui: &mut egui::Ui) -> Option<EditorAction> {
+    pub(crate) fn hex_ui(&mut self, ui: &mut egui::Ui) {
         let id = egui::Id::new(("text-editor-hex", self.block.id()));
         let Some(bytes) = self.block.read().map(|document| document.bytes().to_vec()) else {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
             });
-            return None;
+            return;
         };
         let len = bytes.len();
         let font_id = egui::FontId::monospace(TEXT_SIZE);
@@ -457,7 +457,6 @@ impl TextEditor {
                 }
             }
         }
-        None
     }
 }
 

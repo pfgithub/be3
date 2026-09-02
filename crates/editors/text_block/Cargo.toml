@@ -1,0 +1,24 @@
+[package]
+name = "text_block"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+block = { path = "../../block" }
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
+freetype = "0.7"
+harfbuzz_rs = "2"
+text-editor-core = { path = "../../text-editor-core" }
+unicode-script = "0.5"
+uuid = "1"
+
+[dev-dependencies]
+block-ui-test = { path = "../../block-ui-test" }
+
+[lints]
+workspace = true

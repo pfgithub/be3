@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 block-gpu-abi = { path = "../block-gpu-abi" }
 block-gpu-host = { path = "../block-gpu-host" }
-wasmtime = { version = "48", default-features = false, features = ["cache", "cranelift", "parallel-compilation", "runtime", "std", "threads"] }
+wasmtime = { version = "48", default-features = false, features = ["cache", "cranelift", "gc", "gc-drc", "parallel-compilation", "runtime", "std", "threads"] }
 wasmtime-wasi = { version = "48", default-features = false, features = ["p1"] }
 wgpu = { version = "29", default-features = false, features = ["std", "wgsl"] }
 
@@ -16,5 +16,5 @@ workspace = true
 
 [dev-dependencies]
 block-plugin-api = { path = "../block-plugin-api" }
-wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "threads", "wat"] }
+wasmtime = { version = "48", default-features = false, features = ["cranelift", "gc", "gc-drc", "runtime", "std", "threads", "wat"] }
 wgpu = { version = "29", default-features = false, features = ["noop", "std", "wgsl"] }

@@ -1,6 +1,6 @@
 use block_plugin_api::{
-    DroppedFile, InputBatch, InputEvent, Message, Modifiers, PhysicalKey, PointerButton, ScreenId,
-    ViewportMetrics, WheelUnit,
+    DroppedFile, ImeInput, InputBatch, InputEvent, Message, Modifiers, PhysicalKey, PointerButton,
+    ScreenId, ViewportMetrics, WheelUnit,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -229,6 +229,14 @@ impl InputAdapter {
             }
             egui::Event::Paste(text) if focused => {
                 output.push(InputEvent::Paste(text));
+            }
+            egui::Event::Ime(ime) if focused => {
+                output.push(InputEvent::Ime(match ime {
+                    egui::ImeEvent::Enabled => ImeInput::Enabled,
+                    egui::ImeEvent::Preedit(text) => ImeInput::Preedit(text),
+                    egui::ImeEvent::Commit(text) => ImeInput::Commit(text),
+                    egui::ImeEvent::Disabled => ImeInput::Disabled,
+                }));
             }
             egui::Event::WindowFocused(window_focused) if !window_focused && self.focused => {
                 self.focused = false;

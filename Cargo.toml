@@ -42,6 +42,7 @@ members = [
     "crates/editors/presentation",
     "crates/editors/scene_3d",
     "crates/editors/settings",
+    "crates/editors/text_block",
     "crates/editors/ui_settings",
     "crates/editors/version_control_data",
     "crates/editors/version_control_worktree",

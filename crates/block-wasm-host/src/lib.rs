@@ -197,6 +197,7 @@ fn engine(cache: Option<&Path>) -> Result<Engine, String> {
     config.wasm_threads(true);
     config.shared_memory(true);
     config.wasm_bulk_memory(true);
+    config.wasm_exceptions(true);
     if let Some(directory) = cache {
         config.cache(Some(compilation_cache(directory)?));
     }

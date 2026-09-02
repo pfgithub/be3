@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use eframe::egui::{self, Color32, Pos2, Rect, Stroke, TextureHandle, Vec2};
+use block_editor_plugin::egui::{self, Color32, Pos2, Rect, Stroke, TextureHandle, Vec2};
 use freetype::freetype as ft;
 use harfbuzz_rs::{
     shape, Direction, Face as HbFace, Font as HbFont, Owned, Shared, Tag, UnicodeBuffer,
@@ -24,7 +24,7 @@ use text_editor_core::{
 use unicode_script::{Script, UnicodeScript};
 use uuid::Uuid;
 
-use super::timings::LayoutTimings;
+use crate::timings::LayoutTimings;
 
 unsafe extern "C" {
     fn FT_GlyphSlot_Embolden(slot: ft::FT_GlyphSlot);
@@ -38,13 +38,13 @@ const UNAVAILABLE_EMBED_SIZE: Vec2 = Vec2::new(320.0, 120.0);
 const CHECKBOX_WIDTH: f32 = 18.0;
 const WRAP_FALLBACK_REMAINING_WIDTH: f32 = 0.15;
 
-pub(super) struct TextRenderer {
+pub(crate) struct TextRenderer {
     library: ft::FT_Library,
     fonts: Vec<FontFace>,
     glyphs: HashMap<GlyphKey, RasterizedGlyph>,
 }
 
-pub(super) struct DocumentLayout {
+pub(crate) struct DocumentLayout {
     pub size: Vec2,
     pub lines: Vec<LineLayout>,
     pub positions: Vec<Option<BytePosition>>,
@@ -54,9 +54,10 @@ pub(super) struct DocumentLayout {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct ResolvedEmbed {
+pub(crate) struct ResolvedEmbed {
     pub range: Range<usize>,
     pub id: Uuid,
+    pub block_type: Uuid,
     pub label: String,
     pub icon: Option<&'static str>,
 
@@ -66,9 +67,10 @@ pub(super) struct ResolvedEmbed {
     pub frame_size: Option<Vec2>,
 }
 
-pub(super) struct EmbedLayout {
+pub(crate) struct EmbedLayout {
     pub range: Range<usize>,
     pub id: Uuid,
+    pub block_type: Uuid,
     pub label: String,
     pub icon: Option<&'static str>,
     pub automatic: bool,
@@ -77,7 +79,7 @@ pub(super) struct EmbedLayout {
     pub rect: Rect,
 }
 
-pub(super) struct LineLayout {
+pub(crate) struct LineLayout {
     pub start: usize,
     pub end: usize,
     pub y: f32,
@@ -91,7 +93,7 @@ pub(super) struct LineLayout {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct BytePosition {
+pub(crate) struct BytePosition {
     pub line: usize,
     pub x: f32,
 }
@@ -264,7 +266,7 @@ struct RasterizedGlyph {
     bearing: Vec2,
 }
 
-pub(super) struct PaintLineProfile {
+pub(crate) struct PaintLineProfile {
     pub rasterize: Duration,
     pub glyph_count: usize,
     pub cache_misses: usize,
@@ -442,6 +444,7 @@ impl TextRenderer {
                 embed_layouts.push(EmbedLayout {
                     range: embed.range.clone(),
                     id: embed.id,
+                    block_type: embed.block_type,
                     label: embed.label.clone(),
                     icon: embed.icon,
                     automatic: embed.automatic,
@@ -461,6 +464,7 @@ impl TextRenderer {
                 embed_layouts.push(EmbedLayout {
                     range: embed.range.clone(),
                     id: embed.id,
+                    block_type: embed.block_type,
                     label: embed.label.clone(),
                     icon: embed.icon,
                     automatic: embed.automatic,

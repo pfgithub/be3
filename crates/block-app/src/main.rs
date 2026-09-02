@@ -28,7 +28,7 @@ use block::{
 use block_client::root_settings::RootSettings;
 use block_client::{
     blocks::{ui_settings::UiSettings, workspace_index::BlockEntry},
-    presence::{pick_free_color, PresenceColor, UserActive},
+    presence::{pick_free_color, UserActive},
     properties::MAX_NAME_BYTES,
     BlockClient, BlockHandle, DynamicArtifactDescriptor, ManagementClient, ManagementClientError,
     ReferenceList, Session,
@@ -2776,7 +2776,7 @@ impl BlockApp {
                     let (rect, response) =
                         ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::click());
                     ui.painter()
-                        .rect_filled(rect, 2.0, presence_color_rgb(user.color));
+                        .rect_filled(rect, 2.0, block_ui::presence_color(user.color));
                     let response = response.on_hover_text(
                         "Someone else is viewing this document\nClick to jump to their cursor",
                     );
@@ -3378,19 +3378,6 @@ fn access_mode_icon(access: BlockAccess) -> Option<&'static str> {
         BlockAccess::Edit => None,
         BlockAccess::View => Some(ICON_VISIBILITY.codepoint),
         BlockAccess::KnowExists | BlockAccess::None => Some(ICON_LOCK.codepoint),
-    }
-}
-
-fn presence_color_rgb(color: PresenceColor) -> egui::Color32 {
-    match color {
-        PresenceColor::Red => egui::Color32::from_rgb(224, 82, 82),
-        PresenceColor::Orange => egui::Color32::from_rgb(230, 140, 50),
-        PresenceColor::Yellow => egui::Color32::from_rgb(214, 179, 41),
-        PresenceColor::Green => egui::Color32::from_rgb(84, 171, 90),
-        PresenceColor::Teal => egui::Color32::from_rgb(46, 173, 168),
-        PresenceColor::Blue => egui::Color32::from_rgb(74, 134, 227),
-        PresenceColor::Purple => egui::Color32::from_rgb(150, 100, 214),
-        PresenceColor::Pink => egui::Color32::from_rgb(224, 104, 168),
     }
 }
 

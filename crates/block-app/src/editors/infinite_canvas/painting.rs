@@ -372,7 +372,7 @@ pub(super) fn paint_remote_presence(
         let Some(color) = colors.get(&client_id).copied() else {
             continue;
         };
-        let rgb = presence_color_rgb(color);
+        let rgb = block_ui::presence_color(color);
         if !cursor.selection.is_empty() {
             let selected: HashSet<_> = cursor.selection.iter().copied().collect();
             if let Some(bounds) = entities

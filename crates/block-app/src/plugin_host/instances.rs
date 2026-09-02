@@ -3,9 +3,9 @@ use block_plugin_api::{
     ArtifactDescription, AssetResult, AudioCommand, AudioStatus, BlockPick, BlockTypeDescriptor,
     ChildId, ChildMode, ChildPlacement, ChildPlacements, ChildStatus, ClipboardImage,
     CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult,
-    FilePick, FrameReport, FrameSpec, Message, Occluder, PerformanceMeasurement,
-    RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet,
-    TunnelMessage, ViewChange,
+    FilePick, FrameReport, FrameSpec, ImeArea, Message, Occluder, PerformanceMeasurement,
+    PresenceEntry, RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest,
+    ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{
@@ -19,7 +19,7 @@ use super::{
     audio::AudioPlayer,
     input::{viewport_metrics, BlockDragEvent, FileDropEvent, InputAdapter},
     pieces, BlockPickRequest, EditorBlock, HostChild, HostChildStatus, InstanceRole,
-    MAX_LIVE_CHILDREN,
+    PresencePublication, MAX_LIVE_CHILDREN,
 };
 use crate::{
     performance,
@@ -76,7 +76,16 @@ struct Instance {
     grabbed: bool,
     web_view: Option<WebViewHost>,
     web_view_rect: Option<(EditorRegion, block_plugin_api::ChildRect)>,
+    presence: Option<(bool, Vec<PresenceEntry>)>,
+    presence_publications: Vec<PresencePublication>,
+    replacements: HashMap<(Uuid, Uuid), Replacement>,
+    next_replacement: u64,
     leaving: bool,
+}
+
+enum Replacement {
+    Pending(u64),
+    Answered(bool),
 }
 
 #[derive(Default)]
@@ -117,6 +126,10 @@ impl Instance {
             grabbed: false,
             web_view: None,
             web_view_rect: None,
+            presence: None,
+            presence_publications: Vec::new(),
+            replacements: HashMap::new(),
+            next_replacement: 0,
             leaving: false,
         }
     }
@@ -160,6 +173,7 @@ struct Screen {
     dragging: bool,
     file_dropping: bool,
     cursor: CursorIcon,
+    ime: Option<ImeArea>,
     children: ChildTable,
     reported_statuses: HashMap<ChildId, ChildStatus>,
     revoked: HashSet<ChildId>,
@@ -271,6 +285,7 @@ impl Instances {
                 dragging: false,
                 file_dropping: false,
                 cursor: CursorIcon::Default,
+                ime: None,
                 children: ChildTable::default(),
                 reported_statuses: HashMap::new(),
                 revoked: HashSet::new(),
@@ -824,6 +839,7 @@ impl Instances {
                 aspect_ratio: status.aspect_ratio.unwrap_or_default(),
                 hovered: status.hovered,
                 active: status.active,
+                interaction: status.interaction,
                 error: status.error,
             };
             if screen.reported_statuses.get(&status.child) == Some(&status) {
@@ -1038,8 +1054,98 @@ impl Instances {
         messages
     }
 
+    pub(super) fn presence(
+        &mut self,
+        instance: EditorInstanceId,
+        visible: bool,
+        entries: Vec<PresenceEntry>,
+    ) -> Vec<Message> {
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return Vec::new();
+        };
+        if entry
+            .presence
+            .as_ref()
+            .is_some_and(|(shown, seen)| *shown == visible && *seen == entries)
+        {
+            return Vec::new();
+        }
+        entry.presence = Some((visible, entries.clone()));
+        vec![Message::Editor(EditorMessage::Presence {
+            instance,
+            visible,
+            entries,
+        })]
+    }
+
+    pub(super) fn take_presence_publications(
+        &mut self,
+        instance: EditorInstanceId,
+    ) -> Vec<PresencePublication> {
+        self.entries
+            .get_mut(&instance)
+            .map(|entry| std::mem::take(&mut entry.presence_publications))
+            .unwrap_or_default()
+    }
+
+    pub(super) fn replace_child(
+        &mut self,
+        instance: EditorInstanceId,
+        old: Uuid,
+        new: Uuid,
+    ) -> (Vec<Message>, Option<bool>) {
+        let Some(entry) = self.entries.get_mut(&instance) else {
+            return (Vec::new(), None);
+        };
+        match entry.replacements.get(&(old, new)) {
+            Some(Replacement::Pending(_)) => (Vec::new(), None),
+            Some(Replacement::Answered(_)) => {
+                let Some(Replacement::Answered(replaced)) = entry.replacements.remove(&(old, new))
+                else {
+                    unreachable!("the replacement was just answered")
+                };
+                (Vec::new(), Some(replaced))
+            }
+            None => {
+                entry.next_replacement += 1;
+                let request_id = entry.next_replacement;
+                entry
+                    .replacements
+                    .insert((old, new), Replacement::Pending(request_id));
+                (
+                    vec![Message::Editor(EditorMessage::ReplaceChild {
+                        instance,
+                        request_id,
+                        old: old.into_bytes(),
+                        new: new.into_bytes(),
+                    })],
+                    None,
+                )
+            }
+        }
+    }
+
     pub(super) fn grabbing(&self) -> bool {
         self.entries.values().any(|entry| entry.grabbed)
+    }
+
+    pub(super) fn ime(
+        &self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        rect: egui::Rect,
+    ) -> Option<egui::output::IMEOutput> {
+        let screen = self.entries.get(&instance)?.screens.get(&region)?;
+        let area = screen.ime?;
+        let origin = rect.min.to_vec2();
+        let stretch = egui::vec2(
+            ratio(rect.width(), screen.request.metrics.logical_width),
+            ratio(rect.height(), screen.request.metrics.logical_height),
+        );
+        Some(egui::output::IMEOutput {
+            rect: host_rect(area.rect, origin, stretch),
+            cursor_rect: host_rect(area.cursor, origin, stretch),
+        })
     }
 
     pub(super) fn cursor(
@@ -1409,6 +1515,58 @@ impl Instances {
                     CreationOutcome::Created(block_id) => Ok(Uuid::from_bytes(block_id)),
                     CreationOutcome::Failed(error) => Err(error),
                 });
+                true
+            }
+            EditorMessage::Ime {
+                instance,
+                region,
+                area,
+            } => {
+                let Some(screen) = self
+                    .entries
+                    .get_mut(&instance)
+                    .and_then(|entry| entry.screens.get_mut(&region))
+                else {
+                    return false;
+                };
+                let changed = screen.ime != area;
+                screen.ime = area;
+                changed
+            }
+            EditorMessage::PublishPresence {
+                instance,
+                presence_id,
+                data,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry
+                    .presence_publications
+                    .push((Uuid::from_bytes(presence_id), data));
+                false
+            }
+            EditorMessage::ChildReplaced {
+                instance,
+                request_id,
+                replaced,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                let Some(key) = entry
+                    .replacements
+                    .iter()
+                    .find(
+                        |(_, state)| matches!(state, Replacement::Pending(id) if *id == request_id),
+                    )
+                    .map(|(key, _)| *key)
+                else {
+                    return false;
+                };
+                entry
+                    .replacements
+                    .insert(key, Replacement::Answered(replaced));
                 true
             }
             EditorMessage::Cursor {

@@ -126,6 +126,12 @@ Nor does a snapshot hold what a paint callback draws - a plugin's surface, a 3D 
 since those contents never reach the painter: the snapshot keeps the region and nothing
 inside it, so a test of one asserts on the block instead.
 
+An editor that rasterizes its own glyphs rather than egui's - the text editor, which shapes
+and rasterizes through HarfBuzz and FreeType - draws from whatever fonts the machine
+running the test happens to have, so its content is not a painting to compare. Test what
+that editor does to its block, and keep a snapshot for the parts it draws with egui's own
+fonts.
+
 5. Running them
 
 Build the workspace, not the package: cargo nextest run --workspace. An editor crate on its

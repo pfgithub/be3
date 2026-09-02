@@ -12,7 +12,8 @@ use std::{
 use block_plugin_api::{
     AssetResult, AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode,
     ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorRegion, FetchResult,
-    FilePick, Occluder, PerformanceMeasurement, ViewChange, WebViewCommand, WebViewEvent,
+    FilePick, InteractionMode, Occluder, PerformanceMeasurement, PresenceEntry, ViewChange,
+    WebViewCommand, WebViewEvent,
 };
 pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_ui::BlockCatalog;
@@ -20,6 +21,8 @@ use eframe::egui;
 use uuid::Uuid;
 
 pub type WebViewPlacement = (EditorRegion, Option<ChildRect>);
+
+pub type PresencePublication = (Uuid, Option<Vec<u8>>);
 
 #[derive(Clone, Copy)]
 pub struct BlockDrag {
@@ -224,6 +227,12 @@ impl ChildHandle {
         self.status.as_ref().is_some_and(|status| status.active)
     }
 
+    pub fn interaction(&self) -> InteractionMode {
+        self.status
+            .as_ref()
+            .map_or(InteractionMode::Preview, |status| status.interaction)
+    }
+
     pub fn error(&self) -> Option<&str> {
         self.status.as_ref()?.error.as_deref()
     }
@@ -308,6 +317,8 @@ pub struct EditorHost {
     next_asset: Rc<Cell<u64>>,
     presenting: Rc<Cell<bool>>,
     present_requests: Rc<RefCell<Vec<bool>>>,
+    presence: Rc<RefCell<Vec<PresenceEntry>>>,
+    presence_publications: Rc<RefCell<Vec<PresencePublication>>>,
     hidden_bands: Rc<RefCell<HashSet<EditorBand>>>,
 }
 
@@ -794,6 +805,36 @@ impl EditorHost {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_presenting(&self, presenting: bool) {
         self.presenting.set(presenting);
+    }
+
+    pub fn presence<P: block_client::presence::PresenceKind>(&self) -> Vec<(u64, P)> {
+        self.presence
+            .borrow()
+            .iter()
+            .filter(|entry| Uuid::from_bytes(entry.presence_id) == P::ID)
+            .filter_map(|entry| {
+                serde_json::from_slice(&entry.data)
+                    .ok()
+                    .map(|value| (entry.client_id, value))
+            })
+            .collect()
+    }
+
+    pub fn set_presence<P: block_client::presence::PresenceKind>(&self, value: Option<&P>) {
+        let data = value
+            .map(|value| serde_json::to_vec(value).expect("a presence value could not be encoded"));
+        self.presence_publications.borrow_mut().push((P::ID, data));
+        self.waker.wake();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn set_presence_entries(&self, entries: Vec<PresenceEntry>) {
+        *self.presence.borrow_mut() = entries;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn take_presence_publications(&self) -> Vec<PresencePublication> {
+        std::mem::take(&mut self.presence_publications.borrow_mut())
     }
 
     #[cfg(target_arch = "wasm32")]

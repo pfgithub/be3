@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 #[derive(Clone, Copy, Default)]
-pub(super) struct LayoutTimings {
+pub(crate) struct LayoutTimings {
     pub display_lines: Duration,
     pub font_runs: Duration,
     pub shape: Duration,
@@ -10,7 +10,7 @@ pub(super) struct LayoutTimings {
 }
 
 #[derive(Clone, Copy, Default)]
-pub(super) struct PaintTimings {
+pub(crate) struct PaintTimings {
     pub selection: Duration,
     pub glyphs: Duration,
     pub rasterize: Duration,
@@ -19,7 +19,7 @@ pub(super) struct PaintTimings {
 }
 
 #[derive(Clone, Copy, Default)]
-pub(super) struct FrameProfile {
+pub(crate) struct FrameProfile {
     pub total: Duration,
     pub keyboard: Duration,
     pub toolbar: Duration,

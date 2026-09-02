@@ -205,6 +205,37 @@ impl Screens {
                     session.set_presenting(*presenting);
                 }
             }
+            Message::Editor(EditorMessage::Presence {
+                instance,
+                visible,
+                entries,
+            }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.presence_visible(*visible, entries.clone());
+                }
+            }
+            Message::Editor(EditorMessage::RevealPresence {
+                instance,
+                client_id,
+            }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.reveal_presence(*client_id);
+                }
+            }
+            Message::Editor(EditorMessage::ReplaceChild {
+                instance,
+                request_id,
+                old,
+                new,
+            }) => {
+                if let Some(session) = self.sessions.get_mut(instance) {
+                    session.replace_child(
+                        *request_id,
+                        Uuid::from_bytes(*old),
+                        Uuid::from_bytes(*new),
+                    );
+                }
+            }
             Message::Editor(EditorMessage::ViewChanged {
                 instance,
                 x,

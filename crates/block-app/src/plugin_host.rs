@@ -3,7 +3,7 @@ use std::sync::Arc;
 use block_client::BlockClient;
 use block_plugin_api::{
     BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, EditorInstanceId, EditorRegion, FrameSpec,
-    PluginManifest, ScreenId,
+    InteractionMode, PluginManifest, ScreenId,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -26,15 +26,17 @@ mod web_view;
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
     creation_ready, editor_ui, flush, frame_child, frame_rects, install, intrinsic_size, kill,
-    poll, present, presenting, preview, regenerate_artifact, region_size, report_children, resized,
-    revoke_frame_child, running, take_artifact_outcome, take_block_pick, take_created,
-    take_leaving, take_view_changes,
+    poll, presence, present, presenting, preview, regenerate_artifact, region_size, replace_child,
+    report_children, resized, reveal_presence, revoke_frame_child, running, take_artifact_outcome,
+    take_block_pick, take_created, take_leaving, take_view_changes,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn cache_in(directory: std::path::PathBuf) {
     wasm::cache_in(directory);
 }
+
+pub(crate) type PresencePublication = (Uuid, Option<Vec<u8>>);
 
 pub(crate) const MAX_LIVE_CHILDREN: usize = 16;
 
@@ -76,6 +78,7 @@ pub(crate) struct HostChildStatus {
     pub(crate) aspect_ratio: Option<f32>,
     pub(crate) hovered: bool,
     pub(crate) active: bool,
+    pub(crate) interaction: InteractionMode,
     pub(crate) error: Option<String>,
 }
 

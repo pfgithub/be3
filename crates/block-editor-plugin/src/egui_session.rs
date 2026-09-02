@@ -3,8 +3,9 @@ use block_plugin_api::{
     ArtifactDescription, AssetResult, BlockPick, ChildId, ChildPlacement, ChildPlacements,
     ChildRect, ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId,
     EditorMessage, EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec,
-    InputEvent, Message, Occluder, PointerButton, RegionSize, ScreenPlacement, ScreenRequest,
-    ViewportMetrics, WebViewEvent, WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
+    ImeArea, ImeInput, InputEvent, Message, Occluder, PointerButton, PresenceEntry, RegionSize,
+    ScreenPlacement, ScreenRequest, ViewportMetrics, WebViewEvent, WheelUnit, MAX_CHILDREN,
+    MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -27,6 +28,7 @@ pub(crate) struct EguiSession {
     leaving: bool,
     created: Option<CreationOutcome>,
     artifact: Option<ArtifactState>,
+    replacements: Vec<(u64, bool)>,
     generation: u64,
 }
 
@@ -68,6 +70,8 @@ struct RegionState {
     reported_frame: Option<FrameReport>,
     cursor: CursorIcon,
     reported_cursor: Option<CursorIcon>,
+    ime: Option<ImeArea>,
+    reported_ime: Option<Option<ImeArea>>,
     children: Vec<ChildPlacement>,
     occluders: Vec<Occluder>,
     reported_children: Option<(Vec<ChildPlacement>, Vec<Occluder>)>,
@@ -96,6 +100,9 @@ trait AppUi {
     fn intrinsic_size(&mut self) -> Option<egui::Vec2>;
     fn set_intrinsic_size(&mut self, size: egui::Vec2);
     fn aspect_ratio(&mut self) -> Option<f32>;
+    fn presence_visible(&mut self, visible: bool);
+    fn reveal_presence(&mut self, client_id: u64);
+    fn replace_child(&mut self, old: Uuid, new: Uuid) -> bool;
 }
 
 impl<A: crate::App> AppUi for A {
@@ -177,6 +184,18 @@ impl<A: crate::App> AppUi for A {
     fn aspect_ratio(&mut self) -> Option<f32> {
         crate::App::aspect_ratio(self)
     }
+
+    fn presence_visible(&mut self, visible: bool) {
+        crate::App::presence_visible(self, visible);
+    }
+
+    fn reveal_presence(&mut self, client_id: u64) {
+        crate::App::reveal_presence(self, client_id);
+    }
+
+    fn replace_child(&mut self, old: Uuid, new: Uuid) -> bool {
+        crate::App::replace_child(self, old, new)
+    }
 }
 
 impl EguiSession {
@@ -199,6 +218,7 @@ impl EguiSession {
             leaving: false,
             created: None,
             artifact: None,
+            replacements: Vec::new(),
             generation: 0,
         }
     }
@@ -229,6 +249,20 @@ impl EguiSession {
 
     pub(crate) fn resized(&mut self, size: egui::Vec2) {
         self.app.set_intrinsic_size(size);
+    }
+
+    pub(crate) fn presence_visible(&mut self, visible: bool, entries: Vec<PresenceEntry>) {
+        self.host.set_presence_entries(entries);
+        self.app.presence_visible(visible);
+    }
+
+    pub(crate) fn reveal_presence(&mut self, client_id: u64) {
+        self.app.reveal_presence(client_id);
+    }
+
+    pub(crate) fn replace_child(&mut self, request_id: u64, old: Uuid, new: Uuid) {
+        let replaced = self.app.replace_child(old, new);
+        self.replacements.push((request_id, replaced));
     }
 
     pub(crate) fn set_presenting(&self, presenting: bool) {
@@ -335,6 +369,13 @@ impl EguiSession {
                 cursor,
             }));
         }
+        for (region, area) in self.ime_areas() {
+            messages.push(Message::Editor(EditorMessage::Ime {
+                instance,
+                region,
+                area,
+            }));
+        }
         if let Some(accepted) = self.host.take_drag_accepted() {
             messages.push(Message::Editor(EditorMessage::DragAccepted {
                 instance,
@@ -404,6 +445,20 @@ impl EguiSession {
             messages.push(Message::Editor(EditorMessage::CreationBlock {
                 instance,
                 outcome,
+            }));
+        }
+        for (presence_id, data) in self.host.take_presence_publications() {
+            messages.push(Message::Editor(EditorMessage::PublishPresence {
+                instance,
+                presence_id: presence_id.into_bytes(),
+                data,
+            }));
+        }
+        for (request_id, replaced) in std::mem::take(&mut self.replacements) {
+            messages.push(Message::Editor(EditorMessage::ChildReplaced {
+                instance,
+                request_id,
+                replaced,
             }));
         }
         for (request_id, filter) in self.host.take_picks() {
@@ -502,6 +557,18 @@ impl EguiSession {
             cursors.push((*region, state.cursor));
         }
         cursors
+    }
+
+    fn ime_areas(&mut self) -> Vec<(EditorRegion, Option<ImeArea>)> {
+        let mut areas = Vec::new();
+        for (region, state) in &mut self.regions {
+            if state.reported_ime == Some(state.ime) {
+                continue;
+            }
+            state.reported_ime = Some(state.ime);
+            areas.push((*region, state.ime));
+        }
+        areas
     }
 
     fn frame_reports(&mut self) -> Vec<FrameReport> {
@@ -747,8 +814,13 @@ impl EguiSession {
         self.leaving |= leaving;
         self.used(region, content);
         let cursor = cursor_icon(output.platform_output.cursor_icon);
+        let ime = output.platform_output.ime.map(|ime| ImeArea {
+            rect: plugin_rect(ime.rect, origin),
+            cursor: plugin_rect(ime.cursor_rect, origin),
+        });
         if let Some(state) = self.regions.get_mut(&region) {
             state.cursor = cursor;
+            state.ime = ime;
         }
         output
     }
@@ -859,6 +931,12 @@ impl EguiSession {
                     command: modifiers.command,
                 };
             }
+            InputEvent::Ime(ime) => state.input.events.push(egui::Event::Ime(match ime {
+                ImeInput::Enabled => egui::ImeEvent::Enabled,
+                ImeInput::Preedit(text) => egui::ImeEvent::Preedit(text.clone()),
+                ImeInput::Commit(text) => egui::ImeEvent::Commit(text.clone()),
+                ImeInput::Disabled => egui::ImeEvent::Disabled,
+            })),
             InputEvent::Focus(focused) => state.input.focused = *focused,
         }
     }

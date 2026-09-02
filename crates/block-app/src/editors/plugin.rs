@@ -1,7 +1,7 @@
-use block_client::{blocks, BlockClient, BlockHandleAccess};
+use block_client::{blocks, blocks::workspace_index::BlockEntry, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
     BlockPick, BlockTypeDescriptor, ChildRect, CreationMode, EditorInstanceId, EditorRegion,
-    FrameChrome, FrameSpec, InteractionMode, PluginManifest, ResizeMode, ViewChange,
+    FrameChrome, FrameSpec, InteractionMode, PluginManifest, PresenceEntry, ResizeMode, ViewChange,
 };
 use eframe::egui;
 use std::sync::{
@@ -25,6 +25,14 @@ use crate::{
         HostChildStatus, InstanceRole,
     },
 };
+
+fn child_interaction(editors: &EditorAccess<'_>, block_id: Uuid) -> InteractionMode {
+    match editors.direct_editor_interaction(block_id) {
+        Some(DirectEditorInteraction::Live) => InteractionMode::Live,
+        Some(DirectEditorInteraction::Playback) => InteractionMode::Playback,
+        Some(DirectEditorInteraction::Preview) | None => InteractionMode::Preview,
+    }
+}
 
 pub(super) fn block_type_descriptors(
     types: impl IntoIterator<Item = (uuid::Uuid, block_ui::BlockTypeEntry)>,
@@ -445,6 +453,7 @@ impl PluginEditor {
             aspect_ratio: editors.preview_aspect_ratio(child.block_id),
             hovered,
             active: available && child.is_active(),
+            interaction: child_interaction(editors, child.block_id),
             error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
         });
         action
@@ -485,6 +494,7 @@ impl PluginEditor {
                 aspect_ratio: editors.preview_aspect_ratio(child.block_id),
                 hovered: false,
                 active: false,
+                interaction: child_interaction(editors, child.block_id),
                 error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
             });
         }
@@ -566,6 +576,44 @@ impl Drop for PluginEditor {
 impl BlockEditor for PluginEditor {
     fn block(&self) -> &dyn BlockHandleAccess {
         self.block.as_ref()
+    }
+
+    fn replace_child(&self, old: Uuid, new: BlockEntry) -> Option<bool> {
+        if !self.plugin.children.replace {
+            return None;
+        }
+        match crate::plugin_host::replace_child(
+            &self.plugin.identity.id,
+            self.instance,
+            old,
+            new.id,
+        ) {
+            Some(true) => Some(true),
+            Some(false) => self.block.replace_child(old, new.id),
+            None => None,
+        }
+    }
+
+    fn sync_cursor_presence(&mut self, client: &BlockClient, visible: bool) {
+        let block_id = self.block.id();
+        let entries = client
+            .presence_entries(block_id)
+            .into_iter()
+            .map(|(client_id, presence_id, data)| PresenceEntry {
+                client_id,
+                presence_id: presence_id.into_bytes(),
+                data,
+            })
+            .collect();
+        let published =
+            crate::plugin_host::presence(&self.plugin.identity.id, self.instance, visible, entries);
+        for (presence_id, data) in published {
+            client.set_presence_data(block_id, presence_id, data);
+        }
+    }
+
+    fn reveal_presence_cursor(&mut self, client_id: block::ClientId) {
+        crate::plugin_host::reveal_presence(&self.plugin.identity.id, self.instance, client_id);
     }
 
     fn render(&mut self, context: BlockRenderContext<'_>, editors: &mut EditorAccess<'_>) -> bool {
@@ -657,6 +705,20 @@ impl BlockEditor for PluginEditor {
             crate::plugin_host::intrinsic_size(&self.plugin.identity.id, self.instance)
                 .unwrap_or_else(|| egui::vec2(420.0, 240.0)),
         )
+    }
+
+    fn direct_editor_intrinsic_size_for_width(
+        &mut self,
+        width: f32,
+        editors: &mut EditorAccess<'_>,
+    ) -> Option<egui::Vec2> {
+        let current = self.direct_editor_intrinsic_size(editors)?;
+        crate::plugin_host::resized(
+            &self.plugin.identity.id,
+            self.instance,
+            egui::vec2(width, current.y),
+        );
+        Some(egui::vec2(width, current.y))
     }
 
     fn set_direct_editor_intrinsic_size(
