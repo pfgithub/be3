@@ -26,6 +26,10 @@ fn child_placements_round_trip() {
                 corner_radius: 6.0,
                 layer: ChildLayer::Below,
                 mode: ChildMode::Passive,
+                intrinsic_width: 0.0,
+                intrinsic_height: 0.0,
+                rotation: 0.0,
+                opacity: 1.0,
             },
             ChildPlacement {
                 child: ChildId(2),
@@ -46,6 +50,10 @@ fn child_placements_round_trip() {
                 corner_radius: 0.0,
                 layer: ChildLayer::Above,
                 mode: ChildMode::Live,
+                intrinsic_width: 0.0,
+                intrinsic_height: 0.0,
+                rotation: 0.0,
+                opacity: 1.0,
             },
             ChildPlacement {
                 child: ChildId(3),
@@ -66,6 +74,10 @@ fn child_placements_round_trip() {
                 corner_radius: 0.0,
                 layer: ChildLayer::Below,
                 mode: ChildMode::Live,
+                intrinsic_width: 0.0,
+                intrinsic_height: 0.0,
+                rotation: 0.0,
+                opacity: 1.0,
             },
         ],
         occluders: vec![Occluder {

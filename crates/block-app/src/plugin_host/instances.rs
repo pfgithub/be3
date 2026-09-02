@@ -754,6 +754,10 @@ impl Instances {
                 clip: child_clip,
                 layer: child.layer,
                 mode,
+                intrinsic: (child.intrinsic_width > 0.0 && child.intrinsic_height > 0.0)
+                    .then(|| egui::vec2(child.intrinsic_width, child.intrinsic_height)),
+                rotation: child.rotation,
+                opacity: child.opacity,
             });
         }
         (children, holes)
@@ -840,6 +844,8 @@ impl Instances {
                 hovered: status.hovered,
                 active: status.active,
                 interaction: status.interaction,
+                capabilities: status.capabilities,
+                resize: status.resize,
                 error: status.error,
             };
             if screen.reported_statuses.get(&status.child) == Some(&status) {
@@ -1076,6 +1082,25 @@ impl Instances {
             visible,
             entries,
         })]
+    }
+
+    pub(super) fn child_view_changes(
+        &mut self,
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        changes: Vec<(ChildId, ViewChange)>,
+    ) -> Vec<Message> {
+        changes
+            .into_iter()
+            .map(|(child, change)| {
+                Message::Editor(EditorMessage::ChildView {
+                    instance,
+                    region,
+                    child,
+                    change,
+                })
+            })
+            .collect()
     }
 
     pub(super) fn take_presence_publications(
@@ -1532,6 +1557,13 @@ impl Instances {
                 let changed = screen.ime != area;
                 screen.ime = area;
                 changed
+            }
+            EditorMessage::CopyText { instance, text } => {
+                let Some(entry) = self.entries.get(&instance) else {
+                    return false;
+                };
+                entry.context.copy_text(text);
+                false
             }
             EditorMessage::PublishPresence {
                 instance,

@@ -162,7 +162,9 @@ impl Viewport {
 
     fn settle(&mut self, region: egui::Rect) {
         for change in self.host.take_view_changes() {
-            self.fitting = false;
+            if change != ViewChange::ResumeAutoFit {
+                self.fitting = false;
+            }
             match change {
                 ViewChange::Pan { x, y } => self.pan += egui::vec2(x, y),
                 ViewChange::Zoom { factor, anchor } => {
@@ -172,7 +174,7 @@ impl Viewport {
                     self.pan = anchor - (anchor - self.pan) * (zoom / self.zoom);
                     self.zoom = zoom;
                 }
-                ViewChange::Fit => self.fitting = true,
+                ViewChange::Fit | ViewChange::ResumeAutoFit => self.fitting = true,
             }
         }
     }

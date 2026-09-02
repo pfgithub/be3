@@ -560,6 +560,23 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
     })
 }
 
+pub(crate) fn report_child_views(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    region: EditorRegion,
+    changes: Vec<(block_plugin_api::ChildId, ViewChange)>,
+) {
+    if changes.is_empty() {
+        return;
+    }
+    with(plugin_id, |runtime| {
+        let messages = runtime
+            .instances
+            .child_view_changes(instance, region, changes);
+        runtime.send(messages);
+    });
+}
+
 pub(crate) fn report_children(
     plugin_id: &str,
     instance: EditorInstanceId,

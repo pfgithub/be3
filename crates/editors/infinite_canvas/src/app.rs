@@ -1,5 +1,7 @@
-mod block_editor;
+mod app_impl;
 mod core;
+
+pub use app_impl::CanvasApp;
 mod geometry;
 mod inspector;
 mod interaction;
@@ -29,61 +31,34 @@ use block_client::{
     presence::{PresenceColor, UserActive},
     BlockClient, BlockHandle, ReferenceList,
 };
-use block_ui::database::{DatabaseValueEditor, DatabaseValueEditorOutput};
-use eframe::egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2};
-use egui_material_icons::{
-    icons::{
+use block_editor_plugin::{
+    block_ui::{
+        self,
+        database::{DatabaseValueEditor, DatabaseValueEditorOutput},
+        name_galley, paint_name, BlockLabel, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
+        EMBEDDED_EDITOR_TITLE_HEIGHT,
+    },
+    egui::{self, Color32, PointerButton, Pos2, Rect, Stroke, Vec2},
+    egui_material_icons::icons::{
         ICON_CIRCLE, ICON_DATA_OBJECT, ICON_DIAGONAL_LINE, ICON_DRAW, ICON_FORMAT_COLOR_RESET,
         ICON_KEYBOARD_ARROW_DOWN, ICON_RECTANGLE, ICON_SELECT, ICON_TEXT_FIELDS, ICON_ZOOM_IN,
         ICON_ZOOM_OUT,
     },
-    MaterialIcon,
+    BlockFilter, BlockPicker, ChildMode, EditorHost, FilePicker, ImagePaster, PastedImage,
+    ViewChange,
 };
 use serde::{Deserialize, Serialize};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 use uuid::Uuid;
-
-use crate::{block_picker::BlockPicker, platform::FilePicker};
 
 use block_client::references;
 
-use super::{
-    clipboard::{ClipboardImagePaste, ClipboardImagePasteResult},
-    create_image_block, embedded_editor_ui, frame_child_ui, image_filter, imported_image,
-    name_galley, paint_name, BlockEditor, BlockLabel, BlockRenderContext, CreatableEditor,
-    DirectEditorCapabilities, DirectEditorInteraction, DirectEditorResize, DirectEditorViewport,
-    DirectEditorViewportCommand, DirectEditorViewportInput, EditorAccess, EditorAction, EditorKind,
-    SidebarDragPayload, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
-    EMBEDDED_EDITOR_TITLE_HEIGHT,
-};
+use crate::access::{Access, Children, DirectEditorInteraction, DirectEditorResize};
+use crate::images::{image_filter, imported_image};
+use crate::viewport::Viewport as DirectEditorViewport;
 
-impl EditorKind for InfiniteCanvasEditor {
-    type Block = InfiniteCanvas;
-
-    const DISPLAY_NAME: &'static str = "Canvas";
-    const ICON: MaterialIcon = ICON_DRAW;
-    const CAN_REPLACE_CHILD: bool = true;
-    const DEFAULT_IMPORTANT: bool = true;
-
-    fn open(client: &BlockClient, block: BlockHandle<InfiniteCanvas>) -> Self {
-        Self::new(block, client)
-    }
-}
-
-impl CreatableEditor for InfiniteCanvasEditor {
-    fn create(client: &BlockClient) -> Self {
-        Self::new(client.create_block(InfiniteCanvas::new()), client)
-    }
-}
-
-pub(crate) fn create_from_template(
-    client: &BlockClient,
-    template: crate::slide_templates::SlideTemplate,
-) -> Box<dyn BlockEditor> {
-    let canvas = crate::slide_templates::build_template_canvas(template);
-    Box::new(InfiniteCanvasEditor::new(
-        client.create_block(canvas),
-        client,
-    ))
+pub(crate) enum EditorAction {
+    OpenBlock { id: Uuid, block_type: Uuid },
 }
 
 const MIN_SIZE: f32 = 4.0;
@@ -320,7 +295,11 @@ struct PendingComponentValuePick {
     entity_ids: Vec<Uuid>,
 }
 
-pub(super) struct InfiniteCanvasEditor {
+const DEFAULT_VIEW_WIDTH: f32 = 1280.0;
+
+pub(crate) struct InfiniteCanvasEditor {
+    access: Access,
+    presence_visible: bool,
     block: BlockHandle<InfiniteCanvas>,
     tool: Tool,
     render_scale: f32,
@@ -342,7 +321,7 @@ pub(super) struct InfiniteCanvasEditor {
     image_picker: FilePicker,
     pending_image_center: Option<CanvasPoint>,
     pending_file_drop_position: Option<CanvasPoint>,
-    clipboard_image_paste: ClipboardImagePaste,
+    clipboard_image_paste: ImagePaster,
     focused_editor: Option<Uuid>,
     viewport_center: CanvasPoint,
 
@@ -350,7 +329,7 @@ pub(super) struct InfiniteCanvasEditor {
     fit_selection_requested: bool,
     fit_preview_region_requested: bool,
     fit_entity_requested: Option<Uuid>,
-    pending_presence_reveal: Option<ClientId>,
+    pending_presence_reveal: Option<u64>,
     grouped_inspector_edit_active: bool,
     last_foreground: CanvasColor,
     last_fill: Option<CanvasColor>,

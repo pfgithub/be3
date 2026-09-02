@@ -35,22 +35,6 @@ pub(crate) struct FileFilter {
     pub(crate) mime_types: Vec<String>,
 }
 
-impl FileFilter {
-    pub(crate) fn new(
-        name: &str,
-        default_file_name: &str,
-        extensions: &[&str],
-        mime_types: &[&str],
-    ) -> Self {
-        Self {
-            name: name.to_owned(),
-            default_file_name: default_file_name.to_owned(),
-            extensions: extensions.iter().map(|it| (*it).to_owned()).collect(),
-            mime_types: mime_types.iter().map(|it| (*it).to_owned()).collect(),
-        }
-    }
-}
-
 pub(crate) struct PickedFile {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,

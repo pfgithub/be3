@@ -14,6 +14,8 @@ fn child_statuses_round_trip() {
             hovered: true,
             active: false,
             interaction: InteractionMode::Live,
+            capabilities: EditorCapabilities::default(),
+            resize: ResizeMode::Both,
             error: None,
         },
         ChildStatus {
@@ -27,6 +29,8 @@ fn child_statuses_round_trip() {
             hovered: false,
             active: false,
             interaction: InteractionMode::Live,
+            capabilities: EditorCapabilities::default(),
+            resize: ResizeMode::Both,
             error: Some("the block is already open above this editor".into()),
         },
     ]);
@@ -46,6 +50,8 @@ fn child_statuses_round_trip() {
         hovered: false,
         active: false,
         interaction: InteractionMode::Live,
+        capabilities: EditorCapabilities::default(),
+        resize: ResizeMode::Both,
         error: Some("x".repeat(MAX_STRING_BYTES + 1)),
     }]);
     assert_eq!(

@@ -22,8 +22,8 @@ mod wasm;
 
 pub use block_plugin_api::{
     AssetResult, AudioStatus, BlockFilter, BlockPick, ChildId, ChildLayer, ChildMode,
-    ClipboardImage, EditorBand, EditorRegion, FetchResult, InteractionMode, ViewChange,
-    WebViewCommand, WebViewEvent,
+    ClipboardImage, EditorBand, EditorCapabilities, EditorRegion, FetchResult, InteractionMode,
+    ResizeMode, ViewChange, WebViewCommand, WebViewEvent,
 };
 pub use block_ui;
 pub use host::{

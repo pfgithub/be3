@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 43;
+pub const PROTOCOL_VERSION: u16 = 44;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -201,6 +201,10 @@ pub struct ChildPlacement {
     pub corner_radius: f32,
     pub layer: ChildLayer,
     pub mode: ChildMode,
+    pub intrinsic_width: f32,
+    pub intrinsic_height: f32,
+    pub rotation: f32,
+    pub opacity: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -249,6 +253,8 @@ pub struct ChildStatus {
     pub hovered: bool,
     pub active: bool,
     pub interaction: InteractionMode,
+    pub capabilities: EditorCapabilities,
+    pub resize: ResizeMode,
     pub error: Option<String>,
 }
 
@@ -299,6 +305,16 @@ pub enum ResizeMode {
     Vertical,
     #[default]
     Both,
+}
+
+impl ResizeMode {
+    pub fn horizontal(self) -> bool {
+        matches!(self, Self::Horizontal | Self::Both)
+    }
+
+    pub fn vertical(self) -> bool {
+        matches!(self, Self::Vertical | Self::Both)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -660,6 +676,16 @@ pub enum EditorMessage {
         request_id: u64,
         replaced: bool,
     },
+    ChildView {
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        child: ChildId,
+        change: ViewChange,
+    },
+    CopyText {
+        instance: EditorInstanceId,
+        text: String,
+    },
     AspectRatio {
         instance: EditorInstanceId,
         ratio: f32,
@@ -914,6 +940,7 @@ pub enum ViewChange {
         anchor: Option<(f32, f32)>,
     },
     Fit,
+    ResumeAutoFit,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1242,6 +1269,7 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
             BlockPick::Failed(message) => string(message),
             BlockPick::Chosen { .. } | BlockPick::Cancelled => Ok(()),
         },
+        EditorMessage::CopyText { text, .. } => string(text),
         EditorMessage::Presence { entries, .. } => collection(entries.len()),
         EditorMessage::Fetch { url, .. } => string(url),
         EditorMessage::Fetched { result, .. } => match result {

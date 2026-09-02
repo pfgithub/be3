@@ -1,0 +1,31 @@
+{
+  "id": "be3.infinite-canvas",
+  "name": "Canvas",
+  "version": "0.1.0",
+  "block_type": "696e6669-6e69-7465-2d63-616e76617301",
+  "display_name": "Canvas",
+  "icon": "\ue746",
+  "creation": "Immediate",
+  "children": {
+    "add": false,
+    "delete": false,
+    "replace": true
+  },
+  "important": true,
+  "interaction": "Live",
+  "capabilities": {
+    "rotation": false,
+    "preserve_aspect_ratio": false,
+    "pan_and_zoom": true
+  },
+  "resize": "Both",
+  "regions": [
+    "Frame",
+    "Preview"
+  ],
+  "chrome": [
+    "Toolbar",
+    "RightSidebar"
+  ],
+  "entry_point": "infinite_canvas.wasm"
+}

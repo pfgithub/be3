@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     editors::{
-        infinite_canvas, BlockCreation, BlockEditor, BlockLabel, CreationStep, EditorAccess,
-        EditorRegistry, PendingCreation,
+        BlockCreation, BlockEditor, BlockLabel, CreationStep, EditorAccess, EditorRegistry,
+        PendingCreation,
     },
     slide_templates::SlideTemplate,
 };
@@ -96,10 +96,6 @@ impl BlockPicker {
         self.tab = tab;
         self.search.clear();
         self.excluded = excluded.into_iter().collect();
-    }
-
-    pub fn close(&mut self) {
-        self.open = false;
     }
 
     pub fn is_open(&self) -> bool {
@@ -200,13 +196,7 @@ impl BlockPicker {
             if let Some(block_type) = new_type {
                 result = self.create_registered_block(editors, block_type, created_parent);
             } else if let Some(template) = template {
-                let editor = infinite_canvas::create_from_template(editors.client(), template);
-                result = Some(Self::finish_creation(
-                    editors,
-                    editor,
-                    InfiniteCanvas::TYPE_ID,
-                    created_parent,
-                ));
+                result = Some(Self::finish_template(editors, template, created_parent));
             } else if let Some(block) = linked {
                 editors.ensure(block.id, block.block_type);
                 result = Some(BlockPickerResult {
@@ -311,6 +301,25 @@ impl BlockPicker {
                 self.error = Some(error);
                 None
             }
+        }
+    }
+
+    fn finish_template(
+        editors: &mut EditorAccess<'_>,
+        template: SlideTemplate,
+        parent: BlockParent,
+    ) -> BlockPickerResult {
+        let canvas = crate::slide_templates::build_template_canvas(template);
+        let block = editors.client().create_block(canvas);
+        let id = block.id();
+        block.set_parent(parent);
+        editors.ensure(id, InfiniteCanvas::TYPE_ID);
+        BlockPickerResult {
+            id,
+            block_type: InfiniteCanvas::TYPE_ID,
+            author: editors.client().account_id(),
+            properties: BTreeMap::new(),
+            linked: false,
         }
     }
 

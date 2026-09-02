@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use block_client::BlockClient;
 use block_plugin_api::{
-    BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, EditorInstanceId, EditorRegion, FrameSpec,
-    InteractionMode, PluginManifest, ScreenId,
+    BlockTypeDescriptor, ChildId, ChildLayer, ChildMode, EditorCapabilities, EditorInstanceId,
+    EditorRegion, FrameSpec, InteractionMode, PluginManifest, ResizeMode, ScreenId,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -11,7 +11,6 @@ use uuid::Uuid;
 mod audio;
 mod backend;
 mod clipboard;
-pub(crate) use clipboard::{paste_shortcut_down, read_clipboard_image};
 mod input;
 mod instances;
 mod pieces;
@@ -27,8 +26,8 @@ pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
     creation_ready, editor_ui, flush, frame_child, frame_rects, install, intrinsic_size, kill,
     poll, presence, present, presenting, preview, regenerate_artifact, region_size, replace_child,
-    report_children, resized, reveal_presence, revoke_frame_child, running, take_artifact_outcome,
-    take_block_pick, take_created, take_leaving, take_view_changes,
+    report_child_views, report_children, resized, reveal_presence, revoke_frame_child, running,
+    take_artifact_outcome, take_block_pick, take_created, take_leaving, take_view_changes,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -49,6 +48,9 @@ pub(crate) struct HostChild {
     pub(crate) clip: egui::Rect,
     pub(crate) layer: ChildLayer,
     pub(crate) mode: ChildMode,
+    pub(crate) intrinsic: Option<egui::Vec2>,
+    pub(crate) rotation: f32,
+    pub(crate) opacity: f32,
 }
 
 impl HostChild {
@@ -79,6 +81,8 @@ pub(crate) struct HostChildStatus {
     pub(crate) hovered: bool,
     pub(crate) active: bool,
     pub(crate) interaction: InteractionMode,
+    pub(crate) capabilities: EditorCapabilities,
+    pub(crate) resize: ResizeMode,
     pub(crate) error: Option<String>,
 }
 

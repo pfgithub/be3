@@ -4,8 +4,8 @@ use block_plugin_api::{
     ChildRect, ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId,
     EditorMessage, EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec,
     ImeArea, ImeInput, InputEvent, Message, Occluder, PointerButton, PresenceEntry, RegionSize,
-    ScreenPlacement, ScreenRequest, ViewportMetrics, WebViewEvent, WheelUnit, MAX_CHILDREN,
-    MAX_COLLECTION_ITEMS,
+    ScreenPlacement, ScreenRequest, ViewChange, ViewportMetrics, WebViewEvent, WheelUnit,
+    MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -28,6 +28,7 @@ pub(crate) struct EguiSession {
     leaving: bool,
     created: Option<CreationOutcome>,
     artifact: Option<ArtifactState>,
+    copied: Vec<String>,
     replacements: Vec<(u64, bool)>,
     generation: u64,
 }
@@ -218,6 +219,7 @@ impl EguiSession {
             leaving: false,
             created: None,
             artifact: None,
+            copied: Vec::new(),
             replacements: Vec::new(),
             generation: 0,
         }
@@ -447,6 +449,9 @@ impl EguiSession {
                 outcome,
             }));
         }
+        for text in std::mem::take(&mut self.copied) {
+            messages.push(Message::Editor(EditorMessage::CopyText { instance, text }));
+        }
         for (presence_id, data) in self.host.take_presence_publications() {
             messages.push(Message::Editor(EditorMessage::PublishPresence {
                 instance,
@@ -634,6 +639,10 @@ impl EguiSession {
         self.host.push_web_view_event(event);
     }
 
+    pub(crate) fn child_view_change(&self, child: ChildId, change: ViewChange) {
+        self.host.push_child_view_change(child, change);
+    }
+
     pub(crate) fn set_child_statuses(&self, statuses: Vec<ChildStatus>) {
         self.host.set_child_statuses(statuses);
     }
@@ -813,6 +822,13 @@ impl EguiSession {
         }
         self.leaving |= leaving;
         self.used(region, content);
+        for command in &output.platform_output.commands {
+            if let egui::OutputCommand::CopyText(text) = command {
+                if !text.is_empty() {
+                    self.copied.push(text.clone());
+                }
+            }
+        }
         let cursor = cursor_icon(output.platform_output.cursor_icon);
         let ime = output.platform_output.ime.map(|ime| ImeArea {
             rect: plugin_rect(ime.rect, origin),

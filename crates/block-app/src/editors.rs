@@ -1,6 +1,4 @@
-mod clipboard;
-pub(crate) mod infinite_canvas;
-mod logic_grid;
+pub(crate) mod logic_grid;
 pub(crate) mod plugin;
 mod unsupported;
 
@@ -10,21 +8,17 @@ use std::sync::Arc;
 
 use block::{Block, BlockAccess, BlockParent, BlockReference};
 use block_client::{
-    blocks::{self, image::Image, workspace_index::BlockEntry},
+    blocks::{self, workspace_index::BlockEntry},
     BlockClient, BlockHandle, BlockHandleAccess, BlockHistoryHandle, BlockRelationships,
 };
 use block_plugin_api::PluginManifest;
-pub(super) use block_ui::{
-    name_galley, paint_name, BlockLabel, EMBEDDED_EDITOR_PADDING, EMBEDDED_EDITOR_TITLE_GAP,
-    EMBEDDED_EDITOR_TITLE_HEIGHT,
-};
+pub(super) use block_ui::{paint_name, BlockLabel};
 use block_ui::{BlockTypeEntry, BlockTypes};
 use eframe::egui;
 use egui_material_icons::{icons::ICON_LOCK, MaterialIcon};
 use uuid::Uuid;
 
 use self::unsupported::UnsupportedEditor;
-use crate::platform::{FileFilter, PickedFile};
 
 const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
 const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
@@ -64,16 +58,6 @@ pub enum DirectEditorResize {
     Both,
 }
 
-impl DirectEditorResize {
-    pub fn horizontal(self) -> bool {
-        matches!(self, Self::Horizontal | Self::Both)
-    }
-
-    pub fn vertical(self) -> bool {
-        matches!(self, Self::Vertical | Self::Both)
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectEditorViewportInput {
     Background,
@@ -94,26 +78,16 @@ pub enum DirectEditorViewportCommand {
 }
 
 pub struct DirectEditorViewport {
-    zoom: f32,
     commands: Vec<DirectEditorViewportCommand>,
     content_rect: Option<egui::Rect>,
 }
 
 impl DirectEditorViewport {
-    pub fn new(zoom: f32) -> Self {
+    pub fn new() -> Self {
         Self {
-            zoom,
             commands: Vec::new(),
             content_rect: None,
         }
-    }
-
-    pub fn zoom(&self) -> f32 {
-        self.zoom
-    }
-
-    pub fn push(&mut self, command: DirectEditorViewportCommand) {
-        self.commands.push(command);
     }
 
     pub fn pan(&mut self, delta: egui::Vec2) {
@@ -129,14 +103,14 @@ impl DirectEditorViewport {
         self.commands.push(DirectEditorViewportCommand::Fit);
     }
 
-    pub fn auto_fit(&mut self, target: Uuid) {
-        self.commands
-            .push(DirectEditorViewportCommand::AutoFit(target));
-    }
-
     pub fn resume_auto_fit(&mut self) {
         self.commands
             .push(DirectEditorViewportCommand::ResumeAutoFit);
+    }
+
+    pub fn auto_fit(&mut self, target: Uuid) {
+        self.commands
+            .push(DirectEditorViewportCommand::AutoFit(target));
     }
 
     pub fn drain(&mut self) -> impl Iterator<Item = DirectEditorViewportCommand> + '_ {
@@ -354,12 +328,6 @@ impl<'a> EditorAccess<'a> {
         })
     }
 
-    pub fn default_preserve_aspect_ratio(&self, id: Uuid) -> bool {
-        self.editors
-            .get(&id)
-            .is_some_and(|editor| editor.default_preserve_aspect_ratio())
-    }
-
     pub fn preview_aspect_ratio(&self, id: Uuid) -> Option<f32> {
         self.editors
             .get(&id)
@@ -402,16 +370,6 @@ impl<'a> EditorAccess<'a> {
     pub fn direct_editor_intrinsic_size(&mut self, id: Uuid) -> Option<egui::Vec2> {
         self.with_editor(id, |editor, editors| {
             editor.direct_editor_intrinsic_size(editors)
-        })?
-    }
-
-    pub fn direct_editor_intrinsic_size_for_width(
-        &mut self,
-        id: Uuid,
-        width: f32,
-    ) -> Option<egui::Vec2> {
-        self.with_editor(id, |editor, editors| {
-            editor.direct_editor_intrinsic_size_for_width(width, editors)
         })?
     }
 
@@ -490,14 +448,6 @@ impl<'a> EditorAccess<'a> {
         }
         action
     }
-
-    pub fn set_parent(&mut self, id: Uuid, parent: BlockParent) -> bool {
-        if !self.access_for(id).can_edit() {
-            return false;
-        }
-        self.with_editor(id, |editor, _| editor.set_parent(parent))
-            .is_some()
-    }
 }
 
 #[derive(Clone)]
@@ -565,9 +515,6 @@ pub trait BlockEditor {
     fn render_aspect_ratio(&self) -> Option<f32> {
         None
     }
-    fn default_preserve_aspect_ratio(&self) -> bool {
-        false
-    }
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities;
     fn direct_editor_interaction(&self) -> DirectEditorInteraction {
         DirectEditorInteraction::Preview
@@ -596,15 +543,6 @@ pub trait BlockEditor {
         _editors: &mut EditorAccess<'_>,
     ) -> Option<egui::Vec2> {
         None
-    }
-    fn direct_editor_intrinsic_size_for_width(
-        &mut self,
-        width: f32,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
-        let mut size = self.direct_editor_intrinsic_size(editors)?;
-        size.x = width;
-        Some(size)
     }
     fn set_direct_editor_intrinsic_size(
         &mut self,
@@ -838,7 +776,7 @@ pub(crate) fn direct_editor_frame_ui(
         max_zoom: editor.direct_editor_max_zoom(),
         min_zoom: editor.direct_editor_min_zoom(),
         read_only,
-        viewport: DirectEditorViewport::new(viewport_state.zoom),
+        viewport: DirectEditorViewport::new(),
         viewport_state,
         editor,
         editors,
@@ -1349,30 +1287,6 @@ pub(super) enum CreationStep {
     Working,
 }
 
-pub(super) fn image_filter() -> FileFilter {
-    FileFilter::new("Images", "Image", Image::FILE_EXTENSIONS, Image::MIME_TYPES)
-}
-
-pub(super) fn imported_image(file: PickedFile) -> Image {
-    let PickedFile { name, data } = file;
-    Image::new(name, data)
-}
-
-pub(super) fn create_image_block(
-    editors: &mut EditorAccess<'_>,
-    image: Image,
-    parent: Uuid,
-) -> Uuid {
-    let block = editors.client().create_block(image);
-    let id = block.id();
-    block.set_parent(BlockParent::Uuid(parent));
-    let editor = editors
-        .registry()
-        .open(editors.client(), id, Image::TYPE_ID);
-    editors.insert(editor);
-    id
-}
-
 pub(super) enum BlockCreation {
     Created(Box<dyn BlockEditor>),
     Options(Box<dyn PendingCreation>),
@@ -1429,7 +1343,6 @@ impl EditorRegistry {
             new_block_actions: Vec::new(),
             plugin_block_types: Arc::default(),
         };
-        registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         for manifest in plugin::discovery::manifests() {
             registry.register_plugin(manifest);

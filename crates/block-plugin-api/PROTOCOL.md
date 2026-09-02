@@ -186,6 +186,12 @@ lets it go as soon as none does, and an instance that closes lets go with it.
 While it is held the host reports raw pointer motion to the focused instance
 alongside the events it already sends, since there is no position to report.
 
+An editor instance may ask the host to put text on the clipboard, which only
+the host can reach: the plugin's own egui context has no window under it. The
+text an instance copied while drawing is sent as it is drawn and the host puts
+it on the clipboard for it; a paste comes back the other way as an ordinary
+paste event.
+
 An editor instance may ask the host to read one of the app's own files for it,
 which is how a plugin reaches what was installed beside the app rather than
 built into it: the games the deterministic game editor runs are wasm modules
@@ -291,10 +297,25 @@ draws the trail back out.
 
 The host answers with a status per child: whether the block could be opened
 at all, the size and shape its editor asks for, whether the pointer is over
-it, whether it is being given input, and why it is unavailable when it is. A block already open
-above the instance is refused, so an editor cannot be nested inside itself.
-The host bounds how many children of one region it will run as editors and
+it, whether it is being given input, whether its own editor is live or only
+previewed until it is asked for, which of rotation, aspect ratio and pan-and-zoom
+it allows, how it may be resized, and why it is unavailable when it is. A block
+already open above the instance is refused, so an editor cannot be nested inside
+itself. The host bounds how many children of one region it will run as editors and
 falls back to preview rendering for the rest.
+
+A placement may also carry the size the parent is giving the child, which the
+host passes on as the size the child was resized to, and the rotation and opacity
+to draw a preview child at, which is what lets an editor with a world of its own
+lay a block out at an angle or fade it. Rotation and opacity are the host's to
+apply to a picture it draws; a child it runs as an editor is drawn upright and
+opaque whatever the placement says.
+
+A child with a view of its own asks to pan, zoom or fit that view like any
+instance does, and the host hands those requests to the instance that placed
+it rather than acting on them: a canvas turns a block's request to fit into
+fitting that block in the canvas's own view. An instance that ignores them
+leaves the child's view where it was.
 
 A child drawn as a preview is a picture the host draws rather than an editor
 it runs: the instance declares the child as a preview and leaves a hole for

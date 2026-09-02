@@ -69,7 +69,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         ui: &mut egui::Ui,
         selected: &[&CanvasEntity],
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
     ) -> Option<EditorAction> {
         let selected_ids = self.selection.clone();
         let mut schemas = Vec::new();
@@ -230,9 +230,17 @@ impl InfiniteCanvasEditor {
                             entity_ids,
                         });
                         if let Some(block_type) = request.block_type {
-                            self.value_picker.open_for_types([], [block_type]);
+                            self.value_picker.open(
+                                editors.host(),
+                                BlockFilter {
+                                    name: "Value".to_owned(),
+                                    block_types: vec![block_type.into_bytes()],
+                                    templates: false,
+                                },
+                            );
                         } else {
-                            self.value_picker.open([]);
+                            self.value_picker
+                                .open(editors.host(), BlockFilter::default());
                         }
                     }
                     ui.add_space(8.0);
@@ -241,8 +249,16 @@ impl InfiniteCanvasEditor {
                 if ui.button("Add component...").clicked() {
                     self.pending_component_entities =
                         Some(selected.iter().map(|entity| entity.id).collect());
-                    self.component_picker
-                        .open_for_types([], [<DatabaseSchema as block::Block>::TYPE_ID]);
+                    self.component_picker.open(
+                        editors.host(),
+                        BlockFilter {
+                            name: "Component".to_owned(),
+                            block_types: vec![
+                                <DatabaseSchema as block::Block>::TYPE_ID.into_bytes()
+                            ],
+                            templates: false,
+                        },
+                    );
                 }
             });
         action
@@ -252,7 +268,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
         show_heading: bool,
     ) -> (Option<CanvasLayerMove>, Option<EditorAction>) {
         if show_heading {
@@ -860,6 +876,7 @@ impl InfiniteCanvasEditor {
                         }
                     }
                 });
+                let context = ui.ctx().clone();
                 let can_group = self.selection_can_group(entities);
                 let can_ungroup = selected.iter().any(|entity| entity.group_id.is_some());
                 ui.columns(2, |columns| {
@@ -867,13 +884,13 @@ impl InfiniteCanvasEditor {
                         .add_enabled(can_group, egui::Button::new("Group"))
                         .clicked()
                     {
-                        self.execute_command(CanvasCommand::Group, entities);
+                        self.execute_command(&context, CanvasCommand::Group, entities);
                     }
                     if columns[1]
                         .add_enabled(can_ungroup, egui::Button::new("Ungroup"))
                         .clicked()
                     {
-                        self.execute_command(CanvasCommand::Ungroup, entities);
+                        self.execute_command(&context, CanvasCommand::Ungroup, entities);
                     }
                 });
                 let can_lock = selected.iter().any(|entity| !entity.locked);
@@ -883,13 +900,13 @@ impl InfiniteCanvasEditor {
                         .add_enabled(can_lock, egui::Button::new("Lock"))
                         .clicked()
                     {
-                        self.execute_command(CanvasCommand::Lock, entities);
+                        self.execute_command(&context, CanvasCommand::Lock, entities);
                     }
                     if columns[1]
                         .add_enabled(can_unlock, egui::Button::new("Unlock"))
                         .clicked()
                     {
-                        self.execute_command(CanvasCommand::Unlock, entities);
+                        self.execute_command(&context, CanvasCommand::Unlock, entities);
                     }
                 });
                 let can_delete = selected.iter().any(|entity| !entity.locked);
@@ -897,7 +914,7 @@ impl InfiniteCanvasEditor {
                     .add_enabled(can_delete, egui::Button::new("Delete"))
                     .clicked()
                 {
-                    self.execute_command(CanvasCommand::Delete, entities);
+                    self.execute_command(&context, CanvasCommand::Delete, entities);
                 }
             });
         (movement, editor_action)
@@ -907,9 +924,10 @@ impl InfiniteCanvasEditor {
         &mut self,
         ui: &mut egui::Ui,
         entities: &[CanvasEntity],
-        _editors: &mut EditorAccess<'_>,
+        editors: &Access,
         viewport: &mut DirectEditorViewport,
     ) {
+        let context = ui.ctx().clone();
         ui.horizontal_wrapped(|ui| {
             for (tool, icon, label) in [
                 (Tool::Select, ICON_SELECT, "Select"),
@@ -928,7 +946,7 @@ impl InfiniteCanvasEditor {
             }
             if ui.button(ICON_DATA_OBJECT).on_hover_text("Block").clicked() {
                 self.pending_block_center = Some(self.viewport_center);
-                self.picker.open([self.block.id()]);
+                self.picker.open(editors.host(), BlockFilter::default());
             }
 
             ui.menu_button("Actions", |ui| {
@@ -941,7 +959,7 @@ impl InfiniteCanvasEditor {
                     ("Delete", has_selection, CanvasCommand::Delete),
                 ] {
                     if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                        self.execute_command(command, entities);
+                        self.execute_command(&context, command, entities);
                         ui.close();
                     }
                 }
@@ -973,17 +991,17 @@ impl InfiniteCanvasEditor {
                     ),
                 ] {
                     if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                        self.execute_command(command, entities);
+                        self.execute_command(&context, command, entities);
                         ui.close();
                     }
                 }
                 ui.separator();
                 if ui.button("Select all").clicked() {
-                    self.execute_command(CanvasCommand::SelectAll, entities);
+                    self.execute_command(&context, CanvasCommand::SelectAll, entities);
                     ui.close();
                 }
                 if ui.button("Invert selection").clicked() {
-                    self.execute_command(CanvasCommand::InvertSelection, entities);
+                    self.execute_command(&context, CanvasCommand::InvertSelection, entities);
                     ui.close();
                 }
                 if ui

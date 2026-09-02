@@ -222,6 +222,16 @@ impl Screens {
                     session.reveal_presence(*client_id);
                 }
             }
+            Message::Editor(EditorMessage::ChildView {
+                instance,
+                child,
+                change,
+                ..
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.child_view_change(*child, *change);
+                }
+            }
             Message::Editor(EditorMessage::ReplaceChild {
                 instance,
                 request_id,

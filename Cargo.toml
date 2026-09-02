@@ -33,6 +33,7 @@ members = [
     "crates/editors/gui_builder",
     "crates/editors/hotbar",
     "crates/editors/image_block",
+    "crates/editors/infinite_canvas",
     "crates/editors/logic_game",
     "crates/editors/map",
     "crates/editors/paint_review",

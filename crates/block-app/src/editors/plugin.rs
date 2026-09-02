@@ -1,7 +1,8 @@
 use block_client::{blocks, blocks::workspace_index::BlockEntry, BlockClient, BlockHandleAccess};
 use block_plugin_api::{
-    BlockPick, BlockTypeDescriptor, ChildRect, CreationMode, EditorInstanceId, EditorRegion,
-    FrameChrome, FrameSpec, InteractionMode, PluginManifest, PresenceEntry, ResizeMode, ViewChange,
+    BlockPick, BlockTypeDescriptor, ChildRect, CreationMode, EditorCapabilities, EditorInstanceId,
+    EditorRegion, FrameChrome, FrameSpec, InteractionMode, PluginManifest, PresenceEntry,
+    ResizeMode, ViewChange,
 };
 use eframe::egui;
 use std::sync::{
@@ -15,8 +16,9 @@ pub(crate) mod discovery;
 use super::{
     embedded_editor_ui, frame_child_ui, paint_block_fallback, rect_corners, ArtifactSession,
     ArtifactStatus, BlockEditor, BlockRenderContext, CreationStep, DirectEditorCapabilities,
-    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, DirectEditorViewportInput,
-    EditorAccess, EditorAction, EditorRegistry, FrameSlot, PendingCreation,
+    DirectEditorInteraction, DirectEditorResize, DirectEditorViewport, DirectEditorViewportCommand,
+    DirectEditorViewportInput, EditorAccess, EditorAction, EditorRegistry, FrameSlot,
+    PendingCreation,
 };
 use crate::{
     block_picker::BlockPicker,
@@ -31,6 +33,66 @@ fn child_interaction(editors: &EditorAccess<'_>, block_id: Uuid) -> InteractionM
         Some(DirectEditorInteraction::Live) => InteractionMode::Live,
         Some(DirectEditorInteraction::Playback) => InteractionMode::Playback,
         Some(DirectEditorInteraction::Preview) | None => InteractionMode::Preview,
+    }
+}
+
+fn rotated_corners(rect: egui::Rect, rotation: f32) -> [egui::Pos2; 4] {
+    let corners = rect_corners(rect);
+    if rotation == 0.0 {
+        return corners;
+    }
+    let (sin, cos) = rotation.sin_cos();
+    let center = rect.center();
+    corners.map(|corner| {
+        let offset = corner - center;
+        center
+            + egui::vec2(
+                offset.x * cos - offset.y * sin,
+                offset.x * sin + offset.y * cos,
+            )
+    })
+}
+
+fn collect_view_changes(
+    child: block_plugin_api::ChildId,
+    viewport: &mut DirectEditorViewport,
+    views: &mut Vec<(block_plugin_api::ChildId, ViewChange)>,
+) {
+    for command in viewport.drain() {
+        let change = match command {
+            DirectEditorViewportCommand::Pan(delta) => ViewChange::Pan {
+                x: delta.x,
+                y: delta.y,
+            },
+            DirectEditorViewportCommand::Zoom { factor, anchor } => ViewChange::Zoom {
+                factor,
+                anchor: anchor.map(|anchor| (anchor.x, anchor.y)),
+            },
+            DirectEditorViewportCommand::Fit => ViewChange::Fit,
+            DirectEditorViewportCommand::ResumeAutoFit => ViewChange::ResumeAutoFit,
+            DirectEditorViewportCommand::AutoFit(_) => continue,
+        };
+        views.push((child, change));
+    }
+}
+
+fn child_capabilities(editors: &EditorAccess<'_>, block_id: Uuid) -> EditorCapabilities {
+    let Some(capabilities) = editors.direct_editor_capabilities(block_id) else {
+        return EditorCapabilities::default();
+    };
+    EditorCapabilities {
+        rotation: capabilities.allow_rotation,
+        preserve_aspect_ratio: capabilities.preserve_aspect_ratio,
+        pan_and_zoom: capabilities.supports_pan_and_zoom,
+    }
+}
+
+fn child_resize(editors: &EditorAccess<'_>, block_id: Uuid) -> ResizeMode {
+    match editors.direct_editor_resize(block_id) {
+        Some(DirectEditorResize::Horizontal) => ResizeMode::Horizontal,
+        Some(DirectEditorResize::Vertical) => ResizeMode::Vertical,
+        Some(DirectEditorResize::Both) => ResizeMode::Both,
+        Some(DirectEditorResize::None) | None => ResizeMode::None,
     }
 }
 
@@ -344,13 +406,21 @@ impl PluginEditor {
             .open
             .map(|(id, block_type)| EditorAction::OpenBlock { id, block_type });
         let mut statuses = Vec::new();
-        let mut child_viewport = DirectEditorViewport::new(1.0);
+        let mut views = Vec::new();
+        let mut child_viewport = DirectEditorViewport::new();
         for child in presentation
             .children
             .iter()
             .filter(|child| child.is_below() && !child.frame_owner)
         {
-            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
+            let next = self.child_ui(
+                ui,
+                editors,
+                child,
+                &mut child_viewport,
+                &mut statuses,
+                &mut views,
+            );
             action = action.or(next);
         }
         presentation.present(ui);
@@ -376,11 +446,24 @@ impl PluginEditor {
             .iter()
             .filter(|child| !child.is_below() || child.frame_owner)
         {
-            let next = self.child_ui(ui, editors, child, &mut child_viewport, &mut statuses);
+            let next = self.child_ui(
+                ui,
+                editors,
+                child,
+                &mut child_viewport,
+                &mut statuses,
+                &mut views,
+            );
             action = action.or(next);
         }
         presentation.present_floating(ui);
         presentation.report(statuses);
+        crate::plugin_host::report_child_views(
+            &self.plugin.identity.id,
+            self.instance,
+            region,
+            views,
+        );
         if region == EditorRegion::Frame {
             self.block_pick_ui(ui, editors);
         }
@@ -394,9 +477,13 @@ impl PluginEditor {
         child: &HostChild,
         viewport: &mut DirectEditorViewport,
         statuses: &mut Vec<HostChildStatus>,
+        views: &mut Vec<(block_plugin_api::ChildId, ViewChange)>,
     ) -> Option<EditorAction> {
         editors.ensure(child.block_id, child.block_type);
         let available = editors.is_open(child.block_id);
+        if let Some(size) = child.intrinsic {
+            editors.set_direct_editor_intrinsic_size(child.block_id, size);
+        }
         let hovered = ui
             .ctx()
             .pointer_latest_pos()
@@ -409,8 +496,8 @@ impl PluginEditor {
                 child.block_id,
                 BlockRenderContext {
                     painter: &painter,
-                    corners: rect_corners(child.rect),
-                    opacity: 1.0,
+                    corners: rotated_corners(child.rect, child.rotation),
+                    opacity: child.opacity,
                 },
             );
             if !rendered {
@@ -427,7 +514,7 @@ impl PluginEditor {
                 child.clip,
                 viewport,
             );
-            viewport.drain().for_each(drop);
+            collect_view_changes(child.child, viewport, views);
         } else if available {
             action = embedded_editor_ui(
                 ui,
@@ -439,7 +526,7 @@ impl PluginEditor {
                 1.0,
                 viewport,
             );
-            viewport.drain().for_each(drop);
+            collect_view_changes(child.child, viewport, views);
         }
         statuses.push(HostChildStatus {
             child: child.child,
@@ -454,6 +541,8 @@ impl PluginEditor {
             hovered,
             active: available && child.is_active(),
             interaction: child_interaction(editors, child.block_id),
+            capabilities: child_capabilities(editors, child.block_id),
+            resize: child_resize(editors, child.block_id),
             error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
         });
         action
@@ -495,6 +584,8 @@ impl PluginEditor {
                 hovered: false,
                 active: false,
                 interaction: child_interaction(editors, child.block_id),
+                capabilities: child_capabilities(editors, child.block_id),
+                resize: child_resize(editors, child.block_id),
                 error: (!available).then(|| CHILD_UNAVAILABLE.to_owned()),
             });
         }
@@ -555,6 +646,7 @@ impl PluginEditor {
                     viewport.change_zoom(factor, anchor.map(|(x, y)| rect.min + egui::vec2(x, y)))
                 }
                 ViewChange::Fit => viewport.fit(),
+                ViewChange::ResumeAutoFit => viewport.resume_auto_fit(),
             }
         }
     }
@@ -649,10 +741,6 @@ impl BlockEditor for PluginEditor {
         crate::plugin_host::aspect_ratio(&self.plugin.identity.id, self.instance)
     }
 
-    fn default_preserve_aspect_ratio(&self) -> bool {
-        self.plugin.capabilities.preserve_aspect_ratio
-    }
-
     fn direct_editor_capabilities(&self) -> DirectEditorCapabilities {
         DirectEditorCapabilities {
             allow_rotation: self.plugin.capabilities.rotation,
@@ -705,20 +793,6 @@ impl BlockEditor for PluginEditor {
             crate::plugin_host::intrinsic_size(&self.plugin.identity.id, self.instance)
                 .unwrap_or_else(|| egui::vec2(420.0, 240.0)),
         )
-    }
-
-    fn direct_editor_intrinsic_size_for_width(
-        &mut self,
-        width: f32,
-        editors: &mut EditorAccess<'_>,
-    ) -> Option<egui::Vec2> {
-        let current = self.direct_editor_intrinsic_size(editors)?;
-        crate::plugin_host::resized(
-            &self.plugin.identity.id,
-            self.instance,
-            egui::vec2(width, current.y),
-        );
-        Some(egui::vec2(width, current.y))
     }
 
     fn set_direct_editor_intrinsic_size(

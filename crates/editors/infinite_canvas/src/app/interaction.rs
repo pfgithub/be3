@@ -1,54 +1,43 @@
 use super::*;
 
+fn picked(picker: &mut BlockPicker, editors: &Access) -> Option<(Uuid, Uuid)> {
+    match picker.poll(editors.host()) {
+        Some(Ok(picked)) => Some(picked),
+        Some(Err(_)) | None => None,
+    }
+}
+
 impl InfiniteCanvasEditor {
-    pub(super) fn handle_picker(
-        &mut self,
-        context: &egui::Context,
-        editors: &mut EditorAccess<'_>,
-    ) {
-        if let Some(block) =
-            self.picker
-                .handle(context, editors, BlockParent::Uuid(self.block.id()))
-        {
+    pub(super) fn handle_picker(&mut self, editors: &Access) {
+        if let Some((id, block_type)) = picked(&mut self.picker, editors) {
             let center = self
                 .pending_block_center
                 .take()
                 .unwrap_or(self.viewport_center);
-            self.add_direct_editor(editors, block.id, center);
-            if !block.linked {
-                editors.set_parent(block.id, BlockParent::Uuid(self.block.id()));
-            }
+            editors.ensure(id, block_type);
+            self.add_direct_editor(editors, id, center);
+            editors.set_parent(id, BlockParent::Uuid(self.block.id()));
             self.tool = Tool::Select;
         }
-        if let Some(block) =
-            self.component_picker
-                .handle(context, editors, BlockParent::Uuid(self.block.id()))
-        {
+        if let Some((id, _)) = picked(&mut self.component_picker, editors) {
             let entity_ids = self.pending_component_entities.take().unwrap_or_default();
             let client = editors.client_handle();
             self.pending_components
-                .push(&client, self.block.id(), block.id, entity_ids);
+                .push(&client, self.block.id(), id, entity_ids);
         }
-        if let Some(block) =
-            self.value_picker
-                .handle(context, editors, BlockParent::Uuid(self.block.id()))
-        {
+        if let Some((id, _)) = picked(&mut self.value_picker, editors) {
             if let Some(target) = self.pending_value_target.clone() {
                 let client = editors.client_handle();
                 self.pending_values
-                    .push(&client, self.block.id(), block.id, target);
+                    .push(&client, self.block.id(), id, target);
             }
         }
     }
 
-    pub(super) fn import_picked_image(
-        &mut self,
-        context: &egui::Context,
-        editors: &mut EditorAccess<'_>,
-    ) {
+    pub(super) fn import_picked_image(&mut self, editors: &Access) {
         match self
             .image_picker
-            .poll(context)
+            .poll(editors.host())
             .map(|file| file.map(imported_image))
         {
             Some(Ok(image)) => {
@@ -72,7 +61,7 @@ impl InfiniteCanvasEditor {
         &mut self,
         response: &egui::Response,
         canvas_rect: Rect,
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
     ) {
         let (hovering_file, dropped) = response.ctx.input(|input| {
             (
@@ -144,20 +133,22 @@ impl InfiniteCanvasEditor {
 
     pub(super) fn import_clipboard_image(
         &mut self,
+        ui: &egui::Ui,
         response: &egui::Response,
         canvas_rect: Rect,
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
     ) {
         let enabled = !response.ctx.egui_wants_keyboard_input();
-        let Some(result) = self.clipboard_image_paste.poll(&response.ctx, enabled) else {
+        let Some(result) = self.clipboard_image_paste.poll(ui, editors.host(), enabled) else {
             return;
         };
-        let ClipboardImagePasteResult::Image(image) = result else {
-            if let ClipboardImagePasteResult::Error(error) = result {
+        let PastedImage::Image { name, data } = result else {
+            if let PastedImage::Failed(error) = result {
                 self.image_import_error = Some(error);
             }
             return;
         };
+        let image = ImageBlock::new(name, data);
         self.image_import_error = None;
         let screen_position = response
             .ctx
@@ -259,7 +250,7 @@ impl InfiniteCanvasEditor {
         world: CanvasPoint,
         canvas_rect: Rect,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &Access,
     ) {
         if response.ctx.input(|input| input.key_down(egui::Key::Space)) {
             response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
@@ -305,7 +296,7 @@ impl InfiniteCanvasEditor {
         response: &egui::Response,
         canvas_rect: Rect,
         entities: &[CanvasEntity],
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
         direct_editor_rects: &[Rect],
         viewport: &mut DirectEditorViewport,
     ) -> (Option<CanvasLayerMove>, Option<EditorAction>) {
@@ -325,9 +316,7 @@ impl InfiniteCanvasEditor {
             self.focused_editor = None;
         } else if escape_pressed {
             self.gesture = None;
-            self.picker.close();
-            self.component_picker.close();
-            self.value_picker.close();
+
             self.tool = Tool::Select;
         }
         let keyboard_available = !response.ctx.egui_wants_keyboard_input();
@@ -355,10 +344,10 @@ impl InfiniteCanvasEditor {
                 } else {
                     CanvasCommand::SelectAll
                 };
-                self.execute_command(command, entities);
+                self.execute_command(&response.ctx, command, entities);
             }
             if modifiers.command && response.ctx.input(|input| input.key_pressed(egui::Key::D)) {
-                self.execute_command(CanvasCommand::Duplicate, entities);
+                self.execute_command(&response.ctx, CanvasCommand::Duplicate, entities);
             }
             for (key, command) in [
                 (egui::Key::C, CanvasCommand::Copy),
@@ -366,7 +355,7 @@ impl InfiniteCanvasEditor {
                 (egui::Key::V, CanvasCommand::Paste),
             ] {
                 if modifiers.command && response.ctx.input(|input| input.key_pressed(key)) {
-                    self.execute_command(command, entities);
+                    self.execute_command(&response.ctx, command, entities);
                 }
             }
             if modifiers.command
@@ -374,7 +363,11 @@ impl InfiniteCanvasEditor {
                     .ctx
                     .input(|input| input.key_pressed(egui::Key::OpenBracket))
             {
-                self.execute_command(CanvasCommand::Reorder(CanvasLayerMove::BackOne), entities);
+                self.execute_command(
+                    &response.ctx,
+                    CanvasCommand::Reorder(CanvasLayerMove::BackOne),
+                    entities,
+                );
             }
             if modifiers.command
                 && response
@@ -382,6 +375,7 @@ impl InfiniteCanvasEditor {
                     .input(|input| input.key_pressed(egui::Key::CloseBracket))
             {
                 self.execute_command(
+                    &response.ctx,
                     CanvasCommand::Reorder(CanvasLayerMove::ForwardOne),
                     entities,
                 );
@@ -429,7 +423,7 @@ impl InfiniteCanvasEditor {
             && !self.selection.is_empty()
             && keyboard_available
         {
-            self.execute_command(CanvasCommand::Delete, entities);
+            self.execute_command(&response.ctx, CanvasCommand::Delete, entities);
         }
 
         let pointer = response
@@ -455,18 +449,17 @@ impl InfiniteCanvasEditor {
             }
         }
 
-        if let Some(dragged) = response.dnd_hover_payload::<SidebarDragPayload>() {
-            if dragged.reference.id != self.block.id() {
-                response.ctx.set_cursor_icon(egui::CursorIcon::Alias);
-            }
-        }
-
-        if let Some(dragged) = response.dnd_release_payload::<SidebarDragPayload>() {
-            if dragged.reference.id != self.block.id() {
-                if let Some(world) = world {
-                    self.add_direct_editor(editors, dragged.reference.id, world);
-                    editors.set_parent(dragged.reference.id, BlockParent::Uuid(self.block.id()));
-                }
+        if let Some(dragged) = editors
+            .host()
+            .drag()
+            .filter(|drag| drag.block_id != self.block.id())
+        {
+            editors.host().accept_drag(true);
+            if dragged.dropped {
+                let world = self.screen_to_world(dragged.position, canvas_rect);
+                editors.ensure(dragged.block_id, dragged.block_type);
+                self.add_direct_editor(editors, dragged.block_id, world);
+                editors.set_parent(dragged.block_id, BlockParent::Uuid(self.block.id()));
             }
         }
 
@@ -524,7 +517,7 @@ impl InfiniteCanvasEditor {
                     ("Delete", CanvasCommand::Delete),
                 ] {
                     if ui.button(label).clicked() {
-                        self.execute_command(command, entities);
+                        self.execute_command(&response.ctx, command, entities);
                         ui.close();
                     }
                 }
@@ -544,7 +537,7 @@ impl InfiniteCanvasEditor {
                     ("Unlock", can_unlock, CanvasCommand::Unlock),
                 ] {
                     if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                        self.execute_command(command, entities);
+                        self.execute_command(&response.ctx, command, entities);
                         ui.close();
                     }
                 }
@@ -568,11 +561,11 @@ impl InfiniteCanvasEditor {
                 }
                 ui.separator();
                 if ui.button("Select all").clicked() {
-                    self.execute_command(CanvasCommand::SelectAll, entities);
+                    self.execute_command(&response.ctx, CanvasCommand::SelectAll, entities);
                     ui.close();
                 }
                 if ui.button("Invert selection").clicked() {
-                    self.execute_command(CanvasCommand::InvertSelection, entities);
+                    self.execute_command(&response.ctx, CanvasCommand::InvertSelection, entities);
                     ui.close();
                 }
             } else {
@@ -644,26 +637,26 @@ impl InfiniteCanvasEditor {
                     }
                     if ui.button("Image…").clicked() {
                         self.pending_image_center = self.context_menu_position;
-                        self.image_picker.open(ui.ctx(), &image_filter());
+                        self.image_picker.open(editors.host(), image_filter());
                         ui.close();
                     }
                     if ui.button("Block…").clicked() {
                         self.pending_block_center = self.context_menu_position;
-                        self.picker.open([self.block.id()]);
+                        self.picker.open(editors.host(), BlockFilter::default());
                         ui.close();
                     }
                 });
                 ui.separator();
                 if ui.button("Paste").clicked() {
-                    self.execute_command(CanvasCommand::Paste, entities);
+                    self.execute_command(&response.ctx, CanvasCommand::Paste, entities);
                     ui.close();
                 }
                 if ui.button("Select all").clicked() {
-                    self.execute_command(CanvasCommand::SelectAll, entities);
+                    self.execute_command(&response.ctx, CanvasCommand::SelectAll, entities);
                     ui.close();
                 }
                 if ui.button("Invert selection").clicked() {
-                    self.execute_command(CanvasCommand::InvertSelection, entities);
+                    self.execute_command(&response.ctx, CanvasCommand::InvertSelection, entities);
                     ui.close();
                 }
             }
@@ -1056,11 +1049,12 @@ impl InfiniteCanvasEditor {
 
     pub(super) fn paint(
         &mut self,
+        ui: &mut egui::Ui,
         painter: &egui::Painter,
         rect: Rect,
         entities: &[CanvasEntity],
         dependency_details: &HashMap<Uuid, BlockLabel>,
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
     ) {
         let preview = self
             .gesture
@@ -1084,6 +1078,7 @@ impl InfiniteCanvasEditor {
             let entity = preview.get(&stored.id).unwrap_or(stored);
             paint_entity(
                 self,
+                ui,
                 painter,
                 rect,
                 entity,
@@ -1099,6 +1094,7 @@ impl InfiniteCanvasEditor {
         {
             paint_entity(
                 self,
+                ui,
                 painter,
                 rect,
                 entity,
@@ -1235,7 +1231,9 @@ impl InfiniteCanvasEditor {
                     icon.codepoint,
                     egui::FontId::new(
                         16.0,
-                        egui::FontFamily::Name(egui_material_icons::FONT_FAMILY.into()),
+                        egui::FontFamily::Name(
+                            block_editor_plugin::egui_material_icons::FONT_FAMILY.into(),
+                        ),
                     ),
                     visuals.text_color(),
                 );
@@ -1273,7 +1271,7 @@ impl InfiniteCanvasEditor {
         context: &egui::Context,
         rect: Rect,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &Access,
     ) -> Option<EditorAction> {
         if self.selection.len() != 1 {
             return None;

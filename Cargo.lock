@@ -4903,6 +4903,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "infinite_canvas"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -11,9 +11,9 @@ use std::{
 
 use block_plugin_api::{
     AssetResult, AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode,
-    ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorRegion, FetchResult,
-    FilePick, InteractionMode, Occluder, PerformanceMeasurement, PresenceEntry, ViewChange,
-    WebViewCommand, WebViewEvent,
+    ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorCapabilities,
+    EditorRegion, FetchResult, FilePick, InteractionMode, Occluder, PerformanceMeasurement,
+    PresenceEntry, ResizeMode, ViewChange, WebViewCommand, WebViewEvent,
 };
 pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_ui::BlockCatalog;
@@ -233,6 +233,41 @@ impl ChildHandle {
             .map_or(InteractionMode::Preview, |status| status.interaction)
     }
 
+    pub fn capabilities(&self) -> EditorCapabilities {
+        self.status
+            .as_ref()
+            .map_or_else(EditorCapabilities::default, |status| status.capabilities)
+    }
+
+    pub fn resize(&self) -> ResizeMode {
+        self.status
+            .as_ref()
+            .map_or(ResizeMode::None, |status| status.resize)
+    }
+
+    pub fn set_intrinsic_size(&self, size: egui::Vec2) {
+        self.host.update_child(self.index, |placement| {
+            placement.intrinsic_width = size.x.max(0.0);
+            placement.intrinsic_height = size.y.max(0.0);
+        });
+    }
+
+    pub fn take_view_changes(&self) -> Vec<ViewChange> {
+        self.host.take_child_view_changes(self.child)
+    }
+
+    pub fn set_rotation(&self, radians: f32) {
+        self.host.update_child(self.index, |placement| {
+            placement.rotation = radians;
+        });
+    }
+
+    pub fn set_opacity(&self, opacity: f32) {
+        self.host.update_child(self.index, |placement| {
+            placement.opacity = opacity.clamp(0.0, 1.0);
+        });
+    }
+
     pub fn error(&self) -> Option<&str> {
         self.status.as_ref()?.error.as_deref()
     }
@@ -318,6 +353,7 @@ pub struct EditorHost {
     presenting: Rc<Cell<bool>>,
     present_requests: Rc<RefCell<Vec<bool>>>,
     presence: Rc<RefCell<Vec<PresenceEntry>>>,
+    child_views: Rc<RefCell<HashMap<ChildId, Vec<ViewChange>>>>,
     presence_publications: Rc<RefCell<Vec<PresencePublication>>>,
     hidden_bands: Rc<RefCell<HashSet<EditorBand>>>,
 }
@@ -386,6 +422,12 @@ impl EditorHost {
 
     pub fn fit_view(&self) {
         self.view_changes.borrow_mut().push(ViewChange::Fit);
+    }
+
+    pub fn resume_auto_fit_view(&self) {
+        self.view_changes
+            .borrow_mut()
+            .push(ViewChange::ResumeAutoFit);
     }
 
     pub fn drag(&self) -> Option<BlockDrag> {
@@ -667,6 +709,10 @@ impl EditorHost {
             corner_radius: 0.0,
             layer,
             mode: ChildMode::Passive,
+            intrinsic_width: 0.0,
+            intrinsic_height: 0.0,
+            rotation: 0.0,
+            opacity: 1.0,
         });
         drop(children);
         ChildHandle {
@@ -825,6 +871,22 @@ impl EditorHost {
             .map(|value| serde_json::to_vec(value).expect("a presence value could not be encoded"));
         self.presence_publications.borrow_mut().push((P::ID, data));
         self.waker.wake();
+    }
+
+    fn take_child_view_changes(&self, child: ChildId) -> Vec<ViewChange> {
+        self.child_views
+            .borrow_mut()
+            .remove(&child)
+            .unwrap_or_default()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn push_child_view_change(&self, child: ChildId, change: ViewChange) {
+        self.child_views
+            .borrow_mut()
+            .entry(child)
+            .or_default()
+            .push(change);
     }
 
     #[cfg(target_arch = "wasm32")]

@@ -1,12 +1,14 @@
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn paint_entity(
     editor: &InfiniteCanvasEditor,
+    ui: &mut egui::Ui,
     painter: &egui::Painter,
     rect: Rect,
     entity: &CanvasEntity,
     dependency_details: &HashMap<Uuid, BlockLabel>,
-    editors: &mut EditorAccess<'_>,
+    editors: &Access,
     live_editor_overlay: bool,
     parent_opacity: f32,
 ) {
@@ -109,16 +111,7 @@ pub(super) fn paint_entity(
         CanvasEntityKind::Block { block_id } => {
             let resolved_id = editor.peek_block_id(*block_id);
             let corners = entity_corners(entity).map(|point| editor.world_to_screen(point, rect));
-            if resolved_id.is_some_and(|id| {
-                editors.render(
-                    id,
-                    BlockRenderContext {
-                        painter,
-                        corners,
-                        opacity,
-                    },
-                )
-            }) {
+            if resolved_id.is_some_and(|id| editors.render(ui, id, corners, opacity)) {
                 return;
             }
             painter.add(egui::Shape::convex_polygon(
@@ -213,16 +206,7 @@ pub(super) fn paint_entity(
                     == Some(DirectEditorInteraction::Preview)
                     && editor.focused_editor != Some(entity.id));
             let rendered = preview
-                && resolved_id.is_some_and(|id| {
-                    editors.render(
-                        id,
-                        BlockRenderContext {
-                            painter,
-                            corners: content_corners,
-                            opacity,
-                        },
-                    )
-                });
+                && resolved_id.is_some_and(|id| editors.render(ui, id, content_corners, opacity));
             if preview && !rendered {
                 painter.rect_filled(content, 0.0, with_opacity(Color32::from_gray(35), opacity));
             }

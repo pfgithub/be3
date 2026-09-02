@@ -1,12 +1,16 @@
 use super::*;
 
 impl InfiniteCanvasEditor {
-    pub(in crate::editors) fn new(
+    pub(crate) fn new(
         block: BlockHandle<InfiniteCanvas>,
-        client: &BlockClient,
+        host: EditorHost,
+        client: Arc<BlockClient>,
     ) -> Self {
         let dependencies = client.watch_references(BlockReferenceList::References(block.id()));
+        let access = Access::new(host, client, Rc::new(RefCell::new(Children::default())));
         Self {
+            access,
+            presence_visible: false,
             block,
             tool: Tool::Select,
             render_scale: 1.0,
@@ -28,7 +32,7 @@ impl InfiniteCanvasEditor {
             image_picker: FilePicker::default(),
             pending_image_center: None,
             pending_file_drop_position: None,
-            clipboard_image_paste: ClipboardImagePaste::default(),
+            clipboard_image_paste: ImagePaster::default(),
             focused_editor: None,
             viewport_center: CanvasPoint::default(),
             pointer_world: None,
@@ -54,7 +58,7 @@ impl InfiniteCanvasEditor {
 
     pub(super) fn resolve_block_id(
         &mut self,
-        editors: &EditorAccess<'_>,
+        editors: &Access,
         reference: BlockRef,
     ) -> Option<Uuid> {
         let client = editors.client_handle();
@@ -461,7 +465,12 @@ impl InfiniteCanvasEditor {
         self.record_update(before, ordered, false);
     }
 
-    pub(super) fn execute_command(&mut self, command: CanvasCommand, entities: &[CanvasEntity]) {
+    pub(super) fn execute_command(
+        &mut self,
+        context: &egui::Context,
+        command: CanvasCommand,
+        entities: &[CanvasEntity],
+    ) {
         match command {
             CanvasCommand::SelectAll => {
                 self.selection = entities.iter().map(|entity| entity.id).collect();
@@ -504,14 +513,14 @@ impl InfiniteCanvasEditor {
                 }
             }
             CanvasCommand::Copy => {
-                self.copy_selection_to_clipboard(entities);
+                self.copy_selection_to_clipboard(context, entities);
             }
             CanvasCommand::Cut => {
-                if self.copy_selection_to_clipboard(entities) {
-                    self.execute_command(CanvasCommand::Delete, entities);
+                if self.copy_selection_to_clipboard(context, entities) {
+                    self.execute_command(context, CanvasCommand::Delete, entities);
                 }
             }
-            CanvasCommand::Paste => self.paste_entities_from_clipboard(),
+            CanvasCommand::Paste => self.paste_entities_from_clipboard(context),
         }
     }
 
@@ -544,22 +553,21 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-    pub(super) fn copy_selection_to_clipboard(&mut self, entities: &[CanvasEntity]) -> bool {
+    pub(super) fn copy_selection_to_clipboard(
+        &mut self,
+        context: &egui::Context,
+        entities: &[CanvasEntity],
+    ) -> bool {
         let entities = self.selected_entities(entities);
         if entities.is_empty() {
             return false;
         }
         let payload = CanvasClipboardPayload { entities };
-        let result = serde_json::to_string(&payload)
-            .map(|json| format!("{CANVAS_CLIPBOARD_PREFIX}{json}"))
-            .map_err(|error| error.to_string())
-            .and_then(|text| {
-                let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
-                clipboard.set_text(text).map_err(|error| error.to_string())
-            });
-        match result {
-            Ok(()) => true,
+        match serde_json::to_string(&payload) {
+            Ok(json) => {
+                context.copy_text(format!("{CANVAS_CLIPBOARD_PREFIX}{json}"));
+                true
+            }
             Err(error) => {
                 self.image_import_error = Some(format!("Could not copy canvas objects: {error}"));
                 false
@@ -567,28 +575,22 @@ impl InfiniteCanvasEditor {
         }
     }
 
-    #[cfg(any(target_os = "android", target_arch = "wasm32"))]
-    pub(super) fn copy_selection_to_clipboard(&mut self, _entities: &[CanvasEntity]) -> bool {
-        false
-    }
-
-    #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
-    pub(super) fn paste_entities_from_clipboard(&mut self) {
-        let result = (|| {
-            let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
-            let text = clipboard.get_text().map_err(|error| error.to_string())?;
-            let json = text
-                .strip_prefix(CANVAS_CLIPBOARD_PREFIX)
-                .ok_or_else(|| "Clipboard does not contain canvas objects".to_owned())?;
-            serde_json::from_str::<CanvasClipboardPayload>(json).map_err(|error| error.to_string())
-        })();
-        let payload = match result {
+    pub(super) fn paste_entities_from_clipboard(&mut self, context: &egui::Context) {
+        let pasted = context.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Paste(text) => text
+                    .strip_prefix(CANVAS_CLIPBOARD_PREFIX)
+                    .map(str::to_owned),
+                _ => None,
+            })
+        });
+        let Some(json) = pasted else {
+            return;
+        };
+        let payload = match serde_json::from_str::<CanvasClipboardPayload>(&json) {
             Ok(payload) => payload,
             Err(error) => {
-                if error != "Clipboard does not contain canvas objects" {
-                    self.image_import_error =
-                        Some(format!("Could not paste canvas objects: {error}"));
-                }
+                self.image_import_error = Some(format!("Could not paste canvas objects: {error}"));
                 return;
             }
         };
@@ -605,13 +607,10 @@ impl InfiniteCanvasEditor {
         self.tool = Tool::Select;
     }
 
-    #[cfg(any(target_os = "android", target_arch = "wasm32"))]
-    pub(super) fn paste_entities_from_clipboard(&mut self) {}
-
     pub(super) fn edit_selected(
         &mut self,
         entities: &[CanvasEntity],
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
     ) -> Option<EditorAction> {
         if self.selection.len() != 1 {
             return None;
@@ -656,7 +655,7 @@ impl InfiniteCanvasEditor {
     pub(super) fn toggle_selected_block_mode(
         &mut self,
         entities: &[CanvasEntity],
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
     ) {
         if self.selection.len() != 1 {
             return;
@@ -688,7 +687,7 @@ impl InfiniteCanvasEditor {
 
     pub(super) fn add_direct_editor(
         &mut self,
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
         block_id: Uuid,
         center: CanvasPoint,
     ) {
@@ -697,7 +696,7 @@ impl InfiniteCanvasEditor {
 
     pub(super) fn add_direct_editor_sized(
         &mut self,
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
         block_id: Uuid,
         center: CanvasPoint,
         content_size: CanvasPoint,
@@ -715,41 +714,21 @@ impl InfiniteCanvasEditor {
 
     pub(super) fn add_imported_image(
         &mut self,
-        editors: &mut EditorAccess<'_>,
+        editors: &Access,
         image: ImageBlock,
         center: CanvasPoint,
     ) {
-        let id = create_image_block(editors, image, self.block.id());
+        let block = editors.client().create_block(image);
+        let id = block.id();
+        block.set_parent(BlockParent::Uuid(self.block.id()));
+        editors.ensure(id, <ImageBlock as block::Block>::TYPE_ID);
         self.add_direct_editor(editors, id, center);
-    }
-
-    pub(super) fn ensure_dependency_editors(
-        &mut self,
-        entities: &[CanvasEntity],
-        dependencies: &[block::BlockReference],
-        editors: &mut EditorAccess<'_>,
-    ) {
-        let referenced = entities
-            .iter()
-            .filter_map(|entity| match entity.kind {
-                CanvasEntityKind::Block { block_id }
-                | CanvasEntityKind::DirectEditor { block_id, .. } => {
-                    self.resolve_block_id(editors, block_id)
-                }
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
-        for dependency in dependencies {
-            if referenced.contains(&dependency.id) {
-                editors.ensure(dependency.id, dependency.block_type);
-            }
-        }
     }
 
     pub(super) fn selection_defaults_to_proportional(
         &self,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &Access,
     ) -> bool {
         entities
             .iter()
@@ -769,7 +748,7 @@ impl InfiniteCanvasEditor {
     pub(super) fn selection_allows_rotation(
         &self,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &Access,
     ) -> bool {
         entities
             .iter()
@@ -786,7 +765,7 @@ impl InfiniteCanvasEditor {
     pub(super) fn selection_handles(
         &self,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &Access,
     ) -> (DirectEditorResize, bool) {
         let selected = entities
             .iter()
@@ -800,7 +779,7 @@ impl InfiniteCanvasEditor {
     pub(super) fn selection_resize(
         &self,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &Access,
     ) -> DirectEditorResize {
         let selected = entities
             .iter()
@@ -833,7 +812,7 @@ impl InfiniteCanvasEditor {
     pub(super) fn selection_forces_proportional(
         &self,
         entities: &[CanvasEntity],
-        editors: &EditorAccess<'_>,
+        editors: &Access,
     ) -> bool {
         entities
             .iter()
@@ -847,11 +826,7 @@ impl InfiniteCanvasEditor {
             })
     }
 
-    pub(super) fn autosize_direct_editors(
-        &mut self,
-        entities: &[CanvasEntity],
-        editors: &mut EditorAccess<'_>,
-    ) {
+    pub(super) fn autosize_direct_editors(&mut self, entities: &[CanvasEntity], editors: &Access) {
         let mut before = Vec::new();
         let mut after = Vec::new();
         for entity in entities {
