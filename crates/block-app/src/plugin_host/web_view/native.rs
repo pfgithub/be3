@@ -1,11 +1,12 @@
 use std::sync::mpsc::Sender;
 
+use block_plugin_api::WebViewEvent;
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
     NewWindowResponse, PageLoadEvent, Rect as WebViewRect, WebViewBuilder,
 };
 
-use super::{Bounds, BrowserEvent};
+use super::Bounds;
 
 const HISTORY_SCRIPT: &str = r#"
 (() => {
@@ -37,7 +38,7 @@ impl WebView {
     pub(super) fn new(
         frame: &eframe::Frame,
         url: &str,
-        events: &Sender<BrowserEvent>,
+        events: &Sender<WebViewEvent>,
     ) -> Result<Self, String> {
         let navigation_events = events.clone();
         let page_events = events.clone();
@@ -54,12 +55,12 @@ impl WebView {
             })
             .with_initialization_script(HISTORY_SCRIPT)
             .with_navigation_handler(move |url| {
-                let _ = navigation_events.send(BrowserEvent::Navigate(url));
+                let _ = navigation_events.send(WebViewEvent::Navigate(url));
                 true
             })
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, PageLoadEvent::Finished) {
-                    let _ = page_events.send(BrowserEvent::Finished(url));
+                    let _ = page_events.send(WebViewEvent::Finished(url));
                 }
             })
             .with_ipc_handler(move |request| {
@@ -68,10 +69,10 @@ impl WebView {
                 }
             })
             .with_document_title_changed_handler(move |title| {
-                let _ = title_events.send(BrowserEvent::Title(title));
+                let _ = title_events.send(WebViewEvent::Title(title));
             })
             .with_new_window_req_handler(move |url, _features| {
-                let _ = new_window_events.send(BrowserEvent::NewWindow(url));
+                let _ = new_window_events.send(WebViewEvent::NewWindow(url));
                 NewWindowResponse::Deny
             })
             .build_as_child(frame)
@@ -115,12 +116,12 @@ impl WebView {
     }
 }
 
-fn ipc_event(message: &str) -> Option<BrowserEvent> {
+fn ipc_event(message: &str) -> Option<WebViewEvent> {
     let (kind, value) = message.split_once(':')?;
     match kind {
-        "push" => Some(BrowserEvent::Push(value.into())),
-        "replace" => Some(BrowserEvent::Replace(value.into())),
-        "history" => value.parse().ok().map(BrowserEvent::History),
+        "push" => Some(WebViewEvent::Push(value.into())),
+        "replace" => Some(WebViewEvent::Replace(value.into())),
+        "history" => value.parse().ok().map(WebViewEvent::History),
         _ => None,
     }
 }

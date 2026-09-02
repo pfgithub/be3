@@ -93,6 +93,10 @@ impl<A: App> EditorTest<'_, A> {
         self.harness.key_press(key);
     }
 
+    pub fn key_press_modifiers(&self, modifiers: egui::Modifiers, key: egui::Key) {
+        self.harness.key_press_modifiers(modifiers, key);
+    }
+
     pub fn app(&mut self) -> &mut A {
         self.harness.state_mut()
     }

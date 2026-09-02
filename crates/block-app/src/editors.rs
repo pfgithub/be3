@@ -1,4 +1,3 @@
-mod browser_tab;
 mod clipboard;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
@@ -1446,7 +1445,6 @@ impl EditorRegistry {
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
         registry.register_creatable::<text::TextEditor>();
-        registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         for manifest in plugin::discovery::manifests() {
             registry.register_plugin(manifest);
         }

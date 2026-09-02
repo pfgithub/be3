@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 40;
+pub const PROTOCOL_VERSION: u16 = 41;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -555,6 +555,19 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         grabbed: bool,
     },
+    WebView {
+        instance: EditorInstanceId,
+        region: EditorRegion,
+        rect: Option<ChildRect>,
+    },
+    WebViewCommand {
+        instance: EditorInstanceId,
+        command: WebViewCommand,
+    },
+    WebViewEvent {
+        instance: EditorInstanceId,
+        event: WebViewEvent,
+    },
     ReadAsset {
         instance: EditorInstanceId,
         request_id: u64,
@@ -727,6 +740,28 @@ pub enum FetchResult {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AssetResult {
     Body(Vec<u8>),
+    Failed(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WebViewCommand {
+    Open(String),
+    Load(String),
+    Reload,
+    FocusApp,
+    Close,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WebViewEvent {
+    Navigate(String),
+    Finished(String),
+    Push(String),
+    Replace(String),
+    Title(String),
+    History(i32),
+    NewWindow(String),
+    Address(String),
     Failed(String),
 }
 
@@ -1157,6 +1192,21 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
         EditorMessage::Fetched { result, .. } => match result {
             FetchResult::Failed(message) => string(message),
             FetchResult::Body(_) => Ok(()),
+        },
+        EditorMessage::WebViewCommand { command, .. } => match command {
+            WebViewCommand::Open(url) | WebViewCommand::Load(url) => string(url),
+            WebViewCommand::Reload | WebViewCommand::FocusApp | WebViewCommand::Close => Ok(()),
+        },
+        EditorMessage::WebViewEvent { event, .. } => match event {
+            WebViewEvent::Navigate(value)
+            | WebViewEvent::Finished(value)
+            | WebViewEvent::Push(value)
+            | WebViewEvent::Replace(value)
+            | WebViewEvent::Title(value)
+            | WebViewEvent::NewWindow(value)
+            | WebViewEvent::Address(value)
+            | WebViewEvent::Failed(value) => string(value),
+            WebViewEvent::History(_) => Ok(()),
         },
         EditorMessage::ReadAsset { name, .. } => string(name),
         EditorMessage::AssetRead { result, .. } => match result {

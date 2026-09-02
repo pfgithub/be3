@@ -184,7 +184,7 @@ impl Runtime {
         self.pump();
     }
 
-    fn begin_frame(&mut self, pass: u64) {
+    fn begin_frame(&mut self, frame: &eframe::Frame, pass: u64) {
         if self.error.is_some() || self.pass + 1 < pass {
             return;
         }
@@ -192,6 +192,10 @@ impl Runtime {
             true => self.instances.frame_input(&self.context, self.pass),
             false => Vec::new(),
         };
+        messages.extend(
+            self.instances
+                .drive_web_views(frame, &self.context, self.pass),
+        );
         self.needed |= !messages.is_empty();
         if self.frame_due() {
             self.requested_at = Some(self.now());
@@ -756,14 +760,14 @@ impl PreviewPresentation {
     }
 }
 
-pub(crate) fn poll(context: &egui::Context) {
+pub(crate) fn poll(context: &egui::Context, frame: &eframe::Frame) {
     let pass = context.cumulative_pass_nr();
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         for runtime in host.runtimes.values_mut() {
             runtime.detect_error();
             runtime.pump();
-            runtime.begin_frame(pass);
+            runtime.begin_frame(frame, pass);
         }
         let grabbed = host
             .runtimes

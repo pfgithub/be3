@@ -21,6 +21,7 @@ mod runtime;
 mod wasm;
 #[cfg(target_arch = "wasm32")]
 mod web;
+mod web_view;
 
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,

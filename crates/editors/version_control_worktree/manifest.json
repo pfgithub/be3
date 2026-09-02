@@ -8,7 +8,8 @@
   "creation": "None",
   "children": {
     "add": true,
-    "delete": true
+    "delete": true,
+    "replace": false
   },
   "regions": [
     "Frame"

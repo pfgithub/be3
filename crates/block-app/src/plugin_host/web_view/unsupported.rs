@@ -1,6 +1,8 @@
 use std::sync::mpsc::Sender;
 
-use super::{Bounds, BrowserEvent};
+use block_plugin_api::WebViewEvent;
+
+use super::Bounds;
 
 pub(super) enum WebView {}
 
@@ -8,7 +10,7 @@ impl WebView {
     pub(super) fn new(
         _frame: &eframe::Frame,
         _url: &str,
-        _events: &Sender<BrowserEvent>,
+        _events: &Sender<WebViewEvent>,
     ) -> Result<Self, String> {
         Err("The embedded browser is not supported on this platform.".to_owned())
     }

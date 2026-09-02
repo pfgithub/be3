@@ -21,6 +21,7 @@ members = [
     "crates/logicgame",
     "crates/cvl2",
     "crates/editors/audio_block",
+    "crates/editors/browser_tab",
     "crates/editors/calendar",
     "crates/editors/checklist",
     "crates/editors/compiled_logic",

@@ -140,6 +140,7 @@ impl ClientSession {
                     | block_plugin_api::EditorMessage::BlockPicked { instance, .. }
                     | block_plugin_api::EditorMessage::Fetched { instance, .. }
                     | block_plugin_api::EditorMessage::AssetRead { instance, .. }
+                    | block_plugin_api::EditorMessage::WebViewEvent { instance, .. }
                     | block_plugin_api::EditorMessage::AudioStatus { instance, .. }
                     | block_plugin_api::EditorMessage::ImagePasted { instance, .. }
                     | block_plugin_api::EditorMessage::ArtifactSettings { instance, .. }

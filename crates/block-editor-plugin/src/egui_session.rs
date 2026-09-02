@@ -4,7 +4,7 @@ use block_plugin_api::{
     ChildRect, ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId,
     EditorMessage, EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec,
     InputEvent, Message, Occluder, PointerButton, RegionSize, ScreenPlacement, ScreenRequest,
-    ViewportMetrics, WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
+    ViewportMetrics, WebViewEvent, WheelUnit, MAX_CHILDREN, MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -447,6 +447,19 @@ impl EguiSession {
                 name,
             }));
         }
+        for (region, rect) in self.host.take_web_view_placements() {
+            messages.push(Message::Editor(EditorMessage::WebView {
+                instance,
+                region,
+                rect,
+            }));
+        }
+        for command in self.host.take_web_view_commands() {
+            messages.push(Message::Editor(EditorMessage::WebViewCommand {
+                instance,
+                command,
+            }));
+        }
         if let Some(grabbed) = self.host.take_cursor_grab() {
             messages.push(Message::Editor(EditorMessage::GrabCursor {
                 instance,
@@ -548,6 +561,10 @@ impl EguiSession {
 
     pub(crate) fn asset_read(&self, request_id: u64, result: AssetResult) {
         self.host.set_asset(request_id, result);
+    }
+
+    pub(crate) fn web_view_event(&self, event: WebViewEvent) {
+        self.host.push_web_view_event(event);
     }
 
     pub(crate) fn set_child_statuses(&self, statuses: Vec<ChildStatus>) {

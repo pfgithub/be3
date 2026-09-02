@@ -24,6 +24,7 @@ use super::{
 use crate::{
     performance,
     platform::{assets::Asset, http::Fetch, FileFilter, FilePicker},
+    plugin_host::web_view::WebViewHost,
 };
 
 const FETCH_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -73,6 +74,8 @@ struct Instance {
     presenting: bool,
     reported_presenting: bool,
     grabbed: bool,
+    web_view: Option<WebViewHost>,
+    web_view_rect: Option<(EditorRegion, block_plugin_api::ChildRect)>,
     leaving: bool,
 }
 
@@ -112,6 +115,8 @@ impl Instance {
             presenting: false,
             reported_presenting: false,
             grabbed: false,
+            web_view: None,
+            web_view_rect: None,
             leaving: false,
         }
     }
@@ -995,6 +1000,44 @@ impl Instances {
             .as_ref()
     }
 
+    pub(super) fn drive_web_views(
+        &mut self,
+        frame: &eframe::Frame,
+        context: &egui::Context,
+        pass: u64,
+    ) -> Vec<Message> {
+        let mut messages = Vec::new();
+        for (instance, entry) in &mut self.entries {
+            if entry.web_view.is_none() {
+                continue;
+            }
+            let rect = entry.web_view_rect.and_then(|(region, rect)| {
+                let screen = entry.screens.get(&region)?;
+                let placement = screen.placement?;
+                let live = placement.pass == pass && screen.last_seen == pass;
+                let origin = placement.rect.min.to_vec2();
+                let stretch = egui::vec2(
+                    ratio(placement.rect.width(), screen.request.metrics.logical_width),
+                    ratio(
+                        placement.rect.height(),
+                        screen.request.metrics.logical_height,
+                    ),
+                );
+                live.then(|| host_rect(rect, origin, stretch).intersect(placement.clip))
+            });
+            let mut events = Vec::new();
+            let view = entry.web_view.as_mut().expect("the web view is present");
+            view.drive(frame, context, rect, &mut events);
+            for event in events {
+                messages.push(Message::Editor(EditorMessage::WebViewEvent {
+                    instance: *instance,
+                    event,
+                }));
+            }
+        }
+        messages
+    }
+
     pub(super) fn grabbing(&self) -> bool {
         self.entries.values().any(|entry| entry.grabbed)
     }
@@ -1290,6 +1333,24 @@ impl Instances {
                     false => Fetch::refused(format!("{REFUSED} {url}")),
                 };
                 entry.fetches.push(PendingFetch { request_id, fetch });
+                true
+            }
+            EditorMessage::WebView {
+                instance,
+                region,
+                rect,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.web_view_rect = rect.map(|rect| (region, rect));
+                true
+            }
+            EditorMessage::WebViewCommand { instance, command } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.web_view.get_or_insert_default().command(command);
                 true
             }
             EditorMessage::GrabCursor { instance, grabbed } => {

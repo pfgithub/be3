@@ -1153,6 +1153,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "browser_tab"
+version = "0.1.0"
+dependencies = [
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "uuid",
+]
+
+[[package]]
 name = "bstr"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

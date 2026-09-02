@@ -135,6 +135,19 @@ outstanding together. The host refuses a URL that is not https, or whose host
 name is not one the plugin's manifest names, and reports the refusal as an
 ordinary failure rather than as a protocol error.
 
+An editor instance may ask the host for a web view, which is a window of the
+operating system's own laid over the app rather than anything a plugin could
+draw: it opens one at a URL, says each frame where inside its own screen it
+goes and whether it is shown at all, and asks it to navigate, reload or hand
+the keyboard back to the app. The host maps that rectangle through the
+placement it last drew the instance's screen at, hides the view while the
+instance is not being drawn, and closes it with the instance. It reports back
+what the page does - a navigation started or finished, a history entry pushed
+or replaced, a title, a history traversal the page asked for, a window it
+wanted to open, the address the view is now at - and why anything it was asked
+for could not be done. A platform with no embedded browser answers the first
+request with that failure and nothing else.
+
 An editor instance may ask the host to hold the pointer still and hide it, so
 an editor that looks around a scene reads motion rather than a position. Only
 the host can do that: the window is its own. The request says whether the

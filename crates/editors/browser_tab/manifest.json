@@ -1,0 +1,21 @@
+{
+  "id": "be3.browser-tab",
+  "name": "Web Browser Tab",
+  "version": "0.1.0",
+  "block_type": "7765622d-6272-6f77-7365-722d74616201",
+  "display_name": "Web Browser Tab",
+  "icon": "\ue894",
+  "creation": "Immediate",
+  "capabilities": {
+    "rotation": false,
+    "preserve_aspect_ratio": true,
+    "pan_and_zoom": false
+  },
+  "regions": [
+    "Frame"
+  ],
+  "chrome": [
+    "Toolbar"
+  ],
+  "entry_point": "browser_tab.wasm"
+}

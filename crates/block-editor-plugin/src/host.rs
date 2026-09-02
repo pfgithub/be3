@@ -12,12 +12,14 @@ use std::{
 use block_plugin_api::{
     AssetResult, AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode,
     ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorRegion, FetchResult,
-    FilePick, Occluder, PerformanceMeasurement, ViewChange,
+    FilePick, Occluder, PerformanceMeasurement, ViewChange, WebViewCommand, WebViewEvent,
 };
 pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_ui::BlockCatalog;
 use eframe::egui;
 use uuid::Uuid;
+
+pub type WebViewPlacement = (EditorRegion, Option<ChildRect>);
 
 #[derive(Clone, Copy)]
 pub struct BlockDrag {
@@ -296,6 +298,9 @@ pub struct EditorHost {
     fetches: Rc<RefCell<Vec<(u64, String)>>>,
     fetched: Rc<RefCell<HashMap<u64, FetchResult>>>,
     next_fetch: Rc<Cell<u64>>,
+    web_view_placements: Rc<RefCell<Vec<WebViewPlacement>>>,
+    web_view_commands: Rc<RefCell<Vec<WebViewCommand>>>,
+    web_view_events: Rc<RefCell<Vec<WebViewEvent>>>,
     cursor_grabbed: Rc<Cell<bool>>,
     cursor_grab_changed: Rc<Cell<bool>>,
     asset_reads: Rc<RefCell<Vec<(u64, String)>>>,
@@ -473,6 +478,53 @@ impl EditorHost {
 
     pub fn set_fetched(&self, request: u64, result: FetchResult) {
         self.fetched.borrow_mut().insert(request, result);
+    }
+
+    pub fn place_web_view(&self, rect: Option<egui::Rect>) {
+        let state = self.region.get();
+        let region = state.region.unwrap_or(EditorRegion::Frame);
+        let rect = rect.map(|rect| child_rect(rect.translate(-state.origin)));
+        self.web_view_placements.borrow_mut().push((region, rect));
+    }
+
+    pub fn open_web_view(&self, url: impl Into<String>) {
+        self.command_web_view(WebViewCommand::Open(url.into()));
+    }
+
+    pub fn load_web_view(&self, url: impl Into<String>) {
+        self.command_web_view(WebViewCommand::Load(url.into()));
+    }
+
+    pub fn reload_web_view(&self) {
+        self.command_web_view(WebViewCommand::Reload);
+    }
+
+    pub fn close_web_view(&self) {
+        self.command_web_view(WebViewCommand::Close);
+    }
+
+    pub fn focus_app(&self) {
+        self.command_web_view(WebViewCommand::FocusApp);
+    }
+
+    fn command_web_view(&self, command: WebViewCommand) {
+        self.web_view_commands.borrow_mut().push(command);
+    }
+
+    pub fn take_web_view_events(&self) -> Vec<WebViewEvent> {
+        std::mem::take(&mut self.web_view_events.borrow_mut())
+    }
+
+    pub fn take_web_view_placements(&self) -> Vec<WebViewPlacement> {
+        std::mem::take(&mut self.web_view_placements.borrow_mut())
+    }
+
+    pub fn take_web_view_commands(&self) -> Vec<WebViewCommand> {
+        std::mem::take(&mut self.web_view_commands.borrow_mut())
+    }
+
+    pub fn push_web_view_event(&self, event: WebViewEvent) {
+        self.web_view_events.borrow_mut().push(event);
     }
 
     pub fn grab_cursor(&self, grabbed: bool) {

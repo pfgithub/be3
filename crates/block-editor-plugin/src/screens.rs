@@ -314,6 +314,11 @@ impl Screens {
                     session.asset_read(*request_id, result.clone());
                 }
             }
+            Message::Editor(EditorMessage::WebViewEvent { instance, event }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.web_view_event(event.clone());
+                }
+            }
             Message::ChildStatuses(statuses) => {
                 let mut grouped: HashMap<EditorInstanceId, Vec<ChildStatus>> = HashMap::new();
                 for status in statuses {
