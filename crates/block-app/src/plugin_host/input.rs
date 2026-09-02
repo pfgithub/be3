@@ -153,6 +153,12 @@ impl InputAdapter {
                     y: position.y,
                 });
             }
+            egui::Event::MouseMoved(delta) if focused => {
+                output.push(InputEvent::PointerMotion {
+                    x: delta.x,
+                    y: delta.y,
+                });
+            }
             egui::Event::PointerButton {
                 pos,
                 button,

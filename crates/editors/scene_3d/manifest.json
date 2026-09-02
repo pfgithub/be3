@@ -1,0 +1,13 @@
+{
+  "id": "be3.scene-3d",
+  "name": "3D scene",
+  "version": "0.1.0",
+  "block_type": "33642d73-6365-6e65-2d62-6c6f636b3031",
+  "display_name": "3D scene",
+  "icon": "\uefc9",
+  "creation": "Immediate",
+  "regions": [
+    "Frame"
+  ],
+  "entry_point": "scene_3d.wasm"
+}

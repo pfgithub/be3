@@ -7,7 +7,7 @@ const NEAR: f32 = 0.05;
 const FAR: f32 = 200.0;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Camera {
+pub(crate) struct Camera {
     position: [f32; 3],
     yaw: f32,
     pitch: f32,
@@ -24,12 +24,12 @@ impl Default for Camera {
 }
 
 impl Camera {
-    pub(super) fn look(&mut self, delta: [f32; 2]) {
+    pub(crate) fn look(&mut self, delta: [f32; 2]) {
         self.yaw += delta[0] * LOOK_RADIANS_PER_PIXEL;
         self.pitch = (self.pitch - delta[1] * LOOK_RADIANS_PER_PIXEL).clamp(-MAX_PITCH, MAX_PITCH);
     }
 
-    pub(super) fn walk(&mut self, strafe: f32, forward: f32, dt: f32) {
+    pub(crate) fn walk(&mut self, strafe: f32, forward: f32, dt: f32) {
         let length = (strafe * strafe + forward * forward).sqrt();
         if length < f32::EPSILON {
             return;
@@ -41,7 +41,7 @@ impl Camera {
         self.position[2] += (-cos_yaw * forward + sin_yaw * strafe) * distance;
     }
 
-    pub(super) fn view_projection(&self, aspect: f32) -> [[f32; 4]; 4] {
+    pub(crate) fn view_projection(&self, aspect: f32) -> [[f32; 4]; 4] {
         let forward = [
             self.pitch.cos() * self.yaw.sin(),
             self.pitch.sin(),

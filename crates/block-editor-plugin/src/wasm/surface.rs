@@ -91,4 +91,4 @@ fn configure(layout: &ScreenLayout) {
     block_gpu_guest::configure_surface(SCREENS_SURFACE, layout.width, layout.height, FORMAT);
 }
 
-const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub(crate) const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;

@@ -35,6 +35,7 @@ thread_local! {
 struct Host {
     availability: Availability,
     runtimes: HashMap<String, Runtime>,
+    grabbed: bool,
 }
 
 impl Host {
@@ -42,6 +43,7 @@ impl Host {
         Self {
             availability: Availability::missing(),
             runtimes: HashMap::new(),
+            grabbed: false,
         }
     }
 
@@ -757,10 +759,24 @@ impl PreviewPresentation {
 pub(crate) fn poll(context: &egui::Context) {
     let pass = context.cumulative_pass_nr();
     HOST.with(|host| {
-        for runtime in host.borrow_mut().runtimes.values_mut() {
+        let mut host = host.borrow_mut();
+        for runtime in host.runtimes.values_mut() {
             runtime.detect_error();
             runtime.pump();
             runtime.begin_frame(pass);
+        }
+        let grabbed = host
+            .runtimes
+            .values()
+            .any(|runtime| runtime.instances.grabbing());
+        if host.grabbed != grabbed {
+            host.grabbed = grabbed;
+            let grab = match grabbed {
+                true => egui::CursorGrab::Locked,
+                false => egui::CursorGrab::None,
+            };
+            context.send_viewport_cmd(egui::ViewportCommand::CursorGrab(grab));
+            context.send_viewport_cmd(egui::ViewportCommand::CursorVisible(!grabbed));
         }
     });
 }

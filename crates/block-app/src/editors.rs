@@ -3,7 +3,6 @@ mod clipboard;
 pub(crate) mod infinite_canvas;
 mod logic_grid;
 pub(crate) mod plugin;
-mod scene_3d;
 mod text;
 mod unsupported;
 
@@ -45,7 +44,6 @@ pub(super) fn embedded_editor_frame_size(intrinsic: egui::Vec2, scale: f32) -> e
 
 pub fn install_render_resources(creation_context: &eframe::CreationContext<'_>) {
     logic_grid::renderer::install(creation_context);
-    scene_3d::renderer::install(creation_context);
 }
 
 pub enum EditorAction {
@@ -1447,7 +1445,6 @@ impl EditorRegistry {
         };
         registry.register_creatable::<infinite_canvas::InfiniteCanvasEditor>();
         registry.register_creatable::<logic_grid::LogicGridEditor>();
-        registry.register_creatable::<scene_3d::Scene3DEditor>();
         registry.register_creatable::<text::TextEditor>();
         registry.register_creatable::<browser_tab::WebBrowserTabEditor>();
         for manifest in plugin::discovery::manifests() {

@@ -72,6 +72,7 @@ struct Instance {
     view_changes: Vec<ViewChange>,
     presenting: bool,
     reported_presenting: bool,
+    grabbed: bool,
     leaving: bool,
 }
 
@@ -110,6 +111,7 @@ impl Instance {
             view_changes: Vec::new(),
             presenting: false,
             reported_presenting: false,
+            grabbed: false,
             leaving: false,
         }
     }
@@ -993,6 +995,10 @@ impl Instances {
             .as_ref()
     }
 
+    pub(super) fn grabbing(&self) -> bool {
+        self.entries.values().any(|entry| entry.grabbed)
+    }
+
     pub(super) fn cursor(
         &self,
         instance: EditorInstanceId,
@@ -1284,6 +1290,13 @@ impl Instances {
                     false => Fetch::refused(format!("{REFUSED} {url}")),
                 };
                 entry.fetches.push(PendingFetch { request_id, fetch });
+                true
+            }
+            EditorMessage::GrabCursor { instance, grabbed } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.grabbed = grabbed;
                 true
             }
             EditorMessage::ReadAsset {

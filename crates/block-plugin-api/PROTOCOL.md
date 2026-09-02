@@ -135,6 +135,14 @@ outstanding together. The host refuses a URL that is not https, or whose host
 name is not one the plugin's manifest names, and reports the refusal as an
 ordinary failure rather than as a protocol error.
 
+An editor instance may ask the host to hold the pointer still and hide it, so
+an editor that looks around a scene reads motion rather than a position. Only
+the host can do that: the window is its own. The request says whether the
+instance wants the cursor held, the host holds it while any instance does and
+lets it go as soon as none does, and an instance that closes lets go with it.
+While it is held the host reports raw pointer motion to the focused instance
+alongside the events it already sends, since there is no position to report.
+
 An editor instance may ask the host to read one of the app's own files for it,
 which is how a plugin reaches what was installed beside the app rather than
 built into it: the games the deterministic game editor runs are wasm modules

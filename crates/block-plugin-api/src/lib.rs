@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 39;
+pub const PROTOCOL_VERSION: u16 = 40;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -551,6 +551,10 @@ pub enum EditorMessage {
         request_id: u64,
         result: FetchResult,
     },
+    GrabCursor {
+        instance: EditorInstanceId,
+        grabbed: bool,
+    },
     ReadAsset {
         instance: EditorInstanceId,
         request_id: u64,
@@ -866,6 +870,10 @@ pub struct InputBatch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum InputEvent {
     PointerMoved {
+        x: f32,
+        y: f32,
+    },
+    PointerMotion {
         x: f32,
         y: f32,
     },

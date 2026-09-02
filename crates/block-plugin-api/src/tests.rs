@@ -70,6 +70,7 @@ mod file_drop_messages_round_trip;
 mod file_pick_messages_round_trip;
 mod frame_round_trips;
 mod frame_screens_and_reports_round_trip;
+mod grabbing_the_cursor_round_trips;
 mod manifest_validation;
 mod multiplexed_messages_round_trip;
 mod open_block_request_round_trips;

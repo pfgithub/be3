@@ -1,5 +1,7 @@
+use block_editor_plugin::egui_wgpu::{self, wgpu};
 use bytemuck::{Pod, Zeroable};
-use eframe::egui_wgpu::{self, wgpu};
+
+use crate::scene::SceneFrame;
 
 const SKY_COLOR: wgpu::Color = wgpu::Color {
     r: 0.53,
@@ -35,28 +37,8 @@ struct SceneUniform {
     view_projection: [[f32; 4]; 4],
 }
 
-pub(super) struct SceneFrame {
-    pub(super) viewport_size_px: [u32; 2],
-    pub(super) view_projection: [[f32; 4]; 4],
-}
-
-pub(in crate::editors) fn install(creation_context: &eframe::CreationContext<'_>) {
-    let Some(render_state) = creation_context.wgpu_render_state.as_ref() else {
-        return;
-    };
-    render_state
-        .renderer
-        .write()
-        .callback_resources
-        .insert(Scene3DRenderer::new(
-            &render_state.device,
-            &render_state.queue,
-            render_state.target_format,
-        ));
-}
-
-pub(super) struct Scene3DCallback {
-    pub(super) frame: SceneFrame,
+pub(crate) struct Scene3DCallback {
+    pub(crate) frame: SceneFrame,
 }
 
 impl egui_wgpu::CallbackTrait for Scene3DCallback {
@@ -68,15 +50,18 @@ impl egui_wgpu::CallbackTrait for Scene3DCallback {
         egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        if let Some(renderer) = callback_resources.get_mut::<Scene3DRenderer>() {
-            renderer.render_scene(device, queue, egui_encoder, &self.frame);
-        }
+        let renderer = callback_resources
+            .entry::<Scene3DRenderer>()
+            .or_insert_with(|| {
+                Scene3DRenderer::new(device, queue, block_editor_plugin::surface_format())
+            });
+        renderer.render_scene(device, queue, egui_encoder, &self.frame);
         Vec::new()
     }
 
     fn paint(
         &self,
-        _info: eframe::egui::PaintCallbackInfo,
+        _info: block_editor_plugin::egui::PaintCallbackInfo,
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {

@@ -447,6 +447,12 @@ impl EguiSession {
                 name,
             }));
         }
+        if let Some(grabbed) = self.host.take_cursor_grab() {
+            messages.push(Message::Editor(EditorMessage::GrabCursor {
+                instance,
+                grabbed,
+            }));
+        }
         for placements in self.children() {
             messages.push(Message::Children(placements));
         }
@@ -783,6 +789,10 @@ impl EguiSession {
                 .input
                 .events
                 .push(egui::Event::PointerMoved(egui::pos2(*x, *y) + origin)),
+            InputEvent::PointerMotion { x, y } => state
+                .input
+                .events
+                .push(egui::Event::MouseMoved(egui::vec2(*x, *y))),
             InputEvent::PointerButton {
                 button,
                 pressed,

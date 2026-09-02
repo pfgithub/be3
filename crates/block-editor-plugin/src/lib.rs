@@ -1,4 +1,6 @@
 pub use eframe::egui;
+#[cfg(target_arch = "wasm32")]
+pub use eframe::egui_wgpu;
 pub use egui_material_icons;
 
 use std::sync::Arc;
@@ -28,6 +30,11 @@ pub use host::{
     FileFilter, FilePicker, ImagePaster, PastedImage, PerformanceMeasurementGuard,
     PerformanceReporter, PickedFile, Task, Waker,
 };
+
+#[cfg(target_arch = "wasm32")]
+pub fn surface_format() -> egui_wgpu::wgpu::TextureFormat {
+    wasm::surface_format()
+}
 
 pub trait App: Default + 'static {
     fn connect(

@@ -39,6 +39,7 @@ members = [
     "crates/editors/pixel_art",
     "crates/editors/pixel_ray_tracer",
     "crates/editors/presentation",
+    "crates/editors/scene_3d",
     "crates/editors/settings",
     "crates/editors/ui_settings",
     "crates/editors/version_control_data",

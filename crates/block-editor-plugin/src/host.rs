@@ -296,6 +296,8 @@ pub struct EditorHost {
     fetches: Rc<RefCell<Vec<(u64, String)>>>,
     fetched: Rc<RefCell<HashMap<u64, FetchResult>>>,
     next_fetch: Rc<Cell<u64>>,
+    cursor_grabbed: Rc<Cell<bool>>,
+    cursor_grab_changed: Rc<Cell<bool>>,
     asset_reads: Rc<RefCell<Vec<(u64, String)>>>,
     assets: Rc<RefCell<HashMap<u64, AssetResult>>>,
     next_asset: Rc<Cell<u64>>,
@@ -471,6 +473,22 @@ impl EditorHost {
 
     pub fn set_fetched(&self, request: u64, result: FetchResult) {
         self.fetched.borrow_mut().insert(request, result);
+    }
+
+    pub fn grab_cursor(&self, grabbed: bool) {
+        if self.cursor_grabbed.replace(grabbed) != grabbed {
+            self.cursor_grab_changed.set(true);
+        }
+    }
+
+    pub fn cursor_grabbed(&self) -> bool {
+        self.cursor_grabbed.get()
+    }
+
+    pub fn take_cursor_grab(&self) -> Option<bool> {
+        self.cursor_grab_changed
+            .replace(false)
+            .then(|| self.cursor_grabbed.get())
     }
 
     pub fn read_asset(&self, name: impl Into<String>) -> u64 {

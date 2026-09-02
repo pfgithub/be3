@@ -1,0 +1,25 @@
+[package]
+name = "scene_3d"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+block-client = { path = "../../block-client" }
+block-editor-plugin = { path = "../../block-editor-plugin" }
+uuid = "1"
+
+# The scene is drawn by a paint callback, which only exists in the guest: a
+# native build of this crate is the editor without its renderer, which is what
+# its own tests drive.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+block-ui-test = { path = "../../block-ui-test" }
+
+[lints]
+workspace = true
