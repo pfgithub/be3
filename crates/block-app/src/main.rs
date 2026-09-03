@@ -3507,6 +3507,10 @@ impl eframe::App for BlockApp {
                 Some(panic_guard::take().unwrap_or_else(|| "The app stopped responding.".into()));
         }
     }
+
+    fn on_exit(&mut self) {
+        block_client::shut_down_clients();
+    }
 }
 
 impl BlockApp {
@@ -3668,6 +3672,7 @@ impl BlockApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn restart(&mut self) {
+        block_client::shut_down_clients();
         match Self::new(Some(self.data_dir.clone())) {
             Ok(fresh) => *self = fresh,
             Err(error) => self.error = Some(error.to_string()),
@@ -3676,6 +3681,7 @@ impl BlockApp {
 
     #[cfg(target_arch = "wasm32")]
     fn restart(&mut self) {
+        block_client::shut_down_clients();
         match Self::new() {
             Ok(fresh) => *self = fresh,
             Err(error) => self.error = Some(error.to_string()),
@@ -3705,6 +3711,7 @@ impl BlockApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn delete_server_database(&mut self) {
+        block_client::shut_down_clients();
         self.embedded_server = None;
         let path = self.data_dir.join("server");
         if let Err(error) = std::fs::remove_dir_all(&path) {

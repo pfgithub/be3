@@ -21,7 +21,7 @@ use block::{
 use block_ref::{BlockRef, WorktreeMembership};
 use futures_channel::mpsc;
 use futures_util::{FutureExt, StreamExt};
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{MappedRwLockReadGuard, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use presence::PresenceKind;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
@@ -53,24 +53,48 @@ type PostedPresence = HashMap<(Uuid, Uuid), Vec<u8>>;
 use transport::{Link, Socket, SocketMessage, TunnelSocket};
 
 #[derive(Clone)]
-struct CommandSender(mpsc::UnboundedSender<WorkerCommand>);
+struct CommandSender {
+    commands: mpsc::UnboundedSender<WorkerCommand>,
+    shutdown: Shutdown,
+}
 
 impl CommandSender {
     fn send(&self, command: WorkerCommand) -> Result<(), mpsc::TrySendError<WorkerCommand>> {
-        self.0.unbounded_send(command)
+        if self.shutdown.requested() {
+            return Ok(());
+        }
+        self.commands.unbounded_send(command)
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Shutdown(Arc<AtomicBool>);
 
+static LIVE_SHUTDOWNS: Mutex<Vec<Weak<AtomicBool>>> = Mutex::new(Vec::new());
+
 impl Shutdown {
+    fn new() -> Self {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut live = LIVE_SHUTDOWNS.lock();
+        live.retain(|entry| entry.strong_count() > 0);
+        live.push(Arc::downgrade(&flag));
+        Self(flag)
+    }
+
     fn request(&self) {
         self.0.store(true, Ordering::SeqCst);
     }
 
     fn requested(&self) -> bool {
         self.0.load(Ordering::SeqCst)
+    }
+}
+
+pub fn shut_down_clients() {
+    for entry in LIVE_SHUTDOWNS.lock().iter() {
+        if let Some(flag) = entry.upgrade() {
+            flag.store(true, Ordering::SeqCst);
+        }
     }
 }
 
@@ -692,10 +716,13 @@ impl ClientDebugSnapshot {
 impl BlockClient {
     pub fn new(account_id: Uuid, workspace_id: Uuid) -> Self {
         let (commands, command_rx) = mpsc::unbounded();
-        let commands = CommandSender(commands);
         let id = Uuid::new_v4();
         let connected = Arc::new(OnceLock::new());
-        let shutdown = Shutdown::default();
+        let shutdown = Shutdown::new();
+        let commands = CommandSender {
+            commands,
+            shutdown: shutdown.clone(),
+        };
         let access = Arc::new(RwLock::new(()));
         let debug = Arc::new(RwLock::new(NetworkDebugSnapshot {
             changes_saved: true,
@@ -752,11 +779,14 @@ impl BlockClient {
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let (commands, command_rx) = mpsc::unbounded();
-        let commands = CommandSender(commands);
         let id = Uuid::new_v4();
         let connected = Arc::new(OnceLock::new());
         let _ = connected.set(());
-        let shutdown = Shutdown::default();
+        let shutdown = Shutdown::new();
+        let commands = CommandSender {
+            commands,
+            shutdown: shutdown.clone(),
+        };
         let access = Arc::new(RwLock::new(()));
         let debug = Arc::new(RwLock::new(NetworkDebugSnapshot {
             changes_saved: true,
