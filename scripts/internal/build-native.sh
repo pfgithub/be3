@@ -98,6 +98,12 @@ if [[ ${#selection[@]} -eq 0 ]]; then
     echo '--no-client and --no-server together leave nothing to build' >&2
     exit 1
 fi
+# The terminal emulator the debug terminal window is built on is Zig, and is
+# compiled and cached for the target before cargo links it in.
+if $client; then
+    "$internal/build-ghostty-vt.sh" --triple "$target_triple" > /dev/null
+fi
+
 echo 'Building the app and the server...'
 cargo build "${cargo_arguments[@]}" "${selection[@]}"
 

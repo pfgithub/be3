@@ -8,6 +8,7 @@
 // already initialised by the thread that got there first.
 
 import * as wasi from "./wasi.js";
+import * as environment from "./env.js";
 import * as threads from "./threads.js";
 
 function stub(module, name) {
@@ -29,6 +30,8 @@ function imports(module, memory) {
             group[wanted.name] = wasi[wanted.name];
         } else if (wanted.module === "wasi") {
             group[wanted.name] = threads[wanted.name];
+        } else if (wanted.module === "env") {
+            group[wanted.name] = environment[wanted.name];
         } else {
             group[wanted.name] = stub(wanted.module, wanted.name);
         }
@@ -39,6 +42,7 @@ function imports(module, memory) {
 self.onmessage = (event) => {
     const { module, memory, id, startArgument } = event.data;
     wasi.bindMemory(memory);
+    environment.bindMemory(memory);
     threads.bindThreads(module, memory);
     const instance = new WebAssembly.Instance(module, imports(module, memory));
     try {

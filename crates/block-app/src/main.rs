@@ -3547,12 +3547,6 @@ impl BlockApp {
         self.share.show(ui.ctx(), &self.client);
         self.show_client_debug(ui.ctx());
         self.show_network_debug(ui.ctx());
-        #[cfg(not(any(
-            target_os = "android",
-            target_os = "windows",
-            target_os = "macos",
-            target_arch = "wasm32"
-        )))]
         debug::terminal::show(ui.ctx());
         debug::inspect::show(ui.ctx());
         debug::plugins::show(ui.ctx());

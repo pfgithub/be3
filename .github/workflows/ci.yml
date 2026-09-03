@@ -46,7 +46,9 @@ jobs:
         with:
           tool: cargo-nextest
 
-      # libghostty-vt-sys builds libghostty-vt from source via Zig.
+      # The app links libghostty-vt, the terminal emulator behind the debug
+      # terminal window, which scripts/internal/build-ghostty-vt.sh compiles from
+      # source with Zig.
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
@@ -96,6 +98,13 @@ jobs:
         with:
           path: target/tools
           key: wasi-sysroot-33
+
+      # The app links libghostty-vt, the terminal emulator behind the debug
+      # terminal window, which scripts/internal/build-ghostty-vt.sh compiles from
+      # source with Zig.
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
 
       - run: ./scripts/build --target web --release
 
@@ -176,6 +185,13 @@ jobs:
         with:
           path: target/tools
           key: wasi-sysroot-33
+
+      # The app links libghostty-vt, the terminal emulator behind the debug
+      # terminal window, which scripts/internal/build-ghostty-vt.sh compiles from
+      # source with Zig.
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -330,11 +346,11 @@ jobs:
         with:
           key: ${{ matrix.target }}-llvm-${{ steps.llvm.outputs.version }}
 
-      # libghostty-vt-sys builds libghostty-vt from source via Zig. The client
-      # excludes it on Windows because it is not supported there, and on macOS
-      # because the build is currently broken.
+      # The app links libghostty-vt, the terminal emulator behind the debug
+      # terminal window, which scripts/internal/build-ghostty-vt.sh compiles from
+      # source with Zig.
       - name: Install Zig
-        if: matrix.client && runner.os == 'Linux'
+        if: matrix.client
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2

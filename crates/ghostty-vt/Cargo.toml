@@ -1,0 +1,16 @@
+[package]
+name = "ghostty-vt"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+# The archive the bindings link against is built by
+# scripts/internal/build-ghostty-vt.sh, which build.rs runs for the target
+# being compiled.
+links = "ghostty-vt"
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json = "1"

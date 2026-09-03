@@ -72,6 +72,10 @@ export_wasi_toolchain "$wasi_sysroot"
 # they are separate cargo calls; a single call would unify the two and leave the
 # guest carrying a backend it cannot use.
 load_plugins
+# The terminal emulator the debug terminal window is built on, as a freestanding
+# WebAssembly archive the app's own module links in.
+"$internal/build-ghostty-vt.sh" --triple "$rust_target" > /dev/null
+
 echo "Building the app for $rust_target..."
 cargo build --lib --target "$rust_target" "${cargo_arguments[@]}" -p block-app
 
@@ -141,6 +145,7 @@ write_plugin_index "$output_directory"
 cp "$internal/web/index.html" "$output_directory"
 cp "$internal/web/plugin.js" "$output_directory"
 cp "$internal/web/wasi.js" "$output_directory"
+cp "$internal/web/env.js" "$output_directory"
 cp "$internal/web/threads.js" "$output_directory"
 cp "$internal/web/thread.js" "$output_directory"
 

@@ -89,6 +89,10 @@ cd "$repository"
 # A plugin is a wasm asset the app runs in wasmtime, so the only native library
 # an APK carries is the app itself.
 android_libraries=(libblock_app_lib.so)
+# The terminal emulator the debug terminal window is built on is Zig, and picks
+# the NDK up from the environment exported above.
+"$internal/build-ghostty-vt.sh" --triple aarch64-linux-android > /dev/null
+
 echo 'Building the app for aarch64-linux-android...'
 cargo build --lib --target aarch64-linux-android -p block-app
 

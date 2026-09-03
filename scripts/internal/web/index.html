@@ -49,13 +49,15 @@
             The module is built for wasm32-wasip1-threads, so wasm-bindgen emits
             its WASI calls as imports from these bare specifiers: the ordinary
             ones from "wasi_snapshot_preview1", and thread-spawn from "wasi".
-            The import map is what points them at the shims.
+            "env" is libghostty-vt's logging call, which freestanding Zig has
+            no stderr for. The import map is what points them at the shims.
         -->
         <script type="importmap">
             {
                 "imports": {
                     "wasi_snapshot_preview1": "./wasi.js",
-                    "wasi": "./threads.js"
+                    "wasi": "./threads.js",
+                    "env": "./env.js"
                 }
             }
         </script>
@@ -66,6 +68,7 @@
 
         <script type="module">
             import { bindMemory } from "./wasi.js";
+            import { bindMemory as bindEnvironmentMemory } from "./env.js";
             import { bindThreads } from "./threads.js";
             import init, { run_web } from "./block_app_lib.js";
 
@@ -100,6 +103,7 @@
                 // The glue runs the module's start function before returning,
                 // so this is the earliest the shims can be given memory.
                 bindMemory(wasm.memory);
+                bindEnvironmentMemory(wasm.memory);
                 bindThreads(module, wasm.memory);
 
                 status.hidden = true;
