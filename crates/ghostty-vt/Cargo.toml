@@ -4,8 +4,8 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 # The archive the bindings link against is built by
-# scripts/internal/build-ghostty-vt.sh, which build.rs runs for the target
-# being compiled.
+# scripts/internal/build-ghostty-vt.sh, which the build and verify scripts run
+# for the target being compiled; build.rs only links what is already there.
 links = "ghostty-vt"
 build = "build.rs"
 

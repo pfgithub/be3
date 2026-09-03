@@ -10,6 +10,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 ghostty_repository='https://github.com/ghostty-org/ghostty.git'
 ghostty_commit='a887df42c56f6de86c0fe6da9c4eeca37931e083'
 
+# What Ghostty's build.zig.zon asks for as a minimum, and what CI installs with
+# mlugg/setup-zig. A local build with no zig on PATH downloads this one into
+# target/tools rather than failing; a zig that is already there is used as is.
+zig_version='0.15.2'
+
 triple=''
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -28,6 +33,54 @@ if [[ -z "$triple" ]]; then
     echo 'Usage: build-ghostty-vt.sh --triple TRIPLE' >&2
     exit 1
 fi
+
+# Leaves the zig to build with in $zig: whatever is on PATH if there is one,
+# and otherwise the pinned release, downloaded once into target/tools. Only the
+# platforms Zig ships a tarball for are fetched; anywhere else, saying what to
+# install is all this can do.
+zig='zig'
+ensure_zig() {
+    if command -v zig > /dev/null; then
+        return
+    fi
+
+    local platform
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64) platform='x86_64-linux' ;;
+        Linux-aarch64 | Linux-arm64) platform='aarch64-linux' ;;
+        Darwin-x86_64) platform='x86_64-macos' ;;
+        Darwin-arm64) platform='aarch64-macos' ;;
+        *)
+            assert_command zig "Install Zig $zig_version from https://ziglang.org/download."
+            return
+            ;;
+    esac
+
+    local name="zig-$platform-$zig_version"
+    local tools="$repository/target/tools"
+    local directory="$tools/$name"
+    zig="$directory/zig"
+    if [[ -x "$zig" ]]; then
+        return
+    fi
+
+    assert_command curl 'Install curl, or install Zig yourself from https://ziglang.org/download.'
+    assert_command tar 'Install tar, or install Zig yourself from https://ziglang.org/download.'
+    local url="https://ziglang.org/download/$zig_version/$name.tar.xz"
+    local archive="$tools/$name.tar.xz"
+    echo "Downloading Zig $zig_version from $url..." >&2
+    mkdir -p "$tools"
+    # The extraction is into a directory named after the release, so an
+    # interrupted one leaves nothing that a later run would take for complete.
+    rm -rf "$directory" "$archive"
+    curl --fail --location --output "$archive" "$url"
+    tar -xJf "$archive" -C "$tools"
+    rm "$archive"
+    if [[ ! -x "$zig" ]]; then
+        echo "The Zig tarball did not contain $zig" >&2
+        exit 1
+    fi
+}
 
 # libghostty-vt is Zig, and Zig is a cross compiler for every target the app is
 # built for, so the same toolchain produces the archive for all of them.
@@ -88,7 +141,7 @@ if [[ -f "$archive" && -f "$stamp" && "$(cat "$stamp")" == "$stamp_contents" ]];
 fi
 
 assert_command git 'Install git.'
-assert_command zig 'Install Zig 0.15.2 or newer from https://ziglang.org/download.'
+ensure_zig
 
 # The checkout is deliberately outside the target directory: it is well over a
 # hundred megabytes and survives a cargo clean, and only ever holds the one
@@ -129,7 +182,7 @@ fi
 echo "Building libghostty-vt for $triple ($zig_target)..." >&2
 (
     cd "$source_directory"
-    zig "${zig_arguments[@]}" \
+    "$zig" "${zig_arguments[@]}" \
         --prefix "$install_prefix" \
         --cache-dir "$repository/target/ghostty-vt/zig-cache"
 )

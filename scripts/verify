@@ -27,6 +27,16 @@ cd "$repository"
 
 failed=false
 
+# block-app links libghostty-vt, the terminal emulator behind the debug
+# terminal window. It is Zig rather than Rust, so nothing cargo does builds it,
+# and clippy and the tests cannot link the app without it.
+echo 'libghostty-vt...'
+host_triple="$(rustc --version --verbose | sed -n 's/^host: //p')"
+if ! "$repository/scripts/internal/build-ghostty-vt.sh" --triple "$host_triple" > /dev/null; then
+    echo 'Verification failed.'
+    exit 1
+fi
+
 t() {
     if which time >/dev/null 2>&1; then
         if ! TIME="Took %E" time "$@"; then
