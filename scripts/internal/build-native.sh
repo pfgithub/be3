@@ -124,6 +124,7 @@ done
 
 if $client; then
     build_plugin_wasm "$profile" "$artifact_directory"
+    precompile_plugin_wasm "$artifact_directory" "$target_triple"
     stage_plugin_manifests "$artifact_directory"
     build_games "$profile"
     stage_games "$artifact_directory/games"

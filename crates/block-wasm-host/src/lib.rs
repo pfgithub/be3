@@ -18,6 +18,8 @@ use threads::Spawner;
 
 pub use state::State;
 
+pub const PRECOMPILED_EXTENSION: &str = "cwasm";
+
 #[derive(Clone)]
 pub struct Host {
     engine: Engine,
@@ -39,14 +41,31 @@ impl Host {
     }
 
     pub fn load(&self, path: &Path) -> Result<Plugin, String> {
+        if let Some(module) = precompiled_beside(&self.engine, path) {
+            return Plugin::new(self, module);
+        }
         let bytes = std::fs::read(path)
             .map_err(|error| format!("{} could not be read: {error}", path.display()))?;
         self.load_bytes(&bytes)
     }
 
     pub fn load_bytes(&self, bytes: &[u8]) -> Result<Plugin, String> {
-        Plugin::new(self, bytes)
+        Plugin::new(self, module(&self.engine, bytes)?)
     }
+}
+
+pub fn precompile(bytes: &[u8], target: Option<&str>) -> Result<Vec<u8>, String> {
+    let mut configuration = configuration();
+    if let Some(target) = target {
+        configuration
+            .target(target)
+            .map_err(|error| format!("{target} is not a target wasmtime compiles for: {error}"))?;
+    }
+    let engine = Engine::new(&configuration)
+        .map_err(|error| format!("the wasm engine could not start: {error}"))?;
+    engine
+        .precompile_module(bytes)
+        .map_err(|error| format!("the plugin module could not be compiled: {error}"))
 }
 
 pub struct Plugin {
@@ -58,7 +77,7 @@ pub struct Plugin {
 }
 
 impl Plugin {
-    fn new(host: &Host, bytes: &[u8]) -> Result<Self, String> {
+    fn new(host: &Host, module: Module) -> Result<Self, String> {
         let Host {
             engine,
             device,
@@ -67,8 +86,6 @@ impl Plugin {
         let engine = engine.clone();
         let device = device.clone();
         let queue = queue.clone();
-        let module = Module::new(&engine, bytes)
-            .map_err(|error| format!("the plugin module could not be compiled: {error}"))?;
         let memory = shared_memory(&engine, &module)?;
         let wasi = WasiCtxBuilder::new().inherit_stderr().build_p1();
         let state = State {
@@ -192,16 +209,47 @@ fn global(instance: &Instance, store: &mut Store<State>, name: &str) -> Result<u
         .ok_or_else(|| format!("the plugin does not export {name}"))
 }
 
+fn module(engine: &Engine, bytes: &[u8]) -> Result<Module, String> {
+    if Engine::detect_precompiled(bytes).is_some() {
+        return unsafe { Module::deserialize(engine, bytes) }
+            .map_err(|error| format!("the compiled plugin module could not be loaded: {error}"));
+    }
+    Module::new(engine, bytes)
+        .map_err(|error| format!("the plugin module could not be compiled: {error}"))
+}
+
+fn precompiled_beside(engine: &Engine, path: &Path) -> Option<Module> {
+    let artifact = path.with_extension(PRECOMPILED_EXTENSION);
+    if !artifact.is_file() {
+        return None;
+    }
+    match unsafe { Module::deserialize_file(engine, &artifact) } {
+        Ok(module) => Some(module),
+        Err(error) => {
+            eprintln!(
+                "{} could not be used, compiling the plugin instead: {error}",
+                artifact.display()
+            );
+            None
+        }
+    }
+}
+
 fn engine(cache: Option<&Path>) -> Result<Engine, String> {
+    let mut config = configuration();
+    if let Some(directory) = cache {
+        config.cache(Some(compilation_cache(directory)?));
+    }
+    Engine::new(&config).map_err(|error| format!("the wasm engine could not start: {error}"))
+}
+
+fn configuration() -> Config {
     let mut config = Config::new();
     config.wasm_threads(true);
     config.shared_memory(true);
     config.wasm_bulk_memory(true);
     config.wasm_exceptions(true);
-    if let Some(directory) = cache {
-        config.cache(Some(compilation_cache(directory)?));
-    }
-    Engine::new(&config).map_err(|error| format!("the wasm engine could not start: {error}"))
+    config
 }
 
 fn compilation_cache(directory: &Path) -> Result<Cache, String> {

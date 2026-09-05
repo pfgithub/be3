@@ -103,6 +103,7 @@ load_plugins
 rm -rf "$assets"
 stage_plugin_manifests "$assets"
 build_plugin_wasm debug "$assets"
+precompile_plugin_wasm "$assets" aarch64-linux-android
 write_plugin_index "$assets"
 
 build_games debug

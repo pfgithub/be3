@@ -4,6 +4,9 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
+[features]
+all-arch = ["wasmtime/all-arch"]
+
 [dependencies]
 block-gpu-abi = { path = "../block-gpu-abi" }
 block-gpu-host = { path = "../block-gpu-host" }

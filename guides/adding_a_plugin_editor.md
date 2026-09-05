@@ -103,7 +103,7 @@ A plugin is one wasm for every platform, so a dependency it cannot have there is
 
 6. Build scripts
 
-Nothing to edit: ./scripts/build scans crates/editors/*/manifest.json for every target and copies each manifest beside what cargo produced as <plugin id>.plugin.json. Plugins are built by a cargo call of their own, for wasm32-wasip1-threads with the plugin profile, because the app links wgpu with real backends while a guest links it with only the custom one and one call would unify the two. ./scripts/build --target TRIPLE --release --output DIRECTORY packages the app, the server and every plugin for a cross target, which is the one place the artifacts are copied.
+Nothing to edit: ./scripts/build scans crates/editors/*/manifest.json for every target and copies each manifest beside what cargo produced as <plugin id>.plugin.json. Plugins are built by a cargo call of their own, for wasm32-wasip1-threads with the plugin profile, because the app links wgpu with real backends while a guest links it with only the custom one and one call would unify the two. ./scripts/build --target TRIPLE --release --output DIRECTORY packages the app, the server and every plugin for a cross target, which is the one place the artifacts are copied. Every build but the web one then compiles each module for the target it built and leaves the machine code beside it as foo.cwasm, so opening the editor maps it in rather than waiting seconds for Cranelift; the app reads foo.wasm and compiles it itself whenever the artifact is missing or was made by a different wasmtime, so a plain cargo build still runs. Nothing about a plugin changes for it: the manifest still names foo.wasm.
 
 7. Verification
 

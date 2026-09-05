@@ -40,7 +40,7 @@ pub(crate) fn load(app: &AndroidApp) {
         .map(|manifest| manifest.entry_point.clone())
         .collect();
     for entry in wanted {
-        match read(&entry) {
+        match read(&compiled(&entry)).or_else(|_| read(&entry)) {
             Ok(bytes) => {
                 plugins.modules.insert(entry, Arc::new(bytes));
             }
@@ -48,4 +48,11 @@ pub(crate) fn load(app: &AndroidApp) {
         }
     }
     super::install(plugins);
+}
+
+fn compiled(entry: &str) -> String {
+    match entry.rsplit_once('.') {
+        Some((stem, _)) => format!("{stem}.{}", block_wasm_host::PRECOMPILED_EXTENSION),
+        None => entry.to_owned(),
+    }
 }

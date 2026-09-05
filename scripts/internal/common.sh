@@ -275,6 +275,52 @@ build_plugin_wasm() {
             echo "cargo did not produce $module" >&2
             exit 1
         fi
-        cp "$module" "$destination/$plugin.wasm"
+        cp -p "$module" "$destination/$plugin.wasm"
     done
+}
+
+# Cranelift compiles a plugin the first time the app opens it, which is seconds
+# of work for a module this size and happens again on every machine the build
+# lands on. Compiling it here instead leaves a .cwasm beside the .wasm that
+# wasmtime maps straight in. The app still reads the .wasm whenever an artifact
+# is missing or was made by a different wasmtime, so a plain cargo build stays
+# usable; a stale artifact is one the app would fall back from, so the work is
+# redone whenever the module or the compiler that produced it is newer.
+precompiler=''
+
+build_precompiler() {
+    if [[ -n "$precompiler" ]]; then
+        return
+    fi
+    echo 'Building the plugin compiler...'
+    (cd "$repository" && cargo build --release -p block-wasm-host --features all-arch --example precompile)
+    local built="$repository/target/release/examples/precompile"
+    if [[ -f "$built.exe" ]]; then
+        built+='.exe'
+    fi
+    if [[ ! -f "$built" ]]; then
+        echo "cargo did not produce $built" >&2
+        exit 1
+    fi
+    precompiler="$built"
+}
+
+precompile_plugin_wasm() {
+    local directory="$1" triple="$2"
+    build_precompiler
+    local plugin module artifact stale=()
+    for plugin in "${plugins[@]}"; do
+        module="$directory/$plugin.wasm"
+        artifact="$directory/$plugin.cwasm"
+        if [[ -f "$artifact" && "$artifact" -nt "$module" && "$artifact" -nt "$precompiler" ]]; then
+            continue
+        fi
+        stale+=("$module")
+    done
+    if [[ ${#stale[@]} -eq 0 ]]; then
+        echo "Every plugin is already compiled for $triple"
+        return
+    fi
+    echo "Compiling ${#stale[@]} plugins for $triple..."
+    "$precompiler" --target "$triple" "${stale[@]}"
 }
