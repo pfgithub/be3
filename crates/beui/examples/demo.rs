@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -25,40 +26,72 @@ const HEADER_HEIGHT: f32 = 64.0;
 const HEADER_PADDING: f32 = 20.0;
 const BODY_PADDING: f32 = 20.0;
 const ICON_BUTTON_WIDTH: f32 = 44.0;
-const ROW_COUNT: usize = 200;
+const ROW_COUNT: usize = 10_000;
+const ROW_HEIGHT: f32 = 32.0;
+
+struct Rows {
+    status: NodeId,
+    selected: Cell<Option<usize>>,
+    visuals: RefCell<HashMap<usize, Weak<RowVisual>>>,
+}
+
+impl Rows {
+    fn new(status: NodeId) -> Self {
+        Self {
+            status,
+            selected: Cell::new(None),
+            visuals: RefCell::new(HashMap::new()),
+        }
+    }
+
+    fn register(&self, visual: &Rc<RowVisual>) {
+        let mut visuals = self.visuals.borrow_mut();
+        visuals.retain(|_, visual| visual.strong_count() > 0);
+        visuals.insert(visual.index, Rc::downgrade(visual));
+    }
+
+    fn visual(&self, index: usize) -> Option<Rc<RowVisual>> {
+        self.visuals.borrow().get(&index)?.upgrade()
+    }
+
+    fn select(&self, document: &mut Document, index: usize) {
+        let previous = self.selected.replace(Some(index));
+        if let Some(visual) = previous.and_then(|previous| self.visual(previous)) {
+            visual.apply(document);
+        }
+        if let Some(visual) = self.visual(index) {
+            visual.apply(document);
+        }
+        document.set_text(self.status, format!("Row {index} selected"));
+    }
+}
 
 struct RowVisual {
+    index: usize,
     fill: NodeId,
     value: NodeId,
     hovered: Cell<bool>,
-    selected: Cell<bool>,
+    rows: Rc<Rows>,
 }
 
 impl RowVisual {
+    fn selected(&self) -> bool {
+        self.rows.selected.get() == Some(self.index)
+    }
+
     fn apply(&self, document: &mut Document) {
-        let fill = match (self.selected.get(), self.hovered.get()) {
+        let fill = match (self.selected(), self.hovered.get()) {
             (true, _) => ACCENT_SOFT,
             (false, true) => SURFACE_RAISED,
             (false, false) => Color32::TRANSPARENT,
         };
         document.set_fill_color(self.fill, fill);
-        let value = if self.selected.get() {
-            ACCENT
-        } else {
-            TEXT_MUTED
-        };
+        let value = if self.selected() { ACCENT } else { TEXT_MUTED };
         document.set_text_color(self.value, value);
     }
 }
 
-type Selection = Rc<RefCell<Option<Rc<RowVisual>>>>;
-
-fn scroll_row(
-    document: &mut Document,
-    index: usize,
-    selection: &Selection,
-    status: NodeId,
-) -> NodeId {
+fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>) -> NodeId {
     let label = styled::body(document, format!("Row {index}"));
     let value = styled::caption(document, format!("{} ms", 7 + index * 3 % 91));
     document.set_text_align(value, TextAlign::End, TextAlign::Center);
@@ -77,11 +110,14 @@ fn scroll_row(
     document.set_click_catcher_child(catcher, fill);
 
     let visual = Rc::new(RowVisual {
+        index,
         fill,
         value,
         hovered: Cell::new(false),
-        selected: Cell::new(false),
+        rows: rows.clone(),
     });
+    rows.register(&visual);
+    visual.apply(document);
 
     let hovered = visual.clone();
     document.set_click_catcher_on_hover_change(catcher, move |document, is_hovered| {
@@ -90,17 +126,8 @@ fn scroll_row(
     });
 
     let clicked = visual;
-    let selection = selection.clone();
     document.set_click_catcher_on_click(catcher, move |document| {
-        let previous = selection.borrow_mut().take();
-        if let Some(previous) = previous {
-            previous.selected.set(false);
-            previous.apply(document);
-        }
-        clicked.selected.set(true);
-        clicked.apply(document);
-        *selection.borrow_mut() = Some(clicked.clone());
-        document.set_text(status, format!("Row {index} selected"));
+        clicked.rows.select(document, clicked.index);
     });
 
     catcher
@@ -233,7 +260,7 @@ fn build_main(document: &mut Document, counter_value: NodeId) -> NodeId {
     document.append_child(counter_column, counter_hint, ItemSize::Intrinsic);
     let counter_card = styled::card(document, counter_column);
 
-    let list_title = styled::heading(document, "Rows");
+    let list_title = styled::heading(document, format!("Rows ({ROW_COUNT})"));
     let status = styled::caption(document, "Nothing selected");
     document.set_text_align(status, TextAlign::End, TextAlign::Center);
     let list_header = unstyled::centered_row(document, 12.0);
@@ -243,11 +270,10 @@ fn build_main(document: &mut Document, counter_value: NodeId) -> NodeId {
     let list_line = styled::separator(document);
 
     let scroll = document.create_scroll();
-    let selection: Selection = Rc::new(RefCell::new(None));
-    for index in 0..ROW_COUNT {
-        let row = scroll_row(document, index, &selection, status);
-        document.append_scroll_item(scroll, row);
-    }
+    let rows = Rc::new(Rows::new(status));
+    document.set_scroll_virtual_items(scroll, ROW_COUNT, ROW_HEIGHT, move |document, index| {
+        scroll_row(document, index, &rows)
+    });
     let bar = styled::scrollbar(document, scroll);
 
     let area = unstyled::row(document, 10.0);
