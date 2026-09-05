@@ -56,6 +56,7 @@ struct Instance {
     created: Option<Result<Uuid, String>>,
     screens: HashMap<EditorRegion, Screen>,
     opened: bool,
+    deferred: Vec<Message>,
     opens: Vec<(Uuid, Uuid)>,
     drag_accepted: bool,
     intrinsic: Option<egui::Vec2>,
@@ -111,6 +112,7 @@ impl Instance {
             created: None,
             screens: HashMap::new(),
             opened: false,
+            deferred: Vec::new(),
             opens: Vec::new(),
             drag_accepted: false,
             intrinsic: None,
@@ -219,8 +221,48 @@ impl Instances {
         self.entries.is_empty()
     }
 
+    pub(super) fn gate(&mut self, messages: Vec<Message>) -> Vec<Message> {
+        let mut allowed = Vec::with_capacity(messages.len());
+        for message in messages {
+            match &message {
+                Message::Editor(editor) => {
+                    let instance = editor.instance();
+                    match self.entries.get_mut(&instance) {
+                        Some(entry) if entry.opened => allowed.push(message),
+                        Some(entry) => entry.deferred.push(message),
+                        None if matches!(editor, EditorMessage::Close { .. }) => {
+                            allowed.push(message)
+                        }
+                        None => {}
+                    }
+                }
+                Message::ChildStatuses(statuses) => {
+                    let opened: Vec<_> = statuses
+                        .iter()
+                        .filter(|status| self.is_opened(status.instance))
+                        .cloned()
+                        .collect();
+                    if !opened.is_empty() {
+                        allowed.push(Message::ChildStatuses(opened));
+                    }
+                }
+                Message::Input(batch) if !self.announced.contains(&batch.screen) => {}
+                _ => allowed.push(message),
+            }
+        }
+        allowed
+    }
+
+    fn is_opened(&self, instance: EditorInstanceId) -> bool {
+        self.entries
+            .get(&instance)
+            .is_some_and(|entry| entry.opened)
+    }
+
     pub(super) fn remove(&mut self, instance: EditorInstanceId) -> bool {
-        self.entries.remove(&instance).is_some()
+        self.entries
+            .remove(&instance)
+            .is_some_and(|entry| entry.opened)
     }
 
     fn connect(&mut self, context: &egui::Context, client: &Arc<BlockClient>, client_id: Uuid) {
@@ -436,6 +478,7 @@ impl Instances {
         self.announced.clear();
         for entry in self.entries.values_mut() {
             entry.opened = false;
+            entry.deferred.clear();
             entry.reported_view = None;
             entry.reported_presenting = false;
             entry.fetches.clear();
@@ -510,6 +553,7 @@ impl Instances {
                     }),
                 });
             }
+            opened.append(&mut entry.deferred);
             if entry.presenting != entry.reported_presenting {
                 entry.reported_presenting = entry.presenting;
                 opened.push(Message::Editor(EditorMessage::PresentingChanged {

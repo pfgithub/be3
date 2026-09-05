@@ -16,7 +16,6 @@ pub(super) struct Web {
     adapter: Option<WebProtocolAdapter>,
     started: f64,
     error: Option<String>,
-    pending: Vec<Message>,
 }
 
 impl Backend for Web {
@@ -33,7 +32,6 @@ impl Backend for Web {
             adapter: None,
             started: now(),
             error: None,
-            pending: Vec::new(),
         }
     }
 
@@ -41,13 +39,11 @@ impl Backend for Web {
         self.shutdown();
         self.started = now();
         self.error = None;
-        self.pending.clear();
-        let dark_theme = context.global_style().visuals.dark_mode;
         let Some(canvas) = create_canvas(&self.canvas_id) else {
             self.error = Some("The plugin canvas could not be created.".to_owned());
             return;
         };
-        match WebProtocolAdapter::start(&self.url, &canvas, dark_theme, context) {
+        match WebProtocolAdapter::start(&self.url, &canvas, context) {
             Ok(adapter) => self.adapter = Some(adapter),
             Err(error) => {
                 self.error = Some(error);
@@ -60,10 +56,6 @@ impl Backend for Web {
         let Some(adapter) = &mut self.adapter else {
             return;
         };
-        if !adapter.running() {
-            self.pending.extend(messages);
-            return;
-        }
         if let Err(error) = adapter.send(messages) {
             self.error = Some(error);
         }
@@ -77,14 +69,7 @@ impl Backend for Web {
             self.error = Some(error);
             return Vec::new();
         }
-        if adapter.running() && !self.pending.is_empty() {
-            let pending = std::mem::take(&mut self.pending);
-            self.send(pending);
-        }
-        match &mut self.adapter {
-            Some(adapter) => adapter.take_received(),
-            None => Vec::new(),
-        }
+        adapter.take_received()
     }
 
     fn frame(&mut self, layout: &ScreenLayout, _pass: u64) -> Option<Self::Frame> {

@@ -6,8 +6,9 @@ use std::{
 };
 
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, EditorInstanceId, EditorMessage, EditorRegion, Message,
-    PluginManifest, PresenceEntry, ScreenId, ScreenLayout, ScreenRequest, ViewChange,
+    ArtifactDescription, BlockPick, Capability, EditorInstanceId, EditorMessage, EditorRegion,
+    HostSession, Message, PluginManifest, PresenceEntry, ScreenId, ScreenLayout, ScreenRequest,
+    SessionState, ViewChange, MAX_QUEUED_MESSAGES,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -25,6 +26,7 @@ use super::{
 };
 
 const CROWDED: &str = "Too many plugin runtimes are already presenting.";
+const HOST_NAME: &str = "BE3";
 const UNIT: egui::Rect = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
 const FRAME_TIMEOUT_SECONDS: f64 = 1.0;
 
@@ -89,7 +91,7 @@ impl Host {
 
     fn shutdown(&mut self, context: &egui::Context, plugin_id: &str) -> Option<u32> {
         let mut runtime = self.runtimes.remove(plugin_id)?;
-        runtime.backend.shutdown();
+        runtime.stop();
         context
             .debug_painter()
             .add(eframe::egui_wgpu::Callback::new_paint_callback(
@@ -103,6 +105,8 @@ impl Host {
 pub(super) struct Runtime {
     pub(super) context: egui::Context,
     pub(super) backend: Platform,
+    session: HostSession,
+    queued: Vec<Message>,
     pub(super) instances: Instances,
     pub(super) layout: ScreenLayout,
     pub(super) pass: u64,
@@ -124,9 +128,13 @@ impl Runtime {
         backend.start(plugin, context);
         let mut instances = Instances::default();
         instances.allow_network(plugin.network.clone());
+        let mut session = session(context);
+        session.start(milliseconds(context));
         Self {
             context: context.clone(),
             backend,
+            session,
+            queued: Vec::new(),
             instances,
             layout: ScreenLayout::default(),
             pass: 0,
@@ -143,7 +151,17 @@ impl Runtime {
         }
     }
 
+    fn stop(&mut self) {
+        self.session.shutdown(self.milliseconds());
+        self.drain();
+        self.backend.shutdown();
+    }
+
     fn restart(&mut self, plugin: &PluginManifest) {
+        self.stop();
+        self.session = session(&self.context);
+        self.session.start(self.milliseconds());
+        self.queued.clear();
         self.error = None;
         self.status = PresenterStatus::waiting();
         self.layout = ScreenLayout::default();
@@ -216,6 +234,10 @@ impl Runtime {
         self.context.input(|input| input.time)
     }
 
+    fn milliseconds(&self) -> u64 {
+        milliseconds(&self.context)
+    }
+
     fn detect_error(&mut self) {
         if self.error.is_some() {
             return;
@@ -230,8 +252,25 @@ impl Runtime {
         if self.error.is_some() {
             return;
         }
+        let now = self.milliseconds();
         let received = self.backend.receive();
-        self.apply(received);
+        let mut forwarded = Vec::with_capacity(received.len());
+        for message in received {
+            match message.is_session() {
+                true => self.session.receive(message, now),
+                false => forwarded.push(message),
+            }
+        }
+        self.deliver();
+        self.session.tick(now);
+        match self.session.state() {
+            SessionState::Idle | SessionState::Starting | SessionState::Running => {}
+            state => {
+                self.error = Some(format!("The plugin session stopped: {state:?}"));
+                return;
+            }
+        }
+        self.apply(forwarded);
         let responses = self.instances.client_responses();
         self.send(responses);
     }
@@ -288,10 +327,43 @@ impl Runtime {
     }
 
     fn send(&mut self, messages: Vec<Message>) {
-        if messages.is_empty() {
+        if messages.is_empty() || self.error.is_some() {
             return;
         }
-        self.backend.send(messages);
+        self.queued.extend(self.instances.gate(messages));
+        self.deliver();
+    }
+
+    fn deliver(&mut self) {
+        if self.session.state() != &SessionState::Running {
+            self.drain();
+            return;
+        }
+        let now = self.milliseconds();
+        let mut failure = None;
+        for message in std::mem::take(&mut self.queued) {
+            if self.session.queued_message_count() == MAX_QUEUED_MESSAGES {
+                self.drain();
+            }
+            if let Err(error) = self.session.send(message, now) {
+                failure = Some(format!("The plugin message queue failed: {error:?}"));
+                break;
+            }
+        }
+        self.drain();
+        if let Some(failure) = failure {
+            self.error.get_or_insert(failure);
+        }
+    }
+
+    fn drain(&mut self) {
+        let mut outbound = Vec::new();
+        while let Some(message) = self.session.next_outbound() {
+            outbound.push(message);
+        }
+        if !outbound.is_empty() {
+            self.backend.send(outbound);
+        }
     }
 
     fn present(
@@ -1030,6 +1102,22 @@ pub(crate) fn running() -> Vec<RuntimeStatus> {
         running.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
         running
     })
+}
+
+fn session(context: &egui::Context) -> HostSession {
+    HostSession::new(
+        HOST_NAME,
+        vec![
+            Capability::Lifecycle,
+            Capability::Input,
+            Capability::Surface,
+        ],
+        context.global_style().visuals.dark_mode,
+    )
+}
+
+fn milliseconds(context: &egui::Context) -> u64 {
+    (context.input(|input| input.time) * 1000.0).max(0.0) as u64
 }
 
 pub(super) fn with<R>(plugin_id: &str, act: impl FnOnce(&mut Runtime) -> R) -> Option<R> {

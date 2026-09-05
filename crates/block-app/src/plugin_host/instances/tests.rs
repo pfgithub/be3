@@ -48,6 +48,8 @@ fn placed() -> (Instances, egui::Context, egui::Id) {
     (instances, context, id)
 }
 
+mod a_message_waits_for_the_instance_it_names_to_be_opened;
 mod a_plugin_reaches_only_the_hosts_its_manifest_names;
+mod an_instance_the_plugin_never_opened_is_not_closed;
 mod input_is_withheld_from_screens_the_plugin_no_longer_has;
 mod the_view_a_screen_is_given_carries_the_scale_it_is_shown_at;

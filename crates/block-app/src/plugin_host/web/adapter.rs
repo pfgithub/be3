@@ -1,4 +1,4 @@
-use block_plugin_api::{encode_frame, Capability, HostSession, Message, QueueError, SessionState};
+use block_plugin_api::{encode_frame, Message};
 use eframe::egui;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
@@ -94,10 +94,10 @@ struct Inbox {
 
 pub(super) struct WebProtocolAdapter {
     worker: web_sys::Worker,
-    session: HostSession,
     inbox: Rc<RefCell<Inbox>>,
     received: Vec<Message>,
     frames: u64,
+    spoken: bool,
     _onmessage: Closure<dyn FnMut(web_sys::MessageEvent)>,
 }
 
@@ -105,7 +105,6 @@ impl WebProtocolAdapter {
     pub(super) fn start(
         url: &str,
         canvas: &web_sys::HtmlCanvasElement,
-        dark_theme: bool,
         context: &egui::Context,
     ) -> Result<Self, String> {
         let offscreen = canvas
@@ -122,22 +121,12 @@ impl WebProtocolAdapter {
         worker
             .post_message_with_transfer(&message, &transfer)
             .map_err(|_| "the plugin worker could not be started".to_owned())?;
-        let mut session = HostSession::new(
-            "BE3 web host",
-            vec![
-                Capability::Input,
-                Capability::Lifecycle,
-                Capability::Surface,
-            ],
-            dark_theme,
-        );
-        session.start(now());
         Ok(Self {
             worker,
-            session,
             inbox,
             received: Vec::new(),
             frames: 0,
+            spoken: false,
             _onmessage: onmessage,
         })
     }
@@ -147,59 +136,12 @@ impl WebProtocolAdapter {
     }
 
     pub(super) fn running(&self) -> bool {
-        self.session.state() == &SessionState::Running
+        self.spoken
     }
 
     pub(super) fn send(&mut self, messages: Vec<Message>) -> Result<(), String> {
-        for message in messages {
-            self.session.send(message, now()).map_err(queue_error)?;
-        }
-        self.flush()
-    }
-
-    pub(super) fn poll(&mut self) -> Result<(), String> {
-        let (frames, error) = {
-            let mut inbox = self.inbox.borrow_mut();
-            (std::mem::take(&mut inbox.frames), inbox.error.take())
-        };
-        if let Some(error) = error {
-            return Err(error);
-        }
-        for frame in frames {
-            let message = decode(&frame)?;
-            if message.is_session() {
-                self.session.receive(message, now());
-                continue;
-            }
-            if matches!(message, Message::FrameReady(_)) {
-                self.frames += 1;
-            }
-            self.received.push(message);
-        }
-        self.flush()?;
-        self.session.tick(now());
-        match self.session.state() {
-            SessionState::Starting | SessionState::Running => Ok(()),
-            state => Err(format!("The web plugin session stopped: {state:?}")),
-        }
-    }
-
-    pub(super) fn take_received(&mut self) -> Vec<Message> {
-        std::mem::take(&mut self.received)
-    }
-
-    pub(super) fn shutdown(&mut self) {
-        self.session.shutdown(now());
-        let _ = self.flush();
-        let message = js_sys::Object::new();
-        set(&message, "kind", &"shutdown".into());
-        let _ = self.worker.post_message(&message);
-        self.worker.terminate();
-    }
-
-    fn flush(&mut self) -> Result<(), String> {
         let frames = js_sys::Array::new();
-        while let Some(message) = self.session.next_outbound() {
+        for message in messages {
             let frame = encode_frame(&message).map_err(|error| error.to_string())?;
             frames.push(&js_sys::Uint8Array::from(frame.as_slice()).into());
         }
@@ -212,6 +154,36 @@ impl WebProtocolAdapter {
         self.worker
             .post_message(&message)
             .map_err(|_| "the plugin worker stopped listening".to_owned())
+    }
+
+    pub(super) fn poll(&mut self) -> Result<(), String> {
+        let (frames, error) = {
+            let mut inbox = self.inbox.borrow_mut();
+            (std::mem::take(&mut inbox.frames), inbox.error.take())
+        };
+        if let Some(error) = error {
+            return Err(error);
+        }
+        for frame in frames {
+            let message = decode(&frame)?;
+            self.spoken = true;
+            if matches!(message, Message::FrameReady(_)) {
+                self.frames += 1;
+            }
+            self.received.push(message);
+        }
+        Ok(())
+    }
+
+    pub(super) fn take_received(&mut self) -> Vec<Message> {
+        std::mem::take(&mut self.received)
+    }
+
+    pub(super) fn shutdown(&mut self) {
+        let message = js_sys::Object::new();
+        set(&message, "kind", &"shutdown".into());
+        let _ = self.worker.post_message(&message);
+        self.worker.terminate();
     }
 }
 
@@ -281,15 +253,4 @@ fn get(object: &JsValue, key: &str) -> JsValue {
 
 fn decode(frame: &[u8]) -> Result<Message, String> {
     block_plugin_api::decode_frame(frame).map_err(|error| error.to_string())
-}
-
-fn queue_error(error: QueueError) -> String {
-    format!("The web plugin message queue failed: {error:?}")
-}
-
-fn now() -> u64 {
-    web_sys::window()
-        .and_then(|window| window.performance())
-        .map(|performance| performance.now() as u64)
-        .unwrap_or_default()
 }

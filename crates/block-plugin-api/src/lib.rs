@@ -702,6 +702,67 @@ pub enum EditorMessage {
         message: String,
     },
 }
+
+impl EditorMessage {
+    pub fn instance(&self) -> EditorInstanceId {
+        match self {
+            Self::Open { instance, .. }
+            | Self::EditabilityChanged { instance, .. }
+            | Self::ViewChanged { instance, .. }
+            | Self::ChangeView { instance, .. }
+            | Self::Present { instance, .. }
+            | Self::PresentingChanged { instance, .. }
+            | Self::Resized { instance, .. }
+            | Self::LeaveFrame { instance, .. }
+            | Self::Close { instance, .. }
+            | Self::OpenBlock { instance, .. }
+            | Self::DragOver { instance, .. }
+            | Self::DragLeft { instance, .. }
+            | Self::FileDrop { instance, .. }
+            | Self::FileDropLeft { instance, .. }
+            | Self::DragAccepted { instance, .. }
+            | Self::PickFile { instance, .. }
+            | Self::FilePicked { instance, .. }
+            | Self::PickBlock { instance, .. }
+            | Self::BlockPicked { instance, .. }
+            | Self::PasteImage { instance, .. }
+            | Self::ImagePasted { instance, .. }
+            | Self::PlayAudio { instance, .. }
+            | Self::AudioStatus { instance, .. }
+            | Self::Fetch { instance, .. }
+            | Self::Fetched { instance, .. }
+            | Self::GrabCursor { instance, .. }
+            | Self::WebView { instance, .. }
+            | Self::WebViewCommand { instance, .. }
+            | Self::WebViewEvent { instance, .. }
+            | Self::OpenCreation { instance, .. }
+            | Self::CreationReady { instance, .. }
+            | Self::CommitCreation { instance, .. }
+            | Self::CreationBlock { instance, .. }
+            | Self::OpenArtifact { instance, .. }
+            | Self::ArtifactSettings { instance, .. }
+            | Self::ArtifactDescribed { instance, .. }
+            | Self::ArtifactEdited { instance, .. }
+            | Self::RegenerateArtifact { instance, .. }
+            | Self::ArtifactRegenerated { instance, .. }
+            | Self::Cursor { instance, .. }
+            | Self::Ime { instance, .. }
+            | Self::Presence { instance, .. }
+            | Self::PublishPresence { instance, .. }
+            | Self::RevealPresence { instance, .. }
+            | Self::ReplaceChild { instance, .. }
+            | Self::ChildReplaced { instance, .. }
+            | Self::ChildView { instance, .. }
+            | Self::CopyText { instance, .. }
+            | Self::AspectRatio { instance, .. }
+            | Self::IntrinsicSize { instance, .. }
+            | Self::Performance { instance, .. }
+            | Self::Acknowledged { instance, .. }
+            | Self::Failure { instance, .. } => *instance,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PerformanceMeasurement {
     Duration { name: String, nanoseconds: u64 },
