@@ -5,9 +5,9 @@ use crate::node::NodeId;
 
 pub fn pressable(document: &mut Document) -> NodeId {
     let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
-    let slot = document.create_slot();
+    let slot = document.create_slot("content");
     document.set_click_catcher_child(click_catcher, slot);
-    document.create_shadow(click_catcher, slot)
+    document.create_shadow("pressable", click_catcher, vec![slot])
 }
 
 pub fn set_pressable_child(document: &mut Document, pressable: NodeId, child: NodeId) {

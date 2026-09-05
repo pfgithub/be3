@@ -23,10 +23,25 @@ const MARKER_WIDTH: f32 = 8.0;
 const AUTO_EXPAND_DEPTH: usize = 3;
 const DETAIL_LIMIT: usize = 24;
 
-type Expansion = Rc<RefCell<HashMap<NodeId, bool>>>;
+type Expansion = Rc<RefCell<HashMap<Key, bool>>>;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Key {
+    Node(NodeId),
+    Internals(NodeId),
+    Placeholder(NodeId),
+}
+
+impl Key {
+    fn node(self) -> NodeId {
+        match self {
+            Key::Node(id) | Key::Internals(id) | Key::Placeholder(id) => id,
+        }
+    }
+}
 
 pub(crate) struct Entry {
-    pub(crate) id: NodeId,
+    key: Key,
     pub(crate) depth: usize,
     pub(crate) kind: &'static str,
     expandable: bool,
@@ -37,8 +52,9 @@ pub(crate) struct Entry {
 
 impl Entry {
     fn same_shape(&self, other: &Entry) -> bool {
-        self.id == other.id
+        self.key == other.key
             && self.depth == other.depth
+            && self.kind == other.kind
             && self.expandable == other.expandable
             && self.expanded == other.expanded
     }
@@ -149,32 +165,32 @@ impl Inspector {
     }
 }
 
-fn collect(target: &Document, expansion: &HashMap<NodeId, bool>) -> Vec<Entry> {
+fn collect(target: &Document, expansion: &HashMap<Key, bool>) -> Vec<Entry> {
     let mut entries = Vec::new();
     if let Some(root) = target.root() {
-        visit(target, expansion, root, 0, &mut entries);
+        visit(target, expansion, Key::Node(root), 0, &mut entries);
     }
     entries
 }
 
 fn visit(
     target: &Document,
-    expansion: &HashMap<NodeId, bool>,
-    id: NodeId,
+    expansion: &HashMap<Key, bool>,
+    key: Key,
     depth: usize,
     entries: &mut Vec<Entry>,
 ) {
-    let children = target.children(id);
+    let children = children(target, key);
     let expandable = !children.is_empty();
-    let expanded = expandable && is_expanded(expansion, id, depth);
+    let expanded = expandable && is_expanded(expansion, key, depth);
     entries.push(Entry {
-        id,
+        key,
         depth,
-        kind: target.node_kind(id),
+        kind: kind(target, key),
         expandable,
         expanded,
-        detail: detail(target, id),
-        size: size(target, id),
+        detail: detail(target, key),
+        size: size(target, key.node()),
     });
     if expanded {
         for child in children {
@@ -183,11 +199,42 @@ fn visit(
     }
 }
 
-fn is_expanded(expansion: &HashMap<NodeId, bool>, id: NodeId, depth: usize) -> bool {
+fn children(target: &Document, key: Key) -> Vec<Key> {
+    match key {
+        Key::Placeholder(_) => Vec::new(),
+        Key::Internals(shadow) => vec![child_key(target, target.shadow_root(shadow))],
+        Key::Node(id) if target.as_shadow(id).is_some() => std::iter::once(Key::Internals(id))
+            .chain(target.shadow_slots(id).into_iter().map(Key::Node))
+            .collect(),
+        Key::Node(id) => target
+            .children(id)
+            .into_iter()
+            .map(|child| child_key(target, child))
+            .collect(),
+    }
+}
+
+fn child_key(target: &Document, id: NodeId) -> Key {
+    match target.as_slot(id) {
+        Some(_) => Key::Placeholder(id),
+        None => Key::Node(id),
+    }
+}
+
+fn kind(target: &Document, key: Key) -> &'static str {
+    match key {
+        Key::Node(id) => target.node_kind(id),
+        Key::Internals(_) => "shadow",
+        Key::Placeholder(_) => "slot",
+    }
+}
+
+fn is_expanded(expansion: &HashMap<Key, bool>, key: Key, depth: usize) -> bool {
+    let internals = matches!(key, Key::Internals(_));
     expansion
-        .get(&id)
+        .get(&key)
         .copied()
-        .unwrap_or(depth < AUTO_EXPAND_DEPTH)
+        .unwrap_or(!internals && depth < AUTO_EXPAND_DEPTH)
 }
 
 fn count(target: &Document, id: NodeId) -> usize {
@@ -198,8 +245,13 @@ fn count(target: &Document, id: NodeId) -> usize {
         .sum::<usize>()
 }
 
-fn detail(target: &Document, id: NodeId) -> String {
-    let Some(detail) = target.node_detail(id) else {
+fn detail(target: &Document, key: Key) -> String {
+    let detail = match key {
+        Key::Node(id) => target.node_detail(id),
+        Key::Internals(_) => None,
+        Key::Placeholder(id) => Some(target.node_kind(id).to_owned()),
+    };
+    let Some(detail) = detail else {
         return String::new();
     };
     let detail = detail.replace(['\n', '\t'], " ");
@@ -327,10 +379,10 @@ fn row(
     if entry.expandable {
         let expansion = expansion.clone();
         let revision = revision.clone();
-        let id = entry.id;
+        let key = entry.key;
         let expanded = entry.expanded;
         unstyled::set_pressable_on_click(document, row, move |_document| {
-            expansion.borrow_mut().insert(id, !expanded);
+            expansion.borrow_mut().insert(key, !expanded);
             revision.set(revision.get() + 1);
         });
     }

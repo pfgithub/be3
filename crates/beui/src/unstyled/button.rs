@@ -7,7 +7,7 @@ pub fn button(document: &mut Document) -> NodeId {
     let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
     let focusable = document.create_focusable();
     document.set_focusable_child(focusable, click_catcher);
-    let slot = document.create_slot();
+    let slot = document.create_slot("content");
     document.set_click_catcher_child(click_catcher, slot);
     document.set_focusable_on_activate_change(focusable, move |document, pressed| {
         document.set_click_catcher_key_active(click_catcher, pressed);
@@ -15,7 +15,7 @@ pub fn button(document: &mut Document) -> NodeId {
     document.set_focusable_on_activate(focusable, move |document| {
         document.click_click_catcher(click_catcher);
     });
-    document.create_shadow(focusable, slot)
+    document.create_shadow("button", focusable, vec![slot])
 }
 
 pub fn set_button_child(document: &mut Document, button: NodeId, child: NodeId) {

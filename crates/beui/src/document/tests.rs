@@ -8,6 +8,7 @@ mod shift_tab_moves_focus_to_the_previous_button;
 mod tab_moves_focus_to_the_next_button;
 mod the_inspector_follows_nodes_added_to_the_document;
 mod the_inspector_lists_the_document_tree;
+mod the_inspector_separates_component_internals_from_slots;
 mod the_scroll_position_is_reported_to_its_listener;
 
 use std::cell::Cell;

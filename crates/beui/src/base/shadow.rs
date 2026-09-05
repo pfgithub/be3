@@ -7,8 +7,9 @@ use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
 
 pub(crate) struct ShadowNode {
+    pub(crate) name: &'static str,
     pub(crate) shadow_root: NodeId,
-    pub(crate) slot: NodeId,
+    pub(crate) slots: Vec<NodeId>,
 }
 
 impl Element for ShadowNode {
@@ -47,7 +48,7 @@ impl Element for ShadowNode {
     }
 
     fn kind(&self) -> &'static str {
-        "shadow"
+        self.name
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -60,6 +61,7 @@ impl Element for ShadowNode {
 }
 
 pub(crate) struct SlotNode {
+    pub(crate) name: &'static str,
     pub(crate) content: Option<NodeId>,
 }
 
@@ -106,7 +108,7 @@ impl Element for SlotNode {
     }
 
     fn kind(&self) -> &'static str {
-        "slot"
+        self.name
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -119,20 +121,51 @@ impl Element for SlotNode {
 }
 
 impl Document {
-    pub fn create_slot(&mut self) -> NodeId {
-        self.arena.insert(SlotNode { content: None })
+    pub fn create_slot(&mut self, name: &'static str) -> NodeId {
+        self.arena.insert(SlotNode {
+            name,
+            content: None,
+        })
     }
 
-    pub fn create_shadow(&mut self, shadow_root: NodeId, slot: NodeId) -> NodeId {
-        self.arena.insert(ShadowNode { shadow_root, slot })
+    pub fn create_shadow(
+        &mut self,
+        name: &'static str,
+        shadow_root: NodeId,
+        slots: Vec<NodeId>,
+    ) -> NodeId {
+        self.arena.insert(ShadowNode {
+            name,
+            shadow_root,
+            slots,
+        })
+    }
+
+    pub fn set_slot_child(&mut self, slot: NodeId, child: NodeId) {
+        self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);
     }
 
     pub fn set_shadow_child(&mut self, shadow: NodeId, child: NodeId) {
-        let slot = self.arena.get_as::<ShadowNode>(shadow).slot;
-        self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);
+        let slots = &self.arena.get_as::<ShadowNode>(shadow).slots;
+        let [slot] = slots[..] else {
+            panic!("shadow has more than one slot, use set_slot_child");
+        };
+        self.set_slot_child(slot, child);
     }
 
     pub fn shadow_root(&self, shadow: NodeId) -> NodeId {
         self.arena.get_as::<ShadowNode>(shadow).shadow_root
+    }
+
+    pub fn shadow_slots(&self, shadow: NodeId) -> Vec<NodeId> {
+        self.arena.get_as::<ShadowNode>(shadow).slots.clone()
+    }
+
+    pub(crate) fn as_shadow(&self, id: NodeId) -> Option<&ShadowNode> {
+        self.arena.get(id).as_any().downcast_ref::<ShadowNode>()
+    }
+
+    pub(crate) fn as_slot(&self, id: NodeId) -> Option<&SlotNode> {
+        self.arena.get(id).as_any().downcast_ref::<SlotNode>()
     }
 }
