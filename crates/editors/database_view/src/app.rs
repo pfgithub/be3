@@ -228,10 +228,10 @@ impl DatabaseViewApp {
         }
         let was_open = self.picker.is_open();
         match self.picker.poll(host) {
-            Some(Ok((block_id, _))) => {
+            Some(Ok(picked)) => {
                 if let Some(target) = self.pending_value_target {
                     self.pending_values
-                        .push(client, database.id(), block_id, target);
+                        .push(client, database.id(), picked.id, target);
                 }
             }
             Some(Err(error)) => {
@@ -325,6 +325,7 @@ pub(crate) fn value_block_filter(
             .into_iter()
             .map(Uuid::into_bytes)
             .collect(),
+        excluded: Vec::new(),
         templates: false,
     }
 }

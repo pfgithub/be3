@@ -27,9 +27,9 @@ pub use block_plugin_api::{
 };
 pub use block_ui;
 pub use host::{
-    Artifact, ArtifactDescription, BlockDrag, BlockPicker, ChildHandle, EditorHost, FileDrop,
-    FileFilter, FilePicker, ImagePaster, PastedImage, PerformanceMeasurementGuard,
-    PerformanceReporter, PickedFile, Task, Waker,
+    Artifact, ArtifactDescription, BlockDrag, BlockPicker, BlockSource, ChildHandle, EditorHost,
+    FileDrop, FileFilter, FilePicker, FocusedBlock, ImagePaster, PastedImage,
+    PerformanceMeasurementGuard, PerformanceReporter, PickedBlock, PickedFile, Task, Waker,
 };
 
 #[cfg(target_arch = "wasm32")]

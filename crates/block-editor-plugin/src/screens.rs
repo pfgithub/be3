@@ -197,6 +197,20 @@ impl Screens {
                     session.set_editable(*editable);
                 }
             }
+            Message::Editor(EditorMessage::Focused {
+                instance,
+                block_id,
+                block_type,
+                via,
+            }) => {
+                if let Some(session) = self.sessions.get(instance) {
+                    session.set_focused_block(crate::host::FocusedBlock {
+                        block_id: block_id.map(Uuid::from_bytes),
+                        block_type: Uuid::from_bytes(*block_type),
+                        via: via.iter().copied().map(Uuid::from_bytes).collect(),
+                    });
+                }
+            }
             Message::Editor(EditorMessage::PresentingChanged {
                 instance,
                 presenting,
@@ -475,6 +489,11 @@ fn catalog(descriptors: &[BlockTypeDescriptor]) -> BlockCatalog {
                 display_name: descriptor.display_name.clone(),
                 icon: (!codepoint.is_empty())
                     .then(|| egui_material_icons::MaterialIcon::new(codepoint)),
+                child_edits: block_ui::ChildEdits {
+                    add: descriptor.children.add,
+                    delete: descriptor.children.delete,
+                    replace: descriptor.children.replace,
+                },
             },
         )
     }))

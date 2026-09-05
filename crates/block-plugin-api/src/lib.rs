@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 45;
+pub const PROTOCOL_VERSION: u16 = 46;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -322,6 +322,7 @@ pub struct BlockTypeDescriptor {
     pub block_type: [u8; 16],
     pub display_name: String,
     pub icon_codepoint: String,
+    pub children: ChildOperations,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -488,6 +489,26 @@ pub enum EditorMessage {
         instance: EditorInstanceId,
         block_id: [u8; 16],
         block_type: [u8; 16],
+        via: Option<[u8; 16]>,
+    },
+
+    Focused {
+        instance: EditorInstanceId,
+        block_id: Option<[u8; 16]>,
+        block_type: [u8; 16],
+        via: Vec<[u8; 16]>,
+    },
+
+    DragBlock {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        block_type: [u8; 16],
+    },
+
+    BlockCommand {
+        instance: EditorInstanceId,
+        block_id: [u8; 16],
+        command: BlockCommand,
     },
 
     DragOver {
@@ -716,6 +737,9 @@ impl EditorMessage {
             | Self::LeaveFrame { instance, .. }
             | Self::Close { instance, .. }
             | Self::OpenBlock { instance, .. }
+            | Self::Focused { instance, .. }
+            | Self::DragBlock { instance, .. }
+            | Self::BlockCommand { instance, .. }
             | Self::DragOver { instance, .. }
             | Self::DragLeft { instance, .. }
             | Self::FileDrop { instance, .. }
@@ -816,10 +840,43 @@ pub enum CreationOutcome {
     Failed(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlockLocation {
+    Root,
+    Orphaned,
+    Block([u8; 16]),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlockCommand {
+    Share,
+    Rename,
+    Unlink {
+        container: [u8; 16],
+    },
+    Delete {
+        block_type: [u8; 16],
+        source: BlockLocation,
+        is_reference: bool,
+    },
+    Move {
+        block_type: [u8; 16],
+        source: BlockLocation,
+        destination: [u8; 16],
+        is_reference: bool,
+    },
+    Place {
+        block_type: [u8; 16],
+        parent: [u8; 16],
+        linked: bool,
+    },
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockFilter {
     pub name: String,
     pub block_types: Vec<[u8; 16]>,
+    pub excluded: Vec<[u8; 16]>,
     pub templates: bool,
 }
 
@@ -828,6 +885,7 @@ pub enum BlockPick {
     Chosen {
         block_id: [u8; 16],
         block_type: [u8; 16],
+        linked: bool,
     },
     Cancelled,
     Failed(String),
@@ -1309,12 +1367,14 @@ fn validate_editor(message: &EditorMessage) -> Result<(), DecodeError> {
         },
         EditorMessage::PickBlock { filter, .. } => {
             string(&filter.name)?;
-            collection(filter.block_types.len())
+            collection(filter.block_types.len())?;
+            collection(filter.excluded.len())
         }
         EditorMessage::BlockPicked { pick, .. } => match pick {
             BlockPick::Failed(message) => string(message),
             BlockPick::Chosen { .. } | BlockPick::Cancelled => Ok(()),
         },
+        EditorMessage::Focused { via, .. } => collection(via.len()),
         EditorMessage::CopyText { text, .. } => string(text),
         EditorMessage::Presence { entries, .. } => collection(entries.len()),
         EditorMessage::Fetch { url, .. } => string(url),

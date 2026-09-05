@@ -22,7 +22,19 @@ use self::unsupported::UnsupportedEditor;
 const DIRECT_EDITOR_MIN_ZOOM: f32 = 0.25;
 const DIRECT_EDITOR_MAX_ZOOM: f32 = 32.0;
 pub enum EditorAction {
-    OpenBlock { id: Uuid, block_type: Uuid },
+    OpenBlock {
+        id: Uuid,
+        block_type: Uuid,
+        via: Option<Uuid>,
+    },
+    DragBlock {
+        id: Uuid,
+        block_type: Uuid,
+    },
+    Command {
+        id: Uuid,
+        command: block_plugin_api::BlockCommand,
+    },
 }
 
 pub struct BlockRenderContext<'a> {
@@ -474,11 +486,10 @@ impl<'a> EditorAccess<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct SidebarDragPayload {
-    pub reference: block::BlockReference,
-    pub source: SidebarDragSource,
-    pub is_reference: bool,
+    pub block_id: Uuid,
+    pub block_type: Uuid,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -495,9 +506,6 @@ pub trait BlockEditor {
     }
     fn block_type(&self) -> Uuid {
         self.block().block_type()
-    }
-    fn name(&self) -> Option<String> {
-        self.block().name()
     }
     fn relationships(&self) -> Option<BlockRelationships> {
         self.block().relationships()
@@ -1260,6 +1268,11 @@ impl EditorRegistry {
                     BlockTypeEntry {
                         display_name: registration.display_name.to_owned(),
                         icon: Some(registration.icon),
+                        child_edits: block_ui::ChildEdits {
+                            add: registration.can_add_child,
+                            delete: registration.can_delete_child,
+                            replace: registration.can_replace_child,
+                        },
                     },
                 )
             })
@@ -1400,5 +1413,13 @@ impl BlockTypes for EditorRegistry {
 
     fn icon(&self, block_type: Uuid) -> Option<MaterialIcon> {
         Self::icon(self, block_type)
+    }
+
+    fn child_edits(&self, block_type: Uuid) -> block_ui::ChildEdits {
+        block_ui::ChildEdits {
+            add: self.can_add_child(block_type),
+            delete: self.can_delete_child(block_type),
+            replace: self.can_replace_child(block_type),
+        }
     }
 }

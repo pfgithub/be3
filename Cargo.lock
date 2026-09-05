@@ -3172,6 +3172,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "file_tree"
+version = "0.1.0"
+dependencies = [
+ "block 0.1.0",
+ "block-client",
+ "block-editor-plugin",
+ "uuid",
+]
+
+[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

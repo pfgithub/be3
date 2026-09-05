@@ -25,15 +25,16 @@ use block::{
     Block, BlockAccess, BlockParent, BlockReference, BlockReferenceList, ManagementErrorCode,
     Workspace, WorkspaceInvitation, WorkspaceRole,
 };
-use block_client::root_settings::RootSettings;
+use block_client::root_settings::{RootSetting, RootSettings};
 use block_client::{
-    blocks::{ui_settings::UiSettings, workspace_index::BlockEntry},
+    blocks::{file_tree::FileTree, ui_settings::UiSettings, workspace_index::BlockEntry},
     presence::{pick_free_color, UserActive},
     properties::MAX_NAME_BYTES,
     BlockClient, BlockHandle, DynamicArtifactDescriptor, ManagementClient, ManagementClientError,
     ReferenceList, Session,
 };
 use block_picker::{BlockPicker, BlockPickerResult};
+use block_plugin_api::{BlockCommand, BlockLocation};
 use editors::{
     direct_editor_tab_ui, ArtifactSession, ArtifactStatus, BlockEditor, BlockLabel, EditorAccess,
     EditorAction, EditorRegistry, SidebarDragPayload, SidebarDragSource,
@@ -56,6 +57,7 @@ use uuid::Uuid;
 #[cfg(not(target_arch = "wasm32"))]
 const APP_ID: &str = "Block";
 const COMPACT_FILES_WIDTH: f32 = 700.0;
+const MAX_OPENED_VIA_HOPS: usize = 64;
 const NO_EDIT_ACCESS: &str = "You do not have permission to change this block";
 
 const ICON_DYNAMIC_ARTIFACT: MaterialIcon = ICON_AUTO_AWESOME;
@@ -172,12 +174,10 @@ struct BlockApp {
     server_url: String,
     account: Account,
     client: Arc<BlockClient>,
-    roots: ReferenceList,
     root_settings: RootSettings,
+    file_tree: RootSetting<FileTree>,
+    files_tab: Uuid,
     ui_settings: Option<BlockHandle<UiSettings>>,
-    orphaned: Option<ReferenceList>,
-    orphaned_expanded: bool,
-    expanded: HashMap<Uuid, ReferenceList>,
     parents: HashMap<Uuid, ReferenceList>,
     references: HashMap<Uuid, ReferenceList>,
     backrefs: HashMap<Uuid, ReferenceList>,
@@ -203,7 +203,6 @@ struct BlockApp {
     active_tab: Option<Uuid>,
 
     active_presence: HashSet<Uuid>,
-    sidebar_reveal: Option<Uuid>,
 
     opened_via: HashMap<Uuid, Uuid>,
     pending_transfers: Vec<PendingTransfer>,
@@ -438,7 +437,7 @@ enum PendingDestructiveAction {
 
 #[derive(Clone)]
 struct PendingTransfer {
-    child: BlockReference,
+    child: Uuid,
     source: Option<SidebarDragSource>,
     destination: Option<Uuid>,
     parent_after: Option<BlockParent>,
@@ -527,8 +526,8 @@ impl BlockApp {
             ServerLocation::Remote(remote) => remote.clone(),
         };
         let client = Arc::new(BlockClient::new(account.id, Uuid::nil()));
-        let roots = client.watch_references(BlockReferenceList::Roots);
         let root_settings = RootSettings::new(&client);
+        let file_tree = RootSetting::new(&client);
         Ok(Self {
             app_state,
             client_id,
@@ -555,12 +554,10 @@ impl BlockApp {
             server_url,
             account,
             client,
-            roots,
             root_settings,
+            file_tree,
+            files_tab: Uuid::new_v4(),
             ui_settings: None,
-            orphaned: None,
-            orphaned_expanded: false,
-            expanded: HashMap::new(),
             parents: HashMap::new(),
             references: HashMap::new(),
             backrefs: HashMap::new(),
@@ -579,7 +576,6 @@ impl BlockApp {
             files_compact: false,
             active_tab: None,
             active_presence: HashSet::new(),
-            sidebar_reveal: None,
             opened_via: HashMap::new(),
             pending_transfers: Vec::new(),
             pending_copies: Vec::new(),
@@ -1135,10 +1131,6 @@ impl BlockApp {
     fn open_workspace(&mut self, workspace: Workspace) {
         let client = Arc::new(BlockClient::new(self.account.id, workspace.id));
         client.connect(self.server_url.clone(), self.account.token.clone());
-        let roots = client.watch_references(BlockReferenceList::Roots);
-        self.orphaned = None;
-        self.orphaned_expanded = false;
-        self.expanded.clear();
         self.parents.clear();
         self.references.clear();
         self.backrefs.clear();
@@ -1154,8 +1146,8 @@ impl BlockApp {
         self.dock_state = default_dock_state();
         self.active_tab = None;
         self.share = ShareDialog::default();
-        self.roots = roots;
         self.root_settings = RootSettings::new(&client);
+        self.file_tree = RootSetting::new(&client);
         self.ui_settings = None;
         self.client = client;
         self.workspace = Some(workspace.clone());
@@ -1494,11 +1486,6 @@ impl BlockApp {
             ServerLocation::Remote(url) => url.clone(),
         };
         let client = Arc::new(BlockClient::new(account.id, Uuid::nil()));
-        let roots = client.watch_references(BlockReferenceList::Roots);
-
-        self.orphaned = None;
-        self.orphaned_expanded = false;
-        self.expanded.clear();
         self.parents.clear();
         self.references.clear();
         self.backrefs.clear();
@@ -1514,7 +1501,6 @@ impl BlockApp {
         self.dock_state = default_dock_state();
         self.files_compact = false;
         self.active_tab = None;
-        self.sidebar_reveal = None;
         self.pending_transfers.clear();
         self.rename = None;
         self.share = ShareDialog::default();
@@ -1535,8 +1521,8 @@ impl BlockApp {
         self.workspace_error = None;
         self.reauth = None;
         self.invite_open = false;
-        self.roots = roots;
         self.root_settings = RootSettings::new(&client);
+        self.file_tree = RootSetting::new(&client);
         self.ui_settings = None;
         self.client = client;
         self.account = account;
@@ -1622,21 +1608,7 @@ impl BlockApp {
         match target {
             BlockPickerTarget::Root => self.open_tab(result.id, result.block_type),
             BlockPickerTarget::Block { parent, open } => {
-                self.queue_placement(
-                    BlockReference {
-                        id: result.id,
-                        block_type: result.block_type,
-                        author: result.author,
-                        properties: result.properties,
-                        parent: BlockParent::Orphaned,
-                        references: 0,
-                        dynamic_artifact: false,
-
-                        access: BlockAccess::Edit,
-                    },
-                    parent,
-                    result.linked,
-                );
+                self.queue_placement(result.id, result.block_type, parent, result.linked);
                 if open {
                     self.open_tab(result.id, result.block_type);
                 }
@@ -1671,28 +1643,38 @@ impl BlockApp {
         self.handle_picker_result(result, target);
     }
 
+    fn block_type_of(&self, id: Uuid) -> Option<Uuid> {
+        self.block_types.get(&id).copied().or_else(|| {
+            self.client
+                .cached_block(id)
+                .map(|cached| cached.block_type)
+                .or_else(|| self.editors.get(&id).map(|editor| editor.block_type()))
+        })
+    }
+
     fn ensure_editor(&mut self, id: Uuid) -> bool {
         if self.editors.contains_key(&id) {
             return true;
         }
-        let Some(block_type) = self.block_types.get(&id).copied() else {
+        let Some(block_type) = self.block_type_of(id) else {
             return false;
         };
+        self.block_types.insert(id, block_type);
         self.editors
             .insert(id, self.registry.open(&self.client, id, block_type));
         true
     }
 
-    fn queue_placement(&mut self, child: BlockReference, parent: Uuid, linked: bool) {
-        if child.id == parent
+    fn queue_placement(&mut self, child: Uuid, block_type: Uuid, parent: Uuid, linked: bool) {
+        if child == parent
             || self
                 .pending_transfers
                 .iter()
-                .any(|pending| pending.child.id == child.id && pending.destination == Some(parent))
+                .any(|pending| pending.child == child && pending.destination == Some(parent))
         {
             return;
         }
-        self.block_types.insert(child.id, child.block_type);
+        self.block_types.insert(child, block_type);
         if !self.ensure_editor(parent) {
             return;
         }
@@ -1713,15 +1695,23 @@ impl BlockApp {
         }
     }
 
-    fn queue_move(&mut self, dragged: SidebarDragPayload, destination: Uuid) {
-        if self.pending_transfers.iter().any(|pending| {
-            pending.child.id == dragged.reference.id && pending.destination == Some(destination)
-        }) {
+    fn queue_move(
+        &mut self,
+        child: Uuid,
+        block_type: Uuid,
+        source: SidebarDragSource,
+        destination: Uuid,
+        is_reference: bool,
+    ) {
+        if self
+            .pending_transfers
+            .iter()
+            .any(|pending| pending.child == child && pending.destination == Some(destination))
+        {
             return;
         }
-        self.block_types
-            .insert(dragged.reference.id, dragged.reference.block_type);
-        let source_ready = match dragged.source {
+        self.block_types.insert(child, block_type);
+        let source_ready = match source {
             SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
             SidebarDragSource::Block(source) => self.ensure_editor(source),
         };
@@ -1729,28 +1719,29 @@ impl BlockApp {
             return;
         }
         self.pending_transfers.push(PendingTransfer {
-            child: dragged.reference,
-            source: Some(dragged.source),
+            child,
+            source: Some(source),
             destination: Some(destination),
-            parent_after: (!dragged.is_reference).then_some(BlockParent::Uuid(destination)),
+            parent_after: (!is_reference).then_some(BlockParent::Uuid(destination)),
             stage: TransferStage::DeleteSource,
         });
     }
 
     fn queue_delete(
         &mut self,
-        reference: BlockReference,
+        child: Uuid,
+        block_type: Uuid,
         source: SidebarDragSource,
         is_reference: bool,
     ) {
         if self.pending_transfers.iter().any(|pending| {
-            pending.child.id == reference.id
+            pending.child == child
                 && pending.source == Some(source)
                 && pending.destination.is_none()
         }) {
             return;
         }
-        self.block_types.insert(reference.id, reference.block_type);
+        self.block_types.insert(child, block_type);
         let ready = match source {
             SidebarDragSource::Root | SidebarDragSource::Orphaned => true,
             SidebarDragSource::Block(source) => self.ensure_editor(source),
@@ -1759,7 +1750,7 @@ impl BlockApp {
             return;
         }
         self.pending_transfers.push(PendingTransfer {
-            child: reference,
+            child,
             source: Some(source),
             destination: None,
             parent_after: (!is_reference && source != SidebarDragSource::Root)
@@ -1776,16 +1767,13 @@ impl BlockApp {
                     None | Some(SidebarDragSource::Orphaned) => Some(true),
                     Some(SidebarDragSource::Root) => {
                         self.client
-                            .set_block_parent(transfer.child.id, BlockParent::Orphaned);
+                            .set_block_parent(transfer.child, BlockParent::Orphaned);
                         Some(true)
                     }
-                    Some(SidebarDragSource::Block(source)) => {
-                        self.editors.get(&source).and_then(|editor| {
-                            editor.delete_child(BlockEntry {
-                                id: transfer.child.id,
-                            })
-                        })
-                    }
+                    Some(SidebarDragSource::Block(source)) => self
+                        .editors
+                        .get(&source)
+                        .and_then(|editor| editor.delete_child(BlockEntry { id: transfer.child })),
                 };
                 if ready != Some(true) {
                     self.pending_transfers.push(transfer);
@@ -1795,11 +1783,9 @@ impl BlockApp {
             }
 
             let ready = transfer.destination.map_or(Some(true), |destination| {
-                self.editors.get(&destination).and_then(|editor| {
-                    editor.add_child(BlockEntry {
-                        id: transfer.child.id,
-                    })
-                })
+                self.editors
+                    .get(&destination)
+                    .and_then(|editor| editor.add_child(BlockEntry { id: transfer.child }))
             });
             if ready != Some(true) {
                 self.pending_transfers.push(transfer);
@@ -1807,7 +1793,7 @@ impl BlockApp {
             }
 
             if let Some(parent) = transfer.parent_after {
-                self.set_block_parent(transfer.child.id, parent);
+                self.set_block_parent(transfer.child, parent);
             }
         }
     }
@@ -1820,6 +1806,7 @@ impl BlockApp {
         {
             return;
         }
+        self.ensure_editor(source);
         self.ensure_editor(container);
         self.pending_copies.push(PendingCopy {
             source,
@@ -1833,6 +1820,10 @@ impl BlockApp {
         let pending = std::mem::take(&mut self.pending_copies);
         for mut copy in pending {
             if let CopyStage::Duplicate = copy.stage {
+                if !self.ensure_editor(copy.source) {
+                    self.pending_copies.push(copy);
+                    continue;
+                }
                 let Some((copy_id, block_type)) =
                     self.editors.get(&copy.source).and_then(|editor| {
                         editor
@@ -1915,9 +1906,6 @@ impl BlockApp {
                 self.dock_state.push_to_focused_leaf(tab);
             }
         }
-        if self.active_tab != Some(id) {
-            self.sidebar_reveal = None;
-        }
         self.active_tab = Some(id);
     }
 
@@ -1966,7 +1954,6 @@ impl BlockApp {
         let current = tab.current();
         self.ensure_block_open(current.id, current.block_type);
         self.active_tab = Some(current.id);
-        self.sidebar_reveal = None;
     }
 
     fn close_tab_resources(&mut self, id: Uuid) {
@@ -1983,7 +1970,6 @@ impl BlockApp {
         }
         if self.active_tab == Some(id) {
             self.active_tab = None;
-            self.sidebar_reveal = None;
         }
     }
 
@@ -2417,8 +2403,7 @@ impl BlockApp {
     }
 
     fn copy_permission(&self, container: Option<Uuid>) -> Result<(), &'static str> {
-        let container_block_type =
-            container.and_then(|container| self.block_types.get(&container).copied());
+        let container_block_type = container.and_then(|container| self.block_type_of(container));
         match (container, container_block_type) {
             (Some(_), Some(block_type)) if !self.registry.can_replace_child(block_type) => {
                 Err("This container doesn't support replacing a reference")
@@ -2529,7 +2514,7 @@ impl BlockApp {
                     }
                 }
                 BlockContextMenuAction::Delete => {
-                    self.queue_delete(reference, source, is_reference);
+                    self.queue_delete(reference.id, reference.block_type, source, is_reference);
                 }
             }
         }
@@ -2612,16 +2597,134 @@ impl BlockApp {
         outcome
     }
 
-    fn handle_editor_action(&mut self, tab_id: Uuid, action: EditorAction) {
+    fn handle_editor_action(
+        &mut self,
+        context: &egui::Context,
+        tab_id: Uuid,
+        action: EditorAction,
+    ) {
         match action {
-            EditorAction::OpenBlock { id, block_type } => self.navigate_tab(
-                tab_id,
-                TabNavigation::Open(BlockTabHistoryItem { id, block_type }),
+            EditorAction::OpenBlock {
+                id,
+                block_type,
+                via,
+            } => {
+                match via {
+                    Some(container) => self.opened_via.insert(id, container),
+                    None => self.opened_via.remove(&id),
+                };
+                if tab_id == self.files_tab {
+                    self.open_tab(id, block_type);
+                } else {
+                    self.navigate_tab(
+                        tab_id,
+                        TabNavigation::Open(BlockTabHistoryItem { id, block_type }),
+                    );
+                }
+            }
+            EditorAction::DragBlock { id, block_type } => {
+                egui::DragAndDrop::set_payload(
+                    context,
+                    SidebarDragPayload {
+                        block_id: id,
+                        block_type,
+                    },
+                );
+            }
+            EditorAction::Command { id, command } => self.handle_block_command(id, command),
+        }
+    }
+
+    fn block_label(&self, id: Uuid) -> BlockLabel {
+        self.client.cached_block(id).map_or_else(
+            || {
+                let block_type = self.block_type_of(id).unwrap_or_default();
+                BlockLabel::new(&self.registry, block_type, None)
+            },
+            |cached| BlockLabel::for_cached(&self.registry, &cached),
+        )
+    }
+
+    fn handle_block_command(&mut self, id: Uuid, command: BlockCommand) {
+        match command {
+            BlockCommand::Share => {
+                let label = self.block_label(id);
+                self.share.open(&self.client, id, label);
+            }
+            BlockCommand::Rename => {
+                let name = self.block_label(id).name;
+                self.rename = Some(RenameState { id, name });
+            }
+            BlockCommand::Unlink { container } => {
+                self.queue_copy(id, Uuid::from_bytes(container), Uuid::new_v4());
+            }
+            BlockCommand::Delete {
+                block_type,
+                source,
+                is_reference,
+            } => self.queue_delete(
+                id,
+                Uuid::from_bytes(block_type),
+                drag_source(source),
+                is_reference,
+            ),
+            BlockCommand::Move {
+                block_type,
+                source,
+                destination,
+                is_reference,
+            } => self.queue_move(
+                id,
+                Uuid::from_bytes(block_type),
+                drag_source(source),
+                Uuid::from_bytes(destination),
+                is_reference,
+            ),
+            BlockCommand::Place {
+                block_type,
+                parent,
+                linked,
+            } => self.queue_placement(
+                id,
+                Uuid::from_bytes(block_type),
+                Uuid::from_bytes(parent),
+                linked,
             ),
         }
     }
 
+    fn ensure_file_tree(&mut self) -> Option<Uuid> {
+        let id = self
+            .file_tree
+            .ensure(&self.client, self.client_id)
+            .map(BlockHandle::id)?;
+        self.ensure_block_open(id, FileTree::TYPE_ID);
+        Some(id)
+    }
+
+    fn report_focus(&mut self) {
+        let focused = self.active_tab.and_then(|id| {
+            let block_type = self.block_types.get(&id).copied()?;
+            Some((id, block_type))
+        });
+        let mut via = Vec::new();
+        if let Some((id, _)) = focused {
+            let mut visited = HashSet::new();
+            visited.insert(id);
+            let mut current = id;
+            while let Some(&container) = self.opened_via.get(&current) {
+                if via.len() >= MAX_OPENED_VIA_HOPS || !visited.insert(container) {
+                    break;
+                }
+                via.push(container);
+                current = container;
+            }
+        }
+        plugin_host::set_focus(focused, via);
+    }
+
     fn show_dock(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
+        self.report_focus();
         let mut dock_state = std::mem::replace(&mut self.dock_state, default_dock_state());
         let files_compact = ui.available_width() < COMPACT_FILES_WIDTH;
         if files_compact != self.files_compact {
@@ -2703,9 +2806,6 @@ impl BlockApp {
                 })
             });
         viewer.app.dock_state = dock_state;
-        if previous_active != active_tab {
-            viewer.app.sidebar_reveal = None;
-        }
         viewer.app.active_tab = active_tab;
         for item in pending_tabs {
             viewer.app.open_tab(item.id, item.block_type);
@@ -2714,7 +2814,7 @@ impl BlockApp {
             viewer.app.navigate_tab(tab_id, navigation);
         }
         for (tab_id, _, action) in actions {
-            viewer.app.handle_editor_action(tab_id, action);
+            viewer.app.handle_editor_action(ui.ctx(), tab_id, action);
         }
     }
 
@@ -2884,7 +2984,7 @@ impl BlockApp {
                     }
                 }
                 BlockContextMenuAction::Delete => {
-                    self.queue_delete(reference, source, is_reference);
+                    self.queue_delete(reference.id, reference.block_type, source, is_reference);
                 }
             }
         }
@@ -3034,16 +3134,20 @@ impl TabViewer for BlockTabViewer<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         match tab {
             DockTab::Files => {
-                let content_rect = ui.available_rect_before_wrap();
-                let mut content_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt("blocks-sidebar-content")
-                        .max_rect(content_rect),
-                );
-                content_ui.set_clip_rect(content_rect.intersect(ui.clip_rect()));
-                content_ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                self.app.show_sidebar(&mut content_ui);
-                ui.advance_cursor_after_rect(content_rect);
+                let Some(id) = self.app.ensure_file_tree() else {
+                    ui.centered_and_justified(|ui| {
+                        ui.spinner();
+                    });
+                    return;
+                };
+                if let Some(editor) = self.app.editors.get_mut(&id) {
+                    editor.set_tab_active(true);
+                }
+                let files_tab = self.app.files_tab;
+                let (action, _) = self.app.show_content(ui, files_tab, id, false, false);
+                if let Some(action) = action {
+                    self.actions.push((files_tab, id, action));
+                }
             }
             DockTab::Empty => {
                 ui.centered_and_justified(|ui| {
@@ -3481,6 +3585,14 @@ fn show_account_card(ui: &mut egui::Ui, account: &Account) -> Option<AccountActi
     }
 }
 
+fn drag_source(location: BlockLocation) -> SidebarDragSource {
+    match location {
+        BlockLocation::Root => SidebarDragSource::Root,
+        BlockLocation::Orphaned => SidebarDragSource::Orphaned,
+        BlockLocation::Block(id) => SidebarDragSource::Block(Uuid::from_bytes(id)),
+    }
+}
+
 fn sidebar_source(parent: BlockParent) -> SidebarDragSource {
     match parent {
         BlockParent::Root => SidebarDragSource::Root,
@@ -3557,6 +3669,12 @@ impl BlockApp {
         self.show_invite(ui.ctx());
         self.show_about(ui.ctx());
 
+        egui::Panel::bottom("app-status-bar")
+            .resizable(false)
+            .show_inside(ui, |ui| {
+                ui.separator();
+                self.show_status_bar(ui);
+            });
         self.show_dock(ui, frame);
         self.show_discard_confirmation(ui.ctx());
         performance::show(ui.ctx());

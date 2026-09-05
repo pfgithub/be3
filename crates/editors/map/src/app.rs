@@ -446,9 +446,10 @@ impl MapApp {
         let Some(host) = self.host().cloned() else {
             return;
         };
-        let Some(Ok((id, _))) = self.picker.poll(&host) else {
+        let Some(Ok(picked)) = self.picker.poll(&host) else {
             return;
         };
+        let id = picked.id;
         if let Some(client) = self.client() {
             client.set_block_parent(id, BlockParent::Uuid(self.block_id()));
         }

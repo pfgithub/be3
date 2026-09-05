@@ -108,6 +108,11 @@ pub(super) fn block_type_descriptors(
                 .icon
                 .map(|icon| icon.codepoint.to_owned())
                 .unwrap_or_default(),
+            children: block_plugin_api::ChildOperations {
+                add: entry.child_edits.add,
+                delete: entry.child_edits.delete,
+                replace: entry.child_edits.replace,
+            },
         })
         .collect()
 }
@@ -275,6 +280,7 @@ fn serve_block_pick(
     if pending.is_none() {
         if let Some(request) = crate::plugin_host::take_block_pick(plugin_id, instance) {
             let mut picker = BlockPicker::default();
+            let excluded: Vec<_> = excluded.into_iter().chain(request.excluded).collect();
             if request.templates {
                 picker.open_templates_for_types(excluded, request.block_types);
             } else {
@@ -294,6 +300,7 @@ fn serve_block_pick(
         Some(result) => Some(BlockPick::Chosen {
             block_id: result.id.into_bytes(),
             block_type: result.block_type.into_bytes(),
+            linked: result.linked,
         }),
         None if waiting.picker.is_open() => None,
         None => Some(BlockPick::Cancelled),
@@ -458,8 +465,22 @@ impl PluginEditor {
             self.main_region_id = presentation.id;
         }
         let mut action = presentation
-            .open
-            .map(|(id, block_type)| EditorAction::OpenBlock { id, block_type });
+            .command
+            .map(|(id, command)| EditorAction::Command { id, command })
+            .or_else(|| {
+                presentation
+                    .drag
+                    .map(|(id, block_type)| EditorAction::DragBlock { id, block_type })
+            })
+            .or_else(|| {
+                presentation
+                    .open
+                    .map(|(id, block_type, via)| EditorAction::OpenBlock {
+                        id,
+                        block_type,
+                        via,
+                    })
+            });
         let mut statuses = Vec::new();
         let mut views = Vec::new();
         let mut child_viewport = DirectEditorViewport::new();

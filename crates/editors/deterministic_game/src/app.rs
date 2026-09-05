@@ -100,7 +100,7 @@ impl block_editor_plugin::App for DeterministicGameApp {
             return;
         };
         match self.picker.poll(&host) {
-            Some(Ok((module, _))) => self.chosen = Some(module),
+            Some(Ok(module)) => self.chosen = Some(module.id),
             Some(Err(error)) => {
                 ui.colored_label(ui.visuals().error_fg_color, error)
                     .test_id("game.error");
@@ -208,6 +208,7 @@ pub(crate) fn module_filter() -> BlockFilter {
     BlockFilter {
         name: "Game module".to_owned(),
         block_types: vec![GameModule::TYPE_ID.into_bytes()],
+        excluded: Vec::new(),
         templates: false,
     }
 }

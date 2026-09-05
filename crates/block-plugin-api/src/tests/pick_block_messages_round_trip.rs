@@ -8,6 +8,7 @@ fn pick_block_messages_round_trip() {
         filter: BlockFilter {
             name: "Slide".into(),
             block_types: vec![[9; 16]],
+            excluded: vec![[3; 16]],
             templates: true,
         },
     });
@@ -20,6 +21,7 @@ fn pick_block_messages_round_trip() {
         BlockPick::Chosen {
             block_id: [1; 16],
             block_type: [9; 16],
+            linked: true,
         },
         BlockPick::Cancelled,
         BlockPick::Failed("the block could not be created".into()),
@@ -41,6 +43,7 @@ fn pick_block_messages_round_trip() {
         filter: BlockFilter {
             name: "x".repeat(MAX_STRING_BYTES + 1),
             block_types: Vec::new(),
+            excluded: Vec::new(),
             templates: false,
         },
     });

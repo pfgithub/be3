@@ -2,7 +2,7 @@ use super::*;
 
 fn picked(picker: &mut BlockPicker, editors: &Access) -> Option<(Uuid, Uuid)> {
     match picker.poll(editors.host()) {
-        Some(Ok(picked)) => Some(picked),
+        Some(Ok(picked)) => Some((picked.id, picked.block_type)),
         Some(Err(_)) | None => None,
     }
 }

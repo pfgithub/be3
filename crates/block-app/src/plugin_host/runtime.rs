@@ -6,9 +6,9 @@ use std::{
 };
 
 use block_plugin_api::{
-    ArtifactDescription, BlockPick, Capability, EditorInstanceId, EditorMessage, EditorRegion,
-    HostSession, Message, PluginManifest, PresenceEntry, ScreenId, ScreenLayout, ScreenRequest,
-    SessionState, ViewChange, MAX_QUEUED_MESSAGES,
+    ArtifactDescription, BlockCommand, BlockPick, Capability, EditorInstanceId, EditorMessage,
+    EditorRegion, HostSession, Message, PluginManifest, PresenceEntry, ScreenId, ScreenLayout,
+    ScreenRequest, SessionState, ViewChange, MAX_QUEUED_MESSAGES,
 };
 use eframe::egui;
 use uuid::Uuid;
@@ -16,7 +16,7 @@ use uuid::Uuid;
 use super::{
     backend::{Availability, Backend, Platform},
     input,
-    instances::{Instances, Placement},
+    instances::{Focus, Instances, OpenRequest, Placement},
     presenter::{
         self, PresenterCallback, PresenterState, PresenterStatus, Quad, Shared, MAX_SURFACES,
     },
@@ -37,6 +37,7 @@ thread_local! {
 struct Host {
     availability: Availability,
     runtimes: HashMap<String, Runtime>,
+    focus: Focus,
     grabbed: bool,
 }
 
@@ -45,6 +46,7 @@ impl Host {
         Self {
             availability: Availability::missing(),
             runtimes: HashMap::new(),
+            focus: Focus::default(),
             grabbed: false,
         }
     }
@@ -60,10 +62,12 @@ impl Host {
         let Some(surface) = self.surface_for(&plugin.identity.id, context) else {
             return Err(CROWDED.to_owned());
         };
+        let focus = self.focus.clone();
         let runtime = self
             .runtimes
             .entry(plugin.identity.id.clone())
             .or_insert_with(|| Runtime::new(plugin, surface, context));
+        runtime.instances.set_focus(focus);
         runtime.begin_pass(context.cumulative_pass_nr());
         Ok(runtime)
     }
@@ -439,7 +443,9 @@ pub(crate) struct EditorPresentation {
     quad: Option<Quad>,
     clip: egui::Rect,
     floating: Vec<egui::Rect>,
-    pub(crate) open: Option<(Uuid, Uuid)>,
+    pub(crate) open: Option<OpenRequest>,
+    pub(crate) drag: Option<(Uuid, Uuid)>,
+    pub(crate) command: Option<(Uuid, BlockCommand)>,
     pub(crate) children: Vec<HostChild>,
 }
 
@@ -456,6 +462,8 @@ impl EditorPresentation {
             clip: egui::Rect::ZERO,
             floating: Vec::new(),
             open: None,
+            drag: None,
+            command: None,
             children: Vec::new(),
         }
     }
@@ -627,6 +635,8 @@ pub(crate) fn editor_ui(ui: &mut egui::Ui, slot: EditorSlot<'_>) -> EditorPresen
                 })
                 .unwrap_or_default(),
             open: runtime.instances.take_open(instance),
+            drag: runtime.instances.take_block_drag(instance),
+            command: runtime.instances.take_block_command(instance),
             children,
         }
     })
@@ -881,6 +891,22 @@ pub(crate) fn flush() {
     HOST.with(|host| {
         for runtime in host.borrow_mut().runtimes.values_mut() {
             runtime.flush();
+        }
+    });
+}
+
+pub(crate) fn set_focus(block: Option<(Uuid, Uuid)>, via: Vec<Uuid>) {
+    HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        let focus = Focus { block, via };
+        if host.focus == focus {
+            return;
+        }
+        host.focus = focus.clone();
+        for runtime in host.runtimes.values_mut() {
+            if runtime.instances.set_focus(focus.clone()) {
+                runtime.needed = true;
+            }
         }
     });
 }

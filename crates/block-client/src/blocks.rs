@@ -37,6 +37,7 @@ block_types! {
     database_schema::DatabaseSchema;
     database_view::DatabaseView;
     deterministic_game::DeterministicGame;
+    file_tree::FileTree;
     game_module::GameModule;
     gui_builder::GuiBuilder;
     hotbar::Hotbar;

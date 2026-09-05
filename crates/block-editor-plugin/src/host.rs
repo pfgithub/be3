@@ -10,10 +10,10 @@ use std::{
 };
 
 use block_plugin_api::{
-    AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode, ChildPlacement,
-    ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorCapabilities, EditorRegion,
-    FetchResult, FilePick, InteractionMode, Occluder, PerformanceMeasurement, PresenceEntry,
-    ResizeMode, ViewChange, WebViewCommand, WebViewEvent,
+    AudioCommand, AudioStatus, BlockCommand, BlockLocation, BlockPick, ChildId, ChildLayer,
+    ChildMode, ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorBand,
+    EditorCapabilities, EditorRegion, FetchResult, FilePick, InteractionMode, Occluder,
+    PerformanceMeasurement, PresenceEntry, ResizeMode, ViewChange, WebViewCommand, WebViewEvent,
 };
 pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_ui::BlockCatalog;
@@ -37,6 +37,39 @@ pub struct FileDrop {
     pub position: egui::Pos2,
     pub files: Vec<PickedFile>,
     pub dropped: bool,
+}
+
+type OpenRequest = (Uuid, Uuid, Option<Uuid>);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BlockSource {
+    Root,
+    Orphaned,
+    Block(Uuid),
+}
+
+impl BlockSource {
+    fn encode(self) -> BlockLocation {
+        match self {
+            Self::Root => BlockLocation::Root,
+            Self::Orphaned => BlockLocation::Orphaned,
+            Self::Block(id) => BlockLocation::Block(id.into_bytes()),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PickedBlock {
+    pub id: Uuid,
+    pub block_type: Uuid,
+    pub linked: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct FocusedBlock {
+    pub block_id: Option<Uuid>,
+    pub block_type: Uuid,
+    pub via: Vec<Uuid>,
 }
 
 #[derive(Clone, Copy)]
@@ -319,7 +352,10 @@ struct View {
 #[derive(Clone, Default)]
 pub struct EditorHost {
     waker: Waker,
-    opens: Rc<RefCell<Vec<(Uuid, Uuid)>>>,
+    opens: Rc<RefCell<Vec<OpenRequest>>>,
+    focused: Rc<RefCell<FocusedBlock>>,
+    block_drags: Rc<RefCell<Vec<(Uuid, Uuid)>>>,
+    block_commands: Rc<RefCell<Vec<(Uuid, BlockCommand)>>>,
     block_types: Rc<RefCell<Rc<BlockCatalog>>>,
     drag: Rc<Cell<Option<BlockDrag>>>,
     files: Rc<RefCell<Option<FileDrop>>>,
@@ -388,7 +424,104 @@ impl EditorHost {
     }
 
     pub fn open_block(&self, block_id: Uuid, block_type: Uuid) {
-        self.opens.borrow_mut().push((block_id, block_type));
+        self.opens.borrow_mut().push((block_id, block_type, None));
+    }
+
+    pub fn open_block_via(&self, block_id: Uuid, block_type: Uuid, container: Uuid) {
+        self.opens
+            .borrow_mut()
+            .push((block_id, block_type, Some(container)));
+    }
+
+    pub fn focused_block(&self) -> FocusedBlock {
+        self.focused.borrow().clone()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn set_focused_block(&self, focused: FocusedBlock) {
+        *self.focused.borrow_mut() = focused;
+    }
+
+    pub fn drag_block(&self, block_id: Uuid, block_type: Uuid) {
+        self.block_drags.borrow_mut().push((block_id, block_type));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn take_block_drags(&self) -> Vec<(Uuid, Uuid)> {
+        std::mem::take(&mut self.block_drags.borrow_mut())
+    }
+
+    pub fn share_block(&self, block_id: Uuid) {
+        self.block_commands
+            .borrow_mut()
+            .push((block_id, BlockCommand::Share));
+    }
+
+    pub fn rename_block(&self, block_id: Uuid) {
+        self.block_commands
+            .borrow_mut()
+            .push((block_id, BlockCommand::Rename));
+    }
+
+    pub fn unlink_block(&self, block_id: Uuid, container: Uuid) {
+        self.block_commands.borrow_mut().push((
+            block_id,
+            BlockCommand::Unlink {
+                container: container.into_bytes(),
+            },
+        ));
+    }
+
+    pub fn delete_block(
+        &self,
+        block_id: Uuid,
+        block_type: Uuid,
+        source: BlockSource,
+        is_reference: bool,
+    ) {
+        self.block_commands.borrow_mut().push((
+            block_id,
+            BlockCommand::Delete {
+                block_type: block_type.into_bytes(),
+                source: source.encode(),
+                is_reference,
+            },
+        ));
+    }
+
+    pub fn move_block(
+        &self,
+        block_id: Uuid,
+        block_type: Uuid,
+        source: BlockSource,
+        destination: Uuid,
+        is_reference: bool,
+    ) {
+        self.block_commands.borrow_mut().push((
+            block_id,
+            BlockCommand::Move {
+                block_type: block_type.into_bytes(),
+                source: source.encode(),
+                destination: destination.into_bytes(),
+                is_reference,
+            },
+        ));
+    }
+
+    pub fn place_block(&self, block_id: Uuid, block_type: Uuid, parent: Uuid, linked: bool) {
+        self.block_commands.borrow_mut().push((
+            block_id,
+            BlockCommand::Place {
+                block_type: block_type.into_bytes(),
+                parent: parent.into_bytes(),
+                linked,
+            },
+        ));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn take_block_commands(&self) -> Vec<(Uuid, BlockCommand)> {
+        std::mem::take(&mut self.block_commands.borrow_mut())
     }
 
     pub fn block_types(&self) -> Rc<BlockCatalog> {
@@ -739,7 +872,7 @@ impl EditorHost {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn take_opens(&self) -> Vec<(Uuid, Uuid)> {
+    pub(crate) fn take_opens(&self) -> Vec<OpenRequest> {
         std::mem::take(&mut self.opens.borrow_mut())
     }
 
@@ -1029,17 +1162,19 @@ impl BlockPicker {
         self.request.is_some()
     }
 
-    pub fn poll(&mut self, host: &EditorHost) -> Option<Result<(Uuid, Uuid), String>> {
+    pub fn poll(&mut self, host: &EditorHost) -> Option<Result<PickedBlock, String>> {
         let pick = host.take_block_pick(self.request?)?;
         self.request = None;
         match pick {
             BlockPick::Chosen {
                 block_id,
                 block_type,
-            } => Some(Ok((
-                Uuid::from_bytes(block_id),
-                Uuid::from_bytes(block_type),
-            ))),
+                linked,
+            } => Some(Ok(PickedBlock {
+                id: Uuid::from_bytes(block_id),
+                block_type: Uuid::from_bytes(block_type),
+                linked,
+            })),
             BlockPick::Cancelled => None,
             BlockPick::Failed(error) => Some(Err(error)),
         }

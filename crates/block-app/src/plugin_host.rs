@@ -28,7 +28,8 @@ pub(crate) use runtime::{
     creation_ready, editor_ui, flush, frame_child, frame_rects, install, intrinsic_size, kill,
     poll, presence, present, presenting, preview, regenerate_artifact, region_size, replace_child,
     report_child_views, report_children, resized, reveal_presence, revoke_frame_child, running,
-    take_artifact_outcome, take_block_pick, take_created, take_leaving, take_view_changes,
+    set_focus, take_artifact_outcome, take_block_pick, take_created, take_leaving,
+    take_view_changes,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -90,6 +91,7 @@ pub(crate) struct HostChildStatus {
 pub(crate) struct BlockPickRequest {
     pub(crate) request_id: u64,
     pub(crate) block_types: Vec<Uuid>,
+    pub(crate) excluded: Vec<Uuid>,
     pub(crate) templates: bool,
 }
 

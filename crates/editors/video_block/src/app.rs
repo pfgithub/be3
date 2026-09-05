@@ -533,10 +533,10 @@ impl block_editor_plugin::App for VideoApp {
         let resolved = self.resolve_clips(&video);
         self.advance_playback(ui.ctx(), &video);
 
-        if let Some(Ok((picked, _))) = self.picker.poll(&host) {
+        if let Some(Ok(picked)) = self.picker.poll(&host) {
             let attachment = self.picker_attachment.take();
-            self.set_child_parent(picked);
-            self.insert_clip(&video, picked, attachment, self.playhead, None);
+            self.set_child_parent(picked.id);
+            self.insert_clip(&video, picked.id, attachment, self.playhead, None);
         }
 
         let rect = ui.available_rect_before_wrap();

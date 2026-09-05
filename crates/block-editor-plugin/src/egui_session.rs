@@ -245,6 +245,10 @@ impl EguiSession {
         self.host.set_editable(editable);
     }
 
+    pub(crate) fn set_focused_block(&self, focused: crate::host::FocusedBlock) {
+        self.host.set_focused_block(focused);
+    }
+
     pub(crate) fn set_view(&self, view: egui::Rect, scale: f32) {
         self.host.set_view(view, scale);
     }
@@ -535,11 +539,26 @@ impl EguiSession {
                 change,
             }));
         }
-        for (block_id, block_type) in self.host.take_opens() {
+        for (block_id, block_type, via) in self.host.take_opens() {
             messages.push(Message::Editor(EditorMessage::OpenBlock {
                 instance,
                 block_id: block_id.into_bytes(),
                 block_type: block_type.into_bytes(),
+                via: via.map(Uuid::into_bytes),
+            }));
+        }
+        for (block_id, block_type) in self.host.take_block_drags() {
+            messages.push(Message::Editor(EditorMessage::DragBlock {
+                instance,
+                block_id: block_id.into_bytes(),
+                block_type: block_type.into_bytes(),
+            }));
+        }
+        for (block_id, command) in self.host.take_block_commands() {
+            messages.push(Message::Editor(EditorMessage::BlockCommand {
+                instance,
+                block_id: block_id.into_bytes(),
+                command,
             }));
         }
         messages

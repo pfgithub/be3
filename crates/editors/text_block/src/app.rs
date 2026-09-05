@@ -427,6 +427,7 @@ impl TextEditor {
                     block_editor_plugin::BlockFilter {
                         name: "Insert".to_owned(),
                         block_types: Vec::new(),
+                        excluded: Vec::new(),
                         templates: false,
                     },
                 );
@@ -522,9 +523,10 @@ impl TextEditor {
     }
 
     fn handle_picker(&mut self) {
-        let Some(Ok((id, block_type))) = self.picker.poll(&self.host) else {
+        let Some(Ok(picked)) = self.picker.poll(&self.host) else {
             return;
         };
+        let (id, block_type) = (picked.id, picked.block_type);
         self.client
             .set_block_parent(id, BlockParent::Uuid(self.block.id()));
         let types = self.host.block_types();

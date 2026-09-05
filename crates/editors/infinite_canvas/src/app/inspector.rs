@@ -235,6 +235,7 @@ impl InfiniteCanvasEditor {
                                 BlockFilter {
                                     name: "Value".to_owned(),
                                     block_types: vec![block_type.into_bytes()],
+                                    excluded: Vec::new(),
                                     templates: false,
                                 },
                             );
@@ -256,6 +257,7 @@ impl InfiniteCanvasEditor {
                             block_types: vec![
                                 <DatabaseSchema as block::Block>::TYPE_ID.into_bytes()
                             ],
+                            excluded: Vec::new(),
                             templates: false,
                         },
                     );

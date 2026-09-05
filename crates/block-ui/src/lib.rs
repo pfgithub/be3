@@ -41,11 +41,22 @@ pub fn presence_color(color: PresenceColor) -> egui::Color32 {
 pub trait BlockTypes {
     fn display_name(&self, block_type: Uuid) -> Option<&str>;
     fn icon(&self, block_type: Uuid) -> Option<MaterialIcon>;
+    fn child_edits(&self, _block_type: Uuid) -> ChildEdits {
+        ChildEdits::default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ChildEdits {
+    pub add: bool,
+    pub delete: bool,
+    pub replace: bool,
 }
 
 pub struct BlockTypeEntry {
     pub display_name: String,
     pub icon: Option<MaterialIcon>,
+    pub child_edits: ChildEdits,
 }
 
 #[derive(Default)]
@@ -73,6 +84,12 @@ impl BlockTypes for BlockCatalog {
 
     fn icon(&self, block_type: Uuid) -> Option<MaterialIcon> {
         self.types.get(&block_type).and_then(|entry| entry.icon)
+    }
+
+    fn child_edits(&self, block_type: Uuid) -> ChildEdits {
+        self.types
+            .get(&block_type)
+            .map_or_else(ChildEdits::default, |entry| entry.child_edits)
     }
 }
 #[derive(Clone)]

@@ -26,8 +26,8 @@ pub(super) fn block_drag(response: &egui::Response) -> Option<BlockDragEvent> {
         .unwrap_or_else(|| response.rect.center());
     Some(BlockDragEvent {
         position: pointer - response.rect.min,
-        block_id: payload.reference.id,
-        block_type: payload.reference.block_type,
+        block_id: payload.block_id,
+        block_type: payload.block_type,
         dropped,
     })
 }

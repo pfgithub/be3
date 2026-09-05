@@ -1,11 +1,11 @@
 use block_client::{blocks::audio::Audio, BlockClient, Tunnel};
 use block_plugin_api::{
-    ArtifactDescription, AudioCommand, AudioStatus, BlockPick, BlockTypeDescriptor, ChildId,
-    ChildMode, ChildPlacement, ChildPlacements, ChildStatus, ClipboardImage, CreationOutcome,
-    CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult, FilePick, FrameReport,
-    FrameSpec, ImeArea, Message, Occluder, PerformanceMeasurement, PresenceEntry,
-    RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest, ScreenSet,
-    TunnelMessage, ViewChange,
+    ArtifactDescription, AudioCommand, AudioStatus, BlockCommand, BlockPick, BlockTypeDescriptor,
+    ChildId, ChildMode, ChildPlacement, ChildPlacements, ChildStatus, ClipboardImage,
+    CreationOutcome, CursorIcon, EditorInstanceId, EditorMessage, EditorRegion, FetchResult,
+    FilePick, FrameReport, FrameSpec, ImeArea, Message, Occluder, PerformanceMeasurement,
+    PresenceEntry, RegenerationOutcome, RegionSize, ScreenId, ScreenLayout, ScreenRequest,
+    ScreenSet, TunnelMessage, ViewChange,
 };
 use eframe::egui;
 use std::{
@@ -33,6 +33,7 @@ const REFUSED: &str = "this plugin's manifest does not allow it to reach";
 #[derive(Default)]
 pub(super) struct Instances {
     entries: HashMap<EditorInstanceId, Instance>,
+    focus: Focus,
     connection: Option<Connection>,
     next_screen: u64,
     announced: HashSet<ScreenId>,
@@ -57,7 +58,10 @@ struct Instance {
     screens: HashMap<EditorRegion, Screen>,
     opened: bool,
     deferred: Vec<Message>,
-    opens: Vec<(Uuid, Uuid)>,
+    opens: Vec<OpenRequest>,
+    block_drags: Vec<(Uuid, Uuid)>,
+    block_commands: Vec<(Uuid, BlockCommand)>,
+    reported_focus: Option<Focus>,
     drag_accepted: bool,
     intrinsic: Option<egui::Vec2>,
     aspect_ratio: Option<f32>,
@@ -81,6 +85,14 @@ struct Instance {
     replacements: HashMap<(Uuid, Uuid), Replacement>,
     next_replacement: u64,
     leaving: bool,
+}
+
+pub(super) type OpenRequest = (Uuid, Uuid, Option<Uuid>);
+
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct Focus {
+    pub(crate) block: Option<(Uuid, Uuid)>,
+    pub(crate) via: Vec<Uuid>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -114,6 +126,9 @@ impl Instance {
             opened: false,
             deferred: Vec::new(),
             opens: Vec::new(),
+            block_drags: Vec::new(),
+            block_commands: Vec::new(),
+            reported_focus: None,
             drag_accepted: false,
             intrinsic: None,
             aspect_ratio: None,
@@ -479,6 +494,7 @@ impl Instances {
         for entry in self.entries.values_mut() {
             entry.opened = false;
             entry.deferred.clear();
+            entry.reported_focus = None;
             entry.reported_view = None;
             entry.reported_presenting = false;
             entry.fetches.clear();
@@ -492,6 +508,7 @@ impl Instances {
             .map(|connection| (Arc::clone(&connection.client), connection.client_id));
         let mut instances: Vec<_> = self.entries.keys().copied().collect();
         instances.sort_by_key(|instance| instance.0);
+        let focus = self.focus.clone();
         let mut opened = Vec::new();
         let mut screens = Vec::new();
         if !self.sent_block_types {
@@ -554,6 +571,21 @@ impl Instances {
                 });
             }
             opened.append(&mut entry.deferred);
+            if entry.reported_focus.as_ref() != Some(&focus) {
+                entry.reported_focus = Some(focus.clone());
+                let (block_id, block_type) = match focus.block {
+                    Some((block_id, block_type)) => {
+                        (Some(block_id.into_bytes()), block_type.into_bytes())
+                    }
+                    None => (None, [0; 16]),
+                };
+                opened.push(Message::Editor(EditorMessage::Focused {
+                    instance,
+                    block_id,
+                    block_type,
+                    via: focus.via.iter().map(|id| id.into_bytes()).collect(),
+                }));
+            }
             if entry.presenting != entry.reported_presenting {
                 entry.reported_presenting = entry.presenting;
                 opened.push(Message::Editor(EditorMessage::PresentingChanged {
@@ -1407,13 +1439,42 @@ impl Instances {
                 instance,
                 block_id,
                 block_type,
+                via,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry.opens.push((
+                    Uuid::from_bytes(block_id),
+                    Uuid::from_bytes(block_type),
+                    via.map(Uuid::from_bytes),
+                ));
+                true
+            }
+            EditorMessage::DragBlock {
+                instance,
+                block_id,
+                block_type,
             } => {
                 let Some(entry) = self.entries.get_mut(&instance) else {
                     return false;
                 };
                 entry
-                    .opens
+                    .block_drags
                     .push((Uuid::from_bytes(block_id), Uuid::from_bytes(block_type)));
+                true
+            }
+            EditorMessage::BlockCommand {
+                instance,
+                block_id,
+                command,
+            } => {
+                let Some(entry) = self.entries.get_mut(&instance) else {
+                    return false;
+                };
+                entry
+                    .block_commands
+                    .push((Uuid::from_bytes(block_id), command));
                 true
             }
             EditorMessage::DragAccepted { instance, accepted } => {
@@ -1533,6 +1594,7 @@ impl Instances {
                         .into_iter()
                         .map(Uuid::from_bytes)
                         .collect(),
+                    excluded: filter.excluded.into_iter().map(Uuid::from_bytes).collect(),
                     templates: filter.templates,
                 });
                 true
@@ -1722,13 +1784,42 @@ impl Instances {
         }
     }
 
-    pub(super) fn take_open(&mut self, instance: EditorInstanceId) -> Option<(Uuid, Uuid)> {
+    pub(super) fn take_open(&mut self, instance: EditorInstanceId) -> Option<OpenRequest> {
         let entry = self.entries.get_mut(&instance)?;
         if entry.opens.is_empty() {
             None
         } else {
             Some(entry.opens.remove(0))
         }
+    }
+
+    pub(super) fn take_block_drag(&mut self, instance: EditorInstanceId) -> Option<(Uuid, Uuid)> {
+        let entry = self.entries.get_mut(&instance)?;
+        if entry.block_drags.is_empty() {
+            None
+        } else {
+            Some(entry.block_drags.remove(0))
+        }
+    }
+
+    pub(super) fn take_block_command(
+        &mut self,
+        instance: EditorInstanceId,
+    ) -> Option<(Uuid, BlockCommand)> {
+        let entry = self.entries.get_mut(&instance)?;
+        if entry.block_commands.is_empty() {
+            None
+        } else {
+            Some(entry.block_commands.remove(0))
+        }
+    }
+
+    pub(super) fn set_focus(&mut self, focus: Focus) -> bool {
+        if self.focus == focus {
+            return false;
+        }
+        self.focus = focus;
+        true
     }
 
     pub(super) fn client_message(&mut self, message: TunnelMessage) {

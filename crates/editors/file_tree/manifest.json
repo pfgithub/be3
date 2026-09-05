@@ -1,0 +1,18 @@
+{
+  "id": "be3.file-tree",
+  "name": "Files",
+  "version": "0.1.0",
+  "block_type": "66696c65-2d74-7265-652d-626c6f636b01",
+  "display_name": "Files",
+  "icon": "\ue97a",
+  "creation": "None",
+  "interaction": "Live",
+  "resize": "None",
+  "regions": [
+    "Frame"
+  ],
+  "chrome": [
+    "Toolbar"
+  ],
+  "entry_point": "file_tree.wasm"
+}

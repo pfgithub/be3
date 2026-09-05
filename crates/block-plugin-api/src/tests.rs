@@ -57,6 +57,7 @@ fn region_screen(
 
 mod artifact_messages_round_trip;
 mod audio_messages_round_trip;
+mod block_commands_round_trip;
 mod block_types_round_trip;
 mod child_placements_round_trip;
 mod child_statuses_round_trip;
@@ -70,6 +71,7 @@ mod every_editor_manifest_parses;
 mod fetch_messages_round_trip;
 mod file_drop_messages_round_trip;
 mod file_pick_messages_round_trip;
+mod focus_messages_round_trip;
 mod frame_round_trips;
 mod frame_screens_and_reports_round_trip;
 mod grabbing_the_cursor_round_trips;

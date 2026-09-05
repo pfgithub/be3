@@ -125,6 +125,7 @@ impl PresentationApp {
             BlockFilter {
                 name: "Slide".into(),
                 block_types: Vec::new(),
+                excluded: Vec::new(),
                 templates: true,
             },
         );
@@ -138,9 +139,10 @@ impl PresentationApp {
             return;
         };
         let index = self.picker_index.take().unwrap_or(count);
-        let Ok((block_id, _)) = picked else {
+        let Ok(picked) = picked else {
             return;
         };
+        let block_id = picked.id;
         let Some(editor) = &self.editor else {
             return;
         };

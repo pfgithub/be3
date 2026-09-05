@@ -101,6 +101,7 @@ impl ClientSession {
                 State::Running,
                 Message::Editor(
                     block_plugin_api::EditorMessage::EditabilityChanged { instance, .. }
+                    | block_plugin_api::EditorMessage::Focused { instance, .. }
                     | block_plugin_api::EditorMessage::PresentingChanged { instance, .. }
                     | block_plugin_api::EditorMessage::ViewChanged { instance, .. }
                     | block_plugin_api::EditorMessage::Resized { instance, .. }

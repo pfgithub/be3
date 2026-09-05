@@ -1,11 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use block::{Block, BlockParent};
-use block_client::{
-    blocks::infinite_canvas::InfiniteCanvas,
-    properties::{self, BlockName},
-    BlockClient, CachedBlock,
-};
+use block_client::{blocks::infinite_canvas::InfiniteCanvas, BlockClient, CachedBlock};
 use eframe::egui;
 use egui_material_icons::MaterialIcon;
 use uuid::Uuid;
@@ -35,8 +31,6 @@ struct PendingBlock {
 pub struct BlockPickerResult {
     pub id: Uuid,
     pub block_type: Uuid,
-    pub author: Uuid,
-    pub properties: BTreeMap<Uuid, Vec<u8>>,
     pub linked: bool,
 }
 
@@ -201,8 +195,6 @@ impl BlockPicker {
                 result = Some(BlockPickerResult {
                     id: block.id,
                     block_type: block.block_type,
-                    author: block.author,
-                    properties: block.properties,
                     linked: true,
                 });
             }
@@ -311,8 +303,6 @@ impl BlockPicker {
         BlockPickerResult {
             id,
             block_type: InfiniteCanvas::TYPE_ID,
-            author: editors.client().account_id(),
-            properties: BTreeMap::new(),
             linked: false,
         }
     }
@@ -325,22 +315,10 @@ impl BlockPicker {
     ) -> BlockPickerResult {
         editor.set_parent(parent);
         let id = editor.id();
-        let mut result_properties = BTreeMap::new();
-        if let Some(value) = editor.name() {
-            result_properties.insert(
-                properties::NAME,
-                properties::encode_name(&BlockName {
-                    manual: false,
-                    value,
-                }),
-            );
-        }
         editors.insert(editor);
         BlockPickerResult {
             id,
             block_type,
-            author: editors.client().account_id(),
-            properties: result_properties,
             linked: false,
         }
     }

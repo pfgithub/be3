@@ -122,7 +122,31 @@ replacement through the block's own structural edit.
 
 An editor instance may ask the host to open another block in its own tab.
 The host decides whether to honour the request; it is not answered, and a
-request for a block the host cannot open is discarded.
+request for a block the host cannot open is discarded. The request may name
+the block the instance opened it from, which is what tells the host that the
+block was reached through a reference held by that container rather than on
+its own.
+
+The host tells every open instance which block the user is looking at - the
+block of the tab that has focus, absent while none has - along with the chain
+of containers that block was opened through, innermost first. It is sent when
+it changes and whenever an instance opens, which is what lets an editor that
+lists the workspace's blocks mark where the user is.
+
+An editor instance may tell the host that it has started dragging one of the
+blocks it draws. The host carries the drag from there, reporting it to
+whatever the pointer moves over, so a block dragged out of one editor may be
+dropped into another. The drag ends with the pointer, and is not answered.
+
+An editor instance may ask the host to act on one of the blocks it draws: to
+share or rename it, to replace an occurrence of it inside a named container
+with a copy of its own, to take it out of where it is listed, to move it from
+there into another block, or to place it under one. These are the host's own
+dialogs and structural edits, which an instance cannot draw or make for
+itself, and each names where the block is listed - the root, the blocks with
+no parent, or a container - and whether it is listed there as a reference
+rather than as a child, since that decides whether the block's own parent
+moves with it. None of them is answered.
 
 An editor instance may ask the host to choose a file for it, which only the
 host can do on every platform the app runs on. The request carries the filter
@@ -195,7 +219,9 @@ paste event.
 The host describes its registered block types once per plugin runtime, before
 the first editor instance is opened, so an editor can name and illustrate
 blocks it only holds a reference to. Each description carries the block type,
-its display name, and the codepoint of the host's icon font.
+its display name, the codepoint of the host's icon font, and which of the
+host's structural edits - adding, deleting and replacing a child - blocks of
+that type accept.
 
 The host reports a block dragged over an editor instance's region in that
 screen's own logical coordinates, once per frame while it hovers, once more
@@ -336,7 +362,8 @@ lets an instance acquire a child without waiting for one to be dragged in. The
 request carries the name of what is being chosen, the block types that may be
 chosen, empty for any, and whether the picker should open on the templates the
 host offers, and is answered exactly once, with the block the user chose or
-created, the picker the user closed, or why the block could not be made.
+created and whether it was an existing block rather than a new one, the picker
+the user closed, or why the block could not be made.
 Requests are identified per instance and may be outstanding together. A
 creation dialog asks the same way, which is how an editor whose block cannot be
 made until it references another one gets that block before its own exists; the
