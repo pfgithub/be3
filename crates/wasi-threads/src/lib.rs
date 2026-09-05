@@ -1,17 +1,11 @@
-#[cfg(all(target_os = "wasi", target_feature = "atomics"))]
-unsafe extern "C" {
-    fn __wasi_init_tp();
-}
-
 #[cfg(target_os = "wasi")]
 unsafe extern "C" {
-    #[link_name = "__wasi_init_tp"]
-    fn init_thread_pointer();
+    fn __wasi_init_tp();
     fn __wasm_init_tls(block: *mut u8);
 }
 
 pub fn initialize_main_thread() {
-    #[cfg(all(target_os = "wasi", target_feature = "atomics"))]
+    #[cfg(target_os = "wasi")]
     unsafe {
         __wasi_init_tp();
     }
@@ -28,8 +22,8 @@ pub fn initialize_main_thread_storage(size: usize, align: usize) {
                 }
             }
         }
-        init_thread_pointer();
     }
+    initialize_main_thread();
     #[cfg(not(target_os = "wasi"))]
     {
         let _ = (size, align);
